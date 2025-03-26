@@ -6,6 +6,7 @@ import { Filter, Database, BarChart2, Pencil, Trash2, Plus } from 'lucide-react'
 import axios from 'axios';
 import { toast } from "sonner"
 import { DataSourceModal } from "./DataSourceModal";
+import {EditLayoutModal} from './EditLayoutModal';
 
 interface EditModalProps {
   open: boolean;
@@ -35,6 +36,7 @@ const EditModal = ({
   const [updateMode, setUpdateMode] = useState('手动更新');
   const sqlEditorRef = useRef<any>(null);
   const [isDataSourceModalOpen, setIsDataSourceModalOpen] = useState(false)
+  const [isLayoutModalOpen, setIsLayoutModalOpen] = useState(false);
 
   // 当modal显示或dashboardConfig变化时初始化SQL相关配置
   useEffect(() => {
@@ -110,6 +112,10 @@ const EditModal = ({
     }
   };
 
+  const handleSaveLayout = (layout: any) => {
+    console.log('保存的布局:', layout);
+    setIsLayoutModalOpen(false);
+  };
 
   return (
     <>
@@ -308,7 +314,7 @@ const EditModal = ({
                     <Button 
                       variant="outline" 
                       className="w-full border-dashed"
-                      onClick={() => {}}
+                      onClick={() => setIsLayoutModalOpen(true)}
                     >
                       <Plus className="h-4 w-4 mr-2" />
                       修改布局
@@ -325,6 +331,12 @@ const EditModal = ({
         open={isDataSourceModalOpen}
         onClose={() => setIsDataSourceModalOpen(false)}
         onSave = {() => {}}
+      />
+
+      <EditLayoutModal
+        open={isLayoutModalOpen}
+        onClose={() => setIsLayoutModalOpen(false)}
+        onSave={handleSaveLayout}
       />
     </>
   );

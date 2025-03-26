@@ -1,10 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
-import { Filter, Database, BarChart2, Layout, Pencil, Trash2, Plus } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Filter, Database, BarChart2, Pencil, Trash2, Plus } from 'lucide-react';
 import axios from 'axios';
 import { toast } from "sonner"
 import { DataSourceModal } from "./DataSourceModal";
@@ -37,11 +35,6 @@ const EditModal = ({
   const [updateMode, setUpdateMode] = useState('手动更新');
   const sqlEditorRef = useRef<any>(null);
   const [isDataSourceModalOpen, setIsDataSourceModalOpen] = useState(false)
-  const [dataSourceConfig, setDataSourceConfig] = useState({
-    executorType: '',
-    updateMode: '',
-    dataFrameName: ''
-  })
 
   // 当modal显示或dashboardConfig变化时初始化SQL相关配置
   useEffect(() => {
@@ -117,9 +110,6 @@ const EditModal = ({
     }
   };
 
-  const handleDataSourceSave = (config: DataSourceConfig) => {
-    setDataSourceConfig(config)
-  }
 
   return (
     <>
@@ -131,8 +121,7 @@ const EditModal = ({
           
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
             <TabsList className="w-full grid grid-cols-3 sticky top-0 z-10">
-
-            <TabsTrigger value="data" className="flex items-center gap-2">
+              <TabsTrigger value="data" className="flex items-center gap-2">
                 <Database size={24} />
                 <span>数据源</span>
               </TabsTrigger>
@@ -144,13 +133,70 @@ const EditModal = ({
 
               <TabsTrigger value="charts" className="flex items-center gap-2">
                 <BarChart2 size={24} />
-                <span>图表管理</span>
+                <span>图表</span>
               </TabsTrigger>
             </TabsList>
 
             <div className="flex-1 overflow-y-auto">
+              {/* 数据标签页 */}
+              <TabsContent value="data" className="p-4">
+                <div className="space-y-4">
+                  <div className="space-y-3">
+                    <div className="border rounded-lg p-4 bg-white shadow-sm">
+                      {/* 显示当前数据源配置的摘要信息 */}
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <h4 className="font-medium">数据源1</h4>
+                          <p className="text-sm text-gray-500">type: MYSQL</p>
+                          <p className="text-sm text-gray-500">alias: df, df1</p>
+                        </div>
+                        <div className="flex gap-2">
+                                <Button variant="ghost" size="icon" className="h-8 w-8">
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border rounded-lg p-4 bg-white shadow-sm">
+                      {/* 显示当前数据源配置的摘要信息 */}
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <h4 className="font-medium">数据源2</h4>
+                          <p className="text-sm text-gray-500">python</p>
+                          <p className="text-sm text-gray-500">dataframe: df2</p>
+                        </div>
+                        <div className="flex gap-2">
+                                <Button variant="ghost" size="icon" className="h-8 w-8">
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 添加数据源 */}
+                  <div className="mt-6">
+                    <Button 
+                      variant="outline" 
+                      className="w-full border-dashed"
+                      onClick={() => {}}
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      添加数据源
+                    </Button>
+                  </div>
+                </div>
+              </TabsContent>
+
               {/* 筛选条件标签页 */}
-              <TabsContent value="filters" className="p-4 h-full">
+              <TabsContent value="filters" className="p-4">
                 <div className="space-y-4">
                   
                   <div className="space-y-3">
@@ -223,33 +269,8 @@ const EditModal = ({
                 </div>
               </TabsContent>
 
-              {/* 数据标签页 */}
-              <TabsContent value="data" className="p-4 h-full">
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <h3 className="text-lg font-medium">数据源配置</h3>
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => setIsDataSourceModalOpen(true)}
-                      >
-                        编辑
-                      </Button>
-                    </div>
-                  </div>
-                  
-                  {/* 显示当前数据源配置的摘要信息 */}
-                  <div className="rounded-lg border p-4">
-                    <div>执行引擎: {dataSourceConfig.executorType}</div>
-                    <div>更新方式: {dataSourceConfig.updateMode}</div>
-                    <div>DataFrame名称: {dataSourceConfig.dataFrameName}</div>
-                  </div>
-                </div>
-              </TabsContent>
-
               {/* 图表管理标签页 */}
-              <TabsContent value="charts" className="p-4 h-full">
+              <TabsContent value="charts" className="p-4">
                 <div className="space-y-4">
                   <div className="border rounded-lg p-4">
                     {/* 布局预览区域 */}
@@ -294,8 +315,7 @@ const EditModal = ({
       <DataSourceModal
         open={isDataSourceModalOpen}
         onClose={() => setIsDataSourceModalOpen(false)}
-        onSave={handleDataSourceSave}
-        initialConfig={dataSourceConfig}
+        onSave = {() => {}}
       />
     </>
   );

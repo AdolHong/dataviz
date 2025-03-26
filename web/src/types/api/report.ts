@@ -1,5 +1,5 @@
 // 数据源接口
-export interface Source {
+export interface DataSource {
   name: string;
   description?: string;
   executor: {
@@ -36,7 +36,7 @@ export interface Parameter {
 }
 
 // 可视化参数接口
-export interface VizParam {
+export interface ChartParam {
   name: string;
   alias?: string; // 参数可以有别名, 一般是中文，便于理解参数
   description?: string;
@@ -52,7 +52,7 @@ export interface VizParam {
 }
 
 // 可视化接口
-export interface Visualization {
+export interface Chart {
   title: string;
   description?: string;
   code: string;
@@ -61,16 +61,16 @@ export interface Visualization {
     type: "python";
     engine: string;
   };
-  vizParams?: VizParam[];
+  chartParams?: ChartParam[];
 }
 
 // 主要响应接口
 export interface Report {
   title: string;
   description?: string;
-  sources: Source[];
+  dataSources: DataSource[];
   parameters: Parameter[]; // 使用之前定义的 Parameter 接口
-  visualizations: Visualization[];
+  charts: Chart[];
 }
 
 export interface ReportResponse extends Report {}

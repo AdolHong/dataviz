@@ -1,7 +1,7 @@
 export type {
   ReportResponse,
-  Source,
+  DataSource,
   Parameter,
-  VizParam,
-  Visualization,
+  ChartParam,
+  Chart,
 } from "./api/report";

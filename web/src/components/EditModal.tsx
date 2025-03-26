@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Filter, Database, BarChart2, Layout, Pencil, Trash2, Plus } from 'lucide-react';
 import axios from 'axios';
 import { toast } from "sonner"
-
+import { DataSourceModal } from "./DataSourceModal";
 
 interface EditModalProps {
   open: boolean;
@@ -36,6 +36,12 @@ const EditModal = ({
   const [dataFrameName, setDataFrameName] = useState('df');
   const [updateMode, setUpdateMode] = useState('手动更新');
   const sqlEditorRef = useRef<any>(null);
+  const [isDataSourceModalOpen, setIsDataSourceModalOpen] = useState(false)
+  const [dataSourceConfig, setDataSourceConfig] = useState({
+    executorType: '',
+    updateMode: '',
+    dataFrameName: ''
+  })
 
   // 当modal显示或dashboardConfig变化时初始化SQL相关配置
   useEffect(() => {
@@ -111,212 +117,187 @@ const EditModal = ({
     }
   };
 
+  const handleDataSourceSave = (config: DataSourceConfig) => {
+    setDataSourceConfig(config)
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-[90vw] h-[90vh] flex flex-col">
-        <DialogHeader>
-          <DialogTitle>编辑报表</DialogTitle>
-        </DialogHeader>
-        
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-          <TabsList className="w-full grid grid-cols-4 sticky top-0 z-10">
+    <>
+      <Dialog open={open} onOpenChange={onClose}>
+        <DialogContent className="max-w-[90vw] h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>编辑报表</DialogTitle>
+          </DialogHeader>
           
-            <TabsTrigger value="filters" className="flex items-center gap-2">
-              <Filter size={24} />
-              <span>筛选条件</span>
-            </TabsTrigger>
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
+            <TabsList className="w-full grid grid-cols-3 sticky top-0 z-10">
+
             <TabsTrigger value="data" className="flex items-center gap-2">
-              <Database size={24} />
-              <span>数据</span>
-            </TabsTrigger>
-            <TabsTrigger value="charts" className="flex items-center gap-2">
-              <BarChart2 size={24} />
-              <span>图表管理</span>
-            </TabsTrigger>
-            <TabsTrigger value="layout" className="flex items-center gap-2">
-              <Layout size={24} />
-              <span>布局管理</span>
-            </TabsTrigger>
-          </TabsList>
+                <Database size={24} />
+                <span>数据源</span>
+              </TabsTrigger>
 
-          <div className="flex-1 overflow-y-auto">
-            {/* 筛选条件标签页 */}
-            <TabsContent value="filters" className="p-4 h-full">
-              <div className="space-y-4">
-                <h3 className="text-lg font-medium">筛选条件管理</h3>
-                
-                {/* 筛选条件卡片列表 */}
-                <div className="space-y-3">
-                  {/* 时间范围卡片 */}
-                  <div className="border rounded-lg p-4 bg-white shadow-sm">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <h4 className="font-medium">时间范围</h4>
-                        <p className="text-sm text-gray-500">日期选择器</p>
+              <TabsTrigger value="filters" className="flex items-center gap-2">
+                <Filter size={24} />
+                <span>筛选条件</span>
+              </TabsTrigger>
+
+              <TabsTrigger value="charts" className="flex items-center gap-2">
+                <BarChart2 size={24} />
+                <span>图表管理</span>
+              </TabsTrigger>
+            </TabsList>
+
+            <div className="flex-1 overflow-y-auto">
+              {/* 筛选条件标签页 */}
+              <TabsContent value="filters" className="p-4 h-full">
+                <div className="space-y-4">
+                  
+                  <div className="space-y-3">
+                    {/* 时间范围卡片 */}
+                    <div className="border rounded-lg p-4 bg-white shadow-sm">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <h4 className="font-medium">时间范围</h4>
+                          <p className="text-sm text-gray-500">日期选择器</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex gap-2">
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                    </div>
+
+                    {/* 区域卡片 */}
+                    <div className="border rounded-lg p-4 bg-white shadow-sm">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <h4 className="font-medium">区域</h4>
+                          <p className="text-sm text-gray-500">下拉选择器</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 产品类别卡片 */}
+                    <div className="border rounded-lg p-4 bg-white shadow-sm">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <h4 className="font-medium">产品类别</h4>
+                          <p className="text-sm text-gray-500">下拉选择器</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* 区域卡片 */}
-                  <div className="border rounded-lg p-4 bg-white shadow-sm">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <h4 className="font-medium">区域</h4>
-                        <p className="text-sm text-gray-500">下拉选择器</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 产品类别卡片 */}
-                  <div className="border rounded-lg p-4 bg-white shadow-sm">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <h4 className="font-medium">产品类别</h4>
-                        <p className="text-sm text-gray-500">下拉选择器</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
+                  {/* 添加筛选条件按钮 */}
+                  <div className="mt-6">
+                    <Button 
+                      variant="outline" 
+                      className="w-full border-dashed"
+                      onClick={() => {}}
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      添加筛选条件
+                    </Button>
                   </div>
                 </div>
+              </TabsContent>
 
-                {/* 添加筛选条件按钮 */}
-                <div className="mt-6">
-                  <Button 
-                    variant="outline" 
-                    className="w-full border-dashed"
-                    onClick={() => {}}
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    添加筛选条件
-                  </Button>
-                </div>
-              </div>
-            </TabsContent>
-
-            {/* 数据标签页 */}
-            <TabsContent value="data" className="p-4 h-full">
-              <div className="space-y-4">
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <label>执行引擎:</label>
-                    <Select value={executorType} onValueChange={setExecutorType}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="选择执行引擎" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="MySQL">MySQL</SelectItem>
-                        <SelectItem value="PostgreSQL">PostgreSQL</SelectItem>
-                      </SelectContent>
-                    </Select>
+              {/* 数据标签页 */}
+              <TabsContent value="data" className="p-4 h-full">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <h3 className="text-lg font-medium">数据源配置</h3>
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => setIsDataSourceModalOpen(true)}
+                      >
+                        编辑
+                      </Button>
+                    </div>
                   </div>
                   
-                  <div className="space-y-2">
-                    <label>更新方式:</label>
-                    <Select value={updateMode} onValueChange={setUpdateMode}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="选择更新方式" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="手动更新">手动更新</SelectItem>
-                        <SelectItem value="自动更新">自动更新</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  {/* 显示当前数据源配置的摘要信息 */}
+                  <div className="rounded-lg border p-4">
+                    <div>执行引擎: {dataSourceConfig.executorType}</div>
+                    <div>更新方式: {dataSourceConfig.updateMode}</div>
+                    <div>DataFrame名称: {dataSourceConfig.dataFrameName}</div>
                   </div>
+                </div>
+              </TabsContent>
 
-                  <div className="space-y-2">
-                    <label>DataFrame名称:</label>
-                    <Input 
-                      value={dataFrameName}
-                      onChange={(e) => setDataFrameName(e.target.value)}
-                    />
-                  </div>
-                </div>
-                
-                <div className="h-[500px] border rounded-lg">
-                  {/* SQL编辑器组件 */}
-                </div>
-              </div>
-            </TabsContent>
-
-            {/* 图表管理标签页 */}
-            <TabsContent value="charts" className="p-4 h-full">
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-lg font-medium">图表管理</h3>
-                  <Button onClick={() => {}}>添加图表</Button>
-                </div>
-                <div className="grid grid-cols-3 gap-4">
-                  {/* 图表卡片列表 */}
+              {/* 图表管理标签页 */}
+              <TabsContent value="charts" className="p-4 h-full">
+                <div className="space-y-4">
                   <div className="border rounded-lg p-4">
-                    <h4>销售趋势</h4>
-                    <p className="text-sm text-gray-500">折线图</p>
-                  </div>
-                  <div className="border rounded-lg p-4">
-                    <h4>区域销售占比</h4>
-                    <p className="text-sm text-gray-500">饼图</p>
-                  </div>
-                  <div className="border rounded-lg p-4">
-                    <h4>销售明细数据</h4>
-                    <p className="text-sm text-gray-500">表格</p>
-                  </div>
-                </div>
-              </div>
-            </TabsContent>
-
-            {/* 布局管理标签页 */}
-            <TabsContent value="layout" className="p-4 h-full">
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-lg font-medium">布局管理</h3>
-                  <div className="space-x-2">
-                    <Button variant="outline" onClick={() => {}}>添加行</Button>
-                    <Button variant="outline" onClick={() => {}}>调整列宽</Button>
-                    <Button variant="outline" onClick={() => {}}>调整顺序</Button>
-                  </div>
-                </div>
-                <div className="border rounded-lg p-4 min-h-[500px]">
-                  {/* 布局预览区域 */}
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="border-2 border-dashed rounded-lg p-4 text-center">
-                      销售趋势
-                    </div>
-                    <div className="border-2 border-dashed rounded-lg p-4 text-center">
-                      区域销售占比
-                    </div>
-                    <div className="border-2 border-dashed rounded-lg p-4 text-center">
-                      销售明细数据
+                    {/* 布局预览区域 */}
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200">
+                        销售趋势
+                      </div>
+                      <div className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200">
+                        区域销售占比
+                      </div>
+                      <div className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200">
+                        销售明细数据
+                      </div>
                     </div>
                   </div>
+
+                  <div className="mt-6">
+                    <Button 
+                      variant="outline" 
+                      className="w-full border-dashed"
+                      onClick={() => {}}
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      添加图表
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      className="w-full border-dashed"
+                      onClick={() => {}}
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      修改布局
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            </TabsContent>
-          </div>
-        </Tabs>
-      </DialogContent>
-    </Dialog>
+              </TabsContent>
+            </div>
+          </Tabs>
+        </DialogContent>
+      </Dialog>
+
+      <DataSourceModal
+        open={isDataSourceModalOpen}
+        onClose={() => setIsDataSourceModalOpen(false)}
+        onSave={handleDataSourceSave}
+        initialConfig={dataSourceConfig}
+      />
+    </>
   );
 };
 

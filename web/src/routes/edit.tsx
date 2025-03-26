@@ -15,6 +15,7 @@ export const Route = createFileRoute('/edit')({
 function EditPage() {
   const [config, setConfig] = useState<any>(null);
   const { dashboardId } = useStore();
+  const [isModalOpen, setIsModalOpen] = useState(true);
   
   useEffect(() => {
     async function fetchDashboardConfig() {
@@ -68,8 +69,8 @@ function EditPage() {
   return (
     <div>
         <EditModal
-          open={true}
-          onClose={() => window.history.back()}
+          open={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
           onSave={handleSave}
           parameters={[]}
           visualizations={[]}

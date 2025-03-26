@@ -315,11 +315,6 @@ const EditModal = ({
             </TabsContent>
           </div>
         </Tabs>
-        
-        <DialogFooter className="mt-6">
-          <Button variant="outline" onClick={onClose}>取消</Button>
-          <Button onClick={handleSave}>保存</Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

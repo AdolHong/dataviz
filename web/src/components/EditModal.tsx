@@ -284,6 +284,15 @@ const EditModal = ({
                       <div className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200">
                         销售明细数据
                       </div>
+                      <div className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200 col-span-2">
+                        新增图表1
+                      </div>
+                      <div className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200">
+                        新增图表2
+                      </div>
+                      <div className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200 col-span-3">
+                        新增图表3
+                      </div>
                     </div>
                   </div>
 

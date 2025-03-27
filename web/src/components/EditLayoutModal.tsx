@@ -74,50 +74,76 @@ export function EditLayoutModal({
 
   // 调整总列数
   const adjustColumns = (newColumns: number) => {
+    // 不允许列数小于1
     if (newColumns < 1) return;
     
-    // 确保所有行的单元格宽度总和不超过新的列数
-    const updatedRows = layout.rows.map(row => {
-      const totalWidth = row.cells.reduce((sum, cell) => sum + cell.width, 0);
+    // 如果是减少列数
+    if (newColumns < layout.columns) {
+      // 检查是否存在某一行的所有单元格宽度都为1且占满整行
+      const hasFullRowWithMinWidths = layout.rows.some(row => {
+        const totalWidth = row.cells.reduce((sum, cell) => sum + cell.width, 0);
+        const allCellsAreMinWidth = row.cells.every(cell => cell.width === 1);
+        return totalWidth === layout.columns && allCellsAreMinWidth;
+      });
       
-      if (totalWidth > newColumns) {
-        // 需要调整单元格宽度
-        const cells = [...row.cells];
-        let excess = totalWidth - newColumns;
+      // 如果有这样的行，提示不能缩减列数
+      if (hasFullRowWithMinWidths) {
+        toast.error("存在行的所有单元格已是最小宽度且占满整行，无法减少列数");
+        return;
+      }
+      
+      // 处理每一行
+      const updatedRows = layout.rows.map(row => {
+        const totalWidth = row.cells.reduce((sum, cell) => sum + cell.width, 0);
         
-        // 从最宽的单元格开始缩小
-        while (excess > 0) {
-          const widestCellIndex = cells.findIndex(cell => 
-            cell.width === Math.max(...cells.map(c => c.width))
-          );
+        // 如果当前行已经不超过新列数，无需调整
+        if (totalWidth <= newColumns) {
+          return row;
+        }
+        
+        // 需要减少的宽度
+        let widthToReduce = totalWidth - newColumns;
+        const cells = [...row.cells];
+        
+        // 先处理空隙
+        if (totalWidth < layout.columns) {
+          // 行有空隙，不需要调整单元格，直接返回
+          return row;
+        }
+        
+        // 找到第一个宽度大于1的单元格
+        while (widthToReduce > 0) {
+          // 找到第一个宽度大于1的单元格的索引
+          const widerCellIndex = cells.findIndex(cell => cell.width > 1);
           
-          if (cells[widestCellIndex].width > 1) {
-            cells[widestCellIndex] = {
-              ...cells[widestCellIndex],
-              width: cells[widestCellIndex].width - 1
+          if (widerCellIndex !== -1) {
+            // 找到了宽度大于1的单元格，减少宽度
+            cells[widerCellIndex] = {
+              ...cells[widerCellIndex],
+              width: cells[widerCellIndex].width - 1
             };
-            excess--;
+            widthToReduce--;
           } else {
-            // 如果所有单元格都是最小宽度，则移除最后一个单元格
-            if (cells.length > 1) {
-              cells.pop();
-              excess--;
-            } else {
-              break;
-            }
+            // 找不到宽度大于1的单元格，这种情况应该不会发生（因为前面已经检查过）
+            // 但为了安全，我们提前退出循环
+            break;
           }
         }
         
         return { ...row, cells };
-      }
+      });
       
-      return row;
-    });
-    
-    setLayout({
-      columns: newColumns,
-      rows: updatedRows
-    });
+      setLayout({
+        columns: newColumns,
+        rows: updatedRows
+      });
+    } else {
+      // 增加列数，简单更新
+      setLayout({
+        ...layout,
+        columns: newColumns
+      });
+    }
   };
 
   // 添加新行
@@ -190,21 +216,8 @@ export function EditLayoutModal({
     
     const updatedRows = layout.rows.map(r => {
       if (r.id === rowId) {
-        // 移除单元格
+        // 只移除单元格，不调整其他单元格宽度
         const updatedCells = r.cells.filter(cell => cell.id !== cellId);
-        
-        // 将剩余空间分配给最后一个单元格
-        const currentTotalWidth = updatedCells.reduce((sum, cell) => sum + cell.width, 0);
-        const remainingWidth = layout.columns - currentTotalWidth;
-        
-        if (remainingWidth > 0 && updatedCells.length > 0) {
-          const lastCell = updatedCells[updatedCells.length - 1];
-          updatedCells[updatedCells.length - 1] = {
-            ...lastCell,
-            width: lastCell.width + remainingWidth
-          };
-        }
-        
         return { ...r, cells: updatedCells };
       }
       return r;
@@ -255,8 +268,7 @@ export function EditLayoutModal({
     const [rowId, cellId] = resizingItem.split('-');
     const deltaX = e.clientX - startResizeX;
     
-    // 将像素位移转换为列数变化
-    // 假设每列宽度为100px
+    // 将像素位移转换为列数变化（假设每列宽度为100px）
     const columnWidth = 100;
     const deltaColumns = Math.round(deltaX / columnWidth);
     
@@ -269,19 +281,26 @@ export function EditLayoutModal({
     const cellIndex = layout.rows[rowIndex].cells.findIndex(c => c.id === cellId);
     if (cellIndex === -1) return;
     
-    // 计算新宽度
-    let newWidth = originalWidth + deltaColumns;
+    // 获取当前宽度
+    const currentCell = layout.rows[rowIndex].cells[cellIndex];
     
-    // 确保宽度至少为1
-    newWidth = Math.max(1, newWidth);
+    // 计算新宽度（限制最小为1）
+    let newWidth = Math.max(1, currentCell.width + deltaColumns);
     
-    // 计算行中所有单元格的总宽度
-    const totalWidthWithoutCurrentCell = layout.rows[rowIndex].cells.reduce((sum, cell, idx) => {
-      return idx === cellIndex ? sum : sum + cell.width;
-    }, 0);
+    // 计算当前行的所有单元格总宽度
+    const rowTotalWidth = layout.rows[rowIndex].cells.reduce((sum, cell) => 
+      sum + cell.width, 0
+    );
     
-    // 确保不超过总列数
-    newWidth = Math.min(newWidth, layout.columns - totalWidthWithoutCurrentCell);
+    // 计算行中剩余的最大可用宽度（总列数 - 当前行其他单元格的总宽度）
+    const otherCellsWidth = rowTotalWidth - currentCell.width;
+    const maxAvailableWidth = layout.columns - otherCellsWidth;
+    
+    // 限制新宽度不超过最大可用宽度
+    newWidth = Math.min(newWidth, maxAvailableWidth);
+    
+    // 如果宽度没有变化，不做任何操作
+    if (newWidth === currentCell.width) return;
     
     // 更新布局
     const updatedRows = [...layout.rows];
@@ -296,8 +315,8 @@ export function EditLayoutModal({
     };
     
     setLayout({ ...layout, rows: updatedRows });
-    setStartResizeX(e.clientX);
-    setOriginalWidth(newWidth);
+    setStartResizeX(e.clientX); // 更新起始位置以便下次移动计算
+    setOriginalWidth(newWidth); // 更新原始宽度
   };
 
   const handleResizeEnd = () => {

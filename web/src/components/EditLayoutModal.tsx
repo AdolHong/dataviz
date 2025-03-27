@@ -437,7 +437,7 @@ export function EditLayoutModal({
                           
                           {/* 更改拖动手柄 */}
                           <div
-                            className="absolute right-0 top-0 bottom-0 w-6 bg-blue-500 opacity-50 hover:opacity-80 cursor-col-resize"
+                            className="absolute right-0 top-0 bottom-0 w-2 bg-blue-500 opacity-50 hover:opacity-80 cursor-col-resize rounded-lg"
                             onMouseDown={(e) => handleResizeStart(e, row.id, cell.id)}
                             style={{
                               zIndex: 10

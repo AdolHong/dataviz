@@ -1,27 +1,73 @@
-import { useState } from 'react';
+import  { useEffect, useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Filter, Database, BarChart2, Pencil, Trash2, Plus } from 'lucide-react';
-import axios from 'axios';
 import { toast } from "sonner"
 import { DataSourceModal } from "./DataSourceModal";
 import {EditLayoutModal} from './EditLayoutModal';
+
+import  type {DataSource, Layout, Parameter, Chart, ChartParam, Report} from '@/types';
 
 interface EditModalProps {
   open: boolean;
   onClose: () => void;
   onSave: (params: any[], visualizations: any[], sqlCode: string) => void;
-  parameters: any[];
-  visualizations?: any[];
-  dashboardConfig: any;
-  initialSqlCode: string;
+  reportId: string;
 }
 
 const EditModal = ({ 
   open, 
-  onClose
+  onClose,
+  reportId
 }: EditModalProps) => {
+
+  // todo: 获取报表的布局
+  console.log('reportId', reportId);
+
+  const [dataSources, setDataSources] = useState<DataSource[]>([]);
+  const [parameters, setParameters] = useState<Parameter[]>([]);
+  const [charts, setCharts] = useState<Chart[]>([]);
+  const [layout, setLayout] = useState<Layout>();
+
+  useEffect(() => {
+    // 构造 demo 数据
+    const demoReport = {
+      title: "销售报表",
+      description: "这是一个销售数据的示例报表",
+      dataSources: [
+        { id: 'ds1', type: 'MYSQL', alias: '销售数据' },
+        { id: 'ds2', type: 'API', alias: '外部数据' }
+      ],
+      parameters: [
+        { id: 'param1', name: '开始日期', type: 'date' },
+        { id: 'param2', name: '结束日期', type: 'date' }
+      ],
+      charts: [
+        { id: 'chart1', title: '销售趋势', type: 'line' },
+        { id: 'chart2', title: '销售占比', type: 'pie' }
+      ],
+      layout: {
+        columns: 3,
+        rows: 2,
+        items: [
+          { id: 'item-1', title: '销售趋势', width: 1, height: 1, x: 0, y: 0 },
+          { id: 'item-2', title: '销售占比', width: 1, height: 1, x: 1, y: 0 },
+          { id: 'item-3', title: '销售明细', width: 1, height: 1, x: 2, y: 0 },
+          { id: 'item-4', title: '新增图表1', width: 1, height: 1, x: 0, y: 1 },
+          { id: 'item-5', title: '新增图表2', width: 1, height: 1, x: 1, y: 1 },
+          { id: 'item-6', title: '新增图表333', width: 1, height: 1, x: 2, y: 1 }
+        ]
+      }
+    };
+
+    // 初始化状态
+    setLayout(demoReport.layout);
+    // setDataSources(demoReport.dataSources);
+    // setParameters(demoReport.parameters);
+    // setCharts(demoReport.charts);
+  }, [reportId]); // 依赖于 reportId，当其变化时重新获取数据
+
   const [activeTab, setActiveTab] = useState('filters');
   const [isDataSourceModalOpen, setIsDataSourceModalOpen] = useState(false)
   const [isLayoutModalOpen, setIsLayoutModalOpen] = useState(false);
@@ -251,18 +297,7 @@ const EditModal = ({
         open={isLayoutModalOpen}
         onClose={() => setIsLayoutModalOpen(false)}
         onSave={handleSaveLayout}
-        initialLayout={{
-          columns: 3,
-          rows: 2,
-          items: [
-            { id: 'item-1', title: '销售趋势', width: 1, height: 1, x: 0, y: 0 },
-            { id: 'item-2', title: '销售占比', width: 1, height: 1, x: 1, y: 0 },
-            { id: 'item-3', title: '销售明细', width: 1, height: 1, x: 2, y: 0 },
-            { id: 'item-4', title: '新增图表1', width: 1, height: 1, x: 0, y: 1 },
-            { id: 'item-5', title: '新增图表2', width: 1, height: 1, x: 1, y: 1 },
-            { id: 'item-6', title: '新增图表3', width: 1, height: 1, x: 2, y: 1 }
-          ]
-        }}
+        initialLayout={layout}
       />
     </>
   );

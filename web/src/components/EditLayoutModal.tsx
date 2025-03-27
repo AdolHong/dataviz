@@ -67,10 +67,9 @@ export function EditLayoutModal({
 
   // 初始化布局状态
   const [layout, setLayout] = useState<Layout>(initialLayout || defaultLayout);
-  const [draggingItem, setDraggingItem] = useState<string | null>(null);
-  const [resizingItem, setResizingItem] = useState<string | null>(null);
-  const [startResizeX, setStartResizeX] = useState<number>(0);
-  const [originalWidth, setOriginalWidth] = useState<number>(0);
+
+  // 添加状态来跟踪调整中的单元格
+  const [adjustingCell, setAdjustingCell] = useState<{rowId: string, cellId: string, targetWidth: number} | null>(null);
 
   // 调整总列数
   const adjustColumns = (newColumns: number) => {
@@ -244,85 +243,85 @@ export function EditLayoutModal({
     setLayout({ ...layout, rows: updatedRows });
   };
 
-  // 调整单元格宽度
+  // 重新实现调整宽度的函数，控制灵敏度
   const handleResizeStart = (e: React.MouseEvent, rowId: string, cellId: string) => {
     e.preventDefault();
-    setResizingItem(`${rowId}-${cellId}`);
-    setStartResizeX(e.clientX);
     
-    // 找到单元格当前宽度
-    const row = layout.rows.find(r => r.id === rowId);
-    const cell = row?.cells.find(c => c.id === cellId);
-    if (cell) {
-      setOriginalWidth(cell.width);
-    }
+    // 记录起始位置和原始宽度
+    const startX = e.clientX;
     
-    // 添加全局鼠标事件监听器
-    document.addEventListener('mousemove', handleResizeMove);
-    document.addEventListener('mouseup', handleResizeEnd);
-  };
-
-  const handleResizeMove = (e: MouseEvent) => {
-    if (!resizingItem) return;
-    
-    const [rowId, cellId] = resizingItem.split('-');
-    const deltaX = e.clientX - startResizeX;
-    
-    // 将像素位移转换为列数变化（假设每列宽度为100px）
-    const columnWidth = 100;
-    const deltaColumns = Math.round(deltaX / columnWidth);
-    
-    if (deltaColumns === 0) return;
-    
-    // 找到行和单元格
+    // 找到当前单元格的宽度
     const rowIndex = layout.rows.findIndex(r => r.id === rowId);
-    if (rowIndex === -1) return;
-    
     const cellIndex = layout.rows[rowIndex].cells.findIndex(c => c.id === cellId);
-    if (cellIndex === -1) return;
+    const originalWidth = layout.rows[rowIndex].cells[cellIndex].width;
     
-    // 获取当前宽度
-    const currentCell = layout.rows[rowIndex].cells[cellIndex];
+    console.log('开始调整宽度', rowId, cellId, '原始宽度:', originalWidth);
     
-    // 计算新宽度（限制最小为1）
-    let newWidth = Math.max(1, currentCell.width + deltaColumns);
+    // 设置较低的灵敏度
+    const pixelsPerColumn = 150;
+    let lastWidth = originalWidth;
     
-    // 计算当前行的所有单元格总宽度
-    const rowTotalWidth = layout.rows[rowIndex].cells.reduce((sum, cell) => 
-      sum + cell.width, 0
-    );
-    
-    // 计算行中剩余的最大可用宽度（总列数 - 当前行其他单元格的总宽度）
-    const otherCellsWidth = rowTotalWidth - currentCell.width;
-    const maxAvailableWidth = layout.columns - otherCellsWidth;
-    
-    // 限制新宽度不超过最大可用宽度
-    newWidth = Math.min(newWidth, maxAvailableWidth);
-    
-    // 如果宽度没有变化，不做任何操作
-    if (newWidth === currentCell.width) return;
-    
-    // 更新布局
-    const updatedRows = [...layout.rows];
-    updatedRows[rowIndex] = {
-      ...updatedRows[rowIndex],
-      cells: updatedRows[rowIndex].cells.map((cell, idx) => {
-        if (idx === cellIndex) {
-          return { ...cell, width: newWidth };
-        }
-        return cell;
-      })
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      // 计算水平方向移动的总距离
+      const deltaX = moveEvent.clientX - startX;
+      
+      // 计算列数变化，使用更高的阈值
+      const deltaColumns = Math.round(deltaX / pixelsPerColumn);
+      
+      // 计算新宽度
+      let newWidth = originalWidth + deltaColumns;
+      
+      // 限制最小宽度为1
+      newWidth = Math.max(1, newWidth);
+      
+      // 计算当前行其他单元格的总宽度
+      const otherCellsWidth = layout.rows[rowIndex].cells.reduce((sum, cell, idx) => 
+        idx === cellIndex ? sum : sum + cell.width, 0
+      );
+      
+      // 确保不超过总列数
+      newWidth = Math.min(newWidth, layout.columns - otherCellsWidth);
+      
+      // 更新辅助显示
+      setAdjustingCell({rowId, cellId, targetWidth: newWidth});
+      
+      // 只有当宽度真的变化时才更新布局
+      if (newWidth !== lastWidth) {
+        lastWidth = newWidth;
+        
+        console.log('调整宽度到:', newWidth);
+        
+        // 更新布局
+        setLayout(prevLayout => {
+          const updatedRows = [...prevLayout.rows];
+          
+          updatedRows[rowIndex] = {
+            ...updatedRows[rowIndex],
+            cells: updatedRows[rowIndex].cells.map((cell, idx) => {
+              if (idx === cellIndex) {
+                return { ...cell, width: newWidth };
+              }
+              return cell;
+            })
+          };
+          
+          return {
+            ...prevLayout,
+            rows: updatedRows
+          };
+        });
+      }
     };
     
-    setLayout({ ...layout, rows: updatedRows });
-    setStartResizeX(e.clientX); // 更新起始位置以便下次移动计算
-    setOriginalWidth(newWidth); // 更新原始宽度
-  };
-
-  const handleResizeEnd = () => {
-    setResizingItem(null);
-    document.removeEventListener('mousemove', handleResizeMove);
-    document.removeEventListener('mouseup', handleResizeEnd);
+    const handleMouseUp = () => {
+      console.log('结束调整宽度');
+      setAdjustingCell(null);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+    
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
   };
 
   // 处理保存
@@ -330,14 +329,6 @@ export function EditLayoutModal({
     onSave(layout);
     onClose();
   };
-
-  // 清理事件监听器
-  useEffect(() => {
-    return () => {
-      document.removeEventListener('mousemove', handleResizeMove);
-      document.removeEventListener('mouseup', handleResizeEnd);
-    };
-  }, []);
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -423,7 +414,13 @@ export function EditLayoutModal({
                             onChange={(e) => updateCellTitle(row.id, cell.id, e.target.value)}
                             className="bg-transparent text-center w-full border-none"
                           />
-                          <div className="absolute top-2 right-2 flex">
+                          
+                          {/* 显示宽度信息 */}
+                          <div className="absolute bottom-2 right-2 text-xs bg-white px-1 rounded opacity-70">
+                            宽度: {cell.width}
+                          </div>
+                          
+                          <div className="absolute top-2 left-2 flex">
                             <Button
                               variant="ghost"
                               size="icon"
@@ -434,11 +431,23 @@ export function EditLayoutModal({
                             </Button>
                           </div>
                           
-                          {/* 调整宽度的拖动手柄 */}
+                          {/* 如果是正在调整的单元格，显示目标宽度 */}
+                          {adjustingCell && adjustingCell.cellId === cell.id && adjustingCell.rowId === row.id && (
+                            <div className="absolute inset-0 bg-blue-200 bg-opacity-50 flex items-center justify-center">
+                              <div className="bg-white p-2 rounded shadow">
+                                目标宽度: {adjustingCell.targetWidth}
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* 更改拖动手柄 */}
                           <div
-                            className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize bg-blue-400 bg-opacity-0 hover:bg-opacity-25"
+                            className="absolute right-0 top-0 bottom-0 w-6 bg-blue-500 opacity-50 hover:opacity-80 cursor-col-resize"
                             onMouseDown={(e) => handleResizeStart(e, row.id, cell.id)}
-                          />
+                            style={{
+                              zIndex: 10
+                            }}
+                          ></div>
                         </div>
                       ))}
                     </div>

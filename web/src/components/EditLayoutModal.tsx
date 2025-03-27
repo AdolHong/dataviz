@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -29,9 +29,8 @@ export function EditLayoutModal({
       { id: 'item-2', title: '区域销售占比', width: 1, height: 1, x: 1, y: 0 },
       { id: 'item-3', title: '销售明细数据', width: 1, height: 1, x: 2, y: 0 },
       { id: 'item-4', title: '新增图表1', width: 1, height: 1, x: 0, y: 1 },
-      //{ id: 'item-5', title: '新增图表2', width: 1, height: 1, x: 1, y: 1 },
-      { id: 'item-6', title: '图表4', width: 2, height: 3, x: 1, y: 1 },
-      { id: 'item-7', title: '新增图表3', width: 1, height: 1, x: 0, y: 3 },
+      { id: 'item-5', title: '图表4', width: 2, height: 3, x: 1, y: 1 },
+      { id: 'item-6', title: '新增图表3', width: 1, height: 1, x: 0, y: 3 },
     ]
   };
 
@@ -150,16 +149,6 @@ export function EditLayoutModal({
     setLayout({
       ...layout,
       items: layout.items.filter(item => item.id !== itemId)
-    });
-  };
-
-  // 修改项目标题
-  const updateItemTitle = (itemId: string, title: string) => {
-    setLayout({
-      ...layout,
-      items: layout.items.map(item => 
-        item.id === itemId ? { ...item, title } : item
-      )
     });
   };
 
@@ -296,6 +285,36 @@ export function EditLayoutModal({
     setDragOverCell(null);
   };
 
+  // 删除多余的空行和空列
+  const removeEmptyRowsAndColumns = (layout: Layout): Layout => {
+    const nonEmptyRows = new Set<number>();
+    const nonEmptyColumns = new Set<number>();
+
+    layout.items.forEach(item => {
+      for (let y = item.y; y < item.y + item.height; y++) {
+        nonEmptyRows.add(y);
+      }
+      for (let x = item.x; x < item.x + item.width; x++) {
+        nonEmptyColumns.add(x);
+      }
+    });
+
+    const newRows = Math.max(...nonEmptyRows) + 1;
+    const newColumns = Math.max(...nonEmptyColumns) + 1;
+
+    return {
+      ...layout,
+      rows: newRows,
+      columns: newColumns,
+      items: layout.items.filter(item => {
+        return (
+          item.x < newColumns && 
+          item.y < newRows
+        );
+      })
+    };
+  };
+
   // 处理保存
   const handleSave = () => {
     // 检查项目是否有重叠
@@ -303,8 +322,12 @@ export function EditLayoutModal({
       toast.error("布局中存在重叠的图表，请检查");
       return;
     }
-    
-    onSave(layout);
+
+    // 调用函数并更新layout
+    const updatedLayout = removeEmptyRowsAndColumns(layout);
+    setLayout(updatedLayout);
+
+    onSave(updatedLayout);
     onClose();
   };
 
@@ -668,7 +691,7 @@ export function EditLayoutModal({
         
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>取消</Button>
-          <Button onClick={handleSave}>保存布局</Button>
+          <Button onClick={handleSave}>保存</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

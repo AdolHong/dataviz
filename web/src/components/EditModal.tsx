@@ -1,11 +1,12 @@
 import  { useEffect, useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Filter, Database, BarChart2, Pencil, Trash2, Plus } from 'lucide-react';
 import { toast } from "sonner"
 import { DataSourceModal } from "./DataSourceModal";
 import {EditLayoutModal} from './EditLayoutModal';
+import ConfirmDialog from './ConfirmDialog';
 
 import  type {DataSource, Layout, Parameter, Chart, Report} from '@/types';
 import { addItem as addLayoutItem, removeEmptyRowsAndColumns } from '@/types/models/layout';
@@ -65,6 +66,10 @@ const EditModal = ({
   const [activeTab, setActiveTab] = useState('filters');
   const [isDataSourceModalOpen, setIsDataSourceModalOpen] = useState(false)
   const [isLayoutModalOpen, setIsLayoutModalOpen] = useState(false);
+  const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
+  const [chartToDelete, setChartToDelete] = useState<string | null>(null);
+  const [deleteFunction, setDeleteFunction] = useState<(() => void) | null>(null);
+  const [deleteMessage, setDeleteMessage] = useState<string>("");
 
   const handleSaveLayout = (layout: any) => {
     setLayout(layout);
@@ -116,6 +121,14 @@ const EditModal = ({
     // 删除空行和空列
     newLayout = removeEmptyRowsAndColumns(newLayout)
     setLayout(newLayout);
+    toast.success("图表已删除");
+  };
+
+  const confirmDelete = (chartId: string, deleteFunction: () => void, message: string) => {
+    setChartToDelete(chartId);
+    setIsConfirmDeleteOpen(true);
+    setDeleteFunction(() => deleteFunction);
+    setDeleteMessage(message);
   };
 
   return (
@@ -158,12 +171,12 @@ const EditModal = ({
                           <p className="text-sm text-gray-500">alias: df, df1</p>
                         </div>
                         <div className="flex gap-2">
-                                <Button variant="ghost" size="icon" className="h-8 w-8">
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => confirmDelete('ds1', () => handleDeleteDataSource('ds1'), "您确定要删除数据源1吗？")}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </div>
                       </div>
                     </div>
@@ -177,12 +190,12 @@ const EditModal = ({
                           <p className="text-sm text-gray-500">dataframe: df2</p>
                         </div>
                         <div className="flex gap-2">
-                                <Button variant="ghost" size="icon" className="h-8 w-8">
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => confirmDelete('ds2', () => handleDeleteDataSource('ds2'), "您确定要删除数据源2吗？")}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
                         </div>
                       </div>
                     </div>
@@ -218,7 +231,7 @@ const EditModal = ({
                           <Button variant="ghost" size="icon" className="h-8 w-8">
                             <Pencil className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => confirmDelete('param1', () => handleDeleteParameter('param1'), "您确定要删除参数1吗？")}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
@@ -236,7 +249,7 @@ const EditModal = ({
                           <Button variant="ghost" size="icon" className="h-8 w-8">
                             <Pencil className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => confirmDelete('param2', () => handleDeleteParameter('param2'), "您确定要删除参数2吗？")}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
@@ -254,7 +267,7 @@ const EditModal = ({
                           <Button variant="ghost" size="icon" className="h-8 w-8">
                             <Pencil className="h-4 w-4" />
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
+                          <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => confirmDelete('param3', () => handleDeleteParameter('param3'), "您确定要删除参数3吗？")}>
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
@@ -316,12 +329,7 @@ const EditModal = ({
                                 variant="ghost" 
                                 size="icon" 
                                 className="h-6 w-6 text-destructive" 
-                                onClick={() => {
-                                  const confirmed = window.confirm("您确定要删除这个图表吗？");
-                                  if (confirmed) {
-                                    handleDeleteChart(item.id); // 调用删除逻辑
-                                  }
-                                }}
+                                onClick={() => confirmDelete(item.id, () => handleDeleteChart(item.id), `您确定要删除 "${item.title}" 吗？`)}
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
@@ -397,6 +405,20 @@ const EditModal = ({
         onClose={() => setIsLayoutModalOpen(false)}
         onSave={handleSaveLayout}
         initialLayout={layout}
+      />
+
+      {/* 确认删除对话框 */}
+      <ConfirmDialog 
+        open={isConfirmDeleteOpen} 
+        onClose={() => setIsConfirmDeleteOpen(false)} 
+        onConfirm={() => {
+          if (deleteFunction) {
+            deleteFunction();
+          }
+          setIsConfirmDeleteOpen(false);
+        }} 
+        title="确认删除" 
+        message={deleteMessage}
       />
     </>
   );

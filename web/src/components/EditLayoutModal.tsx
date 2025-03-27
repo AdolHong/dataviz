@@ -685,10 +685,9 @@ export function EditLayoutModal({
               >
                 {/* 美化后的调整手柄UI */}
                 <div className="relative w-6 h-6 flex items-center justify-center">
-                  <div className="absolute inset-0 bg-white opacity-60 rounded-bl-lg"></div>
-                  <div className="absolute right-0.5 bottom-0.5 w-2 h-2 bg-blue-500 rounded-sm"></div>
-                  <div className="absolute right-2.5 bottom-0.5 w-1.5 h-1 bg-blue-400 rounded-sm"></div>
-                  <div className="absolute right-0.5 bottom-2.5 w-1 h-1.5 bg-blue-400 rounded-sm"></div>
+                  <div className="absolute right-0.5 bottom-0.5 w-2 h-2 bg-gray-500 rounded-sm"></div>
+                  <div className="absolute right-2.5 bottom-0.5 w-1.5 h-1 bg-gray-400 rounded-sm"></div>
+                  <div className="absolute right-0.5 bottom-2.5 w-1 h-1.5 bg-gray-400 rounded-sm"></div>
                 </div>
               </div>
             </div>
@@ -769,10 +768,8 @@ export function EditLayoutModal({
             
             {/* 行列调整和导入导出 */}
             <div className="flex justify-between flex-wrap gap-4">
+              <div className='flex-1'></div>
               <div className="flex items-center space-x-8">
-
-
-
                 <div className="flex items-center space-x-4">
                   <Label htmlFor="columns">列数:</Label>
                   <div className="flex items-center space-x-1">
@@ -806,7 +803,6 @@ export function EditLayoutModal({
                   <div className="flex items-center space-x-1">
                   <div className="text-xl font-medium">{layout.rows}</div>
                   <div className="relative flex flex-col items-center">
-                    
                     <div className="flex flex-col -mt-1 space-y-1">
                       <Button
                         variant="ghost"
@@ -829,60 +825,6 @@ export function EditLayoutModal({
                   </div>
                   </div>
                 </div>
-
-                <Button
-                  variant="outline"
-                  onClick={addItem}
-                  className="flex items-center"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  添加图表
-                </Button>
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    try {
-                      const jsonStr = JSON.stringify(layout, null, 2);
-                      navigator.clipboard.writeText(jsonStr);
-                      toast.success("布局已复制到剪贴板");
-                    } catch (error) {
-                      toast.error("导出失败");
-                    }
-                  }}
-                >
-                  导出
-                </Button>
-                
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    try {
-                      // 创建一个输入框让用户粘贴JSON
-                      const jsonStr = prompt("请粘贴布局JSON:");
-                      if (jsonStr) {
-                        const newLayout = JSON.parse(jsonStr);
-                        // 简单验证
-                        if (
-                          typeof newLayout.columns === 'number' && 
-                          typeof newLayout.rows === 'number' && 
-                          Array.isArray(newLayout.items)
-                        ) {
-                          setLayout(newLayout);
-                          toast.success("布局已导入");
-                        } else {
-                          toast.error("无效的布局格式");
-                        }
-                      }
-                    } catch (error) {
-                      toast.error("导入失败，请检查JSON格式");
-                    }
-                  }}
-                >
-                  导入
-                </Button>
               </div>
             </div>
           </div>

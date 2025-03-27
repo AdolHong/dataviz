@@ -21,14 +21,19 @@ const DataSourceTab = ({
       <TabsContent value='data' className='p-4'>
         <div className='space-y-4'>
           <div className='space-y-3'>
-            {dataSources.map((dataSource) => (
+            {dataSources.map((dataSource, idx) => (
               <div
                 key={dataSource.id}
                 className='border rounded-lg p-4 bg-white shadow-sm'
               >
                 <div className='flex justify-between items-center'>
                   <div>
-                    <h4 className='font-medium'>{dataSource.name}</h4>
+                    <div className='flex items-center gap-2'>
+                      <h4 className='font-medium'>{dataSource.name}</h4>
+                      <p className='text-sm text-gray-500'>
+                        {idx === 0 ? '(df, df1)' : `(df${idx + 1})`}
+                      </p>
+                    </div>
                     <p className='text-sm text-gray-500'>
                       type: {dataSource.executor.type}
                     </p>

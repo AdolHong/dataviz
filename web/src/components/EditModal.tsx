@@ -204,7 +204,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   return (
     <>
       <Dialog open={open} onOpenChange={onClose}>
-        <DialogContent className='max-w-[90vw] h-[90vh] flex flex-col'>
+        <DialogContent className='max-w-[90vw] h-[70vh] flex flex-col'>
           <DialogHeader>
             <DialogTitle>编辑报表</DialogTitle>
           </DialogHeader>

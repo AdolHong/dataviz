@@ -29,7 +29,7 @@ export function EditLayoutModal({
       { id: 'item-2', title: '区域销售占比', width: 1, height: 1, x: 1, y: 0 },
       { id: 'item-3', title: '销售明细数据', width: 1, height: 1, x: 2, y: 0 },
       { id: 'item-4', title: '新增图表1', width: 1, height: 1, x: 0, y: 1 },
-      { id: 'item-5', title: '新增图表2', width: 1, height: 1, x: 1, y: 1 },
+      //{ id: 'item-5', title: '新增图表2', width: 1, height: 1, x: 1, y: 1 },
       { id: 'item-6', title: '图表4', width: 2, height: 3, x: 1, y: 1 },
       { id: 'item-7', title: '新增图表3', width: 1, height: 1, x: 0, y: 3 },
     ]
@@ -408,53 +408,20 @@ export function EditLayoutModal({
     const item = layout.items.find(item => item.id === draggedItem);
     if (!item) return;
     
+    // 无论原尺寸多大，都重置为1x1的大小
+    const newWidth = 1;
+    const newHeight = 1;
+    
     // 检查新位置是否超出边界
-    if (x + item.width > layout.columns) {
-      // 自动调整项目宽度以适应网格
-      const adjustedWidth = layout.columns - x;
-      if (adjustedWidth < 1) {
-        toast.error("目标位置无法放置该图表");
-        setDraggedItem(null);
-        setDragOverCell(null);
-        return;
-      }
-      
-      toast.info(`图表宽度已自动调整为 ${adjustedWidth}`);
-      
-      // 更新项目信息，同时修改宽度
-      setLayout({
-        ...layout,
-        items: layout.items.map(i => 
-          i.id === draggedItem ? { ...i, x, y, width: adjustedWidth } : i
-        )
-      });
-      
+    if (x + newWidth > layout.columns) {
+      toast.error("目标位置无法放置该图表");
       setDraggedItem(null);
       setDragOverCell(null);
       return;
     }
     
-    // 同样处理高度溢出的情况
-    if (y + item.height > layout.rows) {
-      // 自动调整项目高度以适应网格
-      const adjustedHeight = layout.rows - y;
-      if (adjustedHeight < 1) {
-        toast.error("目标位置无法放置该图表");
-        setDraggedItem(null);
-        setDragOverCell(null);
-        return;
-      }
-      
-      toast.info(`图表高度已自动调整为 ${adjustedHeight}`);
-      
-      // 更新项目信息，同时修改高度
-      setLayout({
-        ...layout,
-        items: layout.items.map(i => 
-          i.id === draggedItem ? { ...i, x, y, height: adjustedHeight } : i
-        )
-      });
-      
+    if (y + newHeight > layout.rows) {
+      toast.error("目标位置无法放置该图表");
       setDraggedItem(null);
       setDragOverCell(null);
       return;
@@ -479,31 +446,23 @@ export function EditLayoutModal({
     });
     
     // 检查拖拽项目的新位置是否与其他项目重叠
-    let hasOverlap = false;
-    for (let newY = y; newY < y + item.height; newY++) {
-      for (let newX = x; newX < x + item.width; newX++) {
-        if (newY < layout.rows && newX < layout.columns) {
-          if (tempGrid[newY][newX] !== null) {
-            hasOverlap = true;
-            break;
-          }
-        }
-      }
-      if (hasOverlap) break;
-    }
-    
-    if (hasOverlap) {
+    if (tempGrid[y][x] !== null) {
       toast.error("该位置已被其他图表占用");
       setDraggedItem(null);
       setDragOverCell(null);
       return;
     }
     
-    // 更新项目位置
+    // 如果拖拽的尺寸和原尺寸不同，显示提示
+    if (item.width !== newWidth || item.height !== newHeight) {
+      toast.info(`图表尺寸已重置为 1x1`);
+    }
+    
+    // 更新项目位置和尺寸
     setLayout({
       ...layout,
       items: layout.items.map(i => 
-        i.id === draggedItem ? { ...i, x, y } : i
+        i.id === draggedItem ? { ...i, x, y, width: newWidth, height: newHeight } : i
       )
     });
     

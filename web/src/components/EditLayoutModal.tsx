@@ -5,24 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Grip, Plus, Trash2, ArrowLeft, ArrowRight, Move } from 'lucide-react';
 import { toast } from "sonner";
 
-// 定义布局项的接口
-interface LayoutItem {
-  id: string;
-  title: string;
-  width: number; // 以列数为单位
-}
-
-// 定义布局行的接口
-interface LayoutRow {
-  id: string;
-  cells: LayoutItem[];
-}
-
-// 定义整体布局的接口
-interface Layout {
-  columns: number; // 总列数
-  rows: LayoutRow[];
-}
+import type { Layout } from '@/types';
 
 interface EditLayoutModalProps {
   open: boolean;
@@ -631,38 +614,9 @@ export function EditLayoutModal({
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleEmptyAreaDrop}
         >
-          <div className="space-y-4">
-            {/* 全局设置 */}
-            <div className="flex items-center space-x-4">
-              <Label htmlFor="columns">总列数:</Label>
-              <div className="flex items-center">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => adjustColumns(layout.columns - 1)}
-                  disabled={layout.columns <= 1}
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                </Button>
-                <span className="w-8 text-center">{layout.columns}</span>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => adjustColumns(layout.columns + 1)}
-                >
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-              </div>
-              <Button onClick={addRow} variant="outline" className="ml-auto">
-                <Plus className="h-4 w-4 mr-2" />
-                添加行
-              </Button>
-            </div>
-            
-            {/* 布局预览 */}
+          <div className="space-y-4">            
+            {/* 布局 */}
             <div className="border rounded-lg p-4">
-              <h3 className="font-medium mb-4">布局预览</h3>
-              
               <div className="space-y-8">
                 {layout.rows.map((row) => (
                   <div 
@@ -679,22 +633,22 @@ export function EditLayoutModal({
                     <div className="absolute -top-3 left-0 bg-white px-2 text-xs text-gray-500 flex items-center">
                       <Grip className="h-3 w-3 mr-1 cursor-grab" />
                       <span>行 {layout.rows.indexOf(row) + 1}</span>
-                      <Button
+                      {/* <Button
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6 ml-2 text-red-500"
                         onClick={() => removeRow(row.id)}
                       >
                         <Trash2 className="h-3 w-3" />
-                      </Button>
-                      <Button
+                      </Button> */}
+                      {/* <Button
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6 text-blue-500"
                         onClick={() => addCell(row.id)}
                       >
                         <Plus className="h-3 w-3" />
-                      </Button>
+                      </Button> */}
                     </div>
                     
                     <div
@@ -720,27 +674,7 @@ export function EditLayoutModal({
                           onDragOver={(e) => handleCellDragOver(e, row.id, cell.id)}
                           onDrop={(e) => handleCellDrop(e, row.id, cell.id)}
                         >
-                          <input
-                            type="text"
-                            value={cell.title}
-                            onChange={(e) => updateCellTitle(row.id, cell.id, e.target.value)}
-                            className="bg-transparent text-center w-full border-none"
-                          />
-                          
-                          <div className="absolute top-2 left-2 flex">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 text-red-500"
-                              onClick={() => removeCell(row.id, cell.id)}
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                            <div className="h-6 w-6 cursor-move flex items-center justify-center ml-1">
-                              <Move className="h-3 w-3" />
-                            </div>
-                          </div>
-                          
+                          <span className="text-center">{cell.title}</span>
                           {/* 如果是正在调整的单元格，显示目标宽度 */}
                           {adjustingCell && adjustingCell.cellId === cell.id && adjustingCell.rowId === row.id && (
                             <div className="absolute inset-0 bg-blue-200 bg-opacity-50 flex items-center justify-center">
@@ -749,7 +683,6 @@ export function EditLayoutModal({
                               </div>
                             </div>
                           )}
-                          
                           {/* 更改拖动手柄 */}
                           <div
                             className="absolute right-0 top-0 bottom-0 w-2 bg-blue-500 opacity-50 hover:opacity-80 cursor-col-resize rounded-lg"
@@ -766,49 +699,74 @@ export function EditLayoutModal({
               </div>
             </div>
             
-            {/* 导入/导出 */}
+            {/* 列数, 导入导出 */}
             <div className="flex justify-between">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  try {
-                    const jsonStr = JSON.stringify(layout, null, 2);
-                    navigator.clipboard.writeText(jsonStr);
-                    toast.success("布局已复制到剪贴板");
-                  } catch (error) {
-                    toast.error("导出失败");
-                  }
-                }}
-              >
-                导出布局
-              </Button>
               
-              <Button
-                variant="outline"
-                onClick={() => {
-                  try {
-                    // 创建一个输入框让用户粘贴JSON
-                    const jsonStr = prompt("请粘贴布局JSON:");
-                    if (jsonStr) {
-                      const newLayout = JSON.parse(jsonStr);
-                      // 简单验证
-                      if (
-                        typeof newLayout.columns === 'number' && 
-                        Array.isArray(newLayout.rows)
-                      ) {
-                        setLayout(newLayout);
-                        toast.success("布局已导入");
-                      } else {
-                        toast.error("无效的布局格式");
-                      }
+              <div className="flex items-center space-x-4">
+                <Label htmlFor="columns">列数:</Label>
+                <div className="flex items-center">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => adjustColumns(layout.columns - 1)}
+                    disabled={layout.columns <= 1}
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="w-8 text-center">{layout.columns}</span>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => adjustColumns(layout.columns + 1)}
+                  >
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    try {
+                      const jsonStr = JSON.stringify(layout, null, 2);
+                      navigator.clipboard.writeText(jsonStr);
+                      toast.success("布局已复制到剪贴板");
+                    } catch (error) {
+                      toast.error("导出失败");
                     }
-                  } catch (error) {
-                    toast.error("导入失败，请检查JSON格式");
-                  }
-                }}
-              >
-                导入布局
-              </Button>
+                  }}
+                >
+                  导出
+                </Button>
+                
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    try {
+                      // 创建一个输入框让用户粘贴JSON
+                      const jsonStr = prompt("请粘贴布局JSON:");
+                      if (jsonStr) {
+                        const newLayout = JSON.parse(jsonStr);
+                        // 简单验证
+                        if (
+                          typeof newLayout.columns === 'number' && 
+                          Array.isArray(newLayout.rows)
+                        ) {
+                          setLayout(newLayout);
+                          toast.success("布局已导入");
+                        } else {
+                          toast.error("无效的布局格式");
+                        }
+                      }
+                    } catch (error) {
+                      toast.error("导入失败，请检查JSON格式");
+                    }
+                  }}
+                >
+                  导入
+                </Button>
+              </div>
             </div>
           </div>
         </div>

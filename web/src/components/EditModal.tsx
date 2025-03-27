@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -20,97 +20,11 @@ interface EditModalProps {
 
 const EditModal = ({ 
   open, 
-  onClose, 
-  onSave, 
-  parameters, 
-  visualizations = [], 
-  dashboardConfig, 
-  initialSqlCode 
+  onClose
 }: EditModalProps) => {
-  const [paramList, setParamList] = useState<any[]>([]);
-  const [visualizationList, setVisualizationList] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState('filters');
-  const [sqlCode, setSqlCode] = useState(initialSqlCode || '');
-  const [executorType, setExecutorType] = useState('MySQL');
-  const [dataFrameName, setDataFrameName] = useState('df');
-  const [updateMode, setUpdateMode] = useState('手动更新');
-  const sqlEditorRef = useRef<any>(null);
   const [isDataSourceModalOpen, setIsDataSourceModalOpen] = useState(false)
   const [isLayoutModalOpen, setIsLayoutModalOpen] = useState(false);
-
-  // 当modal显示或dashboardConfig变化时初始化SQL相关配置
-  useEffect(() => {
-    if (dashboardConfig?.query) {
-      setSqlCode(dashboardConfig.query.code || '');
-      setExecutorType(dashboardConfig.query.executorType || 'MySQL');
-      setDataFrameName(dashboardConfig.query.dataFrameName || 'df');
-      setUpdateMode(dashboardConfig.query.updateMode || '手动更新');
-    }
-  }, [dashboardConfig]);
-
-  // 当参数列表变化时更新表单
-  useEffect(() => {
-    if (parameters && parameters.length > 0) {
-      setParamList([...parameters]);
-    } else {
-      setParamList([]);
-    }
-    
-    // 当可视化列表变化时更新
-    if (visualizations && visualizations.length > 0) {
-      setVisualizationList([...visualizations]);
-    } else {
-      setVisualizationList([]);
-    }
-  }, [parameters, visualizations]);
-
-  const handleSave = async () => {
-    try {
-      // 从SQLEditor获取最新的SQL查询
-      const currentSqlCode = sqlEditorRef.current ? sqlEditorRef.current.getSqlQuery() : sqlCode;
-      
-      // 构建更新后的配置
-      const newConfig = { 
-        ...dashboardConfig, 
-        parameters: paramList,
-        visualization: visualizationList,
-        query: {
-          code: currentSqlCode,
-          executorType,
-          dataFrameName,
-          updateMode,
-        }
-      };
-      
-      console.log('保存配置到服务器:', newConfig);
-      
-      // 保存到后端
-      const response = await axios.post('http://localhost:8000/api/update_config', {
-          config: newConfig
-      });
-
-      if (response.data.status === 'success') {
-        toast({
-          title: "成功",
-          description: "配置已保存",
-        });
-        onSave(paramList, visualizationList, currentSqlCode);
-      } else {
-        toast({
-          variant: "destructive",
-          title: "保存失败",
-          description: response.data.message,
-        });
-      }
-    } catch (error: any) {
-      console.error('保存失败:', error);
-      toast({
-        variant: "destructive",
-        title: "保存失败",
-        description: error.message,
-      });
-    }
-  };
 
   const handleSaveLayout = (layout: any) => {
     console.log('保存的布局:', layout);
@@ -192,7 +106,7 @@ const EditModal = ({
                     <Button 
                       variant="outline" 
                       className="w-full border-dashed"
-                      onClick={() => {}}
+                      onClick={() => {setIsDataSourceModalOpen(true)}}
                     >
                       <Plus className="h-4 w-4 mr-2" />
                       添加数据源

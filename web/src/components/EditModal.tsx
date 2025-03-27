@@ -8,6 +8,7 @@ import { DataSourceModal } from "./DataSourceModal";
 import {EditLayoutModal} from './EditLayoutModal';
 
 import  type {DataSource, Layout, Parameter, Chart, Report} from '@/types';
+import { addItem as addLayoutItem, removeEmptyRowsAndColumns } from '@/types/models/layout';
 
 interface EditModalProps {
   open: boolean;
@@ -37,8 +38,12 @@ const EditModal = ({
       { id: 'param2', name: '结束日期', type: 'date' }
     ],
     charts: [
-      { id: 'chart1', title: '销售趋势', type: 'line' },
-      { id: 'chart2', title: '销售占比', type: 'pie' }
+      { id: 'item-1', title: '销售趋势', code: 'line', dependencies: ['ds1'], executor: { type: 'python', engine: 'pandas' } },
+      { id: 'item-2', title: '销售占比', code: 'pie', dependencies: ['ds2'], executor: { type: 'python', engine: 'pandas' } },
+      { id: 'item-3', title: '销售占比', code: 'pie', dependencies: ['ds2'], executor: { type: 'python', engine: 'pandas' } },
+      { id: 'item-4', title: '销售占比', code: 'pie', dependencies: ['ds2'], executor: { type: 'python', engine: 'pandas' } },
+      { id: 'item-5', title: '销售占比', code: 'pie', dependencies: ['ds2'], executor: { type: 'python', engine: 'pandas' } },
+      { id: 'item-6', title: '销售占比', code: 'pie', dependencies: ['ds2'], executor: { type: 'python', engine: 'pandas' } }
     ],
     layout: {
       columns: 3,
@@ -54,7 +59,7 @@ const EditModal = ({
     }};
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [parameters, setParameters] = useState<Parameter[]>([]);
-  const [charts, setCharts] = useState<Chart[]>([]);
+  const [charts, setCharts] = useState<Chart[]>(demoReport.charts);
   const [layout, setLayout] = useState<Layout>(demoReport.layout);
 
   const [activeTab, setActiveTab] = useState('filters');
@@ -64,6 +69,53 @@ const EditModal = ({
   const handleSaveLayout = (layout: any) => {
     setLayout(layout);
     setIsLayoutModalOpen(false);
+  };
+
+  // 添加图表
+  const handleAddChart = () => {
+    // 提取现有图表的 ID，并转换为数字
+    const existingIds = charts.map(chart => parseInt(chart.id.split('-')[1], 10));
+
+    // 找到缺失的最小数字
+    let newId = 1;
+    while (existingIds.includes(newId)) {
+      newId++;
+    }
+
+    // 生成新的 ID
+    const newChartId = `item-${newId}`;
+    const title = `新增图表 ${newId}`;
+
+    // 添加新的图表
+    setCharts([...charts, { 
+      id: newChartId, 
+      title: title, 
+      code: 'pie', 
+      dependencies: [], 
+      executor: { type: 'python', engine: 'pandas' } 
+    }]);
+
+    // 更新布局
+    setLayout(addLayoutItem(layout, newChartId, title));
+  };
+
+  // 删除图表
+  const handleDeleteChart = (chartId: string) => {
+    if (charts.length === 1) {
+      toast.error('至少需要保留一个图表');
+      return;
+    }
+    // 删除图表
+    setCharts(charts.filter(chart => chart.id !== chartId));
+    
+    // 更新布局，删除对应的 item
+    let newLayout = {
+      ...layout,
+      items: layout.items.filter(item => item.id !== chartId) // 过滤掉被删除的 item
+    }
+    // 删除空行和空列
+    newLayout = removeEmptyRowsAndColumns(newLayout)
+    setLayout(newLayout);
   };
 
   return (
@@ -235,20 +287,45 @@ const EditModal = ({
                         style={{ 
                           gridTemplateColumns: `repeat(${layout.columns}, 1fr)`,
                           gridTemplateRows: `repeat(${layout.rows}, 100px)`, // 使用固定行高
-                          minHeight: '200px' // 确保有足够的高度
+                          minHeight: '100px' // 确保有足够的高度
                         }}
                       >
                         {/* 先渲染所有项目 */}
                         {layout.items.map((item) => (
                           <div 
                             key={item.id}
-                            className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200 flex items-center justify-center"
+                            className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200 flex items-center justify-center relative group"
                             style={{
                               gridColumn: `${item.x + 1} / span ${item.width}`,
                               gridRow: `${item.y + 1} / span ${item.height}`
                             }}
                           >
                             {item.title}
+
+                            {/* 在右上角添加图标，默认隐藏 */}
+                            <div className="absolute top-0 right-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="h-6 w-6" 
+                                onClick={() => {/* 编辑逻辑 */}}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="h-6 w-6 text-destructive" 
+                                onClick={() => {
+                                  const confirmed = window.confirm("您确定要删除这个图表吗？");
+                                  if (confirmed) {
+                                    handleDeleteChart(item.id); // 调用删除逻辑
+                                  }
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </div>
                         ))}
                           
@@ -288,7 +365,7 @@ const EditModal = ({
                     <Button 
                       variant="outline" 
                       className="w-full border-dashed"
-                      onClick={() => {}}
+                      onClick={() => {handleAddChart()}}
                     >
                       <Plus className="h-4 w-4 mr-2" />
                       添加图表

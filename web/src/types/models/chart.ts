@@ -16,6 +16,7 @@ export interface ChartParam {
 
 // 可视化接口
 export interface Chart {
+  id: string;
   title: string;
   description?: string;
   code: string;

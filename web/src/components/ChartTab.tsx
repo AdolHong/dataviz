@@ -37,7 +37,7 @@ const ChartTab = ({
                 {layout.items.map((item) => (
                   <div
                     key={item.id}
-                    className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200 flex items-center justify-center relative group"
+                    className="border-2 border-dashed rounded-lg p-4 text-center  flex items-center justify-center relative group"
                     style={{
                       gridColumn: `${item.x + 1} / span ${item.width}`,
                       gridRow: `${item.y + 1} / span ${item.height}`,
@@ -48,7 +48,7 @@ const ChartTab = ({
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-4 w-4"
+                        className="h-6 w-6"
                         onClick={() => {
                           /* 编辑逻辑 */
                         }}
@@ -58,7 +58,7 @@ const ChartTab = ({
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-4 w-4 text-destructive"
+                        className="h-6 w-6 text-destructive"
                         onClick={() =>
                           confirmDelete(
                             () => handleDeleteChart(item.id),
@@ -66,7 +66,7 @@ const ChartTab = ({
                           )
                         }
                       >
-                        <Trash2 className="h-4 w-4 text-black" />
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>

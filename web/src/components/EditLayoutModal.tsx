@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Grip, Plus, Trash2, ArrowLeft, ArrowRight, Move, ChevronsUpDown, ChevronsLeftRight } from 'lucide-react';
+import { Grip, Plus, Trash2, ArrowLeft, ArrowRight, Move, ChevronsUpDown, ChevronsLeftRight, ChevronsUp, ChevronsDown } from 'lucide-react';
 import { toast } from "sonner";
 
 import type { Layout, LayoutItem } from '@/types';
@@ -594,9 +594,10 @@ export function EditLayoutModal({
                 </div>
               )}
               
-              {/* 组合调整手柄 - 同时调整宽度和高度 */}
+              {/* 调整手柄美化版 */}
               <div
-                className="absolute right-0 bottom-0 w-4 h-4 bg-blue-500 opacity-50 hover:opacity-80 cursor-nwse-resize rounded-bl-none rounded-tr-none rounded-tl-none rounded-br-lg"
+                className="absolute right-0 bottom-0 cursor-nwse-resize select-none"
+                style={{ zIndex: 10 }}
                 onMouseDown={(e) => {
                   e.preventDefault();
                   const startX = e.clientX;
@@ -681,18 +682,15 @@ export function EditLayoutModal({
                   document.addEventListener('mousemove', handleMouseMove);
                   document.addEventListener('mouseup', handleMouseUp);
                 }}
-                style={{ zIndex: 10 }}
-              ></div>
-              
-              {/* 删除按钮 */}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="absolute top-1 right-1 h-6 w-6 bg-white rounded-full shadow"
-                onClick={() => removeItem(item.id)}
               >
-                <Trash2 className="h-3 w-3" />
-              </Button>
+                {/* 美化后的调整手柄UI */}
+                <div className="relative w-6 h-6 flex items-center justify-center">
+                  <div className="absolute inset-0 bg-white opacity-60 rounded-bl-lg"></div>
+                  <div className="absolute right-0.5 bottom-0.5 w-2 h-2 bg-blue-500 rounded-sm"></div>
+                  <div className="absolute right-2.5 bottom-0.5 w-1.5 h-1 bg-blue-400 rounded-sm"></div>
+                  <div className="absolute right-0.5 bottom-2.5 w-1 h-1.5 bg-blue-400 rounded-sm"></div>
+                </div>
+              </div>
             </div>
           );
         } else if (!itemId) {
@@ -774,45 +772,53 @@ export function EditLayoutModal({
               <div className="flex items-center space-x-8">
                 <div className="flex items-center space-x-4">
                   <Label htmlFor="columns">列数:</Label>
-                  <div className="flex items-center">
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => adjustColumns(layout.columns - 1)}
-                      disabled={layout.columns <= 1}
-                    >
-                      <ArrowLeft className="h-4 w-4" />
-                    </Button>
-                    <span className="w-8 text-center">{layout.columns}</span>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => adjustColumns(layout.columns + 1)}
-                    >
-                      <ArrowRight className="h-4 w-4" />
-                    </Button>
+                  <div className="relative flex flex-col items-center">
+                    <div className="text-xl font-medium">{layout.columns}</div>
+                    <div className="flex flex-col -mt-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 rounded-b-none py-0"
+                        onClick={() => adjustColumns(layout.columns + 1)}
+                      >
+                        <ChevronsUp className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 rounded-t-none py-0"
+                        onClick={() => adjustColumns(layout.columns - 1)}
+                        disabled={layout.columns <= 1}
+                      >
+                        <ChevronsDown className="h-3 w-3" />
+                      </Button>
+                    </div>
                   </div>
                 </div>
                 
                 <div className="flex items-center space-x-4">
                   <Label htmlFor="rows">行数:</Label>
-                  <div className="flex items-center">
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => adjustRows(layout.rows - 1)}
-                      disabled={layout.rows <= 1}
-                    >
-                      <ArrowLeft className="h-4 w-4" />
-                    </Button>
-                    <span className="w-8 text-center">{layout.rows}</span>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => adjustRows(layout.rows + 1)}
-                    >
-                      <ArrowRight className="h-4 w-4" />
-                    </Button>
+                  <div className="relative flex flex-col items-center">
+                    <div className="text-xl font-medium">{layout.rows}</div>
+                    <div className="flex flex-col -mt-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 rounded-b-none py-0"
+                        onClick={() => adjustRows(layout.rows + 1)}
+                      >
+                        <ChevronsUp className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 rounded-t-none py-0"
+                        onClick={() => adjustRows(layout.rows - 1)}
+                        disabled={layout.rows <= 1}
+                      >
+                        <ChevronsDown className="h-3 w-3" />
+                      </Button>
+                    </div>
                   </div>
                 </div>
 

@@ -770,41 +770,48 @@ export function EditLayoutModal({
             {/* 行列调整和导入导出 */}
             <div className="flex justify-between flex-wrap gap-4">
               <div className="flex items-center space-x-8">
+
+
+
                 <div className="flex items-center space-x-4">
                   <Label htmlFor="columns">列数:</Label>
-                  <div className="relative flex flex-col items-center">
+                  <div className="flex items-center space-x-1">
                     <div className="text-xl font-medium">{layout.columns}</div>
-                    <div className="flex flex-col -mt-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 rounded-b-none py-0"
-                        onClick={() => adjustColumns(layout.columns + 1)}
-                      >
-                        <ChevronsUp className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 rounded-t-none py-0"
-                        onClick={() => adjustColumns(layout.columns - 1)}
-                        disabled={layout.columns <= 1}
-                      >
-                        <ChevronsDown className="h-3 w-3" />
-                      </Button>
+                    <div className="relative flex flex-col items-center">
+                      <div className="flex flex-col -mt-1 space-y-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-4 w-4 rounded-b-none py-0"
+                          onClick={() => adjustColumns(layout.columns + 1)}
+                        >
+                          <ChevronsUp className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-4 w-4 rounded-t-none py-0"
+                          onClick={() => adjustColumns(layout.columns - 1)}
+                          disabled={layout.columns <= 1}
+                        >
+                          <ChevronsDown className="h-3 w-3" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </div>
                 
                 <div className="flex items-center space-x-4">
                   <Label htmlFor="rows">行数:</Label>
+                  <div className="flex items-center space-x-1">
+                  <div className="text-xl font-medium">{layout.rows}</div>
                   <div className="relative flex flex-col items-center">
-                    <div className="text-xl font-medium">{layout.rows}</div>
-                    <div className="flex flex-col -mt-1">
+                    
+                    <div className="flex flex-col -mt-1 space-y-1">
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-6 w-6 rounded-b-none py-0"
+                        className="h-4 w-4 rounded-b-none py-0"
                         onClick={() => adjustRows(layout.rows + 1)}
                       >
                         <ChevronsUp className="h-3 w-3" />
@@ -812,13 +819,14 @@ export function EditLayoutModal({
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-6 w-6 rounded-t-none py-0"
+                        className="h-4 w-4 rounded-t-none py-0"
                         onClick={() => adjustRows(layout.rows - 1)}
                         disabled={layout.rows <= 1}
                       >
                         <ChevronsDown className="h-3 w-3" />
                       </Button>
                     </div>
+                  </div>
                   </div>
                 </div>
 

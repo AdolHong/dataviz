@@ -1,12 +1,12 @@
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogFooter,
-} from "@/components/ui/dialog";
+} from '@/components/ui/dialog';
 
 import {
   Select,
@@ -14,10 +14,10 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
+} from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 
-interface DataSourceModalProps {
+interface EditDataSourceModalProps {
   open: boolean;
   onClose: () => void;
   onSave: (config: DataSourceConfig) => void;
@@ -30,18 +30,18 @@ interface DataSourceConfig {
   dataFrameName: string;
 }
 
-export function DataSourceModal({
+export function EditDataSourceModal({
   open,
   onClose,
   onSave,
   initialConfig,
-}: DataSourceModalProps) {
+}: EditDataSourceModalProps) {
   const [executorType, setExecutorType] = useState(
-    initialConfig?.executorType || ""
+    initialConfig?.executorType || ''
   );
-  const [updateMode, setUpdateMode] = useState(initialConfig?.updateMode || "");
+  const [updateMode, setUpdateMode] = useState(initialConfig?.updateMode || '');
   const [dataFrameName, setDataFrameName] = useState(
-    initialConfig?.dataFrameName || ""
+    initialConfig?.dataFrameName || ''
   );
 
   const handleSave = () => {
@@ -55,39 +55,39 @@ export function DataSourceModal({
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className='sm:max-w-[500px]'>
         <DialogHeader>
           <DialogTitle>数据源配置</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
-          <div className="space-y-2">
+        <div className='space-y-4 py-4'>
+          <div className='space-y-2'>
             <label>执行引擎:</label>
             <Select value={executorType} onValueChange={setExecutorType}>
               <SelectTrigger>
-                <SelectValue placeholder="选择执行引擎" />
+                <SelectValue placeholder='选择执行引擎' />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="MySQL">MySQL</SelectItem>
-                <SelectItem value="PostgreSQL">PostgreSQL</SelectItem>
+                <SelectItem value='MySQL'>MySQL</SelectItem>
+                <SelectItem value='PostgreSQL'>PostgreSQL</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          <div className="space-y-2">
+          <div className='space-y-2'>
             <label>更新方式:</label>
             <Select value={updateMode} onValueChange={setUpdateMode}>
               <SelectTrigger>
-                <SelectValue placeholder="选择更新方式" />
+                <SelectValue placeholder='选择更新方式' />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="手动更新">手动更新</SelectItem>
-                <SelectItem value="自动更新">自动更新</SelectItem>
+                <SelectItem value='手动更新'>手动更新</SelectItem>
+                <SelectItem value='自动更新'>自动更新</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          <div className="space-y-2">
+          <div className='space-y-2'>
             <label>DataFrame名称:</label>
             <Input
               value={dataFrameName}
@@ -97,7 +97,7 @@ export function DataSourceModal({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant='outline' onClick={onClose}>
             取消
           </Button>
           <Button onClick={handleSave}>保存</Button>

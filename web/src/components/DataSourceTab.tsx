@@ -2,20 +2,22 @@ import { Button } from '@/components/ui/button';
 import { Trash2, Pencil, Plus } from 'lucide-react';
 import { type DataSource } from '@/types/models/dataSource';
 import { TabsContent } from '@radix-ui/react-tabs';
+import { useState } from 'react';
+import { EditDataSourceModal } from './EditDataSourceModal';
 
 const DataSourceTab = ({
   dataSources,
   setDataSources,
   handleDeleteDataSource,
-  setIsDataSourceModalOpen,
   confirmDelete,
 }: {
   dataSources: DataSource[];
   setDataSources: (dataSources: DataSource[]) => void;
   handleDeleteDataSource: (id: string) => void;
-  setIsDataSourceModalOpen: (open: boolean) => void;
   confirmDelete: (deleteFunction: () => void, message: string) => void;
 }) => {
+  const [isEditDataSourceModalOpen, setIsEditDataSourceModalOpen] =
+    useState(false);
   return (
     <div>
       <TabsContent value='data' className='p-4'>
@@ -65,7 +67,7 @@ const DataSourceTab = ({
             <Button
               variant='outline'
               className='w-full border-dashed'
-              onClick={() => setIsDataSourceModalOpen(true)}
+              onClick={() => setIsEditDataSourceModalOpen(true)}
             >
               <Plus className='h-4 w-4 mr-2' />
               添加数据源
@@ -73,6 +75,12 @@ const DataSourceTab = ({
           </div>
         </div>
       </TabsContent>
+
+      <EditDataSourceModal
+        open={isEditDataSourceModalOpen}
+        onClose={() => setIsEditDataSourceModalOpen(false)}
+        onSave={() => {}}
+      />
     </div>
   );
 };

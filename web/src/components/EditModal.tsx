@@ -1,31 +1,22 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
 
+import { Filter, Database, BarChart2 } from 'lucide-react';
+import { toast } from 'sonner';
+
+import type { DataSource, Layout, Parameter, Chart } from '@/types';
 import DataSourceTab from './DataSourceTab';
 import FilterTab from './FilterTab';
 import ChartTab from './ChartTab';
 
-import {
-  Filter,
-  Database,
-  BarChart2,
-  Pencil,
-  Trash2,
-  Plus,
-} from 'lucide-react';
-import { toast } from 'sonner';
-import { DataSourceModal } from './DataSourceModal';
-import { EditLayoutModal } from './EditLayoutModal';
-import ConfirmDialog from './ConfirmDialog';
-
-import type { DataSource, Layout, Parameter, Chart, Report } from '@/types';
 import {
   addItem as addLayoutItem,
   removeEmptyRowsAndColumns,
@@ -135,7 +126,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   const [layout, setLayout] = useState<Layout>(demoReport.layout);
 
   const [activeTab, setActiveTab] = useState('filters');
-  const [isDataSourceModalOpen, setIsDataSourceModalOpen] = useState(false);
+
   const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
   const [deleteFunction, setDeleteFunction] = useState<(() => void) | null>(
     null
@@ -236,7 +227,6 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
                 dataSources={dataSources}
                 setDataSources={setDataSources}
                 handleDeleteDataSource={() => {}}
-                setIsDataSourceModalOpen={setIsDataSourceModalOpen}
                 confirmDelete={confirmDelete}
               />
               <FilterTab
@@ -257,25 +247,36 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
         </DialogContent>
       </Dialog>
 
-      <DataSourceModal
-        open={isDataSourceModalOpen}
-        onClose={() => setIsDataSourceModalOpen(false)}
-        onSave={() => {}}
-      />
-
-      {/* 确认删除对话框 */}
-      <ConfirmDialog
+      {/* 确认删除对话框, 多个tabs共用 */}
+      <Dialog
         open={isConfirmDeleteOpen}
-        onClose={() => setIsConfirmDeleteOpen(false)}
-        onConfirm={() => {
-          if (deleteFunction) {
-            deleteFunction();
-          }
-          setIsConfirmDeleteOpen(false);
-        }}
-        title='确认删除'
-        message={deleteMessage}
-      />
+        onOpenChange={() => setIsConfirmDeleteOpen(false)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认</DialogTitle>
+          </DialogHeader>
+          <p>{deleteMessage}</p>
+          <DialogFooter>
+            <Button
+              variant='outline'
+              onClick={() => setIsConfirmDeleteOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              onClick={() => {
+                if (deleteFunction) {
+                  deleteFunction();
+                }
+                setIsConfirmDeleteOpen(false);
+              }}
+            >
+              确认
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

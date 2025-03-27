@@ -57,13 +57,8 @@ export function EditLayoutModal({
 
 
   // 处理项目拖拽开始
-  const handleItemDragStart = (e: React.DragEvent, itemId: string) => {
+  const handleItemDragStart = (itemId: string) => {
     setDraggedItem(itemId);
-    e.dataTransfer.setData('text/plain', itemId);
-    // 设置拖拽效果
-    const dragImage = new Image();
-    dragImage.src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
-    e.dataTransfer.setDragImage(dragImage, 0, 0);
   };
   
   // 处理项目拖拽结束
@@ -92,51 +87,11 @@ export function EditLayoutModal({
     const newHeight = 1;
     
     // 检查新位置是否超出边界
-    if (x + newWidth > layout.columns) {
+    if (x + newWidth > layout.columns || y + newHeight > layout.rows) {
       toast.error("目标位置无法放置该图表");
-      setDraggedItem(null);
-      setDragOverCell(null);
       return;
     }
-    
-    if (y + newHeight > layout.rows) {
-      toast.error("目标位置无法放置该图表");
-      setDraggedItem(null);
-      setDragOverCell(null);
-      return;
-    }
-    
-    // 检查新位置是否与其他项目重叠
-    // 创建一个临时的网格，但排除当前被拖拽项目
-    const otherItems = layout.items.filter(i => i.id !== draggedItem);
-    const tempGrid: (string | null)[][] = Array(layout.rows).fill(null).map(() => 
-      Array(layout.columns).fill(null)
-    );
-    
-    // 填充其他项目到临时网格
-    otherItems.forEach(otherItem => {
-      for (let iy = otherItem.y; iy < otherItem.y + otherItem.height; iy++) {
-        for (let ix = otherItem.x; ix < otherItem.x + otherItem.width; ix++) {
-          if (iy < layout.rows && ix < layout.columns) {
-            tempGrid[iy][ix] = otherItem.id;
-          }
-        }
-      }
-    });
-    
-    // 检查拖拽项目的新位置是否与其他项目重叠
-    if (tempGrid[y][x] !== null) {
-      toast.error("该位置已被其他图表占用");
-      setDraggedItem(null);
-      setDragOverCell(null);
-      return;
-    }
-    
-    // 如果拖拽的尺寸和原尺寸不同，显示提示
-    if (item.width !== newWidth || item.height !== newHeight) {
-      toast.info(`图表尺寸已重置为 1x1`);
-    }
-    
+
     // 更新项目位置和尺寸
     setLayout({
       ...layout,
@@ -144,7 +99,8 @@ export function EditLayoutModal({
         i.id === draggedItem ? { ...i, x, y, width: newWidth, height: newHeight } : i
       )
     });
-    
+
+    // 重置拖拽状态
     setDraggedItem(null);
     setDragOverCell(null);
   };
@@ -275,17 +231,14 @@ export function EditLayoutModal({
                 zIndex: 1
               }}
               draggable={true}
-              onDragStart={(e) => handleItemDragStart(e, item.id)}
-              onDragEnd={handleItemDragEnd}
+              onDragStart={() => handleItemDragStart(item.id)}
+              onDragEnd={handleItemDragEnd} // 恢复格子的样式
             >
               <span className="text-center">{item.title}</span>
               
               {/* 如果是正在调整的项目，显示目标尺寸 */}
               {adjustingItem && adjustingItem.itemId === item.id && (
                 <div className="absolute inset-0 bg-blue-200 bg-opacity-50 flex items-center justify-center">
-                  <div className="bg-white p-2 rounded shadow">
-                    尺寸: {adjustingItem.targetWidth} x {adjustingItem.targetHeight}
-                  </div>
                 </div>
               )}
               
@@ -320,11 +273,35 @@ export function EditLayoutModal({
                     const newWidth = Math.max(1, originalWidth + deltaColumns);
                     const newHeight = Math.max(1, originalHeight + deltaRows);
                     
-                    // 更新调整状态
+                    // 检查新尺寸是否超出边界
+                    const boundedWidth = item.x + newWidth > layout.columns 
+                      ? layout.columns - item.x 
+                      : newWidth;
+                      
+                    const boundedHeight = item.y + newHeight > layout.rows 
+                      ? layout.rows - item.y 
+                      : newHeight;
+                    
+                    // 检查是否有重叠
+                    const isOverlapping = checkOverlap(item.id, item.x, item.y, boundedWidth, boundedHeight);
+                    
+                    if (!isOverlapping) {
+                      // 直接更新布局，而不仅仅是预览状态
+                      setLayout({
+                        ...layout,
+                        items: layout.items.map(i => 
+                          i.id === item.id 
+                            ? { ...i, width: boundedWidth, height: boundedHeight } 
+                            : i
+                        )
+                      });
+                    }
+                    
+                    // 仍然更新调整状态，用于显示尺寸信息
                     setAdjustingItem({
                       itemId: item.id,
-                      targetWidth: newWidth,
-                      targetHeight: newHeight
+                      targetWidth: boundedWidth,
+                      targetHeight: boundedHeight
                     });
                   };
                   
@@ -332,53 +309,30 @@ export function EditLayoutModal({
                     document.removeEventListener('mousemove', handleMouseMove);
                     document.removeEventListener('mouseup', handleMouseUp);
                     
-                    // 如果adjustingItem存在，使用其中的目标尺寸
-                    // 否则根据鼠标最终位置计算新尺寸
-                    let finalWidth, finalHeight;
-                    
+                    // 在鼠标释放时，最终更新一次布局
                     if (adjustingItem) {
-                      finalWidth = adjustingItem.targetWidth;
-                      finalHeight = adjustingItem.targetHeight;
-                    } else {
-                      const deltaX = upEvent.clientX - startX;
-                      const deltaY = upEvent.clientY - startY;
+                      const finalWidth = adjustingItem.targetWidth;
+                      const finalHeight = adjustingItem.targetHeight;
                       
-                      // 根据单元格尺寸动态计算增量
-                      const deltaColumns = Math.round(deltaX / cellWidth);
-                      const deltaRows = Math.round(deltaY / cellHeight);
+                      // 检查是否有重叠
+                      const isOverlapping = checkOverlap(item.id, item.x, item.y, finalWidth, finalHeight);
                       
-                      finalWidth = Math.max(1, originalWidth + deltaColumns);
-                      finalHeight = Math.max(1, originalHeight + deltaRows);
-                    }
-                    
-                    // 检查新尺寸是否超出边界
-                    if (item.x + finalWidth > layout.columns) {
-                      finalWidth = layout.columns - item.x;
-                      toast.warning("宽度已调整到边界");
-                    }
-                    
-                    if (item.y + finalHeight > layout.rows) {
-                      finalHeight = layout.rows - item.y;
-                      toast.warning("高度已调整到边界");
-                    }
-                    
-                    // 检查是否有重叠，使用合并的逻辑
-                    const isOverlapping = checkOverlap(item.id, item.x, item.y, finalWidth, finalHeight);
-                    
-                    if (isOverlapping) {
-                      toast.error("调整尺寸会与其他图表重叠");
-                    } else {
-                      // 同时更新宽度和高度
-                      setLayout({
-                        ...layout,
-                        items: layout.items.map(i => 
-                          i.id === item.id 
-                            ? { ...i, width: finalWidth, height: finalHeight } 
-                            : i
-                        )
-                      });
-                      
-                      toast.success(`已将图表尺寸调整为 ${finalWidth} x ${finalHeight}`);
+                      if (isOverlapping) {
+                        toast.error("调整尺寸会与其他图表重叠");
+                        
+                        // 如果有重叠，恢复原始尺寸
+                        setLayout({
+                          ...layout,
+                          items: layout.items.map(i => 
+                            i.id === item.id 
+                              ? { ...i, width: originalWidth, height: originalHeight } 
+                              : i
+                          )
+                        });
+                      } else {
+                        // 布局已经在 handleMouseMove 中更新了，这里只显示一个成功提示
+                        toast.success(`已将图表尺寸调整为 ${finalWidth} x ${finalHeight}`);
+                      }
                     }
                     
                     setAdjustingItem(null);

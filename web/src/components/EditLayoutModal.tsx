@@ -415,11 +415,6 @@ export function EditLayoutModal({
                             className="bg-transparent text-center w-full border-none"
                           />
                           
-                          {/* 显示宽度信息 */}
-                          <div className="absolute bottom-2 right-2 text-xs bg-white px-1 rounded opacity-70">
-                            宽度: {cell.width}
-                          </div>
-                          
                           <div className="absolute top-2 left-2 flex">
                             <Button
                               variant="ghost"

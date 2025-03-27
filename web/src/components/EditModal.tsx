@@ -46,12 +46,26 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
     title: "销售报表",
     description: "这是一个销售数据的示例报表",
     dataSources: [
-      { id: "ds1", type: "MYSQL", alias: "销售数据" },
-      { id: "ds2", type: "API", alias: "外部数据" },
+      {
+        id: "ds1",
+        name: "主数据",
+        type: "python",
+        alias: "销售数据",
+        executor: { type: "python", engine: "pandas" },
+        code: "",
+      },
+      {
+        id: "ds2",
+        name: "外部数据",
+        type: "sql",
+        alias: "外部数据",
+        executor: { type: "python", engine: "pandas" },
+        code: "",
+      },
     ],
     parameters: [
-      { id: "param1", name: "开始日期", type: "date" },
-      { id: "param2", name: "结束日期", type: "date" },
+      { name: "开始日期", type: "single_select" },
+      { name: "结束日期", type: "single_select" },
     ],
     charts: [
       {
@@ -110,24 +124,23 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
       ],
     },
   };
-  const [dataSources, setDataSources] = useState<DataSource[]>([]);
-  const [parameters, setParameters] = useState<Parameter[]>([]);
+
+  const [dataSources, setDataSources] = useState<DataSource[]>(
+    demoReport.dataSources
+  );
+  const [parameters, setParameters] = useState<Parameter[]>(
+    demoReport.parameters
+  );
   const [charts, setCharts] = useState<Chart[]>(demoReport.charts);
   const [layout, setLayout] = useState<Layout>(demoReport.layout);
 
   const [activeTab, setActiveTab] = useState("filters");
   const [isDataSourceModalOpen, setIsDataSourceModalOpen] = useState(false);
-  const [isLayoutModalOpen, setIsLayoutModalOpen] = useState(false);
   const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
   const [deleteFunction, setDeleteFunction] = useState<(() => void) | null>(
     null
   );
   const [deleteMessage, setDeleteMessage] = useState<string>("");
-
-  const handleSaveLayout = (layout: any) => {
-    setLayout(layout);
-    setIsLayoutModalOpen(false);
-  };
 
   // 添加图表
   const handleAddChart = () => {
@@ -221,20 +234,22 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
             <div className="flex-1 overflow-y-auto">
               <DataSourceTab
                 dataSources={dataSources}
+                setDataSources={setDataSources}
                 handleDeleteDataSource={() => {}}
                 setIsDataSourceModalOpen={setIsDataSourceModalOpen}
                 confirmDelete={confirmDelete}
               />
               <FilterTab
                 parameters={parameters}
+                setParameters={setParameters}
                 handleDeleteParameter={() => {}}
                 confirmDelete={confirmDelete}
               />
               <ChartTab
                 layout={layout}
-                handleDeleteChart={handleDeleteChart}
+                setLayout={setLayout}
                 handleAddChart={handleAddChart}
-                setIsLayoutModalOpen={setIsLayoutModalOpen}
+                handleDeleteChart={handleDeleteChart}
                 confirmDelete={confirmDelete}
               />
             </div>
@@ -246,13 +261,6 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
         open={isDataSourceModalOpen}
         onClose={() => setIsDataSourceModalOpen(false)}
         onSave={() => {}}
-      />
-
-      <EditLayoutModal
-        open={isLayoutModalOpen}
-        onClose={() => setIsLayoutModalOpen(false)}
-        onSave={handleSaveLayout}
-        initialLayout={layout}
       />
 
       {/* 确认删除对话框 */}

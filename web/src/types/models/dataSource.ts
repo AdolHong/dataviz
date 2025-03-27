@@ -4,7 +4,7 @@ export interface DataSource {
   name: string;
   description?: string;
   executor: {
-    type: "sql" | "python";
+    type: "sql" | "python" | "csv";
     engine: string;
   };
   code: string;

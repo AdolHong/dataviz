@@ -5,10 +5,12 @@ import { TabsContent } from "@radix-ui/react-tabs";
 
 const FilterTab = ({
   parameters,
+  setParameters,
   handleDeleteParameter,
   confirmDelete,
 }: {
   parameters: Parameter[];
+  setParameters: (parameters: Parameter[]) => void;
   handleDeleteParameter: (id: string) => void;
   confirmDelete: (deleteFunction: () => void, message: string) => void;
 }) => {
@@ -38,9 +40,8 @@ const FilterTab = ({
                     className="h-8 w-8 text-destructive"
                     onClick={() =>
                       confirmDelete(
-                        parameter.name,
                         () => handleDeleteParameter(parameter.name),
-                        `您确定要删除参数 ${parameter.name} 吗？`
+                        `您确定要删除筛选条件"${parameter.name}"吗？`
                       )
                     }
                   >

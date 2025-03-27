@@ -482,6 +482,69 @@ export function EditLayoutModal({
     onClose();
   };
 
+  // 添加一个通用的重叠检测函数，供调整手柄使用
+  const checkOverlap = (itemId: string, x: number, y: number, width: number, height: number) => {
+    // 创建一个新的网格表示图表的当前占位
+    const currentGrid: boolean[][] = Array(layout.rows).fill(false).map(() => 
+      Array(layout.columns).fill(false)
+    );
+    
+    // 获取当前项目
+    const item = layout.items.find(item => item.id === itemId);
+    if (!item) return true;
+    
+    // 标记当前项目占用的位置
+    for (let cy = item.y; cy < item.y + item.height; cy++) {
+      for (let cx = item.x; cx < item.x + item.width; cx++) {
+        if (cy < layout.rows && cx < layout.columns) {
+          currentGrid[cy][cx] = true;
+        }
+      }
+    }
+    
+    // 创建一个新的网格表示扩展后要占用的位置
+    const newGrid: boolean[][] = Array(layout.rows).fill(false).map(() => 
+      Array(layout.columns).fill(false)
+    );
+    
+    // 标记新尺寸下项目会占用的位置
+    for (let ny = y; ny < y + height; ny++) {
+      for (let nx = x; nx < x + width; nx++) {
+        if (ny < layout.rows && nx < layout.columns) {
+          newGrid[ny][nx] = true;
+        }
+      }
+    }
+    
+    // 找出新增占用的单元格
+    const newCells: {x: number, y: number}[] = [];
+    for (let gy = 0; gy < layout.rows; gy++) {
+      for (let gx = 0; gx < layout.columns; gx++) {
+        if (newGrid[gy][gx] && !currentGrid[gy][gx]) {
+          newCells.push({x: gx, y: gy});
+        }
+      }
+    }
+    
+    // 检查新增单元格是否与其他项目重叠
+    const otherItems = layout.items.filter(i => i.id !== itemId);
+    
+    for (const cell of newCells) {
+      for (const otherItem of otherItems) {
+        if (
+          cell.x >= otherItem.x && 
+          cell.x < otherItem.x + otherItem.width &&
+          cell.y >= otherItem.y && 
+          cell.y < otherItem.y + otherItem.height
+        ) {
+          return true; // 有重叠
+        }
+      }
+    }
+    
+    return false; // 没有重叠
+  };
+
   // 用于绘制整个网格的函数
   const renderGrid = () => {
     const grid = getGridOccupancy();
@@ -531,66 +594,31 @@ export function EditLayoutModal({
                 </div>
               )}
               
-              {/* 宽度调整手柄 */}
+              {/* 组合调整手柄 - 同时调整宽度和高度 */}
               <div
-                className="absolute right-0 top-0 bottom-0 w-2 bg-blue-500 opacity-50 hover:opacity-80 cursor-col-resize rounded-lg"
+                className="absolute right-0 bottom-0 w-4 h-4 bg-blue-500 opacity-50 hover:opacity-80 cursor-nwse-resize rounded-bl-none rounded-tr-none rounded-tl-none rounded-br-lg"
                 onMouseDown={(e) => {
                   e.preventDefault();
                   const startX = e.clientX;
-                  const originalWidth = item.width;
-                  
-                  const handleMouseMove = (moveEvent: MouseEvent) => {
-                    const deltaX = moveEvent.clientX - startX;
-                    const deltaColumns = Math.round(deltaX / 150);
-                    const newWidth = Math.max(1, originalWidth + deltaColumns);
-                    
-                    setAdjustingItem({
-                      itemId: item.id,
-                      targetWidth: newWidth,
-                      targetHeight: item.height
-                    });
-                  };
-                  
-                  const handleMouseUp = (upEvent: MouseEvent) => {
-                    document.removeEventListener('mousemove', handleMouseMove);
-                    document.removeEventListener('mouseup', handleMouseUp);
-                    
-                    if (adjustingItem) {
-                      adjustItemWidth(item.id, adjustingItem.targetWidth);
-                    } else {
-                      // 直接使用计算得到的新宽度
-                      const deltaX = upEvent.clientX - startX;
-                      const deltaColumns = Math.round(deltaX / 150);
-                      const newWidth = Math.max(1, originalWidth + deltaColumns);
-                      
-                      adjustItemWidth(item.id, newWidth);
-                    }
-                    
-                    setAdjustingItem(null);
-                  };
-                  
-                  document.addEventListener('mousemove', handleMouseMove);
-                  document.addEventListener('mouseup', handleMouseUp);
-                }}
-                style={{ zIndex: 10 }}
-              ></div>
-              
-              {/* 高度调整手柄 */}
-              <div
-                className="absolute left-0 right-0 bottom-0 h-2 bg-blue-500 opacity-50 hover:opacity-80 cursor-row-resize rounded-lg"
-                onMouseDown={(e) => {
-                  e.preventDefault();
                   const startY = e.clientY;
+                  const originalWidth = item.width;
                   const originalHeight = item.height;
                   
                   const handleMouseMove = (moveEvent: MouseEvent) => {
+                    const deltaX = moveEvent.clientX - startX;
                     const deltaY = moveEvent.clientY - startY;
+                    
+                    // 根据鼠标移动距离计算新的宽度和高度
+                    const deltaColumns = Math.round(deltaX / 150);
                     const deltaRows = Math.round(deltaY / 150);
+                    
+                    const newWidth = Math.max(1, originalWidth + deltaColumns);
                     const newHeight = Math.max(1, originalHeight + deltaRows);
                     
+                    // 更新调整状态
                     setAdjustingItem({
                       itemId: item.id,
-                      targetWidth: item.width,
+                      targetWidth: newWidth,
                       targetHeight: newHeight
                     });
                   };
@@ -599,15 +627,52 @@ export function EditLayoutModal({
                     document.removeEventListener('mousemove', handleMouseMove);
                     document.removeEventListener('mouseup', handleMouseUp);
                     
+                    // 如果adjustingItem存在，使用其中的目标尺寸
+                    // 否则根据鼠标最终位置计算新尺寸
+                    let finalWidth, finalHeight;
+                    
                     if (adjustingItem) {
-                      adjustItemHeight(item.id, adjustingItem.targetHeight);
+                      finalWidth = adjustingItem.targetWidth;
+                      finalHeight = adjustingItem.targetHeight;
                     } else {
-                      // 直接使用计算得到的新高度
+                      const deltaX = upEvent.clientX - startX;
                       const deltaY = upEvent.clientY - startY;
-                      const deltaRows = Math.round(deltaY / 150);
-                      const newHeight = Math.max(1, originalHeight + deltaRows);
                       
-                      adjustItemHeight(item.id, newHeight);
+                      const deltaColumns = Math.round(deltaX / 150);
+                      const deltaRows = Math.round(deltaY / 150);
+                      
+                      finalWidth = Math.max(1, originalWidth + deltaColumns);
+                      finalHeight = Math.max(1, originalHeight + deltaRows);
+                    }
+                    
+                    // 检查新尺寸是否超出边界
+                    if (item.x + finalWidth > layout.columns) {
+                      finalWidth = layout.columns - item.x;
+                      toast.warning("宽度已调整到边界");
+                    }
+                    
+                    if (item.y + finalHeight > layout.rows) {
+                      finalHeight = layout.rows - item.y;
+                      toast.warning("高度已调整到边界");
+                    }
+                    
+                    // 检查是否有重叠，使用合并的逻辑
+                    const isOverlapping = checkOverlap(item.id, item.x, item.y, finalWidth, finalHeight);
+                    
+                    if (isOverlapping) {
+                      toast.error("调整尺寸会与其他图表重叠");
+                    } else {
+                      // 同时更新宽度和高度
+                      setLayout({
+                        ...layout,
+                        items: layout.items.map(i => 
+                          i.id === item.id 
+                            ? { ...i, width: finalWidth, height: finalHeight } 
+                            : i
+                        )
+                      });
+                      
+                      toast.success(`已将图表尺寸调整为 ${finalWidth} x ${finalHeight}`);
                     }
                     
                     setAdjustingItem(null);

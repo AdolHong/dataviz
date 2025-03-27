@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Grip, Plus, Trash2, ArrowLeft, ArrowRight, Move, ChevronsUpDown, ChevronsLeftRight, ChevronsUp, ChevronsDown } from 'lucide-react';
+import { ChevronsUp, ChevronsDown } from 'lucide-react';
 import { toast } from "sonner";
 
 import type { Layout, LayoutItem } from '@/types';
@@ -201,180 +201,6 @@ export function EditLayoutModal({
       ...layout,
       columns: newColumns
     });
-  };
-
-  // 调整项目宽度
-  const adjustItemWidth = (itemId: string, newWidth: number) => {
-    if (newWidth < 1) return;
-    
-    // 获取项目
-    const item = layout.items.find(item => item.id === itemId);
-    if (!item) return;
-    
-    // 检查新宽度是否超出边界
-    if (item.x + newWidth > layout.columns) {
-      toast.error("图表宽度超出边界");
-      return;
-    }
-    
-    // 创建一个新的网格表示图表的当前占位
-    const currentGrid: boolean[][] = Array(layout.rows).fill(false).map(() => 
-      Array(layout.columns).fill(false)
-    );
-    
-    // 标记当前项目占用的位置
-    for (let y = item.y; y < item.y + item.height; y++) {
-      for (let x = item.x; x < item.x + item.width; x++) {
-        if (y < layout.rows && x < layout.columns) {
-          currentGrid[y][x] = true;
-        }
-      }
-    }
-    
-    // 创建一个新的网格表示扩展后要占用的位置
-    const newGrid: boolean[][] = Array(layout.rows).fill(false).map(() => 
-      Array(layout.columns).fill(false)
-    );
-    
-    // 标记新尺寸下项目会占用的位置
-    for (let y = item.y; y < item.y + item.height; y++) {
-      for (let x = item.x; x < item.x + newWidth; x++) {
-        if (y < layout.rows && x < layout.columns) {
-          newGrid[y][x] = true;
-        }
-      }
-    }
-    
-    // 找出新增占用的单元格
-    const newCells: {x: number, y: number}[] = [];
-    for (let y = 0; y < layout.rows; y++) {
-      for (let x = 0; x < layout.columns; x++) {
-        if (newGrid[y][x] && !currentGrid[y][x]) {
-          newCells.push({x, y});
-        }
-      }
-    }
-    
-    // 检查新增单元格是否与其他项目重叠
-    const otherItems = layout.items.filter(i => i.id !== itemId);
-    let willOverlap = false;
-    
-    for (const cell of newCells) {
-      for (const otherItem of otherItems) {
-        if (
-          cell.x >= otherItem.x && 
-          cell.x < otherItem.x + otherItem.width &&
-          cell.y >= otherItem.y && 
-          cell.y < otherItem.y + otherItem.height
-        ) {
-          willOverlap = true;
-          break;
-        }
-      }
-      if (willOverlap) break;
-    }
-    
-    if (willOverlap) {
-      toast.error("调整宽度会与其他图表重叠");
-      return;
-    }
-    
-    // 更新项目宽度
-    setLayout({
-      ...layout,
-      items: layout.items.map(i => 
-        i.id === itemId ? { ...i, width: newWidth } : i
-      )
-    });
-    
-    toast.success(`已将图表宽度调整为 ${newWidth}`);
-  };
-
-  // 调整项目高度
-  const adjustItemHeight = (itemId: string, newHeight: number) => {
-    if (newHeight < 1) return;
-    
-    // 获取项目
-    const item = layout.items.find(item => item.id === itemId);
-    if (!item) return;
-    
-    // 检查新高度是否超出边界
-    if (item.y + newHeight > layout.rows) {
-      toast.error("图表高度超出边界");
-      return;
-    }
-    
-    // 创建一个新的网格表示图表的当前占位
-    const currentGrid: boolean[][] = Array(layout.rows).fill(false).map(() => 
-      Array(layout.columns).fill(false)
-    );
-    
-    // 标记当前项目占用的位置
-    for (let y = item.y; y < item.y + item.height; y++) {
-      for (let x = item.x; x < item.x + item.width; x++) {
-        if (y < layout.rows && x < layout.columns) {
-          currentGrid[y][x] = true;
-        }
-      }
-    }
-    
-    // 创建一个新的网格表示扩展后要占用的位置
-    const newGrid: boolean[][] = Array(layout.rows).fill(false).map(() => 
-      Array(layout.columns).fill(false)
-    );
-    
-    // 标记新尺寸下项目会占用的位置
-    for (let y = item.y; y < item.y + newHeight; y++) {
-      for (let x = item.x; x < item.x + item.width; x++) {
-        if (y < layout.rows && x < layout.columns) {
-          newGrid[y][x] = true;
-        }
-      }
-    }
-    
-    // 找出新增占用的单元格
-    const newCells: {x: number, y: number}[] = [];
-    for (let y = 0; y < layout.rows; y++) {
-      for (let x = 0; x < layout.columns; x++) {
-        if (newGrid[y][x] && !currentGrid[y][x]) {
-          newCells.push({x, y});
-        }
-      }
-    }
-    
-    // 检查新增单元格是否与其他项目重叠
-    const otherItems = layout.items.filter(i => i.id !== itemId);
-    let willOverlap = false;
-    
-    for (const cell of newCells) {
-      for (const otherItem of otherItems) {
-        if (
-          cell.x >= otherItem.x && 
-          cell.x < otherItem.x + otherItem.width &&
-          cell.y >= otherItem.y && 
-          cell.y < otherItem.y + otherItem.height
-        ) {
-          willOverlap = true;
-          break;
-        }
-      }
-      if (willOverlap) break;
-    }
-    
-    if (willOverlap) {
-      toast.error("调整高度会与其他图表重叠");
-      return;
-    }
-    
-    // 更新项目高度
-    setLayout({
-      ...layout,
-      items: layout.items.map(i => 
-        i.id === itemId ? { ...i, height: newHeight } : i
-      )
-    });
-    
-    toast.success(`已将图表高度调整为 ${newHeight}`);
   };
 
   // 处理项目拖拽开始
@@ -605,13 +431,22 @@ export function EditLayoutModal({
                   const originalWidth = item.width;
                   const originalHeight = item.height;
                   
+                  // 获取网格容器尺寸
+                  const gridElement = e.currentTarget.closest('.grid');
+                  if (!gridElement) return;
+                  
+                  // 计算单元格尺寸
+                  const gridRect = gridElement.getBoundingClientRect();
+                  const cellWidth = gridRect.width / layout.columns;
+                  const cellHeight = gridRect.height / layout.rows;
+                  
                   const handleMouseMove = (moveEvent: MouseEvent) => {
                     const deltaX = moveEvent.clientX - startX;
                     const deltaY = moveEvent.clientY - startY;
                     
-                    // 根据鼠标移动距离计算新的宽度和高度
-                    const deltaColumns = Math.round(deltaX / 150);
-                    const deltaRows = Math.round(deltaY / 150);
+                    // 根据单元格尺寸动态计算增量
+                    const deltaColumns = Math.round(deltaX / cellWidth);
+                    const deltaRows = Math.round(deltaY / cellHeight);
                     
                     const newWidth = Math.max(1, originalWidth + deltaColumns);
                     const newHeight = Math.max(1, originalHeight + deltaRows);
@@ -639,8 +474,9 @@ export function EditLayoutModal({
                       const deltaX = upEvent.clientX - startX;
                       const deltaY = upEvent.clientY - startY;
                       
-                      const deltaColumns = Math.round(deltaX / 150);
-                      const deltaRows = Math.round(deltaY / 150);
+                      // 根据单元格尺寸动态计算增量
+                      const deltaColumns = Math.round(deltaX / cellWidth);
+                      const deltaRows = Math.round(deltaY / cellHeight);
                       
                       finalWidth = Math.max(1, originalWidth + deltaColumns);
                       finalHeight = Math.max(1, originalHeight + deltaRows);

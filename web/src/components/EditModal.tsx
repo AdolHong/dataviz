@@ -234,38 +234,48 @@ const EditModal = ({
                         className="grid gap-4 relative" 
                         style={{ 
                           gridTemplateColumns: `repeat(${layout.columns}, 1fr)`,
+                          gridTemplateRows: `repeat(${layout.rows}, 100px)`, // 使用固定行高
                           minHeight: '200px' // 确保有足够的高度
                         }}
                       >
+                        {/* 先渲染所有项目 */}
+                        {layout.items.map((item) => (
+                          <div 
+                            key={item.id}
+                            className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200 flex items-center justify-center"
+                            style={{
+                              gridColumn: `${item.x + 1} / span ${item.width}`,
+                              gridRow: `${item.y + 1} / span ${item.height}`
+                            }}
+                          >
+                            {item.title}
+                          </div>
+                        ))}
+                          
+                        {/* 然后渲染空白单元格（不被项目占据的部分） */}
                         {Array.from({ length: layout.rows }).map((_, rowIndex) => (
                           Array.from({ length: layout.columns }).map((_, colIndex) => {
-                            // 查找当前单元格是否有项目
-                            const item = layout.items.find(i => i.x === colIndex && i.y === rowIndex);
-                            return item ? (
-                              <div 
-                                key={item.id}
-                                className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200 flex items-center justify-center"
-                                style={{
-                                  gridColumn: `${item.x + 1} / span ${item.width}`,
-                                  gridRow: `${item.y + 1} / span ${item.height}`,
-                                  height: '100px' // 设置固定高度
-                                }}
-                              >
-                                {item.title}
-                              </div>
-                            ) : (
+                            // 检查这个单元格是否被任何项目占据
+                            const isCellOccupied = layout.items.some(item => 
+                              colIndex >= item.x && 
+                              colIndex < item.x + item.width && 
+                              rowIndex >= item.y && 
+                              rowIndex < item.y + item.height
+                            );
+                            
+                            // 如果单元格未被占据，则渲染空白格
+                            return !isCellOccupied ? (
                               <div 
                                 key={`empty-${rowIndex}-${colIndex}`} 
-                                className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-100 flex items-center justify-center"
+                                className="border-2 border-dashed rounded-lg p-4 text-center flex items-center justify-center"
                                 style={{
                                   gridColumn: `${colIndex + 1}`,
-                                  gridRow: `${rowIndex + 1}`,
-                                  height: '100px' // 设置固定高度
+                                  gridRow: `${rowIndex + 1}`
                                 }}
                               >
                                 {/* 空白格可以显示提示信息或保持空白 */}
                               </div>
-                            );
+                            ) : null;
                           })
                         ))}
                       </div>

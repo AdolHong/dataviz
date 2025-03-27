@@ -38,7 +38,7 @@ export function EditLayoutModal({
 
   // 初始化布局状态
   const [layout, setLayout] = useState<Layout>(initialLayout || defaultLayout);
-  
+
   // 添加状态来跟踪调整中的项目
   const [adjustingItem, setAdjustingItem] = useState<{
     itemId: string, 
@@ -86,7 +86,7 @@ export function EditLayoutModal({
       toast.error("目标位置无法放置该图表");
       return;
     }
-
+    
     // 更新项目位置和尺寸
     setLayout({
       ...layout,
@@ -107,7 +107,7 @@ export function EditLayoutModal({
       toast.error("布局中存在重叠的图表，请检查");
       return;
     }
-
+    
     // 调用方法更新布局
     const updatedLayout = removeEmptyRowsAndColumns(layout);
     setLayout(updatedLayout); // 更新状态
@@ -275,8 +275,8 @@ export function EditLayoutModal({
                     
                     if (!isOverlapping) {
                       // 直接更新布局，而不仅仅是预览状态
-                      setLayout({
-                        ...layout,
+        setLayout({
+          ...layout,
                         items: layout.items.map(i => 
                           i.id === item.id 
                             ? { ...i, width: boundedWidth, height: boundedHeight } 
@@ -309,8 +309,8 @@ export function EditLayoutModal({
                         toast.error("调整尺寸会与其他图表重叠");
                         
                         // 如果有重叠，恢复原始尺寸
-                        setLayout({
-                          ...layout,
+      setLayout({
+        ...layout,
                           items: layout.items.map(i => 
                             i.id === item.id 
                               ? { ...i, width: originalWidth, height: originalHeight } 
@@ -362,7 +362,7 @@ export function EditLayoutModal({
     
     return gridItems;
   };
-  
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-[90vw] max-h-[90vh] flex flex-col overflow-hidden">
@@ -375,10 +375,10 @@ export function EditLayoutModal({
             {/* 布局 */}
             <div className="border rounded-lg p-4">
               <div 
-                className="grid gap-1"
-                style={{
-                  gridTemplateColumns: `repeat(${layout.columns}, 1fr)`,
-                  gridTemplateRows: `repeat(${layout.rows}, 150px)`,
+                className="grid gap-4"
+                      style={{
+                        gridTemplateColumns: `repeat(${layout.columns}, 1fr)`,
+                  gridTemplateRows: `repeat(${layout.rows}, 100px)`,
                   position: 'relative'
                 }}
               >
@@ -390,49 +390,49 @@ export function EditLayoutModal({
             <div className="flex justify-between flex-wrap gap-4">
               <div className='flex-1'></div>
               <div className="flex items-center space-x-8">
-                <div className="flex items-center space-x-4">
-                  <Label htmlFor="columns">列数:</Label>
+              <div className="flex items-center space-x-4">
+                <Label htmlFor="columns">列数:</Label>
                   <div className="flex items-center space-x-1">
                     <div className="text-xl font-medium">{layout.columns}</div>
                     <div className="relative flex flex-col items-center">
                       <div className="flex flex-col -mt-1 space-y-1">
-                        <Button
+                  <Button
                           variant="ghost"
-                          size="icon"
+                    size="icon"
                           className="h-4 w-4 rounded-b-none py-0"
                           onClick={() => handleAdjustColumns(layout.columns + 1)}
-                        >
+                  >
                           <ChevronsUp className="h-3 w-3" />
-                        </Button>
-                        <Button
+                  </Button>
+                  <Button
                           variant="ghost"
-                          size="icon"
+                    size="icon"
                           className="h-4 w-4 rounded-t-none py-0"
                           onClick={() => handleAdjustColumns(layout.columns - 1)}
                           disabled={layout.columns <= 1}
-                        >
+                  >
                           <ChevronsDown className="h-3 w-3" />
-                        </Button>
+                  </Button>
                       </div>
                     </div>
-                  </div>
                 </div>
-                
+              </div>
+
                 <div className="flex items-center space-x-4">
                   <Label htmlFor="rows">行数:</Label>
                   <div className="flex items-center space-x-1">
                     <div className="text-xl font-medium">{layout.rows}</div>
                     <div className="relative flex flex-col items-center">
                       <div className="flex flex-col -mt-1 space-y-1">
-                        <Button
+                <Button
                           variant="ghost"
                           size="icon"
                           className="h-4 w-4 rounded-b-none py-0"
                           onClick={() => handleAdjustRows(layout.rows + 1)}
                         >
                           <ChevronsUp className="h-3 w-3" />
-                        </Button>
-                        <Button
+                </Button>
+                <Button
                           variant="ghost"
                           size="icon"
                           className="h-4 w-4 rounded-t-none py-0"
@@ -440,7 +440,7 @@ export function EditLayoutModal({
                           disabled={layout.rows <= 1}
                         >
                           <ChevronsDown className="h-3 w-3" />
-                        </Button>
+                </Button>
                       </div>
                     </div>
                   </div>

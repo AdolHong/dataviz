@@ -303,7 +303,7 @@ const EditModal = ({
                             {item.title}
 
                             {/* 在右上角添加图标，默认隐藏 */}
-                            <div className="absolute top-0 right-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="absolute bottom-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               <Button 
                                 variant="ghost" 
                                 size="icon" 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -32,12 +32,21 @@ export function EditLayoutModal({
     columns: 1,
     rows: 1,
     items: [
-      { id: 'item-1', title: '你触发了defaultLayout', width: 1, height: 1, x: 0, y: 0 }
+      { id: 'item-1', title: '你触发了default layout', width: 1, height: 1, x: 0, y: 0 }
     ]
   };
 
-  // 初始化布局状态
   const [layout, setLayout] = useState<Layout>(initialLayout || defaultLayout);
+  
+  // 每次 open 或 initialLayout 变化时重新初始化
+  useEffect(() => {
+    if (open) {
+      setLayout(initialLayout || defaultLayout);
+    }
+  }, [open, initialLayout]);
+
+  // 初始化布局状态
+  
 
   // 添加状态来跟踪调整中的项目
   const [adjustingItem, setAdjustingItem] = useState<{
@@ -374,8 +383,8 @@ export function EditLayoutModal({
           <div className="space-y-4">            
             {/* 布局 */}
             <div className="border rounded-lg p-4">
-              <div 
-                className="grid gap-4"
+                    <div
+                      className="grid gap-4"
                       style={{
                         gridTemplateColumns: `repeat(${layout.columns}, 1fr)`,
                   gridTemplateRows: `repeat(${layout.rows}, 100px)`,

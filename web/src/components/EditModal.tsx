@@ -7,7 +7,7 @@ import { toast } from "sonner"
 import { DataSourceModal } from "./DataSourceModal";
 import {EditLayoutModal} from './EditLayoutModal';
 
-import  type {DataSource, Layout, Parameter, Chart, ChartParam, Report} from '@/types';
+import  type {DataSource, Layout, Parameter, Chart, Report} from '@/types';
 
 interface EditModalProps {
   open: boolean;
@@ -24,56 +24,45 @@ const EditModal = ({
 
   // todo: 获取报表的布局
   console.log('reportId', reportId);
-
+  // 构造 demo 数据
+  const demoReport = {
+    title: "销售报表",
+    description: "这是一个销售数据的示例报表",
+    dataSources: [
+      { id: 'ds1', type: 'MYSQL', alias: '销售数据' },
+      { id: 'ds2', type: 'API', alias: '外部数据' }
+    ],
+    parameters: [
+      { id: 'param1', name: '开始日期', type: 'date' },
+      { id: 'param2', name: '结束日期', type: 'date' }
+    ],
+    charts: [
+      { id: 'chart1', title: '销售趋势', type: 'line' },
+      { id: 'chart2', title: '销售占比', type: 'pie' }
+    ],
+    layout: {
+      columns: 3,
+      rows: 2,
+      items: [
+        { id: 'item-1', title: '销售趋势', width: 1, height: 1, x: 0, y: 0 },
+        { id: 'item-2', title: '销售占比', width: 1, height: 1, x: 1, y: 0 },
+        { id: 'item-3', title: '销售明细', width: 1, height: 1, x: 2, y: 0 },
+        { id: 'item-4', title: '新增图表1', width: 1, height: 1, x: 0, y: 1 },
+        { id: 'item-5', title: '新增图表2', width: 1, height: 1, x: 1, y: 1 },
+        { id: 'item-6', title: '新增图表333', width: 1, height: 1, x: 2, y: 1 }
+      ]
+    }};
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [parameters, setParameters] = useState<Parameter[]>([]);
   const [charts, setCharts] = useState<Chart[]>([]);
-  const [layout, setLayout] = useState<Layout>();
-
-  useEffect(() => {
-    // 构造 demo 数据
-    const demoReport = {
-      title: "销售报表",
-      description: "这是一个销售数据的示例报表",
-      dataSources: [
-        { id: 'ds1', type: 'MYSQL', alias: '销售数据' },
-        { id: 'ds2', type: 'API', alias: '外部数据' }
-      ],
-      parameters: [
-        { id: 'param1', name: '开始日期', type: 'date' },
-        { id: 'param2', name: '结束日期', type: 'date' }
-      ],
-      charts: [
-        { id: 'chart1', title: '销售趋势', type: 'line' },
-        { id: 'chart2', title: '销售占比', type: 'pie' }
-      ],
-      layout: {
-        columns: 3,
-        rows: 2,
-        items: [
-          { id: 'item-1', title: '销售趋势', width: 1, height: 1, x: 0, y: 0 },
-          { id: 'item-2', title: '销售占比', width: 1, height: 1, x: 1, y: 0 },
-          { id: 'item-3', title: '销售明细', width: 1, height: 1, x: 2, y: 0 },
-          { id: 'item-4', title: '新增图表1', width: 1, height: 1, x: 0, y: 1 },
-          { id: 'item-5', title: '新增图表2', width: 1, height: 1, x: 1, y: 1 },
-          { id: 'item-6', title: '新增图表333', width: 1, height: 1, x: 2, y: 1 }
-        ]
-      }
-    };
-
-    // 初始化状态
-    setLayout(demoReport.layout);
-    // setDataSources(demoReport.dataSources);
-    // setParameters(demoReport.parameters);
-    // setCharts(demoReport.charts);
-  }, [reportId]); // 依赖于 reportId，当其变化时重新获取数据
+  const [layout, setLayout] = useState<Layout>(demoReport.layout);
 
   const [activeTab, setActiveTab] = useState('filters');
   const [isDataSourceModalOpen, setIsDataSourceModalOpen] = useState(false)
   const [isLayoutModalOpen, setIsLayoutModalOpen] = useState(false);
 
   const handleSaveLayout = (layout: any) => {
-    toast('保存的布局:', layout);
+    setLayout(layout);
     setIsLayoutModalOpen(false);
   };
 
@@ -239,27 +228,50 @@ const EditModal = ({
               <TabsContent value="charts" className="p-4">
                 <div className="space-y-4">
                   <div className="border rounded-lg p-4">
-                    {/* 布局预览区域 */}
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200">
-                        销售趋势
+                    {/* 布局预览区域 - 使用动态布局 */}
+                    {layout ? (
+                      <div 
+                        className="grid gap-4 relative" 
+                        style={{ 
+                          gridTemplateColumns: `repeat(${layout.columns}, 1fr)`,
+                          minHeight: '200px' // 确保有足够的高度
+                        }}
+                      >
+                        {Array.from({ length: layout.rows }).map((_, rowIndex) => (
+                          Array.from({ length: layout.columns }).map((_, colIndex) => {
+                            // 查找当前单元格是否有项目
+                            const item = layout.items.find(i => i.x === colIndex && i.y === rowIndex);
+                            return item ? (
+                              <div 
+                                key={item.id}
+                                className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200 flex items-center justify-center"
+                                style={{
+                                  gridColumn: `${item.x + 1} / span ${item.width}`,
+                                  gridRow: `${item.y + 1} / span ${item.height}`,
+                                  height: '100px' // 设置固定高度
+                                }}
+                              >
+                                {item.title}
+                              </div>
+                            ) : (
+                              <div 
+                                key={`empty-${rowIndex}-${colIndex}`} 
+                                className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-100 flex items-center justify-center"
+                                style={{
+                                  gridColumn: `${colIndex + 1}`,
+                                  gridRow: `${rowIndex + 1}`,
+                                  height: '100px' // 设置固定高度
+                                }}
+                              >
+                                {/* 空白格可以显示提示信息或保持空白 */}
+                              </div>
+                            );
+                          })
+                        ))}
                       </div>
-                      <div className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200">
-                        销售占比
-                      </div>
-                      <div className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200">
-                        销售明细
-                      </div>
-                      <div className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200 col-span-2">
-                        新增图表1
-                      </div>
-                      <div className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200">
-                        新增图表2
-                      </div>
-                      <div className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200 col-span-3">
-                        新增图表3
-                      </div>
-                    </div>
+                    ) : (
+                      <div className="text-center p-4">正在加载布局...</div>
+                    )}
                   </div>
 
                   <div className="mt-6">
@@ -273,7 +285,7 @@ const EditModal = ({
                     </Button>
                     <Button 
                       variant="outline" 
-                      className="w-full border-dashed"
+                      className="w-full border-dashed mt-2"
                       onClick={() => setIsLayoutModalOpen(true)}
                     >
                       <Plus className="h-4 w-4 mr-2" />

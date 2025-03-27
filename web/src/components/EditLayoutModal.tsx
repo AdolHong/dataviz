@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Grip, Plus, Trash2, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Grip, Plus, Trash2, ArrowLeft, ArrowRight, Move } from 'lucide-react';
 import { toast } from "sonner";
 
 // 定义布局项的接口
@@ -70,6 +70,12 @@ export function EditLayoutModal({
 
   // 添加状态来跟踪调整中的单元格
   const [adjustingCell, setAdjustingCell] = useState<{rowId: string, cellId: string, targetWidth: number} | null>(null);
+
+  // 添加拖拽状态
+  const [draggedRow, setDraggedRow] = useState<string | null>(null);
+  const [draggedCell, setDraggedCell] = useState<{id: string, rowId: string} | null>(null);
+  const [dragOverRow, setDragOverRow] = useState<string | null>(null);
+  const [dragOverCell, setDragOverCell] = useState<{id: string, rowId: string} | null>(null);
 
   // 调整总列数
   const adjustColumns = (newColumns: number) => {
@@ -324,6 +330,289 @@ export function EditLayoutModal({
     document.addEventListener('mouseup', handleMouseUp);
   };
 
+  // 处理行拖拽开始
+  const handleRowDragStart = (e: React.DragEvent, rowId: string) => {
+    setDraggedRow(rowId);
+    e.dataTransfer.setData('text/plain', `row-${rowId}`);
+    // 设置拖拽效果
+    const dragImage = new Image();
+    dragImage.src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    e.dataTransfer.setDragImage(dragImage, 0, 0);
+  };
+  
+  // 处理行拖拽结束
+  const handleRowDragEnd = () => {
+    setDraggedRow(null);
+    setDragOverRow(null);
+  };
+  
+  // 处理行拖拽悬停
+  const handleRowDragOver = (e: React.DragEvent, rowId: string) => {
+    e.preventDefault();
+    if (draggedRow && draggedRow !== rowId) {
+      setDragOverRow(rowId);
+    }
+  };
+  
+  // 处理行放置
+  const handleRowDrop = (e: React.DragEvent, targetRowId: string) => {
+    e.preventDefault();
+    if (draggedRow && draggedRow !== targetRowId) {
+      const updatedRows = [...layout.rows];
+      const draggedRowIndex = updatedRows.findIndex(row => row.id === draggedRow);
+      const targetRowIndex = updatedRows.findIndex(row => row.id === targetRowId);
+      
+      if (draggedRowIndex !== -1 && targetRowIndex !== -1) {
+        // 移除拖拽的行
+        const [draggedRowObj] = updatedRows.splice(draggedRowIndex, 1);
+        // 插入到目标位置
+        updatedRows.splice(targetRowIndex, 0, draggedRowObj);
+        
+        setLayout({
+          ...layout,
+          rows: updatedRows
+        });
+        
+        toast.success("行位置已调整");
+      }
+    }
+    
+    // 重置拖拽状态
+    setDraggedRow(null);
+    setDragOverRow(null);
+  };
+  
+  // 处理单元格拖拽开始
+  const handleCellDragStart = (e: React.DragEvent, rowId: string, cellId: string) => {
+    setDraggedCell({id: cellId, rowId});
+    e.dataTransfer.setData('text/plain', `cell-${cellId}-row-${rowId}`);
+    // 设置拖拽效果
+    const dragImage = new Image();
+    dragImage.src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    e.dataTransfer.setDragImage(dragImage, 0, 0);
+  };
+  
+  // 处理单元格拖拽结束
+  const handleCellDragEnd = () => {
+    setDraggedCell(null);
+    setDragOverCell(null);
+  };
+  
+  // 处理单元格拖拽悬停
+  const handleCellDragOver = (e: React.DragEvent, rowId: string, cellId: string) => {
+    e.preventDefault();
+    if (draggedCell && (draggedCell.id !== cellId || draggedCell.rowId !== rowId)) {
+      setDragOverCell({id: cellId, rowId});
+    }
+  };
+  
+  // 处理行空白区域拖拽悬停，用于处理单元格拖拽到空行
+  const handleRowAreaDragOver = (e: React.DragEvent, rowId: string) => {
+    e.preventDefault();
+    if (draggedCell && draggedCell.rowId !== rowId) {
+      setDragOverRow(rowId);
+    }
+  };
+  
+  // 处理单元格放置
+  const handleCellDrop = (e: React.DragEvent, targetRowId: string, targetCellId: string) => {
+    e.preventDefault();
+    if (draggedCell) {
+      // 同一行内的单元格排序
+      if (draggedCell.rowId === targetRowId) {
+        const rowIndex = layout.rows.findIndex(row => row.id === targetRowId);
+        if (rowIndex === -1) return;
+        
+        const row = layout.rows[rowIndex];
+        const draggedCellIndex = row.cells.findIndex(cell => cell.id === draggedCell.id);
+        const targetCellIndex = row.cells.findIndex(cell => cell.id === targetCellId);
+        
+        if (draggedCellIndex !== -1 && targetCellIndex !== -1) {
+          const updatedCells = [...row.cells];
+          const [draggedCellObj] = updatedCells.splice(draggedCellIndex, 1);
+          updatedCells.splice(targetCellIndex, 0, draggedCellObj);
+          
+          const updatedRows = [...layout.rows];
+          updatedRows[rowIndex] = { ...row, cells: updatedCells };
+          
+          setLayout({
+            ...layout,
+            rows: updatedRows
+          });
+          
+          toast.success("单元格位置已调整");
+        }
+      } else {
+        // 跨行移动单元格
+        const sourceRowIndex = layout.rows.findIndex(row => row.id === draggedCell.rowId);
+        const targetRowIndex = layout.rows.findIndex(row => row.id === targetRowId);
+        
+        if (sourceRowIndex === -1 || targetRowIndex === -1) return;
+        
+        const sourceRow = layout.rows[sourceRowIndex];
+        const targetRow = layout.rows[targetRowIndex];
+        
+        // 找到被拖拽的单元格
+        const draggedCellIndex = sourceRow.cells.findIndex(cell => cell.id === draggedCell.id);
+        const targetCellIndex = targetRow.cells.findIndex(cell => cell.id === targetCellId);
+        
+        if (draggedCellIndex === -1) return;
+        
+        // 复制当前布局
+        const updatedRows = [...layout.rows];
+        
+        // 获取被拖拽的单元格
+        const [draggedCellObj] = updatedRows[sourceRowIndex].cells.splice(draggedCellIndex, 1);
+        
+        // 计算单元格宽度是否需要调整
+        const targetRowTotalWidth = targetRow.cells.reduce((sum, cell) => sum + cell.width, 0);
+        let adjustedCellObj = { ...draggedCellObj };
+        
+        // 检查目标行是否有足够空间
+        if (targetRowTotalWidth + adjustedCellObj.width > layout.columns) {
+          // 调整单元格宽度以适应目标行
+          adjustedCellObj.width = Math.min(adjustedCellObj.width, layout.columns - targetRowTotalWidth);
+          if (adjustedCellObj.width <= 0) {
+            adjustedCellObj.width = 1; // 确保至少有1列宽度
+          }
+        }
+        
+        // 将单元格插入目标行的正确位置
+        if (targetCellIndex !== -1) {
+          updatedRows[targetRowIndex].cells.splice(targetCellIndex, 0, adjustedCellObj);
+        } else {
+          // 如果没有目标单元格，则添加到末尾
+          updatedRows[targetRowIndex].cells.push(adjustedCellObj);
+        }
+        
+        // 如果源行没有单元格了，移除该行
+        if (updatedRows[sourceRowIndex].cells.length === 0) {
+          updatedRows.splice(sourceRowIndex, 1);
+        }
+        
+        setLayout({
+          ...layout,
+          rows: updatedRows
+        });
+        
+        toast.success("单元格已移动到新行");
+      }
+    }
+    
+    // 重置拖拽状态
+    setDraggedCell(null);
+    setDragOverCell(null);
+    setDragOverRow(null);
+  };
+  
+  // 处理拖拽到行的空白区域
+  const handleRowAreaDrop = (e: React.DragEvent, rowId: string) => {
+    e.preventDefault();
+    if (draggedCell && draggedCell.rowId !== rowId) {
+      const sourceRowIndex = layout.rows.findIndex(row => row.id === draggedCell.rowId);
+      const targetRowIndex = layout.rows.findIndex(row => row.id === rowId);
+      
+      if (sourceRowIndex === -1 || targetRowIndex === -1) return;
+      
+      const sourceRow = layout.rows[sourceRowIndex];
+      const targetRow = layout.rows[targetRowIndex];
+      
+      // 找到被拖拽的单元格
+      const draggedCellIndex = sourceRow.cells.findIndex(cell => cell.id === draggedCell.id);
+      
+      if (draggedCellIndex === -1) return;
+      
+      // 复制当前布局
+      const updatedRows = [...layout.rows];
+      
+      // 获取被拖拽的单元格
+      const [draggedCellObj] = updatedRows[sourceRowIndex].cells.splice(draggedCellIndex, 1);
+      
+      // 计算单元格宽度是否需要调整
+      const targetRowTotalWidth = targetRow.cells.reduce((sum, cell) => sum + cell.width, 0);
+      let adjustedCellObj = { ...draggedCellObj };
+      
+      // 检查目标行是否有足够空间
+      if (targetRowTotalWidth + adjustedCellObj.width > layout.columns) {
+        // 调整单元格宽度以适应目标行
+        adjustedCellObj.width = Math.min(adjustedCellObj.width, layout.columns - targetRowTotalWidth);
+        if (adjustedCellObj.width <= 0) {
+          adjustedCellObj.width = 1; // 确保至少有1列宽度
+        }
+      }
+      
+      // 将单元格添加到目标行末尾
+      updatedRows[targetRowIndex].cells.push(adjustedCellObj);
+      
+      // 如果源行没有单元格了，移除该行
+      if (updatedRows[sourceRowIndex].cells.length === 0) {
+        updatedRows.splice(sourceRowIndex, 1);
+      }
+      
+      setLayout({
+        ...layout,
+        rows: updatedRows
+      });
+      
+      toast.success("单元格已移动到行末尾");
+    }
+    
+    // 重置拖拽状态
+    setDraggedCell(null);
+    setDragOverCell(null);
+    setDragOverRow(null);
+  };
+  
+  // 处理拖拽到空白区域，创建新行
+  const handleEmptyAreaDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (draggedCell) {
+      const sourceRowIndex = layout.rows.findIndex(row => row.id === draggedCell.rowId);
+      
+      if (sourceRowIndex === -1) return;
+      
+      const sourceRow = layout.rows[sourceRowIndex];
+      
+      // 找到被拖拽的单元格
+      const draggedCellIndex = sourceRow.cells.findIndex(cell => cell.id === draggedCell.id);
+      
+      if (draggedCellIndex === -1) return;
+      
+      // 复制当前布局
+      const updatedRows = [...layout.rows];
+      
+      // 获取被拖拽的单元格
+      const [draggedCellObj] = updatedRows[sourceRowIndex].cells.splice(draggedCellIndex, 1);
+      
+      // 创建新行，并将单元格添加进去
+      const newRowId = `row-${Date.now()}`;
+      const newRow = {
+        id: newRowId,
+        cells: [draggedCellObj]
+      };
+      
+      // 将新行添加到末尾
+      updatedRows.push(newRow);
+      
+      // 如果源行没有单元格了，移除该行
+      if (updatedRows[sourceRowIndex].cells.length === 0) {
+        updatedRows.splice(sourceRowIndex, 1);
+      }
+      
+      setLayout({
+        ...layout,
+        rows: updatedRows
+      });
+      
+      toast.success("已创建新行并移动单元格");
+    }
+    
+    // 重置拖拽状态
+    setDraggedCell(null);
+    setDragOverCell(null);
+    setDragOverRow(null);
+  };
+
   // 处理保存
   const handleSave = () => {
     onSave(layout);
@@ -337,7 +626,11 @@ export function EditLayoutModal({
           <DialogTitle>编辑布局</DialogTitle>
         </DialogHeader>
         
-        <div className="flex-1 overflow-y-auto p-4">
+        <div 
+          className="flex-1 overflow-y-auto p-4"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleEmptyAreaDrop}
+        >
           <div className="space-y-4">
             {/* 全局设置 */}
             <div className="flex items-center space-x-4">
@@ -372,10 +665,20 @@ export function EditLayoutModal({
               
               <div className="space-y-8">
                 {layout.rows.map((row) => (
-                  <div key={row.id} className="relative border-t border-dashed pt-4">
+                  <div 
+                    key={row.id} 
+                    className={`relative border-t border-dashed pt-4 ${dragOverRow === row.id ? 'border-blue-500 bg-blue-50' : ''}`}
+                    draggable={true}
+                    onDragStart={(e) => handleRowDragStart(e, row.id)}
+                    onDragEnd={handleRowDragEnd}
+                    onDragOver={(e) => handleRowDragOver(e, row.id)}
+                    onDrop={(e) => handleRowDrop(e, row.id)}
+                    onDragEnter={(e) => handleRowAreaDragOver(e, row.id)}
+                    onDragLeave={() => setDragOverRow(null)}
+                  >
                     <div className="absolute -top-3 left-0 bg-white px-2 text-xs text-gray-500 flex items-center">
-                      <Grip className="h-3 w-3 mr-1" />
-                      行 {layout.rows.indexOf(row) + 1}
+                      <Grip className="h-3 w-3 mr-1 cursor-grab" />
+                      <span>行 {layout.rows.indexOf(row) + 1}</span>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -399,14 +702,23 @@ export function EditLayoutModal({
                       style={{
                         gridTemplateColumns: `repeat(${layout.columns}, 1fr)`,
                       }}
+                      onDragOver={(e) => {e.preventDefault(); e.stopPropagation();}}
+                      onDrop={(e) => {e.stopPropagation(); handleRowAreaDrop(e, row.id);}}
                     >
                       {row.cells.map((cell) => (
                         <div
                           key={cell.id}
-                          className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200 relative"
+                          className={`border-2 border-dashed rounded-lg p-4 text-center bg-gray-200 relative 
+                            ${dragOverCell && dragOverCell.id === cell.id && dragOverCell.rowId === row.id ? 'border-blue-500 bg-blue-100' : ''}
+                            ${draggedCell && draggedCell.id === cell.id && draggedCell.rowId === row.id ? 'opacity-50' : ''}`}
                           style={{
                             gridColumn: `span ${cell.width} / span ${cell.width}`,
                           }}
+                          draggable={true}
+                          onDragStart={(e) => handleCellDragStart(e, row.id, cell.id)}
+                          onDragEnd={handleCellDragEnd}
+                          onDragOver={(e) => handleCellDragOver(e, row.id, cell.id)}
+                          onDrop={(e) => handleCellDrop(e, row.id, cell.id)}
                         >
                           <input
                             type="text"
@@ -424,6 +736,9 @@ export function EditLayoutModal({
                             >
                               <Trash2 className="h-3 w-3" />
                             </Button>
+                            <div className="h-6 w-6 cursor-move flex items-center justify-center ml-1">
+                              <Move className="h-3 w-3" />
+                            </div>
                           </div>
                           
                           {/* 如果是正在调整的单元格，显示目标宽度 */}

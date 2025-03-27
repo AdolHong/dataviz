@@ -1,16 +1,16 @@
-import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useEffect, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from '@/components/ui/dialog';
 
-import DataSourceTab from "./DataSourceTab";
-import FilterTab from "./FilterTab";
-import ChartTab from "./ChartTab";
+import DataSourceTab from './DataSourceTab';
+import FilterTab from './FilterTab';
+import ChartTab from './ChartTab';
 
 import {
   Filter,
@@ -19,17 +19,17 @@ import {
   Pencil,
   Trash2,
   Plus,
-} from "lucide-react";
-import { toast } from "sonner";
-import { DataSourceModal } from "./DataSourceModal";
-import { EditLayoutModal } from "./EditLayoutModal";
-import ConfirmDialog from "./ConfirmDialog";
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { DataSourceModal } from './DataSourceModal';
+import { EditLayoutModal } from './EditLayoutModal';
+import ConfirmDialog from './ConfirmDialog';
 
-import type { DataSource, Layout, Parameter, Chart, Report } from "@/types";
+import type { DataSource, Layout, Parameter, Chart, Report } from '@/types';
 import {
   addItem as addLayoutItem,
   removeEmptyRowsAndColumns,
-} from "@/types/models/layout";
+} from '@/types/models/layout';
 
 interface EditModalProps {
   open: boolean;
@@ -40,87 +40,87 @@ interface EditModalProps {
 
 const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   // todo: 获取报表的布局
-  console.log("reportId", reportId);
+  console.log('reportId', reportId);
   // 构造 demo 数据
   const demoReport = {
-    title: "销售报表",
-    description: "这是一个销售数据的示例报表",
+    title: '销售报表',
+    description: '这是一个销售数据的示例报表',
     dataSources: [
       {
-        id: "ds1",
-        name: "主数据",
-        type: "python",
-        alias: "销售数据",
-        executor: { type: "python", engine: "pandas" },
-        code: "",
+        id: 'ds1',
+        name: '主数据',
+        type: 'python',
+        alias: '销售数据',
+        executor: { type: 'python', engine: 'pandas' },
+        code: '',
       },
       {
-        id: "ds2",
-        name: "外部数据",
-        type: "sql",
-        alias: "外部数据",
-        executor: { type: "python", engine: "pandas" },
-        code: "",
+        id: 'ds2',
+        name: '外部数据',
+        type: 'sql',
+        alias: '外部数据',
+        executor: { type: 'python', engine: 'pandas' },
+        code: '',
       },
     ],
     parameters: [
-      { name: "开始日期", type: "single_select" },
-      { name: "结束日期", type: "single_select" },
+      { name: '开始日期', type: 'single_select' },
+      { name: '结束日期', type: 'single_select' },
     ],
     charts: [
       {
-        id: "item-1",
-        title: "销售趋势",
-        code: "line",
-        dependencies: ["ds1"],
-        executor: { type: "python", engine: "pandas" },
+        id: 'item-1',
+        title: '销售趋势',
+        code: 'line',
+        dependencies: ['ds1'],
+        executor: { type: 'python', engine: 'pandas' },
       },
       {
-        id: "item-2",
-        title: "销售占比",
-        code: "pie",
-        dependencies: ["ds2"],
-        executor: { type: "python", engine: "pandas" },
+        id: 'item-2',
+        title: '销售占比',
+        code: 'pie',
+        dependencies: ['ds2'],
+        executor: { type: 'python', engine: 'pandas' },
       },
       {
-        id: "item-3",
-        title: "销售占比",
-        code: "pie",
-        dependencies: ["ds2"],
-        executor: { type: "python", engine: "pandas" },
+        id: 'item-3',
+        title: '销售占比',
+        code: 'pie',
+        dependencies: ['ds2'],
+        executor: { type: 'python', engine: 'pandas' },
       },
       {
-        id: "item-4",
-        title: "销售占比",
-        code: "pie",
-        dependencies: ["ds2"],
-        executor: { type: "python", engine: "pandas" },
+        id: 'item-4',
+        title: '销售占比',
+        code: 'pie',
+        dependencies: ['ds2'],
+        executor: { type: 'python', engine: 'pandas' },
       },
       {
-        id: "item-5",
-        title: "销售占比",
-        code: "pie",
-        dependencies: ["ds2"],
-        executor: { type: "python", engine: "pandas" },
+        id: 'item-5',
+        title: '销售占比',
+        code: 'pie',
+        dependencies: ['ds2'],
+        executor: { type: 'python', engine: 'pandas' },
       },
       {
-        id: "item-6",
-        title: "销售占比",
-        code: "pie",
-        dependencies: ["ds2"],
-        executor: { type: "python", engine: "pandas" },
+        id: 'item-6',
+        title: '销售占比',
+        code: 'pie',
+        dependencies: ['ds2'],
+        executor: { type: 'python', engine: 'pandas' },
       },
     ],
     layout: {
       columns: 3,
       rows: 2,
       items: [
-        { id: "item-1", title: "销售趋势", width: 1, height: 1, x: 0, y: 0 },
-        { id: "item-2", title: "销售占比", width: 1, height: 1, x: 1, y: 0 },
-        { id: "item-3", title: "销售明细", width: 1, height: 1, x: 2, y: 0 },
-        { id: "item-4", title: "新增图表1", width: 1, height: 1, x: 0, y: 1 },
-        { id: "item-5", title: "新增图表2", width: 1, height: 1, x: 1, y: 1 },
-        { id: "item-6", title: "新增图表333", width: 1, height: 1, x: 2, y: 1 },
+        { id: 'item-1', title: '销售趋势', width: 1, height: 1, x: 0, y: 0 },
+        { id: 'item-2', title: '销售占比', width: 1, height: 1, x: 1, y: 0 },
+        { id: 'item-3', title: '销售明细', width: 1, height: 1, x: 2, y: 0 },
+        { id: 'item-4', title: '新增图表1', width: 1, height: 1, x: 0, y: 1 },
+        { id: 'item-5', title: '新增图表2', width: 1, height: 1, x: 1, y: 1 },
+        { id: 'item-6', title: '新增图表333', width: 1, height: 1, x: 2, y: 1 },
       ],
     },
   };
@@ -134,19 +134,19 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   const [charts, setCharts] = useState<Chart[]>(demoReport.charts);
   const [layout, setLayout] = useState<Layout>(demoReport.layout);
 
-  const [activeTab, setActiveTab] = useState("filters");
+  const [activeTab, setActiveTab] = useState('filters');
   const [isDataSourceModalOpen, setIsDataSourceModalOpen] = useState(false);
   const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
   const [deleteFunction, setDeleteFunction] = useState<(() => void) | null>(
     null
   );
-  const [deleteMessage, setDeleteMessage] = useState<string>("");
+  const [deleteMessage, setDeleteMessage] = useState<string>('');
 
   // 添加图表
   const handleAddChart = () => {
     // 提取现有图表的 ID，并转换为数字
     const existingIds = charts.map((chart) =>
-      parseInt(chart.id.split("-")[1], 10)
+      parseInt(chart.id.split('-')[1], 10)
     );
 
     // 找到缺失的最小数字
@@ -165,9 +165,9 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
       {
         id: newChartId,
         title: title,
-        code: "pie",
+        code: 'pie',
         dependencies: [],
-        executor: { type: "python", engine: "pandas" },
+        executor: { type: 'python', engine: 'pandas' },
       },
     ]);
 
@@ -178,7 +178,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   // 删除图表
   const handleDeleteChart = (chartId: string) => {
     if (charts.length === 1) {
-      toast.error("至少需要保留一个图表");
+      toast.error('至少需要保留一个图表');
       return;
     }
     // 删除图表
@@ -192,7 +192,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
     // 删除空行和空列
     newLayout = removeEmptyRowsAndColumns(newLayout);
     setLayout(newLayout);
-    toast.success("图表已删除");
+    toast.success('图表已删除');
   };
 
   const confirmDelete = (deleteFunction: () => void, message: string) => {
@@ -204,7 +204,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   return (
     <>
       <Dialog open={open} onOpenChange={onClose}>
-        <DialogContent className="max-w-[90vw] h-[90vh] flex flex-col">
+        <DialogContent className='max-w-[90vw] h-[90vh] flex flex-col'>
           <DialogHeader>
             <DialogTitle>编辑报表</DialogTitle>
           </DialogHeader>
@@ -212,26 +212,26 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
           <Tabs
             value={activeTab}
             onValueChange={setActiveTab}
-            className="flex-1 flex flex-col overflow-hidden"
+            className='flex-1 flex flex-col overflow-hidden'
           >
-            <TabsList className="w-full grid grid-cols-3 sticky top-0 z-10">
-              <TabsTrigger value="data" className="flex items-center gap-2">
+            <TabsList className='w-full grid grid-cols-3 sticky top-0 z-10'>
+              <TabsTrigger value='data' className='flex items-center gap-2'>
                 <Database size={24} />
                 <span>数据源</span>
               </TabsTrigger>
 
-              <TabsTrigger value="filters" className="flex items-center gap-2">
+              <TabsTrigger value='filters' className='flex items-center gap-2'>
                 <Filter size={24} />
                 <span>筛选条件</span>
               </TabsTrigger>
 
-              <TabsTrigger value="charts" className="flex items-center gap-2">
+              <TabsTrigger value='charts' className='flex items-center gap-2'>
                 <BarChart2 size={24} />
                 <span>图表</span>
               </TabsTrigger>
             </TabsList>
 
-            <div className="flex-1 overflow-y-auto">
+            <div className='flex-1 overflow-y-auto'>
               <DataSourceTab
                 dataSources={dataSources}
                 setDataSources={setDataSources}
@@ -273,7 +273,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
           }
           setIsConfirmDeleteOpen(false);
         }}
-        title="确认删除"
+        title='确认删除'
         message={deleteMessage}
       />
     </>

@@ -4,12 +4,12 @@ export interface DataSource {
   name: string;
   description?: string;
   executor: {
-    type: "sql" | "python" | "csv";
+    type: string;
     engine: string;
   };
   code: string;
   updateMode?: {
-    type: "auto" | "manual";
+    type: 'auto' | 'manual';
     interval?: number;
   };
 }

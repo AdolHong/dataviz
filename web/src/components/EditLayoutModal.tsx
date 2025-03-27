@@ -429,6 +429,7 @@ export function EditLayoutModal({
     if (!item) return null;
     
     return (
+      
       <div
         className="absolute bg-blue-200 bg-opacity-30 border-2 border-blue-500 rounded-lg"
         style={{

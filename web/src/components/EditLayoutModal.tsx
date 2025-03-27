@@ -420,33 +420,6 @@ export function EditLayoutModal({
     
     return gridItems;
   };
-
-  // 用于预览项目的新尺寸
-  const renderPreviewOverlay = () => {
-    if (!adjustingItem) return null;
-    
-    const item = layout.items.find(item => item.id === adjustingItem.itemId);
-    if (!item) return null;
-    
-    return (
-      
-      <div
-        className="absolute bg-blue-200 bg-opacity-30 border-2 border-blue-500 rounded-lg"
-        style={{
-          gridColumnStart: item.x + 1,
-          gridColumnEnd: item.x + adjustingItem.targetWidth + 1,
-          gridRowStart: item.y + 1,
-          gridRowEnd: item.y + adjustingItem.targetHeight + 1,
-          zIndex: 5,
-          pointerEvents: 'none'
-        }}
-      >
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white px-2 py-1 rounded shadow text-sm">
-          {adjustingItem.targetWidth} x {adjustingItem.targetHeight}
-        </div>
-      </div>
-    );
-  };
   
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -468,7 +441,6 @@ export function EditLayoutModal({
                 }}
               >
                 {renderGrid(layout)}
-                {renderPreviewOverlay()}
               </div>
             </div>
             

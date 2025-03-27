@@ -234,14 +234,7 @@ export function EditLayoutModal({
               onDragStart={() => handleItemDragStart(item.id)}
               onDragEnd={handleItemDragEnd} // 恢复格子的样式
             >
-              <span className="text-center">{item.title}</span>
-              
-              {/* 如果是正在调整的项目，显示目标尺寸 */}
-              {adjustingItem && adjustingItem.itemId === item.id && (
-                <div className="absolute inset-0 bg-blue-200 bg-opacity-50 flex items-center justify-center">
-                </div>
-              )}
-              
+              <span className="text-center">{item.title}</span
               {/* 调整手柄美化版 */}
               <div
                 className="absolute right-0 bottom-0 cursor-nwse-resize select-none"

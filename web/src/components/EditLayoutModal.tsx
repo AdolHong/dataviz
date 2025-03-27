@@ -5,7 +5,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { ChevronsUp, ChevronsDown } from 'lucide-react';
 import { toast } from "sonner";
 
-import type { Layout, LayoutItem } from '@/types';
+import type { Layout } from '@/types';
+import   {
+  adjustRows,
+  adjustColumns,
+  hasOverlappingItems,
+  getGridOccupancy,
+  removeEmptyRowsAndColumns,
+} from "@/types/models/layout";
 
 interface EditLayoutModalProps {
   open: boolean;
@@ -48,149 +55,6 @@ export function EditLayoutModal({
   const [draggedItem, setDraggedItem] = useState<string | null>(null);
   const [dragOverCell, setDragOverCell] = useState<{x: number, y: number} | null>(null);
 
-  // 计算实际渲染的网格 - 这会创建一个二维数组，表示每个单元格被哪个项目占用
-  const getGridOccupancy = () => {
-    // 创建一个二维数组，初始化为null
-    const grid: (string | null)[][] = Array(layout.rows).fill(null).map(() => 
-      Array(layout.columns).fill(null)
-    );
-    
-    // 遍历所有项目，填充网格
-    layout.items.forEach(item => {
-      for (let y = item.y; y < item.y + item.height; y++) {
-        for (let x = item.x; x < item.x + item.width; x++) {
-          // 确保在网格范围内
-          if (y < layout.rows && x < layout.columns) {
-            grid[y][x] = item.id;
-          }
-        }
-      }
-    });
-    
-    return grid;
-  };
-
-  // 检查是否有项目重叠或超出边界
-  const hasOverlappingItems = () => {
-    const grid = getGridOccupancy();
-    const itemCounts = new Map<string, number>();
-    
-    // 计算每个项目在网格中出现的次数
-    for (let y = 0; y < grid.length; y++) {
-      for (let x = 0; x < grid[y].length; x++) {
-        const itemId = grid[y][x];
-        if (itemId) {
-          itemCounts.set(itemId, (itemCounts.get(itemId) || 0) + 1);
-        }
-      }
-    }
-    
-    // 检查每个项目是否占用了应该占用的单元格数量
-    let hasOverlap = false;
-    layout.items.forEach(item => {
-      const expectedCells = item.width * item.height;
-      const actualCells = itemCounts.get(item.id) || 0;
-      
-      if (actualCells < expectedCells) {
-        // 项目超出边界
-        hasOverlap = true;
-      }
-    });
-    
-    return hasOverlap;
-  };
-
-  // 添加新项目
-  const addItem = () => {
-    // 查找第一个可用位置
-    const grid = getGridOccupancy();
-    let foundPosition = false;
-    let newX = 0;
-    let newY = 0;
-    
-    for (let y = 0; y < layout.rows; y++) {
-      for (let x = 0; x < layout.columns; x++) {
-        if (grid[y][x] === null) {
-          newX = x;
-          newY = y;
-          foundPosition = true;
-          break;
-        }
-      }
-      if (foundPosition) break;
-    }
-    
-    // 如果没有可用位置，添加到最后一行
-    if (!foundPosition) {
-      newY = layout.rows;
-      setLayout({
-        ...layout,
-        rows: layout.rows + 1
-      });
-    }
-    
-    const newItem: LayoutItem = {
-      id: `item-${Date.now()}`,
-      title: '新图表',
-      width: 1,
-      height: 1,
-      x: newX,
-      y: newY
-    };
-    
-    setLayout({
-      ...layout,
-      items: [...layout.items, newItem]
-    });
-  };
-
-  // 删除项目
-  const removeItem = (itemId: string) => {
-    setLayout({
-      ...layout,
-      items: layout.items.filter(item => item.id !== itemId)
-    });
-  };
-
-  // 调整行数
-  const adjustRows = (newRows: number) => {
-    if (newRows < 1) return;
-    
-    // 检查是否有项目超出新的行数
-    const willBeOutOfBounds = layout.items.some(item => 
-      item.y + item.height > newRows
-    );
-    
-    if (willBeOutOfBounds) {
-      toast.error("减少行数会导致某些图表超出边界");
-      return;
-    }
-    
-    setLayout({
-      ...layout,
-      rows: newRows
-    });
-  };
-
-  // 调整列数
-  const adjustColumns = (newColumns: number) => {
-    if (newColumns < 1) return;
-    
-    // 检查是否有项目超出新的列数
-    const willBeOutOfBounds = layout.items.some(item => 
-      item.x + item.width > newColumns
-    );
-    
-    if (willBeOutOfBounds) {
-      toast.error("减少列数会导致某些图表超出边界");
-      return;
-    }
-    
-    setLayout({
-      ...layout,
-      columns: newColumns
-    });
-  };
 
   // 处理项目拖拽开始
   const handleItemDragStart = (e: React.DragEvent, itemId: string) => {
@@ -285,50 +149,32 @@ export function EditLayoutModal({
     setDragOverCell(null);
   };
 
-  // 删除多余的空行和空列
-  const removeEmptyRowsAndColumns = (layout: Layout): Layout => {
-    const nonEmptyRows = new Set<number>();
-    const nonEmptyColumns = new Set<number>();
-
-    layout.items.forEach(item => {
-      for (let y = item.y; y < item.y + item.height; y++) {
-        nonEmptyRows.add(y);
-      }
-      for (let x = item.x; x < item.x + item.width; x++) {
-        nonEmptyColumns.add(x);
-      }
-    });
-
-    const newRows = Math.max(...nonEmptyRows) + 1;
-    const newColumns = Math.max(...nonEmptyColumns) + 1;
-
-    return {
-      ...layout,
-      rows: newRows,
-      columns: newColumns,
-      items: layout.items.filter(item => {
-        return (
-          item.x < newColumns && 
-          item.y < newRows
-        );
-      })
-    };
-  };
-
   // 处理保存
   const handleSave = () => {
     // 检查项目是否有重叠
-    if (hasOverlappingItems()) {
+    if (hasOverlappingItems(layout)) {
       toast.error("布局中存在重叠的图表，请检查");
       return;
     }
 
-    // 调用函数并更新layout
+    // 调用方法更新布局
     const updatedLayout = removeEmptyRowsAndColumns(layout);
-    setLayout(updatedLayout);
+    setLayout(updatedLayout); // 更新状态
 
     onSave(updatedLayout);
     onClose();
+  };
+
+  // 调整列数
+  const handleAdjustColumns = (newColumns: number) => {
+    const updatedLayout = adjustColumns(layout, newColumns);
+    setLayout(updatedLayout); // 更新状态
+  };
+
+  // 调整行数
+  const handleAdjustRows = (newRows: number) => {
+    const updatedLayout = adjustRows(layout, newRows);
+    setLayout(updatedLayout); // 更新状态
   };
 
   // 添加一个通用的重叠检测函数，供调整手柄使用
@@ -395,8 +241,8 @@ export function EditLayoutModal({
   };
 
   // 用于绘制整个网格的函数
-  const renderGrid = () => {
-    const grid = getGridOccupancy();
+  const renderGrid = (layout: Layout) => {
+    const grid = getGridOccupancy(layout);
     const gridItems = [];
     
     // 渲染每个单元格
@@ -620,7 +466,7 @@ export function EditLayoutModal({
                   position: 'relative'
                 }}
               >
-                {renderGrid()}
+                {renderGrid(layout)}
                 {renderPreviewOverlay()}
               </div>
             </div>
@@ -639,7 +485,7 @@ export function EditLayoutModal({
                           variant="ghost"
                           size="icon"
                           className="h-4 w-4 rounded-b-none py-0"
-                          onClick={() => adjustColumns(layout.columns + 1)}
+                          onClick={() => handleAdjustColumns(layout.columns + 1)}
                         >
                           <ChevronsUp className="h-3 w-3" />
                         </Button>
@@ -647,7 +493,7 @@ export function EditLayoutModal({
                           variant="ghost"
                           size="icon"
                           className="h-4 w-4 rounded-t-none py-0"
-                          onClick={() => adjustColumns(layout.columns - 1)}
+                          onClick={() => handleAdjustColumns(layout.columns - 1)}
                           disabled={layout.columns <= 1}
                         >
                           <ChevronsDown className="h-3 w-3" />
@@ -660,28 +506,28 @@ export function EditLayoutModal({
                 <div className="flex items-center space-x-4">
                   <Label htmlFor="rows">行数:</Label>
                   <div className="flex items-center space-x-1">
-                  <div className="text-xl font-medium">{layout.rows}</div>
-                  <div className="relative flex flex-col items-center">
-                    <div className="flex flex-col -mt-1 space-y-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-4 w-4 rounded-b-none py-0"
-                        onClick={() => adjustRows(layout.rows + 1)}
-                      >
-                        <ChevronsUp className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-4 w-4 rounded-t-none py-0"
-                        onClick={() => adjustRows(layout.rows - 1)}
-                        disabled={layout.rows <= 1}
-                      >
-                        <ChevronsDown className="h-3 w-3" />
-                      </Button>
+                    <div className="text-xl font-medium">{layout.rows}</div>
+                    <div className="relative flex flex-col items-center">
+                      <div className="flex flex-col -mt-1 space-y-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-4 w-4 rounded-b-none py-0"
+                          onClick={() => handleAdjustRows(layout.rows + 1)}
+                        >
+                          <ChevronsUp className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-4 w-4 rounded-t-none py-0"
+                          onClick={() => handleAdjustRows(layout.rows - 1)}
+                          disabled={layout.rows <= 1}
+                        >
+                          <ChevronsDown className="h-3 w-3" />
+                        </Button>
+                      </div>
                     </div>
-                  </div>
                   </div>
                 </div>
               </div>

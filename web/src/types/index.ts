@@ -8,4 +8,4 @@ export type { Parameter } from "./models/parameter";
 
 export type { Report } from "./models/report";
 
-export type { Layout, LayoutRow, LayoutItem } from "./models/layout";
+export type { Layout, LayoutItem } from "./models/layout";

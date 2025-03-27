@@ -27,7 +27,7 @@ const EditModal = ({
   const [isLayoutModalOpen, setIsLayoutModalOpen] = useState(false);
 
   const handleSaveLayout = (layout: any) => {
-    console.log('保存的布局:', layout);
+    toast('保存的布局:', layout);
     setIsLayoutModalOpen(false);
   };
 
@@ -251,6 +251,18 @@ const EditModal = ({
         open={isLayoutModalOpen}
         onClose={() => setIsLayoutModalOpen(false)}
         onSave={handleSaveLayout}
+        initialLayout={{
+          columns: 3,
+          rows: 2,
+          items: [
+            { id: 'item-1', title: '销售趋势', width: 1, height: 1, x: 0, y: 0 },
+            { id: 'item-2', title: '销售占比', width: 1, height: 1, x: 1, y: 0 },
+            { id: 'item-3', title: '销售明细', width: 1, height: 1, x: 2, y: 0 },
+            { id: 'item-4', title: '新增图表1', width: 1, height: 1, x: 0, y: 1 },
+            { id: 'item-5', title: '新增图表2', width: 1, height: 1, x: 1, y: 1 },
+            { id: 'item-6', title: '新增图表3', width: 1, height: 1, x: 2, y: 1 }
+          ]
+        }}
       />
     </>
   );

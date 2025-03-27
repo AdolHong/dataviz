@@ -29,15 +29,10 @@ export function EditLayoutModal({
 }: EditLayoutModalProps) {
   // 默认布局
   const defaultLayout: Layout = {
-    columns: 3,
-    rows: 4,
+    columns: 1,
+    rows: 1,
     items: [
-      { id: 'item-1', title: '销售趋势', width: 1, height: 1, x: 0, y: 0 },
-      { id: 'item-2', title: '区域销售占比', width: 1, height: 1, x: 1, y: 0 },
-      { id: 'item-3', title: '销售明细数据', width: 1, height: 1, x: 2, y: 0 },
-      { id: 'item-4', title: '新增图表1', width: 1, height: 1, x: 0, y: 1 },
-      { id: 'item-5', title: '图表4', width: 2, height: 3, x: 1, y: 1 },
-      { id: 'item-6', title: '新增图表3', width: 1, height: 1, x: 0, y: 3 },
+      { id: 'item-1', title: '你触发了defaultLayout', width: 1, height: 1, x: 0, y: 0 }
     ]
   };
 
@@ -234,7 +229,7 @@ export function EditLayoutModal({
               onDragStart={() => handleItemDragStart(item.id)}
               onDragEnd={handleItemDragEnd} // 恢复格子的样式
             >
-              <span className="text-center">{item.title}</span
+              <span className="text-center">{item.title}</span>
               {/* 调整手柄美化版 */}
               <div
                 className="absolute right-0 bottom-0 cursor-nwse-resize select-none"

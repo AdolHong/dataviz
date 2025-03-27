@@ -285,10 +285,10 @@ const EditModal = ({
                         销售趋势
                       </div>
                       <div className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200">
-                        区域销售占比
+                        销售占比
                       </div>
                       <div className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200">
-                        销售明细数据
+                        销售明细
                       </div>
                       <div className="border-2 border-dashed rounded-lg p-4 text-center bg-gray-200 col-span-2">
                         新增图表1

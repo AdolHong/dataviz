@@ -25,7 +25,6 @@ import {
 interface EditModalProps {
   open: boolean;
   onClose: () => void;
-  onSave: (params: any[], visualizations: any[], sqlCode: string) => void;
   reportId: string;
 }
 
@@ -133,6 +132,12 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   );
   const [deleteMessage, setDeleteMessage] = useState<string>('');
 
+  // todo: 发起api， 保存报表
+  useEffect(() => {
+    console.log('demoReport', demoReport);
+    toast.success(`你保存了报表"${reportId}"`);
+  }, [layout, dataSources, parameters, charts]);
+
   // 添加图表
   const handleAddChart = () => {
     // 提取现有图表的 ID，并转换为数字
@@ -206,14 +211,14 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
             className='flex-1 flex flex-col overflow-hidden'
           >
             <TabsList className='w-full grid grid-cols-3 sticky top-0 z-10'>
-              <TabsTrigger value='data' className='flex items-center gap-2'>
-                <Database size={24} />
-                <span>数据源</span>
-              </TabsTrigger>
-
               <TabsTrigger value='filters' className='flex items-center gap-2'>
                 <Filter size={24} />
                 <span>筛选条件</span>
+              </TabsTrigger>
+
+              <TabsTrigger value='data' className='flex items-center gap-2'>
+                <Database size={24} />
+                <span>数据源</span>
               </TabsTrigger>
 
               <TabsTrigger value='charts' className='flex items-center gap-2'>

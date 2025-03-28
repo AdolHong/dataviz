@@ -4,20 +4,22 @@ import { type DataSource } from '@/types/models/dataSource';
 import { TabsContent } from '@radix-ui/react-tabs';
 import { useState } from 'react';
 import { EditDataSourceModal } from './EditDataSourceModal';
-import type { EngineChoices } from '@/types';
+import type { AliasRelianceMap, EngineChoices } from '@/types';
 
 interface TabDataSourceProps {
   dataSources: DataSource[];
-  engineChoices: EngineChoices;
   setDataSources: (dataSources: DataSource[]) => void;
+  engineChoices: EngineChoices;
+  aliasRelianceMap: AliasRelianceMap;
   handleDeleteDataSource: (id: string) => void;
   confirmDelete: (deleteFunction: () => void, message: string) => void;
 }
 
 const TabDataSource = ({
   dataSources,
-  engineChoices,
   setDataSources,
+  engineChoices,
+  aliasRelianceMap,
   handleDeleteDataSource,
   confirmDelete,
 }: TabDataSourceProps) => {
@@ -115,6 +117,12 @@ const TabDataSource = ({
         }}
         initialDataSource={editingDataSource}
         engineChoices={engineChoices}
+        existingAliases={dataSources
+          .filter((ds) =>
+            editingDataSource ? ds.id !== editingDataSource.id : true
+          )
+          .map((ds) => ds.alias)}
+        aliasRelianceMap={aliasRelianceMap}
       />
     </div>
   );

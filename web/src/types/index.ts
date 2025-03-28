@@ -14,5 +14,6 @@ export type { EngineChoices } from './models/engineChoices';
 
 export {
   type AliasRelianceMap,
-  updateAliasRelianceMap,
+  updateAliasRelianceMapByChart,
+  updateAliasRelianceMapByDataSource,
 } from './models/aliasRelianceMap';

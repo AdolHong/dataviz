@@ -3,19 +3,19 @@ import { Trash2, Pencil, Plus } from 'lucide-react';
 import { type Parameter } from '@/types/models/parameter';
 import { TabsContent } from '@radix-ui/react-tabs';
 
-interface FilterTabProps {
+interface TabFilterProps {
   parameters: Parameter[];
   setParameters: (parameters: Parameter[]) => void;
   handleDeleteParameter: (id: string) => void;
   confirmDelete: (deleteFunction: () => void, message: string) => void;
 }
 
-const FilterTab = ({
+const TabFilter = ({
   parameters,
   setParameters,
   handleDeleteParameter,
   confirmDelete,
-}: FilterTabProps) => {
+}: TabFilterProps) => {
   return (
     <TabsContent value='filters' className='p-4'>
       <div className='space-y-4'>
@@ -70,4 +70,4 @@ const FilterTab = ({
   );
 };
 
-export default FilterTab;
+export default TabFilter;

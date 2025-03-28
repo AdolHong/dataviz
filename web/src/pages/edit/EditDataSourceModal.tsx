@@ -28,7 +28,14 @@ import {
   handleEngineChange,
 } from '@/types/models/dataSource';
 import { CSVTable } from '@/components/CSVTable';
-import type { EngineChoices } from '@/types';
+import type { EngineChoices, AliasRelianceMap } from '@/types';
+
+import AceEditor from 'react-ace';
+import 'ace-builds/src-noconflict/theme-xcode';
+import 'ace-builds/src-noconflict/mode-python';
+import 'ace-builds/src-noconflict/mode-sql';
+import { toast } from 'sonner';
+
 interface EditDataSourceModalProps {
   open: boolean;
   onClose: () => void;
@@ -36,13 +43,8 @@ interface EditDataSourceModalProps {
   initialDataSource?: DataSource | null;
   engineChoices: EngineChoices;
   existingAliases: string[];
-  reliances: string[];
+  aliasRelianceMap: AliasRelianceMap;
 }
-import AceEditor from 'react-ace';
-import 'ace-builds/src-noconflict/theme-xcode';
-import 'ace-builds/src-noconflict/mode-python';
-import 'ace-builds/src-noconflict/mode-sql';
-import { toast } from 'sonner';
 
 export const EditDataSourceModal = ({
   open,
@@ -51,7 +53,7 @@ export const EditDataSourceModal = ({
   initialDataSource = null,
   engineChoices, // 引擎的选项
   existingAliases, // 已存在的别名
-  reliances, // 依赖的图表
+  aliasRelianceMap, // 依赖的图表
 }: EditDataSourceModalProps) => {
   // 默认布局
   const defaultDataSource: DataSource = {
@@ -102,6 +104,10 @@ export const EditDataSourceModal = ({
       }
     }
     // 别名不能重复
+    if (existingAliases.includes(dataSource.alias)) {
+      alert('别名不能重复');
+      return;
+    }
 
     // 保存
     onSave(dataSource);
@@ -153,7 +159,22 @@ export const EditDataSourceModal = ({
               <Input
                 value={dataSource.alias || 'df_'}
                 onChange={(e) => {
-                  console.info(e.target.value);
+                  console.info('aliasRelianceMap');
+                  console.info(aliasRelianceMap);
+                  console.info('dataSource');
+                  console.info(dataSource.id);
+                  console.info(
+                    aliasRelianceMap.aliasToDataSourceId[dataSource.alias]
+                  );
+                  if (
+                    aliasRelianceMap.aliasToCharts[dataSource.alias] &&
+                    dataSource.id ===
+                      aliasRelianceMap.aliasToDataSourceId[dataSource.alias]
+                  ) {
+                    toast.error('存在依赖不能修改');
+                    return;
+                  }
+
                   setDataSource((prev) => ({
                     ...prev,
                     alias: e.target.value,

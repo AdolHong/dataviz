@@ -19,11 +19,12 @@ import type {
   Chart,
   EngineChoices,
 } from '@/types';
+
 import TabDataSource from './TabDataSource';
 import TabFilter from './TabFilter';
 import TabChart from './TabChart';
 
-import { type AliasRelianceMap, updateAliasRelianceMap } from '@/types';
+import { type AliasRelianceMap, updateAliasRelianceMapByChart } from '@/types';
 
 import {
   addItem as addLayoutItem,
@@ -37,8 +38,6 @@ interface EditModalProps {
 }
 
 const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
-  // todo: 获取报表的布局
-  console.log('reportId', reportId);
   // 构造 demo 数据
   const demoReport = {
     id: 'report-1',
@@ -146,10 +145,9 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   const [activeTab, setActiveTab] = useState('filters');
 
   // 创建一个对象来存储 alias 和对应的 chart.id 列表
-  const [aliasRelianceMap, setAliasRelianceMap] = useState<AliasRelianceMap>(
-    demoReport.charts.reduce<{
-      [alias: string]: { chartTitle: string; chartId: string }[];
-    }>((acc, chart) => {
+  const [aliasRelianceMap, setAliasRelianceMap] = useState<AliasRelianceMap>({
+
+    const aliasToCharts = demoReport.charts.reduce<AliasRelianceMap>((acc, chart) => {
       chart.dependencies.forEach((alias) => {
         if (!acc[alias]) {
           acc[alias] = []; // 如果 alias 不存在，初始化为一个空数组
@@ -157,8 +155,9 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
         acc[alias].push({ chartTitle: chart.title, chartId: chart.id }); // 将 chart.title 添加到对应的 alias 列表中
       });
       return acc;
-    }, {})
-  );
+    }, {} as AliasRelianceMap)
+
+  });
 
   // 确认删除dialog
   const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
@@ -170,7 +169,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   // todo: 发起api， 保存报表
   useEffect(() => {
     console.log('demoReport', demoReport);
-    toast.success(`你保存了报表"${reportId}"`);
+    toast.success(`[DEBUG]你保存了报表"${reportId}"`);
   }, [layout, dataSources, parameters, charts]);
 
   // 添加图表Chart: 修改charts, layouts
@@ -192,7 +191,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
 
     // // todo: 更新 aliasRelianceMap
     // setAliasRelianceMap(
-    //   updateAliasRelianceMap(oldChart, newChart, aliasRelianceMap)
+    //   updateAliasRelianceMapByChart(oldChart, newChart, aliasRelianceMap)
     // );
 
     // 添加新的图表
@@ -219,7 +218,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
       return;
     }
     setAliasRelianceMap(
-      updateAliasRelianceMap(oldChart, newChart, aliasRelianceMap)
+      updateAliasRelianceMapByChart(oldChart, newChart, aliasRelianceMap)
     );
 
     // 更新charts
@@ -242,7 +241,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
     }
     // 更新 aliasRelianceMap
     setAliasRelianceMap(
-      updateAliasRelianceMap(oldChart, null, aliasRelianceMap)
+      updateAliasRelianceMapByChart(oldChart, null, aliasRelianceMap)
     );
 
     // 更新charts
@@ -301,6 +300,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
                 dataSources={dataSources}
                 setDataSources={setDataSources}
                 engineChoices={demoEngineChoices}
+                aliasRelianceMap={aliasRelianceMap}
                 handleDeleteDataSource={() => {}}
                 confirmDelete={confirmDelete}
               />

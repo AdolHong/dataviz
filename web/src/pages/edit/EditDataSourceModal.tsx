@@ -353,7 +353,7 @@ export const EditDataSourceModal = ({
                 />
               </div>
               <div className='flex space-x-10'>
-                <div>
+                <div className='flex-1'>
                   <label className='block mb-2'>更新模式</label>
                   <RadioGroup
                     value={updateMode}
@@ -373,7 +373,7 @@ export const EditDataSourceModal = ({
                   </RadioGroup>
                 </div>
                 {updateMode === 'auto' && (
-                  <div className='mt-2'>
+                  <div className='flex justify-center items-center'>
                     <label className='block mb-2'>更新间隔 (秒)</label>
                     <Input
                       type='number'

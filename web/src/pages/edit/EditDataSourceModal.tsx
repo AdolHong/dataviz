@@ -15,7 +15,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import {
@@ -33,6 +32,9 @@ interface EditDataSourceModalProps {
   initialDataSource?: DataSource | null;
 }
 import AceEditor from 'react-ace';
+import 'ace-builds/src-noconflict/theme-xcode';
+import 'ace-builds/src-noconflict/mode-python';
+import 'ace-builds/src-noconflict/mode-sql';
 
 export const EditDataSourceModal = ({
   open,
@@ -225,7 +227,7 @@ export const EditDataSourceModal = ({
 
           <div>
             <label className='block mb-2'>描述（可选）</label>
-            <Textarea
+            <Input
               value={dataSource.description || ''}
               onChange={(e) =>
                 setDataSource((prev) => ({
@@ -255,7 +257,7 @@ export const EditDataSourceModal = ({
                 </SelectContent>
               </Select>
             </div>
-
+            <div className='flex-1'></div>
             {showCodeEditor && (
               <div>
                 <label className='block mb-2'>引擎</label>
@@ -296,7 +298,7 @@ export const EditDataSourceModal = ({
                 </label>
                 <button
                   type='button'
-                  className='px-4 py-2 w-45 shadow-sm  rounded-md hover:bg-blue-100 transition-colors'
+                  className='py-1 h-8 w-45 shadow-sm  rounded-sm hover:bg-blue-100 transition-colors'
                   onClick={() => {
                     // 这里应当触发文件上传，为简化代码，仅模拟
                     const mockData = 'id,name,value\n1,测试,100\n2,示例,200';
@@ -329,43 +331,36 @@ export const EditDataSourceModal = ({
             <>
               <div>
                 <label className='block mb-2'>代码</label>
-                <Textarea
-                  value={
-                    (
-                      dataSource.executor as
-                        | PythonSourceExecutor
-                        | SQLSourceExecutor
-                    ).code || ''
-                  }
-                  onChange={(e) =>
+                <AceEditor
+                  mode={executorType === 'python' ? 'python' : 'sql'}
+                  theme='xcode'
+                  name='codeEditor'
+                  height='200px'
+                  width='100%'
+                  onChange={(value) => {
                     setDataSource((prev) => ({
                       ...prev,
                       executor: {
                         ...(prev.executor as
                           | PythonSourceExecutor
                           | SQLSourceExecutor),
-                        code: e.target.value,
+                        code: value,
                       },
-                    }))
+                    }));
+                  }}
+                  value={
+                    executorType === 'python' || executorType === 'sql'
+                      ? (
+                          dataSource.executor as
+                            | PythonSourceExecutor
+                            | SQLSourceExecutor
+                        ).code || ''
+                      : ''
                   }
-                  placeholder={`输入${executorType === 'python' ? 'Python' : 'SQL'}代码`}
-                  rows={8}
-                  className='font-mono'
-                />
-
-                <AceEditor
-                  mode={executorType === 'python' ? 'python' : 'sql'}
-                  theme='monokai'
-                  name='codeEditor'
-                  onChange={
-                    // todo : 还没实现
-                    (value) => console.log(value)
-                  }
-                  value={dataSource.executor?.code || ''}
                 />
               </div>
               <div className='flex space-x-10'>
-                <div className='flex-1'>
+                <div>
                   <label className='block mb-2'>更新模式</label>
                   <RadioGroup
                     value={updateMode}
@@ -384,8 +379,9 @@ export const EditDataSourceModal = ({
                     </div>
                   </RadioGroup>
                 </div>
+                <div className='flex-1'></div>
                 {updateMode === 'auto' && (
-                  <div className='flex-1 justify-center items-center'>
+                  <div className='justify-center items-center'>
                     <label className='block mb-2'>更新间隔 (秒)</label>
                     <Input
                       type='number'

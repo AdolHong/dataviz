@@ -32,6 +32,7 @@ interface EditDataSourceModalProps {
   onSave: (dataSource: DataSource) => void;
   initialDataSource?: DataSource | null;
 }
+import AceEditor from 'react-ace';
 
 export const EditDataSourceModal = ({
   open,
@@ -350,6 +351,17 @@ export const EditDataSourceModal = ({
                   placeholder={`输入${executorType === 'python' ? 'Python' : 'SQL'}代码`}
                   rows={8}
                   className='font-mono'
+                />
+
+                <AceEditor
+                  mode={executorType === 'python' ? 'python' : 'sql'}
+                  theme='monokai'
+                  name='codeEditor'
+                  onChange={
+                    // todo : 还没实现
+                    (value) => console.log(value)
+                  }
+                  value={dataSource.executor?.code || ''}
                 />
               </div>
               <div className='flex space-x-10'>

@@ -23,6 +23,8 @@ import DataSourceTab from './DataSourceTab';
 import FilterTab from './FilterTab';
 import ChartTab from './ChartTab';
 
+import { type AliasRelianceMap, updateAliasRelianceMap } from '@/types';
+
 import {
   addItem as addLayoutItem,
   removeEmptyRowsAndColumns,
@@ -144,17 +146,15 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   const [activeTab, setActiveTab] = useState('filters');
 
   // 创建一个对象来存储 alias 和对应的 chart.id 列表
-  const aliasMap = useState<{
-    [alias: string]: { title: string; id: string }[];
-  }>(
+  const [aliasRelianceMap, setAliasRelianceMap] = useState<AliasRelianceMap>(
     demoReport.charts.reduce<{
-      [alias: string]: { title: string; id: string }[];
+      [alias: string]: { chartTitle: string; chartId: string }[];
     }>((acc, chart) => {
       chart.dependencies.forEach((alias) => {
         if (!acc[alias]) {
           acc[alias] = []; // 如果 alias 不存在，初始化为一个空数组
         }
-        acc[alias].push({ title: chart.title, id: chart.id }); // 将 chart.title 添加到对应的 alias 列表中
+        acc[alias].push({ chartTitle: chart.title, chartId: chart.id }); // 将 chart.title 添加到对应的 alias 列表中
       });
       return acc;
     }, {})
@@ -204,11 +204,28 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
 
     // 更新布局
     setLayout(addLayoutItem(layout, newChartId, title));
+
+    // // todo: 更新 aliasRelianceMap
+    // setAliasRelianceMap(
+    //   updateAliasRelianceMap(oldChart, newChart, aliasRelianceMap)
+    // );
   };
 
   // 修改图表: 修改charts, layouts
-  const handleModifyChart = (chartId: string, chart: Chart) => {
-    setCharts(charts.map((chart) => (chart.id === chartId ? chart : chart)));
+  const handleModifyChart = (newChart: Chart) => {
+    const oldChart = charts.find((chart) => chart.id === newChart.id);
+    if (!oldChart) {
+      toast.error('图表不存在');
+      return;
+    }
+    setAliasRelianceMap(
+      updateAliasRelianceMap(oldChart, newChart, aliasRelianceMap)
+    );
+
+    // 更新charts
+    setCharts(
+      charts.map((chart) => (chart.id === newChart.id ? newChart : chart))
+    );
   };
 
   // 删除图表: 修改charts, layouts
@@ -218,6 +235,17 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
       return;
     }
     // 删除图表
+    const oldChart = charts.find((chart) => chart.id === chartId);
+    if (!oldChart) {
+      toast.error('图表不存在');
+      return;
+    }
+    // 更新 aliasRelianceMap
+    setAliasRelianceMap(
+      updateAliasRelianceMap(oldChart, null, aliasRelianceMap)
+    );
+
+    // 更新charts
     setCharts(charts.filter((chart) => chart.id !== chartId));
 
     // 更新布局，删除对应的 item

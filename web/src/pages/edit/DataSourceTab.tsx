@@ -4,9 +4,11 @@ import { type DataSource } from '@/types/models/dataSource';
 import { TabsContent } from '@radix-ui/react-tabs';
 import { useState } from 'react';
 import { EditDataSourceModal } from './EditDataSourceModal';
+import type { EngineChoices } from '@/types';
 
 interface DataSourceTabProps {
   dataSources: DataSource[];
+  engineChoices: EngineChoices;
   setDataSources: (dataSources: DataSource[]) => void;
   handleDeleteDataSource: (id: string) => void;
   confirmDelete: (deleteFunction: () => void, message: string) => void;
@@ -14,6 +16,7 @@ interface DataSourceTabProps {
 
 const DataSourceTab = ({
   dataSources,
+  engineChoices,
   setDataSources,
   handleDeleteDataSource,
   confirmDelete,
@@ -111,6 +114,7 @@ const DataSourceTab = ({
           setEditingDataSource(null);
         }}
         initialDataSource={editingDataSource}
+        engineChoices={engineChoices}
       />
     </div>
   );

@@ -36,6 +36,7 @@ export interface CSVUploaderSourceExecutor {
 export interface DataSource {
   id: string; // 自动生成
   name: string; // 中英文均可
+  alias: string; // 别名, 比如df_sales
   description?: string;
   executor:
     | PythonSourceExecutor
@@ -61,6 +62,19 @@ export const handleUpdateModeChange =
 
     return newDataSource;
   };
+export const handleEngineChange =
+  (dataSource: DataSource, engine: string) => (newDataSource: DataSource) => {
+    console.info(dataSource.executor);
+
+    newDataSource = {
+      ...dataSource,
+      executor: {
+        ...(dataSource.executor as PythonSourceExecutor | SQLSourceExecutor),
+        engine,
+      },
+    };
+    return newDataSource;
+  };
 
 // 添加数据源
 export const addItem =
@@ -79,6 +93,16 @@ export const addItem =
     return newDataSources;
   };
 
+// 编辑数据源
+export const editItem =
+  (source: DataSource, dataSources: DataSource[]) =>
+  (newDataSources: DataSource[]) => {
+    newDataSources = dataSources.map((item) => {
+      return item.id === source.id ? source : item;
+    });
+    return newDataSources;
+  };
+
 // 删除数据源
 export const deleteItem =
   (source: DataSource, dataSources: DataSource[]) =>
@@ -86,7 +110,7 @@ export const deleteItem =
     // 删除节点
     newDataSources = dataSources.filter((item) => item.id !== source.id);
 
-    // 更新source id
+    // 更新所有的source id
     newDataSources.map((source, idx) => {
       const newDataSource: DataSource = {
         ...source,

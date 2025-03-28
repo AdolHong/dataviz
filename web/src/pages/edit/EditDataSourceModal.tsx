@@ -25,14 +25,18 @@ import {
   type CSVUploaderSourceExecutor,
   handleExecutorTypeChange,
   handleUpdateModeChange,
+  handleEngineChange,
 } from '@/types/models/dataSource';
 import { CSVTable } from '@/components/CSVTable';
-
+import type { EngineChoices } from '@/types';
 interface EditDataSourceModalProps {
   open: boolean;
   onClose: () => void;
   onSave: (dataSource: DataSource) => void;
   initialDataSource?: DataSource | null;
+  engineChoices: EngineChoices;
+  existingAliases: string[];
+  reliances: string[];
 }
 import AceEditor from 'react-ace';
 import 'ace-builds/src-noconflict/theme-xcode';
@@ -45,12 +49,16 @@ export const EditDataSourceModal = ({
   onClose,
   onSave,
   initialDataSource = null,
+  engineChoices, // 引擎的选项
+  existingAliases, // 已存在的别名
+  reliances, // 依赖的图表
 }: EditDataSourceModalProps) => {
   // 默认布局
   const defaultDataSource: DataSource = {
     id: 'default_id',
     name: '数据名称',
     description: '',
+    alias: 'df_',
     executor: {
       type: 'sql',
       engine: 'default',
@@ -93,19 +101,10 @@ export const EditDataSourceModal = ({
         return;
       }
     }
+    // 别名不能重复
 
-    const finalDataSource: DataSource = {
-      id: dataSource.id || '', // 如果是新建，则id为空，需要判断多个sources去生成id;
-      name: dataSource.name || '',
-      description: dataSource.description,
-      executor: dataSource.executor as
-        | PythonSourceExecutor
-        | SQLSourceExecutor
-        | CSVSourceExecutor
-        | CSVUploaderSourceExecutor,
-    };
-
-    onSave(finalDataSource);
+    // 保存
+    onSave(dataSource);
     onClose();
   };
 
@@ -134,18 +133,35 @@ export const EditDataSourceModal = ({
         </DialogHeader>
 
         <div className='space-y-4'>
-          <div className='flex items-center'>
-            <label className='block mb-2 w-30 h-10 flex items-center'>
-              名称
-            </label>
-            <Input
-              value={dataSource.name || ''}
-              onChange={(e) =>
-                setDataSource((prev) => ({ ...prev, name: e.target.value }))
-              }
-              placeholder='输入数据源名称'
-              className='h-10'
-            />
+          <div className='flex items-center space-x-6'>
+            <div className='flex items-center space-x-2'>
+              <label className='whitespace-nowrap min-w-8 mr-4 flex items-center'>
+                名称
+              </label>
+              <Input
+                value={dataSource.name || ''}
+                onChange={(e) =>
+                  setDataSource((prev) => ({ ...prev, name: e.target.value }))
+                }
+                placeholder='输入数据源名称'
+              />
+            </div>
+            <div className='flex items-center space-x-2'>
+              <label className='whitespace-nowrap min-w-8 mr-4 flex items-center'>
+                别名
+              </label>
+              <Input
+                value={dataSource.alias || 'df_'}
+                onChange={(e) => {
+                  console.info(e.target.value);
+                  setDataSource((prev) => ({
+                    ...prev,
+                    alias: e.target.value,
+                  }));
+                }}
+                placeholder='输入数据源别名'
+              />
+            </div>
           </div>
 
           <div className='flex items-center'>
@@ -204,25 +220,22 @@ export const EditDataSourceModal = ({
                       dataSource.executor as
                         | PythonSourceExecutor
                         | SQLSourceExecutor
-                    ).engine || 'default'
+                    )?.engine ||
+                    engineChoices[executorType as keyof EngineChoices][0]
                   }
-                  onValueChange={(engine) =>
-                    setDataSource((prev) => ({
-                      ...prev,
-                      executor: {
-                        ...(prev.executor as
-                          | PythonSourceExecutor
-                          | SQLSourceExecutor),
-                        engine,
-                      },
-                    }))
-                  }
+                  onValueChange={(engine) => {
+                    setDataSource(handleEngineChange(dataSource, engine));
+                  }}
                 >
                   <SelectTrigger className='w-45'>
                     <SelectValue placeholder='选择引擎' />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value='default'>default</SelectItem>
+                    {engineChoices[executorType as keyof EngineChoices].map(
+                      (engine) => (
+                        <SelectItem value={engine}>{engine}</SelectItem>
+                      )
+                    )}
                   </SelectContent>
                 </Select>
               </div>

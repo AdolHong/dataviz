@@ -12,7 +12,13 @@ import {
 import { Filter, Database, BarChart2 } from 'lucide-react';
 import { toast } from 'sonner';
 
-import type { DataSource, Layout, Parameter, Chart } from '@/types';
+import type {
+  DataSource,
+  Layout,
+  Parameter,
+  Chart,
+  EngineChoices,
+} from '@/types';
 import DataSourceTab from './DataSourceTab';
 import FilterTab from './FilterTab';
 import ChartTab from './ChartTab';
@@ -38,17 +44,17 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
     description: '这是一个销售数据的示例报表',
     dataSources: [
       {
-        id: 'ds1',
+        id: 'source-1',
         name: '主数据',
-        alias: '销售数据',
-        executor: { type: 'sql', engine: 'mysql' },
+        alias: 'df_sales',
+        executor: { type: 'sql', engine: 'default' },
         code: '',
       },
       {
-        id: 'ds2',
+        id: 'source-2',
         name: '外部数据',
-        alias: '外部数据',
-        executor: { type: 'python', engine: 'pandas' },
+        alias: 'df_external',
+        executor: { type: 'python', engine: 'default' },
         code: '',
       },
     ],
@@ -58,42 +64,42 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
     ],
     charts: [
       {
-        id: 'item-1',
+        id: 'chart-1',
         title: '销售趋势',
         code: 'line',
-        dependencies: ['ds1'],
+        dependencies: ['df_sales'],
         executor: { type: 'python', engine: 'pandas' },
       },
       {
-        id: 'item-2',
+        id: 'chart-2',
         title: '销售占比',
         code: 'pie',
-        dependencies: ['ds2'],
+        dependencies: ['df_external'],
         executor: { type: 'python', engine: 'pandas' },
       },
       {
-        id: 'item-3',
+        id: 'chart-3',
         title: '销售占比',
         code: 'pie',
-        dependencies: ['ds2'],
+        dependencies: ['df_external'],
         executor: { type: 'python', engine: 'pandas' },
       },
       {
-        id: 'item-4',
+        id: 'chart-4',
         title: '销售占比',
         code: 'pie',
-        dependencies: ['ds2'],
+        dependencies: ['df_sales', 'df_external'],
         executor: { type: 'python', engine: 'pandas' },
       },
       {
-        id: 'item-5',
+        id: 'chart-5',
         title: '销售占比',
         code: 'pie',
-        dependencies: ['ds2'],
+        dependencies: ['df_sales'],
         executor: { type: 'python', engine: 'pandas' },
       },
       {
-        id: 'item-6',
+        id: 'chart-6',
         title: '销售占比',
         code: 'pie',
         dependencies: ['ds2'],
@@ -104,16 +110,29 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
       columns: 3,
       rows: 2,
       items: [
-        { id: 'item-1', title: '销售趋势', width: 1, height: 1, x: 0, y: 0 },
-        { id: 'item-2', title: '销售占比', width: 1, height: 1, x: 1, y: 0 },
-        { id: 'item-3', title: '销售明细', width: 1, height: 1, x: 2, y: 0 },
-        { id: 'item-4', title: '新增图表1', width: 1, height: 1, x: 0, y: 1 },
-        { id: 'item-5', title: '新增图表2', width: 1, height: 1, x: 1, y: 1 },
-        { id: 'item-6', title: '新增图表333', width: 1, height: 1, x: 2, y: 1 },
+        { id: 'chart-1', title: '销售趋势', width: 1, height: 1, x: 0, y: 0 },
+        { id: 'chart-2', title: '销售占比', width: 1, height: 1, x: 1, y: 0 },
+        { id: 'chart-3', title: '销售明细', width: 1, height: 1, x: 2, y: 0 },
+        { id: 'chart-4', title: '新增图表1', width: 1, height: 1, x: 0, y: 1 },
+        { id: 'chart-5', title: '新增图表2', width: 1, height: 1, x: 1, y: 1 },
+        {
+          id: 'chart-6',
+          title: '新增图表333',
+          width: 1,
+          height: 1,
+          x: 2,
+          y: 1,
+        },
       ],
     },
   };
 
+  const demoEngineChoices: EngineChoices = {
+    sql: ['default', 'starrocks'],
+    python: ['default', '3.9'],
+  };
+
+  // report的参数
   const [dataSources, setDataSources] = useState<DataSource[]>(
     demoReport.dataSources
   );
@@ -122,9 +141,26 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   );
   const [charts, setCharts] = useState<Chart[]>(demoReport.charts);
   const [layout, setLayout] = useState<Layout>(demoReport.layout);
-
   const [activeTab, setActiveTab] = useState('filters');
 
+  // 创建一个对象来存储 alias 和对应的 chart.id 列表
+  const aliasMap = useState<{
+    [alias: string]: { title: string; id: string }[];
+  }>(
+    demoReport.charts.reduce<{
+      [alias: string]: { title: string; id: string }[];
+    }>((acc, chart) => {
+      chart.dependencies.forEach((alias) => {
+        if (!acc[alias]) {
+          acc[alias] = []; // 如果 alias 不存在，初始化为一个空数组
+        }
+        acc[alias].push({ title: chart.title, id: chart.id }); // 将 chart.title 添加到对应的 alias 列表中
+      });
+      return acc;
+    }, {})
+  );
+
+  // 确认删除dialog
   const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);
   const [deleteFunction, setDeleteFunction] = useState<(() => void) | null>(
     null
@@ -151,7 +187,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
     }
 
     // 生成新的 ID
-    const newChartId = `item-${newId}`;
+    const newChartId = `chart-${newId}`;
     const title = `新增图表 ${newId}`;
 
     // 添加新的图表
@@ -168,6 +204,11 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
 
     // 更新布局
     setLayout(addLayoutItem(layout, newChartId, title));
+  };
+
+  // 修改图表: 修改charts, layouts
+  const handleModifyChart = (chartId: string, chart: Chart) => {
+    setCharts(charts.map((chart) => (chart.id === chartId ? chart : chart)));
   };
 
   // 删除图表: 修改charts, layouts
@@ -231,6 +272,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
               <DataSourceTab
                 dataSources={dataSources}
                 setDataSources={setDataSources}
+                engineChoices={demoEngineChoices}
                 handleDeleteDataSource={() => {}}
                 confirmDelete={confirmDelete}
               />

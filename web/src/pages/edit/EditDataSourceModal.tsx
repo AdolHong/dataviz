@@ -23,7 +23,10 @@ import {
   type SQLSourceExecutor,
   type CSVSourceExecutor,
   type CSVUploaderSourceExecutor,
+  handleExecutorTypeChange,
+  handleUpdateModeChange,
 } from '@/types/models/dataSource';
+import { CSVTable } from '@/components/CSVTable';
 
 interface EditDataSourceModalProps {
   open: boolean;
@@ -42,44 +45,22 @@ export const EditDataSourceModal = ({
   onSave,
   initialDataSource = null,
 }: EditDataSourceModalProps) => {
-  const [dataSource, setDataSource] = useState<Partial<DataSource>>({
-    name: '',
-    description: '',
+  // 默认布局
+  const defaultDataSource: DataSource = {
+    id: 'ds1',
+    name: '主数据',
+    description: '销售数据',
     executor: {
-      type: 'python',
+      type: 'sql',
       engine: 'default',
       code: '',
-      updateMode: {
-        type: 'manual',
-      },
+      updateMode: { type: 'manual' },
     },
-  });
+  };
 
-  // 当打开模态框或初始数据源变化时重置表单数据
-  useEffect(() => {
-    if (initialDataSource) {
-      setDataSource({
-        id: initialDataSource.id,
-        name: initialDataSource.name || '',
-        description: initialDataSource.description || '',
-        executor: initialDataSource.executor,
-      });
-    } else {
-      // 重置为初始状态
-      setDataSource({
-        name: '',
-        description: '',
-        executor: {
-          type: 'python',
-          engine: 'default',
-          code: '',
-          updateMode: {
-            type: 'manual',
-          },
-        },
-      });
-    }
-  }, [initialDataSource, open]);
+  const [dataSource, setDataSource] = useState<DataSource>(
+    initialDataSource || defaultDataSource
+  );
 
   const handleSave = () => {
     // 简单的验证
@@ -123,74 +104,8 @@ export const EditDataSourceModal = ({
     onClose();
   };
 
-  // 处理执行器类型变更
-  const handleExecutorTypeChange = (type: string) => {
-    switch (type) {
-      case 'python':
-        setDataSource((prev) => ({
-          ...prev,
-          executor: {
-            type: 'python',
-            engine: 'default',
-            code: '',
-            updateMode: {
-              type: 'manual',
-            },
-          },
-        }));
-        break;
-      case 'sql':
-        setDataSource((prev) => ({
-          ...prev,
-          executor: {
-            type: 'sql',
-            engine: 'default',
-            code: '',
-            updateMode: {
-              type: 'manual',
-            },
-          },
-        }));
-        break;
-      case 'csv_data':
-        setDataSource((prev) => ({
-          ...prev,
-          executor: {
-            type: 'csv_data',
-            data: '',
-          },
-        }));
-        break;
-      case 'csv_uploader':
-        setDataSource((prev) => ({
-          ...prev,
-          executor: {
-            type: 'csv_uploader',
-            demoData: '',
-          },
-        }));
-        break;
-    }
-  };
-
-  // 处理更新模式变更
-  const handleUpdateModeChange = (type: 'manual' | 'auto') => {
-    if (['python', 'sql'].includes(dataSource.executor?.type || '')) {
-      setDataSource((prev) => ({
-        ...prev,
-        executor: {
-          ...(prev.executor as PythonSourceExecutor | SQLSourceExecutor),
-          updateMode: {
-            type,
-            ...(type === 'auto' ? { interval: 600 } : {}),
-          },
-        },
-      }));
-    }
-  };
-
   // 获取执行器类型
-  const executorType = dataSource.executor?.type || 'python';
+  const executorType = dataSource.executor?.type || 'sql';
 
   // 检查是否显示代码编辑器（仅 python 和 sql 需要）
   const showCodeEditor = ['python', 'sql'].includes(executorType);
@@ -244,7 +159,18 @@ export const EditDataSourceModal = ({
               <label className='block mb-2'>执行器类型</label>
               <Select
                 value={executorType}
-                onValueChange={handleExecutorTypeChange}
+                onValueChange={(newExecutorType) =>
+                  setDataSource(
+                    handleExecutorTypeChange(
+                      dataSource,
+                      newExecutorType as
+                        | 'python'
+                        | 'sql'
+                        | 'csv_data'
+                        | 'csv_uploader'
+                    )
+                  )
+                }
               >
                 <SelectTrigger className='w-45'>
                   <SelectValue placeholder='选择执行器类型' />
@@ -260,7 +186,7 @@ export const EditDataSourceModal = ({
             <div className='flex-1'></div>
             {showCodeEditor && (
               <div>
-                <label className='block mb-2'>引擎</label>
+                <label className='block mb-2'>计算引擎</label>
                 <Select
                   value={
                     (
@@ -285,7 +211,7 @@ export const EditDataSourceModal = ({
                     <SelectValue placeholder='选择引擎' />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value='default'>默认</SelectItem>
+                    <SelectItem value='default'>default</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -365,7 +291,12 @@ export const EditDataSourceModal = ({
                   <RadioGroup
                     value={updateMode}
                     onValueChange={(value) =>
-                      handleUpdateModeChange(value as 'manual' | 'auto')
+                      setDataSource(
+                        handleUpdateModeChange(
+                          dataSource,
+                          value as 'manual' | 'auto'
+                        )
+                      )
                     }
                     className='flex gap-4 h-10'
                   >
@@ -391,9 +322,16 @@ export const EditDataSourceModal = ({
                           dataSource.executor as
                             | PythonSourceExecutor
                             | SQLSourceExecutor
-                        ).updateMode?.interval || 600
+                        ).updateMode?.type === 'auto'
+                          ? (
+                              dataSource.executor as
+                                | PythonSourceExecutor
+                                | SQLSourceExecutor
+                            ).updateMode.interval
+                          : 300
                       }
-                      onChange={(e) =>
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value) || 60;
                         setDataSource((prev) => ({
                           ...prev,
                           executor: {
@@ -402,12 +340,13 @@ export const EditDataSourceModal = ({
                               | SQLSourceExecutor),
                             updateMode: {
                               type: 'auto',
-                              interval: parseInt(e.target.value) || 600,
+                              interval: value,
                             },
                           },
-                        }))
-                      }
-                      min={1}
+                        }));
+                      }}
+                      min={60}
+                      step={60}
                     />
                   </div>
                 )}
@@ -417,20 +356,15 @@ export const EditDataSourceModal = ({
 
           {showCSVUploader && (
             <div>
-              <label className='block  mb-2'>
+              <label className='block mb-2'>
                 {executorType === 'csv_data' ? 'CSV 数据' : '示例 CSV 数据'}
               </label>
               <div className='border shadow-sm rounded-md p-8 min-h-40 text-center'>
-                <p className='mt-2 text-sm text-gray-500'>
-                  {executorType === 'csv_data'
-                    ? (dataSource.executor as CSVSourceExecutor)?.data
-                      ? '已上传文件'
-                      : '支持 .csv 格式文件'
-                    : (dataSource.executor as CSVUploaderSourceExecutor)
-                          ?.demoData
-                      ? '已上传示例文件'
-                      : '支持 .csv 格式文件'}
-                </p>
+                <CSVTable
+                  csvData={
+                    (dataSource.executor as CSVSourceExecutor)?.data || ''
+                  }
+                />
               </div>
             </div>
           )}

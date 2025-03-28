@@ -97,7 +97,6 @@ const DataSourceTab = ({
           setEditingDataSource(null);
         }}
         onSave={(updatedDataSource: DataSource) => {
-          console.log('updatedDataSource', updatedDataSource);
           if (editingDataSource) {
             // 编辑现有数据源
             const newDataSources = dataSources.map((ds) =>

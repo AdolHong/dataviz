@@ -38,6 +38,7 @@ import AceEditor from 'react-ace';
 import 'ace-builds/src-noconflict/theme-xcode';
 import 'ace-builds/src-noconflict/mode-python';
 import 'ace-builds/src-noconflict/mode-sql';
+import { toast } from 'sonner';
 
 export const EditDataSourceModal = ({
   open,
@@ -69,7 +70,7 @@ export const EditDataSourceModal = ({
   const handleSave = () => {
     // 简单的验证
     if (!dataSource.name) {
-      alert('请输入数据源名称');
+      toast.error('请输入数据源名称');
       return;
     }
 
@@ -94,7 +95,7 @@ export const EditDataSourceModal = ({
     }
 
     const finalDataSource: DataSource = {
-      id: dataSource.id || Date.now().toString(), // 如果是新建，生成临时ID
+      id: dataSource.id || '', // 如果是新建，则id为空，需要判断多个sources去生成id;
       name: dataSource.name || '',
       description: dataSource.description,
       executor: dataSource.executor as

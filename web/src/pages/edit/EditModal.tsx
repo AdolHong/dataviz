@@ -138,7 +138,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
     toast.success(`你保存了报表"${reportId}"`);
   }, [layout, dataSources, parameters, charts]);
 
-  // 添加图表
+  // 添加图表Chart: 修改charts, layouts
   const handleAddChart = () => {
     // 提取现有图表的 ID，并转换为数字
     const existingIds = charts.map((chart) =>
@@ -171,7 +171,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
     setLayout(addLayoutItem(layout, newChartId, title));
   };
 
-  // 删除图表
+  // 删除图表: 修改charts, layouts
   const handleDeleteChart = (chartId: string) => {
     if (charts.length === 1) {
       toast.error('至少需要保留一个图表');
@@ -191,6 +191,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
     toast.success('图表已删除');
   };
 
+  // 函数： 删除之前的确认， 多个tabs共用
   const confirmDelete = (deleteFunction: () => void, message: string) => {
     setIsConfirmDeleteOpen(true);
     setDeleteFunction(() => deleteFunction);

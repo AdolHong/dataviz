@@ -5,19 +5,21 @@ import { type Layout } from '@/types/models/layout';
 import { useState } from 'react';
 import { EditLayoutModal } from './EditLayoutModal';
 
+interface ChartTabProps {
+  layout: Layout;
+  setLayout: (layout: Layout) => void;
+  handleAddChart: () => void;
+  handleDeleteChart: (id: string) => void;
+  confirmDelete: (deleteFunction: () => void, message: string) => void;
+}
+
 const ChartTab = ({
   layout,
   setLayout,
   handleAddChart,
   handleDeleteChart,
   confirmDelete,
-}: {
-  layout: Layout;
-  setLayout: (layout: Layout) => void;
-  handleAddChart: () => void;
-  handleDeleteChart: (id: string) => void;
-  confirmDelete: (deleteFunction: () => void, message: string) => void;
-}) => {
+}: ChartTabProps) => {
   const [isLayoutModalOpen, setIsLayoutModalOpen] = useState(false);
 
   return (
@@ -37,14 +39,14 @@ const ChartTab = ({
                 {layout.items.map((item) => (
                   <div
                     key={item.id}
-                    className='border-2 border-dashed rounded-lg p-4 text-center  flex items-center justify-center relative group'
+                    className='border-2  rounded-lg p-4 text-center flex items-center justify-center relative group shadow-sm'
                     style={{
                       gridColumn: `${item.x + 1} / span ${item.width}`,
                       gridRow: `${item.y + 1} / span ${item.height}`,
                     }}
                   >
                     {item.title}
-                    <div className='absolute bottom-0  flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity'>
+                    <div className='absolute bottom-0  flex gap-1 opacity-0 group-hover:opacity-80 transition-opacity'>
                       <Button
                         variant='ghost'
                         size='icon'

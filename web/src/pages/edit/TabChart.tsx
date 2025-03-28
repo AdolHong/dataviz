@@ -5,7 +5,7 @@ import { type Layout } from '@/types/models/layout';
 import { useState } from 'react';
 import { EditLayoutModal } from './EditLayoutModal';
 
-interface ChartTabProps {
+interface TabChartProps {
   layout: Layout;
   setLayout: (layout: Layout) => void;
   handleAddChart: () => void;
@@ -13,13 +13,13 @@ interface ChartTabProps {
   confirmDelete: (deleteFunction: () => void, message: string) => void;
 }
 
-const ChartTab = ({
+const TabChart = ({
   layout,
   setLayout,
   handleAddChart,
   handleDeleteChart,
   confirmDelete,
-}: ChartTabProps) => {
+}: TabChartProps) => {
   const [isLayoutModalOpen, setIsLayoutModalOpen] = useState(false);
 
   return (
@@ -113,4 +113,4 @@ const ChartTab = ({
   );
 };
 
-export default ChartTab;
+export default TabChart;

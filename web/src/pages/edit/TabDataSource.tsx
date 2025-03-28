@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { EditDataSourceModal } from './EditDataSourceModal';
 import type { EngineChoices } from '@/types';
 
-interface DataSourceTabProps {
+interface TabDataSourceProps {
   dataSources: DataSource[];
   engineChoices: EngineChoices;
   setDataSources: (dataSources: DataSource[]) => void;
@@ -14,13 +14,13 @@ interface DataSourceTabProps {
   confirmDelete: (deleteFunction: () => void, message: string) => void;
 }
 
-const DataSourceTab = ({
+const TabDataSource = ({
   dataSources,
   engineChoices,
   setDataSources,
   handleDeleteDataSource,
   confirmDelete,
-}: DataSourceTabProps) => {
+}: TabDataSourceProps) => {
   const [isEditDataSourceModalOpen, setIsEditDataSourceModalOpen] =
     useState(false);
   const [editingDataSource, setEditingDataSource] = useState<DataSource | null>(
@@ -120,4 +120,4 @@ const DataSourceTab = ({
   );
 };
 
-export default DataSourceTab;
+export default TabDataSource;

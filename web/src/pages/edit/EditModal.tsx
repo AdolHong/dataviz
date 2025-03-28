@@ -19,9 +19,9 @@ import type {
   Chart,
   EngineChoices,
 } from '@/types';
-import DataSourceTab from './DataSourceTab';
-import FilterTab from './FilterTab';
-import ChartTab from './ChartTab';
+import TabDataSource from './TabDataSource';
+import TabFilter from './TabFilter';
+import TabChart from './TabChart';
 
 import { type AliasRelianceMap, updateAliasRelianceMap } from '@/types';
 
@@ -190,6 +190,11 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
     const newChartId = `chart-${newId}`;
     const title = `新增图表 ${newId}`;
 
+    // // todo: 更新 aliasRelianceMap
+    // setAliasRelianceMap(
+    //   updateAliasRelianceMap(oldChart, newChart, aliasRelianceMap)
+    // );
+
     // 添加新的图表
     setCharts([
       ...charts,
@@ -204,11 +209,6 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
 
     // 更新布局
     setLayout(addLayoutItem(layout, newChartId, title));
-
-    // // todo: 更新 aliasRelianceMap
-    // setAliasRelianceMap(
-    //   updateAliasRelianceMap(oldChart, newChart, aliasRelianceMap)
-    // );
   };
 
   // 修改图表: 修改charts, layouts
@@ -297,20 +297,20 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
             </TabsList>
 
             <div className='flex-1 overflow-y-auto'>
-              <DataSourceTab
+              <TabDataSource
                 dataSources={dataSources}
                 setDataSources={setDataSources}
                 engineChoices={demoEngineChoices}
                 handleDeleteDataSource={() => {}}
                 confirmDelete={confirmDelete}
               />
-              <FilterTab
+              <TabFilter
                 parameters={parameters}
                 setParameters={setParameters}
                 handleDeleteParameter={() => {}}
                 confirmDelete={confirmDelete}
               />
-              <ChartTab
+              <TabChart
                 layout={layout}
                 setLayout={setLayout}
                 handleAddChart={handleAddChart}

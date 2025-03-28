@@ -47,20 +47,24 @@ export const EditDataSourceModal = ({
 }: EditDataSourceModalProps) => {
   // 默认布局
   const defaultDataSource: DataSource = {
-    id: 'ds1',
-    name: '主数据',
-    description: '销售数据',
+    id: 'default_id',
+    name: '数据名称',
+    description: '',
     executor: {
       type: 'sql',
       engine: 'default',
-      code: '',
+      code: 'select 1',
       updateMode: { type: 'manual' },
     },
   };
+  // 没有open返回
+  if (!open) return;
 
-  const [dataSource, setDataSource] = useState<DataSource>(
-    initialDataSource || defaultDataSource
-  );
+  const [dataSource, setDataSource] = useState<DataSource>(defaultDataSource);
+
+  useEffect(() => {
+    setDataSource(initialDataSource || defaultDataSource);
+  }, [open]);
 
   const handleSave = () => {
     // 简单的验证

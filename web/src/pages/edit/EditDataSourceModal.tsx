@@ -290,10 +290,12 @@ export const EditDataSourceModal = ({
 
             {showCSVUploader && (
               <div>
-                <label className='block mb-2'>点击上传</label>
+                <label className='block mb-2'>
+                  {executorType === 'csv_data' ? ' CSV 数据' : ' 示例 CSV 数据'}
+                </label>
                 <button
                   type='button'
-                  className='px-4 py-2 shadow-sm text-blue-700 rounded-md hover:bg-blue-100 transition-colors'
+                  className='px-4 py-2 w-45 shadow-sm  rounded-md hover:bg-blue-100 transition-colors'
                   onClick={() => {
                     // 这里应当触发文件上传，为简化代码，仅模拟
                     const mockData = 'id,name,value\n1,测试,100\n2,示例,200';
@@ -316,8 +318,7 @@ export const EditDataSourceModal = ({
                     }
                   }}
                 >
-                  上传
-                  {executorType === 'csv_data' ? 'CSV 数据' : 'CSV 示例数据'}
+                  点击上传
                 </button>
               </div>
             )}
@@ -351,26 +352,26 @@ export const EditDataSourceModal = ({
                   className='font-mono'
                 />
               </div>
-
-              <div>
-                <label className='block mb-2'>更新模式</label>
-                <RadioGroup
-                  value={updateMode}
-                  onValueChange={(value) =>
-                    handleUpdateModeChange(value as 'manual' | 'auto')
-                  }
-                  className='flex gap-4'
-                >
-                  <div className='flex items-center space-x-2'>
-                    <RadioGroupItem value='manual' id='manual' />
-                    <Label htmlFor='manual'>手动更新</Label>
-                  </div>
-                  <div className='flex items-center space-x-2'>
-                    <RadioGroupItem value='auto' id='auto' />
-                    <Label htmlFor='auto'>自动更新</Label>
-                  </div>
-                </RadioGroup>
-
+              <div className='flex space-x-10'>
+                <div>
+                  <label className='block mb-2'>更新模式</label>
+                  <RadioGroup
+                    value={updateMode}
+                    onValueChange={(value) =>
+                      handleUpdateModeChange(value as 'manual' | 'auto')
+                    }
+                    className='flex gap-4'
+                  >
+                    <div className='flex items-center space-x-2'>
+                      <RadioGroupItem value='manual' id='manual' />
+                      <Label htmlFor='manual'>手动更新</Label>
+                    </div>
+                    <div className='flex items-center space-x-2'>
+                      <RadioGroupItem value='auto' id='auto' />
+                      <Label htmlFor='auto'>自动更新</Label>
+                    </div>
+                  </RadioGroup>
+                </div>
                 {updateMode === 'auto' && (
                   <div className='mt-2'>
                     <label className='block mb-2'>更新间隔 (秒)</label>

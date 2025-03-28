@@ -1,8 +1,8 @@
-import { toast } from "sonner";
+import { toast } from 'sonner';
 
 // 定义布局项的接口
 interface LayoutItem {
-  id: string;
+  id: string; // 自动生成
   title: string;
   width: number; // 横向跨列数
   height: number; // 纵向跨行数
@@ -77,7 +77,7 @@ export const adjustRows = (layout: Layout, newRows: number): Layout => {
   );
 
   if (willBeOutOfBounds) {
-    toast.error("减少行数会导致某些图表超出边界");
+    toast.error('减少行数会导致某些图表超出边界');
     return layout; // 返回原始布局
   }
 
@@ -97,7 +97,7 @@ export const adjustColumns = (layout: Layout, newColumns: number): Layout => {
   );
 
   if (willBeOutOfBounds) {
-    toast.error("减少列数会导致某些图表超出边界");
+    toast.error('减少列数会导致某些图表超出边界');
     return layout; // 返回原始布局
   }
 

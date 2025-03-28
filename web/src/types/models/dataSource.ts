@@ -1,6 +1,6 @@
 // 数据源接口
 export interface DataSource {
-  id: string;
+  id: string; // 自动生成
   name: string;
   description?: string;
   executor: {

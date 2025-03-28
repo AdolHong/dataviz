@@ -33,29 +33,28 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   console.log('reportId', reportId);
   // 构造 demo 数据
   const demoReport = {
+    id: 'report-1',
     title: '销售报表',
     description: '这是一个销售数据的示例报表',
     dataSources: [
       {
         id: 'ds1',
         name: '主数据',
-        type: 'python',
         alias: '销售数据',
-        executor: { type: 'python', engine: 'pandas' },
+        executor: { type: 'sql', engine: 'mysql' },
         code: '',
       },
       {
         id: 'ds2',
         name: '外部数据',
-        type: 'sql',
         alias: '外部数据',
         executor: { type: 'python', engine: 'pandas' },
         code: '',
       },
     ],
     parameters: [
-      { name: '开始日期', type: 'single_select' },
-      { name: '结束日期', type: 'single_select' },
+      { id: 'p1', name: '开始日期', type: 'single_select' },
+      { id: 'p2', name: '结束日期', type: 'single_select' },
     ],
     charts: [
       {

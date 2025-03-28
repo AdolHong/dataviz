@@ -1,5 +1,6 @@
 // 可视化参数接口
 export interface ChartParam {
+  id: string; // 自动生成
   name: string;
   alias?: string; // 参数可以有别名, 一般是中文，便于理解参数
   description?: string;
@@ -16,7 +17,7 @@ export interface ChartParam {
 
 // 可视化接口
 export interface Chart {
-  id: string;
+  id: string; // 自动生成
   title: string;
   description?: string;
   code: string;

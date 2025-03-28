@@ -178,7 +178,7 @@ export const EditDataSourceModal = ({
                 <SelectContent>
                   <SelectItem value='python'>Python</SelectItem>
                   <SelectItem value='sql'>SQL</SelectItem>
-                  <SelectItem value='csv_data'>CSV 数据</SelectItem>
+                  <SelectItem value='csv_data'>CSV 固定数据集</SelectItem>
                   <SelectItem value='csv_uploader'>CSV 上传器</SelectItem>
                 </SelectContent>
               </Select>
@@ -219,9 +219,7 @@ export const EditDataSourceModal = ({
 
             {showCSVUploader && (
               <div>
-                <label className='block mb-2'>
-                  {executorType === 'csv_data' ? ' CSV 数据' : ' 示例 CSV 数据'}
-                </label>
+                <label className='block mb-2'>上传</label>
                 <button
                   type='button'
                   className='py-1 h-8 w-45 shadow-sm  rounded-sm hover:bg-blue-100 transition-colors'
@@ -248,7 +246,7 @@ export const EditDataSourceModal = ({
                     }
                   }}
                 >
-                  点击上传
+                  {executorType === 'csv_data' ? ' CSV 数据' : ' CSV 示例数据 '}
                 </button>
               </div>
             )}

@@ -179,7 +179,7 @@ export const EditDataSourceModal = ({
           ...(prev.executor as PythonSourceExecutor | SQLSourceExecutor),
           updateMode: {
             type,
-            ...(type === 'auto' ? { interval: 60 } : {}),
+            ...(type === 'auto' ? { interval: 600 } : {}),
           },
         },
       }));
@@ -203,7 +203,7 @@ export const EditDataSourceModal = ({
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className='max-w-3xl'>
+      <DialogContent className='max-w-3xl h-[80vh] max-h-[90vh] flex flex-col overflow-hidden'>
         <DialogHeader>
           <DialogTitle>
             {initialDataSource ? '编辑数据源' : '新建数据源'}
@@ -360,7 +360,7 @@ export const EditDataSourceModal = ({
                     onValueChange={(value) =>
                       handleUpdateModeChange(value as 'manual' | 'auto')
                     }
-                    className='flex gap-4'
+                    className='flex gap-4 h-10'
                   >
                     <div className='flex items-center space-x-2'>
                       <RadioGroupItem value='manual' id='manual' />
@@ -373,16 +373,17 @@ export const EditDataSourceModal = ({
                   </RadioGroup>
                 </div>
                 {updateMode === 'auto' && (
-                  <div className='flex justify-center items-center'>
+                  <div className='flex-1 justify-center items-center'>
                     <label className='block mb-2'>更新间隔 (秒)</label>
                     <Input
                       type='number'
+                      className='w-40 h-10'
                       value={
                         (
                           dataSource.executor as
                             | PythonSourceExecutor
                             | SQLSourceExecutor
-                        ).updateMode?.interval || 60
+                        ).updateMode?.interval || 600
                       }
                       onChange={(e) =>
                         setDataSource((prev) => ({
@@ -393,7 +394,7 @@ export const EditDataSourceModal = ({
                               | SQLSourceExecutor),
                             updateMode: {
                               type: 'auto',
-                              interval: parseInt(e.target.value) || 60,
+                              interval: parseInt(e.target.value) || 600,
                             },
                           },
                         }))
@@ -408,10 +409,10 @@ export const EditDataSourceModal = ({
 
           {showCSVUploader && (
             <div>
-              <label className='block mb-2'>
+              <label className='block  mb-2'>
                 {executorType === 'csv_data' ? 'CSV 数据' : '示例 CSV 数据'}
               </label>
-              <div className='border border-dashed rounded-md p-8 text-center'>
+              <div className='border shadow-sm rounded-md p-8 min-h-40 text-center'>
                 <p className='mt-2 text-sm text-gray-500'>
                   {executorType === 'csv_data'
                     ? (dataSource.executor as CSVSourceExecutor)?.data
@@ -427,7 +428,7 @@ export const EditDataSourceModal = ({
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className='mt-auto'>
           <Button variant='outline' onClick={onClose}>
             取消
           </Button>

@@ -51,6 +51,7 @@ const DataSourceTab = ({
                       size='icon'
                       className='h-8 w-8 opacity-80'
                       onClick={() => {
+                        console.log('clickdataSource', dataSource);
                         setEditingDataSource(dataSource);
                         setIsEditDataSourceModalOpen(true);
                       }}
@@ -96,6 +97,7 @@ const DataSourceTab = ({
           setEditingDataSource(null);
         }}
         onSave={(updatedDataSource: DataSource) => {
+          console.log('updatedDataSource', updatedDataSource);
           if (editingDataSource) {
             // 编辑现有数据源
             const newDataSources = dataSources.map((ds) =>

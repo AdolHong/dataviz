@@ -81,7 +81,11 @@ const DataSourceTab = ({
       <EditDataSourceModal
         open={isEditDataSourceModalOpen}
         onClose={() => setIsEditDataSourceModalOpen(false)}
-        onSave={() => {}}
+        onSave={(newDataSource: DataSource) => {
+          const newDataSources = dataSources;
+          setDataSources(newDataSources);
+          setIsEditDataSourceModalOpen(false);
+        }}
       />
     </div>
   );

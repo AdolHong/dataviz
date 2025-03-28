@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -22,28 +22,63 @@ interface EditDataSourceModalProps {
   open: boolean;
   onClose: () => void;
   onSave: (dataSource: DataSource) => void;
-  initialDataSource?: Partial<DataSource>;
+  initialDataSource?: DataSource | null;
 }
 
 export const EditDataSourceModal = ({
   open,
   onClose,
   onSave,
-  initialDataSource = {},
+  initialDataSource = null,
 }: EditDataSourceModalProps) => {
   const [dataSource, setDataSource] = useState<Partial<DataSource>>({
-    name: initialDataSource.name || '',
-    description: initialDataSource.description || '',
+    name: '',
+    description: '',
     executor: {
-      type: initialDataSource.executor?.type || 'pandas',
-      engine: initialDataSource.executor?.engine || 'python',
+      type: 'pandas',
+      engine: 'python',
     },
-    code: initialDataSource.code || '',
+    code: '',
     updateMode: {
-      type: initialDataSource.updateMode?.type || 'manual',
-      interval: initialDataSource.updateMode?.interval || undefined,
+      type: 'manual',
+      interval: undefined,
     },
   });
+
+  // 当打开模态框或初始数据源变化时重置表单数据
+  useEffect(() => {
+    if (initialDataSource) {
+      setDataSource({
+        id: initialDataSource.id,
+        name: initialDataSource.name || '',
+        description: initialDataSource.description || '',
+        executor: {
+          type: initialDataSource.executor?.type || 'pandas',
+          engine: initialDataSource.executor?.engine || 'python',
+        },
+        code: initialDataSource.code || '',
+        updateMode: {
+          type: initialDataSource.updateMode?.type || 'manual',
+          interval: initialDataSource.updateMode?.interval,
+        },
+      });
+    } else {
+      // 重置为初始状态
+      setDataSource({
+        name: '',
+        description: '',
+        executor: {
+          type: 'pandas',
+          engine: 'python',
+        },
+        code: '',
+        updateMode: {
+          type: 'manual',
+          interval: undefined,
+        },
+      });
+    }
+  }, [initialDataSource, open]);
 
   const handleSave = () => {
     // 简单的验证
@@ -52,10 +87,22 @@ export const EditDataSourceModal = ({
       return;
     }
 
-    onSave({
-      id: initialDataSource.id || Date.now().toString(), // 如果是新建，生成临时ID
-      ...dataSource,
-    } as DataSource);
+    const finalDataSource: DataSource = {
+      id: dataSource.id || Date.now().toString(), // 如果是新建，生成临时ID
+      name: dataSource.name || '',
+      description: dataSource.description,
+      executor: {
+        type: dataSource.executor?.type || 'pandas',
+        engine: dataSource.executor?.engine || 'python',
+      },
+      code: dataSource.code || '',
+      updateMode: dataSource.updateMode as {
+        type: 'auto' | 'manual';
+        interval?: number;
+      },
+    };
+
+    onSave(finalDataSource);
     onClose();
   };
 
@@ -64,7 +111,7 @@ export const EditDataSourceModal = ({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {initialDataSource.id ? '编辑数据源' : '新建数据源'}
+            {initialDataSource ? '编辑数据源' : '新建数据源'}
           </DialogTitle>
         </DialogHeader>
 
@@ -72,7 +119,7 @@ export const EditDataSourceModal = ({
           <div>
             <label className='block mb-2'>数据源名称</label>
             <Input
-              value={dataSource.name}
+              value={dataSource.name || ''}
               onChange={(e) =>
                 setDataSource((prev) => ({ ...prev, name: e.target.value }))
               }
@@ -83,7 +130,7 @@ export const EditDataSourceModal = ({
           <div>
             <label className='block mb-2'>描述（可选）</label>
             <Textarea
-              value={dataSource.description}
+              value={dataSource.description || ''}
               onChange={(e) =>
                 setDataSource((prev) => ({
                   ...prev,
@@ -97,11 +144,14 @@ export const EditDataSourceModal = ({
           <div>
             <label className='block mb-2'>执行类型</label>
             <Select
-              value={dataSource.executor?.type}
+              value={dataSource.executor?.type || 'pandas'}
               onValueChange={(value) =>
                 setDataSource((prev) => ({
                   ...prev,
-                  executor: { ...prev.executor, type: value },
+                  executor: {
+                    ...(prev.executor || {}),
+                    type: value,
+                  },
                 }))
               }
             >
@@ -119,7 +169,7 @@ export const EditDataSourceModal = ({
           <div>
             <label className='block mb-2'>代码</label>
             <Textarea
-              value={dataSource.code}
+              value={dataSource.code || ''}
               onChange={(e) =>
                 setDataSource((prev) => ({ ...prev, code: e.target.value }))
               }
@@ -131,12 +181,12 @@ export const EditDataSourceModal = ({
           <div>
             <label className='block mb-2'>更新模式</label>
             <Select
-              value={dataSource.updateMode?.type}
+              value={dataSource.updateMode?.type || 'manual'}
               onValueChange={(value) =>
                 setDataSource((prev) => ({
                   ...prev,
                   updateMode: {
-                    ...prev.updateMode,
+                    ...(prev.updateMode || {}),
                     type: value as 'auto' | 'manual',
                   },
                 }))

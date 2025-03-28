@@ -20,6 +20,9 @@ const DataSourceTab = ({
 }: DataSourceTabProps) => {
   const [isEditDataSourceModalOpen, setIsEditDataSourceModalOpen] =
     useState(false);
+  const [editingDataSource, setEditingDataSource] = useState<DataSource | null>(
+    null
+  );
   return (
     <div>
       <TabsContent value='data' className='p-4'>
@@ -43,13 +46,21 @@ const DataSourceTab = ({
                     </p>
                   </div>
                   <div className='flex gap-2'>
-                    <Button variant='ghost' size='icon' className='h-8 w-8'>
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      className='h-8 w-8 opacity-80'
+                      onClick={() => {
+                        setEditingDataSource(dataSource);
+                        setIsEditDataSourceModalOpen(true);
+                      }}
+                    >
                       <Pencil className='h-4 w-4' />
                     </Button>
                     <Button
                       variant='ghost'
                       size='icon'
-                      className='h-8 w-8 text-destructive'
+                      className='h-8 w-8 text-destructive opacity-80'
                       onClick={() =>
                         confirmDelete(
                           () => handleDeleteDataSource(dataSource.id),
@@ -80,12 +91,25 @@ const DataSourceTab = ({
 
       <EditDataSourceModal
         open={isEditDataSourceModalOpen}
-        onClose={() => setIsEditDataSourceModalOpen(false)}
-        onSave={(newDataSource: DataSource) => {
-          const newDataSources = dataSources;
-          setDataSources(newDataSources);
+        onClose={() => {
           setIsEditDataSourceModalOpen(false);
+          setEditingDataSource(null);
         }}
+        onSave={(updatedDataSource: DataSource) => {
+          if (editingDataSource) {
+            // 编辑现有数据源
+            const newDataSources = dataSources.map((ds) =>
+              ds.id === updatedDataSource.id ? updatedDataSource : ds
+            );
+            setDataSources(newDataSources);
+          } else {
+            // 添加新数据源
+            setDataSources([...dataSources, updatedDataSource]);
+          }
+          setIsEditDataSourceModalOpen(false);
+          setEditingDataSource(null);
+        }}
+        initialDataSource={editingDataSource}
       />
     </div>
   );

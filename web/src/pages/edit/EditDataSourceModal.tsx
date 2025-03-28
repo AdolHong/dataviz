@@ -236,26 +236,26 @@ export const EditDataSourceModal = ({
             />
           </div>
 
-          <div>
-            <label className='block mb-2'>执行器类型</label>
-            <Select
-              value={executorType}
-              onValueChange={handleExecutorTypeChange}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder='选择执行器类型' />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value='python'>Python</SelectItem>
-                <SelectItem value='sql'>SQL</SelectItem>
-                <SelectItem value='csv_data'>CSV 数据</SelectItem>
-                <SelectItem value='csv_uploader'>CSV 上传器</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <div className='flex space-x-10'>
+            <div>
+              <label className='block mb-2'>执行器类型</label>
+              <Select
+                value={executorType}
+                onValueChange={handleExecutorTypeChange}
+              >
+                <SelectTrigger className='w-45'>
+                  <SelectValue placeholder='选择执行器类型' />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value='python'>Python</SelectItem>
+                  <SelectItem value='sql'>SQL</SelectItem>
+                  <SelectItem value='csv_data'>CSV 数据</SelectItem>
+                  <SelectItem value='csv_uploader'>CSV 上传器</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-          {showCodeEditor && (
-            <>
+            {showCodeEditor && (
               <div>
                 <label className='block mb-2'>引擎</label>
                 <Select
@@ -278,7 +278,7 @@ export const EditDataSourceModal = ({
                     }))
                   }
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className='w-45'>
                     <SelectValue placeholder='选择引擎' />
                   </SelectTrigger>
                   <SelectContent>
@@ -286,7 +286,45 @@ export const EditDataSourceModal = ({
                   </SelectContent>
                 </Select>
               </div>
+            )}
 
+            {showCSVUploader && (
+              <div>
+                <label className='block mb-2'>点击上传</label>
+                <button
+                  type='button'
+                  className='px-4 py-2 shadow-sm text-blue-700 rounded-md hover:bg-blue-100 transition-colors'
+                  onClick={() => {
+                    // 这里应当触发文件上传，为简化代码，仅模拟
+                    const mockData = 'id,name,value\n1,测试,100\n2,示例,200';
+                    if (executorType === 'csv_data') {
+                      setDataSource((prev) => ({
+                        ...prev,
+                        executor: {
+                          ...(prev.executor as CSVSourceExecutor),
+                          data: mockData,
+                        },
+                      }));
+                    } else {
+                      setDataSource((prev) => ({
+                        ...prev,
+                        executor: {
+                          ...(prev.executor as CSVUploaderSourceExecutor),
+                          demoData: mockData,
+                        },
+                      }));
+                    }
+                  }}
+                >
+                  上传
+                  {executorType === 'csv_data' ? 'CSV 数据' : 'CSV 示例数据'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {showCodeEditor && (
+            <>
               <div>
                 <label className='block mb-2'>代码</label>
                 <Textarea
@@ -373,33 +411,6 @@ export const EditDataSourceModal = ({
                 {executorType === 'csv_data' ? 'CSV 数据' : '示例 CSV 数据'}
               </label>
               <div className='border border-dashed rounded-md p-8 text-center'>
-                <button
-                  type='button'
-                  className='px-4 py-2 bg-blue-50 text-blue-700 rounded-md hover:bg-blue-100 transition-colors'
-                  onClick={() => {
-                    // 这里应当触发文件上传，为简化代码，仅模拟
-                    const mockData = 'id,name,value\n1,测试,100\n2,示例,200';
-                    if (executorType === 'csv_data') {
-                      setDataSource((prev) => ({
-                        ...prev,
-                        executor: {
-                          ...(prev.executor as CSVSourceExecutor),
-                          data: mockData,
-                        },
-                      }));
-                    } else {
-                      setDataSource((prev) => ({
-                        ...prev,
-                        executor: {
-                          ...(prev.executor as CSVUploaderSourceExecutor),
-                          demoData: mockData,
-                        },
-                      }));
-                    }
-                  }}
-                >
-                  点击上传 CSV 文件
-                </button>
                 <p className='mt-2 text-sm text-gray-500'>
                   {executorType === 'csv_data'
                     ? (dataSource.executor as CSVSourceExecutor)?.data

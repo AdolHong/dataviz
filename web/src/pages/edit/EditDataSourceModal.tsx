@@ -359,13 +359,22 @@ export const EditDataSourceModal = ({
               <label className='block mb-2'>
                 {executorType === 'csv_data' ? 'CSV 数据' : '示例 CSV 数据'}
               </label>
-              <div className='border shadow-sm rounded-md p-8 min-h-40 text-center'>
+              <CSVTable
+                csvData={
+                  (dataSource.executor as CSVSourceExecutor)?.data ||
+                  (dataSource.executor as CSVUploaderSourceExecutor)
+                    ?.demoData ||
+                  'a,b,c\n1,2,3\n'
+                }
+              />
+              {/* <div className='border shadow-sm rounded-md p-8 min-h-40 text-center'>
                 <CSVTable
                   csvData={
-                    (dataSource.executor as CSVSourceExecutor)?.data || ''
+                    (dataSource.executor as CSVSourceExecutor)?.data ||
+                    'a,b,c\n1,2,3\n'
                   }
                 />
-              </div>
+              </div> */}
             </div>
           )}
         </div>

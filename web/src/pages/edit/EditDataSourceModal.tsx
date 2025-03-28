@@ -129,19 +129,24 @@ export const EditDataSourceModal = ({
         </DialogHeader>
 
         <div className='space-y-4'>
-          <div>
-            <label className='block mb-2'>数据源名称</label>
+          <div className='flex items-center'>
+            <label className='block mb-2 w-30 h-10 flex items-center'>
+              名称
+            </label>
             <Input
               value={dataSource.name || ''}
               onChange={(e) =>
                 setDataSource((prev) => ({ ...prev, name: e.target.value }))
               }
               placeholder='输入数据源名称'
+              className='h-10'
             />
           </div>
 
-          <div>
-            <label className='block mb-2'>描述（可选）</label>
+          <div className='flex items-center'>
+            <label className='block mb-2 w-30 h-10 flex items-center'>
+              描述（可选）
+            </label>
             <Input
               value={dataSource.description || ''}
               onChange={(e) =>
@@ -151,6 +156,7 @@ export const EditDataSourceModal = ({
                 }))
               }
               placeholder='输入数据源描述'
+              className='h-10'
             />
           </div>
 

@@ -16,7 +16,15 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { type DataSource } from '@/types/models/dataSource';
+import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import {
+  type DataSource,
+  type PythonSourceExecutor,
+  type SQLSourceExecutor,
+  type CSVSourceExecutor,
+  type CSVUploaderSourceExecutor,
+} from '@/types/models/dataSource';
 
 interface EditDataSourceModalProps {
   open: boolean;
@@ -35,13 +43,12 @@ export const EditDataSourceModal = ({
     name: '',
     description: '',
     executor: {
-      type: 'pandas',
-      engine: 'python',
-    },
-    code: '',
-    updateMode: {
-      type: 'manual',
-      interval: undefined,
+      type: 'python',
+      engine: 'default',
+      code: '',
+      updateMode: {
+        type: 'manual',
+      },
     },
   });
 
@@ -52,15 +59,7 @@ export const EditDataSourceModal = ({
         id: initialDataSource.id,
         name: initialDataSource.name || '',
         description: initialDataSource.description || '',
-        executor: {
-          type: initialDataSource.executor?.type || 'pandas',
-          engine: initialDataSource.executor?.engine || 'python',
-        },
-        code: initialDataSource.code || '',
-        updateMode: {
-          type: initialDataSource.updateMode?.type || 'manual',
-          interval: initialDataSource.updateMode?.interval,
-        },
+        executor: initialDataSource.executor,
       });
     } else {
       // 重置为初始状态
@@ -68,13 +67,12 @@ export const EditDataSourceModal = ({
         name: '',
         description: '',
         executor: {
-          type: 'pandas',
-          engine: 'python',
-        },
-        code: '',
-        updateMode: {
-          type: 'manual',
-          interval: undefined,
+          type: 'python',
+          engine: 'default',
+          code: '',
+          updateMode: {
+            type: 'manual',
+          },
         },
       });
     }
@@ -87,28 +85,125 @@ export const EditDataSourceModal = ({
       return;
     }
 
+    // 根据执行器类型验证
+    if (['python', 'sql'].includes(dataSource.executor?.type || '')) {
+      if (
+        !(dataSource.executor as PythonSourceExecutor | SQLSourceExecutor).code
+      ) {
+        alert('请输入代码');
+        return;
+      }
+    } else if (dataSource.executor?.type === 'csv_data') {
+      if (!(dataSource.executor as CSVSourceExecutor).data) {
+        alert('请上传CSV数据');
+        return;
+      }
+    } else if (dataSource.executor?.type === 'csv_uploader') {
+      if (!(dataSource.executor as CSVUploaderSourceExecutor).demoData) {
+        alert('请上传示例CSV数据');
+        return;
+      }
+    }
+
     const finalDataSource: DataSource = {
       id: dataSource.id || Date.now().toString(), // 如果是新建，生成临时ID
       name: dataSource.name || '',
       description: dataSource.description,
-      executor: {
-        type: dataSource.executor?.type || 'pandas',
-        engine: dataSource.executor?.engine || 'python',
-      },
-      code: dataSource.code || '',
-      updateMode: dataSource.updateMode as {
-        type: 'auto' | 'manual';
-        interval?: number;
-      },
+      executor: dataSource.executor as
+        | PythonSourceExecutor
+        | SQLSourceExecutor
+        | CSVSourceExecutor
+        | CSVUploaderSourceExecutor,
     };
 
     onSave(finalDataSource);
     onClose();
   };
 
+  // 处理执行器类型变更
+  const handleExecutorTypeChange = (type: string) => {
+    switch (type) {
+      case 'python':
+        setDataSource((prev) => ({
+          ...prev,
+          executor: {
+            type: 'python',
+            engine: 'default',
+            code: '',
+            updateMode: {
+              type: 'manual',
+            },
+          },
+        }));
+        break;
+      case 'sql':
+        setDataSource((prev) => ({
+          ...prev,
+          executor: {
+            type: 'sql',
+            engine: 'default',
+            code: '',
+            updateMode: {
+              type: 'manual',
+            },
+          },
+        }));
+        break;
+      case 'csv_data':
+        setDataSource((prev) => ({
+          ...prev,
+          executor: {
+            type: 'csv_data',
+            data: '',
+          },
+        }));
+        break;
+      case 'csv_uploader':
+        setDataSource((prev) => ({
+          ...prev,
+          executor: {
+            type: 'csv_uploader',
+            demoData: '',
+          },
+        }));
+        break;
+    }
+  };
+
+  // 处理更新模式变更
+  const handleUpdateModeChange = (type: 'manual' | 'auto') => {
+    if (['python', 'sql'].includes(dataSource.executor?.type || '')) {
+      setDataSource((prev) => ({
+        ...prev,
+        executor: {
+          ...(prev.executor as PythonSourceExecutor | SQLSourceExecutor),
+          updateMode: {
+            type,
+            ...(type === 'auto' ? { interval: 60 } : {}),
+          },
+        },
+      }));
+    }
+  };
+
+  // 获取执行器类型
+  const executorType = dataSource.executor?.type || 'python';
+
+  // 检查是否显示代码编辑器（仅 python 和 sql 需要）
+  const showCodeEditor = ['python', 'sql'].includes(executorType);
+
+  // 检查是否显示CSV上传器（仅 csv_data 和 csv_uploader 需要）
+  const showCSVUploader = ['csv_data', 'csv_uploader'].includes(executorType);
+
+  // 获取更新模式（仅 python 和 sql 有）
+  const updateMode = showCodeEditor
+    ? (dataSource.executor as PythonSourceExecutor | SQLSourceExecutor)
+        .updateMode?.type || 'manual'
+    : 'manual';
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent>
+      <DialogContent className='max-w-3xl'>
         <DialogHeader>
           <DialogTitle>
             {initialDataSource ? '编辑数据源' : '新建数据源'}
@@ -142,65 +237,182 @@ export const EditDataSourceModal = ({
           </div>
 
           <div>
-            <label className='block mb-2'>执行类型</label>
+            <label className='block mb-2'>执行器类型</label>
             <Select
-              value={dataSource.executor?.type || 'pandas'}
-              onValueChange={(value) =>
-                setDataSource((prev) => ({
-                  ...prev,
-                  executor: {
-                    ...(prev.executor || {}),
-                    type: value,
-                  },
-                }))
-              }
+              value={executorType}
+              onValueChange={handleExecutorTypeChange}
             >
               <SelectTrigger>
-                <SelectValue placeholder='选择执行类型' />
+                <SelectValue placeholder='选择执行器类型' />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value='pandas'>Pandas</SelectItem>
-                <SelectItem value='sql'>SQL</SelectItem>
                 <SelectItem value='python'>Python</SelectItem>
+                <SelectItem value='sql'>SQL</SelectItem>
+                <SelectItem value='csv_data'>CSV 数据</SelectItem>
+                <SelectItem value='csv_uploader'>CSV 上传器</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
-          <div>
-            <label className='block mb-2'>代码</label>
-            <Textarea
-              value={dataSource.code || ''}
-              onChange={(e) =>
-                setDataSource((prev) => ({ ...prev, code: e.target.value }))
-              }
-              placeholder='输入数据处理代码'
-              rows={5}
-            />
-          </div>
+          {showCodeEditor && (
+            <>
+              <div>
+                <label className='block mb-2'>引擎</label>
+                <Select
+                  value={
+                    (
+                      dataSource.executor as
+                        | PythonSourceExecutor
+                        | SQLSourceExecutor
+                    ).engine || 'default'
+                  }
+                  onValueChange={(engine) =>
+                    setDataSource((prev) => ({
+                      ...prev,
+                      executor: {
+                        ...(prev.executor as
+                          | PythonSourceExecutor
+                          | SQLSourceExecutor),
+                        engine,
+                      },
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder='选择引擎' />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value='default'>默认</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-          <div>
-            <label className='block mb-2'>更新模式</label>
-            <Select
-              value={dataSource.updateMode?.type || 'manual'}
-              onValueChange={(value) =>
-                setDataSource((prev) => ({
-                  ...prev,
-                  updateMode: {
-                    ...(prev.updateMode || {}),
-                    type: value as 'auto' | 'manual',
-                  },
-                }))
-              }
-            >
-              <SelectTrigger>
-                <SelectValue placeholder='选择更新模式' />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value='manual'>手动</SelectItem>
-                <SelectItem value='auto'>自动</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+              <div>
+                <label className='block mb-2'>代码</label>
+                <Textarea
+                  value={
+                    (
+                      dataSource.executor as
+                        | PythonSourceExecutor
+                        | SQLSourceExecutor
+                    ).code || ''
+                  }
+                  onChange={(e) =>
+                    setDataSource((prev) => ({
+                      ...prev,
+                      executor: {
+                        ...(prev.executor as
+                          | PythonSourceExecutor
+                          | SQLSourceExecutor),
+                        code: e.target.value,
+                      },
+                    }))
+                  }
+                  placeholder={`输入${executorType === 'python' ? 'Python' : 'SQL'}代码`}
+                  rows={8}
+                  className='font-mono'
+                />
+              </div>
+
+              <div>
+                <label className='block mb-2'>更新模式</label>
+                <RadioGroup
+                  value={updateMode}
+                  onValueChange={(value) =>
+                    handleUpdateModeChange(value as 'manual' | 'auto')
+                  }
+                  className='flex gap-4'
+                >
+                  <div className='flex items-center space-x-2'>
+                    <RadioGroupItem value='manual' id='manual' />
+                    <Label htmlFor='manual'>手动更新</Label>
+                  </div>
+                  <div className='flex items-center space-x-2'>
+                    <RadioGroupItem value='auto' id='auto' />
+                    <Label htmlFor='auto'>自动更新</Label>
+                  </div>
+                </RadioGroup>
+
+                {updateMode === 'auto' && (
+                  <div className='mt-2'>
+                    <label className='block mb-2'>更新间隔 (秒)</label>
+                    <Input
+                      type='number'
+                      value={
+                        (
+                          dataSource.executor as
+                            | PythonSourceExecutor
+                            | SQLSourceExecutor
+                        ).updateMode?.interval || 60
+                      }
+                      onChange={(e) =>
+                        setDataSource((prev) => ({
+                          ...prev,
+                          executor: {
+                            ...(prev.executor as
+                              | PythonSourceExecutor
+                              | SQLSourceExecutor),
+                            updateMode: {
+                              type: 'auto',
+                              interval: parseInt(e.target.value) || 60,
+                            },
+                          },
+                        }))
+                      }
+                      min={1}
+                    />
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {showCSVUploader && (
+            <div>
+              <label className='block mb-2'>
+                {executorType === 'csv_data' ? 'CSV 数据' : '示例 CSV 数据'}
+              </label>
+              <div className='border border-dashed rounded-md p-8 text-center'>
+                <button
+                  type='button'
+                  className='px-4 py-2 bg-blue-50 text-blue-700 rounded-md hover:bg-blue-100 transition-colors'
+                  onClick={() => {
+                    // 这里应当触发文件上传，为简化代码，仅模拟
+                    const mockData = 'id,name,value\n1,测试,100\n2,示例,200';
+                    if (executorType === 'csv_data') {
+                      setDataSource((prev) => ({
+                        ...prev,
+                        executor: {
+                          ...(prev.executor as CSVSourceExecutor),
+                          data: mockData,
+                        },
+                      }));
+                    } else {
+                      setDataSource((prev) => ({
+                        ...prev,
+                        executor: {
+                          ...(prev.executor as CSVUploaderSourceExecutor),
+                          demoData: mockData,
+                        },
+                      }));
+                    }
+                  }}
+                >
+                  点击上传 CSV 文件
+                </button>
+                <p className='mt-2 text-sm text-gray-500'>
+                  {executorType === 'csv_data'
+                    ? (dataSource.executor as CSVSourceExecutor)?.data
+                      ? '已上传文件'
+                      : '支持 .csv 格式文件'
+                    : (dataSource.executor as CSVUploaderSourceExecutor)
+                          ?.demoData
+                      ? '已上传示例文件'
+                      : '支持 .csv 格式文件'}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         <DialogFooter>

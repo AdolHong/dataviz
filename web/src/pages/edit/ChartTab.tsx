@@ -1,9 +1,9 @@
-import { Button } from "@/components/ui/button";
-import { Trash2, Pencil, Plus } from "lucide-react";
-import { TabsContent } from "@/components/ui/tabs";
-import { type Layout } from "@/types/models/layout";
-import { useState } from "react";
-import { EditLayoutModal } from "./EditLayoutModal";
+import { Button } from '@/components/ui/button';
+import { Trash2, Pencil, Plus } from 'lucide-react';
+import { TabsContent } from '@/components/ui/tabs';
+import { type Layout } from '@/types/models/layout';
+import { useState } from 'react';
+import { EditLayoutModal } from './EditLayoutModal';
 
 const ChartTab = ({
   layout,
@@ -22,43 +22,43 @@ const ChartTab = ({
 
   return (
     <div>
-      <TabsContent value="charts" className="p-4">
-        <div className="space-y-4">
-          <div className="border rounded-lg p-4">
+      <TabsContent value='charts' className='p-4'>
+        <div className='space-y-4'>
+          <div className='border rounded-lg p-4'>
             {layout ? (
               <div
-                className="grid gap-4 relative"
+                className='grid gap-4 relative'
                 style={{
                   gridTemplateColumns: `repeat(${layout.columns}, 1fr)`,
                   gridTemplateRows: `repeat(${layout.rows}, 100px)`,
-                  minHeight: "100px",
+                  minHeight: '100px',
                 }}
               >
                 {layout.items.map((item) => (
                   <div
                     key={item.id}
-                    className="border-2 border-dashed rounded-lg p-4 text-center  flex items-center justify-center relative group"
+                    className='border-2 border-dashed rounded-lg p-4 text-center  flex items-center justify-center relative group'
                     style={{
                       gridColumn: `${item.x + 1} / span ${item.width}`,
                       gridRow: `${item.y + 1} / span ${item.height}`,
                     }}
                   >
                     {item.title}
-                    <div className="absolute bottom-0  flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className='absolute bottom-0  flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity'>
                       <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
+                        variant='ghost'
+                        size='icon'
+                        className='h-6 w-6'
                         onClick={() => {
                           /* 编辑逻辑 */
                         }}
                       >
-                        <Pencil className="h-4 w-4" />
+                        <Pencil className='h-4 w-4' />
                       </Button>
                       <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 text-destructive"
+                        variant='ghost'
+                        size='icon'
+                        className='h-6 w-6 text-destructive'
                         onClick={() =>
                           confirmDelete(
                             () => handleDeleteChart(item.id),
@@ -66,32 +66,32 @@ const ChartTab = ({
                           )
                         }
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className='h-4 w-4' />
                       </Button>
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="text-center p-4">正在加载布局...</div>
+              <div className='text-center p-4'>正在加载布局...</div>
             )}
           </div>
 
-          <div className="mt-6">
+          <div className='mt-6'>
             <Button
-              variant="outline"
-              className="w-full border-dashed"
+              variant='outline'
+              className='w-full border-dashed'
               onClick={handleAddChart}
             >
-              <Plus className="h-4 w-4 mr-2" />
+              <Plus className='h-4 w-4 mr-2' />
               添加图表
             </Button>
             <Button
-              variant="outline"
-              className="w-full border-dashed mt-2"
+              variant='outline'
+              className='w-full border-dashed mt-2'
               onClick={() => setIsLayoutModalOpen(true)}
             >
-              <Plus className="h-4 w-4 mr-2" />
+              <Plus className='h-4 w-4 mr-2' />
               修改布局
             </Button>
           </div>
@@ -101,7 +101,7 @@ const ChartTab = ({
       <EditLayoutModal
         open={isLayoutModalOpen}
         onClose={() => setIsLayoutModalOpen(false)}
-        onSave={(newLayout) => {
+        onSave={(newLayout: Layout) => {
           setLayout(newLayout);
           setIsLayoutModalOpen(false);
         }}

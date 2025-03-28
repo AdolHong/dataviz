@@ -5,17 +5,19 @@ import { TabsContent } from '@radix-ui/react-tabs';
 import { useState } from 'react';
 import { EditDataSourceModal } from './EditDataSourceModal';
 
+interface DataSourceTabProps {
+  dataSources: DataSource[];
+  setDataSources: (dataSources: DataSource[]) => void;
+  handleDeleteDataSource: (id: string) => void;
+  confirmDelete: (deleteFunction: () => void, message: string) => void;
+}
+
 const DataSourceTab = ({
   dataSources,
   setDataSources,
   handleDeleteDataSource,
   confirmDelete,
-}: {
-  dataSources: DataSource[];
-  setDataSources: (dataSources: DataSource[]) => void;
-  handleDeleteDataSource: (id: string) => void;
-  confirmDelete: (deleteFunction: () => void, message: string) => void;
-}) => {
+}: DataSourceTabProps) => {
   const [isEditDataSourceModalOpen, setIsEditDataSourceModalOpen] =
     useState(false);
   return (

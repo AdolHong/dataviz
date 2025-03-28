@@ -99,13 +99,6 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
         dependencies: ['df_sales'],
         executor: { type: 'python', engine: 'pandas' },
       },
-      {
-        id: 'chart-6',
-        title: '销售占比',
-        code: 'pie',
-        dependencies: ['ds2'],
-        executor: { type: 'python', engine: 'pandas' },
-      },
     ],
     layout: {
       columns: 3,
@@ -116,14 +109,6 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
         { id: 'chart-3', title: '销售明细', width: 1, height: 1, x: 2, y: 0 },
         { id: 'chart-4', title: '新增图表1', width: 1, height: 1, x: 0, y: 1 },
         { id: 'chart-5', title: '新增图表2', width: 1, height: 1, x: 1, y: 1 },
-        {
-          id: 'chart-6',
-          title: '新增图表333',
-          width: 1,
-          height: 1,
-          x: 2,
-          y: 1,
-        },
       ],
     },
   };
@@ -145,19 +130,32 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   const [activeTab, setActiveTab] = useState('filters');
 
   // 创建一个对象来存储 alias 和对应的 chart.id 列表
-  const [aliasRelianceMap, setAliasRelianceMap] = useState<AliasRelianceMap>({
+  const [aliasRelianceMap, setAliasRelianceMap] = useState<AliasRelianceMap>(
+    () => {
+      const aliasToCharts = demoReport.charts.reduce<{
+        aliasToCharts: {
+          [alias: string]: { chartTitle: string; chartId: string }[];
+        };
+      }>((acc, chart) => {
+        chart.dependencies.forEach((alias) => {
+          if (!acc[alias]) {
+            acc[alias] = []; // 如果 alias 不存在，初始化为一个空数组
+          }
+          acc[alias].push({ chartTitle: chart.title, chartId: chart.id }); // 将 chart.title 添加到对应的 alias 列表中
+        });
+        return acc;
+      }, {});
 
-    const aliasToCharts = demoReport.charts.reduce<AliasRelianceMap>((acc, chart) => {
-      chart.dependencies.forEach((alias) => {
-        if (!acc[alias]) {
-          acc[alias] = []; // 如果 alias 不存在，初始化为一个空数组
-        }
-        acc[alias].push({ chartTitle: chart.title, chartId: chart.id }); // 将 chart.title 添加到对应的 alias 列表中
-      });
-      return acc;
-    }, {} as AliasRelianceMap)
+      const aliasToDataSourceId = demoReport.dataSources.reduce<{
+        aliasToDataSourceId: { [alias: string]: string };
+      }>((acc, dataSource) => {
+        acc[dataSource.alias] = dataSource.id; // 将数据源的别名映射到其ID
+        return acc;
+      }, {});
 
-  });
+      return { aliasToCharts, aliasToDataSourceId };
+    }
+  );
 
   // 确认删除dialog
   const [isConfirmDeleteOpen, setIsConfirmDeleteOpen] = useState(false);

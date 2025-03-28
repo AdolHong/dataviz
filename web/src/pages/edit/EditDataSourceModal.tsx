@@ -89,23 +89,30 @@ export const EditDataSourceModal = ({
       if (
         !(dataSource.executor as PythonSourceExecutor | SQLSourceExecutor).code
       ) {
-        alert('请输入代码');
+        toast.error('请输入代码');
         return;
       }
     } else if (dataSource.executor?.type === 'csv_data') {
       if (!(dataSource.executor as CSVSourceExecutor).data) {
-        alert('请上传CSV数据');
+        toast.error('请上传CSV数据');
         return;
       }
     } else if (dataSource.executor?.type === 'csv_uploader') {
       if (!(dataSource.executor as CSVUploaderSourceExecutor).demoData) {
-        alert('请上传示例CSV数据');
+        toast.error('请上传示例CSV数据');
         return;
       }
     }
+
     // 别名不能重复
     if (existingAliases.includes(dataSource.alias)) {
-      alert('别名不能重复');
+      toast.error('别名不能重复');
+      return;
+    }
+
+    // 别名为前缀_df
+    if (dataSource.alias === 'df_') {
+      toast.error('请修改别名，别名不能为df_');
       return;
     }
 
@@ -159,13 +166,7 @@ export const EditDataSourceModal = ({
               <Input
                 value={dataSource.alias || 'df_'}
                 onChange={(e) => {
-                  console.info('aliasRelianceMap');
-                  console.info(aliasRelianceMap);
-                  console.info('dataSource');
-                  console.info(dataSource.id);
-                  console.info(
-                    aliasRelianceMap.aliasToDataSourceId[dataSource.alias]
-                  );
+                  // 如果存在依赖不能修改
                   if (
                     aliasRelianceMap.aliasToCharts[dataSource.alias] &&
                     dataSource.id ===
@@ -175,6 +176,13 @@ export const EditDataSourceModal = ({
                     return;
                   }
 
+                  // 别名必须以df_开头
+                  if (!e.target.value.startsWith('df_')) {
+                    toast.error('别名必须以df_开头');
+                    return;
+                  }
+
+                  // 修改别名
                   setDataSource((prev) => ({
                     ...prev,
                     alias: e.target.value,

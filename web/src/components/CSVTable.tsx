@@ -1,16 +1,23 @@
+import React, { useMemo } from 'react';
 import { useReactTable, getCoreRowModel } from '@tanstack/react-table';
 import Papa from 'papaparse';
 
-export const CSVTable = ({ csvData }: { csvData: string }) => {
-  // 解析 CSV 数据
-  const results = Papa.parse(csvData, { header: true });
-  const parsedData = results.data.slice(0, 10); // 只取前10行
+export const CSVTable = React.memo(({ csvData }: { csvData: string }) => {
+  // 使用 useMemo 缓存解析结果
+  const parsedData = useMemo(() => {
+    const results = Papa.parse(csvData, { header: true });
+    return results.data.slice(0, 5); // 只取前5行
+  }, [csvData]); // 仅在 csvData 变化时重新计算
 
-  // 定义列
-  const columns = Object.keys(parsedData[0] || {}).map((key) => ({
-    header: key,
-    accessor: key, // 访问器
-  }));
+  // 使用 useMemo 缓存列定义
+  const columns = useMemo(() => {
+    if (parsedData.length === 0) return [];
+    return Object.keys(parsedData[0]).map((key) => ({
+      id: key,
+      header: key,
+      accessorKey: key,
+    }));
+  }, [parsedData]);
 
   // 创建表格实例
   const table = useReactTable({
@@ -20,17 +27,17 @@ export const CSVTable = ({ csvData }: { csvData: string }) => {
   });
 
   return (
-    <div style={{ overflowX: 'auto', maxHeight: '400px' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+    <div className='overflow-x-auto overflow-y-auto max-h-70'>
+      <table className='min-w-full border-collapse'>
         <thead>
           {table.getHeaderGroups().map((headerGroup) => (
             <tr key={headerGroup.id}>
               {headerGroup.headers.map((column) => (
                 <th
                   key={column.id}
-                  style={{ border: '1px solid black', padding: '8px' }}
+                  className='border border-black p-2 text-left'
                 >
-                  {column.header}
+                  {String(column.column.columnDef.header)}
                 </th>
               ))}
             </tr>
@@ -40,11 +47,8 @@ export const CSVTable = ({ csvData }: { csvData: string }) => {
           {table.getRowModel().rows.map((row) => (
             <tr key={row.id}>
               {row.getVisibleCells().map((cell) => (
-                <td
-                  key={cell.id}
-                  style={{ border: '1px solid black', padding: '8px' }}
-                >
-                  {cell.getValue()}
+                <td key={cell.id} className='border border-black p-2'>
+                  {String(cell.getValue() ?? '')}
                 </td>
               ))}
             </tr>
@@ -53,6 +57,4 @@ export const CSVTable = ({ csvData }: { csvData: string }) => {
       </table>
     </div>
   );
-};
-
-export default CSVTable;
+});

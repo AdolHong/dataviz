@@ -27,6 +27,21 @@ import type {
   SingleInputParamConfig,
 } from '@/types/models/parameter';
 import { toast } from 'sonner';
+import { Check, ChevronsUpDown } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 
 interface EditFilterModalProps {
   isOpen: boolean;
@@ -228,6 +243,7 @@ const EditFilterModal = ({
   // 渲染特定类型的配置字段
   const renderParamConfigFields = () => {
     switch (paramType) {
+      // 单选列表
       case 'single_select':
         return (
           <>
@@ -245,6 +261,14 @@ const EditFilterModal = ({
                     .map((s) => s.trim())
                     .filter(Boolean);
                   setSingleSelectChoices(choices);
+
+                  // 如果默认值不在选项中，则设置为第一个选项
+                  if (
+                    singleSelectDefault &&
+                    !choices.includes(singleSelectDefault)
+                  ) {
+                    setSingleSelectDefault('');
+                  }
                 }}
                 className='col-span-3'
                 placeholder='逗号分隔, e.g. 选项1,选项2'
@@ -254,42 +278,56 @@ const EditFilterModal = ({
               <Label htmlFor='single-select-default' className='text-right'>
                 默认值
               </Label>
-              <Select
-                value={singleSelectDefault}
-                onValueChange={setSingleSelectDefault}
-                disabled={singleSelectChoices.length === 0}
-              >
-                <SelectTrigger
-                  id='single-select-default'
-                  className='col-span-3'
-                >
-                  <SelectValue placeholder='选择默认值' />
-                </SelectTrigger>
-                <SelectContent>
-                  {singleSelectChoices.map((choice) => (
-                    <SelectItem key={choice} value={choice}>
-                      {choice}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className='col-span-3'>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant='outline'
+                      role='combobox'
+                      className='w-full justify-between'
+                    >
+                      {singleSelectDefault || '选择默认值'}
+                      <ChevronsUpDown className='ml-2 h-4 w-4 shrink-0 opacity-50' />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className='w-full p-0'>
+                    <Command>
+                      <CommandInput
+                        placeholder='搜索选项...'
+                        disabled={singleSelectChoices.length === 0}
+                      />
+                      <CommandList>
+                        <CommandEmpty>没有找到选项</CommandEmpty>
+                        <CommandGroup>
+                          {singleSelectChoices.map((choice) => (
+                            <CommandItem
+                              key={choice}
+                              value={choice}
+                              onSelect={() => {
+                                setSingleSelectDefault(choice);
+                              }}
+                            >
+                              <Check
+                                className={cn(
+                                  'mr-2 h-4 w-4',
+                                  singleSelectDefault === choice
+                                    ? 'opacity-100'
+                                    : 'opacity-0'
+                                )}
+                              />
+                              {choice}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              </div>
             </div>
           </>
         );
-      case 'single_input':
-        return (
-          <div className='grid grid-cols-4 items-center gap-4'>
-            <Label htmlFor='single-input-default' className='text-right'>
-              默认值
-            </Label>
-            <Input
-              id='single-input-default'
-              value={singleInputDefault}
-              onChange={(e) => setSingleInputDefault(e.target.value)}
-              className='col-span-3'
-            />
-          </div>
-        );
+      // 多选列表
       case 'multi_select':
         return (
           <>
@@ -316,43 +354,62 @@ const EditFilterModal = ({
               <Label htmlFor='multi-select-default' className='text-right'>
                 默认值
               </Label>
-              <Select
-                value={JSON.stringify(multiSelectDefault)}
-                onValueChange={(value) => {
-                  const selectedValues = JSON.parse(value);
-                  setMultiSelectDefault(selectedValues);
-                }}
-                disabled={multiSelectChoices.length === 0}
-              >
-                <SelectTrigger id='multi-select-default' className='col-span-3'>
-                  <SelectValue placeholder='选择默认值'>
-                    {multiSelectDefault.length > 0
-                      ? multiSelectDefault.join(', ')
-                      : '选择默认值'}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {multiSelectChoices.map((choice) => (
-                    <SelectItem
-                      key={choice}
-                      value={JSON.stringify(
-                        multiSelectDefault.includes(choice)
-                          ? multiSelectDefault.filter((c) => c !== choice)
-                          : [...multiSelectDefault, choice]
-                      )}
+              <div className='col-span-3'>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant='outline'
+                      role='combobox'
+                      className='w-full justify-between'
                     >
-                      <div className='flex items-center'>
-                        <Checkbox
-                          checked={multiSelectDefault.includes(choice)}
-                          onCheckedChange={() => {}} // 阻止复选框的默认行为
-                          className='mr-2'
-                        />
-                        {choice}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                      {multiSelectDefault.length > 0
+                        ? multiSelectDefault.join(', ')
+                        : '选择默认值'}
+                      <ChevronsUpDown className='ml-2 h-4 w-4 shrink-0 opacity-50' />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className='w-full p-0'>
+                    <Command>
+                      <CommandInput
+                        placeholder='搜索选项...'
+                        disabled={multiSelectChoices.length === 0}
+                      />
+                      <CommandList>
+                        <CommandEmpty>没有找到选项</CommandEmpty>
+                        <CommandGroup>
+                          {multiSelectChoices.map((choice) => (
+                            <CommandItem
+                              key={choice}
+                              value={choice}
+                              onSelect={() => {
+                                // 切换选中状态
+                                const newDefaults = multiSelectDefault.includes(
+                                  choice
+                                )
+                                  ? multiSelectDefault.filter(
+                                      (c) => c !== choice
+                                    )
+                                  : [...multiSelectDefault, choice];
+                                setMultiSelectDefault(newDefaults);
+                              }}
+                            >
+                              <Check
+                                className={cn(
+                                  'mr-2 h-4 w-4',
+                                  multiSelectDefault.includes(choice)
+                                    ? 'opacity-100'
+                                    : 'opacity-0'
+                                )}
+                              />
+                              {choice}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              </div>
             </div>
             <div className='grid grid-cols-4 items-center gap-4'>
               <Label htmlFor='multi-select-sep' className='text-right'>
@@ -379,6 +436,7 @@ const EditFilterModal = ({
             </div>
           </>
         );
+      // 日期选择
       case 'date_picker':
         return (
           <>
@@ -410,6 +468,22 @@ const EditFilterModal = ({
             </div>
           </>
         );
+      // 单值输入
+      case 'single_input':
+        return (
+          <div className='grid grid-cols-4 items-center gap-4'>
+            <Label htmlFor='single-input-default' className='text-right'>
+              默认值
+            </Label>
+            <Input
+              id='single-input-default'
+              value={singleInputDefault}
+              onChange={(e) => setSingleInputDefault(e.target.value)}
+              className='col-span-3'
+            />
+          </div>
+        );
+      // 多值输入
       case 'multi_input':
         return (
           <>

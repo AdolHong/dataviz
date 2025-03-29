@@ -9,9 +9,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Check, ChevronsUpDown, Plus, Pencil, Trash2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import {
   Command,
   CommandEmpty,
@@ -32,9 +30,13 @@ import type {
   SinglePlainParam,
   MultiplePlainParam,
   CascaderParam,
-  CascaderLevel,
 } from '@/types';
 import EditArtifactParamModal from './EditArtifactParamModal';
+
+// 引入 AceEditor 相关依赖
+import AceEditor from 'react-ace';
+import 'ace-builds/src-noconflict/theme-xcode';
+import 'ace-builds/src-noconflict/mode-python';
 
 interface EditArtifactModalProps {
   isOpen: boolean;
@@ -265,12 +267,11 @@ const EditArtifactModal = ({
                             }}
                           >
                             <Check
-                              className={cn(
-                                'mr-2 h-4 w-4',
+                              className={`mr-2 h-4 w-4 ${
                                 executor_engine === engine
                                   ? 'opacity-100'
                                   : 'opacity-0'
-                              )}
+                              }`}
                             />
                             {engine}
                           </CommandItem>
@@ -325,12 +326,7 @@ const EditArtifactModal = ({
                             }}
                           >
                             <Check
-                              className={cn(
-                                'mr-2 h-4 w-4',
-                                dependencies.includes(alias)
-                                  ? 'opacity-100'
-                                  : 'opacity-0'
-                              )}
+                              className={`mr-2 h-4 w-4 ${dependencies.includes(alias) ? 'opacity-100' : 'opacity-0'}`}
                             />
                             {alias}
                           </CommandItem>
@@ -468,13 +464,24 @@ const EditArtifactModal = ({
             <Label htmlFor='code' className='text-right pt-2'>
               代码*
             </Label>
-            <Textarea
-              id='code'
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              className='col-span-3 min-h-[200px]'
-              placeholder='输入图表代码'
-            />
+            <div className='col-span-3'>
+              <AceEditor
+                mode='python'
+                theme='xcode'
+                name='artifactCodeEditor'
+                height='200px'
+                width='100%'
+                onChange={(value) => setCode(value)}
+                value={code}
+                setOptions={{
+                  enableBasicAutocompletion: true,
+                  enableLiveAutocompletion: true,
+                  enableSnippets: true,
+                  showLineNumbers: true,
+                  tabSize: 2,
+                }}
+              />
+            </div>
           </div>
         </div>
 

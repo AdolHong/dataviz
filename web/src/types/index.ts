@@ -1,8 +1,8 @@
 export type { ReportResponse } from './api/reportResponse';
 
-export type { ArtifactParam, Artifact } from './models/artifact';
+export * from './models/artifact';
 
-export type { DataSource } from './models/dataSource';
+export * from './models/datasource';
 
 export type { Parameter } from './models/parameter';
 

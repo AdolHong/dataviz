@@ -34,20 +34,22 @@ import {
 } from '@/components/ui/select';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { toast } from 'sonner';
-import type { 
-  SinglePlainParam, 
-  MultiplePlainParam, 
-  CascaderParam, 
-  CascaderLevel, 
-  DataSource 
+import type {
+  SinglePlainParam,
+  MultiplePlainParam,
+  CascaderParam,
+  CascaderLevel,
+  DataSource,
 } from '@/types';
 
 // 定义参数编辑模态框属性
 interface EditArtifactParamModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (param: SinglePlainParam | MultiplePlainParam | CascaderParam) => void;
-  paramData: { param: any, type: 'plain' | 'cascader', id: string } | null; // null表示新增
+  onSave: (
+    param: SinglePlainParam | MultiplePlainParam | CascaderParam
+  ) => void;
+  paramData: { param: any; type: 'plain' | 'cascader'; id: string } | null; // null表示新增
   dataSources: DataSource[];
 }
 
@@ -64,34 +66,40 @@ const EditArtifactParamModal = ({
 }: EditArtifactParamModalProps) => {
   // 参数类型选择
   const [paramType, setParamType] = useState<'plain' | 'cascader'>('plain');
-  
+
   // Plain 参数的状态
   const [plainId, setPlainId] = useState('');
   const [plainName, setPlainName] = useState('');
   const [plainAlias, setPlainAlias] = useState('');
   const [plainDescription, setPlainDescription] = useState('');
-  const [plainValueType, setPlainValueType] = useState<'string' | 'double' | 'boolean' | 'int'>('string');
-  const [plainParamType, setPlainParamType] = useState<'single' | 'multiple'>('single');
+  const [plainValueType, setPlainValueType] = useState<
+    'string' | 'double' | 'boolean' | 'int'
+  >('string');
+  const [plainParamType, setPlainParamType] = useState<'single' | 'multiple'>(
+    'single'
+  );
   const [plainDefault, setPlainDefault] = useState<string>('');
-  const [plainDefaultMultiple, setPlainDefaultMultiple] = useState<string[]>([]);
+  const [plainDefaultMultiple, setPlainDefaultMultiple] = useState<string[]>(
+    []
+  );
   const [plainChoices, setPlainChoices] = useState<string[]>([]);
   const [plainChoicesString, setPlainChoicesString] = useState('');
-  
+
   // Cascader 参数的状态
   const [cascaderDfAlias, setCascaderDfAlias] = useState('');
   const [cascaderLevels, setCascaderLevels] = useState<CascaderLevel[]>([]);
-  
+
   // UI状态
   const [openDataSourceAlias, setOpenDataSourceAlias] = useState(false);
-  
+
   // 初始化表单
   useEffect(() => {
     if (paramData) {
       // 编辑模式
       setParamType(paramData.type);
-      
+
       if (paramData.type === 'plain') {
-        const param = paramData.param as (SinglePlainParam | MultiplePlainParam);
+        const param = paramData.param as SinglePlainParam | MultiplePlainParam;
         setPlainId(param.id);
         setPlainName(param.name);
         setPlainAlias(param.alias || '');
@@ -100,7 +108,7 @@ const EditArtifactParamModal = ({
         setPlainParamType(param.type);
         setPlainChoices(param.choices);
         setPlainChoicesString(param.choices.join(','));
-        
+
         if (param.type === 'single') {
           setPlainDefault(param.default);
         } else {
@@ -153,7 +161,9 @@ const EditArtifactParamModal = ({
 
     // 过滤掉不在选项列表中的默认值
     if (plainDefaultMultiple.length > 0) {
-      setPlainDefaultMultiple(plainDefaultMultiple.filter((v) => newChoices.includes(v)));
+      setPlainDefaultMultiple(
+        plainDefaultMultiple.filter((v) => newChoices.includes(v))
+      );
     }
   };
 
@@ -161,12 +171,16 @@ const EditArtifactParamModal = ({
   const handleAddCascaderLevel = () => {
     setCascaderLevels([
       ...cascaderLevels,
-      { dfColumn: '', name: `级别 ${cascaderLevels.length}` }
+      { dfColumn: '', name: `级别 ${cascaderLevels.length}` },
     ]);
   };
 
   // 更新级联级别
-  const handleUpdateCascaderLevel = (index: number, field: keyof CascaderLevel, value: string) => {
+  const handleUpdateCascaderLevel = (
+    index: number,
+    field: keyof CascaderLevel,
+    value: string
+  ) => {
     const newLevels = [...cascaderLevels];
     newLevels[index] = { ...newLevels[index], [field]: value };
     setCascaderLevels(newLevels);
@@ -186,12 +200,12 @@ const EditArtifactParamModal = ({
           toast.error('参数名称不能为空');
           return;
         }
-        
+
         if (plainChoices.length === 0) {
           toast.error('请至少添加一个选项');
           return;
         }
-        
+
         if (plainParamType === 'single') {
           // 构建单选参数
           const singleParam: SinglePlainParam = {
@@ -214,7 +228,10 @@ const EditArtifactParamModal = ({
             alias: plainAlias || undefined,
             description: plainDescription || undefined,
             valueType: plainValueType,
-            default: plainDefaultMultiple.length > 0 ? plainDefaultMultiple : [plainChoices[0]],
+            default:
+              plainDefaultMultiple.length > 0
+                ? plainDefaultMultiple
+                : [plainChoices[0]],
             choices: plainChoices,
           };
           onSave(multipleParam);
@@ -225,25 +242,25 @@ const EditArtifactParamModal = ({
           toast.error('数据源别名不能为空');
           return;
         }
-        
+
         if (cascaderLevels.length === 0) {
           toast.error('请至少添加一个级联级别');
           return;
         }
-        
+
         for (let i = 0; i < cascaderLevels.length; i++) {
           if (!cascaderLevels[i].dfColumn || !cascaderLevels[i].name) {
             toast.error(`级别 ${i} 的数据列名和名称不能为空`);
             return;
           }
         }
-        
+
         // 构建级联参数
         const cascaderParam: CascaderParam = {
           dfAlias: cascaderDfAlias,
-          levels: cascaderLevels
+          levels: cascaderLevels,
         };
-        
+
         onSave(cascaderParam);
       }
     } catch (error) {
@@ -265,7 +282,9 @@ const EditArtifactParamModal = ({
             <Label className='text-right'>参数类型*</Label>
             <RadioGroup
               value={paramType}
-              onValueChange={(value) => setParamType(value as 'plain' | 'cascader')}
+              onValueChange={(value) =>
+                setParamType(value as 'plain' | 'cascader')
+              }
               className='col-span-3 flex'
             >
               <div className='flex items-center space-x-2 mr-4'>
@@ -346,7 +365,9 @@ const EditArtifactParamModal = ({
                 <Label className='text-right'>参数值类型*</Label>
                 <RadioGroup
                   value={plainParamType}
-                  onValueChange={(value) => setPlainParamType(value as 'single' | 'multiple')}
+                  onValueChange={(value) =>
+                    setPlainParamType(value as 'single' | 'multiple')
+                  }
                   className='col-span-3 flex'
                 >
                   <div className='flex items-center space-x-2 mr-4'>
@@ -412,7 +433,10 @@ const EditArtifactParamModal = ({
                           checked={plainDefaultMultiple.includes(choice)}
                           onChange={(e) => {
                             if (e.target.checked) {
-                              setPlainDefaultMultiple([...plainDefaultMultiple, choice]);
+                              setPlainDefaultMultiple([
+                                ...plainDefaultMultiple,
+                                choice,
+                              ]);
                             } else {
                               setPlainDefaultMultiple(
                                 plainDefaultMultiple.filter((v) => v !== choice)
@@ -492,4 +516,126 @@ const EditArtifactParamModal = ({
                 </div>
               </div>
 
-              <div
+              <div className='grid grid-cols-4 items-start gap-4 mt-2'>
+                <Label className='text-right pt-2'>级联层级列表*</Label>
+                <div className='col-span-3 space-y-3'>
+                  {cascaderLevels.length > 0 ? (
+                    cascaderLevels.map((level, index) => (
+                      <div
+                        key={index}
+                        className='border rounded-md p-3 relative group'
+                      >
+                        <h4 className='text-sm font-medium mb-2'>
+                          级别 {index + 1}
+                        </h4>
+
+                        <div className='grid gap-2'>
+                          <div className='grid grid-cols-4 items-center gap-2'>
+                            <Label
+                              htmlFor={`level-${index}-name`}
+                              className='text-right text-xs'
+                            >
+                              名称*
+                            </Label>
+                            <Input
+                              id={`level-${index}-name`}
+                              value={level.name}
+                              onChange={(e) =>
+                                handleUpdateCascaderLevel(
+                                  index,
+                                  'name',
+                                  e.target.value
+                                )
+                              }
+                              className='col-span-3'
+                              placeholder='给这个级别起一个名称'
+                            />
+                          </div>
+
+                          <div className='grid grid-cols-4 items-center gap-2'>
+                            <Label
+                              htmlFor={`level-${index}-column`}
+                              className='text-right text-xs'
+                            >
+                              数据列名*
+                            </Label>
+                            <Input
+                              id={`level-${index}-column`}
+                              value={level.dfColumn}
+                              onChange={(e) =>
+                                handleUpdateCascaderLevel(
+                                  index,
+                                  'dfColumn',
+                                  e.target.value
+                                )
+                              }
+                              className='col-span-3'
+                              placeholder='数据源中的列名'
+                            />
+                          </div>
+
+                          <div className='grid grid-cols-4 items-center gap-2'>
+                            <Label
+                              htmlFor={`level-${index}-description`}
+                              className='text-right text-xs'
+                            >
+                              描述
+                            </Label>
+                            <Input
+                              id={`level-${index}-description`}
+                              value={level.description || ''}
+                              onChange={(e) =>
+                                handleUpdateCascaderLevel(
+                                  index,
+                                  'description',
+                                  e.target.value
+                                )
+                              }
+                              className='col-span-3'
+                              placeholder='可选描述'
+                            />
+                          </div>
+                        </div>
+
+                        <Button
+                          variant='ghost'
+                          size='icon'
+                          className='absolute top-2 right-2 h-6 w-6 text-destructive opacity-0 group-hover:opacity-100 transition-opacity'
+                          onClick={() => handleDeleteCascaderLevel(index)}
+                        >
+                          <Trash2 className='h-4 w-4' />
+                        </Button>
+                      </div>
+                    ))
+                  ) : (
+                    <div className='text-center text-gray-500 p-4 border-2 border-dashed rounded-lg'>
+                      暂无级联层级，请添加第一个层级
+                    </div>
+                  )}
+
+                  <Button
+                    variant='outline'
+                    className='w-full border-dashed'
+                    onClick={handleAddCascaderLevel}
+                  >
+                    <Plus className='h-4 w-4 mr-2' />
+                    添加级联层级
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant='outline' onClick={onClose}>
+            取消
+          </Button>
+          <Button onClick={handleSaveParam}>保存</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+export default EditArtifactParamModal;

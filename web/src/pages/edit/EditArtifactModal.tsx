@@ -345,7 +345,7 @@ const EditArtifactModal = ({
 
           <div className='grid grid-cols-4 items-start gap-4'>
             <Label className='text-right pt-2'>参数列表</Label>
-            <div className='col-span-3 space-y-2'>
+            <div className='col-span-3 pt-1 space-y-2'>
               {/* Plain 参数列表 */}
               {plainParams.length > 0 && (
                 <div className='space-y-2'>
@@ -403,13 +403,11 @@ const EditArtifactModal = ({
                       className='border-2 rounded-lg p-3 text-sm relative group shadow-sm'
                     >
                       <div className='font-medium'>数据源: {param.dfAlias}</div>
-                      <div className='text-xs text-gray-500'>
-                        级联层级数: {param.levels.length}
-                      </div>
                       <ul className='text-xs mt-1'>
                         {param.levels.map((level, levelIndex) => (
                           <li key={levelIndex}>
-                            级别 {levelIndex}: {level.name} ({level.dfColumn})
+                            level {levelIndex + 1}: {level.dfColumn}{' '}
+                            {level.name && `(别名: ${level.name})`}
                           </li>
                         ))}
                       </ul>

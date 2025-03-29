@@ -51,20 +51,49 @@ const EditFilterModal = ({
   const [paramType, setParamType] =
     useState<Parameter['paramConfig']['type']>('single_input'); // 默认类型
 
-  // 各种类型参数的配置状态 (根据需要添加/调整)
+  // --- 各类型参数配置状态 ---
+  // single_select
   const [singleSelectChoices, setSingleSelectChoices] = useState<string[]>([]);
   const [singleSelectDefault, setSingleSelectDefault] = useState('');
+  // single_input
   const [singleInputDefault, setSingleInputDefault] = useState('');
-  // ... 其他类型参数的状态 ...
+  // multi_select
+  const [multiSelectChoices, setMultiSelectChoices] = useState<string[]>([]);
+  const [multiSelectDefault, setMultiSelectDefault] = useState<string[]>([]);
+  const [multiSelectSep, setMultiSelectSep] = useState(',');
+  const [multiSelectWrapper, setMultiSelectWrapper] = useState("'");
+  // date_picker
+  const [datePickerFormat, setDatePickerFormat] = useState('YYYY-MM-DD');
+  const [datePickerDefault, setDatePickerDefault] = useState('');
+  // multi_input
+  const [multiInputDefault, setMultiInputDefault] = useState<string[]>([]);
+  const [multiInputSep, setMultiInputSep] = useState(',');
+  const [multiInputWrapper, setMultiInputWrapper] = useState("'");
 
   // --- 效果钩子 ---
-  // 当 parameter prop 变化时 (打开模态框编辑现有参数)，填充表单
   useEffect(() => {
+    // 重置所有特定配置状态的函数
+    const resetConfigStates = () => {
+      setSingleSelectChoices([]);
+      setSingleSelectDefault('');
+      setSingleInputDefault('');
+      setMultiSelectChoices([]);
+      setMultiSelectDefault([]);
+      setMultiSelectSep(',');
+      setMultiSelectWrapper("'");
+      setDatePickerFormat('YYYY-MM-DD');
+      setDatePickerDefault('');
+      setMultiInputDefault([]);
+      setMultiInputSep(',');
+      setMultiInputWrapper("'");
+    };
+
     if (parameter) {
       setName(parameter.name);
       setAlias(parameter.alias || '');
       setDescription(parameter.description || '');
       setParamType(parameter.paramConfig.type);
+      resetConfigStates(); // 先重置所有特定配置状态
 
       // 根据类型填充特定配置
       switch (parameter.paramConfig.type) {
@@ -75,81 +104,112 @@ const EditFilterModal = ({
         case 'single_input':
           setSingleInputDefault(parameter.paramConfig.default);
           break;
-        // ... 处理其他类型 ...
+        case 'multi_select':
+          setMultiSelectChoices(parameter.paramConfig.choices);
+          setMultiSelectDefault(parameter.paramConfig.default);
+          setMultiSelectSep(parameter.paramConfig.sep);
+          setMultiSelectWrapper(parameter.paramConfig.wrapper);
+          break;
+        case 'date_picker':
+          setDatePickerFormat(parameter.paramConfig.dateFormat);
+          setDatePickerDefault(parameter.paramConfig.default);
+          break;
+        case 'multi_input':
+          setMultiInputDefault(parameter.paramConfig.default);
+          setMultiInputSep(parameter.paramConfig.sep);
+          setMultiInputWrapper(parameter.paramConfig.wrapper);
+          break;
         default:
-          // 处理未知类型或重置为默认值
-          setSingleSelectChoices([]);
-          setSingleSelectDefault('');
-          setSingleInputDefault('');
+          // 在类型不匹配时，已由 resetConfigStates 处理
           break;
       }
     } else {
-      // 新增模式，重置表单
+      // 新增模式，重置所有状态
       setName('');
       setAlias('');
       setDescription('');
       setParamType('single_input'); // 重置为默认类型
-      setSingleSelectChoices([]);
-      setSingleSelectDefault('');
-      setSingleInputDefault('');
-      // ... 重置其他类型状态 ...
+      resetConfigStates(); // 重置所有特定配置状态
     }
-  }, [parameter, isOpen]); // 依赖 isOpen 确保每次打开模态框都重新初始化
+  }, [parameter, isOpen]);
 
   // --- 事件处理 ---
   const handleSaveClick = () => {
-    // 构建 paramConfig 对象
     let paramConfig: Parameter['paramConfig'];
-    switch (paramType) {
-      case 'single_select':
-        paramConfig = {
-          type: 'single_select',
-          choices: singleSelectChoices,
-          default: singleSelectDefault,
-        };
-        break;
-      case 'single_input':
-        paramConfig = { type: 'single_input', default: singleInputDefault };
-        break;
-      // ... 构建其他类型的 paramConfig ...
-      case 'multi_select':
-        // 示例，需要添加对应的状态和输入字段
-        paramConfig = {
-          type: 'multi_select',
-          choices: [],
-          default: [],
-          sep: ',',
-          wrapper: "'",
-        };
-        break;
-      case 'date_picker':
-        // 示例，需要添加对应的状态和输入字段
-        paramConfig = {
-          type: 'date_picker',
-          dateFormat: 'YYYY-MM-DD',
-          default: '',
-        };
-        break;
-      case 'multi_input':
-        // 示例，需要添加对应的状态和输入字段
-        paramConfig = {
-          type: 'multi_input',
-          default: [],
-          sep: ',',
-          wrapper: "'",
-        };
-        break;
-      default:
-        // 不应该发生，但作为保险
-        console.error('Unknown parameter type:', paramType);
-        return;
+    try {
+      switch (paramType) {
+        case 'single_select':
+          paramConfig = {
+            type: 'single_select',
+            choices: singleSelectChoices,
+            default: singleSelectDefault,
+          };
+          // 校验：默认值必须在选项中
+          if (
+            singleSelectDefault &&
+            !singleSelectChoices.includes(singleSelectDefault)
+          ) {
+            console.warn(
+              'Single select default value not in choices. Resetting default.'
+            );
+            paramConfig.default = singleSelectChoices[0] || ''; // or handle as error
+          }
+          break;
+        case 'single_input':
+          paramConfig = { type: 'single_input', default: singleInputDefault };
+          break;
+        case 'multi_select':
+          paramConfig = {
+            type: 'multi_select',
+            choices: multiSelectChoices,
+            default: multiSelectDefault,
+            sep: multiSelectSep,
+            wrapper: multiSelectWrapper,
+          };
+          // 校验：默认值数组中的每个值都必须在选项中
+          const validMultiDefaults = multiSelectDefault.filter((d) =>
+            multiSelectChoices.includes(d)
+          );
+          if (validMultiDefaults.length !== multiSelectDefault.length) {
+            console.warn(
+              'Some multi select default values were not in choices. Keeping only valid ones.'
+            );
+            paramConfig.default = validMultiDefaults; // or handle as error
+          }
+          break;
+        case 'date_picker':
+          paramConfig = {
+            type: 'date_picker',
+            dateFormat: datePickerFormat,
+            default: datePickerDefault,
+          };
+          // 可以添加日期格式校验
+          break;
+        case 'multi_input':
+          paramConfig = {
+            type: 'multi_input',
+            default: multiInputDefault,
+            sep: multiInputSep,
+            wrapper: multiInputWrapper,
+          };
+          break;
+        default:
+          // 利用 never 类型检查确保所有 case 都已处理 (编译时检查)
+          const exhaustiveCheck: never = paramType;
+          console.error('Unhandled parameter type:', exhaustiveCheck);
+          return; // 或者抛出错误
+      }
+    } catch (error) {
+      console.error('Error constructing paramConfig:', error);
+      // 可能需要向用户显示错误消息
+      return;
     }
 
     const savedParameter: Parameter = {
-      id: parameter?.id || generateId(), // 如果是编辑则用旧 ID，新增则生成新 ID
+      id: parameter?.id || generateId(),
       name,
-      alias: alias || undefined, // 如果为空则设为 undefined
-      description: description || undefined, // 如果为空则设为 undefined
+      alias: alias || undefined,
+      description: description || undefined,
       paramConfig,
     };
     onSave(savedParameter);
@@ -161,8 +221,10 @@ const EditFilterModal = ({
       case 'single_select':
         return (
           <>
-            <div className='grid gap-2'>
-              <Label htmlFor='single-select-choices'>选项 (逗号分隔)</Label>
+            <div className='grid grid-cols-4 items-center gap-4'>
+              <Label htmlFor='single-select-choices' className='text-right'>
+                选项
+              </Label>
               <Input
                 id='single-select-choices'
                 value={singleSelectChoices.join(',')}
@@ -174,16 +236,23 @@ const EditFilterModal = ({
                       .filter(Boolean)
                   )
                 }
-                placeholder='选项1,选项2,选项3'
+                className='col-span-3'
+                placeholder='逗号分隔, e.g. 选项1,选项2'
               />
             </div>
-            <div className='grid gap-2'>
-              <Label htmlFor='single-select-default'>默认值</Label>
+            <div className='grid grid-cols-4 items-center gap-4'>
+              <Label htmlFor='single-select-default' className='text-right'>
+                默认值
+              </Label>
               <Select
                 value={singleSelectDefault}
                 onValueChange={setSingleSelectDefault}
+                disabled={singleSelectChoices.length === 0}
               >
-                <SelectTrigger id='single-select-default'>
+                <SelectTrigger
+                  id='single-select-default'
+                  className='col-span-3'
+                >
                   <SelectValue placeholder='选择默认值' />
                 </SelectTrigger>
                 <SelectContent>
@@ -199,26 +268,173 @@ const EditFilterModal = ({
         );
       case 'single_input':
         return (
-          <div className='grid gap-2'>
-            <Label htmlFor='single-input-default'>默认值</Label>
+          <div className='grid grid-cols-4 items-center gap-4'>
+            <Label htmlFor='single-input-default' className='text-right'>
+              默认值
+            </Label>
             <Input
               id='single-input-default'
               value={singleInputDefault}
               onChange={(e) => setSingleInputDefault(e.target.value)}
+              className='col-span-3'
             />
           </div>
         );
-      // ... 添加其他类型的字段渲染 ...
       case 'multi_select':
+        return (
+          <>
+            <div className='grid grid-cols-4 items-center gap-4'>
+              <Label htmlFor='multi-select-choices' className='text-right'>
+                选项
+              </Label>
+              <Input
+                id='multi-select-choices'
+                value={multiSelectChoices.join(',')}
+                onChange={(e) =>
+                  setMultiSelectChoices(
+                    e.target.value
+                      .split(',')
+                      .map((s) => s.trim())
+                      .filter(Boolean)
+                  )
+                }
+                className='col-span-3'
+                placeholder='逗号分隔, e.g. 选项A,选项B'
+              />
+            </div>
+            <div className='grid grid-cols-4 items-center gap-4'>
+              <Label htmlFor='multi-select-default' className='text-right'>
+                默认值
+              </Label>
+              {/* TODO: Implement a proper multi-select component */}
+              <Input
+                id='multi-select-default'
+                value={multiSelectDefault.join(',')}
+                onChange={(e) =>
+                  setMultiSelectDefault(
+                    e.target.value
+                      .split(',')
+                      .map((s) => s.trim())
+                      .filter(Boolean)
+                  )
+                }
+                className='col-span-3'
+                placeholder='逗号分隔默认值'
+                disabled={multiSelectChoices.length === 0}
+              />
+              {/* <p className="col-span-3 text-sm text-muted-foreground">多选默认值待实现</p> */}
+            </div>
+            <div className='grid grid-cols-4 items-center gap-4'>
+              <Label htmlFor='multi-select-sep' className='text-right'>
+                分隔符
+              </Label>
+              <Input
+                id='multi-select-sep'
+                value={multiSelectSep}
+                onChange={(e) => setMultiSelectSep(e.target.value)}
+                className='col-span-3'
+              />
+            </div>
+            <div className='grid grid-cols-4 items-center gap-4'>
+              <Label htmlFor='multi-select-wrapper' className='text-right'>
+                包装符
+              </Label>
+              <Input
+                id='multi-select-wrapper'
+                value={multiSelectWrapper}
+                onChange={(e) => setMultiSelectWrapper(e.target.value)}
+                className='col-span-3'
+                placeholder='e.g. &apos; or "'
+              />
+            </div>
+          </>
+        );
       case 'date_picker':
+        return (
+          <>
+            <div className='grid grid-cols-4 items-center gap-4'>
+              <Label htmlFor='date-picker-format' className='text-right'>
+                日期格式
+              </Label>
+              <Input
+                id='date-picker-format'
+                value={datePickerFormat}
+                onChange={(e) => setDatePickerFormat(e.target.value)}
+                className='col-span-3'
+                placeholder='e.g. YYYY-MM-DD'
+              />
+            </div>
+            <div className='grid grid-cols-4 items-center gap-4'>
+              <Label htmlFor='date-picker-default' className='text-right'>
+                默认日期
+              </Label>
+              {/* TODO: Implement a proper date picker component */}
+              <Input
+                id='date-picker-default'
+                type='text' // Should ideally be a date picker input
+                value={datePickerDefault}
+                onChange={(e) => setDatePickerDefault(e.target.value)}
+                className='col-span-3'
+                placeholder='默认日期字符串'
+              />
+            </div>
+          </>
+        );
       case 'multi_input':
         return (
-          <p className='text-sm text-muted-foreground'>
-            类型 "{paramType}" 的配置界面待实现。
-          </p>
+          <>
+            <div className='grid grid-cols-4 items-center gap-4'>
+              <Label htmlFor='multi-input-default' className='text-right'>
+                默认值
+              </Label>
+              <Input
+                id='multi-input-default'
+                value={multiInputDefault.join(',')}
+                onChange={(e) =>
+                  setMultiInputDefault(
+                    e.target.value
+                      .split(',')
+                      .map((s) => s.trim())
+                      .filter(Boolean)
+                  )
+                }
+                className='col-span-3'
+                placeholder='逗号分隔默认值'
+              />
+            </div>
+            <div className='grid grid-cols-4 items-center gap-4'>
+              <Label htmlFor='multi-input-sep' className='text-right'>
+                分隔符
+              </Label>
+              <Input
+                id='multi-input-sep'
+                value={multiInputSep}
+                onChange={(e) => setMultiInputSep(e.target.value)}
+                className='col-span-3'
+              />
+            </div>
+            <div className='grid grid-cols-4 items-center gap-4'>
+              <Label htmlFor='multi-input-wrapper' className='text-right'>
+                包装符
+              </Label>
+              <Input
+                id='multi-input-wrapper'
+                value={multiInputWrapper}
+                onChange={(e) => setMultiInputWrapper(e.target.value)}
+                className='col-span-3'
+                placeholder='e.g. &apos; or "'
+              />
+            </div>
+          </>
         );
       default:
-        return null;
+        // 利用 never 类型检查确保所有 case 都已处理 (编译时检查)
+        const exhaustiveCheck: never = paramType;
+        return (
+          <p className='text-sm text-destructive'>
+            未知参数类型: {exhaustiveCheck}
+          </p>
+        );
     }
   };
 

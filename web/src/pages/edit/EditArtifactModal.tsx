@@ -32,6 +32,7 @@ import type {
   CascaderParam,
 } from '@/types';
 import EditArtifactParamModal from './EditArtifactParamModal';
+import { Combobox } from '@/components/combobox';
 
 // 引入 AceEditor 相关依赖
 import AceEditor from 'react-ace';
@@ -73,7 +74,6 @@ const EditArtifactModal = ({
 
   // UI 状态控制
   const [openEngine, setOpenEngine] = useState(false);
-  const [openDependencies, setOpenDependencies] = useState(false);
   const [isParamModalOpen, setIsParamModalOpen] = useState(false);
   const [editingParam, setEditingParam] = useState<{
     param: SinglePlainParam | MultiplePlainParam | CascaderParam;
@@ -285,57 +285,25 @@ const EditArtifactModal = ({
           </div>
 
           <div className='grid grid-cols-4 items-start gap-4'>
-            <Label htmlFor='dependencies' className='text-right pt-2'>
-              数据源依赖*
-            </Label>
+            <Label className='text-right pt-2'>数据源依赖*</Label>
             <div className='col-span-3'>
-              <Popover
-                open={openDependencies}
-                onOpenChange={setOpenDependencies}
-              >
-                <PopoverTrigger asChild>
-                  <Button
-                    variant='outline'
-                    role='combobox'
-                    aria-expanded={openDependencies}
-                    className='w-full justify-between'
-                  >
-                    {dependencies.length > 0
-                      ? dependencies.join(', ')
-                      : '选择数据源依赖'}
-                    <ChevronsUpDown className='ml-2 h-4 w-4 shrink-0 opacity-50' />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className='w-full p-0'>
-                  <Command>
-                    <CommandInput placeholder='搜索数据源...' />
-                    <CommandList>
-                      <CommandEmpty>没有找到匹配的数据源</CommandEmpty>
-                      <CommandGroup>
-                        {dataSourceOptions.map((alias) => (
-                          <CommandItem
-                            key={alias}
-                            value={alias}
-                            onSelect={() => {
-                              setDependencies((prev) =>
-                                prev.includes(alias)
-                                  ? prev.filter((a) => a !== alias)
-                                  : [...prev, alias]
-                              );
-                              // 多选不关闭弹窗
-                            }}
-                          >
-                            <Check
-                              className={`mr-2 h-4 w-4 ${dependencies.includes(alias) ? 'opacity-100' : 'opacity-0'}`}
-                            />
-                            {alias}
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
+              <Combobox
+                options={dataSourceOptions}
+                value={dependencies}
+                onValueChange={(value: string | string[]) => {
+                  if (Array.isArray(value)) {
+                    setDependencies(value);
+                  } else {
+                    setDependencies((prev) =>
+                      prev.includes(value)
+                        ? prev.filter((a) => a !== value)
+                        : [...prev, value]
+                    );
+                  }
+                }}
+                mode='multiple' // 允许多选
+                placeholder='选择数据源依赖'
+              />
             </div>
           </div>
 

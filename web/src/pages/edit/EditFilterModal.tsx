@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea'; // 假设需要 Textarea
+import { Checkbox } from '@/components/ui/checkbox'; // 添加 Checkbox 组件导入
 import type {
   Parameter,
   SingleSelectParamConfig,
@@ -302,27 +303,40 @@ const EditFilterModal = ({
                 placeholder='逗号分隔, e.g. 选项A,选项B'
               />
             </div>
-            <div className='grid grid-cols-4 items-center gap-4'>
-              <Label htmlFor='multi-select-default' className='text-right'>
-                默认值
-              </Label>
-              {/* TODO: Implement a proper multi-select component */}
-              <Input
-                id='multi-select-default'
-                value={multiSelectDefault.join(',')}
-                onChange={(e) =>
-                  setMultiSelectDefault(
-                    e.target.value
-                      .split(',')
-                      .map((s) => s.trim())
-                      .filter(Boolean)
-                  )
-                }
-                className='col-span-3'
-                placeholder='逗号分隔默认值'
-                disabled={multiSelectChoices.length === 0}
-              />
-              {/* <p className="col-span-3 text-sm text-muted-foreground">多选默认值待实现</p> */}
+            <div className='grid grid-cols-4 items-start gap-4'>
+              <Label className='text-right pt-2'>默认值</Label>
+              <div className='col-span-3 space-y-2'>
+                {multiSelectChoices.length > 0 ? (
+                  multiSelectChoices.map((choice) => (
+                    <div key={choice} className='flex items-center space-x-2'>
+                      <Checkbox
+                        id={`choice-${choice}`}
+                        checked={multiSelectDefault.includes(choice)}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setMultiSelectDefault([
+                              ...multiSelectDefault,
+                              choice,
+                            ]);
+                          } else {
+                            setMultiSelectDefault(
+                              multiSelectDefault.filter((c) => c !== choice)
+                            );
+                          }
+                        }}
+                      />
+                      <Label
+                        htmlFor={`choice-${choice}`}
+                        className='text-sm font-normal'
+                      >
+                        {choice}
+                      </Label>
+                    </div>
+                  ))
+                ) : (
+                  <p className='text-sm text-muted-foreground'>请先添加选项</p>
+                )}
+              </div>
             </div>
             <div className='grid grid-cols-4 items-center gap-4'>
               <Label htmlFor='multi-select-sep' className='text-right'>

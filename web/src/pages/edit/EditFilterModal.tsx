@@ -17,7 +17,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea'; // 假设需要 Textarea
 import { Checkbox } from '@/components/ui/checkbox'; // 添加 Checkbox 组件导入
 import type {
   Parameter,
@@ -27,6 +26,7 @@ import type {
   MultiInputParamConfig,
   SingleInputParamConfig,
 } from '@/types/models/parameter';
+import { toast } from 'sonner';
 
 interface EditFilterModalProps {
   isOpen: boolean;
@@ -54,11 +54,15 @@ const EditFilterModal = ({
 
   // --- 各类型参数配置状态 ---
   // single_select
+  const [singleSelectChoicesJoined, setSingleSelectChoicesJoined] =
+    useState<string>('');
   const [singleSelectChoices, setSingleSelectChoices] = useState<string[]>([]);
   const [singleSelectDefault, setSingleSelectDefault] = useState('');
   // single_input
   const [singleInputDefault, setSingleInputDefault] = useState('');
   // multi_select
+  const [multiSelectChoicesJoined, setMultiSelectChoicesJoined] =
+    useState<string>('');
   const [multiSelectChoices, setMultiSelectChoices] = useState<string[]>([]);
   const [multiSelectDefault, setMultiSelectDefault] = useState<string[]>([]);
   const [multiSelectSep, setMultiSelectSep] = useState(',');
@@ -75,6 +79,8 @@ const EditFilterModal = ({
   useEffect(() => {
     // 重置所有特定配置状态的函数
     const resetConfigStates = () => {
+      setSingleSelectChoicesJoined('');
+      setMultiSelectChoicesJoined('');
       setSingleSelectChoices([]);
       setSingleSelectDefault('');
       setSingleInputDefault('');
@@ -99,28 +105,31 @@ const EditFilterModal = ({
       // 根据类型填充特定配置
       switch (parameter.paramConfig.type) {
         case 'single_select':
+          setSingleSelectChoicesJoined(parameter.paramConfig.choices.join(','));
           setSingleSelectChoices(parameter.paramConfig.choices);
           setSingleSelectDefault(parameter.paramConfig.default);
           break;
-        case 'single_input':
-          setSingleInputDefault(parameter.paramConfig.default);
-          break;
         case 'multi_select':
+          setMultiSelectChoicesJoined(parameter.paramConfig.choices.join(','));
           setMultiSelectChoices(parameter.paramConfig.choices);
           setMultiSelectDefault(parameter.paramConfig.default);
           setMultiSelectSep(parameter.paramConfig.sep);
           setMultiSelectWrapper(parameter.paramConfig.wrapper);
           break;
-        case 'date_picker':
-          setDatePickerFormat(parameter.paramConfig.dateFormat);
-          setDatePickerDefault(parameter.paramConfig.default);
+        case 'single_input':
+          setSingleInputDefault(parameter.paramConfig.default);
           break;
         case 'multi_input':
           setMultiInputDefault(parameter.paramConfig.default);
           setMultiInputSep(parameter.paramConfig.sep);
           setMultiInputWrapper(parameter.paramConfig.wrapper);
           break;
+        case 'date_picker':
+          setDatePickerFormat(parameter.paramConfig.dateFormat);
+          setDatePickerDefault(parameter.paramConfig.default);
+          break;
         default:
+          toast.error('[DEBUG] parameter edit: 未知参数类型');
           // 在类型不匹配时，已由 resetConfigStates 处理
           break;
       }
@@ -228,15 +237,15 @@ const EditFilterModal = ({
               </Label>
               <Input
                 id='single-select-choices'
-                value={singleSelectChoices.join(',')}
-                onChange={(e) =>
-                  setSingleSelectChoices(
-                    e.target.value
-                      .split(',')
-                      .map((s) => s.trim())
-                      .filter(Boolean)
-                  )
-                }
+                value={singleSelectChoicesJoined}
+                onChange={(e) => {
+                  setSingleSelectChoicesJoined(e.target.value);
+                  const choices = e.target.value
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean);
+                  setSingleSelectChoices(choices);
+                }}
                 className='col-span-3'
                 placeholder='逗号分隔, e.g. 选项1,选项2'
               />
@@ -290,15 +299,15 @@ const EditFilterModal = ({
               </Label>
               <Input
                 id='multi-select-choices'
-                value={multiSelectChoices.join(',')}
-                onChange={(e) =>
-                  setMultiSelectChoices(
-                    e.target.value
-                      .split(',')
-                      .map((s) => s.trim())
-                      .filter(Boolean)
-                  )
-                }
+                value={multiSelectChoicesJoined}
+                onChange={(e) => {
+                  setMultiSelectChoicesJoined(e.target.value);
+                  const choices = e.target.value
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean);
+                  setMultiSelectChoices(choices);
+                }}
                 className='col-span-3'
                 placeholder='逗号分隔, e.g. 选项A,选项B'
               />

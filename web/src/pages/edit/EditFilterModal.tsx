@@ -17,7 +17,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox'; // 添加 Checkbox 组件导入
 import type {
   Parameter,
   SingleSelectParamConfig,
@@ -27,21 +26,7 @@ import type {
   SingleInputParamConfig,
 } from '@/types/models/parameter';
 import { toast } from 'sonner';
-import { Check, ChevronsUpDown } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
+import { Combobox } from '@/components/combobox';
 
 interface EditFilterModalProps {
   isOpen: boolean;
@@ -174,10 +159,8 @@ const EditFilterModal = ({
             singleSelectDefault &&
             !singleSelectChoices.includes(singleSelectDefault)
           ) {
-            console.warn(
-              'Single select default value not in choices. Resetting default.'
-            );
-            paramConfig.default = singleSelectChoices[0] || ''; // or handle as error
+            toast.error('[PARAM] 异常, 默认值必须在单选清单中');
+            paramConfig.default = '';
           }
           break;
         case 'single_input':
@@ -196,9 +179,7 @@ const EditFilterModal = ({
             multiSelectChoices.includes(d)
           );
           if (validMultiDefaults.length !== multiSelectDefault.length) {
-            console.warn(
-              'Some multi select default values were not in choices. Keeping only valid ones.'
-            );
+            toast.error('[PARAM] 异常, 默认值必须在多选清单中');
             paramConfig.default = validMultiDefaults; // or handle as error
           }
           break;
@@ -208,6 +189,13 @@ const EditFilterModal = ({
             dateFormat: datePickerFormat,
             default: datePickerDefault,
           };
+          if (
+            datePickerFormat != 'YYYY-MM-DD' &&
+            datePickerFormat != 'YYYYMMDD'
+          ) {
+            toast.error('[PARAM] 异常, 默认日期格式错误');
+            paramConfig.default = 'YYYY-MM-DD';
+          }
           // 可以添加日期格式校验
           break;
         case 'multi_input':
@@ -230,11 +218,17 @@ const EditFilterModal = ({
       return;
     }
 
+    // 判断name中仅包含数字、字母、下划线, 首字符为字母
+    if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(name)) {
+      toast.error('[PARAM] 异常, 名称仅包含数字、字母、下划线, 首字符为字母');
+      return;
+    }
+
     const savedParameter: Parameter = {
       id: parameter?.id || generateId(),
       name,
-      alias: alias || undefined,
-      description: description || undefined,
+      alias: alias || '',
+      description: description || '',
       paramConfig,
     };
     onSave(savedParameter);
@@ -262,7 +256,7 @@ const EditFilterModal = ({
                     .filter(Boolean);
                   setSingleSelectChoices(choices);
 
-                  // 如果默认值不在选项中，则设置为第一个选项
+                  // 如果默认值不在选项中，则设置为空
                   if (
                     singleSelectDefault &&
                     !choices.includes(singleSelectDefault)
@@ -279,50 +273,15 @@ const EditFilterModal = ({
                 默认值
               </Label>
               <div className='col-span-3'>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant='outline'
-                      role='combobox'
-                      className='w-full justify-between'
-                    >
-                      {singleSelectDefault || '选择默认值'}
-                      <ChevronsUpDown className='ml-2 h-4 w-4 shrink-0 opacity-50' />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className='w-full p-0'>
-                    <Command>
-                      <CommandInput
-                        placeholder='搜索选项...'
-                        disabled={singleSelectChoices.length === 0}
-                      />
-                      <CommandList>
-                        <CommandEmpty>没有找到选项</CommandEmpty>
-                        <CommandGroup>
-                          {singleSelectChoices.map((choice) => (
-                            <CommandItem
-                              key={choice}
-                              value={choice}
-                              onSelect={() => {
-                                setSingleSelectDefault(choice);
-                              }}
-                            >
-                              <Check
-                                className={cn(
-                                  'mr-2 h-4 w-4',
-                                  singleSelectDefault === choice
-                                    ? 'opacity-100'
-                                    : 'opacity-0'
-                                )}
-                              />
-                              {choice}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
+                <Combobox
+                  options={singleSelectChoices}
+                  value={singleSelectDefault}
+                  onValueChange={(value) =>
+                    setSingleSelectDefault(value as string)
+                  }
+                  mode='single'
+                  placeholder='默认值为空'
+                />
               </div>
             </div>
           </>
@@ -345,6 +304,8 @@ const EditFilterModal = ({
                     .map((s) => s.trim())
                     .filter(Boolean);
                   setMultiSelectChoices(choices);
+
+                  setMultiSelectDefault([]);
                 }}
                 className='col-span-3'
                 placeholder='逗号分隔, e.g. 选项A,选项B'
@@ -355,60 +316,15 @@ const EditFilterModal = ({
                 默认值
               </Label>
               <div className='col-span-3'>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant='outline'
-                      role='combobox'
-                      className='w-full justify-between'
-                    >
-                      {multiSelectDefault.length > 0
-                        ? multiSelectDefault.join(', ')
-                        : '选择默认值'}
-                      <ChevronsUpDown className='ml-2 h-4 w-4 shrink-0 opacity-50' />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className='w-full p-0'>
-                    <Command>
-                      <CommandInput
-                        placeholder='搜索选项...'
-                        disabled={multiSelectChoices.length === 0}
-                      />
-                      <CommandList>
-                        <CommandEmpty>没有找到选项</CommandEmpty>
-                        <CommandGroup>
-                          {multiSelectChoices.map((choice) => (
-                            <CommandItem
-                              key={choice}
-                              value={choice}
-                              onSelect={() => {
-                                // 切换选中状态
-                                const newDefaults = multiSelectDefault.includes(
-                                  choice
-                                )
-                                  ? multiSelectDefault.filter(
-                                      (c) => c !== choice
-                                    )
-                                  : [...multiSelectDefault, choice];
-                                setMultiSelectDefault(newDefaults);
-                              }}
-                            >
-                              <Check
-                                className={cn(
-                                  'mr-2 h-4 w-4',
-                                  multiSelectDefault.includes(choice)
-                                    ? 'opacity-100'
-                                    : 'opacity-0'
-                                )}
-                              />
-                              {choice}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
+                <Combobox
+                  options={multiSelectChoices}
+                  value={multiSelectDefault}
+                  placeholder='默认值为空'
+                  onValueChange={(value) =>
+                    setMultiSelectDefault(value as string[])
+                  }
+                  mode='multiple'
+                />
               </div>
             </div>
             <div className='grid grid-cols-4 items-center gap-4'>

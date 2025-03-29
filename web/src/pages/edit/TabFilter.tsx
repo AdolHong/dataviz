@@ -8,14 +8,16 @@ import EditFilterModal from './EditFilterModal';
 interface TabFilterProps {
   parameters: Parameter[];
   setParameters: (parameters: Parameter[]) => void;
-  handleUpsertParameter: (parameter: Parameter | null) => void;
+  handleAddParameter: (parameter: Parameter) => boolean;
+  handleEditParameter: (parameter: Parameter) => boolean;
   handleDeleteParameter: (parameter: Parameter) => void;
   confirmDelete: (deleteFunction: () => void, message: string) => void;
 }
 
 const TabFilter = ({
   parameters,
-  handleUpsertParameter,
+  handleAddParameter,
+  handleEditParameter,
   handleDeleteParameter,
   confirmDelete,
 }: TabFilterProps) => {
@@ -35,7 +37,13 @@ const TabFilter = ({
   };
 
   const handleSave = (parameter: Parameter) => {
-    handleUpsertParameter(parameter);
+    let successFlag: boolean = false;
+    if (editingParameter) {
+      successFlag = handleEditParameter(parameter);
+    } else {
+      successFlag = handleAddParameter(parameter);
+    }
+    if (successFlag) {
     closeModal();
   };
 

@@ -320,6 +320,37 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
     setAliasRelianceMap(newAliasRelianceMap);
   };
 
+  // 添加参数
+  const handleAddParameter = (parameter: Parameter): boolean => {
+    const existedOtherParam = parameters.find((p) => p.name === parameter.name);
+    if (existedOtherParam) {
+      toast.error('[PARAM] 异常, 参数名称已存在');
+      return false;
+    }
+    setParameters([...parameters, parameter]);
+    return true;
+  };
+
+  // 修改参数
+  const handleEditParameter = (parameter: Parameter): boolean => {
+    const existedOtherParam = parameters.find(
+      (p) => p.id === parameter.id && p.name !== parameter.name
+    );
+    if (existedOtherParam) {
+      toast.error('[PARAM] 异常, 参数名称已存在');
+      return false;
+    }
+    setParameters(
+      parameters.map((p) => (p.id === parameter.id ? parameter : p))
+    );
+    return true;
+  };
+
+  // 删除参数
+  const handleDeleteParameter = (parameter: Parameter) => {
+    setParameters(parameters.filter((p) => p.id !== parameter.id));
+  };
+
   return (
     <>
       <Dialog open={open} onOpenChange={onClose}>
@@ -364,8 +395,9 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
               <TabFilter
                 parameters={parameters}
                 setParameters={setParameters}
-                handleDeleteParameter={() => {}}
-                handleUpsertParameter={() => {}}
+                handleDeleteParameter={handleDeleteParameter}
+                handleAddParameter={handleAddParameter}
+                handleEditParameter={handleEditParameter}
                 confirmDelete={confirmDelete}
               />
               <TabChart

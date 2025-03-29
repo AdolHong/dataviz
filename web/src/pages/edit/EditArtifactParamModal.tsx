@@ -9,7 +9,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Check, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -71,14 +70,19 @@ const EditArtifactParamModal = ({
   // 各参数类型的具体值
   const [defaultValue, setDefaultValue] = useState<string>('');
   const [defaultValues, setDefaultValues] = useState<string[]>([]);
+  const [choicesString, setChoicesString] = useState<string>(''); // 用于存储逗号分隔的选项字符串
   const [choices, setChoices] = useState<string[]>([]);
   const [dfAlias, setDfAlias] = useState<string>('');
   const [dfColumn, setDfColumn] = useState<string>('');
   const [level, setLevel] = useState<number>(0);
 
   // UI状态
-  const [newChoice, setNewChoice] = useState<string>('');
   const [openDataSourceAlias, setOpenDataSourceAlias] = useState(false);
+
+  // 是否是级联类型
+  const isCascadeType =
+    paramTypeValue === 'cascade_single' ||
+    paramTypeValue === 'cascade_multiple';
 
   // 初始化表单
   useEffect(() => {
@@ -94,6 +98,7 @@ const EditArtifactParamModal = ({
       // 根据不同类型设置对应参数
       const paramType = param.paramType;
       setChoices(paramType.choices);
+      setChoicesString(paramType.choices.join(','));
 
       if (
         paramType.type === 'plain_single' ||
@@ -133,29 +138,31 @@ const EditArtifactParamModal = ({
       setDefaultValue('');
       setDefaultValues([]);
       setChoices([]);
+      setChoicesString('');
       setDfAlias('');
       setDfColumn('');
       setLevel(0);
     }
   }, [param, isOpen]);
 
-  // 添加选项
-  const handleAddChoice = () => {
-    if (newChoice.trim() && !choices.includes(newChoice.trim())) {
-      setChoices([...choices, newChoice.trim()]);
-      setNewChoice('');
-    }
-  };
+  // 处理选项字符串变化
+  const handleChoicesChange = (value: string) => {
+    setChoicesString(value);
+    const newChoices = value
+      .split(',')
+      .map((choice) => choice.trim())
+      .filter((choice) => choice.length > 0);
 
-  // 移除选项
-  const handleRemoveChoice = (choice: string) => {
-    setChoices(choices.filter((c) => c !== choice));
-    // 如果删除的是默认选项，也要移除默认值
-    if (defaultValue === choice) {
+    setChoices(newChoices);
+
+    // 如果默认值不在选项列表中，则清空默认值
+    if (defaultValue && !newChoices.includes(defaultValue)) {
       setDefaultValue('');
     }
-    if (defaultValues.includes(choice)) {
-      setDefaultValues(defaultValues.filter((v) => v !== choice));
+
+    // 过滤掉不在选项列表中的默认值
+    if (defaultValues.length > 0) {
+      setDefaultValues(defaultValues.filter((v) => newChoices.includes(v)));
     }
   };
 
@@ -168,21 +175,35 @@ const EditArtifactParamModal = ({
         return;
       }
 
-      if (choices.length === 0) {
+      // 非级联类型需要校验选项
+      if (!isCascadeType && choices.length === 0) {
         toast.error('请至少添加一个选项');
         return;
       }
+
+      // 级联类型需要校验数据源和列名
+      if (isCascadeType && (!dfAlias || !dfColumn)) {
+        toast.error('级联参数需要指定数据源和列名');
+        return;
+      }
+
+      // 根据级联类型，设置默认选项
+      let finalChoices = isCascadeType ? [] : choices;
 
       // 验证默认值
       if (
         paramTypeValue === 'plain_single' ||
         paramTypeValue === 'cascade_single'
       ) {
-        if (!defaultValue && choices.length > 0) {
+        if (!defaultValue && !isCascadeType && choices.length > 0) {
           setDefaultValue(choices[0]); // 自动选择第一个
         }
       } else {
-        if (defaultValues.length === 0 && choices.length > 0) {
+        if (
+          defaultValues.length === 0 &&
+          !isCascadeType &&
+          choices.length > 0
+        ) {
           setDefaultValues([choices[0]]); // 自动选择第一个
         }
       }
@@ -192,22 +213,27 @@ const EditArtifactParamModal = ({
       if (paramTypeValue === 'plain_single') {
         paramType = {
           type: 'plain_single',
-          default: defaultValue || choices[0],
-          choices: choices,
+          default: defaultValue || (choices.length > 0 ? choices[0] : ''),
+          choices: finalChoices,
         };
       } else if (paramTypeValue === 'plain_multiple') {
         paramType = {
           type: 'plain_multiple',
-          default: defaultValues.length > 0 ? defaultValues : [choices[0]],
-          choices: choices,
+          default:
+            defaultValues.length > 0
+              ? defaultValues
+              : choices.length > 0
+                ? [choices[0]]
+                : [],
+          choices: finalChoices,
           dfAlias: dfAlias,
           dfColumn: dfColumn,
         };
       } else if (paramTypeValue === 'cascade_single') {
         paramType = {
           type: 'cascade_single',
-          default: defaultValue || choices[0],
-          choices: choices,
+          default: defaultValue || '',
+          choices: finalChoices,
           dfAlias: dfAlias,
           dfColumn: dfColumn,
           level: level,
@@ -215,8 +241,8 @@ const EditArtifactParamModal = ({
       } else {
         paramType = {
           type: 'cascade_multiple',
-          default: defaultValues.length > 0 ? defaultValues : [choices[0]],
-          choices: choices,
+          default: defaultValues.length > 0 ? defaultValues : [],
+          choices: finalChoices,
           dfAlias: dfAlias,
           dfColumn: dfColumn,
           level: level,
@@ -337,116 +363,90 @@ const EditArtifactParamModal = ({
             </Select>
           </div>
 
-          {/* 选项列表 */}
-          <div className='grid grid-cols-4 items-start gap-4'>
-            <Label className='text-right pt-2'>选项列表*</Label>
-            <div className='col-span-3 space-y-2'>
-              <div className='flex gap-2'>
+          {/* 仅非级联类型显示选项和默认值 */}
+          {!isCascadeType && (
+            <>
+              {/* 选项列表 - 使用逗号分隔的输入框 */}
+              <div className='grid grid-cols-4 items-center gap-4'>
+                <Label htmlFor='choices' className='text-right'>
+                  选项列表*
+                </Label>
                 <Input
-                  value={newChoice}
-                  onChange={(e) => setNewChoice(e.target.value)}
-                  placeholder='添加选项'
-                  className='flex-1'
+                  id='choices'
+                  value={choicesString}
+                  onChange={(e) => handleChoicesChange(e.target.value)}
+                  className='col-span-3'
+                  placeholder='逗号分隔的选项，如：选项1,选项2,选项3'
                 />
-                <Button type='button' onClick={handleAddChoice} size='sm'>
-                  添加
-                </Button>
               </div>
 
-              <div className='max-h-32 overflow-y-auto border rounded-md p-2'>
-                {choices.length > 0 ? (
-                  <ul className='space-y-1'>
+              {/* 默认值 - 单选类型 */}
+              {paramTypeValue === 'plain_single' && (
+                <div className='grid grid-cols-4 items-center gap-4'>
+                  <Label htmlFor='defaultValue' className='text-right'>
+                    默认值
+                  </Label>
+                  <Select
+                    value={defaultValue}
+                    onValueChange={setDefaultValue}
+                    disabled={choices.length === 0}
+                  >
+                    <SelectTrigger className='col-span-3'>
+                      <SelectValue placeholder='选择默认值' />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {choices.map((choice, index) => (
+                        <SelectItem key={index} value={choice}>
+                          {choice}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {/* 默认值 - 多选类型 */}
+              {paramTypeValue === 'plain_multiple' && (
+                <div className='grid grid-cols-4 items-start gap-4'>
+                  <Label className='text-right pt-2'>默认值</Label>
+                  <div className='col-span-3'>
                     {choices.map((choice, index) => (
-                      <li
-                        key={index}
-                        className='flex justify-between items-center text-sm p-1 hover:bg-gray-100 rounded'
-                      >
-                        <span>{choice}</span>
-                        <Button
-                          variant='ghost'
-                          size='sm'
-                          className='h-6 w-6 text-destructive'
-                          onClick={() => handleRemoveChoice(choice)}
-                        >
-                          ×
-                        </Button>
-                      </li>
+                      <div key={index} className='flex items-center mb-1'>
+                        <input
+                          type='checkbox'
+                          id={`choice-${index}`}
+                          checked={defaultValues.includes(choice)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setDefaultValues([...defaultValues, choice]);
+                            } else {
+                              setDefaultValues(
+                                defaultValues.filter((v) => v !== choice)
+                              );
+                            }
+                          }}
+                          className='mr-2'
+                        />
+                        <label htmlFor={`choice-${index}`} className='text-sm'>
+                          {choice}
+                        </label>
+                      </div>
                     ))}
-                  </ul>
-                ) : (
-                  <div className='text-center text-gray-500 py-2'>暂无选项</div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* 默认值 - 单选类型 */}
-          {(paramTypeValue === 'plain_single' ||
-            paramTypeValue === 'cascade_single') && (
-            <div className='grid grid-cols-4 items-center gap-4'>
-              <Label htmlFor='defaultValue' className='text-right'>
-                默认值
-              </Label>
-              <Select
-                value={defaultValue}
-                onValueChange={setDefaultValue}
-                disabled={choices.length === 0}
-              >
-                <SelectTrigger className='col-span-3'>
-                  <SelectValue placeholder='选择默认值' />
-                </SelectTrigger>
-                <SelectContent>
-                  {choices.map((choice, index) => (
-                    <SelectItem key={index} value={choice}>
-                      {choice}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          {/* 默认值 - 多选类型 */}
-          {(paramTypeValue === 'plain_multiple' ||
-            paramTypeValue === 'cascade_multiple') && (
-            <div className='grid grid-cols-4 items-start gap-4'>
-              <Label className='text-right pt-2'>默认值</Label>
-              <div className='col-span-3'>
-                {choices.map((choice, index) => (
-                  <div key={index} className='flex items-center mb-1'>
-                    <input
-                      type='checkbox'
-                      id={`choice-${index}`}
-                      checked={defaultValues.includes(choice)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setDefaultValues([...defaultValues, choice]);
-                        } else {
-                          setDefaultValues(
-                            defaultValues.filter((v) => v !== choice)
-                          );
-                        }
-                      }}
-                      className='mr-2'
-                    />
-                    <label htmlFor={`choice-${index}`} className='text-sm'>
-                      {choice}
-                    </label>
+                    {choices.length === 0 && (
+                      <div className='text-gray-500 text-sm'>请先添加选项</div>
+                    )}
                   </div>
-                ))}
-                {choices.length === 0 && (
-                  <div className='text-gray-500 text-sm'>请先添加选项</div>
-                )}
-              </div>
-            </div>
+                </div>
+              )}
+            </>
           )}
 
-          {/* 数据源相关字段 */}
-          {paramTypeValue !== 'plain_single' && (
+          {/* 数据源相关字段 - 对所有非plain_single类型或级联类型都显示 */}
+          {(paramTypeValue !== 'plain_single' || isCascadeType) && (
             <>
               <div className='grid grid-cols-4 items-center gap-4'>
                 <Label htmlFor='dfAlias' className='text-right'>
-                  数据源别名
+                  数据源别名{isCascadeType ? '*' : ''}
                 </Label>
                 <div className='col-span-3'>
                   <Popover
@@ -500,7 +500,7 @@ const EditArtifactParamModal = ({
 
               <div className='grid grid-cols-4 items-center gap-4'>
                 <Label htmlFor='dfColumn' className='text-right'>
-                  数据列名
+                  数据列名{isCascadeType ? '*' : ''}
                 </Label>
                 <Input
                   id='dfColumn'
@@ -514,11 +514,10 @@ const EditArtifactParamModal = ({
           )}
 
           {/* 级联参数的级别 */}
-          {(paramTypeValue === 'cascade_single' ||
-            paramTypeValue === 'cascade_multiple') && (
+          {isCascadeType && (
             <div className='grid grid-cols-4 items-center gap-4'>
               <Label htmlFor='level' className='text-right'>
-                级联级别
+                级联级别*
               </Label>
               <Input
                 id='level'
@@ -531,6 +530,15 @@ const EditArtifactParamModal = ({
               />
             </div>
           )}
+
+          {/* 级联类型说明 */}
+          {isCascadeType && (
+            <div className='grid grid-cols-4 items-start gap-4'>
+              <div className='col-start-2 col-span-3 text-sm text-gray-500 bg-gray-50 p-2 rounded-md'>
+                注意：级联参数的选项和默认值将从数据源中自动推断，无需手动设置。
+              </div>
+            </div>
+          )}
         </div>
 
         <DialogFooter>
@@ -539,7 +547,11 @@ const EditArtifactParamModal = ({
           </Button>
           <Button
             onClick={handleSaveParam}
-            disabled={!name || choices.length === 0}
+            disabled={
+              !name ||
+              (!isCascadeType && choices.length === 0) ||
+              (isCascadeType && (!dfAlias || !dfColumn))
+            }
           >
             保存
           </Button>

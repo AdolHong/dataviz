@@ -20,13 +20,19 @@ import {
 import type { Parameter } from '@/types/models/parameter';
 import { toast } from 'sonner';
 import { Combobox } from '@/components/combobox';
-
+import { format } from 'date-fns';
 interface EditFilterModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (parameter: Parameter) => void;
   parameter: Parameter | null; // 接收要编辑的参数，null 表示新增
 }
+
+import {
+  isValidDynamicDate,
+  isValidDate,
+  parseDynamicDate,
+} from '@/utils/datetime';
 
 // 辅助函数生成唯一 ID (实际项目中可能使用 uuid 库)
 const generateId = () =>
@@ -190,15 +196,17 @@ const EditFilterModal = ({
             paramConfig.dateFormat = 'YYYY-MM-DD';
           }
 
-          //todo: 校验默认日期是否合理
-          if (datePickerDefault) {
-            toast.info(datePickerDefault);
-            const date = new Date(datePickerDefault);
-            console.log(date);
-            if (isNaN(date.getTime())) {
+          if (isValidDate(datePickerDefault, datePickerFormat)) {
+          } else if (isValidDynamicDate(datePickerDefault)) {
+            // 若是动态参数， 也要检查格式
+            const parsedDate = parseDynamicDate(datePickerDefault);
+            if (parsedDate && !isValidDate(parsedDate, datePickerFormat)) {
               toast.error('[PARAM] 异常, 默认日期格式错误');
-              paramConfig.default = '';
+              return;
             }
+          } else {
+            toast.error('[PARAM] 异常, 默认日期格式错误');
+            return;
           }
 
           break;

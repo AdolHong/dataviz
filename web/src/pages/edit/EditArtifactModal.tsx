@@ -26,7 +26,14 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { toast } from 'sonner';
-import type { Artifact, DataSource, ArtifactParam } from '@/types';
+import type {
+  Artifact,
+  DataSource,
+  SinglePlainParam,
+  MultiplePlainParam,
+  CascaderParam,
+  CascaderLevel,
+} from '@/types';
 import EditArtifactParamModal from './EditArtifactParamModal';
 
 interface EditArtifactModalProps {
@@ -57,13 +64,20 @@ const EditArtifactModal = ({
   const [code, setCode] = useState('');
   const [dependencies, setDependencies] = useState<string[]>([]);
   const [executor_engine, setExecutorEngine] = useState('default');
-  const [artifactParams, setArtifactParams] = useState<ArtifactParam[]>([]);
+  const [plainParams, setPlainParams] = useState<
+    (SinglePlainParam | MultiplePlainParam)[]
+  >([]);
+  const [cascaderParams, setCascaderParams] = useState<CascaderParam[]>([]);
 
   // UI 状态控制
   const [openEngine, setOpenEngine] = useState(false);
   const [openDependencies, setOpenDependencies] = useState(false);
   const [isParamModalOpen, setIsParamModalOpen] = useState(false);
-  const [editingParam, setEditingParam] = useState<ArtifactParam | null>(null);
+  const [editingParam, setEditingParam] = useState<{
+    param: SinglePlainParam | MultiplePlainParam | CascaderParam;
+    type: 'plain' | 'cascader';
+    id: string;
+  } | null>(null);
 
   // 数据源别名列表（供依赖选择用）
   const dataSourceOptions = dataSources.map((ds) => ds.alias);
@@ -78,7 +92,8 @@ const EditArtifactModal = ({
       setCode(artifact.code);
       setDependencies(artifact.dependencies);
       setExecutorEngine(artifact.executor_engine);
-      setArtifactParams(artifact.ArtifactParams || []);
+      setPlainParams(artifact.plainParams || []);
+      setCascaderParams(artifact.cascaderParams || []);
     } else {
       // 新增模式：重置所有状态
       setId(generateId());
@@ -87,26 +102,63 @@ const EditArtifactModal = ({
       setCode('');
       setDependencies([]);
       setExecutorEngine('default');
-      setArtifactParams([]);
+      setPlainParams([]);
+      setCascaderParams([]);
     }
   }, [artifact, isOpen]);
 
   // --- 参数相关操作 ---
-  const handleAddParam = (param: ArtifactParam) => {
-    setArtifactParams((prev) => [...prev, param]);
+  const handleAddParam = (
+    param: SinglePlainParam | MultiplePlainParam | CascaderParam
+  ) => {
+    if ('type' in param) {
+      // 处理 Plain 参数
+      setPlainParams((prev) => [
+        ...prev,
+        param as SinglePlainParam | MultiplePlainParam,
+      ]);
+    } else {
+      // 处理 Cascader 参数
+      setCascaderParams((prev) => [...prev, param as CascaderParam]);
+    }
     setIsParamModalOpen(false);
   };
 
-  const handleEditParam = (param: ArtifactParam) => {
-    setArtifactParams((prev) =>
-      prev.map((p) => (p.id === param.id ? param : p))
-    );
+  const handleEditParam = (
+    param: SinglePlainParam | MultiplePlainParam | CascaderParam,
+    paramType: 'plain' | 'cascader',
+    originalId: string
+  ) => {
+    if (paramType === 'plain') {
+      setPlainParams((prev) =>
+        prev.map((p) =>
+          p.id === originalId
+            ? (param as SinglePlainParam | MultiplePlainParam)
+            : p
+        )
+      );
+    } else {
+      setCascaderParams((prev) =>
+        prev.map((p, index) =>
+          index === parseInt(originalId) ? (param as CascaderParam) : p
+        )
+      );
+    }
     setEditingParam(null);
     setIsParamModalOpen(false);
   };
 
-  const handleDeleteParam = (paramId: string) => {
-    setArtifactParams((prev) => prev.filter((p) => p.id !== paramId));
+  const handleDeleteParam = (
+    paramId: string,
+    paramType: 'plain' | 'cascader'
+  ) => {
+    if (paramType === 'plain') {
+      setPlainParams((prev) => prev.filter((p) => p.id !== paramId));
+    } else {
+      setCascaderParams((prev) =>
+        prev.filter((_, index) => index.toString() !== paramId)
+      );
+    }
   };
 
   // --- 事件处理 ---
@@ -135,7 +187,8 @@ const EditArtifactModal = ({
         code: code || '',
         dependencies: dependencies || [],
         executor_engine: executor_engine || 'default',
-        ArtifactParams: artifactParams,
+        plainParams: plainParams.length > 0 ? plainParams : undefined,
+        cascaderParams: cascaderParams.length > 0 ? cascaderParams : undefined,
       };
       onSave(savedArtifact);
     } catch (error) {
@@ -293,9 +346,11 @@ const EditArtifactModal = ({
           <div className='grid grid-cols-4 items-start gap-4'>
             <Label className='text-right pt-2'>参数列表</Label>
             <div className='col-span-3 space-y-2'>
-              {artifactParams.length > 0 ? (
+              {/* Plain 参数列表 */}
+              {plainParams.length > 0 && (
                 <div className='space-y-2'>
-                  {artifactParams.map((param) => (
+                  <h4 className='text-sm font-medium'>普通参数</h4>
+                  {plainParams.map((param) => (
                     <div
                       key={param.id}
                       className='border-2 rounded-lg p-3 text-sm relative group shadow-sm'
@@ -305,7 +360,7 @@ const EditArtifactModal = ({
                       </div>
                       <div className='text-xs text-gray-500'>
                         {param.description || '无描述'} · {param.valueType} ·{' '}
-                        {param.paramType.type}
+                        {param.type}
                       </div>
 
                       <div className='absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-80 transition-opacity'>
@@ -314,7 +369,11 @@ const EditArtifactModal = ({
                           size='icon'
                           className='h-6 w-6'
                           onClick={() => {
-                            setEditingParam(param);
+                            setEditingParam({
+                              param,
+                              type: 'plain',
+                              id: param.id,
+                            });
                             setIsParamModalOpen(true);
                           }}
                         >
@@ -324,7 +383,7 @@ const EditArtifactModal = ({
                           variant='ghost'
                           size='icon'
                           className='h-6 w-6 text-destructive'
-                          onClick={() => handleDeleteParam(param.id)}
+                          onClick={() => handleDeleteParam(param.id, 'plain')}
                         >
                           <Trash2 className='h-4 w-4' />
                         </Button>
@@ -332,7 +391,62 @@ const EditArtifactModal = ({
                     </div>
                   ))}
                 </div>
-              ) : (
+              )}
+
+              {/* Cascader 参数列表 */}
+              {cascaderParams.length > 0 && (
+                <div className='space-y-2'>
+                  <h4 className='text-sm font-medium'>级联参数</h4>
+                  {cascaderParams.map((param, index) => (
+                    <div
+                      key={index}
+                      className='border-2 rounded-lg p-3 text-sm relative group shadow-sm'
+                    >
+                      <div className='font-medium'>数据源: {param.dfAlias}</div>
+                      <div className='text-xs text-gray-500'>
+                        级联层级数: {param.levels.length}
+                      </div>
+                      <ul className='text-xs mt-1'>
+                        {param.levels.map((level, levelIndex) => (
+                          <li key={levelIndex}>
+                            级别 {levelIndex}: {level.name} ({level.dfColumn})
+                          </li>
+                        ))}
+                      </ul>
+
+                      <div className='absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-80 transition-opacity'>
+                        <Button
+                          variant='ghost'
+                          size='icon'
+                          className='h-6 w-6'
+                          onClick={() => {
+                            setEditingParam({
+                              param,
+                              type: 'cascader',
+                              id: index.toString(),
+                            });
+                            setIsParamModalOpen(true);
+                          }}
+                        >
+                          <Pencil className='h-4 w-4' />
+                        </Button>
+                        <Button
+                          variant='ghost'
+                          size='icon'
+                          className='h-6 w-6 text-destructive'
+                          onClick={() =>
+                            handleDeleteParam(index.toString(), 'cascader')
+                          }
+                        >
+                          <Trash2 className='h-4 w-4' />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {plainParams.length === 0 && cascaderParams.length === 0 && (
                 <div className='text-center text-gray-500 p-4 border-2 border-dashed rounded-lg'>
                   暂无参数
                 </div>
@@ -386,8 +500,13 @@ const EditArtifactModal = ({
           setIsParamModalOpen(false);
           setEditingParam(null);
         }}
-        onSave={editingParam ? handleEditParam : handleAddParam}
-        param={editingParam}
+        onSave={
+          editingParam
+            ? (param) =>
+                handleEditParam(param, editingParam.type, editingParam.id)
+            : handleAddParam
+        }
+        paramData={editingParam}
         dataSources={dataSources}
       />
     </Dialog>

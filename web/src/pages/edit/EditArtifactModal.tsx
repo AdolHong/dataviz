@@ -9,20 +9,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { Check, ChevronsUpDown, Plus, Pencil, Trash2 } from 'lucide-react';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
+import { Plus, Pencil, Trash2 } from 'lucide-react';
+
 import { toast } from 'sonner';
 import type {
   Artifact,
@@ -239,48 +227,19 @@ const EditArtifactModal = ({
               执行引擎*
             </Label>
             <div className='col-span-3'>
-              <Popover open={openEngine} onOpenChange={setOpenEngine}>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant='outline'
-                    role='combobox'
-                    aria-expanded={openEngine}
-                    className='w-full justify-between'
-                  >
-                    {executor_engine || '选择执行引擎'}
-                    <ChevronsUpDown className='ml-2 h-4 w-4 shrink-0 opacity-50' />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className='w-full p-0'>
-                  <Command>
-                    <CommandInput placeholder='搜索引擎...' />
-                    <CommandList>
-                      <CommandEmpty>没有找到匹配的引擎</CommandEmpty>
-                      <CommandGroup>
-                        {engineChoices.map((engine) => (
-                          <CommandItem
-                            key={engine}
-                            value={engine}
-                            onSelect={(currentValue) => {
-                              setExecutorEngine(currentValue);
-                              setOpenEngine(false);
-                            }}
-                          >
-                            <Check
-                              className={`mr-2 h-4 w-4 ${
-                                executor_engine === engine
-                                  ? 'opacity-100'
-                                  : 'opacity-0'
-                              }`}
-                            />
-                            {engine}
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
-              </Popover>
+              <Combobox
+                options={engineChoices}
+                value={executor_engine || 'default'}
+                onValueChange={(value: string | string[]) => {
+                  if (Array.isArray(value)) {
+                    setExecutorEngine(value[0]);
+                  } else {
+                    setExecutorEngine(value);
+                  }
+                }}
+                mode='single' // 单选
+                placeholder='选择执行引擎'
+              />
             </div>
           </div>
 

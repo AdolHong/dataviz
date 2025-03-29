@@ -302,10 +302,21 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   };
 
   const handleDeleteDataSource = (dataSource: DataSource) => {
+    // 判断数据源是否被图表依赖
+    if (aliasRelianceMap.aliasToCharts[dataSource.alias]) {
+      const chartTitles = aliasRelianceMap.aliasToCharts[dataSource.alias].map(
+        (chart) => `"${chart.chartTitle}"`
+      );
+      toast.error(
+        `数据源${dataSource.name}被图表[${chartTitles.join(', ')}]依赖，不能删除`
+      );
+      return;
+    }
+
     const { newDataSources, newAliasRelianceMap } = deleteDataSource(
       dataSource,
       dataSources,
-      aliasRelianceMap
+      charts
     );
     setDataSources(newDataSources);
     setAliasRelianceMap(newAliasRelianceMap);
@@ -356,6 +367,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
                 parameters={parameters}
                 setParameters={setParameters}
                 handleDeleteParameter={() => {}}
+                handleUpsertParameter={() => {}}
                 confirmDelete={confirmDelete}
               />
               <TabChart

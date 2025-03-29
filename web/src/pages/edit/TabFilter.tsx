@@ -6,7 +6,8 @@ import { TabsContent } from '@radix-ui/react-tabs';
 interface TabFilterProps {
   parameters: Parameter[];
   setParameters: (parameters: Parameter[]) => void;
-  handleDeleteParameter: (id: string) => void;
+  handleUpsertParameter: (parameter: Parameter) => void;
+  handleDeleteParameter: (parameter: Parameter) => void;
   confirmDelete: (deleteFunction: () => void, message: string) => void;
 }
 
@@ -33,16 +34,20 @@ const TabFilter = ({
                   </p>
                 </div>
                 <div className='flex gap-2'>
-                  <Button variant='ghost' size='icon' className='h-8 w-8'>
+                  <Button
+                    variant='ghost'
+                    size='icon'
+                    className='h-8 w-8 opacity-80'
+                  >
                     <Pencil className='h-4 w-4' />
                   </Button>
                   <Button
                     variant='ghost'
                     size='icon'
-                    className='h-8 w-8 text-destructive'
+                    className='h-8 w-8 text-destructive opacity-80'
                     onClick={() =>
                       confirmDelete(
-                        () => handleDeleteParameter(parameter.name),
+                        () => handleDeleteParameter(parameter),
                         `您确定要删除筛选条件"${parameter.name}"吗？`
                       )
                     }

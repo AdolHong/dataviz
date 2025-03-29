@@ -4,23 +4,48 @@ import { TabsContent } from '@/components/ui/tabs';
 import { type Layout } from '@/types/models/layout';
 import { useState } from 'react';
 import { EditLayoutModal } from './EditLayoutModal';
+import EditArtifactModal from './EditArtifactModal';
+import type { Artifact, DataSource } from '@/types';
+import { toast } from 'sonner';
 
 interface TabArtifactProps {
   layout: Layout;
   setLayout: (layout: Layout) => void;
   handleAddArtifact: () => void;
+  handleModifyArtifact: (artifact: Artifact) => void;
   handleDeleteArtifact: (id: string) => void;
   confirmDelete: (deleteFunction: () => void, message: string) => void;
+  artifacts: Artifact[];
+  dataSources: DataSource[];
+  engineChoices: string[];
 }
 
 const TabArtifact = ({
   layout,
   setLayout,
   handleAddArtifact,
+  handleModifyArtifact,
   handleDeleteArtifact,
   confirmDelete,
+  artifacts,
+  dataSources,
+  engineChoices,
 }: TabArtifactProps) => {
+  console.info('dataSources222', dataSources);
+
   const [isLayoutModalOpen, setIsLayoutModalOpen] = useState(false);
+  const [isArtifactModalOpen, setIsArtifactModalOpen] = useState(false);
+  const [editingArtifact, setEditingArtifact] = useState<Artifact | null>(null);
+
+  // 处理图表保存
+  const handleSaveArtifact = (artifact: Artifact) => {
+    if (editingArtifact) {
+      handleModifyArtifact(artifact);
+    } else {
+      handleAddArtifact(artifact);
+    }
+    setIsArtifactModalOpen(false);
+  };
 
   return (
     <div>
@@ -39,20 +64,28 @@ const TabArtifact = ({
                 {layout.items.map((item) => (
                   <div
                     key={item.id}
-                    className='border-2  rounded-lg p-4 text-center flex items-center justify-center relative group shadow-sm'
+                    className='border-2 rounded-lg p-4 text-center flex items-center justify-center relative group shadow-sm'
                     style={{
                       gridColumn: `${item.x + 1} / span ${item.width}`,
                       gridRow: `${item.y + 1} / span ${item.height}`,
                     }}
                   >
                     {item.title}
-                    <div className='absolute bottom-0  flex gap-1 opacity-0 group-hover:opacity-80 transition-opacity'>
+                    <div className='absolute bottom-0 flex gap-1 opacity-0 group-hover:opacity-80 transition-opacity'>
                       <Button
                         variant='ghost'
                         size='icon'
                         className='h-6 w-6'
                         onClick={() => {
-                          /* 编辑逻辑 */
+                          const artifact = artifacts.find(
+                            (a) => a.id === item.id
+                          );
+                          if (artifact) {
+                            setEditingArtifact(artifact);
+                            setIsArtifactModalOpen(true);
+                          } else {
+                            toast.error('图表不存在');
+                          }
                         }}
                       >
                         <Pencil className='h-4 w-4' />
@@ -83,7 +116,10 @@ const TabArtifact = ({
             <Button
               variant='outline'
               className='w-full border-dashed'
-              onClick={handleAddArtifact}
+              onClick={() => {
+                setEditingArtifact(null);
+                setIsArtifactModalOpen(true);
+              }}
             >
               <Plus className='h-4 w-4 mr-2' />
               添加图表
@@ -100,6 +136,17 @@ const TabArtifact = ({
         </div>
       </TabsContent>
 
+      {/* 图表编辑对话框 */}
+      <EditArtifactModal
+        isOpen={isArtifactModalOpen}
+        onClose={() => setIsArtifactModalOpen(false)}
+        onSave={handleSaveArtifact}
+        artifact={editingArtifact}
+        dataSources={dataSources}
+        engineChoices={engineChoices}
+      />
+
+      {/* 布局编辑对话框 */}
       <EditLayoutModal
         open={isLayoutModalOpen}
         onClose={() => setIsLayoutModalOpen(false)}

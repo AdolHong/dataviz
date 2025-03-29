@@ -109,21 +109,21 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
       },
       {
         id: 'artifact-3',
-        title: '销售占比',
+        title: '销售明细',
         code: 'pie',
         dependencies: ['df_external'],
         executor: { type: 'python', engine: 'pandas' },
       },
       {
         id: 'artifact-4',
-        title: '销售占比',
+        title: '新增图表1',
         code: 'pie',
         dependencies: ['df_sales', 'df_external'],
         executor: { type: 'python', engine: 'pandas' },
       },
       {
         id: 'artifact-5',
-        title: '销售占比',
+        title: '新增图表2',
         code: 'pie',
         dependencies: ['df_sales'],
         executor: { type: 'python', engine: 'pandas' },
@@ -177,10 +177,12 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
     },
   };
 
-  const demoEngineChoices: EngineChoices = {
+  const demoDataSourceEngineChoices: EngineChoices = {
     sql: ['default', 'starrocks'],
     python: ['default', '3.9'],
   };
+
+  const demoArtifactEngineChoices: EngineChoices = ['default'];
 
   // report的参数
   const [dataSources, setDataSources] = useState<DataSource[]>(
@@ -217,41 +219,17 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   }, [layout, dataSources, parameters, artifacts, aliasRelianceMap]);
 
   // 添加图表Artifact: 修改artifacts, layouts
-  const handleAddArtifact = () => {
-    // 提取现有图表的 ID，并转换为数字
-    const existingIds = artifacts.map((artifact) =>
-      parseInt(artifact.id.split('-')[1], 10)
+  const handleAddArtifact = (newArtifact: Artifact) => {
+    // 添加新的图表
+    setArtifacts([...artifacts, newArtifact]);
+
+    // 更新 aliasRelianceMap
+    setAliasRelianceMap(
+      updateAliasRelianceMapByArtifact(null, newArtifact, aliasRelianceMap)
     );
 
-    // 找到缺失的最小数字
-    let newId = 1;
-    while (existingIds.includes(newId)) {
-      newId++;
-    }
-
-    // 生成新的 ID
-    const newArtifactId = `artifact-${newId}`;
-    const title = `新增图表 ${newId}`;
-
-    // // todo: 更新 aliasRelianceMap
-    // setAliasRelianceMap(
-    //   updateAliasRelianceMapByArtifact(oldArtifact, newArtifact, aliasRelianceMap)
-    // );
-
-    // 添加新的图表
-    setArtifacts([
-      ...artifacts,
-      {
-        id: newArtifactId,
-        title: title,
-        code: 'pie',
-        dependencies: [],
-        executor_engine: 'default',
-      },
-    ]);
-
     // 更新布局
-    setLayout(addLayoutItem(layout, newArtifactId, title));
+    setLayout(addLayoutItem(layout, newArtifact.id, newArtifact.title));
   };
 
   // 修改图表: 修改artifacts, layouts
@@ -263,6 +241,18 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
       toast.error('图表不存在');
       return;
     }
+
+    // 如果标题变了，同步更新布局
+    if (oldArtifact.title !== newArtifact.title) {
+      const newLayout = layout.items.map((item) => {
+        if (item.id === newArtifact.id) {
+          return { ...item, title: newArtifact.title };
+        }
+        return item;
+      });
+      setLayout({ ...layout, items: newLayout });
+    }
+
     setAliasRelianceMap(
       updateAliasRelianceMapByArtifact(
         oldArtifact,
@@ -346,7 +336,10 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
 
   const handleDeleteDataSource = (dataSource: DataSource) => {
     // 判断数据源是否被图表依赖
-    if (aliasRelianceMap.aliasToArtifacts[dataSource.alias]) {
+    if (
+      aliasRelianceMap.aliasToArtifacts[dataSource.alias] &&
+      aliasRelianceMap.aliasToArtifacts[dataSource.alias].length > 0
+    ) {
       const artifactTitles = aliasRelianceMap.aliasToArtifacts[
         dataSource.alias
       ].map((artifact) => `"${artifact.artifactTitle}"`);
@@ -433,7 +426,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
               <TabDataSource
                 dataSources={dataSources}
                 setDataSources={setDataSources}
-                engineChoices={demoEngineChoices}
+                engineChoices={demoDataSourceEngineChoices}
                 aliasRelianceMap={aliasRelianceMap}
                 handleAddDataSource={handleAddDataSource}
                 handleEditDataSource={handleEditDataSource}
@@ -442,7 +435,6 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
               />
               <TabFilter
                 parameters={parameters}
-                setParameters={setParameters}
                 handleDeleteParameter={handleDeleteParameter}
                 handleAddParameter={handleAddParameter}
                 handleEditParameter={handleEditParameter}
@@ -452,8 +444,12 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
                 layout={layout}
                 setLayout={setLayout}
                 handleAddArtifact={handleAddArtifact}
+                handleModifyArtifact={handleModifyArtifact}
                 handleDeleteArtifact={handleDeleteArtifact}
                 confirmDelete={confirmDelete}
+                artifacts={artifacts}
+                dataSources={dataSources}
+                engineChoices={demoArtifactEngineChoices}
               />
             </div>
           </Tabs>

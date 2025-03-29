@@ -107,13 +107,12 @@ const EditArtifactModal = ({
       const savedArtifact: Artifact = {
         id: artifact?.id || id,
         title,
-        description: description || undefined,
-        code,
-        dependencies,
-        executor_engine,
+        description: description || '',
+        code: code || '',
+        dependencies: dependencies || [],
+        executor_engine: executor_engine || 'default',
         ArtifactParams: artifact?.ArtifactParams || [],
       };
-
       onSave(savedArtifact);
     } catch (error) {
       console.error('Error saving artifact:', error);

@@ -22,7 +22,6 @@ interface TabDataSourceProps {
 
 const TabDataSource = ({
   dataSources,
-  setDataSources,
   engineChoices,
   aliasRelianceMap,
   handleAddDataSource,

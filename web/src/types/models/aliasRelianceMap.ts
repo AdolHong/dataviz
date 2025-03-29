@@ -40,6 +40,13 @@ export const updateAliasRelianceMapByArtifact = (
     });
   }
 
+  // 删除aliasToArtifacts中, 列表为空的alias
+  Object.keys(updatedAliasMap.aliasToArtifacts).forEach((alias) => {
+    if (updatedAliasMap.aliasToArtifacts[alias].length === 0) {
+      delete updatedAliasMap.aliasToArtifacts[alias];
+    }
+  });
+
   return updatedAliasMap;
 };
 
@@ -61,6 +68,14 @@ export const upsertAliasRelianceMapByDataSource = (
     });
   }
   updatedAliasMap.aliasToDataSourceId[newDataSource.alias] = newDataSource.id;
+
+  // 删除aliasToArtifacts中, 列表为空的alias
+  Object.keys(updatedAliasMap.aliasToArtifacts).forEach((alias) => {
+    if (updatedAliasMap.aliasToArtifacts[alias].length === 0) {
+      delete updatedAliasMap.aliasToArtifacts[alias];
+    }
+  });
+
   return updatedAliasMap;
 };
 

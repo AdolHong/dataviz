@@ -7,7 +7,6 @@ import EditFilterModal from './EditFilterModal';
 
 interface TabFilterProps {
   parameters: Parameter[];
-  setParameters: (parameters: Parameter[]) => void;
   handleAddParameter: (parameter: Parameter) => boolean;
   handleEditParameter: (parameter: Parameter) => boolean;
   handleDeleteParameter: (parameter: Parameter) => void;

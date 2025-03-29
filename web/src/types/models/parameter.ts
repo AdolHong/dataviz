@@ -1,11 +1,11 @@
 export interface SingleSelectParamConfig {
-  Config: 'single_select';
+  type: 'single_select';
   choices: string[];
   default: string;
 }
 
 export interface MultiSelectParamConfig {
-  Config: 'multi_select';
+  type: 'multi_select';
   choices: string[];
   default: string[];
   sep: string;
@@ -13,20 +13,20 @@ export interface MultiSelectParamConfig {
 }
 
 export interface DatePickerParamConfig {
-  Config: 'date_picker';
+  type: 'date_picker';
   dateFormat: string;
   default: string;
 }
 
 export interface MultiInputParamConfig {
-  Config: 'multi_input';
+  type: 'multi_input';
   default: string[];
   sep: string;
   wrapper: string;
 }
 
 export interface SingleInputParamConfig {
-  Config: 'single_input';
+  type: 'single_input';
   default: string;
 }
 

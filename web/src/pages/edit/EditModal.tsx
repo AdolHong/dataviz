@@ -69,8 +69,28 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
       },
     ],
     parameters: [
-      { id: 'p1', name: '开始日期', type: 'single_select' },
-      { id: 'p2', name: '结束日期', type: 'single_select' },
+      {
+        id: 'p1',
+        name: '开始日期',
+        alias: '开始', // 可选字段
+        description: '选择开始日期',
+        paramConfig: {
+          type: 'single_select',
+          choices: ['2023-01-01', '2023-01-02', '2023-01-03'],
+          default: '2023-01-01',
+        },
+      },
+      {
+        id: 'p2',
+        name: '结束日期',
+        alias: '结束', // 可选字段
+        description: '选择结束日期',
+        paramConfig: {
+          type: 'single_select',
+          choices: ['2023-01-04', '2023-01-05', '2023-01-06'],
+          default: '2023-01-04',
+        },
+      },
     ],
     charts: [
       {

@@ -5,26 +5,26 @@ import { type Layout } from '@/types/models/layout';
 import { useState } from 'react';
 import { EditLayoutModal } from './EditLayoutModal';
 
-interface TabChartProps {
+interface TabArtifactProps {
   layout: Layout;
   setLayout: (layout: Layout) => void;
-  handleAddChart: () => void;
-  handleDeleteChart: (id: string) => void;
+  handleAddArtifact: () => void;
+  handleDeleteArtifact: (id: string) => void;
   confirmDelete: (deleteFunction: () => void, message: string) => void;
 }
 
-const TabChart = ({
+const TabArtifact = ({
   layout,
   setLayout,
-  handleAddChart,
-  handleDeleteChart,
+  handleAddArtifact,
+  handleDeleteArtifact,
   confirmDelete,
-}: TabChartProps) => {
+}: TabArtifactProps) => {
   const [isLayoutModalOpen, setIsLayoutModalOpen] = useState(false);
 
   return (
     <div>
-      <TabsContent value='charts' className='p-4'>
+      <TabsContent value='artifacts' className='p-4'>
         <div className='space-y-4'>
           <div className='border rounded-lg p-4'>
             {layout ? (
@@ -63,7 +63,7 @@ const TabChart = ({
                         className='h-6 w-6 text-destructive'
                         onClick={() =>
                           confirmDelete(
-                            () => handleDeleteChart(item.id),
+                            () => handleDeleteArtifact(item.id),
                             `您确定要删除 "${item.title}" 吗？`
                           )
                         }
@@ -83,7 +83,7 @@ const TabChart = ({
             <Button
               variant='outline'
               className='w-full border-dashed'
-              onClick={handleAddChart}
+              onClick={handleAddArtifact}
             >
               <Plus className='h-4 w-4 mr-2' />
               添加图表
@@ -113,4 +113,4 @@ const TabChart = ({
   );
 };
 
-export default TabChart;
+export default TabArtifact;

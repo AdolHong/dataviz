@@ -1,6 +1,6 @@
 import type { DataSource } from './dataSource';
 import type { Parameter } from './parameter';
-import type { Chart } from './chart';
+import type { Artifact } from './artifact';
 import type { Layout } from './layout';
 import {
   type AliasRelianceMap,
@@ -15,7 +15,7 @@ export interface Report {
   description?: string;
   dataSources: DataSource[];
   parameters: Parameter[]; // 使用之前定义的 Parameter 接口
-  charts: Chart[];
+  artifacts: Artifact[];
   layout: Layout;
 }
 
@@ -31,7 +31,7 @@ export const addDataSource = (
     id: `source_${length + 1}`,
   };
 
-  // 更新aliasRelianceMap: source与charts的依赖关系
+  // 更新aliasRelianceMap: source与artifacts的依赖关系
   const newAliasRelianceMap = upsertAliasRelianceMapByDataSource(
     null,
     newSource,
@@ -58,7 +58,7 @@ export const editDataSource = (
     return item.id === newSource.id ? newSource : item;
   });
 
-  // 更新aliasRelianceMap: source与charts的依赖关系
+  // 更新aliasRelianceMap: source与artifacts的依赖关系
   const newAliasRelianceMap = upsertAliasRelianceMapByDataSource(
     oldSource,
     newSource,
@@ -75,7 +75,7 @@ export const editDataSource = (
 export const deleteDataSource = (
   source: DataSource,
   dataSources: DataSource[],
-  charts: Chart[]
+  artifacts: Artifact[]
 ): { newDataSources: DataSource[]; newAliasRelianceMap: AliasRelianceMap } => {
   // 删除节点
   const filteredDataSources = dataSources.filter(
@@ -88,8 +88,8 @@ export const deleteDataSource = (
     id: `source_${idx + 1}`,
   }));
 
-  // 更新aliasRelianceMap: source与charts的依赖关系
-  const newAliasRelianceMap = createAliasRelianceMap(newDataSources, charts);
+  // 更新aliasRelianceMap: source与artifacts的依赖关系
+  const newAliasRelianceMap = createAliasRelianceMap(newDataSources, artifacts);
 
   return {
     newDataSources,

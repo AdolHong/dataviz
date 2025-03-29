@@ -1,35 +1,35 @@
 // 可视化接口
-export interface Chart {
+export interface Artifact {
   id: string; // 自动生成
   title: string;
   description?: string;
   code: string;
   dependencies: string[]; // 依赖哪个数据源
   executor_engine: string;
-  chartParams?: ChartParam[];
+  ArtifactParams?: ArtifactParam[];
 }
 
 // 可视化参数接口
-export interface ChartParam {
+export interface ArtifactParam {
   id: string; // 自动生成
   name: string;
   alias?: string; // 参数可以有别名, 一般是中文，便于理解参数
   description?: string;
   valueType: 'string' | 'double' | 'boolean' | 'int';
   paramType:
-    | PlainSingleChartParamType
-    | PlainMultipleChartParamType
-    | CascadeSingleChartParamType
-    | CascadeMultipleChartParamType;
+    | PlainSingleArtifactParamType
+    | PlainMultipleArtifactParamType
+    | CascadeSingleArtifactParamType
+    | CascadeMultipleArtifactParamType;
 }
 
-export interface PlainSingleChartParamType {
+export interface PlainSingleArtifactParamType {
   type: 'plain_single';
   default: string;
   choices: string[];
 }
 
-export interface PlainMultipleChartParamType {
+export interface PlainMultipleArtifactParamType {
   type: 'plain_multiple';
   default: string[];
   choices: string[];
@@ -37,7 +37,7 @@ export interface PlainMultipleChartParamType {
   dfColumn: string;
 }
 
-export interface CascadeSingleChartParamType {
+export interface CascadeSingleArtifactParamType {
   type: 'cascade_single';
   default: string;
   choices: string[];
@@ -46,7 +46,7 @@ export interface CascadeSingleChartParamType {
   level: number;
 }
 
-export interface CascadeMultipleChartParamType {
+export interface CascadeMultipleArtifactParamType {
   type: 'cascade_multiple';
   default: string[];
   choices: string[];

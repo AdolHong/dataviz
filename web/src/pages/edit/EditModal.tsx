@@ -16,18 +16,18 @@ import type {
   DataSource,
   Layout,
   Parameter,
-  Chart,
+  Artifact,
   EngineChoices,
 } from '@/types';
 
 import TabDataSource from './TabDataSource';
 import TabFilter from './TabFilter';
-import TabChart from './TabChart';
+import TabArtifact from './TabArtifact';
 
 import {
   type AliasRelianceMap,
   createAliasRelianceMap,
-  updateAliasRelianceMapByChart,
+  updateAliasRelianceMapByArtifact,
 } from '@/types/models/aliasRelianceMap';
 
 import {
@@ -92,37 +92,37 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
         },
       },
     ],
-    charts: [
+    artifacts: [
       {
-        id: 'chart-1',
+        id: 'artifact-1',
         title: '销售趋势',
         code: 'line',
         dependencies: ['df_sales'],
         executor: { type: 'python', engine: 'pandas' },
       },
       {
-        id: 'chart-2',
+        id: 'artifact-2',
         title: '销售占比',
         code: 'pie',
         dependencies: ['df_external'],
         executor: { type: 'python', engine: 'pandas' },
       },
       {
-        id: 'chart-3',
+        id: 'artifact-3',
         title: '销售占比',
         code: 'pie',
         dependencies: ['df_external'],
         executor: { type: 'python', engine: 'pandas' },
       },
       {
-        id: 'chart-4',
+        id: 'artifact-4',
         title: '销售占比',
         code: 'pie',
         dependencies: ['df_sales', 'df_external'],
         executor: { type: 'python', engine: 'pandas' },
       },
       {
-        id: 'chart-5',
+        id: 'artifact-5',
         title: '销售占比',
         code: 'pie',
         dependencies: ['df_sales'],
@@ -133,11 +133,46 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
       columns: 3,
       rows: 2,
       items: [
-        { id: 'chart-1', title: '销售趋势', width: 1, height: 1, x: 0, y: 0 },
-        { id: 'chart-2', title: '销售占比', width: 1, height: 1, x: 1, y: 0 },
-        { id: 'chart-3', title: '销售明细', width: 1, height: 1, x: 2, y: 0 },
-        { id: 'chart-4', title: '新增图表1', width: 1, height: 1, x: 0, y: 1 },
-        { id: 'chart-5', title: '新增图表2', width: 1, height: 1, x: 1, y: 1 },
+        {
+          id: 'artifact-1',
+          title: '销售趋势',
+          width: 1,
+          height: 1,
+          x: 0,
+          y: 0,
+        },
+        {
+          id: 'artifact-2',
+          title: '销售占比',
+          width: 1,
+          height: 1,
+          x: 1,
+          y: 0,
+        },
+        {
+          id: 'artifact-3',
+          title: '销售明细',
+          width: 1,
+          height: 1,
+          x: 2,
+          y: 0,
+        },
+        {
+          id: 'artifact-4',
+          title: '新增图表1',
+          width: 1,
+          height: 1,
+          x: 0,
+          y: 1,
+        },
+        {
+          id: 'artifact-5',
+          title: '新增图表2',
+          width: 1,
+          height: 1,
+          x: 1,
+          y: 1,
+        },
       ],
     },
   };
@@ -154,13 +189,13 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   const [parameters, setParameters] = useState<Parameter[]>(
     demoReport.parameters
   );
-  const [charts, setCharts] = useState<Chart[]>(demoReport.charts);
+  const [artifacts, setArtifacts] = useState<Artifact[]>(demoReport.artifacts);
   const [layout, setLayout] = useState<Layout>(demoReport.layout);
   const [activeTab, setActiveTab] = useState('filters');
 
-  // 创建一个对象来存储 alias 和对应的 chart.id 列表
+  // 创建一个对象来存储 alias 和对应的 artifact.id 列表
   const [aliasRelianceMap, setAliasRelianceMap] = useState<AliasRelianceMap>(
-    createAliasRelianceMap(demoReport.dataSources, demoReport.charts)
+    createAliasRelianceMap(demoReport.dataSources, demoReport.artifacts)
   );
 
   // 确认删除dialog
@@ -176,16 +211,16 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
     console.log('layout', demoReport);
     console.log('dataSources', dataSources);
     console.log('parameters', parameters);
-    console.log('charts', charts);
+    console.log('artifacts', artifacts);
     console.log('aliasRelianceMap', aliasRelianceMap);
     toast.success(`[DEBUG]你保存了报表"${reportId}"`);
-  }, [layout, dataSources, parameters, charts, aliasRelianceMap]);
+  }, [layout, dataSources, parameters, artifacts, aliasRelianceMap]);
 
-  // 添加图表Chart: 修改charts, layouts
-  const handleAddChart = () => {
+  // 添加图表Artifact: 修改artifacts, layouts
+  const handleAddArtifact = () => {
     // 提取现有图表的 ID，并转换为数字
-    const existingIds = charts.map((chart) =>
-      parseInt(chart.id.split('-')[1], 10)
+    const existingIds = artifacts.map((artifact) =>
+      parseInt(artifact.id.split('-')[1], 10)
     );
 
     // 找到缺失的最小数字
@@ -195,71 +230,81 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
     }
 
     // 生成新的 ID
-    const newChartId = `chart-${newId}`;
+    const newArtifactId = `artifact-${newId}`;
     const title = `新增图表 ${newId}`;
 
     // // todo: 更新 aliasRelianceMap
     // setAliasRelianceMap(
-    //   updateAliasRelianceMapByChart(oldChart, newChart, aliasRelianceMap)
+    //   updateAliasRelianceMapByArtifact(oldArtifact, newArtifact, aliasRelianceMap)
     // );
 
     // 添加新的图表
-    setCharts([
-      ...charts,
+    setArtifacts([
+      ...artifacts,
       {
-        id: newChartId,
+        id: newArtifactId,
         title: title,
         code: 'pie',
         dependencies: [],
-        executor: { type: 'python', engine: 'pandas' },
+        executor_engine: 'default',
       },
     ]);
 
     // 更新布局
-    setLayout(addLayoutItem(layout, newChartId, title));
+    setLayout(addLayoutItem(layout, newArtifactId, title));
   };
 
-  // 修改图表: 修改charts, layouts
-  const handleModifyChart = (newChart: Chart) => {
-    const oldChart = charts.find((chart) => chart.id === newChart.id);
-    if (!oldChart) {
+  // 修改图表: 修改artifacts, layouts
+  const handleModifyArtifact = (newArtifact: Artifact) => {
+    const oldArtifact = artifacts.find(
+      (artifact) => artifact.id === newArtifact.id
+    );
+    if (!oldArtifact) {
       toast.error('图表不存在');
       return;
     }
     setAliasRelianceMap(
-      updateAliasRelianceMapByChart(oldChart, newChart, aliasRelianceMap)
+      updateAliasRelianceMapByArtifact(
+        oldArtifact,
+        newArtifact,
+        aliasRelianceMap
+      )
     );
 
-    // 更新charts
-    setCharts(
-      charts.map((chart) => (chart.id === newChart.id ? newChart : chart))
+    // 更新artifacts
+    setArtifacts(
+      artifacts.map((artifact) =>
+        artifact.id === newArtifact.id ? newArtifact : artifact
+      )
     );
   };
 
-  // 删除图表: 修改charts, layouts
-  const handleDeleteChart = (chartId: string) => {
-    if (charts.length === 1) {
+  // 删除图表: 修改artifacts, layouts
+  const handleDeleteArtifact = (artifactId: string) => {
+    if (artifacts.length === 1) {
       toast.error('至少需要保留一个图表');
       return;
     }
     // 删除图表
-    const oldChart = charts.find((chart) => chart.id === chartId);
-    if (!oldChart) {
+    const oldArtifact = artifacts.find(
+      (artifact) => artifact.id === artifactId
+    );
+    if (!oldArtifact) {
       toast.error('图表不存在');
       return;
     }
     // 更新 aliasRelianceMap
     setAliasRelianceMap(
-      updateAliasRelianceMapByChart(oldChart, null, aliasRelianceMap)
+      updateAliasRelianceMapByArtifact(oldArtifact, null, aliasRelianceMap)
     );
 
-    // 更新charts
-    setCharts(charts.filter((chart) => chart.id !== chartId));
+    // 更新artifacts
+    setArtifacts(artifacts.filter((artifact) => artifact.id !== artifactId));
 
     // 更新布局，删除对应的 item
     let newLayout = {
       ...layout,
-      items: layout.items.filter((item) => item.id !== chartId), // 过滤掉被删除的 item
+      items: layout.items.filter((item) => item.id !== artifactId), // 过滤掉被删除的 item
     };
     // 删除空行和空列
     newLayout = removeEmptyRowsAndColumns(newLayout);
@@ -301,12 +346,12 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
 
   const handleDeleteDataSource = (dataSource: DataSource) => {
     // 判断数据源是否被图表依赖
-    if (aliasRelianceMap.aliasToCharts[dataSource.alias]) {
-      const chartTitles = aliasRelianceMap.aliasToCharts[dataSource.alias].map(
-        (chart) => `"${chart.chartTitle}"`
-      );
+    if (aliasRelianceMap.aliasToArtifacts[dataSource.alias]) {
+      const artifactTitles = aliasRelianceMap.aliasToArtifacts[
+        dataSource.alias
+      ].map((artifact) => `"${artifact.artifactTitle}"`);
       toast.error(
-        `数据源${dataSource.name}被图表[${chartTitles.join(', ')}]依赖，不能删除`
+        `数据源${dataSource.name}被图表[${artifactTitles.join(', ')}]依赖，不能删除`
       );
       return;
     }
@@ -314,7 +359,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
     const { newDataSources, newAliasRelianceMap } = deleteDataSource(
       dataSource,
       dataSources,
-      charts
+      artifacts
     );
     setDataSources(newDataSources);
     setAliasRelianceMap(newAliasRelianceMap);
@@ -375,7 +420,10 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
                 <span>数据源</span>
               </TabsTrigger>
 
-              <TabsTrigger value='charts' className='flex items-center gap-2'>
+              <TabsTrigger
+                value='artifacts'
+                className='flex items-center gap-2'
+              >
                 <BarChart2 size={24} />
                 <span>图表</span>
               </TabsTrigger>
@@ -400,11 +448,11 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
                 handleEditParameter={handleEditParameter}
                 confirmDelete={confirmDelete}
               />
-              <TabChart
+              <TabArtifact
                 layout={layout}
                 setLayout={setLayout}
-                handleAddChart={handleAddChart}
-                handleDeleteChart={handleDeleteChart}
+                handleAddArtifact={handleAddArtifact}
+                handleDeleteArtifact={handleDeleteArtifact}
                 confirmDelete={confirmDelete}
               />
             </div>

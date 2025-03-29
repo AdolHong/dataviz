@@ -1,6 +1,6 @@
 export type { ReportResponse } from './api/reportResponse';
 
-export type { ChartParam, Chart } from './models/chart';
+export type { ArtifactParam, Artifact } from './models/artifact';
 
 export type { DataSource } from './models/dataSource';
 

@@ -168,7 +168,7 @@ export const EditDataSourceModal = ({
                 onChange={(e) => {
                   // 如果存在依赖不能修改
                   if (
-                    aliasRelianceMap.aliasToCharts[dataSource.alias] &&
+                    aliasRelianceMap.aliasToArtifacts[dataSource.alias] &&
                     dataSource.id ===
                       aliasRelianceMap.aliasToDataSourceId[dataSource.alias]
                   ) {

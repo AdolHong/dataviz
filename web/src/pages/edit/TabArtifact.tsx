@@ -42,7 +42,8 @@ const TabArtifact = ({
     if (editingArtifact) {
       handleModifyArtifact(artifact);
     } else {
-      handleAddArtifact(artifact);
+      handleAddArtifact();
+      handleModifyArtifact(artifact);
     }
     setIsArtifactModalOpen(false);
   };

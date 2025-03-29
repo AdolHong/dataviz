@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Check, ChevronsUpDown } from 'lucide-react';
+import { Check, ChevronsUpDown, Plus, Pencil, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   Command,
@@ -26,7 +26,8 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { toast } from 'sonner';
-import type { Artifact, DataSource } from '@/types';
+import type { Artifact, DataSource, ArtifactParam } from '@/types';
+import EditArtifactParamModal from './EditArtifactParamModal';
 
 interface EditArtifactModalProps {
   isOpen: boolean;
@@ -56,10 +57,13 @@ const EditArtifactModal = ({
   const [code, setCode] = useState('');
   const [dependencies, setDependencies] = useState<string[]>([]);
   const [executor_engine, setExecutorEngine] = useState('default');
+  const [artifactParams, setArtifactParams] = useState<ArtifactParam[]>([]);
 
   // UI 状态控制
   const [openEngine, setOpenEngine] = useState(false);
   const [openDependencies, setOpenDependencies] = useState(false);
+  const [isParamModalOpen, setIsParamModalOpen] = useState(false);
+  const [editingParam, setEditingParam] = useState<ArtifactParam | null>(null);
 
   // 数据源别名列表（供依赖选择用）
   const dataSourceOptions = dataSources.map((ds) => ds.alias);
@@ -74,6 +78,7 @@ const EditArtifactModal = ({
       setCode(artifact.code);
       setDependencies(artifact.dependencies);
       setExecutorEngine(artifact.executor_engine);
+      setArtifactParams(artifact.ArtifactParams || []);
     } else {
       // 新增模式：重置所有状态
       setId(generateId());
@@ -82,8 +87,27 @@ const EditArtifactModal = ({
       setCode('');
       setDependencies([]);
       setExecutorEngine('default');
+      setArtifactParams([]);
     }
   }, [artifact, isOpen]);
+
+  // --- 参数相关操作 ---
+  const handleAddParam = (param: ArtifactParam) => {
+    setArtifactParams((prev) => [...prev, param]);
+    setIsParamModalOpen(false);
+  };
+
+  const handleEditParam = (param: ArtifactParam) => {
+    setArtifactParams((prev) =>
+      prev.map((p) => (p.id === param.id ? param : p))
+    );
+    setEditingParam(null);
+    setIsParamModalOpen(false);
+  };
+
+  const handleDeleteParam = (paramId: string) => {
+    setArtifactParams((prev) => prev.filter((p) => p.id !== paramId));
+  };
 
   // --- 事件处理 ---
   const handleSaveClick = () => {
@@ -111,7 +135,7 @@ const EditArtifactModal = ({
         code: code || '',
         dependencies: dependencies || [],
         executor_engine: executor_engine || 'default',
-        ArtifactParams: artifact?.ArtifactParams || [],
+        ArtifactParams: artifactParams,
       };
       onSave(savedArtifact);
     } catch (error) {
@@ -267,6 +291,68 @@ const EditArtifactModal = ({
           </div>
 
           <div className='grid grid-cols-4 items-start gap-4'>
+            <Label className='text-right pt-2'>参数列表</Label>
+            <div className='col-span-3 space-y-2'>
+              {artifactParams.length > 0 ? (
+                <div className='space-y-2'>
+                  {artifactParams.map((param) => (
+                    <div
+                      key={param.id}
+                      className='border-2 rounded-lg p-3 text-sm relative group shadow-sm'
+                    >
+                      <div className='font-medium'>
+                        {param.name} {param.alias ? `(${param.alias})` : ''}
+                      </div>
+                      <div className='text-xs text-gray-500'>
+                        {param.description || '无描述'} · {param.valueType} ·{' '}
+                        {param.paramType.type}
+                      </div>
+
+                      <div className='absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-80 transition-opacity'>
+                        <Button
+                          variant='ghost'
+                          size='icon'
+                          className='h-6 w-6'
+                          onClick={() => {
+                            setEditingParam(param);
+                            setIsParamModalOpen(true);
+                          }}
+                        >
+                          <Pencil className='h-4 w-4' />
+                        </Button>
+                        <Button
+                          variant='ghost'
+                          size='icon'
+                          className='h-6 w-6 text-destructive'
+                          onClick={() => handleDeleteParam(param.id)}
+                        >
+                          <Trash2 className='h-4 w-4' />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className='text-center text-gray-500 p-4 border-2 border-dashed rounded-lg'>
+                  暂无参数
+                </div>
+              )}
+
+              <Button
+                variant='outline'
+                className='w-full border-dashed mt-2'
+                onClick={() => {
+                  setEditingParam(null);
+                  setIsParamModalOpen(true);
+                }}
+              >
+                <Plus className='h-4 w-4 mr-2' />
+                新增参数
+              </Button>
+            </div>
+          </div>
+
+          <div className='grid grid-cols-4 items-start gap-4'>
             <Label htmlFor='code' className='text-right pt-2'>
               代码*
             </Label>
@@ -292,6 +378,18 @@ const EditArtifactModal = ({
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      {/* 参数编辑模态框 */}
+      <EditArtifactParamModal
+        isOpen={isParamModalOpen}
+        onClose={() => {
+          setIsParamModalOpen(false);
+          setEditingParam(null);
+        }}
+        onSave={editingParam ? handleEditParam : handleAddParam}
+        param={editingParam}
+        dataSources={dataSources}
+      />
     </Dialog>
   );
 };

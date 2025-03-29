@@ -31,7 +31,7 @@ export interface SingleInputParamConfig {
 }
 
 // 参数接口
-export type Parameter = {
+export interface Parameter {
   id: string; // 自动生成
   name: string;
   alias?: string; // 参数可以有别名, 一般是中文，便于理解参数
@@ -42,8 +42,4 @@ export type Parameter = {
     | DatePickerParamConfig
     | MultiInputParamConfig
     | SingleInputParamConfig;
-};
-
-export type SingleSelectParamConfig = { ... };
-export type MultiSelectParamConfig = { ... };
-// 其他类型定义
+}

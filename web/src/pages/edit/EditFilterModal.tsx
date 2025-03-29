@@ -17,14 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import type {
-  Parameter,
-  SingleSelectParamConfig,
-  MultiSelectParamConfig,
-  DatePickerParamConfig,
-  MultiInputParamConfig,
-  SingleInputParamConfig,
-} from '@/types/models/parameter';
+import type { Parameter } from '@/types/models/parameter';
 import { toast } from 'sonner';
 import { Combobox } from '@/components/combobox';
 

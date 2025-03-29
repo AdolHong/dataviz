@@ -1,3 +1,17 @@
+// 可视化接口
+export interface Chart {
+  id: string; // 自动生成
+  title: string;
+  description?: string;
+  code: string;
+  dependencies: string[]; // 依赖哪个数据源
+  executor: {
+    type: string;
+    engine: string;
+  };
+  chartParams?: ChartParam[];
+}
+
 // 可视化参数接口
 export interface ChartParam {
   id: string; // 自动生成
@@ -15,16 +29,11 @@ export interface ChartParam {
   };
 }
 
-// 可视化接口
-export interface Chart {
+export interface Artifact {
   id: string; // 自动生成
-  title: string;
+  name: string;
   description?: string;
-  code: string;
+
   dependencies: string[]; // 依赖哪个数据源
-  executor: {
-    type: string;
-    engine: string;
-  };
-  chartParams?: ChartParam[];
+  config: 
 }

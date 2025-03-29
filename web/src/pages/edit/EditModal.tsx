@@ -74,7 +74,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
         name: 'start_date',
         alias: '开始日期', // 可选字段
         description: '选择开始日期',
-        paramConfig: {
+        config: {
           type: 'single_select',
           choices: ['2023-01-01', '2023-01-02', '2023-01-03'],
           default: '2023-01-01',
@@ -85,7 +85,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
         name: 'end_date',
         alias: '结束日期', // 可选字段
         description: '选择结束日期',
-        paramConfig: {
+        config: {
           type: 'single_select',
           choices: ['2023-01-04', '2023-01-05', '2023-01-06'],
           default: '2023-01-04',

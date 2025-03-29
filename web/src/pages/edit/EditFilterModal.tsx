@@ -48,7 +48,7 @@ const EditFilterModal = ({
   const [alias, setAlias] = useState('');
   const [description, setDescription] = useState('');
   const [paramType, setParamType] =
-    useState<Parameter['paramConfig']['type']>('single_input'); // 默认类型
+    useState<Parameter['config']['type']>('single_input'); // 默认类型
 
   // --- 各类型参数配置状态 ---
   // single_select
@@ -97,34 +97,34 @@ const EditFilterModal = ({
       setName(parameter.name);
       setAlias(parameter.alias || '');
       setDescription(parameter.description || '');
-      setParamType(parameter.paramConfig.type);
+      setParamType(parameter.config.type);
       resetConfigStates(); // 先重置所有特定配置状态
 
       // 根据类型填充特定配置
-      switch (parameter.paramConfig.type) {
+      switch (parameter.config.type) {
         case 'single_select':
-          setSingleSelectChoicesJoined(parameter.paramConfig.choices.join(','));
-          setSingleSelectChoices(parameter.paramConfig.choices);
-          setSingleSelectDefault(parameter.paramConfig.default);
+          setSingleSelectChoicesJoined(parameter.config.choices.join(','));
+          setSingleSelectChoices(parameter.config.choices);
+          setSingleSelectDefault(parameter.config.default);
           break;
         case 'multi_select':
-          setMultiSelectChoicesJoined(parameter.paramConfig.choices.join(','));
-          setMultiSelectChoices(parameter.paramConfig.choices);
-          setMultiSelectDefault(parameter.paramConfig.default);
-          setMultiSelectSep(parameter.paramConfig.sep);
-          setMultiSelectWrapper(parameter.paramConfig.wrapper);
+          setMultiSelectChoicesJoined(parameter.config.choices.join(','));
+          setMultiSelectChoices(parameter.config.choices);
+          setMultiSelectDefault(parameter.config.default);
+          setMultiSelectSep(parameter.config.sep);
+          setMultiSelectWrapper(parameter.config.wrapper);
           break;
         case 'single_input':
-          setSingleInputDefault(parameter.paramConfig.default);
+          setSingleInputDefault(parameter.config.default);
           break;
         case 'multi_input':
-          setMultiInputDefault(parameter.paramConfig.default);
-          setMultiInputSep(parameter.paramConfig.sep);
-          setMultiInputWrapper(parameter.paramConfig.wrapper);
+          setMultiInputDefault(parameter.config.default);
+          setMultiInputSep(parameter.config.sep);
+          setMultiInputWrapper(parameter.config.wrapper);
           break;
         case 'date_picker':
-          setDatePickerFormat(parameter.paramConfig.dateFormat);
-          setDatePickerDefault(parameter.paramConfig.default);
+          setDatePickerFormat(parameter.config.dateFormat);
+          setDatePickerDefault(parameter.config.default);
           break;
         default:
           toast.error('[DEBUG] parameter edit: 未知参数类型');
@@ -143,11 +143,11 @@ const EditFilterModal = ({
 
   // --- 事件处理 ---
   const handleSaveClick = () => {
-    let paramConfig: Parameter['paramConfig'];
+    let config: Parameter['config'];
     try {
       switch (paramType) {
         case 'single_select':
-          paramConfig = {
+          config = {
             type: 'single_select',
             choices: singleSelectChoices,
             default: singleSelectDefault,
@@ -158,14 +158,14 @@ const EditFilterModal = ({
             !singleSelectChoices.includes(singleSelectDefault)
           ) {
             toast.error('[PARAM] 异常, 默认值必须在单选清单中');
-            paramConfig.default = '';
+            config.default = '';
           }
           break;
         case 'single_input':
-          paramConfig = { type: 'single_input', default: singleInputDefault };
+          config = { type: 'single_input', default: singleInputDefault };
           break;
         case 'multi_select':
-          paramConfig = {
+          config = {
             type: 'multi_select',
             choices: multiSelectChoices,
             default: multiSelectDefault,
@@ -178,11 +178,11 @@ const EditFilterModal = ({
           );
           if (validMultiDefaults.length !== multiSelectDefault.length) {
             toast.error('[PARAM] 异常, 默认值必须在多选清单中');
-            paramConfig.default = validMultiDefaults; // or handle as error
+            config.default = validMultiDefaults; // or handle as error
           }
           break;
         case 'date_picker':
-          paramConfig = {
+          config = {
             type: 'date_picker',
             dateFormat: datePickerFormat,
             default: datePickerDefault,
@@ -192,7 +192,7 @@ const EditFilterModal = ({
             datePickerFormat != 'YYYYMMDD'
           ) {
             toast.error('[PARAM] 异常, 默认日期格式错误');
-            paramConfig.dateFormat = 'YYYY-MM-DD';
+            config.dateFormat = 'YYYY-MM-DD';
           }
 
           if (
@@ -214,7 +214,7 @@ const EditFilterModal = ({
 
           break;
         case 'multi_input':
-          paramConfig = {
+          config = {
             type: 'multi_input',
             default: multiInputDefault,
             sep: multiInputSep,
@@ -228,7 +228,7 @@ const EditFilterModal = ({
           return; // 或者抛出错误
       }
     } catch (error) {
-      console.error('Error constructing paramConfig:', error);
+      console.error('Error constructing config:', error);
       // 可能需要向用户显示错误消息
       return;
     }
@@ -244,13 +244,13 @@ const EditFilterModal = ({
       name,
       alias: alias || '',
       description: description || '',
-      paramConfig,
+      config,
     };
     onSave(savedParameter);
   };
 
   // 渲染特定类型的配置字段
-  const renderParamConfigFields = () => {
+  const renderconfigFields = () => {
     switch (paramType) {
       // 单选列表
       case 'single_select':
@@ -531,7 +531,7 @@ const EditFilterModal = ({
             </Label>
             <Select
               value={paramType}
-              onValueChange={(value: Parameter['paramConfig']['type']) =>
+              onValueChange={(value: Parameter['config']['type']) =>
                 setParamType(value)
               }
             >
@@ -549,7 +549,7 @@ const EditFilterModal = ({
           </div>
 
           {/* 动态渲染特定类型的配置 */}
-          {renderParamConfigFields()}
+          {renderconfigFields()}
         </div>
         <DialogFooter>
           <Button variant='outline' onClick={onClose}>

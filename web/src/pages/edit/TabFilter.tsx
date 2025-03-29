@@ -66,7 +66,7 @@ const TabFilter = ({
                     </h4>
 
                     <p className='text-sm text-gray-500'>
-                      type: {parameter.paramConfig.type}
+                      type: {parameter.config.type}
                     </p>
                   </div>
                   <div className='flex gap-2'>

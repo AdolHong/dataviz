@@ -44,7 +44,8 @@ const TabFilter = ({
       successFlag = handleAddParameter(parameter);
     }
     if (successFlag) {
-    closeModal();
+      closeModal();
+    }
   };
 
   return (

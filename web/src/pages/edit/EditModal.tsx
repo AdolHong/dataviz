@@ -334,7 +334,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   // 修改参数
   const handleEditParameter = (parameter: Parameter): boolean => {
     const existedOtherParam = parameters.find(
-      (p) => p.id === parameter.id && p.name !== parameter.name
+      (p) => p.name === parameter.name && p.id !== parameter.id
     );
     if (existedOtherParam) {
       toast.error('[PARAM] 异常, 参数名称已存在');

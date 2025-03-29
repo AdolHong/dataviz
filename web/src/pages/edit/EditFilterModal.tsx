@@ -187,9 +187,20 @@ const EditFilterModal = ({
             datePickerFormat != 'YYYYMMDD'
           ) {
             toast.error('[PARAM] 异常, 默认日期格式错误');
-            paramConfig.default = 'YYYY-MM-DD';
+            paramConfig.dateFormat = 'YYYY-MM-DD';
           }
-          // 可以添加日期格式校验
+
+          //todo: 校验默认日期是否合理
+          if (datePickerDefault) {
+            toast.info(datePickerDefault);
+            const date = new Date(datePickerDefault);
+            console.log(date);
+            if (isNaN(date.getTime())) {
+              toast.error('[PARAM] 异常, 默认日期格式错误');
+              paramConfig.default = '';
+            }
+          }
+
           break;
         case 'multi_input':
           paramConfig = {

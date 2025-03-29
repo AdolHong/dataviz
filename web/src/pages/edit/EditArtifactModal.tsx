@@ -202,12 +202,12 @@ const EditArtifactModal = ({
   // --- JSX ---
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className='sm:max-w-[650px]'>
+      <DialogContent className='max-w-[650px] '>
         <DialogHeader>
           <DialogTitle>{artifact ? '编辑图表' : '添加图表'}</DialogTitle>
         </DialogHeader>
 
-        <div className='grid gap-4 py-4'>
+        <div className='grid gap-4 py-4 pr-2 max-h-[70vh] overflow-y-auto'>
           <div className='grid grid-cols-4 items-center gap-4'>
             <Label htmlFor='title' className='text-right'>
               标题*
@@ -507,7 +507,7 @@ const EditArtifactModal = ({
         }}
         onSave={
           editingParam
-            ? (param) =>
+            ? (param: SinglePlainParam | MultiplePlainParam | CascaderParam) =>
                 handleEditParam(param, editingParam.type, editingParam.id)
             : handleAddParam
         }

@@ -30,6 +30,11 @@ import {
   addItem as addLayoutItem,
   removeEmptyRowsAndColumns,
 } from '@/types/models/layout';
+import {
+  addDataSource,
+  deleteDataSource,
+  editDataSource,
+} from '@/types/models/report';
 
 interface EditModalProps {
   open: boolean;
@@ -263,6 +268,40 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
     setDeleteMessage(message);
   };
 
+  const handleAddDataSource = (dataSource: DataSource) => {
+    const { newDataSources, newAliasRelianceMap } = addDataSource(
+      dataSource,
+      dataSources,
+      aliasRelianceMap
+    );
+    setDataSources(newDataSources);
+    setAliasRelianceMap(newAliasRelianceMap);
+  };
+
+  const handleEditDataSource = (
+    oldDataSource: DataSource,
+    newDataSource: DataSource
+  ) => {
+    const { newDataSources, newAliasRelianceMap } = editDataSource(
+      oldDataSource,
+      newDataSource,
+      dataSources,
+      aliasRelianceMap
+    );
+    setDataSources(newDataSources);
+    setAliasRelianceMap(newAliasRelianceMap);
+  };
+
+  const handleDeleteDataSource = (dataSource: DataSource) => {
+    const { newDataSources, newAliasRelianceMap } = deleteDataSource(
+      dataSource,
+      dataSources,
+      aliasRelianceMap
+    );
+    setDataSources(newDataSources);
+    setAliasRelianceMap(newAliasRelianceMap);
+  };
+
   return (
     <>
       <Dialog open={open} onOpenChange={onClose}>
@@ -299,7 +338,9 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
                 setDataSources={setDataSources}
                 engineChoices={demoEngineChoices}
                 aliasRelianceMap={aliasRelianceMap}
-                handleDeleteDataSource={() => {}}
+                handleAddDataSource={handleAddDataSource}
+                handleEditDataSource={handleEditDataSource}
+                handleDeleteDataSource={handleDeleteDataSource}
                 confirmDelete={confirmDelete}
               />
               <TabFilter

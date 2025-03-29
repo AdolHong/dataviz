@@ -57,7 +57,7 @@ export const EditDataSourceModal = ({
 }: EditDataSourceModalProps) => {
   // 默认布局
   const defaultDataSource: DataSource = {
-    id: 'default_id',
+    id: '',
     name: '数据名称',
     description: '',
     alias: 'df_',
@@ -113,6 +113,11 @@ export const EditDataSourceModal = ({
     // 别名为前缀_df
     if (dataSource.alias === 'df_') {
       toast.error('请修改别名，别名不能为df_');
+      return;
+    }
+
+    if (dataSource.id === '') {
+      toast.error('数据源ID此时为空');
       return;
     }
 

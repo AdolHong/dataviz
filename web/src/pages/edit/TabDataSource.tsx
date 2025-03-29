@@ -4,13 +4,19 @@ import { type DataSource } from '@/types/models/dataSource';
 import { TabsContent } from '@radix-ui/react-tabs';
 import { useState } from 'react';
 import { EditDataSourceModal } from './EditDataSourceModal';
-import type { AliasRelianceMap, EngineChoices } from '@/types';
+import {
+  updateAliasRelianceMapByDataSource,
+  type AliasRelianceMap,
+  type EngineChoices,
+} from '@/types';
 
 interface TabDataSourceProps {
   dataSources: DataSource[];
   setDataSources: (dataSources: DataSource[]) => void;
   engineChoices: EngineChoices;
   aliasRelianceMap: AliasRelianceMap;
+  handleAddDataSource: (dataSource: DataSource) => void;
+  handleEditDataSource: (dataSource: DataSource) => void;
   handleDeleteDataSource: (id: string) => void;
   confirmDelete: (deleteFunction: () => void, message: string) => void;
 }
@@ -20,6 +26,8 @@ const TabDataSource = ({
   setDataSources,
   engineChoices,
   aliasRelianceMap,
+  handleAddDataSource,
+  handleEditDataSource,
   handleDeleteDataSource,
   confirmDelete,
 }: TabDataSourceProps) => {
@@ -40,15 +48,15 @@ const TabDataSource = ({
               >
                 <div className='flex justify-between items-center'>
                   <div>
-                    <div className='flex items-center gap-2'>
-                      <h4 className='font-medium'>{dataSource.name}</h4>
+                    <h4 className='font-medium'>{dataSource.name}</h4>
+                    <div className='flex items-center gap-4'>
                       <p className='text-sm text-gray-500'>
-                        {idx === 0 ? '(df, df1)' : `(df${idx + 1})`}
+                        type: {dataSource.executor.type}
+                      </p>
+                      <p className='text-sm text-gray-500'>
+                        alias: {dataSource.alias}
                       </p>
                     </div>
-                    <p className='text-sm text-gray-500'>
-                      type: {dataSource.executor.type}
-                    </p>
                   </div>
                   <div className='flex gap-2'>
                     <Button
@@ -103,15 +111,17 @@ const TabDataSource = ({
         }}
         onSave={(updatedDataSource: DataSource) => {
           if (editingDataSource) {
-            // 编辑现有数据源
-            const newDataSources = dataSources.map((ds) =>
-              ds.id === updatedDataSource.id ? updatedDataSource : ds
-            );
-            setDataSources(newDataSources);
+            // source id不变, alias可能变化
+            handleEditDataSource(updatedDataSource);
           } else {
-            // 添加新数据源
-            setDataSources([...dataSources, updatedDataSource]);
+            handleAddDataSource(updatedDataSource);
           }
+          // 更新aliasRelianceMap
+          updateAliasRelianceMapByDataSource(
+            editingDataSource,
+            updatedDataSource,
+            aliasRelianceMap
+          );
           setIsEditDataSourceModalOpen(false);
           setEditingDataSource(null);
         }}

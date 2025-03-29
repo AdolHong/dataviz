@@ -76,51 +76,6 @@ export const handleEngineChange =
     return newDataSource;
   };
 
-// 添加数据源
-export const addItem =
-  (source: DataSource, dataSources: DataSource[]) =>
-  (newDataSources: DataSource[]) => {
-    const length = dataSources.length;
-
-    newDataSources = [
-      ...newDataSources,
-      {
-        ...source,
-        id: `source_${length + 1}`,
-      },
-    ];
-
-    return newDataSources;
-  };
-
-// 编辑数据源
-export const editItem =
-  (source: DataSource, dataSources: DataSource[]) =>
-  (newDataSources: DataSource[]) => {
-    newDataSources = dataSources.map((item) => {
-      return item.id === source.id ? source : item;
-    });
-    return newDataSources;
-  };
-
-// 删除数据源
-export const deleteItem =
-  (source: DataSource, dataSources: DataSource[]) =>
-  (newDataSources: DataSource[]) => {
-    // 删除节点
-    newDataSources = dataSources.filter((item) => item.id !== source.id);
-
-    // 更新所有的source id
-    newDataSources.map((source, idx) => {
-      const newDataSource: DataSource = {
-        ...source,
-        id: `source_${idx + 1}`,
-      };
-      return newDataSource;
-    });
-    return newDataSources;
-  };
-
 // 处理执行器类型变更
 export const handleExecutorTypeChange =
   (

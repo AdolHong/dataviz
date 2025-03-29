@@ -61,7 +61,6 @@ const EditArtifactModal = ({
   const [cascaderParams, setCascaderParams] = useState<CascaderParam[]>([]);
 
   // UI 状态控制
-  const [openEngine, setOpenEngine] = useState(false);
   const [isParamModalOpen, setIsParamModalOpen] = useState(false);
   const [editingParam, setEditingParam] = useState<{
     param: SinglePlainParam | MultiplePlainParam | CascaderParam;
@@ -439,7 +438,7 @@ const EditArtifactModal = ({
             : handleAddParam
         }
         paramData={editingParam}
-        dataSources={dataSources}
+        dependencies={dependencies}
       />
     </Dialog>
   );

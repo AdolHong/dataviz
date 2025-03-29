@@ -10,21 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Combobox } from '@/components/combobox';
-import { Check, ChevronsUpDown, Plus, Trash2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
+import { Plus, Trash2 } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -50,7 +36,7 @@ interface EditArtifactParamModalProps {
     param: SinglePlainParam | MultiplePlainParam | CascaderParam
   ) => void;
   paramData: { param: any; type: 'plain' | 'cascader'; id: string } | null; // null表示新增
-  dataSources: DataSource[];
+  dependencies: string[];
 }
 
 // 辅助函数生成唯一ID
@@ -62,7 +48,7 @@ const EditArtifactParamModal = ({
   onClose,
   onSave,
   paramData,
-  dataSources,
+  dependencies,
 }: EditArtifactParamModalProps) => {
   // 参数类型选择
   const [paramType, setParamType] = useState<'plain' | 'cascader'>('plain');
@@ -88,9 +74,6 @@ const EditArtifactParamModal = ({
   // Cascader 参数的状态
   const [cascaderDfAlias, setCascaderDfAlias] = useState('');
   const [cascaderLevels, setCascaderLevels] = useState<CascaderLevel[]>([]);
-
-  // UI状态
-  const [openDataSourceAlias, setOpenDataSourceAlias] = useState(false);
 
   // 初始化表单
   useEffect(() => {
@@ -250,7 +233,7 @@ const EditArtifactParamModal = ({
 
         for (let i = 0; i < cascaderLevels.length; i++) {
           if (!cascaderLevels[i].dfColumn || !cascaderLevels[i].name) {
-            toast.error(`级别 ${i} 的数据列名和名称不能为空`);
+            toast.error(`级别 ${i + 1} 的数据列名和名称不能为空`);
             return;
           }
         }
@@ -467,52 +450,19 @@ const EditArtifactParamModal = ({
                   数据源别名*
                 </Label>
                 <div className='col-span-3'>
-                  <Popover
-                    open={openDataSourceAlias}
-                    onOpenChange={setOpenDataSourceAlias}
-                  >
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant='outline'
-                        role='combobox'
-                        aria-expanded={openDataSourceAlias}
-                        className='w-full justify-between'
-                      >
-                        {cascaderDfAlias || '选择数据源别名'}
-                        <ChevronsUpDown className='ml-2 h-4 w-4 shrink-0 opacity-50' />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className='w-full p-0'>
-                      <Command>
-                        <CommandInput placeholder='搜索数据源...' />
-                        <CommandList>
-                          <CommandEmpty>没有找到匹配的数据源</CommandEmpty>
-                          <CommandGroup>
-                            {dataSources.map((ds) => (
-                              <CommandItem
-                                key={ds.alias}
-                                value={ds.alias}
-                                onSelect={(value) => {
-                                  setCascaderDfAlias(value);
-                                  setOpenDataSourceAlias(false);
-                                }}
-                              >
-                                <Check
-                                  className={cn(
-                                    'mr-2 h-4 w-4',
-                                    cascaderDfAlias === ds.alias
-                                      ? 'opacity-100'
-                                      : 'opacity-0'
-                                  )}
-                                />
-                                {ds.alias}
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
+                  <Combobox
+                    options={dependencies}
+                    value={cascaderDfAlias}
+                    onValueChange={(value: string | string[]) => {
+                      if (Array.isArray(value)) {
+                        setCascaderDfAlias(value[0]);
+                      } else {
+                        setCascaderDfAlias(value);
+                      }
+                    }}
+                    mode='single'
+                    placeholder='选择数据源别名'
+                  />
                 </div>
               </div>
 
@@ -532,28 +482,6 @@ const EditArtifactParamModal = ({
                         <div className='grid gap-2'>
                           <div className='grid grid-cols-4 items-center gap-2'>
                             <Label
-                              htmlFor={`level-${index}-name`}
-                              className='text-right text-xs'
-                            >
-                              名称*
-                            </Label>
-                            <Input
-                              id={`level-${index}-name`}
-                              value={level.name}
-                              onChange={(e) =>
-                                handleUpdateCascaderLevel(
-                                  index,
-                                  'name',
-                                  e.target.value
-                                )
-                              }
-                              className='col-span-3'
-                              placeholder='给这个级别起一个名称'
-                            />
-                          </div>
-
-                          <div className='grid grid-cols-4 items-center gap-2'>
-                            <Label
                               htmlFor={`level-${index}-column`}
                               className='text-right text-xs'
                             >
@@ -570,7 +498,28 @@ const EditArtifactParamModal = ({
                                 )
                               }
                               className='col-span-3'
-                              placeholder='数据源中的列名'
+                              placeholder='指定df中的column'
+                            />
+                          </div>
+                          <div className='grid grid-cols-4 items-center gap-2'>
+                            <Label
+                              htmlFor={`level-${index}-name`}
+                              className='text-right text-xs'
+                            >
+                              名称*
+                            </Label>
+                            <Input
+                              id={`level-${index}-name`}
+                              value={level.name}
+                              onChange={(e) =>
+                                handleUpdateCascaderLevel(
+                                  index,
+                                  'name',
+                                  e.target.value
+                                )
+                              }
+                              className='col-span-3'
+                              placeholder='名称, 便于理解'
                             />
                           </div>
 

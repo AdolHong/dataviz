@@ -6,51 +6,40 @@ export interface Artifact {
   code: string;
   dependencies: string[]; // 依赖哪个数据源
   executor_engine: string;
-  ArtifactParams?: ArtifactParam[];
+  plainParams?: (SinglePlainParam | MultiplePlainParam)[];
+  cascaderParams?: CascaderParam[];
 }
 
-// 可视化参数接口
-export interface ArtifactParam {
+export interface SinglePlainParam {
+  type: 'single';
   id: string; // 自动生成
   name: string;
   alias?: string; // 参数可以有别名, 一般是中文，便于理解参数
   description?: string;
   valueType: 'string' | 'double' | 'boolean' | 'int';
-  paramType:
-    | PlainSingleArtifactParamType
-    | PlainMultipleArtifactParamType
-    | CascadeSingleArtifactParamType
-    | CascadeMultipleArtifactParamType;
-}
-
-export interface PlainSingleArtifactParamType {
-  type: 'plain_single';
   default: string;
   choices: string[];
 }
 
-export interface PlainMultipleArtifactParamType {
-  type: 'plain_multiple';
+export interface MultiplePlainParam {
+  type: 'multiple';
+  id: string; // 自动生成
+  name: string;
+  alias?: string; // 参数可以有别名, 一般是中文，便于理解参数
+  description?: string;
+  valueType: 'string' | 'double' | 'boolean' | 'int';
   default: string[];
   choices: string[];
-  dfAlias: string;
-  dfColumn: string;
 }
 
-export interface CascadeSingleArtifactParamType {
-  type: 'cascade_single';
-  default: string;
-  choices: string[];
+export interface CascaderParam {
   dfAlias: string;
-  dfColumn: string;
-  level: number;
+  levels: CascaderLevel[];
 }
 
-export interface CascadeMultipleArtifactParamType {
-  type: 'cascade_multiple';
-  default: string[];
-  choices: string[];
-  dfAlias: string;
+export interface CascaderLevel {
   dfColumn: string;
-  level: number;
+  name: string;
+  alias?: string;
+  description?: string;
 }

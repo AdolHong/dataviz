@@ -270,7 +270,7 @@ const EditArtifactModal = ({
             <Label htmlFor='code' className='text-right pt-2'>
               代码*
             </Label>
-            <Textarea
+            <Input
               id='code'
               value={code}
               onChange={(e) => setCode(e.target.value)}

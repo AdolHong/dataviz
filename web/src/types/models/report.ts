@@ -2,8 +2,11 @@ import type { DataSource } from './dataSource';
 import type { Parameter } from './parameter';
 import type { Chart } from './chart';
 import type { Layout } from './layout';
-import type { AliasRelianceMap } from '@/types';
-import { updateAliasRelianceMapByDataSource } from '@/types';
+import {
+  type AliasRelianceMap,
+  createAliasRelianceMap,
+  upsertAliasRelianceMapByDataSource,
+} from './aliasRelianceMap';
 
 // 主要响应接口
 export interface Report {
@@ -29,7 +32,7 @@ export const addDataSource = (
   };
 
   // 更新aliasRelianceMap: source与charts的依赖关系
-  const newAliasRelianceMap = updateAliasRelianceMapByDataSource(
+  const newAliasRelianceMap = upsertAliasRelianceMapByDataSource(
     null,
     newSource,
     aliasRelianceMap
@@ -56,7 +59,7 @@ export const editDataSource = (
   });
 
   // 更新aliasRelianceMap: source与charts的依赖关系
-  const newAliasRelianceMap = updateAliasRelianceMapByDataSource(
+  const newAliasRelianceMap = upsertAliasRelianceMapByDataSource(
     oldSource,
     newSource,
     aliasRelianceMap
@@ -72,29 +75,24 @@ export const editDataSource = (
 export const deleteDataSource = (
   source: DataSource,
   dataSources: DataSource[],
-  aliasRelianceMap: AliasRelianceMap
+  charts: Chart[]
 ): { newDataSources: DataSource[]; newAliasRelianceMap: AliasRelianceMap } => {
   // 删除节点
-  const newDataSources = dataSources.filter((item) => item.id !== source.id);
-
-  // 更新所有的source id
-  newDataSources.map((source, idx) => {
-    const newDataSource: DataSource = {
-      ...source,
-      id: `source_${idx + 1}`,
-    };
-    return newDataSource;
-  });
-
-  // 更新aliasRelianceMap: source与charts的依赖关系
-  const newAliasRelianceMap = updateAliasRelianceMapByDataSource(
-    source,
-    null,
-    aliasRelianceMap
+  const filteredDataSources = dataSources.filter(
+    (item) => item.id !== source.id
   );
 
+  // 正确地更新所有的source id
+  const newDataSources = filteredDataSources.map((source, idx) => ({
+    ...source,
+    id: `source_${idx + 1}`,
+  }));
+
+  // 更新aliasRelianceMap: source与charts的依赖关系
+  const newAliasRelianceMap = createAliasRelianceMap(newDataSources, charts);
+
   return {
-    newDataSources: newDataSources,
-    newAliasRelianceMap: newAliasRelianceMap,
+    newDataSources,
+    newAliasRelianceMap,
   };
 };

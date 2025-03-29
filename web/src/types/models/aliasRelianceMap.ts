@@ -42,10 +42,10 @@ export const updateAliasRelianceMapByChart = (
   return updatedAliasMap;
 };
 
-// datasource: 新增删除修改时， 需要更新aliasMap
-export const updateAliasRelianceMapByDataSource = (
+// datasource: 新增修改时， 需要更新aliasMap
+export const upsertAliasRelianceMapByDataSource = (
   oldDataSource: DataSource | null,
-  newDataSource: DataSource | null,
+  newDataSource: DataSource,
   aliasMap: AliasRelianceMap
 ) => {
   const updatedAliasMap = { ...aliasMap };
@@ -59,11 +59,40 @@ export const updateAliasRelianceMapByDataSource = (
       }
     });
   }
-
-  // 添加新数据源的依赖  (删除datasource时,newDataSource为null)
-  if (newDataSource) {
-    updatedAliasMap.aliasToDataSourceId[newDataSource.alias] = newDataSource.id;
-  }
-
+  updatedAliasMap.aliasToDataSourceId[newDataSource.alias] = newDataSource.id;
   return updatedAliasMap;
+};
+
+// 根据dataSources和charts， 构建aliasRelianceMap
+export const createAliasRelianceMap = (
+  dataSources: DataSource[],
+  charts: Chart[]
+): AliasRelianceMap => {
+  const aliasToCharts = charts.reduce<{
+    aliasToCharts: {
+      [alias: string]: { chartTitle: string; chartId: string }[];
+    };
+  }>((acc, chart) => {
+    chart.dependencies.forEach((alias) => {
+      if (!acc[alias]) {
+        acc[alias] = []; // 如果 alias 不存在，初始化为一个空数组
+      }
+      acc[alias].push({ chartTitle: chart.title, chartId: chart.id }); // 将 chart.title 添加到对应的 alias 列表中
+    });
+    return acc;
+  }, {});
+
+  const aliasToDataSourceId = dataSources.reduce<{
+    aliasToDataSourceId: { [alias: string]: string };
+  }>((acc, dataSource) => {
+    acc[dataSource.alias] = dataSource.id; // 将数据源的别名映射到其ID
+    return acc;
+  }, {});
+
+  const aliasRelianceMap: AliasRelianceMap = {
+    aliasToCharts,
+    aliasToDataSourceId,
+  };
+
+  return aliasRelianceMap;
 };

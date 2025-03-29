@@ -4,11 +4,7 @@ import { type DataSource } from '@/types/models/dataSource';
 import { TabsContent } from '@radix-ui/react-tabs';
 import { useState } from 'react';
 import { EditDataSourceModal } from './EditDataSourceModal';
-import {
-  updateAliasRelianceMapByDataSource,
-  type AliasRelianceMap,
-  type EngineChoices,
-} from '@/types';
+import { type AliasRelianceMap, type EngineChoices } from '@/types';
 
 interface TabDataSourceProps {
   dataSources: DataSource[];
@@ -20,7 +16,7 @@ interface TabDataSourceProps {
     oldDataSource: DataSource,
     newDataSource: DataSource
   ) => void;
-  handleDeleteDataSource: (id: string) => void;
+  handleDeleteDataSource: (dataSource: DataSource) => void;
   confirmDelete: (deleteFunction: () => void, message: string) => void;
 }
 
@@ -80,7 +76,7 @@ const TabDataSource = ({
                       className='h-8 w-8 text-destructive opacity-80'
                       onClick={() =>
                         confirmDelete(
-                          () => handleDeleteDataSource(dataSource.id),
+                          () => handleDeleteDataSource(dataSource),
                           `您确定要删除数据源 ${dataSource.name} 吗？`
                         )
                       }

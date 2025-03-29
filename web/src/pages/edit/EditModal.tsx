@@ -20,11 +20,14 @@ import type {
   EngineChoices,
 } from '@/types';
 
-import TabDataSource from '@/components/TabDataSource';
-import TabFilter from '@/components/TabFilter';
-import TabChart from '@/components/TabChart';
+import TabDataSource from './TabDataSource';
+import TabFilter from './TabFilter';
+import TabChart from './TabChart';
 
-import { type AliasRelianceMap, updateAliasRelianceMapByChart } from '@/types';
+import {
+  type AliasRelianceMap,
+  updateAliasRelianceMapByChart,
+} from '@/types/models/aliasRelianceMap';
 
 import {
   addItem as addLayoutItem,
@@ -171,9 +174,14 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
 
   // todo: 发起api， 保存报表
   useEffect(() => {
-    console.log('demoReport', demoReport);
+    console.log('正在保存 demoReport');
+    console.log('layout', demoReport);
+    console.log('dataSources', dataSources);
+    console.log('parameters', parameters);
+    console.log('charts', charts);
+    console.log('aliasRelianceMap', aliasRelianceMap);
     toast.success(`[DEBUG]你保存了报表"${reportId}"`);
-  }, [layout, dataSources, parameters, charts]);
+  }, [layout, dataSources, parameters, charts, aliasRelianceMap]);
 
   // 添加图表Chart: 修改charts, layouts
   const handleAddChart = () => {
@@ -269,7 +277,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   };
 
   const handleAddDataSource = (dataSource: DataSource) => {
-    const { newDataSources, newAliasRelianceMap } = editDataSource(
+    const { newDataSources, newAliasRelianceMap } = addDataSource(
       dataSource,
       dataSources,
       aliasRelianceMap

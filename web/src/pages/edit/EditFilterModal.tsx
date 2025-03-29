@@ -20,7 +20,6 @@ import {
 import type { Parameter } from '@/types/models/parameter';
 import { toast } from 'sonner';
 import { Combobox } from '@/components/combobox';
-import { format } from 'date-fns';
 interface EditFilterModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -196,7 +195,11 @@ const EditFilterModal = ({
             paramConfig.dateFormat = 'YYYY-MM-DD';
           }
 
-          if (isValidDate(datePickerDefault, datePickerFormat)) {
+          if (
+            datePickerDefault === '' ||
+            isValidDate(datePickerDefault, datePickerFormat)
+          ) {
+            // 合理日期或空
           } else if (isValidDynamicDate(datePickerDefault)) {
             // 若是动态参数， 也要检查格式
             const parsedDate = parseDynamicDate(datePickerDefault);
@@ -205,7 +208,7 @@ const EditFilterModal = ({
               return;
             }
           } else {
-            toast.error('[PARAM] 异常, 默认日期格式错误');
+            toast.error('[PARAM] 异常, 默认日期不是有效日期');
             return;
           }
 
@@ -372,19 +375,25 @@ const EditFilterModal = ({
               <Label htmlFor='date-picker-format' className='text-right'>
                 日期格式
               </Label>
-              <Input
-                id='date-picker-format'
-                value={datePickerFormat}
-                onChange={(e) => setDatePickerFormat(e.target.value)}
-                className='col-span-3'
-                placeholder='e.g. YYYY-MM-DD'
-              />
+              <div className='col-span-3'>
+                <Select
+                  value={datePickerFormat}
+                  onValueChange={setDatePickerFormat}
+                >
+                  <SelectTrigger id='date-picker-format'>
+                    <SelectValue placeholder='选择日期格式' />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value='YYYY-MM-DD'>YYYY-MM-DD</SelectItem>
+                    <SelectItem value='YYYYMMDD'>YYYYMMDD</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             <div className='grid grid-cols-4 items-center gap-4'>
               <Label htmlFor='date-picker-default' className='text-right'>
                 默认日期
               </Label>
-              {/* TODO: Implement a proper date picker component */}
               <Input
                 id='date-picker-default'
                 type='text' // Should ideally be a date picker input
@@ -478,9 +487,6 @@ const EditFilterModal = ({
           <DialogTitle>
             {parameter ? '编辑筛选条件' : '添加筛选条件'}
           </DialogTitle>
-          <DialogDescription>
-            配置筛选条件的名称、类型和具体设置。
-          </DialogDescription>
         </DialogHeader>
         <div className='grid gap-4 py-4'>
           <div className='grid grid-cols-4 items-center gap-4'>

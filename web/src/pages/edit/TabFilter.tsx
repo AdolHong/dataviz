@@ -64,11 +64,7 @@ const TabFilter = ({
                       {parameter.name}{' '}
                       {parameter.alias && `(alias: ${parameter.alias})`}
                     </h4>
-                    {parameter.description && (
-                      <p className='text-xs text-gray-400 mt-1'>
-                        {parameter.description}
-                      </p>
-                    )}
+
                     <p className='text-sm text-gray-500'>
                       type: {parameter.paramConfig.type}
                     </p>

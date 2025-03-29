@@ -5,10 +5,7 @@ export interface Chart {
   description?: string;
   code: string;
   dependencies: string[]; // 依赖哪个数据源
-  executor: {
-    type: string;
-    engine: string;
-  };
+  executor_engine: string;
   chartParams?: ChartParam[];
 }
 
@@ -18,22 +15,42 @@ export interface ChartParam {
   name: string;
   alias?: string; // 参数可以有别名, 一般是中文，便于理解参数
   description?: string;
-  type: string;
-  selectionMode: string;
-  default?: string | number | boolean | string[] | number[];
-  choices?: string[] | number[];
-  // 级联配置
-  cascade?: {
-    column: string;
-    level: number;
-  };
+  valueType: 'string' | 'double' | 'boolean' | 'int';
+  paramType:
+    | PlainSingleChartParamType
+    | PlainMultipleChartParamType
+    | CascadeSingleChartParamType
+    | CascadeMultipleChartParamType;
 }
 
-export interface Artifact {
-  id: string; // 自动生成
-  name: string;
-  description?: string;
+export interface PlainSingleChartParamType {
+  type: 'plain_single';
+  default: string;
+  choices: string[];
+}
 
-  dependencies: string[]; // 依赖哪个数据源
-  config: 
+export interface PlainMultipleChartParamType {
+  type: 'plain_multiple';
+  default: string[];
+  choices: string[];
+  dfAlias: string;
+  dfColumn: string;
+}
+
+export interface CascadeSingleChartParamType {
+  type: 'cascade_single';
+  default: string;
+  choices: string[];
+  dfAlias: string;
+  dfColumn: string;
+  level: number;
+}
+
+export interface CascadeMultipleChartParamType {
+  type: 'cascade_multiple';
+  default: string[];
+  choices: string[];
+  dfAlias: string;
+  dfColumn: string;
+  level: number;
 }

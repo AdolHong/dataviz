@@ -49,7 +49,7 @@ const TabDataSource = ({
                   <div>
                     <h4 className='font-medium'>{dataSource.name}</h4>
                     <div className='flex items-center gap-4'>
-                      <p className='text-sm text-gray-500'>
+                      <p className='text-sm text-gray-500 w-25'>
                         type: {dataSource.executor.type}
                       </p>
                       <p className='text-sm text-gray-500'>

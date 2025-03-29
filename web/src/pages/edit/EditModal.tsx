@@ -26,6 +26,7 @@ import TabChart from './TabChart';
 
 import {
   type AliasRelianceMap,
+  createAliasRelianceMap,
   updateAliasRelianceMapByChart,
 } from '@/types/models/aliasRelianceMap';
 
@@ -139,30 +140,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
 
   // 创建一个对象来存储 alias 和对应的 chart.id 列表
   const [aliasRelianceMap, setAliasRelianceMap] = useState<AliasRelianceMap>(
-    () => {
-      const aliasToCharts = demoReport.charts.reduce<{
-        aliasToCharts: {
-          [alias: string]: { chartTitle: string; chartId: string }[];
-        };
-      }>((acc, chart) => {
-        chart.dependencies.forEach((alias) => {
-          if (!acc[alias]) {
-            acc[alias] = []; // 如果 alias 不存在，初始化为一个空数组
-          }
-          acc[alias].push({ chartTitle: chart.title, chartId: chart.id }); // 将 chart.title 添加到对应的 alias 列表中
-        });
-        return acc;
-      }, {});
-
-      const aliasToDataSourceId = demoReport.dataSources.reduce<{
-        aliasToDataSourceId: { [alias: string]: string };
-      }>((acc, dataSource) => {
-        acc[dataSource.alias] = dataSource.id; // 将数据源的别名映射到其ID
-        return acc;
-      }, {});
-
-      return { aliasToCharts, aliasToDataSourceId };
-    }
+    createAliasRelianceMap(demoReport.dataSources, demoReport.charts)
   );
 
   // 确认删除dialog

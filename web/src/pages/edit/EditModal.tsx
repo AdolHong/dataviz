@@ -20,9 +20,9 @@ import type {
   EngineChoices,
 } from '@/types';
 
-import TabDataSource from './TabDataSource';
-import TabFilter from './TabFilter';
-import TabChart from './TabChart';
+import TabDataSource from '@/components/TabDataSource';
+import TabFilter from '@/components/TabFilter';
+import TabChart from '@/components/TabChart';
 
 import { type AliasRelianceMap, updateAliasRelianceMapByChart } from '@/types';
 
@@ -269,7 +269,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   };
 
   const handleAddDataSource = (dataSource: DataSource) => {
-    const { newDataSources, newAliasRelianceMap } = addDataSource(
+    const { newDataSources, newAliasRelianceMap } = editDataSource(
       dataSource,
       dataSources,
       aliasRelianceMap
@@ -288,6 +288,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
       dataSources,
       aliasRelianceMap
     );
+
     setDataSources(newDataSources);
     setAliasRelianceMap(newAliasRelianceMap);
   };

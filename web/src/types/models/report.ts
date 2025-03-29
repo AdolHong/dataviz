@@ -17,80 +17,84 @@ export interface Report {
 }
 
 // 添加数据源
-export const addDataSource =
-  (
-    source: DataSource,
-    dataSources: DataSource[],
-    aliasRelianceMap: AliasRelianceMap
-  ) =>
-  (newDataSources: DataSource[], newAliasRelianceMap: AliasRelianceMap) => {
-    const length = dataSources.length;
-    const newSource = {
-      ...source,
-      id: `source_${length + 1}`,
-    };
-
-    // 更新aliasRelianceMap: source与charts的依赖关系
-    newAliasRelianceMap = updateAliasRelianceMapByDataSource(
-      null,
-      newSource,
-      aliasRelianceMap
-    );
-
-    // 更新dataSources
-    newDataSources = [...newDataSources, newSource];
-    return { newDataSources, newAliasRelianceMap };
+export const addDataSource = (
+  source: DataSource,
+  dataSources: DataSource[],
+  aliasRelianceMap: AliasRelianceMap
+): { newDataSources: DataSource[]; newAliasRelianceMap: AliasRelianceMap } => {
+  const length = dataSources.length;
+  const newSource = {
+    ...source,
+    id: `source_${length + 1}`,
   };
+
+  // 更新aliasRelianceMap: source与charts的依赖关系
+  const newAliasRelianceMap = updateAliasRelianceMapByDataSource(
+    null,
+    newSource,
+    aliasRelianceMap
+  );
+
+  // 更新dataSources
+  const newDataSources = [...dataSources, newSource];
+
+  return {
+    newDataSources,
+    newAliasRelianceMap,
+  };
+};
 
 // 编辑数据源
-export const editDataSource =
-  (
-    oldSource: DataSource,
-    newSource: DataSource,
-    dataSources: DataSource[],
-    aliasRelianceMap: AliasRelianceMap
-  ) =>
-  (newDataSources: DataSource[], newAliasRelianceMap: AliasRelianceMap) => {
-    newDataSources = dataSources.map((item) => {
-      return item.id === newSource.id ? newSource : item;
-    });
+export const editDataSource = (
+  oldSource: DataSource,
+  newSource: DataSource,
+  dataSources: DataSource[],
+  aliasRelianceMap: AliasRelianceMap
+): { newDataSources: DataSource[]; newAliasRelianceMap: AliasRelianceMap } => {
+  const newDataSources = dataSources.map((item) => {
+    return item.id === newSource.id ? newSource : item;
+  });
 
-    // 更新aliasRelianceMap: source与charts的依赖关系
-    aliasRelianceMap = updateAliasRelianceMapByDataSource(
-      oldSource,
-      newSource,
-      aliasRelianceMap
-    );
+  // 更新aliasRelianceMap: source与charts的依赖关系
+  const newAliasRelianceMap = updateAliasRelianceMapByDataSource(
+    oldSource,
+    newSource,
+    aliasRelianceMap
+  );
 
-    return { newDataSources, newAliasRelianceMap };
+  return {
+    newDataSources: newDataSources,
+    newAliasRelianceMap: newAliasRelianceMap,
   };
+};
 
 // 删除数据源
-export const deleteDataSource =
-  (
-    source: DataSource,
-    dataSources: DataSource[],
-    aliasRelianceMap: AliasRelianceMap
-  ) =>
-  (newDataSources: DataSource[], newAliasRelianceMap: AliasRelianceMap) => {
-    // 删除节点
-    newDataSources = dataSources.filter((item) => item.id !== source.id);
+export const deleteDataSource = (
+  source: DataSource,
+  dataSources: DataSource[],
+  aliasRelianceMap: AliasRelianceMap
+): { newDataSources: DataSource[]; newAliasRelianceMap: AliasRelianceMap } => {
+  // 删除节点
+  const newDataSources = dataSources.filter((item) => item.id !== source.id);
 
-    // 更新所有的source id
-    newDataSources.map((source, idx) => {
-      const newDataSource: DataSource = {
-        ...source,
-        id: `source_${idx + 1}`,
-      };
-      return newDataSource;
-    });
+  // 更新所有的source id
+  newDataSources.map((source, idx) => {
+    const newDataSource: DataSource = {
+      ...source,
+      id: `source_${idx + 1}`,
+    };
+    return newDataSource;
+  });
 
-    // 更新aliasRelianceMap: source与charts的依赖关系
-    newAliasRelianceMap = updateAliasRelianceMapByDataSource(
-      source,
-      null,
-      aliasRelianceMap
-    );
+  // 更新aliasRelianceMap: source与charts的依赖关系
+  const newAliasRelianceMap = updateAliasRelianceMapByDataSource(
+    source,
+    null,
+    aliasRelianceMap
+  );
 
-    return { newDataSources, newAliasRelianceMap };
+  return {
+    newDataSources: newDataSources,
+    newAliasRelianceMap: newAliasRelianceMap,
   };
+};

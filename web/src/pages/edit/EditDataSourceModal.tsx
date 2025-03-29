@@ -116,11 +116,6 @@ export const EditDataSourceModal = ({
       return;
     }
 
-    if (dataSource.id === '') {
-      toast.error('数据源ID此时为空');
-      return;
-    }
-
     // 保存
     onSave(dataSource);
     onClose();

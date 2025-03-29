@@ -16,7 +16,10 @@ interface TabDataSourceProps {
   engineChoices: EngineChoices;
   aliasRelianceMap: AliasRelianceMap;
   handleAddDataSource: (dataSource: DataSource) => void;
-  handleEditDataSource: (dataSource: DataSource) => void;
+  handleEditDataSource: (
+    oldDataSource: DataSource,
+    newDataSource: DataSource
+  ) => void;
   handleDeleteDataSource: (id: string) => void;
   confirmDelete: (deleteFunction: () => void, message: string) => void;
 }
@@ -111,17 +114,11 @@ const TabDataSource = ({
         }}
         onSave={(updatedDataSource: DataSource) => {
           if (editingDataSource) {
-            // source id不变, alias可能变化
-            handleEditDataSource(updatedDataSource);
+            // 若是编辑, 则alias可能变化； 需要传递oldDataSource
+            handleEditDataSource(editingDataSource, updatedDataSource);
           } else {
             handleAddDataSource(updatedDataSource);
           }
-          // 更新aliasRelianceMap
-          updateAliasRelianceMapByDataSource(
-            editingDataSource,
-            updatedDataSource,
-            aliasRelianceMap
-          );
           setIsEditDataSourceModalOpen(false);
           setEditingDataSource(null);
         }}

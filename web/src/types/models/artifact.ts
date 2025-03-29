@@ -39,7 +39,6 @@ export interface CascaderParam {
 
 export interface CascaderLevel {
   dfColumn: string;
-  name: string;
-  alias?: string;
+  name?: string;
   description?: string;
 }

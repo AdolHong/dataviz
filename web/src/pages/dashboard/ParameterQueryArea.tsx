@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -30,10 +30,6 @@ import {
   Upload,
   Search,
   Check,
-  FileUp,
-  FileText,
-  RefreshCw,
-  Eye,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -47,13 +43,7 @@ import {
   CommandItem,
 } from '@/components/ui/command';
 import { Badge } from '@/components/ui/badge';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { CSVTable } from '@/components/CSVTable';
+import { FileUploadArea } from '@/pages/dashboard/FileUploadArea';
 import type { DataSource } from '@/types';
 
 interface ParameterQueryAreaProps {
@@ -74,8 +64,6 @@ export function ParameterQueryArea({
   const [files, setFiles] = useState<Record<string, File[]>>({});
   const [parametersExpanded, setParametersExpanded] = useState(true);
   const [activeTab, setActiveTab] = useState<string>('parameters');
-  const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
-  const [previewSource, setPreviewSource] = useState<DataSource | null>(null);
 
   // 检查需要文件上传的数据源
   const csvDataSources = dataSources.filter(
@@ -85,8 +73,6 @@ export function ParameterQueryArea({
   const requireFileUpload = csvDataSources.length > 0;
 
   const multiInputRef = useRef<HTMLInputElement>(null);
-  // 修复 fileInputRefs 类型问题
-  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const toggleParametersExpanded = () => {
     setParametersExpanded(!parametersExpanded);
@@ -96,49 +82,14 @@ export function ParameterQueryArea({
     setValues((prev) => ({ ...prev, [id]: value }));
   };
 
-  const handleFileChange = (
-    e: React.ChangeEvent<HTMLInputElement>,
-    sourceId: string
-  ) => {
-    if (e.target.files && e.target.files.length > 0) {
-      setFiles((prev) => ({
-        ...prev,
-        [sourceId]: Array.from(e.target.files!),
-      }));
-    }
-  };
-
-  const handleRemoveFile = (sourceId: string) => {
-    setFiles((prev) => {
-      const newFiles = { ...prev };
-      delete newFiles[sourceId];
-      return newFiles;
-    });
-
-    // 清空文件输入框，以便重新上传相同的文件
-    if (fileInputRefs.current[sourceId]) {
-      fileInputRefs.current[sourceId]!.value = '';
-    }
+  const handleFilesChange = (newFiles: Record<string, File[]>) => {
+    setFiles(newFiles);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSubmit(values, files);
   };
-
-  // 显示数据预览对话框
-  const handleShowPreview = useCallback((source: DataSource) => {
-    setPreviewSource(source);
-    setPreviewDialogOpen(true);
-  }, []);
-
-  // 设置文件输入引用的回调
-  const setFileInputRef = useCallback(
-    (el: HTMLInputElement | null, sourceId: string) => {
-      fileInputRefs.current[sourceId] = el;
-    },
-    []
-  );
 
   const getParameterLabel = (param: Parameter) => {
     if (param.alias) {
@@ -354,16 +305,6 @@ export function ParameterQueryArea({
     );
   };
 
-  // 获取CSV数据源的预览数据
-  const getSourcePreviewData = (source: DataSource): string => {
-    if (source.executor.type === 'csv_uploader') {
-      return source.executor.demoData || '';
-    } else if (source.executor.type === 'csv_data') {
-      return source.executor.data || '';
-    }
-    return '';
-  };
-
   return (
     <Card className='w-full'>
       <CardContent className='pt-4 pb-2'>
@@ -418,130 +359,14 @@ export function ParameterQueryArea({
               </TabsContent>
 
               {requireFileUpload && (
-                <TabsContent value='upload' className='mt-2 space-y-4'>
-                  <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
-                    {csvDataSources.map((source) => (
-                      <div
-                        key={source.id}
-                        className='border rounded-md p-4 flex flex-col space-y-3'
-                      >
-                        <div className='flex items-center justify-between'>
-                          <div className='flex items-center space-x-2'>
-                            <FileText size={16} className='text-primary' />
-                            <h3 className='font-medium text-sm'>
-                              {source.name}
-                            </h3>
-                          </div>
-
-                          <div className='flex space-x-1'>
-                            <Button
-                              variant='ghost'
-                              size='icon'
-                              className='h-6 w-6 hover:text-blue-500'
-                              onClick={(e) => {
-                                e.preventDefault();
-                                handleShowPreview(source);
-                              }}
-                            >
-                              <Eye size={14} />
-                            </Button>
-                          </div>
-                        </div>
-
-                        <div className='text-xs text-muted-foreground'>
-                          数据别名: {source.alias}
-                        </div>
-
-                        {files[source.id] ? (
-                          <div className='space-y-2'>
-                            <div className='flex items-center justify-between'>
-                              <span className='text-sm truncate'>
-                                {files[source.id][0].name}
-                              </span>
-                              <div className='flex space-x-1'>
-                                <Button
-                                  variant='ghost'
-                                  size='icon'
-                                  className='h-7 w-7'
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    fileInputRefs.current[source.id]?.click();
-                                  }}
-                                >
-                                  <RefreshCw size={14} />
-                                </Button>
-                                <Button
-                                  variant='ghost'
-                                  size='icon'
-                                  className='h-7 w-7 text-destructive'
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    handleRemoveFile(source.id);
-                                  }}
-                                >
-                                  <X size={14} />
-                                </Button>
-                              </div>
-                            </div>
-                            <div className='text-xs text-muted-foreground'>
-                              {(files[source.id][0].size / 1024).toFixed(2)} KB
-                              • {files[source.id][0].type || '未知类型'}
-                            </div>
-                          </div>
-                        ) : (
-                          <div
-                            className='border-2 border-dashed rounded-md p-3 text-center hover:border-primary/50 transition-colors cursor-pointer'
-                            onClick={() =>
-                              fileInputRefs.current[source.id]?.click()
-                            }
-                          >
-                            <Input
-                              ref={(el) => setFileInputRef(el, source.id)}
-                              id={`file-upload-${source.id}`}
-                              type='file'
-                              accept='.csv,.txt'
-                              className='hidden'
-                              onChange={(e) => handleFileChange(e, source.id)}
-                            />
-                            <div className='flex flex-col items-center gap-1'>
-                              <FileUp
-                                size={16}
-                                className='text-muted-foreground'
-                              />
-                              <span className='text-xs font-medium'>
-                                点击上传
-                              </span>
-                              <span className='text-xs text-muted-foreground'>
-                                支持CSV文件
-                              </span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                <TabsContent value='upload' className='mt-2'>
+                  <FileUploadArea
+                    dataSources={csvDataSources}
+                    onFilesChange={handleFilesChange}
+                  />
+                  <div className='flex justify-end mt-4'>
+                    <Button type='submit'>应用</Button>
                   </div>
-
-                  {Object.keys(files).length > 0 && (
-                    <div className='flex justify-between items-center mt-4'>
-                      <Button
-                        variant='outline'
-                        size='sm'
-                        onClick={(e) => {
-                          e.preventDefault();
-                          setFiles({});
-                          Object.keys(fileInputRefs.current).forEach((key) => {
-                            const inputRef = fileInputRefs.current[key];
-                            if (inputRef) {
-                              inputRef.value = '';
-                            }
-                          });
-                        }}
-                      >
-                        清空所有
-                      </Button>
-                      <Button type='submit'>应用</Button>
-                    </div>
-                  )}
                 </TabsContent>
               )}
             </Tabs>
@@ -562,22 +387,6 @@ export function ParameterQueryArea({
           )}
         </form>
       </CardContent>
-
-      {/* 添加数据预览对话框 */}
-      <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
-        <DialogContent className='sm:max-w-[800px]'>
-          <DialogHeader>
-            <DialogTitle>
-              {previewSource ? `${previewSource.name} 数据预览` : '数据预览'}
-            </DialogTitle>
-          </DialogHeader>
-          <div className='max-h-[500px] overflow-auto'>
-            {previewSource && (
-              <CSVTable csvData={getSourcePreviewData(previewSource)} />
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
     </Card>
   );
 }

@@ -7,10 +7,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTabs,
-  DialogTabsContent,
-  DialogTabsList,
-  DialogTabsTrigger,
 } from '@/components/ui/dialog';
 import { CSVTable } from '@/components/CSVTable';
 import { type DataSource } from '@/types';

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -80,6 +80,34 @@ export function ParameterQueryArea({
       ds.executor.type === 'csv_uploader' || ds.executor.type === 'csv_data'
   );
   const requireFileUpload = csvDataSources.length > 0;
+
+  // 使用 useEffect 在初始渲染时设置默认值
+  useEffect(() => {
+    const initialValues: Record<string, any> = {};
+    parameters.forEach((param) => {
+      // 对于多选和多输入类型，使用默认数组
+      if (
+        param.config.type === 'multi_select' ||
+        param.config.type === 'multi_input'
+      ) {
+        initialValues[param.id] = param.config.default || [];
+      }
+      // 对于单选和单输入类型，使用默认值
+      else if (
+        param.config.type === 'single_select' ||
+        param.config.type === 'single_input' ||
+        param.config.type === 'date_picker'
+      ) {
+        initialValues[param.id] = param.config.default;
+      }
+    });
+
+    // 更新 values 状态
+    setValues((prev) => ({
+      ...prev,
+      ...initialValues,
+    }));
+  }, [parameters]);
 
   const toggleParametersExpanded = () => {
     setParametersExpanded(!parametersExpanded);
@@ -262,7 +290,7 @@ export function ParameterQueryArea({
                 onKeyDown={(e) => handleMultiInputKeyDown(e, param)}
               />
               <div className='flex flex-wrap gap-2 mb-2'>
-                {(values[param.id] || param.config.default || []).map(
+                {(values[param.id] || []).map(
                   (value: string, index: number) => (
                     <div
                       key={`${value}-${index}`}

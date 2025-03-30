@@ -23,6 +23,12 @@ const TabBasicInfo = ({ title, description, onUpdate }: TabBasicInfoProps) => {
       toast.error('报表标题不能为空');
       return;
     }
+    // 检查标题是否包含特殊字符
+    const invalidChars = /[<>:"/\\|?*\x00-\x1F]/; // Linux 文件名不允许的字符
+    if (invalidChars.test(newTitle)) {
+      toast.error('报表标题包含不允许的字符');
+      return;
+    }
 
     onUpdate(newTitle, newDescription);
     setIsEditing(false);

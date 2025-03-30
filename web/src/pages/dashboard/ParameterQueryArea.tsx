@@ -42,9 +42,9 @@ import {
   CommandInput,
   CommandItem,
 } from '@/components/ui/command';
-import { Badge } from '@/components/ui/badge';
 import { FileUploadArea } from '@/pages/dashboard/FileUploadArea';
 import type { DataSource } from '@/types';
+import { toast } from 'sonner';
 
 interface ParameterQueryAreaProps {
   parameters: Parameter[];
@@ -71,8 +71,6 @@ export function ParameterQueryArea({
       ds.executor.type === 'csv_uploader' || ds.executor.type === 'csv_data'
   );
   const requireFileUpload = csvDataSources.length > 0;
-
-  const multiInputRef = useRef<HTMLInputElement>(null);
 
   const toggleParametersExpanded = () => {
     setParametersExpanded(!parametersExpanded);
@@ -107,8 +105,15 @@ export function ParameterQueryArea({
       e.preventDefault();
       const newValue = e.currentTarget.value.trim();
       const currentValues = values[param.id] || [];
-      handleValueChange(param.id, [...currentValues, newValue]);
-      e.currentTarget.value = '';
+
+      // 检查是否已存在该值
+      if (!currentValues.includes(newValue)) {
+        handleValueChange(param.id, [...currentValues, newValue]);
+        e.currentTarget.value = '';
+      } else {
+        // 可选：添加重复值的提示
+        toast.warning('不允许添加重复值');
+      }
     }
   };
 
@@ -232,42 +237,32 @@ export function ParameterQueryArea({
           );
 
         case 'multi_input':
-          // 修复多输入
-          const currentInputValues = values[param.id] || [];
-          const defaultValues = param.config.default || [];
-          const displayValues =
-            currentInputValues.length > 0 ? currentInputValues : defaultValues;
-
           return (
             <div className='space-y-2'>
-              <div>
-                <Input
-                  ref={multiInputRef}
-                  placeholder='输入后按回车添加'
-                  onKeyDown={(e) => handleMultiInputKeyDown(e, param)}
-                />
-              </div>
-              {displayValues.length > 0 && (
-                <div className='flex flex-wrap gap-1 mt-2'>
-                  {displayValues.map((value: string, index: number) => (
-                    <Badge
-                      key={index}
-                      variant='secondary'
-                      className='flex items-center gap-1'
+              <Input
+                placeholder={`输入${param.name}（按回车添加）`}
+                onKeyDown={(e) => handleMultiInputKeyDown(e, param)}
+              />
+              <div className='flex flex-wrap gap-2 mb-2'>
+                {(values[param.id] || []).map(
+                  (value: string, index: number) => (
+                    <div
+                      key={`${value}-${index}`}
+                      className='flex items-center bg-muted rounded-md px-2 py-1 text-xs'
                     >
-                      {value}
-                      <X
-                        size={14}
-                        className='cursor-pointer hover:text-destructive'
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeMultiInputItem(param, index);
-                        }}
-                      />
-                    </Badge>
-                  ))}
-                </div>
-              )}
+                      <span className='mr-2'>{value}</span>
+                      <Button
+                        variant='ghost'
+                        size='icon'
+                        className='h-4 w-4 hover:bg-destructive/20'
+                        onClick={() => removeMultiInputItem(param, index)}
+                      >
+                        <X size={12} />
+                      </Button>
+                    </div>
+                  )
+                )}
+              </div>
             </div>
           );
 

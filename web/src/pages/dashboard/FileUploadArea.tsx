@@ -112,29 +112,17 @@ export function FileUploadArea({
     document.body.removeChild(a);
   };
 
-  // 从上传的文件中读取内容
-  const getUploadedFileContent = async (sourceId: string): Promise<string> => {
-    const sourceFiles = files[sourceId];
-    if (!sourceFiles || sourceFiles.length === 0) return '';
-
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        resolve((e.target?.result as string) || '');
-      };
-      reader.readAsText(sourceFiles[0]);
-    });
-  };
-
   return (
     <div className='space-y-4'>
-      {/* CSV上传区 */}
-      {uploaderSources.length > 0 && (
+      {/* CSV 数据源区域 */}
+      {(uploaderSources.length > 0 || dataOnlySources.length > 0) && (
         <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
-          {uploaderSources.map((source) => (
+          {[...uploaderSources, ...dataOnlySources].map((source) => (
             <div
               key={source.id}
-              className='border rounded-md p-4 flex flex-col space-y-3'
+              className={`border rounded-md p-4 flex flex-col space-y-3 ${
+                source.executor.type === 'csv_data' ? 'bg-muted/30' : ''
+              }`}
             >
               <div className='flex items-center justify-between'>
                 <div className='flex items-center space-x-2'>
@@ -143,11 +131,12 @@ export function FileUploadArea({
                 </div>
 
                 <div className='flex space-x-1'>
+                  {/* 下载按钮 */}
                   <Button
                     variant='ghost'
                     size='icon'
                     className='h-6 w-6 hover:text-green-500'
-                    title='下载示例数据'
+                    title='下载数据'
                     onClick={(e) => {
                       e.preventDefault();
                       handleDownloadDemo(source);
@@ -155,6 +144,8 @@ export function FileUploadArea({
                   >
                     <Download size={14} />
                   </Button>
+
+                  {/* 预览按钮 */}
                   <Button
                     variant='ghost'
                     size='icon'
@@ -164,7 +155,10 @@ export function FileUploadArea({
                       e.preventDefault();
                       handleShowPreview(
                         source,
-                        files[source.id] ? 'uploaded' : 'demo'
+                        source.executor.type === 'csv_uploader' &&
+                          files[source.id]
+                          ? 'uploaded'
+                          : 'demo'
                       );
                     }}
                   >
@@ -177,108 +171,72 @@ export function FileUploadArea({
                 数据别名: {source.alias}
               </div>
 
-              {files[source.id] ? (
-                <div className='space-y-2'>
-                  <div className='flex items-center justify-between'>
-                    <span className='text-sm truncate'>
-                      {files[source.id][0].name}
-                    </span>
-                    <div className='flex space-x-1'>
-                      <Button
-                        variant='ghost'
-                        size='icon'
-                        className='h-7 w-7'
-                        title='重新上传'
-                        onClick={(e) => {
-                          e.preventDefault();
-                          fileInputRefs.current[source.id]?.click();
-                        }}
-                      >
-                        <RefreshCw size={14} />
-                      </Button>
-                      <Button
-                        variant='ghost'
-                        size='icon'
-                        className='h-7 w-7 text-destructive'
-                        title='删除'
-                        onClick={(e) => {
-                          e.preventDefault();
-                          handleRemoveFile(source.id);
-                        }}
-                      >
-                        <X size={14} />
-                      </Button>
+              {source.executor.type === 'csv_uploader' ? (
+                files[source.id] ? (
+                  <div className='space-y-2'>
+                    <div className='flex items-center justify-between'>
+                      <span className='text-sm truncate'>
+                        {files[source.id][0].name}
+                      </span>
+                      <div className='flex space-x-1'>
+                        <Button
+                          variant='ghost'
+                          size='icon'
+                          className='h-7 w-7'
+                          title='重新上传'
+                          onClick={(e) => {
+                            e.preventDefault();
+                            fileInputRefs.current[source.id]?.click();
+                          }}
+                        >
+                          <RefreshCw size={14} />
+                        </Button>
+                        <Button
+                          variant='ghost'
+                          size='icon'
+                          className='h-7 w-7 text-destructive'
+                          title='删除'
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleRemoveFile(source.id);
+                          }}
+                        >
+                          <X size={14} />
+                        </Button>
+                      </div>
+                    </div>
+                    <div className='text-xs text-muted-foreground'>
+                      {(files[source.id][0].size / 1024).toFixed(2)} KB •{' '}
+                      {files[source.id][0].type || '未知类型'}
                     </div>
                   </div>
-                  <div className='text-xs text-muted-foreground'>
-                    {(files[source.id][0].size / 1024).toFixed(2)} KB •{' '}
-                    {files[source.id][0].type || '未知类型'}
+                ) : (
+                  <div
+                    className='border-2 border-dashed rounded-md p-3 text-center hover:border-primary/50 transition-colors cursor-pointer'
+                    onClick={() => fileInputRefs.current[source.id]?.click()}
+                  >
+                    <Input
+                      ref={(el) => setFileInputRef(el, source.id)}
+                      id={`file-upload-${source.id}`}
+                      type='file'
+                      accept='.csv,.txt'
+                      className='hidden'
+                      onChange={(e) => handleFileChange(e, source.id)}
+                    />
+                    <div className='flex flex-col items-center gap-1'>
+                      <FileUp size={16} className='text-muted-foreground' />
+                      <span className='text-xs font-medium'>点击上传</span>
+                      <span className='text-xs text-muted-foreground'>
+                        支持CSV文件
+                      </span>
+                    </div>
                   </div>
-                </div>
+                )
               ) : (
-                <div
-                  className='border-2 border-dashed rounded-md p-3 text-center hover:border-primary/50 transition-colors cursor-pointer'
-                  onClick={() => fileInputRefs.current[source.id]?.click()}
-                >
-                  <Input
-                    ref={(el) => setFileInputRef(el, source.id)}
-                    id={`file-upload-${source.id}`}
-                    type='file'
-                    accept='.csv,.txt'
-                    className='hidden'
-                    onChange={(e) => handleFileChange(e, source.id)}
-                  />
-                  <div className='flex flex-col items-center gap-1'>
-                    <FileUp size={16} className='text-muted-foreground' />
-                    <span className='text-xs font-medium'>点击上传</span>
-                    <span className='text-xs text-muted-foreground'>
-                      支持CSV文件
-                    </span>
-                  </div>
+                <div className='text-xs text-center italic text-muted-foreground py-2'>
+                  (内置数据，无需上传)
                 </div>
               )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* CSV数据区(无需上传) */}
-      {dataOnlySources.length > 0 && (
-        <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4'>
-          {dataOnlySources.map((source) => (
-            <div
-              key={source.id}
-              className='border rounded-md p-4 flex flex-col space-y-3 bg-muted/30'
-            >
-              <div className='flex items-center justify-between'>
-                <div className='flex items-center space-x-2'>
-                  <FileText size={16} className='text-primary' />
-                  <h3 className='font-medium text-sm'>{source.name}</h3>
-                </div>
-
-                <div className='flex space-x-1'>
-                  <Button
-                    variant='ghost'
-                    size='icon'
-                    className='h-6 w-6 hover:text-blue-500'
-                    title='预览数据'
-                    onClick={(e) => {
-                      e.preventDefault();
-                      handleShowPreview(source);
-                    }}
-                  >
-                    <Eye size={14} />
-                  </Button>
-                </div>
-              </div>
-
-              <div className='text-xs text-muted-foreground'>
-                数据别名: {source.alias}
-              </div>
-
-              <div className='text-xs text-center italic text-muted-foreground py-2'>
-                (内置数据，无需上传)
-              </div>
             </div>
           ))}
         </div>

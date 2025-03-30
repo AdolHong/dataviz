@@ -10,6 +10,11 @@ import type { Layout } from '@/types/models/layout';
 import { toast } from 'sonner';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { ParameterQueryArea } from '@/pages/dashboard/ParameterQueryArea';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 const demoReportResponse: ReportResponse = {
   id: 'report-1',
@@ -351,12 +356,18 @@ export function DashboardPage() {
               <>
                 <div>
                   <div className='space-y-2'>
-                    <h1 className='text-2xl font-semibold'>
-                      {demoReportResponse.title}
-                    </h1>
-                    <p className='text-muted-foreground'>
-                      {demoReportResponse.description}
-                    </p>
+                    <Tooltip>
+                      <TooltipTrigger>
+                        <h1 className='text-2xl font-semibold'>
+                          {demoReportResponse.title}
+                        </h1>
+                      </TooltipTrigger>
+                      {demoReportResponse.description && (
+                        <TooltipContent>
+                          <p>{demoReportResponse.description}</p>
+                        </TooltipContent>
+                      )}
+                    </Tooltip>
                   </div>
                 </div>
 

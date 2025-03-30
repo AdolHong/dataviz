@@ -8,6 +8,8 @@ import {
 } from '@/components/ui/card';
 import { type Layout, type LayoutItem } from '@/types/models/layout';
 import { cn } from '@/lib/utils';
+import { TooltipContent } from '@/components/ui/tooltip';
+import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface LayoutGridProps {
   layout: Layout;
@@ -47,12 +49,18 @@ export function LayoutGrid({ layout, onItemClick }: LayoutGridProps) {
         <Card className='h-full overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300'>
           <CardHeader className='h-5 flex items-center justify-between'>
             <div>
-              <CardTitle className='text-sm font-medium'>
-                {item.title}
-              </CardTitle>
-              <CardDescription className='text-xs text-muted-foreground'>
-                {item.title}的描述信息(todo: description)
-              </CardDescription>
+              <Tooltip>
+                <TooltipTrigger>
+                  <CardTitle className='text-sm font-medium'>
+                    {item.title}
+                  </CardTitle>
+                </TooltipTrigger>
+                {true && (
+                  <TooltipContent>
+                    <p>{item.description} todo: description</p>
+                  </TooltipContent>
+                )}
+              </Tooltip>
             </div>
             <div className='flex space-x-2'>
               {[1, 2, 3].map((dot) => (

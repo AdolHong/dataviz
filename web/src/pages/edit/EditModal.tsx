@@ -215,13 +215,23 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   // todo: 发起api， 保存报表
   useEffect(() => {
     console.log('正在保存 demoReport');
-    console.log('layout', demoReport);
+    console.log('layout', layout);
     console.log('dataSources', dataSources);
     console.log('parameters', parameters);
     console.log('artifacts', artifacts);
     console.log('aliasRelianceMap', aliasRelianceMap);
+    console.log('title', title);
+    console.log('description', description);
     toast.success(`[DEBUG]你保存了报表"${reportId}"`);
-  }, [layout, dataSources, parameters, artifacts, aliasRelianceMap]);
+  }, [
+    layout,
+    dataSources,
+    parameters,
+    artifacts,
+    aliasRelianceMap,
+    title,
+    description,
+  ]);
 
   // 添加图表Artifact: 修改artifacts, layouts
   const handleAddArtifact = (newArtifact: Artifact) => {

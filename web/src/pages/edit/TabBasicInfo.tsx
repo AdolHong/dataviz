@@ -37,12 +37,12 @@ const TabBasicInfo = ({ title, description, onUpdate }: TabBasicInfoProps) => {
 
   return (
     <div className='p-6 space-y-6'>
-      <Card>
-        <CardContent className='pt-6'>
+      <Card className='shadow-sm'>
+        <CardContent className='pt-6 pb-6'>
           {isEditing ? (
             <div className='space-y-4'>
               <div className='grid grid-cols-4 items-center gap-4'>
-                <Label htmlFor='title' className='text-right'>
+                <Label htmlFor='title' className='text-right font-medium'>
                   报表标题<span className='text-red-500'>*</span>
                 </Label>
                 <Input
@@ -51,27 +51,33 @@ const TabBasicInfo = ({ title, description, onUpdate }: TabBasicInfoProps) => {
                   onChange={(e) => setNewTitle(e.target.value)}
                   className='col-span-3'
                   placeholder='请输入报表标题'
+                  required
                 />
               </div>
 
               <div className='grid grid-cols-4 items-start gap-4'>
-                <Label htmlFor='description' className='text-right pt-2'>
+                <Label
+                  htmlFor='description'
+                  className='text-right font-medium pt-2'
+                >
                   报表描述
                 </Label>
                 <Textarea
                   id='description'
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
-                  className='col-span-3 min-h-[100px]'
+                  className='col-span-3 min-h-[100px] max-h-[200px] overflow-y-auto'
                   placeholder='请输入报表描述（可选）'
                 />
               </div>
 
-              <div className='flex justify-end space-x-2 pt-2'>
+              <div className='flex justify-end space-x-2 pt-4'>
                 <Button variant='outline' onClick={handleCancel}>
                   取消
                 </Button>
-                <Button onClick={handleSave}>保存</Button>
+                <Button onClick={handleSave} disabled={!newTitle.trim()}>
+                  保存
+                </Button>
               </div>
             </div>
           ) : (
@@ -86,7 +92,7 @@ const TabBasicInfo = ({ title, description, onUpdate }: TabBasicInfoProps) => {
                 <div className='col-span-3'>{description || '无描述'}</div>
               </div>
 
-              <div className='flex justify-end'>
+              <div className='flex justify-end pt-4'>
                 <Button
                   variant='outline'
                   onClick={() => setIsEditing(true)}

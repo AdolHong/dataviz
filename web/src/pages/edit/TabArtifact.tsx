@@ -31,8 +31,6 @@ const TabArtifact = ({
   dataSources,
   engineChoices,
 }: TabArtifactProps) => {
-  console.info('dataSources222', dataSources);
-
   const [isLayoutModalOpen, setIsLayoutModalOpen] = useState(false);
   const [isArtifactModalOpen, setIsArtifactModalOpen] = useState(false);
   const [editingArtifact, setEditingArtifact] = useState<Artifact | null>(null);

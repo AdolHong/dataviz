@@ -76,18 +76,6 @@ export function FileUploadArea({
     }
   };
 
-  const handleClearAllFiles = (e: React.MouseEvent) => {
-    e.preventDefault();
-    setFiles({});
-    onFilesChange({});
-    Object.keys(fileInputRefs.current).forEach((key) => {
-      const inputRef = fileInputRefs.current[key];
-      if (inputRef) {
-        inputRef.value = '';
-      }
-    });
-  };
-
   // 显示数据预览对话框
   const handleShowPreview = useCallback(
     (source: DataSource, initialTab: 'demo' | 'uploaded' = 'demo') => {
@@ -296,17 +284,9 @@ export function FileUploadArea({
         </div>
       )}
 
-      {Object.keys(files).length > 0 && (
-        <div className='flex justify-end items-center mt-4'>
-          <Button variant='outline' size='sm' onClick={handleClearAllFiles}>
-            清空所有
-          </Button>
-        </div>
-      )}
-
       {/* 数据预览对话框 */}
       <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
-        <DialogContent className='max-w-[90vw] w-auto sm:max-w-[85vw] md:max-w-[1200px]'>
+        <DialogContent className='min-w-[300px] max-w-[800px]'>
           <DialogHeader>
             <DialogTitle>
               {previewSource ? `${previewSource.name} 数据预览` : '数据预览'}
@@ -316,18 +296,18 @@ export function FileUploadArea({
           {previewSource &&
           previewSource.executor.type === 'csv_uploader' &&
           files[previewSource.id] ? (
-            <Tabs defaultValue={previewTab} className='w-full'>
+            <Tabs
+              defaultValue={previewTab}
+              className='min-w-[300px] max-w-[800px]'
+            >
               <TabsList className='grid w-full grid-cols-2'>
                 <TabsTrigger value='demo'>示例数据</TabsTrigger>
                 <TabsTrigger value='uploaded'>已上传数据</TabsTrigger>
               </TabsList>
-              <TabsContent value='demo' className='max-h-[70vh] overflow-auto'>
+              <TabsContent value='demo'>
                 <CSVPreview csvData={getSourceDemoData(previewSource)} />
               </TabsContent>
-              <TabsContent
-                value='uploaded'
-                className='max-h-[70vh] overflow-auto'
-              >
+              <TabsContent value='uploaded' className='w-full'>
                 <UploadedFilePreview
                   sourceId={previewSource.id}
                   files={files}
@@ -335,7 +315,7 @@ export function FileUploadArea({
               </TabsContent>
             </Tabs>
           ) : (
-            <div className='max-h-[70vh] overflow-auto w-full'>
+            <div className='overflow-auto'>
               {previewSource && (
                 <CSVPreview csvData={getSourceDemoData(previewSource)} />
               )}
@@ -349,14 +329,20 @@ export function FileUploadArea({
 
 // 新增的 CSV 预览组件，直接使用 TanStack Table
 function CSVPreview({ csvData }: { csvData: string }) {
-  // 解析 CSV 数据
-  const parsedData = useMemo(() => {
+  // 使用 useMemo 只解析一次 CSV 数据
+  const { parsedData, totalRowCount } = useMemo(() => {
     try {
       const results = Papa.parse(csvData, { header: true });
-      return results.data.slice(0, 100); // 最多显示 100 行
+      return {
+        parsedData: results.data.slice(0, 5), // 最多显示 5 行
+        totalRowCount: results.data.length,
+      };
     } catch (error) {
       console.error('CSV 解析错误:', error);
-      return [];
+      return {
+        parsedData: [],
+        totalRowCount: 0,
+      };
     }
   }, [csvData]);
 
@@ -388,44 +374,54 @@ function CSVPreview({ csvData }: { csvData: string }) {
   });
 
   return (
-    <div className='relative w-full overflow-x-auto'>
-      <table className='border-collapse w-full'>
-        <thead className='bg-muted sticky top-0'>
-          {table.getHeaderGroups().map((headerGroup) => (
-            <tr key={headerGroup.id}>
-              {headerGroup.headers.map((header) => (
-                <th
-                  key={header.id}
-                  className='border px-4 py-2 text-left whitespace-nowrap'
-                  style={{ minWidth: '120px' }}
-                >
-                  {header.isPlaceholder
-                    ? null
-                    : flexRender(
-                        header.column.columnDef.header,
-                        header.getContext()
+    <div className='relative'>
+      <div className='overflow-auto'>
+        <div className='min-w-max'>
+          <table className='border-collapse w-full'>
+            <thead className='bg-muted sticky top-0'>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <tr key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => (
+                    <th
+                      key={header.id}
+                      className='border px-4 py-2 text-left whitespace-nowrap'
+                      style={{ minWidth: '120px' }}
+                    >
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(
+                            header.column.columnDef.header,
+                            header.getContext()
+                          )}
+                    </th>
+                  ))}
+                </tr>
+              ))}
+            </thead>
+            <tbody>
+              {table.getRowModel().rows.map((row) => (
+                <tr key={row.id}>
+                  {row.getVisibleCells().map((cell) => (
+                    <td
+                      key={cell.id}
+                      className='border px-4 py-2 whitespace-nowrap overflow-hidden text-ellipsis'
+                      style={{ maxWidth: '200px' }}
+                    >
+                      {flexRender(
+                        cell.column.columnDef.cell,
+                        cell.getContext()
                       )}
-                </th>
+                    </td>
+                  ))}
+                </tr>
               ))}
-            </tr>
-          ))}
-        </thead>
-        <tbody>
-          {table.getRowModel().rows.map((row) => (
-            <tr key={row.id}>
-              {row.getVisibleCells().map((cell) => (
-                <td
-                  key={cell.id}
-                  className='border px-4 py-2 whitespace-nowrap overflow-hidden text-ellipsis'
-                  style={{ maxWidth: '200px' }}
-                >
-                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className='text-right text-xs text-muted-foreground mt-2 pr-2'>
+        显示 {parsedData.length} / {totalRowCount} 行
+      </div>
     </div>
   );
 }

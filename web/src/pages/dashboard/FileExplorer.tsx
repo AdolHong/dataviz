@@ -287,10 +287,7 @@ export function FileExplorer({
               {/* 图标 */}
               <div className='mr-2 flex-shrink-0'>
                 {isFolder ? (
-                  <Folder
-                    size={18}
-                    className='text-blue-500 dark:text-blue-400'
-                  />
+                  <Folder size={18} className='text-blackAlpha.900' />
                 ) : (
                   <File size={18} className='text-muted-foreground' />
                 )}
@@ -363,9 +360,34 @@ export function FileExplorer({
 
   return (
     <div className='h-full flex flex-col'>
-      <div className='space-y-0.5 overflow-auto flex-1 pr-1 min-w-0'>
-        {renderItems(null)}
-      </div>
+      {/* 添加根目录右键菜单 */}
+      <ContextMenu>
+        <ContextMenuTrigger className='flex-1 overflow-auto pr-1 min-w-0'>
+          <div className='space-y-0.5'>
+            {renderItems(null)}
+            {/* 如果没有任何项目，添加一个提示 */}
+            {items.length === 0 && (
+              <div className='text-center text-muted-foreground py-4'>
+                右键添加文件或文件夹
+              </div>
+            )}
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className='w-56'>
+          <ContextMenuItem
+            onClick={() => openNewItemDialog(null, FileSystemItemType.FOLDER)}
+          >
+            <Folder className='mr-2 h-4 w-4 text-gray-500' />
+            <span>新建文件夹</span>
+          </ContextMenuItem>
+          <ContextMenuItem
+            onClick={() => openNewItemDialog(null, FileSystemItemType.FILE)}
+          >
+            <File className='mr-2 h-4 w-4' />
+            <span>新建文件</span>
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
 
       {/* 新建项目对话框 */}
       <Dialog open={isNewItemDialogOpen} onOpenChange={setIsNewItemDialogOpen}>

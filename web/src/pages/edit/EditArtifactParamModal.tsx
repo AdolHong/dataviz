@@ -25,7 +25,6 @@ import type {
   MultiplePlainParam,
   CascaderParam,
   CascaderLevel,
-  DataSource,
 } from '@/types';
 
 // 定义参数编辑模态框属性
@@ -367,7 +366,7 @@ const EditArtifactParamModal = ({
               {/* 选项列表 - 使用逗号分隔的输入框 */}
               <div className='grid grid-cols-4 items-center gap-4'>
                 <Label htmlFor='plainChoices' className='text-right'>
-                  选项列表*
+                  选项列表(逗号分隔)*
                 </Label>
                 <Input
                   id='plainChoices'
@@ -580,7 +579,20 @@ const EditArtifactParamModal = ({
           <Button variant='outline' onClick={onClose}>
             取消
           </Button>
-          <Button onClick={handleSaveParam}>保存</Button>
+          <Button
+            onClick={handleSaveParam}
+            disabled={
+              (paramType === 'plain' && (!plainName || !plainChoices.length)) ||
+              (paramType === 'cascader' &&
+                (!cascaderDfAlias ||
+                  !cascaderLevels.length ||
+                  cascaderLevels.some(
+                    (level) => !level.dfColumn || !level.name
+                  )))
+            }
+          >
+            保存
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

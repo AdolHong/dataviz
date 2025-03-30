@@ -35,6 +35,7 @@ import 'ace-builds/src-noconflict/theme-xcode';
 import 'ace-builds/src-noconflict/mode-python';
 import 'ace-builds/src-noconflict/mode-sql';
 import { toast } from 'sonner';
+import Papa from 'papaparse';
 
 interface EditDataSourceModalProps {
   open: boolean;
@@ -277,26 +278,68 @@ export const EditDataSourceModal = ({
                   type='button'
                   className='py-1 h-8 w-45 shadow-sm  rounded-sm hover:bg-blue-100 transition-colors'
                   onClick={() => {
-                    // 这里应当触发文件上传，为简化代码，仅模拟
-                    const mockData =
-                      'id,name,value1,value2,value3,value4,value5,value6,value7,value8,value9,value10,value11,value12,value13,value14,value15,value16,value17,value18,value19,value20\n1,测试1,10,20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180\n2,测试2,15,25,35,45,55,65,75,85,95,105,115,125,135,145,155,165,175,185\n3,测试3,20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190\n4,测试4,25,35,45,55,65,75,85,95,105,115,125,135,145,155,165,175,185,195\n5,测试5,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200\n6,测试6,35,45,55,65,75,85,95,105,115,125,135,145,155,165,175,185,195,205\n7,测试7,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200,210\n8,测试8,45,55,65,75,85,95,105,115,125,135,145,155,165,175,185,195,205,215\n9,测试9,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200,210,220\n10,测试10,55,65,75,85,95,105,115,125,135,145,155,165,175,185,195,205,215,225';
-                    if (executorType === 'csv_data') {
-                      setDataSource((prev) => ({
-                        ...prev,
-                        executor: {
-                          ...(prev.executor as CSVSourceExecutor),
-                          data: mockData,
+                    const fileInput = document.createElement('input');
+                    fileInput.type = 'file';
+                    fileInput.accept = '.csv';
+                    fileInput.onchange = (e: any) => {
+                      const file = e.target.files[0];
+                      if (!file) return;
+
+                      // 文件大小限制（例如：10MB）
+                      const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+                      if (file.size > MAX_FILE_SIZE) {
+                        toast.error('文件大小不能超过 10MB');
+                        return;
+                      }
+
+                      // 使用 Papa Parse 解析 CSV 文件
+                      Papa.parse(file, {
+                        complete: (results) => {
+                          // 验证解析结果
+                          if (results.errors.length > 0) {
+                            toast.error('CSV 文件解析出错');
+                            console.error(results.errors);
+                            return;
+                          }
+
+                          // 验证数据是否为空
+                          if (results.data.length <= 1) {
+                            toast.error('CSV 文件内容不能为空');
+                            return;
+                          }
+
+                          // 如果是csv_uploader， 仅保留top 10行数据
+                          if (executorType === 'csv_uploader') {
+                            results.data = results.data.slice(0, 10 + 1);
+                          }
+
+                          // 将解析后的数据转换为 CSV 字符串
+                          const csvData = Papa.unparse(results.data);
+
+                          // 根据执行器类型更新数据源
+                          setDataSource((prev) => ({
+                            ...prev,
+                            executor: {
+                              ...(prev.executor as
+                                | CSVSourceExecutor
+                                | CSVUploaderSourceExecutor),
+                              ...(executorType === 'csv_data'
+                                ? { data: csvData }
+                                : { demoData: csvData }),
+                            },
+                          }));
+
+                          // 提示成功
+                          toast.success('CSV 文件上传成功');
                         },
-                      }));
-                    } else {
-                      setDataSource((prev) => ({
-                        ...prev,
-                        executor: {
-                          ...(prev.executor as CSVUploaderSourceExecutor),
-                          demoData: mockData,
+                        error: (error) => {
+                          toast.error('CSV 文件解析失败');
+                          console.error(error);
                         },
-                      }));
-                    }
+                        skipEmptyLines: true, // 跳过空行
+                      });
+                    };
+                    fileInput.click();
                   }}
                 >
                   {executorType === 'csv_data'
@@ -411,7 +454,8 @@ export const EditDataSourceModal = ({
           {showCSVUploader && (
             <div>
               <label className='block mb-2'>
-                {executorType === 'csv_data' ? 'CSV 数据' : '示例 CSV 数据'}
+                {executorType === 'csv_data' ? 'CSV 数据' : '示例 CSV 数据'}{' '}
+                {' (仅显示前5行)'}
               </label>
 
               <div className='px-2'>

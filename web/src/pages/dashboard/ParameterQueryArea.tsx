@@ -45,6 +45,12 @@ import {
 import { FileUploadArea } from '@/pages/dashboard/FileUploadArea';
 import type { DataSource } from '@/types';
 import { toast } from 'sonner';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 interface ParameterQueryAreaProps {
   parameters: Parameter[];
@@ -64,6 +70,9 @@ export function ParameterQueryArea({
   const [files, setFiles] = useState<Record<string, File[]>>({});
   const [parametersExpanded, setParametersExpanded] = useState(true);
   const [activeTab, setActiveTab] = useState<string>('parameters');
+  const [selectedDataSourceIndex, setSelectedDataSourceIndex] = useState<
+    number | null
+  >(null);
 
   // 检查需要文件上传的数据源
   const csvDataSources = dataSources.filter(
@@ -320,24 +329,36 @@ export function ParameterQueryArea({
             className='w-full'
           >
             <div className='flex justify-between items-center mb-2'>
-              <TabsList>
-                <TabsTrigger
-                  value='parameters'
-                  className='flex items-center gap-1'
-                >
-                  <Search size={14} />
-                  <span>查询参数</span>
-                </TabsTrigger>
-                {requireFileUpload && (
+              <div className='flex items-center'>
+                <TabsList>
                   <TabsTrigger
-                    value='upload'
+                    value='parameters'
                     className='flex items-center gap-1'
                   >
-                    <Upload size={14} />
-                    <span>文件上传 ({csvDataSources.length})</span>
+                    <Search size={14} />
+                    <span>查询参数</span>
                   </TabsTrigger>
-                )}
-              </TabsList>
+                  {requireFileUpload && (
+                    <TabsTrigger
+                      value='upload'
+                      className='flex items-center gap-1'
+                    >
+                      <Upload size={14} />
+                      <span>文件上传 ({csvDataSources.length})</span>
+                    </TabsTrigger>
+                  )}
+                </TabsList>
+                <div className='flex space-x-2 ml-4'>
+                  {dataSources.map((source, index) => (
+                    <button
+                      key={source.id}
+                      type='button'
+                      onClick={() => setSelectedDataSourceIndex(index)}
+                      className='w-3 h-3 rounded-full bg-gray-300 shadow-sm hover:bg-gray-400 cursor-pointer'
+                    />
+                  ))}
+                </div>
+              </div>
               <div className='flex items-center space-x-2'>
                 <Button type='submit' size='sm'>
                   查询
@@ -381,6 +402,24 @@ export function ParameterQueryArea({
             ) : null}
           </Tabs>
         </form>
+
+        {/* 数据源详情对话框 */}
+        <Dialog
+          open={selectedDataSourceIndex !== null}
+          onOpenChange={() => setSelectedDataSourceIndex(null)}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                {selectedDataSourceIndex !== null
+                  ? `数据源: ${dataSources[selectedDataSourceIndex].name}`
+                  : '数据源详情'}
+              </DialogTitle>
+            </DialogHeader>
+            {/* 后续可以在这里添加更多详细信息 */}
+            <div className='text-muted-foreground'>数据源详情 - 待完善</div>
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );

@@ -168,14 +168,18 @@ export function ParameterQueryArea({
                   <CommandEmpty>未找到结果</CommandEmpty>
                   <CommandGroup className='max-h-64 overflow-auto'>
                     {param.config.choices.map((choice) => {
-                      const isSelected = (values[param.id] || []).includes(
-                        choice
-                      );
+                      // 使用 param.config.default 初始化多选值
+                      const initialValues = param.config.default || [];
+                      const isSelected = (
+                        values[param.id] || initialValues
+                      ).includes(choice);
+
                       return (
                         <CommandItem
                           key={choice}
                           onSelect={() => {
-                            const currentValues = values[param.id] || [];
+                            const currentValues =
+                              values[param.id] || initialValues;
                             const newValues = isSelected
                               ? currentValues.filter(
                                   (v: string) => v !== choice
@@ -221,7 +225,12 @@ export function ParameterQueryArea({
                 >
                   <CalendarIcon className='mr-2 h-4 w-4' />
                   {values[param.id]
-                    ? format(values[param.id], param.config.dateFormat)
+                    ? format(
+                        values[param.id],
+                        param.config.dateFormat === 'YYYY-MM-DD'
+                          ? 'yyyy-MM-dd'
+                          : 'yyyyMMdd'
+                      )
                     : '选择日期'}
                 </Button>
               </PopoverTrigger>
@@ -244,7 +253,7 @@ export function ParameterQueryArea({
                 onKeyDown={(e) => handleMultiInputKeyDown(e, param)}
               />
               <div className='flex flex-wrap gap-2 mb-2'>
-                {(values[param.id] || []).map(
+                {(values[param.id] || param.config.default || []).map(
                   (value: string, index: number) => (
                     <div
                       key={`${value}-${index}`}

@@ -81,9 +81,9 @@ const demoReportResponse: ReportResponse = {
       alias: '结束日期', // 可选字段
       description: '选择结束日期',
       config: {
-        type: 'single_select',
-        choices: ['2023-01-04', '2023-01-05', '2023-01-06'],
+        type: 'date_picker',
         default: '2023-01-04',
+        dateFormat: 'YYYY-MM-DD',
       },
     },
     {
@@ -116,7 +116,7 @@ const demoReportResponse: ReportResponse = {
       alias: '关键词',
       config: {
         type: 'single_input',
-        default: '',
+        default: 'hi',
       },
     },
     {

@@ -17,6 +17,7 @@ import type { ReportResponse } from '@/types';
 import { reportApi } from '@/api/report';
 import type { Layout } from '@/types/models/layout';
 import { toast } from 'sonner';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 export function DashboardPage() {
   const [fileSystemItems, setFileSystemItems] =
@@ -29,6 +30,25 @@ export function DashboardPage() {
   const { dashboardId, setDashboardId } = useStore();
 
   const [layout, setLayout] = useState<Layout | null>(null);
+
+  // 添加导航栏显示控制状态
+  const [navbarVisible, setNavbarVisible] = useState(true);
+  const [navbarWidth, setNavbarWidth] = useState(256); // 默认宽度为64 (16rem)
+
+  // 切换导航栏显示状态
+  const toggleNavbar = () => {
+    setNavbarVisible(!navbarVisible);
+  };
+
+  // 根据选中文件的文件名长度调整导航栏宽度
+  useEffect(() => {
+    if (selectedItem && selectedItem.name) {
+      // 计算一个基础宽度，每个字符大约10px，最小256px，最大400px
+      const nameLength = selectedItem.name.length;
+      const calculatedWidth = Math.min(Math.max(256, nameLength * 10), 400);
+      setNavbarWidth(calculatedWidth);
+    }
+  }, [selectedItem]);
 
   // 当选择一个文件时，加载该文件对应的reportId的数据
   useEffect(() => {
@@ -176,14 +196,37 @@ export function DashboardPage() {
   };
 
   return (
-    <div className='flex h-screen'>
+    <div className='flex h-screen relative'>
       {/* 左侧导航栏 */}
-      <div className='w-64 border-r bg-background overflow-auto'>
+      <div
+        className='border-r bg-background overflow-auto transition-all duration-300 ease-in-out'
+        style={{
+          width: navbarVisible ? `${navbarWidth}px` : '0px',
+          opacity: navbarVisible ? 1 : 0,
+          visibility: navbarVisible ? 'visible' : 'hidden',
+        }}
+      >
         <FileExplorer
           items={fileSystemItems}
           onItemsChange={handleFileSystemChange}
           onSelectItem={handleSelectItem}
         />
+      </div>
+
+      {/* 导航栏切换按钮 */}
+      <div className='absolute top-100 left-0 z-10'>
+        <Button
+          variant='ghost'
+          size='icon'
+          className={`rounded-full ml-${navbarVisible ? navbarWidth / 4 : '0'} bg-secondary shadow-md`}
+          onClick={toggleNavbar}
+        >
+          {navbarVisible ? (
+            <ChevronLeft size={16} />
+          ) : (
+            <ChevronRight size={16} />
+          )}
+        </Button>
       </div>
 
       {/* 右侧内容区 */}

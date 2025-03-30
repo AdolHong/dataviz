@@ -247,7 +247,6 @@ export function DashboardPage() {
   const [navbarVisible, setNavbarVisible] = useState(true);
   const [navbarWidth, setNavbarWidth] = useState(256); // 默认宽度为64 (16rem)
 
-  const [requireFileUpload, setRequireFileUpload] = useState(true);
   const [queryResults, setQueryResults] = useState<Record<string, any> | null>(
     null
   );
@@ -294,31 +293,6 @@ export function DashboardPage() {
   const handleChartItemClick = (itemId: string) => {
     console.log('点击了图表项:', itemId);
     // 这里可以添加查看或编辑图表的逻辑
-  };
-
-  // 布局变更处理
-  const handleLayoutChange = (newLayout: Layout) => {
-    setLayout(newLayout);
-  };
-
-  // 保存布局
-  const handleSaveLayout = () => {
-    if (!layout) return;
-
-    // 模拟保存布局的API调用
-    setTimeout(() => {
-      toast.success('布局已保存');
-      setEditMode(false);
-      // 如果有后端API，可以在这里调用
-    }, 500);
-  };
-
-  // 重置布局
-  const handleResetLayout = () => {
-    if (dashboardData?.layout) {
-      setLayout(dashboardData.layout);
-      toast.info('布局已重置');
-    }
   };
 
   // 修改handleQuerySubmit函数，接收文件参数

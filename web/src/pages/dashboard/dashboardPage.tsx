@@ -40,9 +40,12 @@ const demoReportResponse: ReportResponse = {
     },
     {
       id: 'source-3',
-      name: 'csv上传',
-      alias: 'df_csv',
-      executor: { type: 'csv_uploader', demoData: 'a,b,c\n1,2,3\n4,5,6' },
+      name: '品类销量',
+      alias: 'df_category',
+      executor: {
+        type: 'csv_uploader',
+        demoData: 'category,sales\nA,100\nB,200\nC,300',
+      },
     },
     {
       id: 'source-4',
@@ -52,9 +55,12 @@ const demoReportResponse: ReportResponse = {
     },
     {
       id: 'source-5',
-      name: 'csv上传',
-      alias: 'df_csv2',
-      executor: { type: 'csv_uploader', demoData: 'a,b,c\n1,2,3\n4,5,6' },
+      name: '月度预算',
+      alias: 'df_budget',
+      executor: {
+        type: 'csv_uploader',
+        demoData: 'month,budget\n1,1000\n2,2000\n3,3000',
+      },
     },
   ],
   parameters: [

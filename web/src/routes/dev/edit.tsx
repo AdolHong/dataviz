@@ -2,11 +2,11 @@ import { createFileRoute } from '@tanstack/react-router';
 import { useState } from 'react';
 import EditModal from '@/pages/edit/EditModal';
 
-export const Route = createFileRoute('/edit')({
-  component: EditPage,
+export const Route = createFileRoute('/dev/edit')({
+  component: Edit,
 });
 
-function EditPage() {
+function Edit() {
   const [isModalOpen, setIsModalOpen] = useState(true);
 
   return (

@@ -36,6 +36,8 @@ interface EditArtifactParamModalProps {
   ) => void;
   paramData: { param: any; type: 'plain' | 'cascader'; id: string } | null; // null表示新增
   dependencies: string[];
+  plainParamNames: string[];
+  setPlainParamNames: (names: string[]) => void;
 }
 
 // 辅助函数生成唯一ID
@@ -48,6 +50,8 @@ const EditArtifactParamModal = ({
   onSave,
   paramData,
   dependencies,
+  plainParamNames,
+  setPlainParamNames,
 }: EditArtifactParamModalProps) => {
   // 参数类型选择
   const [paramType, setParamType] = useState<'plain' | 'cascader'>('plain');
@@ -183,6 +187,22 @@ const EditArtifactParamModal = ({
           return;
         }
 
+        // 判断name中仅包含数字、字母、下划线, 首字符为字母
+        if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(plainName)) {
+          toast.error(
+            '[PARAM] 异常, 名称仅包含数字、字母、下划线, 首字符为字母'
+          );
+          return;
+        }
+        // 检查是否存在同名参数
+        if (
+          plainParamNames.includes(plainName) &&
+          plainName !== paramData?.param.name
+        ) {
+          toast.error('参数名称已存在');
+          return;
+        }
+
         if (plainChoices.length === 0) {
           toast.error('请至少添加一个选项');
           return;
@@ -218,6 +238,13 @@ const EditArtifactParamModal = ({
           };
           onSave(multipleParam);
         }
+
+        // todo: 删除旧名, 更换新名
+        const newPlainParamNames = plainParamNames.filter(
+          (name) => name !== paramData?.param.name
+        );
+        newPlainParamNames.push(plainName);
+        setPlainParamNames(newPlainParamNames);
       } else {
         // Cascader 参数验证
         if (!cascaderDfAlias) {
@@ -379,57 +406,49 @@ const EditArtifactParamModal = ({
 
               {/* 默认值 - 单选类型 */}
               {plainParamType === 'single' && (
-                <div className='grid grid-cols-4 items-center gap-4'>
-                  <Label htmlFor='plainDefault' className='text-right'>
+                <div className='grid grid-cols-4 items-start gap-4'>
+                  <Label htmlFor='plainDefault' className='text-right pt-2'>
                     默认值
                   </Label>
-                  <Combobox
-                    options={plainChoices}
-                    value={plainDefault}
-                    onValueChange={(value: string | string[]) => {
-                      if (Array.isArray(value)) {
-                        setPlainDefault(value[0]);
-                      } else {
-                        setPlainDefault(plainDefault === value ? '' : value);
-                      }
-                    }}
-                    mode='single'
-                    placeholder='选择默认值'
-                    disabled={plainChoices.length === 0}
-                  />
+                  <div className='col-span-3'>
+                    <Combobox
+                      options={plainChoices}
+                      value={plainDefault}
+                      onValueChange={(value: string | string[]) => {
+                        if (!Array.isArray(value)) {
+                          setPlainDefault(plainDefault === value ? '' : value);
+                        }
+                      }}
+                      mode='single'
+                      placeholder='选择默认值'
+                      disabled={plainChoices.length === 0}
+                    />
+                  </div>
                 </div>
               )}
 
               {/* 默认值 - 多选类型 */}
               {plainParamType === 'multiple' && (
                 <div className='grid grid-cols-4 items-start gap-4'>
-                  <Label className='text-right pt-2'>默认值</Label>
+                  <Label
+                    htmlFor='plainDefaultMultiple'
+                    className='text-right pt-2'
+                  >
+                    默认值
+                  </Label>
                   <div className='col-span-3'>
-                    {plainChoices.map((choice, index) => (
-                      <div key={index} className='flex items-center mb-1'>
-                        <input
-                          type='checkbox'
-                          id={`choice-${index}`}
-                          checked={plainDefaultMultiple.includes(choice)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setPlainDefaultMultiple([
-                                ...plainDefaultMultiple,
-                                choice,
-                              ]);
-                            } else {
-                              setPlainDefaultMultiple(
-                                plainDefaultMultiple.filter((v) => v !== choice)
-                              );
-                            }
-                          }}
-                          className='mr-2'
-                        />
-                        <label htmlFor={`choice-${index}`} className='text-sm'>
-                          {choice}
-                        </label>
-                      </div>
-                    ))}
+                    <Combobox
+                      options={plainChoices}
+                      value={plainDefaultMultiple}
+                      onValueChange={(value: string | string[]) => {
+                        if (Array.isArray(value)) {
+                          setPlainDefaultMultiple(value.sort());
+                        }
+                      }}
+                      mode='multiple'
+                      placeholder='选择默认值'
+                      disabled={plainChoices.length === 0}
+                    />
                     {plainChoices.length === 0 && (
                       <div className='text-gray-500 text-sm'>请先添加选项</div>
                     )}

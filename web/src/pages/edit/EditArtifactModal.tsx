@@ -60,6 +60,8 @@ const EditArtifactModal = ({
   >([]);
   const [cascaderParams, setCascaderParams] = useState<CascaderParam[]>([]);
 
+  const [plainParamNames, setPlainParamNames] = useState<string[]>([]);
+
   // UI 状态控制
   const [isParamModalOpen, setIsParamModalOpen] = useState(false);
   const [editingParam, setEditingParam] = useState<{
@@ -83,6 +85,7 @@ const EditArtifactModal = ({
       setExecutorEngine(artifact.executor_engine);
       setPlainParams(artifact.plainParams || []);
       setCascaderParams(artifact.cascaderParams || []);
+      setPlainParamNames(artifact.plainParams?.map((p) => p.name) || []);
     } else {
       // 新增模式：重置所有状态
       setId(generateId());
@@ -93,6 +96,7 @@ const EditArtifactModal = ({
       setExecutorEngine('default');
       setPlainParams([]);
       setCascaderParams([]);
+      setPlainParamNames([]);
     }
   }, [artifact, isOpen]);
 
@@ -369,7 +373,7 @@ const EditArtifactModal = ({
 
               {plainParams.length === 0 && cascaderParams.length === 0 && (
                 <div className='text-center text-gray-500 p-4 border-2 border-dashed rounded-lg'>
-                  暂无参数
+                  暂无参数(可选)
                 </div>
               )}
 
@@ -441,6 +445,8 @@ const EditArtifactModal = ({
             : handleAddParam
         }
         paramData={editingParam}
+        plainParamNames={plainParamNames}
+        setPlainParamNames={setPlainParamNames}
         dependencies={dependencies}
       />
     </Dialog>

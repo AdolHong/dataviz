@@ -25,13 +25,3 @@ export interface DataSource {
     [key: string]: any;
   };
 }
-
-export interface ReportResponse {
-  id: string;
-  title: string;
-  description: string;
-  dataSources: DataSource[];
-  parameters: Parameter[];
-  artifacts: any[];
-  layout: Layout;
-}

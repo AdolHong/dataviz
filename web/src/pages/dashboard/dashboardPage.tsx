@@ -98,26 +98,6 @@ const demoReportResponse: ReportResponse = {
       },
     },
     {
-      id: 'param2',
-      name: 'startDate',
-      alias: '开始日期',
-      config: {
-        type: 'date_picker',
-        dateFormat: 'yyyy-MM-dd',
-        default: '',
-      },
-    },
-    {
-      id: 'param3',
-      name: 'endDate',
-      alias: '结束日期',
-      config: {
-        type: 'date_picker',
-        dateFormat: 'yyyy-MM-dd',
-        default: '',
-      },
-    },
-    {
       id: 'param4',
       name: 'department',
       alias: '部门',
@@ -301,8 +281,11 @@ export function DashboardPage() {
     // 这里可以添加查看或编辑图表的逻辑
   };
 
-  // 修改handleQuerySubmit函数，接收文件参数
-  const handleQuerySubmit = (values: Record<string, any>, files?: File[]) => {
+  // 修改handleQuerySubmit函数，接收文件参数为对象
+  const handleQuerySubmit = (
+    values: Record<string, any>,
+    files?: Record<string, File[]>
+  ) => {
     console.log('查询参数:', values);
     console.log('上传文件:', files);
     setQueryResults(values);
@@ -325,7 +308,7 @@ export function DashboardPage() {
           >
             <polyline points='22 12 18 12 15 21 9 3 6 12 2 12'></polyline>
           </svg>
-          <span className='text-xl font-semibold'>数据分析平台</span>
+          <span className='text-xl font-semibold'>DataViz</span>
         </div>
       </div>
 

@@ -30,6 +30,10 @@ import {
   Upload,
   Search,
   Check,
+  FileUp,
+  FileText,
+  RefreshCw,
+  Info,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -48,7 +52,10 @@ import type { DataSource } from '@/types';
 interface ParameterQueryAreaProps {
   parameters: Parameter[];
   dataSources?: DataSource[];
-  onSubmit: (values: Record<string, any>, files?: File[]) => void;
+  onSubmit: (
+    values: Record<string, any>,
+    files?: Record<string, File[]>
+  ) => void;
 }
 
 export function ParameterQueryArea({
@@ -57,17 +64,19 @@ export function ParameterQueryArea({
   onSubmit,
 }: ParameterQueryAreaProps) {
   const [values, setValues] = useState<Record<string, any>>({});
-  const [files, setFiles] = useState<File[]>([]);
+  // 修改文件存储结构为字典，键为数据源ID
+  const [files, setFiles] = useState<Record<string, File[]>>({});
   const [parametersExpanded, setParametersExpanded] = useState(true);
   const [activeTab, setActiveTab] = useState<string>('parameters');
 
   // 检查是否需要显示文件上传选项卡
-  const requireFileUpload = dataSources.some(
-    (ds) =>
-      ds.executor.type === 'csv_uploader' || ds.executor.type === 'csv_data'
+  const csvDataSources = dataSources.filter(
+    (ds) => ds.executor.type === 'csv_uploader'
   );
+  const requireFileUpload = csvDataSources.length > 0;
 
   const multiInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const toggleParametersExpanded = () => {
     setParametersExpanded(!parametersExpanded);
@@ -77,9 +86,28 @@ export function ParameterQueryArea({
     setValues((prev) => ({ ...prev, [id]: value }));
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setFiles(Array.from(e.target.files));
+  const handleFileChange = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    sourceId: string
+  ) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setFiles((prev) => ({
+        ...prev,
+        [sourceId]: Array.from(e.target.files!),
+      }));
+    }
+  };
+
+  const handleRemoveFile = (sourceId: string) => {
+    setFiles((prev) => {
+      const newFiles = { ...prev };
+      delete newFiles[sourceId];
+      return newFiles;
+    });
+
+    // 清空文件输入框，以便重新上传相同的文件
+    if (fileInputRefs.current[sourceId]) {
+      fileInputRefs.current[sourceId]!.value = '';
     }
   };
 
@@ -302,6 +330,26 @@ export function ParameterQueryArea({
     );
   };
 
+  // 格式化CSV预览数据
+  const formatCsvPreview = (csvData: string) => {
+    if (!csvData) return '无预览数据';
+    const rows = csvData.split('\n').slice(0, 5); // 只显示前5行
+    if (rows.length === 0) return '无预览数据';
+
+    return rows.map((row, i) => (
+      <div key={i} className='grid grid-cols-4 gap-1'>
+        {row
+          .split(',')
+          .slice(0, 4)
+          .map((cell, j) => (
+            <span key={j} className={i === 0 ? 'font-medium' : ''}>
+              {cell}
+            </span>
+          ))}
+      </div>
+    ));
+  };
+
   return (
     <Card className='w-full'>
       <CardContent className='pt-4 pb-2'>
@@ -328,7 +376,7 @@ export function ParameterQueryArea({
                       className='flex items-center gap-1'
                     >
                       <Upload size={14} />
-                      <span>文件上传</span>
+                      <span>文件上传 ({csvDataSources.length})</span>
                     </TabsTrigger>
                   )}
                 </TabsList>
@@ -357,84 +405,120 @@ export function ParameterQueryArea({
 
               {requireFileUpload && (
                 <TabsContent value='upload' className='mt-2 space-y-4'>
-                  <div className='space-y-4'>
-                    <div className='space-y-2'>
-                      <div className='border-2 border-dashed rounded-md p-6 text-center hover:border-primary/50 transition-colors'>
-                        <Input
-                          id='file-upload'
-                          type='file'
-                          multiple
-                          className='hidden'
-                          onChange={handleFileChange}
-                        />
-                        <Label
-                          htmlFor='file-upload'
-                          className='cursor-pointer block'
-                        >
-                          <div className='flex flex-col items-center gap-2'>
-                            <Upload
-                              size={20}
-                              className='text-muted-foreground'
-                            />
-                            <span className='text-sm font-medium'>
-                              点击或拖拽文件到此处上传
-                            </span>
-                            <span className='text-xs text-muted-foreground'>
-                              {dataSources
-                                .filter(
-                                  (ds) =>
-                                    ds.executor.type === 'csv_uploader' ||
-                                    ds.executor.type === 'csv_data'
-                                )
-                                .map((ds) => ds.name)
-                                .join(', ')}
-                            </span>
+                  <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
+                    {csvDataSources.map((source) => (
+                      <div
+                        key={source.id}
+                        className='border rounded-md p-4 flex flex-col space-y-3'
+                      >
+                        <div className='flex items-center justify-between'>
+                          <div className='flex items-center space-x-2'>
+                            <FileText size={16} className='text-primary' />
+                            <h3 className='font-medium text-sm'>
+                              {source.name}
+                            </h3>
                           </div>
-                        </Label>
-                      </div>
-                      {files.length > 0 && (
-                        <div className='mt-4 space-y-2'>
-                          <div className='flex justify-between items-center'>
-                            <p className='text-sm font-medium'>
-                              已选择的文件 ({files.length}):
-                            </p>
-                            <Button
-                              variant='ghost'
-                              size='sm'
-                              onClick={() => setFiles([])}
-                              className='text-destructive hover:text-destructive/80'
-                            >
-                              清空
-                            </Button>
-                          </div>
-                          <ul className='text-sm max-h-40 overflow-y-auto space-y-1'>
-                            {files.map((file, index) => (
-                              <li
-                                key={index}
-                                className='text-muted-foreground truncate flex items-center gap-2'
-                              >
+
+                          <TooltipProvider delayDuration={300}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
                                 <Button
                                   variant='ghost'
                                   size='icon'
                                   className='h-6 w-6'
-                                  onClick={() => {
-                                    setFiles(
-                                      files.filter((_, i) => i !== index)
-                                    );
+                                >
+                                  <Info size={14} />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent className='w-80'>
+                                <div className='space-y-2'>
+                                  <p className='font-medium text-xs'>
+                                    {source.name} 预览数据:
+                                  </p>
+                                  <div className='bg-muted p-2 rounded-sm text-xs'>
+                                    {formatCsvPreview(
+                                      source.executor.demoData || ''
+                                    )}
+                                  </div>
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        </div>
+
+                        <div className='text-xs text-muted-foreground'>
+                          数据别名: {source.alias}
+                        </div>
+
+                        {files[source.id] ? (
+                          <div className='space-y-2'>
+                            <div className='flex items-center justify-between'>
+                              <span className='text-sm truncate'>
+                                {files[source.id][0].name}
+                              </span>
+                              <div className='flex space-x-1'>
+                                <Button
+                                  variant='ghost'
+                                  size='icon'
+                                  className='h-7 w-7'
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    fileInputRefs.current[source.id]?.click();
+                                  }}
+                                >
+                                  <RefreshCw size={14} />
+                                </Button>
+                                <Button
+                                  variant='ghost'
+                                  size='icon'
+                                  className='h-7 w-7 text-destructive'
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    handleRemoveFile(source.id);
                                   }}
                                 >
                                   <X size={14} />
                                 </Button>
-                                {file.name}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      <div className='flex justify-end mt-4'>
-                        <Button type='submit'>应用</Button>
+                              </div>
+                            </div>
+                            <div className='text-xs text-muted-foreground'>
+                              {(files[source.id][0].size / 1024).toFixed(2)} KB
+                              •{files[source.id][0].type || '未知类型'}
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            className='border-2 border-dashed rounded-md p-3 text-center hover:border-primary/50 transition-colors cursor-pointer'
+                            onClick={() =>
+                              fileInputRefs.current[source.id]?.click()
+                            }
+                          >
+                            <Input
+                              ref={(el) =>
+                                (fileInputRefs.current[source.id] = el)
+                              }
+                              id={`file-upload-${source.id}`}
+                              type='file'
+                              accept='.csv,.txt'
+                              className='hidden'
+                              onChange={(e) => handleFileChange(e, source.id)}
+                            />
+                            <div className='flex flex-col items-center gap-1'>
+                              <FileUp
+                                size={16}
+                                className='text-muted-foreground'
+                              />
+                              <span className='text-xs font-medium'>
+                                点击上传
+                              </span>
+                              <span className='text-xs text-muted-foreground'>
+                                支持CSV文件
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    </div>
+                    ))}
                   </div>
                 </TabsContent>
               )}

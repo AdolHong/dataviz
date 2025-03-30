@@ -363,10 +363,6 @@ export function FileExplorer({
 
   return (
     <div className='h-full flex flex-col'>
-      <div className='flex items-center justify-between mb-4 px-1'>
-        <h2 className='text-lg font-medium truncate'>文件浏览器</h2>
-      </div>
-
       <div className='space-y-0.5 overflow-auto flex-1 pr-1 min-w-0'>
         {renderItems(null)}
       </div>

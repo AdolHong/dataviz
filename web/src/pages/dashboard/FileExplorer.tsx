@@ -5,10 +5,10 @@ import {
   ChevronDown,
   File,
   Folder,
-  MoreHorizontal,
   Plus,
   Pencil,
   Trash,
+  Copy,
   Move,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import {
   FileSystemItemType,
   getChildItems,
   createFolder,
@@ -31,94 +38,7 @@ import {
   deleteItem,
 } from '@/types/models/fileSystem';
 import type { FileSystemItem } from '@/types/models/fileSystem';
-
-// 临时实现一个简单的下拉菜单组件（由于缺少shadcn的dropdown-menu组件）
-const DropdownMenu = ({ children }: { children: React.ReactNode }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  // 点击外部关闭菜单
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, []);
-
-  return (
-    <div className='relative' ref={menuRef}>
-      {React.Children.map(children, (child) => {
-        if (React.isValidElement(child) && child.type === DropdownMenuTrigger) {
-          return React.cloneElement(child as React.ReactElement<any>, {
-            onClick: () => setIsOpen(!isOpen),
-          });
-        }
-        if (React.isValidElement(child) && child.type === DropdownMenuContent) {
-          return isOpen ? child : null;
-        }
-        return child;
-      })}
-    </div>
-  );
-};
-
-const DropdownMenuTrigger = ({
-  children,
-  asChild,
-  onClick,
-}: {
-  children: React.ReactNode;
-  asChild?: boolean;
-  onClick?: () => void;
-}) => {
-  return <div onClick={onClick}>{children}</div>;
-};
-
-const DropdownMenuContent = ({
-  children,
-  align = 'left',
-}: {
-  children: React.ReactNode;
-  align?: 'left' | 'right' | 'end';
-}) => {
-  const alignClass =
-    align === 'right' || align === 'end' ? 'right-0' : 'left-0';
-
-  return (
-    <div
-      className={`absolute z-50 mt-1 ${alignClass} min-w-[8rem] rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none`}
-    >
-      <div className='py-1'>{children}</div>
-    </div>
-  );
-};
-
-const DropdownMenuItem = ({
-  children,
-  onClick,
-}: {
-  children: React.ReactNode;
-  onClick?: () => void;
-}) => {
-  return (
-    <div
-      className='px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 cursor-pointer flex items-center'
-      onClick={onClick}
-    >
-      {children}
-    </div>
-  );
-};
-
-const DropdownMenuSeparator = () => {
-  return <div className='h-px my-1 bg-gray-200' />;
-};
+import { cn } from '@/lib/utils';
 
 // 拖放类型定义
 interface DragItem {
@@ -142,6 +62,7 @@ export function FileExplorer({
   );
   const [draggedItem, setDraggedItem] = useState<DragItem | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [activeItem, setActiveItem] = useState<string | null>(null);
 
   // 对话框状态
   const [isNewItemDialogOpen, setIsNewItemDialogOpen] = useState(false);
@@ -169,6 +90,8 @@ export function FileExplorer({
 
   // 处理项目点击
   const handleItemClick = (item: FileSystemItem) => {
+    setActiveItem(item.id);
+
     if (item.type === FileSystemItemType.FOLDER) {
       toggleFolder(item.id);
     } else if (onSelectItem) {
@@ -314,103 +237,110 @@ export function FileExplorer({
     const isExpanded = isFolder && expandedFolders.has(item.id);
     const isDragging = draggedItem?.id === item.id;
     const isDropTarget = dropTarget === item.id;
+    const isActive = activeItem === item.id;
 
     return (
       <div key={item.id} className='select-none'>
-        <div
-          className={`flex items-center px-2 py-1 rounded-md cursor-pointer ${
-            isDragging ? 'opacity-50' : ''
-          } ${
-            isDropTarget
-              ? 'bg-blue-100 dark:bg-blue-900'
-              : 'hover:bg-gray-100 dark:hover:bg-gray-800'
-          }`}
-          onClick={() => handleItemClick(item)}
-          draggable
-          onDragStart={(e) => handleDragStart(e, item)}
-          onDragEnd={handleDragEnd}
-          onDragOver={(e) => handleDragOver(e, item)}
-          onDragLeave={handleDragLeave}
-          onDrop={(e) => handleDrop(e, item)}
-        >
-          {/* 展开/折叠图标 */}
-          <div className='w-5 h-5 flex items-center justify-center mr-1'>
-            {isFolder && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggleFolder(item.id);
-                }}
-                className='focus:outline-none'
-              >
-                {isExpanded ? (
-                  <ChevronDown size={16} />
-                ) : (
-                  <ChevronRight size={16} />
-                )}
-              </button>
-            )}
-          </div>
-
-          {/* 图标 */}
-          <div className='mr-2'>
-            {isFolder ? (
-              <Folder size={18} className='text-blue-500' />
-            ) : (
-              <File size={18} className='text-gray-500' />
-            )}
-          </div>
-
-          {/* 名称 */}
-          <div className='flex-1 truncate'>{item.name}</div>
-
-          {/* 操作菜单 */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                className='h-8 w-8 p-0 flex items-center justify-center rounded-md opacity-0 group-hover:opacity-100 hover:bg-gray-200 dark:hover:bg-gray-700'
-                onClick={(e) => e.stopPropagation()}
-              >
-                <MoreHorizontal size={16} />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align='end'>
-              {isFolder && (
-                <>
-                  <DropdownMenuItem
-                    onClick={() =>
-                      openNewItemDialog(item.id, FileSystemItemType.FOLDER)
-                    }
-                  >
-                    <Plus className='mr-2 h-4 w-4' />
-                    <span>新建文件夹</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() =>
-                      openNewItemDialog(item.id, FileSystemItemType.FILE)
-                    }
-                  >
-                    <Plus className='mr-2 h-4 w-4' />
-                    <span>新建文件</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                </>
+        <ContextMenu>
+          <ContextMenuTrigger>
+            <div
+              className={cn(
+                'flex items-center px-2 py-1.5 rounded-md cursor-pointer transition-colors group',
+                isDragging ? 'opacity-50' : '',
+                isDropTarget
+                  ? 'bg-blue-100 dark:bg-blue-900/40'
+                  : isActive
+                    ? 'bg-secondary'
+                    : 'hover:bg-secondary/50'
               )}
-              <DropdownMenuItem onClick={() => openRenameDialog(item)}>
-                <Pencil className='mr-2 h-4 w-4' />
-                <span>重命名</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => openDeleteDialog(item)}>
-                <Trash className='mr-2 h-4 w-4' />
-                <span>删除</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+              onClick={() => handleItemClick(item)}
+              draggable
+              onDragStart={(e) => handleDragStart(e, item)}
+              onDragEnd={handleDragEnd}
+              onDragOver={(e) => handleDragOver(e, item)}
+              onDragLeave={handleDragLeave}
+              onDrop={(e) => handleDrop(e, item)}
+            >
+              {/* 展开/折叠图标 */}
+              <div className='w-5 h-5 flex items-center justify-center mr-1'>
+                {isFolder && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleFolder(item.id);
+                    }}
+                    className='focus:outline-none'
+                  >
+                    {isExpanded ? (
+                      <ChevronDown
+                        size={16}
+                        className='text-muted-foreground'
+                      />
+                    ) : (
+                      <ChevronRight
+                        size={16}
+                        className='text-muted-foreground'
+                      />
+                    )}
+                  </button>
+                )}
+              </div>
+
+              {/* 图标 */}
+              <div className='mr-2'>
+                {isFolder ? (
+                  <Folder
+                    size={18}
+                    className='text-blue-500 dark:text-blue-400'
+                  />
+                ) : (
+                  <File size={18} className='text-muted-foreground' />
+                )}
+              </div>
+
+              {/* 名称 */}
+              <div className='flex-1 truncate text-sm'>{item.name}</div>
+            </div>
+          </ContextMenuTrigger>
+
+          <ContextMenuContent className='w-56'>
+            {isFolder && (
+              <>
+                <ContextMenuItem
+                  onClick={() =>
+                    openNewItemDialog(item.id, FileSystemItemType.FOLDER)
+                  }
+                >
+                  <Plus className='mr-2 h-4 w-4' />
+                  <span>新建文件夹</span>
+                </ContextMenuItem>
+                <ContextMenuItem
+                  onClick={() =>
+                    openNewItemDialog(item.id, FileSystemItemType.FILE)
+                  }
+                >
+                  <File className='mr-2 h-4 w-4' />
+                  <span>新建文件</span>
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+              </>
+            )}
+            <ContextMenuItem onClick={() => openRenameDialog(item)}>
+              <Pencil className='mr-2 h-4 w-4' />
+              <span>重命名</span>
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => openDeleteDialog(item)}>
+              <Trash className='mr-2 h-4 w-4' />
+              <span>删除</span>
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
 
         {/* 子项目 */}
         {isFolder && isExpanded && (
-          <div className='pl-6 mt-1'>{renderItems(item.id)}</div>
+          <div className='pl-5 mt-0.5 border-l ml-2.5 border-border/50'>
+            {renderItems(item.id)}
+          </div>
         )}
       </div>
     );
@@ -432,30 +362,32 @@ export function FileExplorer({
   };
 
   return (
-    <div className='h-full overflow-auto'>
-      <div className='flex items-center justify-between mb-4'>
-        <h2 className='text-lg font-semibold'>文件夹</h2>
-        <div className='flex space-x-2'>
+    <div className='h-full flex flex-col'>
+      <div className='flex items-center justify-between mb-4 px-1'>
+        <h2 className='text-lg font-medium'>文件浏览器</h2>
+        <div className='flex space-x-1'>
           <Button
-            variant='outline'
-            size='sm'
+            variant='ghost'
+            size='icon'
+            title='新建文件夹'
             onClick={() => openNewItemDialog(null, FileSystemItemType.FOLDER)}
           >
-            <Plus size={16} className='mr-1' />
-            新建文件夹
+            <Folder size={16} className='text-blue-500 dark:text-blue-400' />
           </Button>
           <Button
-            variant='outline'
-            size='sm'
+            variant='ghost'
+            size='icon'
+            title='新建文件'
             onClick={() => openNewItemDialog(null, FileSystemItemType.FILE)}
           >
-            <Plus size={16} className='mr-1' />
-            新建文件
+            <File size={16} />
           </Button>
         </div>
       </div>
 
-      <div className='space-y-1'>{renderItems(null)}</div>
+      <div className='space-y-0.5 overflow-auto flex-1 pr-1'>
+        {renderItems(null)}
+      </div>
 
       {/* 新建项目对话框 */}
       <Dialog open={isNewItemDialogOpen} onOpenChange={setIsNewItemDialogOpen}>

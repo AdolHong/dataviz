@@ -14,6 +14,7 @@ import { demoFileSystemData } from '@/data/demoFileSystem';
 import type { FileSystemItem } from '@/types/models/fileSystem';
 import type { ReportResponse } from '@/types';
 import { reportApi } from '@/api/report';
+import { Layout, LayoutItem } from '@/types/models/layout';
 
 export function DashboardPage() {
   const [fileSystemItems, setFileSystemItems] =
@@ -136,10 +137,38 @@ export function DashboardPage() {
     }
   };
 
+  // 渲染布局网格
+  const renderLayoutGrid = (layout: Layout) => {
+    return (
+      <div
+        className='grid gap-4'
+        style={{
+          gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))`,
+        }}
+      >
+        {layout.items.map((item) => renderLayoutItem(item))}
+      </div>
+    );
+  };
+
+  // 渲染单个布局项
+  const renderLayoutItem = (item: LayoutItem) => {
+    return (
+      <Card key={item.id} className='col-span-1'>
+        <CardHeader className='pb-2'>
+          <CardTitle className='text-lg'>{item.title}</CardTitle>
+        </CardHeader>
+        <CardContent className='h-60 border-2 border-dashed border-muted-foreground/20 rounded-md flex items-center justify-center'>
+          <p className='text-muted-foreground'>{item.title} 内容</p>
+        </CardContent>
+      </Card>
+    );
+  };
+
   return (
     <div className='flex h-screen'>
       {/* 左侧导航栏 */}
-      <div className='w-64 border-r bg-background p-4 overflow-auto'>
+      <div className='w-64 border-r bg-background overflow-auto'>
         <FileExplorer
           items={fileSystemItems}
           onItemsChange={handleFileSystemChange}
@@ -149,36 +178,41 @@ export function DashboardPage() {
 
       {/* 右侧内容区 */}
       <div className='flex-1 overflow-auto'>
-        <div className='container mx-auto p-6 space-y-6'>
+        <div className='container mx-auto py-6 px-8 space-y-6'>
           {loading ? (
             <div className='flex items-center justify-center h-64'>
               <p className='text-muted-foreground'>加载中...</p>
             </div>
           ) : !selectedItem || selectedItem.type !== 'file' ? (
-            <div className='flex items-center justify-center h-64'>
-              <p className='text-muted-foreground'>请从左侧选择一个报表文件</p>
+            <div className='flex flex-col items-center justify-center h-64 text-center'>
+              <p className='text-muted-foreground mb-2'>
+                请从左侧选择一个报表文件
+              </p>
+              <p className='text-xs text-muted-foreground/70'>
+                选择后将展示报表内容与配置
+              </p>
             </div>
           ) : (
             <>
               {/* 标题和描述 */}
-              <div>
-                <h1 className='text-3xl font-bold'>
+              <div className='border-b pb-4'>
+                <h1 className='text-2xl font-semibold'>
                   {dashboardData?.title || selectedItem.name}
                 </h1>
-                <p className='text-muted-foreground'>
+                <p className='text-muted-foreground mt-1'>
                   {dashboardData?.description || '无描述'}
                 </p>
               </div>
 
               {/* 参数区域 */}
-              <Card>
-                <CardHeader className='pb-3'>
-                  <CardTitle>查询参数</CardTitle>
-                  <CardDescription>设置过滤条件</CardDescription>
+              <Card className='shadow-sm'>
+                <CardHeader className='pb-2'>
+                  <CardTitle className='text-base'>查询参数</CardTitle>
+                  <CardDescription>设置报表过滤条件</CardDescription>
                 </CardHeader>
                 <CardContent className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4'>
                   {dashboardData?.parameters.map((param) => (
-                    <div key={param.id} className='space-y-2'>
+                    <div key={param.id} className='space-y-1.5'>
                       <label className='text-sm font-medium'>
                         {param.alias || param.name}
                       </label>
@@ -186,28 +220,25 @@ export function DashboardPage() {
                     </div>
                   ))}
                 </CardContent>
-                <div className='flex justify-end px-6 pb-6'>
+                <div className='flex justify-end px-6 pb-4'>
                   <Button>查询</Button>
                 </div>
               </Card>
 
               {/* 展示区域 */}
-              <div className='space-y-6'>
-                <h2 className='text-lg font-medium mb-2'>数据可视化</h2>
-                <div className='grid grid-cols-3 gap-4'>
-                  {dashboardData?.layout.items.map((item) => (
-                    <Card key={item.id} className='col-span-1'>
-                      <CardHeader>
-                        <CardTitle className='text-lg'>{item.title}</CardTitle>
-                      </CardHeader>
-                      <CardContent className='h-64 border-2 border-dashed border-muted-foreground/20 rounded-md flex items-center justify-center'>
-                        <p className='text-muted-foreground'>
-                          {item.title} 内容
-                        </p>
-                      </CardContent>
-                    </Card>
-                  ))}
+              <div className='space-y-4'>
+                <div className='flex items-center justify-between'>
+                  <h2 className='text-lg font-medium'>数据可视化</h2>
+                  <div className='flex items-center space-x-2 text-sm'>
+                    <span className='text-muted-foreground'>布局：</span>
+                    <span>
+                      {dashboardData?.layout.columns || 3} x{' '}
+                      {dashboardData?.layout.rows || 2}
+                    </span>
+                  </div>
                 </div>
+                {dashboardData?.layout &&
+                  renderLayoutGrid(dashboardData.layout)}
               </div>
             </>
           )}

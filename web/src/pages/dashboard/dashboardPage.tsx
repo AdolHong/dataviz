@@ -313,7 +313,7 @@ export function DashboardPage() {
       <div className='flex flex-1 overflow-hidden'>
         {/* 左侧导航栏 */}
         <div
-          className='border-r bg-background overflow-auto transition-all duration-300 ease-in-out'
+          className='border-r bg-background overflow-auto transition-all duration-300 ease-in-out flex-shrink-0'
           style={{
             width: navbarVisible ? `${navbarWidth}px` : '0px',
             opacity: navbarVisible ? 1 : 0,
@@ -344,8 +344,8 @@ export function DashboardPage() {
         </div>
 
         {/* 右侧内容区 */}
-        <div className='flex-1 overflow-auto'>
-          <div className='container mx-auto py-6 px-8 space-y-6'>
+        <div className='flex-1 w-0 min-w-0 overflow-auto'>
+          <div className='container max-w-full py-6 px-4 md:px-8 space-y-6'>
             {selectedItem && selectedItem.type === 'file' && (
               // 显示选中的报表
               <>

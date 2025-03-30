@@ -383,25 +383,20 @@ const EditArtifactParamModal = ({
                   <Label htmlFor='plainDefault' className='text-right'>
                     默认值
                   </Label>
-                  <Select
+                  <Combobox
+                    options={plainChoices}
                     value={plainDefault}
-                    onValueChange={(value) => {
-                      console.log('plainDefault', plainDefault);
-                      setPlainDefault(plainDefault === value ? '' : value);
+                    onValueChange={(value: string | string[]) => {
+                      if (Array.isArray(value)) {
+                        setPlainDefault(value[0]);
+                      } else {
+                        setPlainDefault(plainDefault === value ? '' : value);
+                      }
                     }}
+                    mode='single'
+                    placeholder='选择默认值'
                     disabled={plainChoices.length === 0}
-                  >
-                    <SelectTrigger className='col-span-3'>
-                      <SelectValue placeholder='选择默认值' />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {plainChoices.map((choice, index) => (
-                        <SelectItem key={index} value={choice}>
-                          {choice}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  />
                 </div>
               )}
 

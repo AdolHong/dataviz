@@ -436,7 +436,24 @@ export const EditDataSourceModal = ({
           <Button variant='outline' onClick={onClose}>
             取消
           </Button>
-          <Button onClick={handleSave}>保存</Button>
+          <Button
+            onClick={handleSave}
+            // 判断是否禁用"保存"按钮
+            disabled={
+              !dataSource.name ||
+              dataSource.alias === 'df_' ||
+              (dataSource.executor.type === 'sql' &&
+                !dataSource.executor.code) ||
+              (dataSource.executor.type === 'python' &&
+                !dataSource.executor.code) ||
+              (dataSource.executor.type === 'csv_data' &&
+                !dataSource.executor.data) ||
+              (dataSource.executor.type === 'csv_uploader' &&
+                !dataSource.executor.demoData)
+            }
+          >
+            保存
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

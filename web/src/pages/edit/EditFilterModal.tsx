@@ -555,7 +555,14 @@ const EditFilterModal = ({
           <Button variant='outline' onClick={onClose}>
             取消
           </Button>
-          <Button onClick={handleSaveClick} disabled={!name}>
+          <Button
+            onClick={handleSaveClick}
+            disabled={
+              !name ||
+              (paramType === 'single_select' && !singleSelectChoices.length) ||
+              (paramType === 'multi_select' && !multiSelectChoices.length)
+            }
+          >
             保存
           </Button>
         </DialogFooter>

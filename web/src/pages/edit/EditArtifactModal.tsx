@@ -233,7 +233,8 @@ const EditArtifactModal = ({
                   if (Array.isArray(value)) {
                     setExecutorEngine(value[0]);
                   } else {
-                    setExecutorEngine(value);
+                    console.log('engine value:', value);
+                    setExecutorEngine(value || 'default');
                   }
                 }}
                 mode='single' // 单选
@@ -388,7 +389,7 @@ const EditArtifactModal = ({
 
           <div className='grid grid-cols-4 items-start gap-4'>
             <Label htmlFor='code' className='text-right pt-2'>
-              代码*
+              Python代码*
             </Label>
             <div className='col-span-3'>
               <AceEditor
@@ -417,7 +418,9 @@ const EditArtifactModal = ({
           </Button>
           <Button
             onClick={handleSaveClick}
-            disabled={!title || !code || dependencies.length === 0}
+            disabled={
+              !title || !code || dependencies.length === 0 || !executor_engine
+            }
           >
             保存
           </Button>

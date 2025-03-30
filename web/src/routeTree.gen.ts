@@ -10,9 +10,10 @@
 
 // Import Routes
 
-import { Route as rootRoute } from './routes/__root'
-import { Route as EditImport } from './routes/edit'
-import { Route as IndexImport } from './routes/index'
+import { Route as rootRoute } from './routes/__root';
+import { Route as EditImport } from './routes/edit';
+import { Route as IndexImport } from './routes/index';
+import { Route as DevDashboardImport } from './routes/dev/dashboard';
 
 // Create/Update Routes
 
@@ -20,75 +21,93 @@ const EditRoute = EditImport.update({
   id: '/edit',
   path: '/edit',
   getParentRoute: () => rootRoute,
-} as any)
+} as any);
 
 const IndexRoute = IndexImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRoute,
-} as any)
+} as any);
+
+const DevDashboardRoute = DevDashboardImport.update({
+  id: '/dev/dashboard',
+  path: '/dev/dashboard',
+  getParentRoute: () => rootRoute,
+} as any);
 
 // Populate the FileRoutesByPath interface
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
     '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexImport
-      parentRoute: typeof rootRoute
-    }
+      id: '/';
+      path: '/';
+      fullPath: '/';
+      preLoaderRoute: typeof IndexImport;
+      parentRoute: typeof rootRoute;
+    };
     '/edit': {
-      id: '/edit'
-      path: '/edit'
-      fullPath: '/edit'
-      preLoaderRoute: typeof EditImport
-      parentRoute: typeof rootRoute
-    }
+      id: '/edit';
+      path: '/edit';
+      fullPath: '/edit';
+      preLoaderRoute: typeof EditImport;
+      parentRoute: typeof rootRoute;
+    };
+    '/dev/dashboard': {
+      id: '/dev/dashboard';
+      path: '/dev/dashboard';
+      fullPath: '/dev/dashboard';
+      preLoaderRoute: typeof DevDashboardImport;
+      parentRoute: typeof rootRoute;
+    };
   }
 }
 
 // Create and export the route tree
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/edit': typeof EditRoute
+  '/': typeof IndexRoute;
+  '/edit': typeof EditRoute;
+  '/dev/dashboard': typeof DevDashboardRoute;
 }
 
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/edit': typeof EditRoute
+  '/': typeof IndexRoute;
+  '/edit': typeof EditRoute;
+  '/dev/dashboard': typeof DevDashboardRoute;
 }
 
 export interface FileRoutesById {
-  __root__: typeof rootRoute
-  '/': typeof IndexRoute
-  '/edit': typeof EditRoute
+  __root__: typeof rootRoute;
+  '/': typeof IndexRoute;
+  '/edit': typeof EditRoute;
+  '/dev/dashboard': typeof DevDashboardRoute;
 }
 
 export interface FileRouteTypes {
-  fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/edit'
-  fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/edit'
-  id: '__root__' | '/' | '/edit'
-  fileRoutesById: FileRoutesById
+  fileRoutesByFullPath: FileRoutesByFullPath;
+  fullPaths: '/' | '/edit' | '/dev/dashboard';
+  fileRoutesByTo: FileRoutesByTo;
+  to: '/' | '/edit' | '/dev/dashboard';
+  id: '__root__' | '/' | '/edit' | '/dev/dashboard';
+  fileRoutesById: FileRoutesById;
 }
 
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  EditRoute: typeof EditRoute
+  IndexRoute: typeof IndexRoute;
+  EditRoute: typeof EditRoute;
+  DevDashboardRoute: typeof DevDashboardRoute;
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   EditRoute: EditRoute,
-}
+  DevDashboardRoute: DevDashboardRoute,
+};
 
 export const routeTree = rootRoute
   ._addFileChildren(rootRouteChildren)
-  ._addFileTypes<FileRouteTypes>()
+  ._addFileTypes<FileRouteTypes>();
 
 /* ROUTE_MANIFEST_START
 {
@@ -97,7 +116,8 @@ export const routeTree = rootRoute
       "filePath": "__root.tsx",
       "children": [
         "/",
-        "/edit"
+        "/edit",
+        "/dev/dashboard"
       ]
     },
     "/": {
@@ -105,6 +125,9 @@ export const routeTree = rootRoute
     },
     "/edit": {
       "filePath": "edit.tsx"
+    },
+    "/dev/dashboard": {
+      "filePath": "dev/dashboard.tsx"
     }
   }
 }

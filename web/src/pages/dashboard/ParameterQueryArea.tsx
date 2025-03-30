@@ -304,79 +304,73 @@ export function ParameterQueryArea({
     <Card className='w-full'>
       <CardContent className='pt-4 pb-2'>
         <form onSubmit={handleSubmit}>
-          {parametersExpanded ? (
-            <Tabs
-              defaultValue='parameters'
-              value={activeTab}
-              onValueChange={setActiveTab}
-              className='w-full'
-            >
-              <div className='flex justify-between items-center mb-2'>
-                <TabsList>
+          <Tabs
+            defaultValue='parameters'
+            value={activeTab}
+            onValueChange={setActiveTab}
+            className='w-full'
+          >
+            <div className='flex justify-between items-center mb-2'>
+              <TabsList>
+                <TabsTrigger
+                  value='parameters'
+                  className='flex items-center gap-1'
+                >
+                  <Search size={14} />
+                  <span>查询参数</span>
+                </TabsTrigger>
+                {requireFileUpload && (
                   <TabsTrigger
-                    value='parameters'
+                    value='upload'
                     className='flex items-center gap-1'
                   >
-                    <Search size={14} />
-                    <span>查询参数</span>
+                    <Upload size={14} />
+                    <span>文件上传 ({csvDataSources.length})</span>
                   </TabsTrigger>
-                  {requireFileUpload && (
-                    <TabsTrigger
-                      value='upload'
-                      className='flex items-center gap-1'
-                    >
-                      <Upload size={14} />
-                      <span>文件上传 ({csvDataSources.length})</span>
-                    </TabsTrigger>
-                  )}
-                </TabsList>
+                )}
+              </TabsList>
+              <div className='flex items-center space-x-2'>
+                <Button type='submit' size='sm'>
+                  查询
+                </Button>
                 <Button
                   variant='ghost'
                   size='sm'
                   onClick={toggleParametersExpanded}
                   className='h-8 px-2'
                 >
-                  <ChevronUp size={16} className='text-muted-foreground' />
+                  {parametersExpanded ? (
+                    <ChevronUp size={16} className='text-muted-foreground' />
+                  ) : (
+                    <ChevronDown size={16} className='text-muted-foreground' />
+                  )}
                 </Button>
               </div>
-
-              <TabsContent value='parameters' className='mt-2 space-y-4'>
-                <div className='grid grid-cols-2 md:grid-cols-4 gap-3'>
-                  {parameters.map((param) => (
-                    <div key={param.id} className='col-span-1'>
-                      {renderParameterInput(param)}
-                    </div>
-                  ))}
-                </div>
-                <div className='flex justify-end'>
-                  <Button type='submit'>查询</Button>
-                </div>
-              </TabsContent>
-
-              {requireFileUpload && (
-                <TabsContent value='upload' className='mt-2'>
-                  <FileUploadArea
-                    dataSources={csvDataSources}
-                    onFilesChange={handleFilesChange}
-                  />
-                </TabsContent>
-              )}
-            </Tabs>
-          ) : (
-            <div className='flex justify-between items-center'>
-              <Button type='submit' className='w-full'>
-                查询
-              </Button>
-              <Button
-                variant='ghost'
-                size='sm'
-                onClick={toggleParametersExpanded}
-                className='h-8 px-2 ml-2'
-              >
-                <ChevronDown size={16} className='text-muted-foreground' />
-              </Button>
             </div>
-          )}
+
+            {parametersExpanded ? (
+              <>
+                <TabsContent value='parameters' className='mt-2 space-y-4'>
+                  <div className='grid grid-cols-2 md:grid-cols-4 gap-3'>
+                    {parameters.map((param) => (
+                      <div key={param.id} className='col-span-1'>
+                        {renderParameterInput(param)}
+                      </div>
+                    ))}
+                  </div>
+                </TabsContent>
+
+                {requireFileUpload && (
+                  <TabsContent value='upload' className='mt-2'>
+                    <FileUploadArea
+                      dataSources={csvDataSources}
+                      onFilesChange={handleFilesChange}
+                    />
+                  </TabsContent>
+                )}
+              </>
+            ) : null}
+          </Tabs>
         </form>
       </CardContent>
     </Card>

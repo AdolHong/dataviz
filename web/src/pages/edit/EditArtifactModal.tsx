@@ -172,18 +172,31 @@ const EditArtifactModal = ({
         toast.error('请至少选择一个数据源依赖');
         return;
       }
-
-      console.info('artifact', artifact);
-      const savedArtifact: Artifact = {
-        id: artifact?.id || id,
-        title,
-        description: description || '',
-        code: code || '',
-        dependencies: dependencies || [],
-        executor_engine: executor_engine || 'default',
-        plainParams: plainParams.length > 0 ? plainParams : undefined,
-        cascaderParams: cascaderParams.length > 0 ? cascaderParams : undefined,
-      };
+      let savedArtifact: Artifact;
+      if (artifact) {
+        savedArtifact = {
+          id: artifact?.id || id,
+          title,
+          description: description || '',
+          code: code || '',
+          dependencies: dependencies || [],
+          executor_engine: executor_engine || 'default',
+          plainParams: plainParams.length > 0 ? plainParams : [],
+          cascaderParams: cascaderParams.length > 0 ? cascaderParams : [],
+        };
+      } else {
+        savedArtifact = {
+          id,
+          title,
+          description: description || '',
+          code: code || '',
+          dependencies: dependencies || [],
+          executor_engine: executor_engine || 'default',
+          plainParams: plainParams.length > 0 ? plainParams : [],
+          cascaderParams: cascaderParams.length > 0 ? cascaderParams : [],
+        };
+      }
+      console.info('savedArtifact', savedArtifact);
       onSave(savedArtifact);
     } catch (error) {
       console.error('Error saving artifact:', error);

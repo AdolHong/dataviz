@@ -11,7 +11,7 @@ import { toast } from 'sonner';
 interface TabArtifactProps {
   layout: Layout;
   setLayout: (layout: Layout) => void;
-  handleAddArtifact: () => void;
+  handleAddArtifact: (artifact: Artifact) => void;
   handleModifyArtifact: (artifact: Artifact) => void;
   handleDeleteArtifact: (id: string) => void;
   confirmDelete: (deleteFunction: () => void, message: string) => void;
@@ -40,8 +40,7 @@ const TabArtifact = ({
     if (editingArtifact) {
       handleModifyArtifact(artifact);
     } else {
-      handleAddArtifact();
-      handleModifyArtifact(artifact);
+      handleAddArtifact(artifact);
     }
     setIsArtifactModalOpen(false);
   };

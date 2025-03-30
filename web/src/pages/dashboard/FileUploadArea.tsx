@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useMemo } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { FileText, FileUp, Eye, Download, RefreshCw, X } from 'lucide-react';
@@ -8,9 +8,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { CSVTable } from '@/components/CSVTable';
 import { type DataSource } from '@/types';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  useReactTable,
+  getCoreRowModel,
+  flexRender,
+  createColumnHelper,
+} from '@tanstack/react-table';
+import Papa from 'papaparse';
 
 interface FileUploadAreaProps {
   dataSources: DataSource[];
@@ -300,7 +306,7 @@ export function FileUploadArea({
 
       {/* 数据预览对话框 */}
       <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
-        <DialogContent className='max-w-[800px]'>
+        <DialogContent className='max-w-[90vw] w-auto sm:max-w-[85vw] md:max-w-[1200px]'>
           <DialogHeader>
             <DialogTitle>
               {previewSource ? `${previewSource.name} 数据预览` : '数据预览'}
@@ -310,17 +316,17 @@ export function FileUploadArea({
           {previewSource &&
           previewSource.executor.type === 'csv_uploader' &&
           files[previewSource.id] ? (
-            <Tabs defaultValue={previewTab} className='max-w-[800px]'>
+            <Tabs defaultValue={previewTab} className='w-full'>
               <TabsList className='grid w-full grid-cols-2'>
                 <TabsTrigger value='demo'>示例数据</TabsTrigger>
                 <TabsTrigger value='uploaded'>已上传数据</TabsTrigger>
               </TabsList>
-              <TabsContent value='demo' className='max-h-[500px] overflow-auto'>
-                <CSVTable csvData={getSourceDemoData(previewSource)} />
+              <TabsContent value='demo' className='max-h-[70vh] overflow-auto'>
+                <CSVPreview csvData={getSourceDemoData(previewSource)} />
               </TabsContent>
               <TabsContent
                 value='uploaded'
-                className='max-h-[500px] overflow-auto'
+                className='max-h-[70vh] overflow-auto'
               >
                 <UploadedFilePreview
                   sourceId={previewSource.id}
@@ -329,9 +335,9 @@ export function FileUploadArea({
               </TabsContent>
             </Tabs>
           ) : (
-            <div className='max-h-[500px] overflow-auto'>
+            <div className='max-h-[70vh] overflow-auto w-full'>
               {previewSource && (
-                <CSVTable csvData={getSourceDemoData(previewSource)} />
+                <CSVPreview csvData={getSourceDemoData(previewSource)} />
               )}
             </div>
           )}
@@ -341,7 +347,90 @@ export function FileUploadArea({
   );
 }
 
-// 用于预览上传的文件内容的组件
+// 新增的 CSV 预览组件，直接使用 TanStack Table
+function CSVPreview({ csvData }: { csvData: string }) {
+  // 解析 CSV 数据
+  const parsedData = useMemo(() => {
+    try {
+      const results = Papa.parse(csvData, { header: true });
+      return results.data.slice(0, 100); // 最多显示 100 行
+    } catch (error) {
+      console.error('CSV 解析错误:', error);
+      return [];
+    }
+  }, [csvData]);
+
+  // 如果没有数据，显示提示
+  if (!parsedData.length) {
+    return <div className='py-4 text-center'>没有可显示的数据</div>;
+  }
+
+  // 动态创建列
+  const columns = useMemo(() => {
+    if (parsedData.length === 0) return [];
+
+    const firstRow = parsedData[0] as Record<string, unknown>;
+    const columnHelper = createColumnHelper<Record<string, unknown>>();
+
+    return Object.keys(firstRow).map((key) =>
+      columnHelper.accessor(key, {
+        header: key,
+        cell: (info) => info.getValue() as React.ReactNode,
+      })
+    );
+  }, [parsedData]);
+
+  // 创建表格实例
+  const table = useReactTable({
+    data: parsedData as Record<string, unknown>[],
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+  });
+
+  return (
+    <div className='relative w-full overflow-x-auto'>
+      <table className='border-collapse w-full'>
+        <thead className='bg-muted sticky top-0'>
+          {table.getHeaderGroups().map((headerGroup) => (
+            <tr key={headerGroup.id}>
+              {headerGroup.headers.map((header) => (
+                <th
+                  key={header.id}
+                  className='border px-4 py-2 text-left whitespace-nowrap'
+                  style={{ minWidth: '120px' }}
+                >
+                  {header.isPlaceholder
+                    ? null
+                    : flexRender(
+                        header.column.columnDef.header,
+                        header.getContext()
+                      )}
+                </th>
+              ))}
+            </tr>
+          ))}
+        </thead>
+        <tbody>
+          {table.getRowModel().rows.map((row) => (
+            <tr key={row.id}>
+              {row.getVisibleCells().map((cell) => (
+                <td
+                  key={cell.id}
+                  className='border px-4 py-2 whitespace-nowrap overflow-hidden text-ellipsis'
+                  style={{ maxWidth: '200px' }}
+                >
+                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// 修改 UploadedFilePreview 组件使用新的 CSVPreview 组件
 function UploadedFilePreview({
   sourceId,
   files,
@@ -377,7 +466,7 @@ function UploadedFilePreview({
     return <div className='py-4 text-center'>无法读取文件内容</div>;
   }
 
-  return <CSVTable csvData={fileContent} />;
+  return <CSVPreview csvData={fileContent} />;
 }
 
 // 从文件读取内容

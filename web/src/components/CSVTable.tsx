@@ -12,7 +12,7 @@ export const CSVTable = React.memo(({ csvData }: { csvData: string }) => {
   // 使用 useMemo 缓存列定义
   const columns = useMemo(() => {
     if (parsedData.length === 0) return [];
-    return Object.keys(parsedData[0]).map((key) => ({
+    return Object.keys(parsedData[0] as Record<string, unknown>).map((key) => ({
       id: key,
       header: key,
       accessorKey: key,
@@ -27,34 +27,47 @@ export const CSVTable = React.memo(({ csvData }: { csvData: string }) => {
   });
 
   return (
-    <div className='overflow-x-auto overflow-y-auto'>
-      <table className='min-w-full border-collapse'>
-        <thead>
-          {table.getHeaderGroups().map((headerGroup) => (
-            <tr key={headerGroup.id}>
-              {headerGroup.headers.map((column) => (
-                <th
-                  key={column.id}
-                  className='border border-black p-2 text-left'
-                >
-                  {String(column.column.columnDef.header)}
-                </th>
-              ))}
-            </tr>
-          ))}
-        </thead>
-        <tbody>
-          {table.getRowModel().rows.map((row) => (
-            <tr key={row.id}>
-              {row.getVisibleCells().map((cell) => (
-                <td key={cell.id} className='border border-black p-2'>
-                  {String(cell.getValue() ?? '')}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className='max-w-full relative'>
+      <div
+        className='overflow-x-auto overflow-y-auto max-w-full'
+        style={{ maxHeight: '400px' }}
+      >
+        <table
+          className='border-collapse'
+          style={{ tableLayout: 'auto', minWidth: '100%' }}
+        >
+          <thead className='sticky top-0 bg-white'>
+            {table.getHeaderGroups().map((headerGroup) => (
+              <tr key={headerGroup.id}>
+                {headerGroup.headers.map((column) => (
+                  <th
+                    key={column.id}
+                    className='border border-black p-2 text-left whitespace-nowrap'
+                    style={{ minWidth: '120px' }}
+                  >
+                    {String(column.column.columnDef.header)}
+                  </th>
+                ))}
+              </tr>
+            ))}
+          </thead>
+          <tbody>
+            {table.getRowModel().rows.map((row) => (
+              <tr key={row.id}>
+                {row.getVisibleCells().map((cell) => (
+                  <td
+                    key={cell.id}
+                    className='border border-black p-2 whitespace-nowrap'
+                    style={{ minWidth: '120px' }}
+                  >
+                    {String(cell.getValue() ?? '')}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 });

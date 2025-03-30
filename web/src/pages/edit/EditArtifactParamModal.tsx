@@ -385,7 +385,10 @@ const EditArtifactParamModal = ({
                   </Label>
                   <Select
                     value={plainDefault}
-                    onValueChange={setPlainDefault}
+                    onValueChange={(value) => {
+                      console.log('plainDefault', plainDefault);
+                      setPlainDefault(plainDefault === value ? '' : value);
+                    }}
                     disabled={plainChoices.length === 0}
                   >
                     <SelectTrigger className='col-span-3'>

@@ -298,65 +298,42 @@ export function ParameterQueryArea({
     <Card className='w-full'>
       <CardContent className='pt-4 pb-2'>
         <form onSubmit={handleSubmit}>
-          <div className='flex justify-between items-center mb-2'>
-            {!parametersExpanded && (
-              <div className='flex-1'>
-                <Button type='submit' className='w-full'>
-                  查询
-                </Button>
-              </div>
-            )}
-            {parametersExpanded && (
-              <Tabs
-                defaultValue='parameters'
-                className='w-full'
-                value={activeTab}
-                onValueChange={setActiveTab}
-              >
-                <div className='flex justify-between items-center'>
-                  <TabsList>
+          {parametersExpanded ? (
+            <Tabs
+              defaultValue='parameters'
+              value={activeTab}
+              onValueChange={setActiveTab}
+              className='w-full'
+            >
+              <div className='flex justify-between items-center mb-2'>
+                <TabsList>
+                  <TabsTrigger
+                    value='parameters'
+                    className='flex items-center gap-1'
+                  >
+                    <Search size={14} />
+                    <span>查询参数</span>
+                  </TabsTrigger>
+                  {requireFileUpload && (
                     <TabsTrigger
-                      value='parameters'
+                      value='upload'
                       className='flex items-center gap-1'
                     >
-                      <Search size={14} />
-                      <span>查询参数</span>
+                      <Upload size={14} />
+                      <span>文件上传</span>
                     </TabsTrigger>
-                    {requireFileUpload && (
-                      <TabsTrigger
-                        value='upload'
-                        className='flex items-center gap-1'
-                      >
-                        <Upload size={14} />
-                        <span>文件上传</span>
-                      </TabsTrigger>
-                    )}
-                  </TabsList>
-                  <Button
-                    variant='ghost'
-                    size='sm'
-                    onClick={toggleParametersExpanded}
-                    className='h-8 px-2'
-                  >
-                    <ChevronUp size={16} className='text-muted-foreground' />
-                  </Button>
-                </div>
-              </Tabs>
-            )}
-            {!parametersExpanded && (
-              <Button
-                variant='ghost'
-                size='sm'
-                onClick={toggleParametersExpanded}
-                className='h-8 px-2 ml-2'
-              >
-                <ChevronDown size={16} className='text-muted-foreground' />
-              </Button>
-            )}
-          </div>
+                  )}
+                </TabsList>
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  onClick={toggleParametersExpanded}
+                  className='h-8 px-2'
+                >
+                  <ChevronUp size={16} className='text-muted-foreground' />
+                </Button>
+              </div>
 
-          {parametersExpanded && (
-            <>
               <TabsContent value='parameters' className='mt-2 space-y-4'>
                 <div className='grid grid-cols-2 md:grid-cols-4 gap-3'>
                   {parameters.map((param) => (
@@ -436,7 +413,21 @@ export function ParameterQueryArea({
                   </div>
                 </TabsContent>
               )}
-            </>
+            </Tabs>
+          ) : (
+            <div className='flex justify-between items-center'>
+              <Button type='submit' className='w-full'>
+                查询
+              </Button>
+              <Button
+                variant='ghost'
+                size='sm'
+                onClick={toggleParametersExpanded}
+                className='h-8 px-2 ml-2'
+              >
+                <ChevronDown size={16} className='text-muted-foreground' />
+              </Button>
+            </div>
           )}
         </form>
       </CardContent>

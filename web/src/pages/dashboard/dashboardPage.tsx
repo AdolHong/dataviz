@@ -82,6 +82,149 @@ const exampleParameters: Parameter[] = [
   },
 ];
 
+const demoReportResponse: ReportResponse = {
+  id: 'report-1',
+  title: '销售报表',
+  description: '这是一个销售数据的示例报表',
+  dataSources: [
+    {
+      id: 'source-1',
+      name: '主数据',
+      alias: 'df_sales',
+      executor: {
+        type: 'sql',
+        engine: 'default',
+        code: 'select 1',
+        updateMode: { type: 'manual' },
+      },
+    },
+    {
+      id: 'source-2',
+      name: '外部数据',
+      alias: 'df_external',
+      executor: {
+        type: 'python',
+        engine: 'default',
+        code: 'result = df.groupby("category").sum()',
+        updateMode: { type: 'manual' },
+      },
+    },
+    {
+      id: 'source-3',
+      name: 'csv上传',
+      alias: 'df_csv',
+      executor: { type: 'csv_uploader', demoData: 'a,b,c\n1,2,3\n4,5,6' },
+    },
+  ],
+  parameters: [
+    {
+      id: 'p1',
+      name: 'start_date',
+      alias: '开始日期', // 可选字段
+      description: '选择开始日期',
+      config: {
+        type: 'single_select',
+        choices: ['2023-01-01', '2023-01-02', '2023-01-03'],
+        default: '2023-01-01',
+      },
+    },
+    {
+      id: 'p2',
+      name: 'end_date',
+      alias: '结束日期', // 可选字段
+      description: '选择结束日期',
+      config: {
+        type: 'single_select',
+        choices: ['2023-01-04', '2023-01-05', '2023-01-06'],
+        default: '2023-01-04',
+      },
+    },
+  ],
+  artifacts: [
+    {
+      id: 'artifact-1',
+      title: '销售趋势',
+      code: 'line',
+      dependencies: ['df_sales'],
+      executor_engine: 'default',
+    },
+    {
+      id: 'artifact-2',
+      title: '销售占比',
+      code: 'pie',
+      dependencies: ['df_external'],
+      executor_engine: 'default',
+    },
+    {
+      id: 'artifact-3',
+      title: '销售明细',
+      code: 'pie',
+      dependencies: ['df_external'],
+      executor_engine: 'default',
+    },
+    {
+      id: 'artifact-4',
+      title: '新增图表1',
+      code: 'pie',
+      dependencies: ['df_sales', 'df_external'],
+      executor_engine: 'default',
+    },
+    {
+      id: 'artifact-5',
+      title: '新增图表2',
+      code: 'pie',
+      dependencies: ['df_sales'],
+      executor_engine: 'default',
+    },
+  ],
+  layout: {
+    columns: 3,
+    rows: 2,
+    items: [
+      {
+        id: 'artifact-1',
+        title: '销售趋势',
+        width: 1,
+        height: 1,
+        x: 0,
+        y: 0,
+      },
+      {
+        id: 'artifact-2',
+        title: '销售占比',
+        width: 1,
+        height: 1,
+        x: 1,
+        y: 0,
+      },
+      {
+        id: 'artifact-3',
+        title: '销售明细',
+        width: 1,
+        height: 1,
+        x: 2,
+        y: 0,
+      },
+      {
+        id: 'artifact-4',
+        title: '新增图表1',
+        width: 1,
+        height: 1,
+        x: 0,
+        y: 1,
+      },
+      {
+        id: 'artifact-5',
+        title: '新增图表2',
+        width: 1,
+        height: 1,
+        x: 1,
+        y: 1,
+      },
+    ],
+  },
+};
+
 export function DashboardPage() {
   const [fileSystemItems, setFileSystemItems] =
     useState<FileSystemItem[]>(demoFileSystemData);

@@ -72,7 +72,7 @@ const demoReportResponse: ReportResponse = {
       config: {
         type: 'single_select',
         choices: ['2023-01-01', '2023-01-02', '2023-01-03'],
-        default: '2023-01-01',
+        default: '2023-01-02',
       },
     },
     {
@@ -105,7 +105,7 @@ const demoReportResponse: ReportResponse = {
       config: {
         type: 'multi_select',
         choices: ['销售部', '技术部', '市场部', '人力资源部', '财务部'],
-        default: [],
+        default: ['销售部', '技术部'],
         sep: ',',
         wrapper: '',
       },
@@ -126,7 +126,7 @@ const demoReportResponse: ReportResponse = {
       description: '输入多个标签进行筛选',
       config: {
         type: 'multi_input',
-        default: [''],
+        default: ['tag1', 'tag2', 'tag3'],
         sep: ',',
         wrapper: '',
       },
@@ -356,13 +356,16 @@ export function DashboardPage() {
               // 显示默认的示例报表
               <>
                 {/* 标题和描述 */}
-                <div className='border-b pb-4'>
-                  <h1 className='text-2xl font-semibold'>
-                    {demoReportResponse.title}
-                  </h1>
-                  <p className='text-muted-foreground mt-1'>
-                    {demoReportResponse.description}
-                  </p>
+
+                <div>
+                  <div className='space-y-2'>
+                    <h1 className='text-2xl font-semibold'>
+                      {demoReportResponse.title}
+                    </h1>
+                    <p className='text-muted-foreground'>
+                      {demoReportResponse.description}
+                    </p>
+                  </div>
                 </div>
 
                 {/* 参数区域 */}

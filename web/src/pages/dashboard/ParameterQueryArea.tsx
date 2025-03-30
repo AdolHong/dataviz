@@ -351,7 +351,7 @@ export function ParameterQueryArea({
             {parametersExpanded ? (
               <>
                 <TabsContent value='parameters' className='mt-2 space-y-4'>
-                  <div className='grid grid-cols-2 md:grid-cols-4 gap-3'>
+                  <div className='grid grid-cols-2 md:grid-cols-4 gap-x-10 gap-y-3'>
                     {parameters.map((param) => (
                       <div key={param.id} className='col-span-1'>
                         {renderParameterInput(param)}

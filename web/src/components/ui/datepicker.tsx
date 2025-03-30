@@ -33,8 +33,9 @@ export function DatePicker({ date, setDate }: DatePickerProps) {
 
   const years = React.useMemo(() => {
     const currentYear = new Date().getFullYear();
+    // 年份的开始结束
     return Array.from(
-      { length: currentYear - 1900 + 1 },
+      { length: currentYear - 2000 + 1 },
       (_, i) => currentYear - i
     );
   }, []);
@@ -89,7 +90,7 @@ export function DatePicker({ date, setDate }: DatePickerProps) {
           )}
         >
           <CalendarIcon className='mr-2 h-4 w-4' />
-          {date ? format(date, 'PPP') : <span>Pick a date</span>}
+          {date ? format(date, 'yyyy-MM-dd') : <span>Pick a date</span>}
         </Button>
       </PopoverTrigger>
       <PopoverContent className='w-auto p-0' align='start'>

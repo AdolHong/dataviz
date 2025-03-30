@@ -16,22 +16,12 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { Calendar } from '@/components/ui/calendar';
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import {
-  Calendar as CalendarIcon,
-  X,
-  ChevronUp,
-  ChevronDown,
-  Upload,
-  Search,
-  Check,
-} from 'lucide-react';
-import { format } from 'date-fns';
+import { X, ChevronUp, ChevronDown, Upload, Search, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { type Parameter } from '@/types/models/parameter';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -51,6 +41,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { DatePicker } from '@/components/ui/datepicker';
 
 interface ParameterQueryAreaProps {
   parameters: Parameter[];
@@ -251,35 +242,10 @@ export function ParameterQueryArea({
 
         case 'date_picker':
           return (
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant='outline'
-                  className={cn(
-                    'w-full justify-start text-left font-normal',
-                    !values[param.id] && 'text-muted-foreground'
-                  )}
-                >
-                  <CalendarIcon className='mr-2 h-4 w-4' />
-                  {values[param.id]
-                    ? format(
-                        values[param.id],
-                        param.config.dateFormat === 'YYYY-MM-DD'
-                          ? 'yyyy-MM-dd'
-                          : 'yyyyMMdd'
-                      )
-                    : '选择日期'}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className='w-auto p-0'>
-                <Calendar
-                  mode='single'
-                  selected={values[param.id]}
-                  onSelect={(date) => handleValueChange(param.id, date)}
-                  initialFocus
-                />
-              </PopoverContent>
-            </Popover>
+            <DatePicker
+              date={values[param.id] ? new Date(values[param.id]) : undefined}
+              setDate={(date) => handleValueChange(param.id, date)}
+            />
           );
 
         case 'multi_input':

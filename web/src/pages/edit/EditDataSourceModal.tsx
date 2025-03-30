@@ -299,7 +299,9 @@ export const EditDataSourceModal = ({
                     }
                   }}
                 >
-                  {executorType === 'csv_data' ? ' CSV 数据' : ' CSV 示例数据 '}
+                  {executorType === 'csv_data'
+                    ? ' CSV 数据'
+                    : ' 示例 CSV 数据 '}
                 </button>
               </div>
             )}
@@ -409,24 +411,48 @@ export const EditDataSourceModal = ({
           {showCSVUploader && (
             <div>
               <label className='block mb-2'>
-                {executorType === 'csv_data' ? 'CSV 数据' : '示例 CSV 数据'}{' '}
-                (top5)
+                {executorType === 'csv_data' ? 'CSV 数据' : '示例 CSV 数据'}
               </label>
 
               <div className='px-2'>
-                <CSVTable
-                  csvData={`id,name,value1,value2,value3,value4,value5,value6,value7,value8,value9,value10,value11,value12,value13,value14,value15,value16,value17,value18,value19,value20
-1,测试1,10,20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180
-2,测试2,15,25,35,45,55,65,75,85,95,105,115,125,135,145,155,165,175,185
-3,测试3,20,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190
-4,测试4,25,35,45,55,65,75,85,95,105,115,125,135,145,155,165,175,185,195
-5,测试5,30,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200
-6,测试6,35,45,55,65,75,85,95,105,115,125,135,145,155,165,175,185,195,205
-7,测试7,40,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200,210
-8,测试8,45,55,65,75,85,95,105,115,125,135,145,155,165,175,185,195,205,215
-9,测试9,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200,210,220
-10,测试10,55,65,75,85,95,105,115,125,135,145,155,165,175,185,195,205,215,225`}
-                />
+                {(dataSource.executor?.type === 'csv_data' &&
+                  dataSource.executor.data.length === 0) ||
+                (dataSource.executor?.type === 'csv_uploader' &&
+                  dataSource.executor.demoData.length === 0) ? (
+                  <div className='border-2 border-dashed border-gray-300 rounded-lg p-6 text-center'>
+                    <div className='flex flex-col items-center justify-center space-y-4'>
+                      <svg
+                        xmlns='http://www.w3.org/2000/svg'
+                        className='h-12 w-12 text-gray-400'
+                        fill='none'
+                        viewBox='0 0 24 24'
+                        stroke='currentColor'
+                      >
+                        <path
+                          strokeLinecap='round'
+                          strokeLinejoin='round'
+                          strokeWidth={2}
+                          d='M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z'
+                        />
+                      </svg>
+                      <p className='text-gray-600'>
+                        {executorType === 'csv_data'
+                          ? '请上传 CSV 文件'
+                          : '暂无示例 CSV 数据'}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className='flex justify-center items-center'>
+                    <CSVTable
+                      csvData={
+                        dataSource.executor.type === 'csv_data'
+                          ? dataSource.executor.data
+                          : dataSource.executor.demoData
+                      }
+                    />
+                  </div>
+                )}
               </div>
             </div>
           )}

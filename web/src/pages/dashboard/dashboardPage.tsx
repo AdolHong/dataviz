@@ -10,11 +10,13 @@ import { Input } from '@/components/ui/input';
 import { useState, useEffect } from 'react';
 import { useStore } from '@/lib/store';
 import { FileExplorer } from '@/pages/dashboard/FileExplorer';
+import { LayoutGrid } from '@/pages/dashboard/LayoutGrid';
 import { demoFileSystemData } from '@/data/demoFileSystem';
 import type { FileSystemItem } from '@/types/models/fileSystem';
 import type { ReportResponse } from '@/types';
 import { reportApi } from '@/api/report';
-import type { Layout, LayoutItem } from '@/types/models/layout';
+import type { Layout } from '@/types/models/layout';
+import { toast } from 'sonner';
 
 export function DashboardPage() {
   const [fileSystemItems, setFileSystemItems] =
@@ -25,6 +27,8 @@ export function DashboardPage() {
   );
   const [loading, setLoading] = useState(false);
   const { dashboardId, setDashboardId } = useStore();
+
+  const [layout, setLayout] = useState<Layout | null>(null);
 
   // 当选择一个文件时，加载该文件对应的reportId的数据
   useEffect(() => {
@@ -37,10 +41,11 @@ export function DashboardPage() {
         setDashboardId(selectedItem.reportId);
         const response = await reportApi.getReportConfig(selectedItem.reportId);
         setDashboardData(response);
+        setLayout(response.layout);
       } catch (error) {
         console.error('获取报表数据失败:', error);
         // 使用一些示例数据
-        setDashboardData({
+        const demoData = {
           id: selectedItem.reportId,
           title: selectedItem.name,
           description: '这是一个示例报表描述',
@@ -114,7 +119,9 @@ export function DashboardPage() {
               },
             ],
           },
-        });
+        };
+        setDashboardData(demoData);
+        setLayout(demoData.layout);
       } finally {
         setLoading(false);
       }
@@ -137,32 +144,35 @@ export function DashboardPage() {
     }
   };
 
-  // 渲染布局网格
-  const renderLayoutGrid = (layout: Layout) => {
-    return (
-      <div
-        className='grid gap-4'
-        style={{
-          gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))`,
-        }}
-      >
-        {layout.items.map((item) => renderLayoutItem(item))}
-      </div>
-    );
+  // 处理图表项点击
+  const handleChartItemClick = (itemId: string) => {
+    console.log('点击了图表项:', itemId);
+    // 这里可以添加查看或编辑图表的逻辑
   };
 
-  // 渲染单个布局项
-  const renderLayoutItem = (item: LayoutItem) => {
-    return (
-      <Card key={item.id} className='col-span-1'>
-        <CardHeader className='pb-2'>
-          <CardTitle className='text-lg'>{item.title}</CardTitle>
-        </CardHeader>
-        <CardContent className='h-60 border-2 border-dashed border-muted-foreground/20 rounded-md flex items-center justify-center'>
-          <p className='text-muted-foreground'>{item.title} 内容</p>
-        </CardContent>
-      </Card>
-    );
+  // 布局变更处理
+  const handleLayoutChange = (newLayout: Layout) => {
+    setLayout(newLayout);
+  };
+
+  // 保存布局
+  const handleSaveLayout = () => {
+    if (!layout) return;
+
+    // 模拟保存布局的API调用
+    setTimeout(() => {
+      toast.success('布局已保存');
+      setEditMode(false);
+      // 如果有后端API，可以在这里调用
+    }, 500);
+  };
+
+  // 重置布局
+  const handleResetLayout = () => {
+    if (dashboardData?.layout) {
+      setLayout(dashboardData.layout);
+      toast.info('布局已重置');
+    }
   };
 
   return (
@@ -229,16 +239,13 @@ export function DashboardPage() {
               <div className='space-y-4'>
                 <div className='flex items-center justify-between'>
                   <h2 className='text-lg font-medium'>数据可视化</h2>
-                  <div className='flex items-center space-x-2 text-sm'>
-                    <span className='text-muted-foreground'>布局：</span>
-                    <span>
-                      {dashboardData?.layout.columns || 3} x{' '}
-                      {dashboardData?.layout.rows || 2}
-                    </span>
-                  </div>
                 </div>
-                {dashboardData?.layout &&
-                  renderLayoutGrid(dashboardData.layout)}
+                {layout && layout.items.length > 0 && (
+                  <LayoutGrid
+                    layout={layout}
+                    onItemClick={handleChartItemClick}
+                  />
+                )}
               </div>
             </>
           )}

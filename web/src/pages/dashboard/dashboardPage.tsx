@@ -1,12 +1,4 @@
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { useState, useEffect } from 'react';
 import { useStore } from '@/lib/store';
 import { FileExplorer } from '@/pages/dashboard/FileExplorer';
@@ -18,6 +10,77 @@ import { reportApi } from '@/api/report';
 import type { Layout } from '@/types/models/layout';
 import { toast } from 'sonner';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ParameterQueryArea } from '@/pages/dashboard/ParameterQueryArea';
+import { type Parameter } from '@/types/models/parameter';
+
+// 示例参数，实际使用时可能从API获取
+const exampleParameters: Parameter[] = [
+  {
+    id: 'param1',
+    name: 'period',
+    alias: '周期',
+    description: '选择报表的统计周期',
+    config: {
+      type: 'single_select',
+      choices: ['日', '周', '月', '季', '年'],
+      default: '月',
+    },
+  },
+  {
+    id: 'param2',
+    name: 'startDate',
+    alias: '开始日期',
+    config: {
+      type: 'date_picker',
+      dateFormat: 'yyyy-MM-dd',
+      default: '',
+    },
+  },
+  {
+    id: 'param3',
+    name: 'endDate',
+    alias: '结束日期',
+    config: {
+      type: 'date_picker',
+      dateFormat: 'yyyy-MM-dd',
+      default: '',
+    },
+  },
+  {
+    id: 'param4',
+    name: 'department',
+    alias: '部门',
+    description: '选择需要查看的部门',
+    config: {
+      type: 'multi_select',
+      choices: ['销售部', '技术部', '市场部', '人力资源部', '财务部'],
+      default: [],
+      sep: ',',
+      wrapper: '',
+    },
+  },
+  {
+    id: 'param5',
+    name: 'keyword',
+    alias: '关键词',
+    config: {
+      type: 'single_input',
+      default: '',
+    },
+  },
+  {
+    id: 'param6',
+    name: 'tags',
+    alias: '标签',
+    description: '输入多个标签进行筛选',
+    config: {
+      type: 'multi_input',
+      default: [''],
+      sep: ',',
+      wrapper: '',
+    },
+  },
+];
 
 export function DashboardPage() {
   const [fileSystemItems, setFileSystemItems] =
@@ -34,6 +97,11 @@ export function DashboardPage() {
   // 添加导航栏显示控制状态
   const [navbarVisible, setNavbarVisible] = useState(true);
   const [navbarWidth, setNavbarWidth] = useState(256); // 默认宽度为64 (16rem)
+
+  const [requireFileUpload, setRequireFileUpload] = useState(true);
+  const [queryResults, setQueryResults] = useState<Record<string, any> | null>(
+    null
+  );
 
   // 切换导航栏显示状态
   const toggleNavbar = () => {
@@ -195,103 +263,118 @@ export function DashboardPage() {
     }
   };
 
+  const handleQuerySubmit = (values: Record<string, any>) => {
+    console.log('查询参数:', values);
+    setQueryResults(values);
+    // 这里可以添加API调用逻辑
+  };
+
   return (
-    <div className='flex h-screen relative'>
-      {/* 左侧导航栏 */}
-      <div
-        className='border-r bg-background overflow-auto transition-all duration-300 ease-in-out'
-        style={{
-          width: navbarVisible ? `${navbarWidth}px` : '0px',
-          opacity: navbarVisible ? 1 : 0,
-          visibility: navbarVisible ? 'visible' : 'hidden',
-        }}
-      >
-        <FileExplorer
-          items={fileSystemItems}
-          onItemsChange={handleFileSystemChange}
-          onSelectItem={handleSelectItem}
-        />
+    <div className='flex flex-col h-screen relative'>
+      {/* 顶部Header */}
+      <div className='border-b bg-background flex items-center h-14 px-4'>
+        <div className='flex items-center space-x-2'>
+          <svg
+            className='h-6 w-6 text-blue-500'
+            viewBox='0 0 24 24'
+            fill='none'
+            stroke='currentColor'
+            strokeWidth='2'
+            strokeLinecap='round'
+            strokeLinejoin='round'
+          >
+            <polyline points='22 12 18 12 15 21 9 3 6 12 2 12'></polyline>
+          </svg>
+          <span className='text-xl font-semibold'>数据分析平台</span>
+        </div>
       </div>
 
-      {/* 导航栏切换按钮 */}
-      <div className='absolute top-100 left-0 z-10'>
-        <Button
-          variant='ghost'
-          size='icon'
-          className={`rounded-full ml-${navbarVisible ? navbarWidth / 4 : '0'} bg-secondary shadow-md`}
-          onClick={toggleNavbar}
+      <div className='flex flex-1 overflow-hidden'>
+        {/* 左侧导航栏 */}
+        <div
+          className='border-r bg-background overflow-auto transition-all duration-300 ease-in-out'
+          style={{
+            width: navbarVisible ? `${navbarWidth}px` : '0px',
+            opacity: navbarVisible ? 1 : 0,
+            visibility: navbarVisible ? 'visible' : 'hidden',
+          }}
         >
-          {navbarVisible ? (
-            <ChevronLeft size={16} />
-          ) : (
-            <ChevronRight size={16} />
-          )}
-        </Button>
-      </div>
+          <FileExplorer
+            items={fileSystemItems}
+            onItemsChange={handleFileSystemChange}
+            onSelectItem={handleSelectItem}
+          />
+        </div>
 
-      {/* 右侧内容区 */}
-      <div className='flex-1 overflow-auto'>
-        <div className='container mx-auto py-6 px-8 space-y-6'>
-          {loading ? (
-            <div className='flex items-center justify-center h-64'>
-              <p className='text-muted-foreground'>加载中...</p>
-            </div>
-          ) : !selectedItem || selectedItem.type !== 'file' ? (
-            <div className='flex flex-col items-center justify-center h-64 text-center'>
-              <p className='text-muted-foreground mb-2'>
-                请从左侧选择一个报表文件
-              </p>
-              <p className='text-xs text-muted-foreground/70'>
-                选择后将展示报表内容与配置
-              </p>
-            </div>
-          ) : (
-            <>
-              {/* 标题和描述 */}
-              <div className='border-b pb-4'>
-                <h1 className='text-2xl font-semibold'>
-                  {dashboardData?.title || selectedItem.name}
-                </h1>
-                <p className='text-muted-foreground mt-1'>
-                  {dashboardData?.description || '无描述'}
+        {/* 导航栏切换按钮 */}
+        <div className='absolute top-100 left-0 z-10'>
+          <Button
+            variant='ghost'
+            size='icon'
+            className={`rounded-full ml-${navbarVisible ? navbarWidth / 4 : '0'} bg-secondary shadow-md`}
+            onClick={toggleNavbar}
+          >
+            {navbarVisible ? (
+              <ChevronLeft size={16} />
+            ) : (
+              <ChevronRight size={16} />
+            )}
+          </Button>
+        </div>
+
+        {/* 右侧内容区 */}
+        <div className='flex-1 overflow-auto'>
+          <div className='container mx-auto py-6 px-8 space-y-6'>
+            {loading ? (
+              <div className='flex items-center justify-center h-64'>
+                <p className='text-muted-foreground'>加载中...</p>
+              </div>
+            ) : !selectedItem || selectedItem.type !== 'file' ? (
+              <div className='flex flex-col items-center justify-center h-64 text-center'>
+                <p className='text-muted-foreground mb-2'>
+                  请从左侧选择一个报表文件
+                </p>
+                <p className='text-xs text-muted-foreground/70'>
+                  选择后将展示报表内容与配置
                 </p>
               </div>
-
-              {/* 参数区域 */}
-              <Card className='shadow-sm'>
-                <CardHeader className='pb-2'>
-                  <CardTitle className='text-base'>查询参数</CardTitle>
-                  <CardDescription>设置报表过滤条件</CardDescription>
-                </CardHeader>
-                <CardContent className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4'>
-                  {dashboardData?.parameters.map((param) => (
-                    <div key={param.id} className='space-y-1.5'>
-                      <label className='text-sm font-medium'>
-                        {param.alias || param.name}
-                      </label>
-                      <Input placeholder={param.config.default.toString()} />
-                    </div>
-                  ))}
-                </CardContent>
-                <div className='flex justify-end px-6 pb-4'>
-                  <Button>查询</Button>
+            ) : (
+              <>
+                {/* 标题和描述 */}
+                <div className='border-b pb-4'>
+                  <h1 className='text-2xl font-semibold'>
+                    {dashboardData?.title || selectedItem.name}
+                  </h1>
+                  <p className='text-muted-foreground mt-1'>
+                    {dashboardData?.description || '无描述'}
+                  </p>
                 </div>
-              </Card>
 
-              {/* 展示区域 */}
-              <div className='space-y-4'>
-                <div className='flex items-center justify-between'>
-                  <h2 className='text-lg font-medium'>数据可视化</h2>
-                </div>
-                {layout && layout.items.length > 0 && (
-                  <LayoutGrid
-                    layout={layout}
-                    onItemClick={handleChartItemClick}
+                {/* 参数区域 */}
+                <div className='space-y-2'>
+                  <h2 className='text-lg font-semibold'>查询参数</h2>
+                  <ParameterQueryArea
+                    parameters={exampleParameters}
+                    onSubmit={handleQuerySubmit}
+                    requireFileUpload={requireFileUpload}
                   />
-                )}
-              </div>
-            </>
-          )}
+                </div>
+
+                {/* 展示区域 */}
+                <div className='space-y-4'>
+                  <div className='flex items-center justify-between'>
+                    <h2 className='text-lg font-medium'>数据可视化</h2>
+                  </div>
+                  {layout && layout.items.length > 0 && (
+                    <LayoutGrid
+                      layout={layout}
+                      onItemClick={handleChartItemClick}
+                    />
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>

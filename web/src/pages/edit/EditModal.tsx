@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
-import { Filter, Database, BarChart2 } from 'lucide-react';
+import { Filter, Database, BarChart2, Info } from 'lucide-react';
 import { toast } from 'sonner';
 
 import type {
@@ -23,6 +23,7 @@ import type {
 import TabDataSource from './TabDataSource';
 import TabFilter from './TabFilter';
 import TabArtifact from './TabArtifact';
+import TabBasicInfo from './TabBasicInfo';
 
 import {
   type AliasRelianceMap,
@@ -193,7 +194,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
   );
   const [artifacts, setArtifacts] = useState<Artifact[]>(demoReport.artifacts);
   const [layout, setLayout] = useState<Layout>(demoReport.layout);
-  const [activeTab, setActiveTab] = useState('filters');
+  const [activeTab, setActiveTab] = useState('info');
 
   // 创建一个对象来存储 alias 和对应的 artifact.id 列表
   const [aliasRelianceMap, setAliasRelianceMap] = useState<AliasRelianceMap>(
@@ -206,6 +207,10 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
     null
   );
   const [deleteMessage, setDeleteMessage] = useState<string>('');
+
+  // 添加新的状态变量
+  const [title, setTitle] = useState(demoReport.title);
+  const [description, setDescription] = useState(demoReport.description);
 
   // todo: 发起api， 保存报表
   useEffect(() => {
@@ -389,6 +394,12 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
     setParameters(parameters.filter((p) => p.id !== parameter.id));
   };
 
+  // 处理更新基本信息
+  const handleUpdateBasicInfo = (newTitle: string, newDescription: string) => {
+    setTitle(newTitle);
+    setDescription(newDescription);
+  };
+
   return (
     <>
       <Dialog open={open} onOpenChange={onClose}>
@@ -402,7 +413,12 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
             onValueChange={setActiveTab}
             className='flex-1 flex flex-col overflow-hidden'
           >
-            <TabsList className='w-full grid grid-cols-3 sticky top-0 z-10'>
+            <TabsList className='w-full grid grid-cols-4 sticky top-0 z-10'>
+              <TabsTrigger value='info' className='flex items-center gap-2'>
+                <Info size={24} />
+                <span>基本信息</span>
+              </TabsTrigger>
+
               <TabsTrigger value='filters' className='flex items-center gap-2'>
                 <Filter size={24} />
                 <span>筛选条件</span>
@@ -423,6 +439,14 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
             </TabsList>
 
             <div className='flex-1 overflow-y-auto'>
+              {activeTab === 'info' && (
+                <TabBasicInfo
+                  title={title}
+                  description={description}
+                  onUpdate={handleUpdateBasicInfo}
+                />
+              )}
+
               <TabDataSource
                 dataSources={dataSources}
                 setDataSources={setDataSources}

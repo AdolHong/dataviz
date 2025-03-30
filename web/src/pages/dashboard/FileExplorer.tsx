@@ -8,8 +8,6 @@ import {
   Plus,
   Pencil,
   Trash,
-  Copy,
-  Move,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -365,24 +363,6 @@ export function FileExplorer({
     <div className='h-full flex flex-col'>
       <div className='flex items-center justify-between mb-4 px-1'>
         <h2 className='text-lg font-medium'>文件浏览器</h2>
-        <div className='flex space-x-1'>
-          <Button
-            variant='ghost'
-            size='icon'
-            title='新建文件夹'
-            onClick={() => openNewItemDialog(null, FileSystemItemType.FOLDER)}
-          >
-            <Folder size={16} className='text-blue-500 dark:text-blue-400' />
-          </Button>
-          <Button
-            variant='ghost'
-            size='icon'
-            title='新建文件'
-            onClick={() => openNewItemDialog(null, FileSystemItemType.FILE)}
-          >
-            <File size={16} />
-          </Button>
-        </div>
       </div>
 
       <div className='space-y-0.5 overflow-auto flex-1 pr-1'>
@@ -469,9 +449,7 @@ export function FileExplorer({
             >
               取消
             </Button>
-            <Button variant='destructive' onClick={handleDeleteItem}>
-              删除
-            </Button>
+            <Button onClick={handleDeleteItem}>删除</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

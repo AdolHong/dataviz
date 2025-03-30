@@ -40,13 +40,28 @@ export function LayoutGrid({ layout, onItemClick }: LayoutGridProps) {
     return (
       <div
         key={item.id}
-        className={cn('min-h-60')}
+        className={cn('min-h-80 max-h-120')}
         style={itemStyle}
         onClick={() => onItemClick?.(item.id)}
       >
         <Card className='h-full overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300'>
-          <CardHeader className='pb-2'>
-            <CardTitle className='text-lg font-medium'>{item.title}</CardTitle>
+          <CardHeader className='h-5 flex items-center justify-between'>
+            <div>
+              <CardTitle className='text-sm font-medium'>
+                {item.title}
+              </CardTitle>
+              <CardDescription className='text-xs text-muted-foreground'>
+                {item.title}的描述信息(todo: description)
+              </CardDescription>
+            </div>
+            <div className='flex space-x-2'>
+              {[1, 2, 3].map((dot) => (
+                <span
+                  key={dot}
+                  className='w-3 h-3 rounded-full bg-green-500 shadow-sm'
+                />
+              ))}
+            </div>
           </CardHeader>
           <CardContent className='p-0 h-[calc(100%-3.5rem)]'>
             <div className='flex items-center justify-center h-full border-t p-4'>

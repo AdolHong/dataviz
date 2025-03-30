@@ -173,6 +173,7 @@ const EditArtifactModal = ({
         return;
       }
 
+      console.info('artifact', artifact);
       const savedArtifact: Artifact = {
         id: artifact?.id || id,
         title,

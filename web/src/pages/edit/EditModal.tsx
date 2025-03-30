@@ -286,10 +286,10 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
 
   // 删除图表: 修改artifacts, layouts
   const handleDeleteArtifact = (artifactId: string) => {
-    if (artifacts.length === 1) {
-      toast.error('至少需要保留一个图表');
-      return;
-    }
+    // if (artifacts.length === 1) {
+    //   toast.error('至少需要保留一个图表');
+    //   return;
+    // }
     // 删除图表
     const oldArtifact = artifacts.find(
       (artifact) => artifact.id === artifactId

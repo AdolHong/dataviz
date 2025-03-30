@@ -29,6 +29,7 @@ import {
 } from '@/types/models/dataSource';
 import { CSVTable } from '@/components/CSVTable';
 import type { EngineChoices, AliasRelianceMap } from '@/types';
+import { Download } from 'lucide-react';
 
 import AceEditor from 'react-ace';
 import 'ace-builds/src-noconflict/theme-xcode';
@@ -453,9 +454,52 @@ export const EditDataSourceModal = ({
 
           {showCSVUploader && (
             <div>
-              <label className='block mb-2'>
-                {executorType === 'csv_data' ? 'CSV 数据' : '示例 CSV 数据'}{' '}
-                {' (仅显示前5行)'}
+              <label className='block mb-2 flex items-center justify-between'>
+                <span>
+                  {executorType === 'csv_data' ? 'CSV 数据' : '示例 CSV 数据'}{' '}
+                  {' (仅显示前5行)'}
+                </span>
+                {((executorType === 'csv_data' &&
+                  dataSource.executor?.type === 'csv_data' &&
+                  dataSource.executor.data.length > 0) ||
+                  (executorType === 'csv_uploader' &&
+                    dataSource.executor?.type === 'csv_uploader' &&
+                    dataSource.executor.demoData.length > 0)) && (
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={() => {
+                      // 获取当前的CSV数据
+                      const csvData =
+                        executorType === 'csv_data'
+                          ? (dataSource.executor as CSVSourceExecutor).data
+                          : (dataSource.executor as CSVUploaderSourceExecutor)
+                              .demoData;
+
+                      // 创建下载链接
+                      const blob = new Blob([csvData], {
+                        type: 'text/csv;charset=utf-8;',
+                      });
+                      const link = document.createElement('a');
+                      const url = URL.createObjectURL(blob);
+
+                      // 生成文件名
+                      const filename = `${dataSource.name || 'data'}_${
+                        executorType === 'csv_data' ? 'dataset' : 'demo'
+                      }.csv`;
+
+                      link.setAttribute('href', url);
+                      link.setAttribute('download', filename);
+                      link.style.visibility = 'hidden';
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }}
+                  >
+                    <Download className='h-4 w-4 mr-2' />
+                    下载 CSV
+                  </Button>
+                )}
               </label>
 
               <div className='px-2'>

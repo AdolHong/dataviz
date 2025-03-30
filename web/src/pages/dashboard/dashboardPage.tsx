@@ -224,8 +224,6 @@ export function DashboardPage() {
   const [dashboardData, setDashboardData] = useState<ReportResponse | null>(
     null
   );
-  const [loading, setLoading] = useState(false);
-  const { dashboardId, setDashboardId } = useStore();
 
   const [layout, setLayout] = useState<Layout | null>(null);
 
@@ -348,15 +346,9 @@ export function DashboardPage() {
         {/* 右侧内容区 */}
         <div className='flex-1 overflow-auto'>
           <div className='container mx-auto py-6 px-8 space-y-6'>
-            {loading ? (
-              <div className='flex items-center justify-center h-64'>
-                <p className='text-muted-foreground'>加载中...</p>
-              </div>
-            ) : !selectedItem || selectedItem.type !== 'file' ? (
-              // 显示默认的示例报表
+            {selectedItem && selectedItem.type === 'file' && (
+              // 显示选中的报表
               <>
-                {/* 标题和描述 */}
-
                 <div>
                   <div className='space-y-2'>
                     <h1 className='text-2xl font-semibold'>
@@ -366,42 +358,6 @@ export function DashboardPage() {
                       {demoReportResponse.description}
                     </p>
                   </div>
-                </div>
-
-                {/* 参数区域 */}
-                <div className='space-y-2'>
-                  <ParameterQueryArea
-                    parameters={demoReportResponse.parameters}
-                    dataSources={demoReportResponse.dataSources}
-                    onSubmit={handleQuerySubmit}
-                  />
-                </div>
-
-                {/* 展示区域 */}
-                <div className='space-y-4'>
-                  <div className='flex items-center justify-between'>
-                    <h2 className='text-lg font-medium'>数据可视化</h2>
-                  </div>
-                  {demoReportResponse.layout &&
-                    demoReportResponse.layout.items.length > 0 && (
-                      <LayoutGrid
-                        layout={demoReportResponse.layout}
-                        onItemClick={handleChartItemClick}
-                      />
-                    )}
-                </div>
-              </>
-            ) : (
-              // 显示选中的报表
-              <>
-                {/* 标题和描述 */}
-                <div className='border-b pb-4'>
-                  <h1 className='text-2xl font-semibold'>
-                    {dashboardData?.title || selectedItem.name}
-                  </h1>
-                  <p className='text-muted-foreground mt-1'>
-                    {dashboardData?.description || '无描述'}
-                  </p>
                 </div>
 
                 {/* 参数区域 */}

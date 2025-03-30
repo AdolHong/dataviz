@@ -352,7 +352,6 @@ export function DashboardPage() {
 
                 {/* 参数区域 */}
                 <div className='space-y-2'>
-                  <h2 className='text-lg font-semibold'>查询参数</h2>
                   <ParameterQueryArea
                     parameters={exampleParameters}
                     onSubmit={handleQuerySubmit}

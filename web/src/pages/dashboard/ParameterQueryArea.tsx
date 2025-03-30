@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -33,7 +33,7 @@ import {
   FileUp,
   FileText,
   RefreshCw,
-  Info,
+  Eye,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -47,6 +47,13 @@ import {
   CommandItem,
 } from '@/components/ui/command';
 import { Badge } from '@/components/ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { CSVTable } from '@/components/CSVTable';
 import type { DataSource } from '@/types';
 
 interface ParameterQueryAreaProps {
@@ -64,18 +71,21 @@ export function ParameterQueryArea({
   onSubmit,
 }: ParameterQueryAreaProps) {
   const [values, setValues] = useState<Record<string, any>>({});
-  // 修改文件存储结构为字典，键为数据源ID
   const [files, setFiles] = useState<Record<string, File[]>>({});
   const [parametersExpanded, setParametersExpanded] = useState(true);
   const [activeTab, setActiveTab] = useState<string>('parameters');
+  const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
+  const [previewSource, setPreviewSource] = useState<DataSource | null>(null);
 
-  // 检查是否需要显示文件上传选项卡
+  // 检查需要文件上传的数据源
   const csvDataSources = dataSources.filter(
-    (ds) => ds.executor.type === 'csv_uploader'
+    (ds) =>
+      ds.executor.type === 'csv_uploader' || ds.executor.type === 'csv_data'
   );
   const requireFileUpload = csvDataSources.length > 0;
 
   const multiInputRef = useRef<HTMLInputElement>(null);
+  // 修复 fileInputRefs 类型问题
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const toggleParametersExpanded = () => {
@@ -115,6 +125,20 @@ export function ParameterQueryArea({
     e.preventDefault();
     onSubmit(values, files);
   };
+
+  // 显示数据预览对话框
+  const handleShowPreview = useCallback((source: DataSource) => {
+    setPreviewSource(source);
+    setPreviewDialogOpen(true);
+  }, []);
+
+  // 设置文件输入引用的回调
+  const setFileInputRef = useCallback(
+    (el: HTMLInputElement | null, sourceId: string) => {
+      fileInputRefs.current[sourceId] = el;
+    },
+    []
+  );
 
   const getParameterLabel = (param: Parameter) => {
     if (param.alias) {
@@ -330,24 +354,14 @@ export function ParameterQueryArea({
     );
   };
 
-  // 格式化CSV预览数据
-  const formatCsvPreview = (csvData: string) => {
-    if (!csvData) return '无预览数据';
-    const rows = csvData.split('\n').slice(0, 5); // 只显示前5行
-    if (rows.length === 0) return '无预览数据';
-
-    return rows.map((row, i) => (
-      <div key={i} className='grid grid-cols-4 gap-1'>
-        {row
-          .split(',')
-          .slice(0, 4)
-          .map((cell, j) => (
-            <span key={j} className={i === 0 ? 'font-medium' : ''}>
-              {cell}
-            </span>
-          ))}
-      </div>
-    ));
+  // 获取CSV数据源的预览数据
+  const getSourcePreviewData = (source: DataSource): string => {
+    if (source.executor.type === 'csv_uploader') {
+      return source.executor.demoData || '';
+    } else if (source.executor.type === 'csv_data') {
+      return source.executor.data || '';
+    }
+    return '';
   };
 
   return (
@@ -419,31 +433,19 @@ export function ParameterQueryArea({
                             </h3>
                           </div>
 
-                          <TooltipProvider delayDuration={300}>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant='ghost'
-                                  size='icon'
-                                  className='h-6 w-6'
-                                >
-                                  <Info size={14} />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent className='w-80'>
-                                <div className='space-y-2'>
-                                  <p className='font-medium text-xs'>
-                                    {source.name} 预览数据:
-                                  </p>
-                                  <div className='bg-muted p-2 rounded-sm text-xs'>
-                                    {formatCsvPreview(
-                                      source.executor.demoData || ''
-                                    )}
-                                  </div>
-                                </div>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
+                          <div className='flex space-x-1'>
+                            <Button
+                              variant='ghost'
+                              size='icon'
+                              className='h-6 w-6 hover:text-blue-500'
+                              onClick={(e) => {
+                                e.preventDefault();
+                                handleShowPreview(source);
+                              }}
+                            >
+                              <Eye size={14} />
+                            </Button>
+                          </div>
                         </div>
 
                         <div className='text-xs text-muted-foreground'>
@@ -483,7 +485,7 @@ export function ParameterQueryArea({
                             </div>
                             <div className='text-xs text-muted-foreground'>
                               {(files[source.id][0].size / 1024).toFixed(2)} KB
-                              •{files[source.id][0].type || '未知类型'}
+                              • {files[source.id][0].type || '未知类型'}
                             </div>
                           </div>
                         ) : (
@@ -494,9 +496,7 @@ export function ParameterQueryArea({
                             }
                           >
                             <Input
-                              ref={(el) =>
-                                (fileInputRefs.current[source.id] = el)
-                              }
+                              ref={(el) => setFileInputRef(el, source.id)}
                               id={`file-upload-${source.id}`}
                               type='file'
                               accept='.csv,.txt'
@@ -520,6 +520,28 @@ export function ParameterQueryArea({
                       </div>
                     ))}
                   </div>
+
+                  {Object.keys(files).length > 0 && (
+                    <div className='flex justify-between items-center mt-4'>
+                      <Button
+                        variant='outline'
+                        size='sm'
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setFiles({});
+                          Object.keys(fileInputRefs.current).forEach((key) => {
+                            const inputRef = fileInputRefs.current[key];
+                            if (inputRef) {
+                              inputRef.value = '';
+                            }
+                          });
+                        }}
+                      >
+                        清空所有
+                      </Button>
+                      <Button type='submit'>应用</Button>
+                    </div>
+                  )}
                 </TabsContent>
               )}
             </Tabs>
@@ -540,6 +562,22 @@ export function ParameterQueryArea({
           )}
         </form>
       </CardContent>
+
+      {/* 添加数据预览对话框 */}
+      <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
+        <DialogContent className='sm:max-w-[800px]'>
+          <DialogHeader>
+            <DialogTitle>
+              {previewSource ? `${previewSource.name} 数据预览` : '数据预览'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className='max-h-[500px] overflow-auto'>
+            {previewSource && (
+              <CSVTable csvData={getSourcePreviewData(previewSource)} />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

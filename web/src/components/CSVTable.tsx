@@ -27,7 +27,7 @@ export const CSVTable = React.memo(({ csvData }: { csvData: string }) => {
   });
 
   return (
-    <div className='max-w-100 overflow-x-auto overflow-y-auto max-h-70'>
+    <div className='overflow-x-auto overflow-y-auto'>
       <table className='min-w-full border-collapse'>
         <thead>
           {table.getHeaderGroups().map((headerGroup) => (

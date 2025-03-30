@@ -300,7 +300,7 @@ export function FileUploadArea({
 
       {/* 数据预览对话框 */}
       <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
-        <DialogContent className='sm:max-w-[800px]'>
+        <DialogContent className='max-w-[800px]'>
           <DialogHeader>
             <DialogTitle>
               {previewSource ? `${previewSource.name} 数据预览` : '数据预览'}
@@ -310,7 +310,7 @@ export function FileUploadArea({
           {previewSource &&
           previewSource.executor.type === 'csv_uploader' &&
           files[previewSource.id] ? (
-            <Tabs defaultValue={previewTab} className='w-full'>
+            <Tabs defaultValue={previewTab} className='max-w-[800px]'>
               <TabsList className='grid w-full grid-cols-2'>
                 <TabsTrigger value='demo'>示例数据</TabsTrigger>
                 <TabsTrigger value='uploaded'>已上传数据</TabsTrigger>

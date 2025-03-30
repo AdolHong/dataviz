@@ -6,81 +6,10 @@ import { LayoutGrid } from '@/pages/dashboard/LayoutGrid';
 import { demoFileSystemData } from '@/data/demoFileSystem';
 import type { FileSystemItem } from '@/types/models/fileSystem';
 import type { ReportResponse } from '@/types';
-import { reportApi } from '@/api/report';
 import type { Layout } from '@/types/models/layout';
 import { toast } from 'sonner';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { ParameterQueryArea } from '@/pages/dashboard/ParameterQueryArea';
-import { type Parameter } from '@/types/models/parameter';
-
-// 示例参数，实际使用时可能从API获取
-const exampleParameters: Parameter[] = [
-  {
-    id: 'param1',
-    name: 'period',
-    alias: '周期',
-    description: '选择报表的统计周期',
-    config: {
-      type: 'single_select',
-      choices: ['日', '周', '月', '季', '年'],
-      default: '月',
-    },
-  },
-  {
-    id: 'param2',
-    name: 'startDate',
-    alias: '开始日期',
-    config: {
-      type: 'date_picker',
-      dateFormat: 'yyyy-MM-dd',
-      default: '',
-    },
-  },
-  {
-    id: 'param3',
-    name: 'endDate',
-    alias: '结束日期',
-    config: {
-      type: 'date_picker',
-      dateFormat: 'yyyy-MM-dd',
-      default: '',
-    },
-  },
-  {
-    id: 'param4',
-    name: 'department',
-    alias: '部门',
-    description: '选择需要查看的部门',
-    config: {
-      type: 'multi_select',
-      choices: ['销售部', '技术部', '市场部', '人力资源部', '财务部'],
-      default: [],
-      sep: ',',
-      wrapper: '',
-    },
-  },
-  {
-    id: 'param5',
-    name: 'keyword',
-    alias: '关键词',
-    config: {
-      type: 'single_input',
-      default: '',
-    },
-  },
-  {
-    id: 'param6',
-    name: 'tags',
-    alias: '标签',
-    description: '输入多个标签进行筛选',
-    config: {
-      type: 'multi_input',
-      default: [''],
-      sep: ',',
-      wrapper: '',
-    },
-  },
-];
 
 const demoReportResponse: ReportResponse = {
   id: 'report-1',
@@ -115,6 +44,18 @@ const demoReportResponse: ReportResponse = {
       alias: 'df_csv',
       executor: { type: 'csv_uploader', demoData: 'a,b,c\n1,2,3\n4,5,6' },
     },
+    {
+      id: 'source-4',
+      name: 'csv数据',
+      alias: 'df_csv_data',
+      executor: { type: 'csv_data', data: 'a,b,c\n1,2,3\n4,5,6' },
+    },
+    {
+      id: 'source-5',
+      name: 'csv上传',
+      alias: 'df_csv2',
+      executor: { type: 'csv_uploader', demoData: 'a,b,c\n1,2,3\n4,5,6' },
+    },
   ],
   parameters: [
     {
@@ -137,6 +78,71 @@ const demoReportResponse: ReportResponse = {
         type: 'single_select',
         choices: ['2023-01-04', '2023-01-05', '2023-01-06'],
         default: '2023-01-04',
+      },
+    },
+    {
+      id: 'param1',
+      name: 'period',
+      alias: '周期',
+      description: '选择报表的统计周期',
+      config: {
+        type: 'single_select',
+        choices: ['日', '周', '月', '季', '年'],
+        default: '月',
+      },
+    },
+    {
+      id: 'param2',
+      name: 'startDate',
+      alias: '开始日期',
+      config: {
+        type: 'date_picker',
+        dateFormat: 'yyyy-MM-dd',
+        default: '',
+      },
+    },
+    {
+      id: 'param3',
+      name: 'endDate',
+      alias: '结束日期',
+      config: {
+        type: 'date_picker',
+        dateFormat: 'yyyy-MM-dd',
+        default: '',
+      },
+    },
+    {
+      id: 'param4',
+      name: 'department',
+      alias: '部门',
+      description: '选择需要查看的部门',
+      config: {
+        type: 'multi_select',
+        choices: ['销售部', '技术部', '市场部', '人力资源部', '财务部'],
+        default: [],
+        sep: ',',
+        wrapper: '',
+      },
+    },
+    {
+      id: 'param5',
+      name: 'keyword',
+      alias: '关键词',
+      config: {
+        type: 'single_input',
+        default: '',
+      },
+    },
+    {
+      id: 'param6',
+      name: 'tags',
+      alias: '标签',
+      description: '输入多个标签进行筛选',
+      config: {
+        type: 'multi_input',
+        default: [''],
+        sep: ',',
+        wrapper: '',
       },
     },
   ],
@@ -261,105 +267,14 @@ export function DashboardPage() {
     }
   }, [selectedItem]);
 
-  // 当选择一个文件时，加载该文件对应的reportId的数据
+  // 使用 demoReportResponse 作为默认选择的报表数据
   useEffect(() => {
-    if (!selectedItem || selectedItem.type !== 'file') return;
-
-    const loadReportData = async () => {
-      try {
-        setLoading(true);
-        // 使用selectedItem的reportId
-        setDashboardId(selectedItem.reportId);
-        const response = await reportApi.getReportConfig(selectedItem.reportId);
-        setDashboardData(response);
-        setLayout(response.layout);
-      } catch (error) {
-        console.error('获取报表数据失败:', error);
-        // 使用一些示例数据
-        const demoData = {
-          id: selectedItem.reportId,
-          title: selectedItem.name,
-          description: '这是一个示例报表描述',
-          dataSources: [],
-          parameters: [
-            {
-              id: 'param1',
-              name: 'region',
-              alias: '区域',
-              config: {
-                type: 'single_select',
-                choices: ['华东', '华南', '华北'],
-                default: '华东',
-              },
-            },
-            {
-              id: 'param2',
-              name: 'category',
-              alias: '分类',
-              config: {
-                type: 'single_select',
-                choices: ['电子产品', '服装', '食品'],
-                default: '电子产品',
-              },
-            },
-            {
-              id: 'param3',
-              name: 'date',
-              alias: '日期',
-              config: {
-                type: 'date_picker',
-                dateFormat: 'YYYY-MM-DD',
-                default: '2023-01-30',
-              },
-            },
-            {
-              id: 'param4',
-              name: 'min_price',
-              alias: '最低价格',
-              config: { type: 'single_input', default: '100' },
-            },
-          ],
-          artifacts: [],
-          layout: {
-            columns: 3,
-            rows: 2,
-            items: [
-              {
-                id: 'artifact-1',
-                title: '销售趋势',
-                width: 1,
-                height: 1,
-                x: 0,
-                y: 0,
-              },
-              {
-                id: 'artifact-2',
-                title: '销售占比',
-                width: 1,
-                height: 1,
-                x: 1,
-                y: 0,
-              },
-              {
-                id: 'artifact-3',
-                title: '销售明细',
-                width: 3,
-                height: 1,
-                x: 0,
-                y: 1,
-              },
-            ],
-          },
-        };
-        setDashboardData(demoData);
-        setLayout(demoData.layout);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadReportData();
-  }, [selectedItem, setDashboardId]);
+    if (!selectedItem || selectedItem.type !== 'file') {
+      // 设置默认的demoReportResponse
+      setDashboardData(demoReportResponse);
+      setLayout(demoReportResponse.layout);
+    }
+  }, [selectedItem]);
 
   // 处理文件系统项目变更
   const handleFileSystemChange = (items: FileSystemItem[]) => {
@@ -406,8 +321,10 @@ export function DashboardPage() {
     }
   };
 
-  const handleQuerySubmit = (values: Record<string, any>) => {
+  // 修改handleQuerySubmit函数，接收文件参数
+  const handleQuerySubmit = (values: Record<string, any>, files?: File[]) => {
     console.log('查询参数:', values);
+    console.log('上传文件:', files);
     setQueryResults(values);
     // 这里可以添加API调用逻辑
   };
@@ -473,15 +390,43 @@ export function DashboardPage() {
                 <p className='text-muted-foreground'>加载中...</p>
               </div>
             ) : !selectedItem || selectedItem.type !== 'file' ? (
-              <div className='flex flex-col items-center justify-center h-64 text-center'>
-                <p className='text-muted-foreground mb-2'>
-                  请从左侧选择一个报表文件
-                </p>
-                <p className='text-xs text-muted-foreground/70'>
-                  选择后将展示报表内容与配置
-                </p>
-              </div>
+              // 显示默认的示例报表
+              <>
+                {/* 标题和描述 */}
+                <div className='border-b pb-4'>
+                  <h1 className='text-2xl font-semibold'>
+                    {demoReportResponse.title}
+                  </h1>
+                  <p className='text-muted-foreground mt-1'>
+                    {demoReportResponse.description}
+                  </p>
+                </div>
+
+                {/* 参数区域 */}
+                <div className='space-y-2'>
+                  <ParameterQueryArea
+                    parameters={demoReportResponse.parameters}
+                    dataSources={demoReportResponse.dataSources}
+                    onSubmit={handleQuerySubmit}
+                  />
+                </div>
+
+                {/* 展示区域 */}
+                <div className='space-y-4'>
+                  <div className='flex items-center justify-between'>
+                    <h2 className='text-lg font-medium'>数据可视化</h2>
+                  </div>
+                  {demoReportResponse.layout &&
+                    demoReportResponse.layout.items.length > 0 && (
+                      <LayoutGrid
+                        layout={demoReportResponse.layout}
+                        onItemClick={handleChartItemClick}
+                      />
+                    )}
+                </div>
+              </>
             ) : (
+              // 显示选中的报表
               <>
                 {/* 标题和描述 */}
                 <div className='border-b pb-4'>
@@ -496,9 +441,9 @@ export function DashboardPage() {
                 {/* 参数区域 */}
                 <div className='space-y-2'>
                   <ParameterQueryArea
-                    parameters={exampleParameters}
+                    parameters={dashboardData?.parameters || []}
+                    dataSources={dashboardData?.dataSources || []}
                     onSubmit={handleQuerySubmit}
-                    requireFileUpload={requireFileUpload}
                   />
                 </div>
 

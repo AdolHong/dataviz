@@ -1,4 +1,4 @@
-import React, { useState, useRef, KeyboardEvent } from 'react';
+import React, { useState, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -25,7 +25,6 @@ import {
 import {
   Calendar as CalendarIcon,
   X,
-  Plus,
   ChevronUp,
   ChevronDown,
   Upload,
@@ -34,7 +33,6 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
-import { Checkbox } from '@/components/ui/checkbox';
 import { type Parameter } from '@/types/models/parameter';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -45,25 +43,31 @@ import {
   CommandItem,
 } from '@/components/ui/command';
 import { Badge } from '@/components/ui/badge';
+import type { DataSource } from '@/types';
 
 interface ParameterQueryAreaProps {
   parameters: Parameter[];
-  onSubmit: (values: Record<string, any>) => void;
-  requireFileUpload?: boolean;
+  dataSources?: DataSource[];
+  onSubmit: (values: Record<string, any>, files?: File[]) => void;
 }
 
 export function ParameterQueryArea({
   parameters,
+  dataSources = [],
   onSubmit,
-  requireFileUpload = false,
 }: ParameterQueryAreaProps) {
   const [values, setValues] = useState<Record<string, any>>({});
   const [files, setFiles] = useState<File[]>([]);
   const [parametersExpanded, setParametersExpanded] = useState(true);
   const [activeTab, setActiveTab] = useState<string>('parameters');
 
-  // 多输入引用
-  const multiInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  // 检查是否需要显示文件上传选项卡
+  const requireFileUpload = dataSources.some(
+    (ds) =>
+      ds.executor.type === 'csv_uploader' || ds.executor.type === 'csv_data'
+  );
+
+  const multiInputRef = useRef<HTMLInputElement>(null);
 
   const toggleParametersExpanded = () => {
     setParametersExpanded(!parametersExpanded);
@@ -81,7 +85,7 @@ export function ParameterQueryArea({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit(values);
+    onSubmit(values, files);
   };
 
   const getParameterLabel = (param: Parameter) => {
@@ -93,13 +97,13 @@ export function ParameterQueryArea({
 
   // 多输入框键盘事件处理
   const handleMultiInputKeyDown = (
-    e: KeyboardEvent<HTMLInputElement>,
+    e: React.KeyboardEvent<HTMLInputElement>,
     param: Parameter
   ) => {
     if (e.key === 'Enter' && e.currentTarget.value.trim() !== '') {
       e.preventDefault();
       const newValue = e.currentTarget.value.trim();
-      const currentValues = values[param.id] || param.config.default || [];
+      const currentValues = values[param.id] || [];
       handleValueChange(param.id, [...currentValues, newValue]);
       e.currentTarget.value = '';
     }
@@ -107,7 +111,7 @@ export function ParameterQueryArea({
 
   // 删除多输入框中的项
   const removeMultiInputItem = (param: Parameter, index: number) => {
-    const currentValues = values[param.id] || param.config.default || [];
+    const currentValues = values[param.id] || [];
     const newValues = [...currentValues];
     newValues.splice(index, 1);
     handleValueChange(param.id, newValues);
@@ -138,7 +142,6 @@ export function ParameterQueryArea({
           );
 
         case 'multi_select':
-          // 改为下拉选择形式
           return (
             <Popover>
               <PopoverTrigger asChild>
@@ -226,35 +229,40 @@ export function ParameterQueryArea({
           );
 
         case 'multi_input':
-          // 改为回车添加的输入方式
+          // 修复多输入
+          const currentInputValues = values[param.id] || [];
+          const defaultValues = param.config.default || [];
+          const displayValues =
+            currentInputValues.length > 0 ? currentInputValues : defaultValues;
+
           return (
             <div className='space-y-2'>
               <div>
                 <Input
-                  ref={(el) => (multiInputRefs.current[param.id] = el)}
+                  ref={multiInputRef}
                   placeholder='输入后按回车添加'
                   onKeyDown={(e) => handleMultiInputKeyDown(e, param)}
                 />
               </div>
-              {(values[param.id]?.length > 0 ||
-                param.config.default?.length > 0) && (
+              {displayValues.length > 0 && (
                 <div className='flex flex-wrap gap-1 mt-2'>
-                  {(values[param.id] || param.config.default || []).map(
-                    (value: string, index: number) => (
-                      <Badge
-                        key={index}
-                        variant='secondary'
-                        className='flex items-center gap-1'
-                      >
-                        {value}
-                        <X
-                          size={14}
-                          className='cursor-pointer'
-                          onClick={() => removeMultiInputItem(param, index)}
-                        />
-                      </Badge>
-                    )
-                  )}
+                  {displayValues.map((value: string, index: number) => (
+                    <Badge
+                      key={index}
+                      variant='secondary'
+                      className='flex items-center gap-1'
+                    >
+                      {value}
+                      <X
+                        size={14}
+                        className='cursor-pointer hover:text-destructive'
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeMultiInputItem(param, index);
+                        }}
+                      />
+                    </Badge>
+                  ))}
                 </div>
               )}
             </div>
@@ -348,7 +356,7 @@ export function ParameterQueryArea({
               </TabsContent>
 
               {requireFileUpload && (
-                <TabsContent value='upload' className='mt-2'>
+                <TabsContent value='upload' className='mt-2 space-y-4'>
                   <div className='space-y-4'>
                     <div className='space-y-2'>
                       <div className='border-2 border-dashed rounded-md p-6 text-center hover:border-primary/50 transition-colors'>
@@ -372,16 +380,33 @@ export function ParameterQueryArea({
                               点击或拖拽文件到此处上传
                             </span>
                             <span className='text-xs text-muted-foreground'>
-                              支持多文件上传
+                              {dataSources
+                                .filter(
+                                  (ds) =>
+                                    ds.executor.type === 'csv_uploader' ||
+                                    ds.executor.type === 'csv_data'
+                                )
+                                .map((ds) => ds.name)
+                                .join(', ')}
                             </span>
                           </div>
                         </Label>
                       </div>
                       {files.length > 0 && (
                         <div className='mt-4 space-y-2'>
-                          <p className='text-sm font-medium'>
-                            已选择的文件 ({files.length}):
-                          </p>
+                          <div className='flex justify-between items-center'>
+                            <p className='text-sm font-medium'>
+                              已选择的文件 ({files.length}):
+                            </p>
+                            <Button
+                              variant='ghost'
+                              size='sm'
+                              onClick={() => setFiles([])}
+                              className='text-destructive hover:text-destructive/80'
+                            >
+                              清空
+                            </Button>
+                          </div>
                           <ul className='text-sm max-h-40 overflow-y-auto space-y-1'>
                             {files.map((file, index) => (
                               <li
@@ -407,7 +432,7 @@ export function ParameterQueryArea({
                         </div>
                       )}
                       <div className='flex justify-end mt-4'>
-                        <Button type='submit'>确认上传</Button>
+                        <Button type='submit'>应用</Button>
                       </div>
                     </div>
                   </div>

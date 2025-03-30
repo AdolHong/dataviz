@@ -14,7 +14,7 @@ import { demoFileSystemData } from '@/data/demoFileSystem';
 import type { FileSystemItem } from '@/types/models/fileSystem';
 import type { ReportResponse } from '@/types';
 import { reportApi } from '@/api/report';
-import { Layout, LayoutItem } from '@/types/models/layout';
+import type { Layout, LayoutItem } from '@/types/models/layout';
 
 export function DashboardPage() {
   const [fileSystemItems, setFileSystemItems] =
@@ -107,10 +107,10 @@ export function DashboardPage() {
               {
                 id: 'artifact-3',
                 title: '销售明细',
-                width: 1,
+                width: 3,
                 height: 1,
-                x: 2,
-                y: 0,
+                x: 0,
+                y: 1,
               },
             ],
           },

@@ -18,7 +18,6 @@ function Edit({ reportId = 'file-1743432164631' }: { reportId?: string }) {
 
   useEffect(() => {
     reportApi.getReportByFileId(reportId).then((report) => {
-      console.info('读的都深恶梦鬼', report);
       setEditReport(report);
     });
   }, [reportId]);

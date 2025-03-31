@@ -24,3 +24,4 @@ ENV/
 .vscode/
 *.swp
 *.swo
+*.data

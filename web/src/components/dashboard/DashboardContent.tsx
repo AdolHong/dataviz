@@ -1,13 +1,14 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { ParameterQueryArea } from './ParameterQueryArea';
 import { LayoutGrid } from './LayoutGrid';
+import type { DataSource, Layout, Parameter } from '@/types';
 
 interface DashboardContentProps {
   title: string;
   description: string;
-  parameters: any[]; // 根据实际类型定义
-  dataSources: any[]; // 根据实际类型定义
-  layout: any; // 根据实际类型定义
+  parameters: Parameter[]; // 根据实际类型定义
+  dataSources: DataSource[]; // 根据实际类型定义
+  layout: Layout; // 根据实际类型定义
   handleQuerySubmit: (
     values: Record<string, any>,
     files?: Record<string, File[]>

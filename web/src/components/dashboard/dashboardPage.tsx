@@ -287,39 +287,42 @@ export function DashboardPage() {
               <div className='h-full'>
                 {/* 为每个报表渲染内容组件 */}
                 {openTabs.map((tab) => (
-                  <div
-                    key={tab.id}
-                    className={cn(
-                      'h-full',
-                      tab.id === activeTabId ? 'block' : 'hidden'
-                    )}
-                  >
-                    {/* 添加编辑按钮 */}
-                    <div className='absolute top-4 right-4 z-10'>
-                      <Button
-                        variant='outline'
-                        size='icon'
-                        onClick={() => handleEditReport(demoReportResponse)}
-                      >
-                        <Edit className='h-4 w-4' />
-                      </Button>
+                  <div>
+                    <div
+                      key={tab.id}
+                      className={cn(
+                        'h-full',
+                        tab.id === activeTabId ? 'block' : 'hidden'
+                      )}
+                    >
+                      {/* 添加编辑按钮 */}
+                      <div className='absolute top-4 right-4 z-10'>
+                        <Button
+                          variant='outline'
+                          size='icon'
+                          onClick={() => handleEditReport(demoReportResponse)}
+                        >
+                          <Edit className='h-4 w-4' />
+                        </Button>
+                      </div>
                     </div>
-
-                    {/* 使用 DashboardContent 组件替换原有内容 */}
-                    <DashboardContent
-                      title={demoReportResponse.title}
-                      description={demoReportResponse.description || ''}
-                      parameters={demoReportResponse.parameters || []}
-                      dataSources={demoReportResponse.dataSources || []}
-                      layout={
-                        demoReportResponse.layout || {
-                          items: [],
-                          columns: 1,
-                          rows: 1,
+                    <div>
+                      {/* 使用 DashboardContent 组件替换原有内容 */}
+                      <DashboardContent
+                        title={demoReportResponse.title || 'hi'}
+                        description={demoReportResponse.description || ''}
+                        parameters={demoReportResponse.parameters || []}
+                        dataSources={demoReportResponse.dataSources || []}
+                        layout={
+                          demoReportResponse.layout || {
+                            items: [],
+                            columns: 1,
+                            rows: 1,
+                          }
                         }
-                      }
-                      handleQuerySubmit={handleQuerySubmit}
-                    />
+                        handleQuerySubmit={handleQuerySubmit}
+                      />
+                    </div>
                   </div>
                 ))}
               </div>

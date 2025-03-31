@@ -266,6 +266,8 @@ def delete_folder(folder_id: str, recursive: bool = False):
     if recursive:
         ids_to_remove = get_folder_and_children_ids(items, folder_id)
         items = [item for item in items if item.id not in ids_to_remove]
+        print("ids_to_remove", ids_to_remove)
+        print("items", items)
         
         # 删除指向已删除文件的所有引用
         items = [item for item in items if item.type != FileSystemItemType.REFERENCE or item.referenceTo not in ids_to_remove]
@@ -375,9 +377,13 @@ def move_item(item_id: str, new_parent_id: Optional[str] = None):
 # API端点：批量处理操作
 @app.post("/api/fs/batch", response_model=Dict[str, Any])
 def batch_operations(request: BatchOperationRequest):
-    items = load_fs_data()
     results = []
     
+    
+    print("多少操作", len(request.operations))
+    print("操作", request.operations)
+
+
     for operation in request.operations:
         try:
             if operation.type == FileSystemOperation.CREATE_FILE:
@@ -389,7 +395,7 @@ def batch_operations(request: BatchOperationRequest):
             elif operation.type == FileSystemOperation.DELETE_FILE:
                 result = delete_file(operation.item.id)
             elif operation.type == FileSystemOperation.DELETE_FOLDER:
-                result = delete_folder(operation.item.id)
+                result = delete_folder(operation.item.id, recursive=True)
             elif operation.type == FileSystemOperation.DELETE_REFERENCE:
                 result = delete_reference(operation.item.id)
             elif operation.type == FileSystemOperation.RENAME_FOLDER:

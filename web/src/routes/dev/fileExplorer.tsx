@@ -11,17 +11,17 @@ import { fsApi } from '@/api/fs';
 import type { FileSystemItem } from '@/types/models/fileSystem';
 
 function FileExplorer() {
-  const [fileSystemData, setFileSystemData] = useState<FileSystemItem[]>([]);
+  const [fileSystemItems, setFileSystemItems] = useState<FileSystemItem[]>([]);
 
   // 是否用demo数据进行展示
-  const isDemo = true;
+  const isDemo = false;
 
   useEffect(() => {
     if (isDemo) {
-      setFileSystemData(demoFileSystemData);
+      setFileSystemItems(demoFileSystemData);
     } else {
       fsApi.getAllItems().then((items) => {
-        setFileSystemData(items);
+        setFileSystemItems(items);
       });
     }
   }, []);
@@ -29,17 +29,17 @@ function FileExplorer() {
   useEffect(() => {
     if (!isDemo) {
       fsApi.getAllItems().then((items) => {
-        setFileSystemData(items);
+        setFileSystemItems(items);
       });
     }
-  }, [fileSystemData]);
+  }, [fileSystemItems]);
 
   return (
     <FileExplorerComponent
-      fsItems={fileSystemData}
+      fsItems={fileSystemItems}
       setFsItems={(items) => {
-        fsApi.saveFileSystemChanges(fileSystemData, items);
-        setFileSystemData(items);
+        fsApi.saveFileSystemChanges(fileSystemItems, items);
+        setFileSystemItems(items);
       }}
     />
   );

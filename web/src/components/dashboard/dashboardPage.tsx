@@ -9,6 +9,7 @@ import type { Layout } from '@/types/models/layout';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { demoReportResponse } from '@/data/demoReport';
 import { cn } from '@/lib/utils';
+import { fsApi } from '@/api/fs';
 
 // 定义标签页类型
 interface TabItem {
@@ -19,8 +20,7 @@ interface TabItem {
 }
 
 export function DashboardPage() {
-  const [fileSystemItems, setFileSystemItems] =
-    useState<FileSystemItem[]>(demoFileSystemData);
+  const [fileSystemItems, setFileSystemItems] = useState<FileSystemItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<FileSystemItem | null>(null);
   const [dashboardData, setDashboardData] = useState<ReportResponse | null>(
     null
@@ -39,6 +39,13 @@ export function DashboardPage() {
   const [queryResults, setQueryResults] = useState<Record<string, any> | null>(
     null
   );
+
+  // 初始化
+  useEffect(() => {
+    fsApi.getAllItems().then((items) => {
+      setFileSystemItems(items);
+    });
+  }, []);
 
   // 切换导航栏显示状态
   const toggleNavbar = () => {
@@ -63,11 +70,6 @@ export function DashboardPage() {
       setLayout(demoReportResponse.layout);
     }
   }, [selectedItem]);
-
-  // 处理文件系统项目变更
-  const handleFileSystemChange = (items: FileSystemItem[]) => {
-    setFileSystemItems(items);
-  };
 
   // 打开报表标签页
   const openReportTab = (item: FileSystemItem) => {
@@ -177,7 +179,10 @@ export function DashboardPage() {
         >
           <FileExplorer
             fsItems={fileSystemItems}
-            setFsItems={setFileSystemItems}
+            setFsItems={(items) => {
+              fsApi.saveFileSystemChanges(fileSystemItems, items);
+              setFileSystemItems(items);
+            }}
             onSelectItem={handleSelectItem}
             onItemDoubleClick={handleItemDoubleClick}
           />

@@ -26,7 +26,7 @@ export const DashboardContent = ({
   return (
     <div className='flex-1 w-0 min-w-0 overflow-auto'>
       <div className='container max-w-full py-6 px-4 md:px-8 space-y-6'>
-        // 显示选中的报表
+        显示选中的报表
         <>
           <div>
             <div className='space-y-2'>

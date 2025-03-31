@@ -183,59 +183,58 @@ export function DashboardPage() {
           />
         </div>
 
-        {/* 导航栏切换按钮 */}
-        <div className='absolute top-100 left-0 z-10'>
-          <Button
-            variant='ghost'
-            size='icon'
-            className={`rounded-full ml-${navbarVisible ? navbarWidth / 4 : '0'} bg-secondary shadow-md`}
-            onClick={toggleNavbar}
-          >
-            {navbarVisible ? (
-              <ChevronLeft size={16} />
-            ) : (
-              <ChevronRight size={16} />
-            )}
-          </Button>
-        </div>
-
         {/* 右侧内容区 */}
         <div className='flex-1 w-0 min-w-0 overflow-hidden flex flex-col'>
-          {/* 标签页栏 */}
-          {openTabs.length > 0 && (
-            <div className='border-b bg-muted/30'>
-              <div className='flex overflow-x-auto'>
-                {openTabs.map((tab) => (
-                  <div
-                    key={tab.id}
-                    className={cn(
-                      'flex items-center px-4 py-2 cursor-pointer border-r border-border relative min-w-[150px] max-w-[200px]',
-                      tab.id === activeTabId
-                        ? 'bg-background'
-                        : 'bg-muted/50 hover:bg-muted'
-                    )}
-                    onClick={() => setActiveTabId(tab.id)}
-                  >
-                    <div className='truncate flex-1'>{tab.title}</div>
-                    <Button
-                      variant='ghost'
-                      size='icon'
-                      className='h-4 w-4 ml-2 opacity-60 hover:opacity-100'
-                      onClick={(e) => closeTab(tab.id, e)}
-                    >
-                      <X size={14} />
-                    </Button>
-                  </div>
-                ))}
+          {/* 标签页栏 - 现在包含导航切换按钮作为第一个元素 */}
+          <div className='border-b bg-muted/30'>
+            <div className='flex overflow-x-auto items-center'>
+              {/* 导航栏切换按钮 - 现在放在标签栏的开头 */}
+              <div className='flex items-center border-r border-border px-2'>
+                <Button
+                  variant='ghost'
+                  size='icon'
+                  className='h-8 w-8 rounded-full'
+                  onClick={toggleNavbar}
+                >
+                  {navbarVisible ? (
+                    <ChevronLeft size={16} />
+                  ) : (
+                    <ChevronRight size={16} />
+                  )}
+                </Button>
               </div>
+
+              {/* 标签页 */}
+              {openTabs.map((tab) => (
+                <div
+                  key={tab.id}
+                  className={cn(
+                    'flex items-center px-4 py-2 cursor-pointer border-r border-border relative min-w-[150px] max-w-[200px]',
+                    tab.id === activeTabId
+                      ? 'bg-background'
+                      : 'bg-muted/50 hover:bg-muted'
+                  )}
+                  onClick={() => setActiveTabId(tab.id)}
+                >
+                  <div className='truncate flex-1'>{tab.title}</div>
+                  <Button
+                    variant='ghost'
+                    size='icon'
+                    className='h-4 w-4 ml-2 opacity-60 hover:opacity-100'
+                    onClick={(e) => closeTab(tab.id, e)}
+                  >
+                    <X size={14} />
+                  </Button>
+                </div>
+              ))}
             </div>
-          )}
+          </div>
 
           {/* 标签内容区 */}
           <div className='flex-1 overflow-auto'>
             {openTabs.length > 0 && activeTabId ? (
               <div className='h-full p-6'>
-                {/* 为每个报表渲染一个DashboardContent组件 */}
+                {/* 为每个报表渲染内容组件 */}
                 {openTabs.map((tab) => (
                   <div
                     key={tab.id}

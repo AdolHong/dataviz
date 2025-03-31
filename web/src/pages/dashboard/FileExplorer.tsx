@@ -37,10 +37,12 @@ import {
 } from '@/types/models/fileSystem';
 import type { FileSystemItem } from '@/types/models/fileSystem';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 // 拖放类型定义
 interface DragItem {
   id: string;
+  name: string;
   type: FileSystemItemType;
 }
 
@@ -137,6 +139,15 @@ export function FileExplorer({
   const handleCreateItem = () => {
     if (newItemName.trim() === '') return;
 
+    // 检查同目录下是否有重名项目
+    const existingItem = items.find(
+      (item) => item.name === newItemName && item.parentId === newItemParent
+    );
+    if (existingItem) {
+      toast.error('同目录下已存在同名文件或文件夹');
+      return;
+    }
+
     let updatedItems: FileSystemItem[];
 
     if (newItemType === FileSystemItemType.FOLDER) {
@@ -163,6 +174,16 @@ export function FileExplorer({
   // 重命名项目
   const handleRenameItem = () => {
     if (!selectedItem || newItemName.trim() === '') return;
+
+    // 检查同目录下是否有重名项目
+    const existingItem = items.find(
+      (item) =>
+        item.name === newItemName && item.parentId === selectedItem.parentId
+    );
+    if (existingItem) {
+      toast.error('同目录下已存在同名文件或文件夹');
+      return;
+    }
 
     const updatedItems = renameItem(items, selectedItem.id, newItemName);
     onItemsChange(updatedItems);
@@ -197,6 +218,7 @@ export function FileExplorer({
   const handleDragStart = (e: React.DragEvent, item: FileSystemItem) => {
     setDraggedItem({
       id: item.id,
+      name: item.name,
       type: item.type,
     });
     // 设置拖拽效果和数据
@@ -244,6 +266,16 @@ export function FileExplorer({
 
     // 防止拖放到自己内部
     if (draggedItem.id === targetFolder.id) return;
+
+    // 检查同目录下是否有重名项目
+    const existingItem = items.find(
+      (item) =>
+        item.name === draggedItem.name && item.parentId === targetFolder.id
+    );
+    if (existingItem) {
+      toast.error('同目录下已存在同名文件或文件夹，无法移动');
+      return;
+    }
 
     // 移动项目
     const updatedItems = moveItem(items, draggedItem.id, targetFolder.id);

@@ -7,6 +7,7 @@ export const Route = createFileRoute('/dev/fileExplorer')({
 
 import { demoFileSystemData } from '@/data/demoFileSystem';
 import { useState } from 'react';
+import { fsApi } from '@/api/fs';
 
 function FileExplorer() {
   const [fileSystemData, setFileSystemData] = useState(demoFileSystemData);
@@ -15,7 +16,7 @@ function FileExplorer() {
     <FileExplorerComponent
       fsItems={fileSystemData}
       setFsItems={(items) => {
-        console.log('items', items);
+        fsApi.saveFileSystemChanges(fileSystemData, items);
 
         setFileSystemData(items);
       }}

@@ -1,3 +1,4 @@
+import { axiosInstance } from '@/lib/axios';
 import { FileSystemItemType } from '@/types/models/fileSystem';
 import type { FileSystemItem } from '@/types/models/fileSystem';
 
@@ -27,6 +28,7 @@ interface FileSystemDiff {
   oldItem?: FileSystemItem;
 }
 
+// 检查两个文件系统项目列表之间的差异
 const checkItemsDiff = (
   oldItems: FileSystemItem[],
   newItems: FileSystemItem[]
@@ -142,4 +144,120 @@ const checkItemsDiff = (
   return diff;
 };
 
+export const fsApi = {
+  // 获取所有文件系统项目
+  async getAllItems(): Promise<FileSystemItem[]> {
+    return axiosInstance.get('/fs/items');
+  },
+
+  // 创建文件
+  async createFile(item: FileSystemItem): Promise<FileSystemItem> {
+    return axiosInstance.post('/fs/operations/create-file', item);
+  },
+
+  // 创建文件夹
+  async createFolder(item: FileSystemItem): Promise<FileSystemItem> {
+    return axiosInstance.post('/fs/operations/create-folder', item);
+  },
+
+  // 创建引用
+  async createReference(item: FileSystemItem): Promise<FileSystemItem> {
+    return axiosInstance.post('/fs/operations/create-reference', item);
+  },
+
+  // 删除文件
+  async deleteFile(fileId: string): Promise<boolean> {
+    const response = await axiosInstance.delete(
+      `/fs/operations/delete-file/${fileId}`
+    );
+    return response.data.success;
+  },
+
+  // 删除文件夹
+  async deleteFolder(
+    folderId: string,
+    recursive: boolean = false
+  ): Promise<boolean> {
+    const response = await axiosInstance.delete(
+      `/fs/operations/delete-folder/${folderId}`,
+      {
+        params: { recursive },
+      }
+    );
+    return response.data.success;
+  },
+
+  // 删除引用
+  async deleteReference(referenceId: string): Promise<boolean> {
+    const response = await axiosInstance.delete(
+      `/fs/operations/delete-reference/${referenceId}`
+    );
+    return response.data.success;
+  },
+
+  // 重命名文件夹
+  async renameFolder(
+    folderId: string,
+    newName: string
+  ): Promise<FileSystemItem> {
+    return axiosInstance.put(`/fs/operations/rename-folder/${folderId}`, null, {
+      params: { new_name: newName },
+    });
+  },
+
+  // 重命名文件
+  async renameFile(fileId: string, newName: string): Promise<FileSystemItem> {
+    return axiosInstance.put(`/fs/operations/rename-file/${fileId}`, null, {
+      params: { new_name: newName },
+    });
+  },
+
+  // 重命名引用
+  async renameReference(
+    referenceId: string,
+    newName: string
+  ): Promise<FileSystemItem> {
+    return axiosInstance.put(
+      `/fs/operations/rename-reference/${referenceId}`,
+      null,
+      {
+        params: { new_name: newName },
+      }
+    );
+  },
+
+  // 移动项目
+  async moveItem(
+    itemId: string,
+    newParentId: string | null
+  ): Promise<FileSystemItem> {
+    return axiosInstance.put(`/fs/operations/move-item/${itemId}`, null, {
+      params: { new_parent_id: newParentId },
+    });
+  },
+
+  // 批量处理操作
+  async batchOperations(operations: FileSystemDiff[]): Promise<any> {
+    return axiosInstance.post('/fs/batch', { operations });
+  },
+
+  // 保存文件系统更改
+  async saveFileSystemChanges(
+    oldItems: FileSystemItem[],
+    newItems: FileSystemItem[]
+  ): Promise<any> {
+    // 计算差异
+    const differences = checkItemsDiff(oldItems, newItems);
+
+    // 如果没有差异，直接返回成功
+    if (differences.length === 0) {
+      return { success: true, results: [] };
+    }
+
+    // 批量处理所有操作
+    return this.batchOperations(differences);
+  },
+};
+
 export { checkItemsDiff, FileSystemOperation };
+export type { FileSystemDiff };

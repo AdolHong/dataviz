@@ -2,6 +2,7 @@
 export enum FileSystemItemType {
   FOLDER = 'folder',
   FILE = 'file',
+  REFERENCE = 'reference', // 添加引用类型
 }
 
 // 文件系统项的基础接口
@@ -25,8 +26,14 @@ export interface FolderItem extends FileSystemItemBase {
   type: FileSystemItemType.FOLDER;
 }
 
+// 引用特有属性
+export interface ReferenceItem extends FileSystemItemBase {
+  type: FileSystemItemType.REFERENCE;
+  referenceTo: string; // 指向原始文件的ID
+}
+
 // 统一文件系统项类型
-export type FileSystemItem = FileItem | FolderItem;
+export type FileSystemItem = FileItem | FolderItem | ReferenceItem;
 
 // 整个文件系统的接口
 export interface FileSystem {
@@ -140,13 +147,47 @@ export const moveItem = (
   );
 };
 
-// 辅助函数：删除项目及其所有子项
+// 辅助函数：创建引用
+export const createReference = (
+  items: FileSystemItem[],
+  name: string,
+  referencedFileId: string,
+  parentId: string | null = null
+): FileSystemItem[] => {
+  const newReference: ReferenceItem = {
+    id: `ref-${Date.now()}`,
+    name,
+    type: FileSystemItemType.REFERENCE,
+    parentId,
+    referenceTo: referencedFileId,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  return [...items, newReference];
+};
+
+// 修改删除项目函数，处理引用的情况
 export const deleteItem = (
   items: FileSystemItem[],
   itemId: string
 ): FileSystemItem[] => {
   const itemToDelete = findItemById(items, itemId);
   if (!itemToDelete) return items;
+
+  // 要删除的所有项目ID
+  let idsToDelete = [itemId];
+
+  // 如果是文件，查找并删除指向该文件的所有引用
+  if (itemToDelete.type === FileSystemItemType.FILE) {
+    const references = items.filter(
+      (item) =>
+        item.type === FileSystemItemType.REFERENCE &&
+        (item as ReferenceItem).referenceTo === itemId
+    );
+
+    idsToDelete = [...idsToDelete, ...references.map((ref) => ref.id)];
+  }
 
   // 如果是文件夹，递归删除所有子项
   if (itemToDelete.type === FileSystemItemType.FOLDER) {
@@ -160,6 +201,6 @@ export const deleteItem = (
     return result.filter((item) => item.id !== itemId);
   }
 
-  // 如果是文件，直接删除
-  return items.filter((item) => item.id !== itemId);
+  // 删除所有标记的项目
+  return items.filter((item) => !idsToDelete.includes(item.id));
 };

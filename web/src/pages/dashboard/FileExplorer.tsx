@@ -8,6 +8,7 @@ import {
   Plus,
   Pencil,
   Trash,
+  Link,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -34,6 +35,7 @@ import {
   renameItem,
   moveItem,
   deleteItem,
+  createReference,
 } from '@/types/models/fileSystem';
 import type { FileSystemItem } from '@/types/models/fileSystem';
 import { cn } from '@/lib/utils';
@@ -69,6 +71,8 @@ export function FileExplorer({
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isDuplicateDialogOpen, setIsDuplicateDialogOpen] = useState(false);
+  const [isCreateReferenceDialogOpen, setIsCreateReferenceDialogOpen] =
+    useState(false);
 
   // 新建和编辑表单状态
   const [newItemName, setNewItemName] = useState('');
@@ -79,6 +83,10 @@ export function FileExplorer({
   const [selectedItem, setSelectedItem] = useState<FileSystemItem | null>(null);
   const [duplicateItemName, setDuplicateItemName] = useState('');
   const [itemToDuplicate, setItemToDuplicate] = useState<FileSystemItem | null>(
+    null
+  );
+  const [referenceItemName, setReferenceItemName] = useState('');
+  const [fileToReference, setFileToReference] = useState<FileSystemItem | null>(
     null
   );
 
@@ -133,6 +141,18 @@ export function FileExplorer({
     setItemToDuplicate(item);
     setDuplicateItemName(`${item.name} - 副本`); // 默认新文件名
     setIsDuplicateDialogOpen(true);
+  };
+
+  // 打开创建引用对话框
+  const openCreateReferenceDialog = (item: FileSystemItem) => {
+    if (item.type !== FileSystemItemType.FILE) {
+      toast.error('只能为文件创建引用');
+      return;
+    }
+
+    setFileToReference(item);
+    setReferenceItemName(`${item.name} 的引用`); // 默认引用名称
+    setIsCreateReferenceDialogOpen(true);
   };
 
   // 创建新项目
@@ -190,28 +210,110 @@ export function FileExplorer({
     setIsRenameDialogOpen(false);
   };
 
-  // 删除项目
-  const handleDeleteItem = () => {
-    if (!selectedItem) return;
-
-    const updatedItems = deleteItem(items, selectedItem.id);
-    onItemsChange(updatedItems);
-    setIsDeleteDialogOpen(false);
-  };
-
   // 处理复制文件
   const handleDuplicateItem = () => {
     if (!itemToDuplicate || duplicateItemName.trim() === '') return;
 
-    const updatedItems = createFile(
-      items,
-      duplicateItemName,
-      itemToDuplicate.reportId, // 使用原文件的 reportId
-      itemToDuplicate.parentId // 使用原文件的父级 ID
+    // 检查同目录下是否有重名项目
+    const existingItem = items.find(
+      (item) =>
+        item.name === duplicateItemName &&
+        item.parentId === itemToDuplicate.parentId
     );
+    if (existingItem) {
+      toast.error('同目录下已存在同名文件或文件夹');
+      return;
+    }
+
+    let updatedItems: FileSystemItem[];
+
+    // 如果是引用类型，则创建一个新的引用
+    if (itemToDuplicate.type === FileSystemItemType.REFERENCE) {
+      // 假设引用有一个指向原始文件的 referenceTo 属性
+      const referencedFileId = (itemToDuplicate as any).referenceTo;
+      updatedItems = createReference(
+        items,
+        duplicateItemName,
+        referencedFileId,
+        itemToDuplicate.parentId
+      );
+    } else {
+      // 普通文件复制
+      updatedItems = createFile(
+        items,
+        duplicateItemName,
+        (itemToDuplicate as any).reportId || `report-${Date.now()}`,
+        itemToDuplicate.parentId
+      );
+    }
 
     onItemsChange(updatedItems);
     setIsDuplicateDialogOpen(false);
+  };
+
+  // 处理创建引用
+  const handleCreateReference = () => {
+    if (!fileToReference || referenceItemName.trim() === '') return;
+
+    // 检查同目录下是否有重名项目
+    const existingItem = items.find(
+      (item) =>
+        item.name === referenceItemName &&
+        item.parentId === fileToReference.parentId
+    );
+    if (existingItem) {
+      toast.error('同目录下已存在同名文件或文件夹');
+      return;
+    }
+
+    const updatedItems = createReference(
+      items,
+      referenceItemName,
+      fileToReference.id,
+      fileToReference.parentId
+    );
+
+    onItemsChange(updatedItems);
+    setIsCreateReferenceDialogOpen(false);
+  };
+
+  // 删除项目
+  const handleDeleteItem = () => {
+    if (!selectedItem) return;
+
+    // 如果是文件，检查是否有引用
+    if (selectedItem.type === FileSystemItemType.FILE) {
+      const references = items.filter(
+        (item) =>
+          item.type === FileSystemItemType.REFERENCE &&
+          (item as any).referenceTo === selectedItem.id
+      );
+
+      if (references.length > 0) {
+        setIsDeleteDialogOpen(false);
+
+        // 使用自定义对话框显示警告
+        toast.warning(
+          `此文件有 ${references.length} 个引用，删除后所有引用也将失效。确定要删除吗？`,
+          {
+            duration: 5000,
+            action: {
+              label: '确认删除',
+              onClick: () => {
+                const updatedItems = deleteItem(items, selectedItem.id);
+                onItemsChange(updatedItems);
+              },
+            },
+          }
+        );
+        return;
+      }
+    }
+
+    // 常规删除逻辑
+    const updatedItems = deleteItem(items, selectedItem.id);
+    onItemsChange(updatedItems);
+    setIsDeleteDialogOpen(false);
   };
 
   // 拖拽开始
@@ -291,6 +393,7 @@ export function FileExplorer({
   // 渲染单个项目
   const renderItem = (item: FileSystemItem) => {
     const isFolder = item.type === FileSystemItemType.FOLDER;
+    const isReference = item.type === FileSystemItemType.REFERENCE;
     const isExpanded = isFolder && expandedFolders.has(item.id);
     const isDragging = draggedItem?.id === item.id;
     const isDropTarget = dropTarget === item.id;
@@ -347,6 +450,8 @@ export function FileExplorer({
               <div className='mr-2 flex-shrink-0'>
                 {isFolder ? (
                   <Folder size={18} className='text-blackAlpha.900' />
+                ) : isReference ? (
+                  <Link size={18} className='text-blue-500' />
                 ) : (
                   <File size={18} className='text-muted-foreground' />
                 )}
@@ -381,6 +486,7 @@ export function FileExplorer({
                 <ContextMenuSeparator />
               </>
             )}
+
             <ContextMenuItem onClick={() => openRenameDialog(item)}>
               <Pencil className='mr-2 h-4 w-4' />
               <span>重命名</span>
@@ -389,10 +495,30 @@ export function FileExplorer({
               <Trash className='mr-2 h-4 w-4' />
               <span>删除</span>
             </ContextMenuItem>
-            <ContextMenuItem onClick={() => openDuplicateDialog(item)}>
-              <File className='mr-2 h-4 w-4' />
-              <span>复制文件</span>
-            </ContextMenuItem>
+
+            {/* 文件专有菜单项 */}
+            {item.type === FileSystemItemType.FILE && (
+              <>
+                <ContextMenuItem
+                  onClick={() => openCreateReferenceDialog(item)}
+                >
+                  <Link className='mr-2 h-4 w-4' />
+                  <span>创建引用</span>
+                </ContextMenuItem>
+              </>
+            )}
+
+            {/* 复制选项，对文件和引用都可用 */}
+            {item.type !== FileSystemItemType.FOLDER && (
+              <ContextMenuItem onClick={() => openDuplicateDialog(item)}>
+                <File className='mr-2 h-4 w-4' />
+                <span>
+                  {item.type === FileSystemItemType.REFERENCE
+                    ? '复制引用'
+                    : '复制文件'}
+                </span>
+              </ContextMenuItem>
+            )}
           </ContextMenuContent>
         </ContextMenu>
 
@@ -410,15 +536,20 @@ export function FileExplorer({
   const renderItems = (parentId: string | null) => {
     const children = getChildItems(items, parentId);
 
-    // 先展示文件夹，再展示文件
-    const folders = children.filter(
-      (item) => item.type === FileSystemItemType.FOLDER
-    );
-    const files = children.filter(
-      (item) => item.type === FileSystemItemType.FILE
-    );
+    // 对项目进行排序：先文件夹，再文件，最后引用
+    const sortedChildren = [...children].sort((a, b) => {
+      const typeOrder = {
+        [FileSystemItemType.FOLDER]: 0,
+        [FileSystemItemType.FILE]: 1,
+        [FileSystemItemType.REFERENCE]: 2,
+      };
 
-    return [...folders, ...files].map(renderItem);
+      return (
+        typeOrder[a.type] - typeOrder[b.type] || a.name.localeCompare(b.name)
+      );
+    });
+
+    return sortedChildren.map(renderItem);
   };
 
   return (
@@ -561,6 +692,34 @@ export function FileExplorer({
               取消
             </Button>
             <Button onClick={handleDuplicateItem}>确定</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 创建引用对话框 */}
+      <Dialog
+        open={isCreateReferenceDialogOpen}
+        onOpenChange={setIsCreateReferenceDialogOpen}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>创建引用</DialogTitle>
+            <DialogDescription>请输入引用名称</DialogDescription>
+          </DialogHeader>
+          <Input
+            value={referenceItemName}
+            onChange={(e) => setReferenceItemName(e.target.value)}
+            placeholder='引用名称'
+            autoFocus
+          />
+          <DialogFooter>
+            <Button
+              variant='outline'
+              onClick={() => setIsCreateReferenceDialogOpen(false)}
+            >
+              取消
+            </Button>
+            <Button onClick={handleCreateReference}>创建</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -49,15 +49,15 @@ interface DragItem {
 }
 
 interface FileExplorerProps {
-  items: FileSystemItem[];
-  onItemsChange: (items: FileSystemItem[]) => void;
+  fsItems: FileSystemItem[];
+  setFsItems: (items: FileSystemItem[]) => void;
   onSelectItem?: (item: FileSystemItem) => void;
   onItemDoubleClick?: (item: FileSystemItem) => void;
 }
 
 export function FileExplorer({
-  items,
-  onItemsChange,
+  fsItems,
+  setFsItems,
   onSelectItem,
   onItemDoubleClick,
 }: FileExplorerProps) {
@@ -141,7 +141,7 @@ export function FileExplorer({
 
     // 如果是文件，检查引用并获取引用路径
     if (item.type === FileSystemItemType.FILE) {
-      const references = items.filter(
+      const references = fsItems.filter(
         (ref) =>
           ref.type === FileSystemItemType.REFERENCE &&
           (ref as any).referenceTo === item.id
@@ -155,7 +155,7 @@ export function FileExplorer({
           let currentId = ref.parentId;
 
           while (currentId) {
-            const parent = items.find((item) => item.id === currentId);
+            const parent = fsItems.find((item) => item.id === currentId);
             if (!parent) break;
 
             path = `${parent.name}/${path}`;
@@ -200,7 +200,7 @@ export function FileExplorer({
     if (newItemName.trim() === '') return;
 
     // 检查同目录下是否有重名项目
-    const existingItem = items.find(
+    const existingItem = fsItems.find(
       (item) => item.name === newItemName && item.parentId === newItemParent
     );
     if (existingItem) {
@@ -211,18 +211,18 @@ export function FileExplorer({
     let updatedItems: FileSystemItem[];
 
     if (newItemType === FileSystemItemType.FOLDER) {
-      updatedItems = createFolder(items, newItemName, newItemParent);
+      updatedItems = createFolder(fsItems, newItemName, newItemParent);
     } else {
       // 为简单起见，这里创建文件时使用一个临时reportId
       updatedItems = createFile(
-        items,
+        fsItems,
         newItemName,
         `report-${Date.now()}`,
         newItemParent
       );
     }
 
-    onItemsChange(updatedItems);
+    setFsItems(updatedItems);
     setIsNewItemDialogOpen(false);
 
     // 如果是在文件夹内创建，确保文件夹是展开的
@@ -236,7 +236,7 @@ export function FileExplorer({
     if (!selectedItem || newItemName.trim() === '') return;
 
     // 检查同目录下是否有重名项目
-    const existingItem = items.find(
+    const existingItem = fsItems.find(
       (item) =>
         item.name === newItemName && item.parentId === selectedItem.parentId
     );
@@ -245,8 +245,8 @@ export function FileExplorer({
       return;
     }
 
-    const updatedItems = renameItem(items, selectedItem.id, newItemName);
-    onItemsChange(updatedItems);
+    const updatedItems = renameItem(fsItems, selectedItem.id, newItemName);
+    setFsItems(updatedItems);
     setIsRenameDialogOpen(false);
   };
 
@@ -255,7 +255,7 @@ export function FileExplorer({
     if (!itemToDuplicate || duplicateItemName.trim() === '') return;
 
     // 检查同目录下是否有重名项目
-    const existingItem = items.find(
+    const existingItem = fsItems.find(
       (item) =>
         item.name === duplicateItemName &&
         item.parentId === itemToDuplicate.parentId
@@ -272,7 +272,7 @@ export function FileExplorer({
       // 假设引用有一个指向原始文件的 referenceTo 属性
       const referencedFileId = (itemToDuplicate as any).referenceTo;
       updatedItems = createReference(
-        items,
+        fsItems,
         duplicateItemName,
         referencedFileId,
         itemToDuplicate.parentId
@@ -280,14 +280,14 @@ export function FileExplorer({
     } else {
       // 普通文件复制
       updatedItems = createFile(
-        items,
+        fsItems,
         duplicateItemName,
         (itemToDuplicate as any).reportId || `report-${Date.now()}`,
         itemToDuplicate.parentId
       );
     }
 
-    onItemsChange(updatedItems);
+    setFsItems(updatedItems);
     setIsDuplicateDialogOpen(false);
   };
 
@@ -296,7 +296,7 @@ export function FileExplorer({
     if (!fileToReference || referenceItemName.trim() === '') return;
 
     // 检查同目录下是否有重名项目
-    const existingItem = items.find(
+    const existingItem = fsItems.find(
       (item) =>
         item.name === referenceItemName &&
         item.parentId === fileToReference.parentId
@@ -307,13 +307,13 @@ export function FileExplorer({
     }
 
     const updatedItems = createReference(
-      items,
+      fsItems,
       referenceItemName,
       fileToReference.id,
       fileToReference.parentId
     );
 
-    onItemsChange(updatedItems);
+    setFsItems(updatedItems);
     setIsCreateReferenceDialogOpen(false);
   };
 
@@ -323,7 +323,7 @@ export function FileExplorer({
 
     // 如果是文件，检查是否有引用
     if (selectedItem.type === FileSystemItemType.FILE) {
-      const references = items.filter(
+      const references = fsItems.filter(
         (item) =>
           item.type === FileSystemItemType.REFERENCE &&
           (item as any).referenceTo === selectedItem.id
@@ -331,16 +331,16 @@ export function FileExplorer({
 
       // 如果存在引用，直接删除文件和所有引用
       if (references.length > 0) {
-        const updatedItems = deleteItem(items, selectedItem.id);
-        onItemsChange(updatedItems);
+        const updatedItems = deleteItem(fsItems, selectedItem.id);
+        setFsItems(updatedItems);
         setIsDeleteDialogOpen(false);
         return;
       }
     }
 
     // 常规删除逻辑
-    const updatedItems = deleteItem(items, selectedItem.id);
-    onItemsChange(updatedItems);
+    const updatedItems = deleteItem(fsItems, selectedItem.id);
+    setFsItems(updatedItems);
     setIsDeleteDialogOpen(false);
   };
 
@@ -398,7 +398,7 @@ export function FileExplorer({
     if (draggedItem.id === targetFolder.id) return;
 
     // 检查同目录下是否有重名项目
-    const existingItem = items.find(
+    const existingItem = fsItems.find(
       (item) =>
         item.name === draggedItem.name && item.parentId === targetFolder.id
     );
@@ -408,8 +408,8 @@ export function FileExplorer({
     }
 
     // 移动项目
-    const updatedItems = moveItem(items, draggedItem.id, targetFolder.id);
-    onItemsChange(updatedItems);
+    const updatedItems = moveItem(fsItems, draggedItem.id, targetFolder.id);
+    setFsItems(updatedItems);
 
     // 确保目标文件夹是展开的
     setExpandedFolders((prev) => new Set([...prev, targetFolder.id]));
@@ -563,7 +563,7 @@ export function FileExplorer({
 
   // 渲染指定父项的所有子项
   const renderItems = (parentId: string | null) => {
-    const children = getChildItems(items, parentId);
+    const children = getChildItems(fsItems, parentId);
 
     // 对项目进行排序：先文件夹，再文件，最后引用
     const sortedChildren = [...children].sort((a, b) => {
@@ -589,7 +589,7 @@ export function FileExplorer({
           <div className='space-y-0.5'>
             {renderItems(null)}
             {/* 如果没有任何项目，添加一个提示 */}
-            {items.length === 0 && (
+            {fsItems.length === 0 && (
               <div className='text-center text-muted-foreground py-4'>
                 右键添加文件或文件夹
               </div>

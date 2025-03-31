@@ -681,14 +681,14 @@ export function FileExplorer({
             <DialogTitle>确认删除</DialogTitle>
             <DialogDescription>
               {selectedItem?.type === FileSystemItemType.FOLDER ? (
-                '删除文件夹将同时删除其中的所有内容，此操作不可撤销。'
+                <div>删除文件夹将同时删除其中的所有内容，此操作不可撤销。</div>
               ) : selectedItem?.type === FileSystemItemType.FILE &&
                 referencePaths.length > 0 ? (
                 <div className='space-y-2'>
-                  <p>
+                  <div>
                     此文件有 {referencePaths.length}{' '}
                     个引用，删除后这些引用将失效：
-                  </p>
+                  </div>
                   <div className='bg-muted p-2 rounded-md text-xs max-h-32 overflow-y-auto'>
                     {referencePaths.map((path, index) => (
                       <div
@@ -699,12 +699,12 @@ export function FileExplorer({
                       </div>
                     ))}
                   </div>
-                  <p className='text-destructive'>
+                  <div className='text-destructive'>
                     确定要删除此文件吗？此操作不可撤销。
-                  </p>
+                  </div>
                 </div>
               ) : (
-                '确定要删除此文件吗？此操作不可撤销。'
+                <div>确定要删除此文件吗？此操作不可撤销。</div>
               )}
             </DialogDescription>
           </DialogHeader>

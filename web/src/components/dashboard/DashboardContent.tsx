@@ -14,7 +14,7 @@ interface DashboardContentProps {
   ) => void;
 }
 
-export const DashboardContent: DashboardContentProps = ({
+export const DashboardContent = ({
   title,
   description,
   parameters,

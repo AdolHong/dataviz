@@ -20,23 +20,13 @@
     "referenceTo": null
   },
   {
-    "id": "file-1743435959381",
-    "name": "b",
+    "id": "file-1743436362131",
+    "name": "aaa",
     "type": "file",
     "parentId": "folder-1743435936634",
-    "createdAt": "2025-03-31T23:45:59.390225",
-    "updatedAt": "2025-03-31T23:45:59.390225",
-    "reportId": "report-1743435959381",
+    "createdAt": "2025-03-31T23:52:42.139110",
+    "updatedAt": "2025-03-31T23:52:42.139110",
+    "reportId": "report-1743436362131",
     "referenceTo": null
-  },
-  {
-    "id": "ref-1743435963864",
-    "name": "b 的引用",
-    "type": "reference",
-    "parentId": "folder-1743435936634",
-    "createdAt": "2025-03-31T23:46:03.878155",
-    "updatedAt": "2025-03-31T23:46:03.878155",
-    "reportId": null,
-    "referenceTo": "file-1743435959381"
   }
 ]

@@ -37,6 +37,7 @@ export function DashboardPage() {
   const [queryResults, setQueryResults] = useState<Record<string, any> | null>(
     null
   );
+  const [layout, setLayout] = useState<Layout | null>(null);
 
   // 添加编辑模态框状态
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);

@@ -15,6 +15,8 @@ export const Route = createFileRoute('/dev/edit')({
 function Edit() {
   const [isModalOpen, setIsModalOpen] = useState(true);
   const [reportId, setReportId] = useState('file-1743428151348');
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [parameters, setParameters] = useState<Parameter[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
@@ -35,27 +37,42 @@ function Edit() {
     });
   }, [reportId]);
 
-  const handleSave = () => {
-    const report = {
-      id: reportId,
-      title: '临时标题',
-      description: '临时描述',
-      parameters,
-      artifacts,
-      dataSources,
-      layout,
-    };
+  const handleSave = (
+    title: string,
+    description: string,
+    parameters: Parameter[],
+    artifacts: Artifact[],
+    dataSources: DataSource[],
+    layout: Layout
+  ) => {
+    if (isModalOpen) {
+      console.log('[DEBUG]isModalOpen', isModalOpen);
 
-    console.log('report', report);
+      const report = {
+        id: reportId,
+        title: title,
+        description: description,
+        parameters,
+        artifacts,
+        dataSources,
+        layout,
+      };
 
-    reportApi.updateReport(reportId, report).then((res) => {
-      console.log('res', res);
-    });
+      console.log('[DEBUG]report', report);
+
+      reportApi.updateReport(reportId, report).then((res) => {
+        console.log('res', res);
+      });
+    }
   };
 
   return (
     <EditModal
       open={isModalOpen}
+      title={title}
+      setTitle={setTitle}
+      description={description}
+      setDescription={setDescription}
       dataSources={dataSources}
       setDataSources={setDataSources}
       parameters={parameters}

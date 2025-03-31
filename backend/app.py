@@ -212,9 +212,10 @@ def get_report(file_id: str):
     file_item = find_item_by_id(items, file_id)
     if not file_item or file_item.type != FileSystemItemType.FILE:
         raise HTTPException(status_code=404, detail="报表文件不存在")
-    
+
     # 获取报表内容
     report_content = get_report_content(file_id)
+    print("report_content:", report_content)
     if not report_content:
         # 如果文件为空，初始化一个默认的报表结构
         default_report = {
@@ -249,7 +250,7 @@ def update_report(file_id: str, report: Report):
         report.id = file_id
     
     # 保存报表内容
-    save_report_content(file_id, report.dict())
+    save_report_content(file_id, report.model_dump())
     
     # 更新文件系统项目的更新时间
     for i, item in enumerate(items):

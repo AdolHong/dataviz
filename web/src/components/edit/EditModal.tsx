@@ -39,6 +39,10 @@ interface EditModalProps {
   open: boolean;
   onClose: () => void;
   reportId: string;
+  title: string;
+  setTitle: (title: string) => void;
+  description: string;
+  setDescription: (description: string) => void;
   dataSources: DataSource[];
   setDataSources: (dataSources: DataSource[]) => void;
   parameters: Parameter[];
@@ -47,7 +51,14 @@ interface EditModalProps {
   setArtifacts: (artifacts: Artifact[]) => void;
   layout: Layout;
   setLayout: (layout: Layout) => void;
-  handleSave: () => void;
+  handleSave: (
+    title: string,
+    description: string,
+    parameters: Parameter[],
+    artifacts: Artifact[],
+    dataSources: DataSource[],
+    layout: Layout
+  ) => void;
 }
 
 import { demoReportResponse as demoReport } from '@/data/demoReport';
@@ -60,6 +71,10 @@ const EditModal = ({
   open,
   onClose,
   reportId,
+  title,
+  setTitle,
+  description,
+  setDescription,
   dataSources,
   setDataSources,
   parameters,
@@ -93,15 +108,13 @@ const EditModal = ({
   );
   const [deleteMessage, setDeleteMessage] = useState<string>('');
 
-  // 添加新的状态变量
-  const [title, setTitle] = useState(demoReport.title);
-  const [description, setDescription] = useState(demoReport.description);
-
   // todo: 发起api， 保存报表
   useEffect(() => {
-    handleSave();
+    handleSave(title, description, parameters, artifacts, dataSources, layout);
     toast.success(`[DEBUG]你保存了报表"${reportId}"`);
   }, [
+    title,
+    description,
     layout,
     dataSources,
     parameters,

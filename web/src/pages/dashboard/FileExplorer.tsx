@@ -327,23 +327,11 @@ export function FileExplorer({
           (item as any).referenceTo === selectedItem.id
       );
 
+      // 如果存在引用，直接删除文件和所有引用
       if (references.length > 0) {
+        const updatedItems = deleteItem(items, selectedItem.id);
+        onItemsChange(updatedItems);
         setIsDeleteDialogOpen(false);
-
-        // 使用自定义对话框显示警告
-        toast.warning(
-          `此文件有 ${references.length} 个引用，删除后所有引用也将失效。确定要删除吗？`,
-          {
-            duration: 5000,
-            action: {
-              label: '确认删除',
-              onClick: () => {
-                const updatedItems = deleteItem(items, selectedItem.id);
-                onItemsChange(updatedItems);
-              },
-            },
-          }
-        );
         return;
       }
     }

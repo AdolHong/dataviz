@@ -109,14 +109,16 @@ export const adjustColumns = (layout: Layout, newColumns: number): Layout => {
 
 // 添加新项目
 export const addItem = (layout: Layout, id: string, title: string) => {
-  // 新item, 默认新增一行
+  const isEmptyLayout = layout.items.length === 0;
+
+  // 新item, 默认新增一行:  若空，则填充
   const newItem: LayoutItem = {
     id: id,
     title: title,
     width: layout.columns,
     height: 1,
     x: 0,
-    y: layout.rows,
+    y: isEmptyLayout ? 0 : layout.rows,
   };
 
   return {

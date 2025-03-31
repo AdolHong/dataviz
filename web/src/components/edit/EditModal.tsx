@@ -367,7 +367,9 @@ const EditModal = ({ open, onClose, report, handleSave }: EditModalProps) => {
                   layout
                 );
               }}
-            ></Button>
+            >
+              保存
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

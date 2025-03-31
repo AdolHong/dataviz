@@ -121,18 +121,13 @@ class Artifact(BaseModel):
     executor_engine: str
     plainParams: Optional[List[Union[SinglePlainParam, MultiplePlainParam]]] = None
     cascaderParams: Optional[List[CascaderParam]] = None
-    type: str
-    config: Optional[Dict[str, Any]] = None
 
 # Layout 相关模型
 class LayoutItem(BaseModel):
     id: str
+    title: Optional[str] = None
     x: int = 0
     y: int = 0
-    w: int = 1
-    h: int = 1
-    artifactId: Optional[str] = None
-    title: Optional[str] = None
     width: Optional[int] = None
     height: Optional[int] = None
 

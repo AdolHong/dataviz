@@ -53,8 +53,9 @@ export const removeEmptyRowsAndColumns = (layout: Layout): Layout => {
     }
   });
 
-  const newRows = Math.max(...nonEmptyRows) + 1;
-  const newColumns = Math.max(...nonEmptyColumns) + 1;
+  // 不允许删除到为空行
+  const newRows = Math.max(Math.max(...nonEmptyRows) + 1, 1);
+  const newColumns = Math.max(Math.max(...nonEmptyColumns) + 1, 1);
 
   // 返回新的布局对象
   return {
@@ -123,7 +124,7 @@ export const addItem = (layout: Layout, id: string, title: string) => {
 
   return {
     ...layout,
-    rows: layout.rows + 1,
+    rows: isEmptyLayout ? 1 : layout.rows + 1,
     items: [...layout.items, newItem],
   };
 };

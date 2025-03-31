@@ -5,7 +5,7 @@ from datetime import datetime
 
 from models.fs_models import FileSystemItem, FileSystemItemType
 from models.report_models import Report
-from utils.fs_utils import load_fs_data, save_fs_data, find_item_by_id, get_item_path
+from utils.fs_utils import load_fs_data, save_fs_data, find_item_by_id
 from utils.report_utils import get_report_content, save_report_content
 
 router = APIRouter(tags=["reports"])
@@ -22,7 +22,6 @@ def get_report(file_id: str):
 
     # 获取报表内容
     report_content = get_report_content(file_id)
-    print("report_content:", report_content)
     if not report_content:
         # 如果文件为空，初始化一个默认的报表结构
         default_report = {

@@ -1,5 +1,5 @@
 import { axiosInstance } from '@/lib/axios';
-import type { Report, ReportResponse } from '@/types';
+import type { Report } from '@/types';
 
 export const reportApi = {
   // 根据文件ID获取报表配置

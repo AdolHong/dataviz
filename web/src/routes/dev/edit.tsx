@@ -11,13 +11,14 @@ export const Route = createFileRoute('/dev/edit')({
   component: Edit,
 });
 
-function Edit({ reportId = 'file-1743428151348' }: { reportId?: string }) {
+function Edit({ reportId = 'file-1743432164631' }: { reportId?: string }) {
   const [isModalOpen, setIsModalOpen] = useState(true);
-  const [report, setReport] = useState<Report | null>(null);
+  const [editReport, setEditReport] = useState<Report | null>(null);
 
   useEffect(() => {
     reportApi.getReportByFileId(reportId).then((report) => {
-      setReport(report as Report);
+      console.info('读的都深恶梦鬼', report);
+      setEditReport(report);
     });
   }, [reportId]);
 
@@ -47,7 +48,7 @@ function Edit({ reportId = 'file-1743428151348' }: { reportId?: string }) {
   return (
     <EditModal
       open={isModalOpen}
-      report={report}
+      report={editReport}
       handleSave={(
         title,
         description,

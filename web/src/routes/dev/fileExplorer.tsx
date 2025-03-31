@@ -6,20 +6,33 @@ export const Route = createFileRoute('/dev/fileExplorer')({
 });
 
 import { demoFileSystemData } from '@/data/demoFileSystem';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { fsApi } from '@/api/fs';
 
 function FileExplorer() {
   const [fileSystemData, setFileSystemData] = useState(demoFileSystemData);
 
-  return (
-    <FileExplorerComponent
-      fsItems={fileSystemData}
-      setFsItems={(items) => {
-        fsApi.saveFileSystemChanges(fileSystemData, items);
+  useEffect(() => {
+    fsApi.getAllItems().then((items) => {
+      setFileSystemData(items);
+    });
+  }, []);
 
-        setFileSystemData(items);
-      }}
-    />
+  useEffect(() => {
+    fsApi.getAllItems().then((items) => {
+      setFileSystemData(items);
+    });
+  }, [fileSystemData]);
+
+  return (
+    <div className='parent-container'>
+      <FileExplorerComponent
+        fsItems={fileSystemData}
+        setFsItems={(items) => {
+          fsApi.saveFileSystemChanges(fileSystemData, items);
+          setFileSystemData(items);
+        }}
+      />
+    </div>
   );
 }

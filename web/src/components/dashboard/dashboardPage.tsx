@@ -176,8 +176,8 @@ export function DashboardPage() {
           }}
         >
           <FileExplorer
-            items={fileSystemItems}
-            setItems={setFileSystemItems}
+            fsItems={fileSystemItems}
+            setFsItems={setFileSystemItems}
             onSelectItem={handleSelectItem}
             onItemDoubleClick={handleItemDoubleClick}
           />

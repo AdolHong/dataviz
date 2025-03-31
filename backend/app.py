@@ -29,8 +29,9 @@ app.add_middleware(
 DATA_DIR = "data"
 FS_DATA_FILE = os.path.join(DATA_DIR, "fs_items.json")
 
-# 确保数据目录存在
-os.makedirs(DATA_DIR, exist_ok=True)
+# 设置实际文件存储的基础路径
+FILE_STORAGE_PATH = os.path.join(DATA_DIR, "files")
+os.makedirs(FILE_STORAGE_PATH, exist_ok=True)
 
 # 文件系统项目类型
 class FileSystemItemType(str, Enum):
@@ -127,6 +128,15 @@ def get_folder_and_children_ids(items: List[FileSystemItem], folder_id: str) -> 
 def get_references_to_file(items: List[FileSystemItem], file_id: str) -> List[FileSystemItem]:
     return [item for item in items if item.type == FileSystemItemType.REFERENCE and item.referenceTo == file_id]
 
+# 获取项目的实际文件路径
+def get_item_path(item: FileSystemItem) -> str:
+    if item.type == FileSystemItemType.FOLDER:
+        return os.path.join(FILE_STORAGE_PATH, item.id)
+    elif item.type == FileSystemItemType.FILE:
+        return os.path.join(FILE_STORAGE_PATH, item.id + ".data")
+    else:
+        return ""  # 引用类型没有实际文件
+
 # API端点：获取所有文件系统项目
 @app.get("/api/fs/items", response_model=List[FileSystemItem])
 def get_fs_items():
@@ -150,6 +160,11 @@ def create_file(item: FileSystemItem):
     item.createdAt = now
     item.updatedAt = now
     
+    # 创建实际文件
+    file_path = get_item_path(item)
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write("{}")  # 创建空json文件
+    
     # 添加到列表并保存
     items.append(item)
     save_fs_data(items)
@@ -172,7 +187,7 @@ def create_folder(item: FileSystemItem):
     now = datetime.now().isoformat()
     item.createdAt = now
     item.updatedAt = now
-    
+        
     # 添加到列表并保存
     items.append(item)
     save_fs_data(items)
@@ -219,7 +234,12 @@ def delete_file(file_id: str):
     if not file_item or file_item.type != FileSystemItemType.FILE:
         raise HTTPException(status_code=404, detail="文件不存在")
     
-    # 删除文件
+    # 删除实际文件
+    file_path = get_item_path(file_item)
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    
+    # 删除文件记录
     items = [item for item in items if item.id != file_id]
     
     # 删除指向该文件的所有引用

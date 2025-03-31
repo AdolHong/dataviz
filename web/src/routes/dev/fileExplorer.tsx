@@ -14,7 +14,11 @@ function FileExplorer() {
   return (
     <FileExplorerComponent
       fsItems={fileSystemData}
-      setFsItems={setFileSystemData}
+      setFsItems={(items) => {
+        console.log('items', items);
+
+        setFileSystemData(items);
+      }}
     />
   );
 }

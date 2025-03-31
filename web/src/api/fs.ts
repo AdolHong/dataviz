@@ -2,15 +2,23 @@ import { FileSystemItemType } from '@/types/models/fileSystem';
 import type { FileSystemItem } from '@/types/models/fileSystem';
 
 enum FileSystemOperation {
+  // 创建
   CREATE_FILE = 'CREATE_FILE',
   CREATE_FOLDER = 'CREATE_FOLDER',
+  CREATE_REFERENCE = 'CREATE_REFERENCE',
+
+  // 删除
   DELETE_FILE = 'DELETE_FILE',
   DELETE_FOLDER = 'DELETE_FOLDER',
-  RENAME_FOLDER = 'RENAME_FOLDER',
-  MOVE_ITEM = 'MOVE_ITEM',
-  CREATE_REFERENCE = 'CREATE_REFERENCE',
   DELETE_REFERENCE = 'DELETE_REFERENCE',
+
+  // 重命名
+  RENAME_FOLDER = 'RENAME_FOLDER',
+  RENAME_FILE = 'RENAME_FILE',
   RENAME_REFERENCE = 'RENAME_REFERENCE',
+
+  // 移动
+  MOVE_ITEM = 'MOVE_ITEM',
 }
 
 interface FileSystemDiff {
@@ -63,6 +71,18 @@ const checkItemsDiff = (
     ) {
       diff.push({
         type: FileSystemOperation.RENAME_FOLDER,
+        item: newItem,
+        oldItem: oldItem,
+      });
+    }
+
+    // 重命名文件
+    if (
+      oldItem.type === FileSystemItemType.FILE &&
+      oldItem.name !== newItem.name
+    ) {
+      diff.push({
+        type: FileSystemOperation.RENAME_FILE,
         item: newItem,
         oldItem: oldItem,
       });

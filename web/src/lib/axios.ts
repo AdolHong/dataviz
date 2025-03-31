@@ -29,8 +29,11 @@ axiosInstance.interceptors.request.use(
 // 响应拦截器
 axiosInstance.interceptors.response.use(
   (response) => {
-    // 只记录日志，但返回完整的 response
-    return response;
+    return {
+      data: response.data,
+      status: response.status,
+      headers: response.headers,
+    };
   },
   (error) => {
     // 对响应错误做些什么

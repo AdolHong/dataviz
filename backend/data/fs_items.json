@@ -1,32 +1,12 @@
 [
   {
-    "id": "folder-1743428144742",
-    "name": "山姆云仓",
-    "type": "folder",
-    "parentId": "folder-1743432105884",
-    "createdAt": "2025-03-31T21:35:44.749548",
-    "updatedAt": "2025-03-31T22:41:49.564858",
-    "reportId": null,
-    "referenceTo": null
-  },
-  {
-    "id": "folder-1743432105884",
-    "name": "adol",
-    "type": "folder",
-    "parentId": null,
-    "createdAt": "2025-03-31T22:41:45.889838",
-    "updatedAt": "2025-03-31T22:42:40.078561",
-    "reportId": null,
-    "referenceTo": null
-  },
-  {
-    "id": "file-1743432164631",
-    "name": "T0",
+    "id": "file-1743435801735",
+    "name": "a",
     "type": "file",
-    "parentId": "folder-1743428144742",
-    "createdAt": "2025-03-31T22:42:44.637290",
-    "updatedAt": "2025-03-31T23:23:08.748284",
-    "reportId": "report-1743432164631",
+    "parentId": null,
+    "createdAt": "2025-03-31T23:43:21.741644",
+    "updatedAt": "2025-03-31T23:43:21.741644",
+    "reportId": "report-1743435801735",
     "referenceTo": null
   }
 ]

@@ -147,22 +147,37 @@ const checkItemsDiff = (
 export const fsApi = {
   // 获取所有文件系统项目
   async getAllItems(): Promise<FileSystemItem[]> {
-    return axiosInstance.get('/fs/items');
+    const response = await axiosInstance.get<{ data: FileSystemItem[] }>(
+      '/fs/items'
+    );
+    return response.data.data;
   },
 
   // 创建文件
   async createFile(item: FileSystemItem): Promise<FileSystemItem> {
-    return axiosInstance.post('/fs/operations/create-file', item);
+    const response = await axiosInstance.post(
+      '/fs/operations/create-file',
+      item
+    );
+    return response.data;
   },
 
   // 创建文件夹
   async createFolder(item: FileSystemItem): Promise<FileSystemItem> {
-    return axiosInstance.post('/fs/operations/create-folder', item);
+    const response = await axiosInstance.post(
+      '/fs/operations/create-folder',
+      item
+    );
+    return response.data;
   },
 
   // 创建引用
   async createReference(item: FileSystemItem): Promise<FileSystemItem> {
-    return axiosInstance.post('/fs/operations/create-reference', item);
+    const response = await axiosInstance.post(
+      '/fs/operations/create-reference',
+      item
+    );
+    return response.data;
   },
 
   // 删除文件
@@ -200,16 +215,26 @@ export const fsApi = {
     folderId: string,
     newName: string
   ): Promise<FileSystemItem> {
-    return axiosInstance.put(`/fs/operations/rename-folder/${folderId}`, null, {
-      params: { new_name: newName },
-    });
+    const response = await axiosInstance.put(
+      `/fs/operations/rename-folder/${folderId}`,
+      null,
+      {
+        params: { new_name: newName },
+      }
+    );
+    return response.data;
   },
 
   // 重命名文件
   async renameFile(fileId: string, newName: string): Promise<FileSystemItem> {
-    return axiosInstance.put(`/fs/operations/rename-file/${fileId}`, null, {
-      params: { new_name: newName },
-    });
+    const response = await axiosInstance.put(
+      `/fs/operations/rename-file/${fileId}`,
+      null,
+      {
+        params: { new_name: newName },
+      }
+    );
+    return response.data;
   },
 
   // 重命名引用
@@ -217,13 +242,14 @@ export const fsApi = {
     referenceId: string,
     newName: string
   ): Promise<FileSystemItem> {
-    return axiosInstance.put(
+    const response = await axiosInstance.put(
       `/fs/operations/rename-reference/${referenceId}`,
       null,
       {
         params: { new_name: newName },
       }
     );
+    return response.data;
   },
 
   // 移动项目
@@ -231,14 +257,20 @@ export const fsApi = {
     itemId: string,
     newParentId: string | null
   ): Promise<FileSystemItem> {
-    return axiosInstance.put(`/fs/operations/move-item/${itemId}`, null, {
-      params: { new_parent_id: newParentId },
-    });
+    const response = await axiosInstance.put(
+      `/fs/operations/move-item/${itemId}`,
+      null,
+      {
+        params: { new_parent_id: newParentId },
+      }
+    );
+    return response.data;
   },
 
   // 批量处理操作
   async batchOperations(operations: FileSystemDiff[]): Promise<any> {
-    return axiosInstance.post('/fs/batch', { operations });
+    const response = await axiosInstance.post('/fs/batch', { operations });
+    return response.data;
   },
 
   // 保存文件系统更改
@@ -246,15 +278,10 @@ export const fsApi = {
     oldItems: FileSystemItem[],
     newItems: FileSystemItem[]
   ): Promise<any> {
-    // 计算差异
     const differences = checkItemsDiff(oldItems, newItems);
-
-    // 如果没有差异，直接返回成功
     if (differences.length === 0) {
       return { success: true, results: [] };
     }
-
-    // 批量处理所有操作
     return this.batchOperations(differences);
   },
 };

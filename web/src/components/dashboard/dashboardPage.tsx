@@ -1,15 +1,15 @@
 import { Button } from '@/components/ui/button';
 import { useState, useEffect } from 'react';
-import { useStore } from '@/lib/store';
 import { FileExplorer } from '@/components/dashboard/FileExplorer';
-import { demoFileSystemData } from '@/data/demoFileSystem';
 import type { FileSystemItem } from '@/types/models/fileSystem';
 import type { ReportResponse } from '@/types';
 import type { Layout } from '@/types/models/layout';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Edit } from 'lucide-react';
 import { demoReportResponse } from '@/data/demoReport';
 import { cn } from '@/lib/utils';
 import { fsApi } from '@/api/fs';
+import { DashboardContent } from '@/components/dashboard/DashboardContent';
+import EditModal from '@/components/edit/EditModal';
 
 // 定义标签页类型
 interface TabItem {
@@ -30,8 +30,6 @@ export function DashboardPage() {
   const [openTabs, setOpenTabs] = useState<TabItem[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
 
-  const [layout, setLayout] = useState<Layout | null>(null);
-
   // 添加导航栏显示控制状态
   const [navbarVisible, setNavbarVisible] = useState(true);
   const [navbarWidth, setNavbarWidth] = useState(256); // 默认宽度为256px
@@ -40,9 +38,15 @@ export function DashboardPage() {
     null
   );
 
+  // 添加编辑模态框状态
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [currentEditReport, setCurrentEditReport] =
+    useState<ReportResponse | null>(null);
+
   // 初始化
   useEffect(() => {
     fsApi.getAllItems().then((items) => {
+      console;
       setFileSystemItems(items);
     });
   }, []);
@@ -147,6 +151,47 @@ export function DashboardPage() {
     // 这里可以添加API调用逻辑
   };
 
+  // 处理编辑报表
+  const handleEditReport = (report: ReportResponse) => {
+    setCurrentEditReport(report);
+    setIsEditModalOpen(true);
+  };
+
+  // 处理保存报表
+  const handleSaveReport = (
+    title: string,
+    description: string,
+    parameters: any[],
+    artifacts: any[],
+    dataSources: any[],
+    layout: Layout
+  ) => {
+    // 这里可以添加保存报表的逻辑
+    console.log('保存报表', {
+      title,
+      description,
+      parameters,
+      artifacts,
+      dataSources,
+      layout,
+    });
+    setIsEditModalOpen(false);
+
+    // 更新当前报表数据
+    if (dashboardData) {
+      setDashboardData({
+        ...dashboardData,
+        title,
+        description,
+        parameters,
+        artifacts,
+        dataSources,
+        layout,
+      });
+      setLayout(layout);
+    }
+  };
+
   return (
     <div className='flex flex-col h-screen relative'>
       {/* 顶部Header */}
@@ -238,7 +283,7 @@ export function DashboardPage() {
           {/* 标签内容区 */}
           <div className='flex-1 overflow-auto'>
             {openTabs.length > 0 && activeTabId ? (
-              <div className='h-full p-6'>
+              <div className='h-full'>
                 {/* 为每个报表渲染内容组件 */}
                 {openTabs.map((tab) => (
                   <div
@@ -248,62 +293,32 @@ export function DashboardPage() {
                       tab.id === activeTabId ? 'block' : 'hidden'
                     )}
                   >
-                    {/* 展示报表内容 */}
-                    <div>
-                      <div className='space-y-2'>
-                        <h1 className='text-2xl font-semibold'>
-                          {demoReportResponse.title}
-                        </h1>
-                        <p className='text-muted-foreground'>
-                          {demoReportResponse.description || ''}
-                        </p>
-                      </div>
+                    {/* 添加编辑按钮 */}
+                    <div className='absolute top-4 right-4 z-10'>
+                      <Button
+                        variant='outline'
+                        size='icon'
+                        onClick={() => handleEditReport(demoReportResponse)}
+                      >
+                        <Edit className='h-4 w-4' />
+                      </Button>
                     </div>
 
-                    {/* 参数区域 */}
-                    <div className='space-y-6 mt-6'>
-                      {/* 这里应该渲染ParameterQueryArea */}
-                      <div className='p-4 border rounded-md'>
-                        <h2 className='font-medium mb-2'>查询参数</h2>
-                        <div className='grid grid-cols-3 gap-4'>
-                          {demoReportResponse.parameters.map((param) => (
-                            <div key={param.id} className='space-y-1'>
-                              <label className='text-sm font-medium'>
-                                {param.alias || param.name}
-                              </label>
-                              <div className='h-9 px-3 py-1 rounded-md border bg-muted/40'>
-                                {param.config.default?.toString() || '默认值'}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                        <div className='flex justify-end mt-4'>
-                          <Button onClick={() => handleQuerySubmit({})}>
-                            查询
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 展示区域 */}
-                    <div className='space-y-4 mt-6'>
-                      <div className='flex items-center justify-between'>
-                        <h2 className='text-lg font-medium'>数据可视化</h2>
-                      </div>
-                      <div className='grid grid-cols-3 gap-4'>
-                        {demoReportResponse.layout.items.map((item) => (
-                          <div
-                            key={item.id}
-                            className='border rounded-md shadow-sm p-4 h-64'
-                          >
-                            <h3 className='font-medium mb-2'>{item.title}</h3>
-                            <div className='h-full flex items-center justify-center bg-muted/20 rounded'>
-                              图表内容
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                    {/* 使用 DashboardContent 组件替换原有内容 */}
+                    <DashboardContent
+                      title={demoReportResponse.title}
+                      description={demoReportResponse.description || ''}
+                      parameters={demoReportResponse.parameters || []}
+                      dataSources={demoReportResponse.dataSources || []}
+                      layout={
+                        demoReportResponse.layout || {
+                          items: [],
+                          columns: 1,
+                          rows: 1,
+                        }
+                      }
+                      handleQuerySubmit={handleQuerySubmit}
+                    />
                   </div>
                 ))}
               </div>
@@ -315,6 +330,16 @@ export function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* 添加 EditModal 组件 */}
+      {currentEditReport && (
+        <EditModal
+          open={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          report={currentEditReport}
+          handleSave={handleSaveReport}
+        />
+      )}
     </div>
   );
 }

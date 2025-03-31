@@ -9,10 +9,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
-import { Filter, Database, BarChart2, Info } from 'lucide-react';
+import { Filter, Database, BarChart2, Info, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
 
-import type { DataSource, Layout, Parameter, Artifact } from '@/types';
+import type { DataSource, Layout, Parameter, Artifact, Report } from '@/types';
 
 import TabDataSource from './TabDataSource';
 import TabFilter from './TabFilter';
@@ -38,19 +38,7 @@ import {
 interface EditModalProps {
   open: boolean;
   onClose: () => void;
-  reportId: string;
-  title: string;
-  setTitle: (title: string) => void;
-  description: string;
-  setDescription: (description: string) => void;
-  dataSources: DataSource[];
-  setDataSources: (dataSources: DataSource[]) => void;
-  parameters: Parameter[];
-  setParameters: (parameters: Parameter[]) => void;
-  artifacts: Artifact[];
-  setArtifacts: (artifacts: Artifact[]) => void;
-  layout: Layout;
-  setLayout: (layout: Layout) => void;
+  report: Report | null;
   handleSave: (
     title: string,
     description: string,
@@ -67,34 +55,27 @@ import {
   demoArtifactEngineChoices,
 } from '@/data/demoEngine';
 
-const EditModal = ({
-  open,
-  onClose,
-  reportId,
-  title,
-  setTitle,
-  description,
-  setDescription,
-  dataSources,
-  setDataSources,
-  parameters,
-  setParameters,
-  artifacts,
-  setArtifacts,
-  layout,
-  setLayout,
-  handleSave,
-}: EditModalProps) => {
-  // // report的参数
-  // const [dataSources, setDataSources] = useState<DataSource[]>(
-  //   demoReport.dataSources
-  // );
-  // const [parameters, setParameters] = useState<Parameter[]>(
-  //   demoReport.parameters
-  // );
-  // const [artifacts, setArtifacts] = useState<Artifact[]>(demoReport.artifacts);
-  // const [layout, setLayout] = useState<Layout>(demoReport.layout);
+const EditModal = ({ open, onClose, report, handleSave }: EditModalProps) => {
   const [activeTab, setActiveTab] = useState('info');
+  const [isSaving, setIsSaving] = useState(false);
+  const [title, setTitle] = useState(report?.title || '');
+  const [description, setDescription] = useState(report?.description || '');
+  const [dataSources, setDataSources] = useState<DataSource[]>(
+    report?.dataSources || []
+  );
+  const [parameters, setParameters] = useState<Parameter[]>(
+    report?.parameters || []
+  );
+  const [artifacts, setArtifacts] = useState<Artifact[]>(
+    report?.artifacts || []
+  );
+  const [layout, setLayout] = useState<Layout>(
+    report?.layout || {
+      items: [],
+      columns: 1,
+      rows: 1,
+    }
+  );
 
   // 创建一个对象来存储 alias 和对应的 artifact.id 列表
   const [aliasRelianceMap, setAliasRelianceMap] = useState<AliasRelianceMap>(
@@ -108,21 +89,10 @@ const EditModal = ({
   );
   const [deleteMessage, setDeleteMessage] = useState<string>('');
 
-  // todo: 发起api， 保存报表
-  useEffect(() => {
-    handleSave(title, description, parameters, artifacts, dataSources, layout);
-    toast.success(`[DEBUG]你保存了报表"${reportId}"`);
-  }, [
-    title,
-    description,
-    layout,
-    dataSources,
-    parameters,
-    artifacts,
-    aliasRelianceMap,
-    title,
-    description,
-  ]);
+  // 取消编辑
+  const onCancelEdit = () => {
+    onClose();
+  };
 
   // 添加图表Artifact: 修改artifacts, layouts
   const handleAddArtifact = (newArtifact: Artifact) => {
@@ -378,6 +348,33 @@ const EditModal = ({
               />
             </div>
           </Tabs>
+
+          {/* 添加保存和取消按钮 */}
+          <DialogFooter>
+            <Button
+              variant='outline'
+              onClick={onCancelEdit}
+              disabled={isSaving}
+              className='mr-2'
+            >
+              取消
+            </Button>
+            <Button
+              onClick={() => {
+                handleSave(
+                  title,
+                  description,
+                  parameters,
+                  artifacts,
+                  dataSources,
+                  layout
+                );
+              }}
+              disabled={isSaving}
+            >
+              {isSaving ? '保存中...' : '保存'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

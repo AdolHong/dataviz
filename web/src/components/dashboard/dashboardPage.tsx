@@ -7,9 +7,7 @@ import type { FileSystemItem } from '@/types/models/fileSystem';
 import type { ReportResponse } from '@/types';
 import type { Layout } from '@/types/models/layout';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
-import { DashboardContent } from '@/components/dashboard/DashboardContent';
 import { demoReportResponse } from '@/data/demoReport';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 
 // 定义标签页类型
@@ -123,9 +121,9 @@ export function DashboardPage() {
   // 处理选择文件系统项目
   const handleSelectItem = (item: FileSystemItem) => {
     setSelectedItem(item);
-    // 如果选择的是文件，将其报表ID设置到store中（保留原功能）
+    // 如果选择的是文件，将其报表ID保存到状态中
     if (item.type === 'file') {
-      setDashboardId(item.reportId);
+      setDashboardData(demoReportResponse); // 使用演示数据
     }
   };
 
@@ -236,7 +234,8 @@ export function DashboardPage() {
           {/* 标签内容区 */}
           <div className='flex-1 overflow-auto'>
             {openTabs.length > 0 && activeTabId ? (
-              <div className='h-full'>
+              <div className='h-full p-6'>
+                {/* 为每个报表渲染一个DashboardContent组件 */}
                 {openTabs.map((tab) => (
                   <div
                     key={tab.id}
@@ -245,14 +244,62 @@ export function DashboardPage() {
                       tab.id === activeTabId ? 'block' : 'hidden'
                     )}
                   >
-                    <DashboardContent
-                      title={demoReportResponse.title}
-                      description={demoReportResponse?.description || ''}
-                      parameters={demoReportResponse?.parameters || []}
-                      dataSources={demoReportResponse?.dataSources || []}
-                      layout={demoReportResponse?.layout || []}
-                      handleQuerySubmit={handleQuerySubmit}
-                    />
+                    {/* 展示报表内容 */}
+                    <div>
+                      <div className='space-y-2'>
+                        <h1 className='text-2xl font-semibold'>
+                          {demoReportResponse.title}
+                        </h1>
+                        <p className='text-muted-foreground'>
+                          {demoReportResponse.description || ''}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* 参数区域 */}
+                    <div className='space-y-6 mt-6'>
+                      {/* 这里应该渲染ParameterQueryArea */}
+                      <div className='p-4 border rounded-md'>
+                        <h2 className='font-medium mb-2'>查询参数</h2>
+                        <div className='grid grid-cols-3 gap-4'>
+                          {demoReportResponse.parameters.map((param) => (
+                            <div key={param.id} className='space-y-1'>
+                              <label className='text-sm font-medium'>
+                                {param.alias || param.name}
+                              </label>
+                              <div className='h-9 px-3 py-1 rounded-md border bg-muted/40'>
+                                {param.config.default?.toString() || '默认值'}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className='flex justify-end mt-4'>
+                          <Button onClick={() => handleQuerySubmit({})}>
+                            查询
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 展示区域 */}
+                    <div className='space-y-4 mt-6'>
+                      <div className='flex items-center justify-between'>
+                        <h2 className='text-lg font-medium'>数据可视化</h2>
+                      </div>
+                      <div className='grid grid-cols-3 gap-4'>
+                        {demoReportResponse.layout.items.map((item) => (
+                          <div
+                            key={item.id}
+                            className='border rounded-md shadow-sm p-4 h-64'
+                          >
+                            <h3 className='font-medium mb-2'>{item.title}</h3>
+                            <div className='h-full flex items-center justify-center bg-muted/20 rounded'>
+                              图表内容
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>

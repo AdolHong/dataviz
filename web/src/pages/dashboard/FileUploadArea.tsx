@@ -182,18 +182,6 @@ export function FileUploadArea({
                         <Button
                           variant='ghost'
                           size='icon'
-                          className='h-7 w-7'
-                          title='重新上传'
-                          onClick={(e) => {
-                            e.preventDefault();
-                            fileInputRefs.current[source.id]?.click();
-                          }}
-                        >
-                          <RefreshCw size={14} />
-                        </Button>
-                        <Button
-                          variant='ghost'
-                          size='icon'
                           className='h-7 w-7 text-destructive'
                           title='删除'
                           onClick={(e) => {

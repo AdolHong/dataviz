@@ -16,7 +16,6 @@ axiosInstance.interceptors.request.use(
     // 可以在这里添加 token
     const token = localStorage.getItem('token');
 
-    
     if (token) {
       config.headers['Authorization'] = `Bearer ${token}`;
     }
@@ -30,8 +29,8 @@ axiosInstance.interceptors.request.use(
 // 响应拦截器
 axiosInstance.interceptors.response.use(
   (response) => {
-    // 对响应数据做些什么
-    return response.data;
+    // 只记录日志，但返回完整的 response
+    return response;
   },
   (error) => {
     // 对响应错误做些什么

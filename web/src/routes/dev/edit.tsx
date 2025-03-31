@@ -6,6 +6,7 @@ import type { Layout } from '@/types';
 import type { Artifact } from '@/types';
 import type { Parameter } from '@/types';
 import type { DataSource } from '@/types';
+import type { Report } from '@/types';
 
 export const Route = createFileRoute('/dev/edit')({
   component: Edit,
@@ -13,7 +14,7 @@ export const Route = createFileRoute('/dev/edit')({
 
 function Edit({ reportId = 'file-1743432164631' }: { reportId?: string }) {
   const [isModalOpen, setIsModalOpen] = useState(true);
-  const [editReport, setEditReport] = useState<Report | null>(null);
+  const [editReport, setEditReport] = useState<Report>();
 
   useEffect(() => {
     reportApi.getReportByFileId(reportId).then((report) => {
@@ -48,7 +49,7 @@ function Edit({ reportId = 'file-1743432164631' }: { reportId?: string }) {
   return (
     <EditModal
       open={isModalOpen}
-      report={editReport}
+      report={editReport as Report}
       handleSave={(
         title,
         description,

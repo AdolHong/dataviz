@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
-import { Filter, Database, BarChart2, Info, Save, X } from 'lucide-react';
+import { Filter, Database, BarChart2, Info } from 'lucide-react';
 import { toast } from 'sonner';
 
 import type { DataSource, Layout, Parameter, Artifact, Report } from '@/types';
@@ -38,7 +38,7 @@ import {
 interface EditModalProps {
   open: boolean;
   onClose: () => void;
-  report: Report | null;
+  report: Report;
   handleSave: (
     title: string,
     description: string,
@@ -57,25 +57,27 @@ import {
 
 const EditModal = ({ open, onClose, report, handleSave }: EditModalProps) => {
   const [activeTab, setActiveTab] = useState('info');
-  const [isSaving, setIsSaving] = useState(false);
-  const [title, setTitle] = useState(report?.title || '');
-  const [description, setDescription] = useState(report?.description || '');
-  const [dataSources, setDataSources] = useState<DataSource[]>(
-    report?.dataSources || []
-  );
-  const [parameters, setParameters] = useState<Parameter[]>(
-    report?.parameters || []
-  );
-  const [artifacts, setArtifacts] = useState<Artifact[]>(
-    report?.artifacts || []
-  );
-  const [layout, setLayout] = useState<Layout>(
-    report?.layout || {
-      items: [],
-      columns: 1,
-      rows: 1,
+  const [title, setTitle] = useState<string>('');
+  const [description, setDescription] = useState<string>('');
+  const [dataSources, setDataSources] = useState<DataSource[]>([]);
+  const [parameters, setParameters] = useState<Parameter[]>([]);
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [layout, setLayout] = useState<Layout>({
+    items: [],
+    columns: 1,
+    rows: 1,
+  });
+
+  useEffect(() => {
+    if (report) {
+      setTitle(report?.title || '');
+      setDescription(report?.description || '');
+      setDataSources(report?.dataSources || []);
+      setParameters(report?.parameters || []);
+      setArtifacts(report?.artifacts || []);
+      setLayout(report?.layout || { items: [], columns: 1, rows: 1 });
     }
-  );
+  }, [report]);
 
   // 创建一个对象来存储 alias 和对应的 artifact.id 列表
   const [aliasRelianceMap, setAliasRelianceMap] = useState<AliasRelianceMap>(
@@ -351,12 +353,7 @@ const EditModal = ({ open, onClose, report, handleSave }: EditModalProps) => {
 
           {/* 添加保存和取消按钮 */}
           <DialogFooter>
-            <Button
-              variant='outline'
-              onClick={onCancelEdit}
-              disabled={isSaving}
-              className='mr-2'
-            >
+            <Button variant='outline' onClick={onCancelEdit} className='mr-2'>
               取消
             </Button>
             <Button
@@ -370,10 +367,7 @@ const EditModal = ({ open, onClose, report, handleSave }: EditModalProps) => {
                   layout
                 );
               }}
-              disabled={isSaving}
-            >
-              {isSaving ? '保存中...' : '保存'}
-            </Button>
+            ></Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

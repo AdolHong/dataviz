@@ -16,7 +16,7 @@ function FileExplorer() {
   // 初始化加载文件系统项目
   useEffect(() => {
     const loadItems = async () => {
-      const { data } = await fsApi.getAllItems();
+      const data = await fsApi.getAllItems();
 
       setFileSystemItems(data);
     };

@@ -1,12 +1,42 @@
 [
   {
-    "id": "file-1743435801735",
+    "id": "folder-1743435931036",
     "name": "a",
-    "type": "file",
+    "type": "folder",
     "parentId": null,
-    "createdAt": "2025-03-31T23:43:21.741644",
-    "updatedAt": "2025-03-31T23:43:21.741644",
-    "reportId": "report-1743435801735",
+    "createdAt": "2025-03-31T23:45:31.044062",
+    "updatedAt": "2025-03-31T23:45:31.044062",
+    "reportId": null,
     "referenceTo": null
+  },
+  {
+    "id": "folder-1743435936634",
+    "name": "v",
+    "type": "folder",
+    "parentId": "folder-1743435931036",
+    "createdAt": "2025-03-31T23:45:36.640927",
+    "updatedAt": "2025-03-31T23:45:36.640927",
+    "reportId": null,
+    "referenceTo": null
+  },
+  {
+    "id": "file-1743435959381",
+    "name": "b",
+    "type": "file",
+    "parentId": "folder-1743435936634",
+    "createdAt": "2025-03-31T23:45:59.390225",
+    "updatedAt": "2025-03-31T23:45:59.390225",
+    "reportId": "report-1743435959381",
+    "referenceTo": null
+  },
+  {
+    "id": "ref-1743435963864",
+    "name": "b 的引用",
+    "type": "reference",
+    "parentId": "folder-1743435936634",
+    "createdAt": "2025-03-31T23:46:03.878155",
+    "updatedAt": "2025-03-31T23:46:03.878155",
+    "reportId": null,
+    "referenceTo": "file-1743435959381"
   }
 ]

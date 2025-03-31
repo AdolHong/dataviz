@@ -150,7 +150,8 @@ export const fsApi = {
     const response = await axiosInstance.get<{ data: FileSystemItem[] }>(
       '/fs/items'
     );
-    return response.data.data;
+
+    return response.data;
   },
 
   // 创建文件

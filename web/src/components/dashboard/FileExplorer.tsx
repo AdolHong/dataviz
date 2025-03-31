@@ -52,12 +52,14 @@ interface FileExplorerProps {
   items: FileSystemItem[];
   onItemsChange: (items: FileSystemItem[]) => void;
   onSelectItem?: (item: FileSystemItem) => void;
+  onItemDoubleClick?: (item: FileSystemItem) => void;
 }
 
 export function FileExplorer({
   items,
   onItemsChange,
   onSelectItem,
+  onItemDoubleClick,
 }: FileExplorerProps) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
     new Set()
@@ -440,6 +442,7 @@ export function FileExplorer({
                     : 'hover:bg-secondary/50'
               )}
               onClick={() => handleItemClick(item)}
+              onDoubleClick={() => onItemDoubleClick && onItemDoubleClick(item)}
               draggable
               onDragStart={(e) => handleDragStart(e, item)}
               onDragEnd={handleDragEnd}

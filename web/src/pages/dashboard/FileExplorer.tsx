@@ -90,6 +90,9 @@ export function FileExplorer({
     null
   );
 
+  // 在组件内添加一个新的 state 用于存储引用路径
+  const [referencePaths, setReferencePaths] = useState<string[]>([]);
+
   // 展开/折叠文件夹
   const toggleFolder = (folderId: string) => {
     const newExpandedFolders = new Set(expandedFolders);
@@ -133,6 +136,41 @@ export function FileExplorer({
   // 打开删除确认对话框
   const openDeleteDialog = (item: FileSystemItem) => {
     setSelectedItem(item);
+
+    // 如果是文件，检查引用并获取引用路径
+    if (item.type === FileSystemItemType.FILE) {
+      const references = items.filter(
+        (ref) =>
+          ref.type === FileSystemItemType.REFERENCE &&
+          (ref as any).referenceTo === item.id
+      );
+
+      if (references.length > 0) {
+        // 收集每个引用的路径
+        const paths = references.map((ref) => {
+          // 获取引用所在的文件夹路径
+          let path = ref.name;
+          let currentId = ref.parentId;
+
+          while (currentId) {
+            const parent = items.find((item) => item.id === currentId);
+            if (!parent) break;
+
+            path = `${parent.name}/${path}`;
+            currentId = parent.parentId;
+          }
+
+          return path;
+        });
+
+        setReferencePaths(paths);
+      } else {
+        setReferencePaths([]);
+      }
+    } else {
+      setReferencePaths([]);
+    }
+
     setIsDeleteDialogOpen(true);
   };
 
@@ -651,9 +689,32 @@ export function FileExplorer({
           <DialogHeader>
             <DialogTitle>确认删除</DialogTitle>
             <DialogDescription>
-              {selectedItem?.type === FileSystemItemType.FOLDER
-                ? '删除文件夹将同时删除其中的所有内容，此操作不可撤销。'
-                : '确定要删除此文件吗？此操作不可撤销。'}
+              {selectedItem?.type === FileSystemItemType.FOLDER ? (
+                '删除文件夹将同时删除其中的所有内容，此操作不可撤销。'
+              ) : selectedItem?.type === FileSystemItemType.FILE &&
+                referencePaths.length > 0 ? (
+                <div className='space-y-2'>
+                  <p>
+                    此文件有 {referencePaths.length}{' '}
+                    个引用，删除后这些引用将失效：
+                  </p>
+                  <div className='bg-muted p-2 rounded-md text-xs max-h-32 overflow-y-auto'>
+                    {referencePaths.map((path, index) => (
+                      <div
+                        key={index}
+                        className='pb-1 border-b border-border/50 last:border-0 last:pb-0 mb-1 last:mb-0'
+                      >
+                        {path}
+                      </div>
+                    ))}
+                  </div>
+                  <p className='text-destructive'>
+                    确定要删除此文件吗？此操作不可撤销。
+                  </p>
+                </div>
+              ) : (
+                '确定要删除此文件吗？此操作不可撤销。'
+              )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -663,7 +724,9 @@ export function FileExplorer({
             >
               取消
             </Button>
-            <Button onClick={handleDeleteItem}>删除</Button>
+            <Button variant='destructive' onClick={handleDeleteItem}>
+              删除
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

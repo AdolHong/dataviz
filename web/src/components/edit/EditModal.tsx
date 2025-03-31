@@ -39,6 +39,15 @@ interface EditModalProps {
   open: boolean;
   onClose: () => void;
   reportId: string;
+  dataSources: DataSource[];
+  setDataSources: (dataSources: DataSource[]) => void;
+  parameters: Parameter[];
+  setParameters: (parameters: Parameter[]) => void;
+  artifacts: Artifact[];
+  setArtifacts: (artifacts: Artifact[]) => void;
+  layout: Layout;
+  setLayout: (layout: Layout) => void;
+  handleSave: () => void;
 }
 
 import { demoReportResponse as demoReport } from '@/data/demoReport';
@@ -47,16 +56,29 @@ import {
   demoArtifactEngineChoices,
 } from '@/data/demoEngine';
 
-const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
-  // report的参数
-  const [dataSources, setDataSources] = useState<DataSource[]>(
-    demoReport.dataSources
-  );
-  const [parameters, setParameters] = useState<Parameter[]>(
-    demoReport.parameters
-  );
-  const [artifacts, setArtifacts] = useState<Artifact[]>(demoReport.artifacts);
-  const [layout, setLayout] = useState<Layout>(demoReport.layout);
+const EditModal = ({
+  open,
+  onClose,
+  reportId,
+  dataSources,
+  setDataSources,
+  parameters,
+  setParameters,
+  artifacts,
+  setArtifacts,
+  layout,
+  setLayout,
+  handleSave,
+}: EditModalProps) => {
+  // // report的参数
+  // const [dataSources, setDataSources] = useState<DataSource[]>(
+  //   demoReport.dataSources
+  // );
+  // const [parameters, setParameters] = useState<Parameter[]>(
+  //   demoReport.parameters
+  // );
+  // const [artifacts, setArtifacts] = useState<Artifact[]>(demoReport.artifacts);
+  // const [layout, setLayout] = useState<Layout>(demoReport.layout);
   const [activeTab, setActiveTab] = useState('info');
 
   // 创建一个对象来存储 alias 和对应的 artifact.id 列表
@@ -77,14 +99,7 @@ const EditModal = ({ open, onClose, reportId }: EditModalProps) => {
 
   // todo: 发起api， 保存报表
   useEffect(() => {
-    console.log('正在保存 demoReport');
-    console.log('layout', layout);
-    console.log('dataSources', dataSources);
-    console.log('parameters', parameters);
-    console.log('artifacts', artifacts);
-    console.log('aliasRelianceMap', aliasRelianceMap);
-    console.log('title', title);
-    console.log('description', description);
+    handleSave();
     toast.success(`[DEBUG]你保存了报表"${reportId}"`);
   }, [
     layout,

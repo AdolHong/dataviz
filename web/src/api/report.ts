@@ -1,21 +1,42 @@
-import { axiosInstance } from "@/lib/axios";
-import type { ReportResponse } from "@/types";
+import { axiosInstance } from '@/lib/axios';
+import type { Report, ReportResponse } from '@/types';
 
 export const reportApi = {
-  async getReportConfig(reportId: string): Promise<ReportResponse> {
-    return axiosInstance.get(`/report/${reportId}`);
+  // 根据文件ID获取报表配置
+  async getReportByFileId(fileId: string): Promise<Report> {
+    const { data } = await axiosInstance.get(`/report/${fileId}`);
+    return data;
   },
 
-  async updateReportConfig(config: ReportResponse): Promise<ReportResponse> {
-    return axiosInstance.post("/update_config", { config });
+  // 更新报表配置
+  async updateReport(fileId: string, report: Report): Promise<Report> {
+    const { data } = await axiosInstance.post(`/report/${fileId}`, report);
+    return data;
   },
 
-  // 可以添加更多仪表板相关的 API 方法
-  async listReports() {
-    return axiosInstance.get("/reports");
+  // 获取所有报表列表
+  async listReports(): Promise<
+    Array<{
+      id: string;
+      title: string;
+      description: string;
+      updatedAt: string;
+      createdAt: string;
+    }>
+  > {
+    const { data } = await axiosInstance.get('/reports');
+    return data;
   },
 
-  async createReport(reportData: Partial<ReportResponse>) {
-    return axiosInstance.post("/report", reportData);
+  // 创建新报表
+  async createReport(
+    report: Partial<Report>,
+    parentId?: string
+  ): Promise<Report> {
+    const params = parentId ? { parent_id: parentId } : {};
+    const { data } = await axiosInstance.post('/reports', report, {
+      params,
+    });
+    return data;
   },
 };

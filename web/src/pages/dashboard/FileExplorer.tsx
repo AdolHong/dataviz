@@ -66,6 +66,7 @@ export function FileExplorer({
   const [isNewItemDialogOpen, setIsNewItemDialogOpen] = useState(false);
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isDuplicateDialogOpen, setIsDuplicateDialogOpen] = useState(false);
 
   // 新建和编辑表单状态
   const [newItemName, setNewItemName] = useState('');
@@ -74,6 +75,10 @@ export function FileExplorer({
     FileSystemItemType.FOLDER
   );
   const [selectedItem, setSelectedItem] = useState<FileSystemItem | null>(null);
+  const [duplicateItemName, setDuplicateItemName] = useState('');
+  const [itemToDuplicate, setItemToDuplicate] = useState<FileSystemItem | null>(
+    null
+  );
 
   // 展开/折叠文件夹
   const toggleFolder = (folderId: string) => {
@@ -121,6 +126,13 @@ export function FileExplorer({
     setIsDeleteDialogOpen(true);
   };
 
+  // 打开复制对话框
+  const openDuplicateDialog = (item: FileSystemItem) => {
+    setItemToDuplicate(item);
+    setDuplicateItemName(`${item.name} - 副本`); // 默认新文件名
+    setIsDuplicateDialogOpen(true);
+  };
+
   // 创建新项目
   const handleCreateItem = () => {
     if (newItemName.trim() === '') return;
@@ -164,6 +176,21 @@ export function FileExplorer({
     const updatedItems = deleteItem(items, selectedItem.id);
     onItemsChange(updatedItems);
     setIsDeleteDialogOpen(false);
+  };
+
+  // 处理复制文件
+  const handleDuplicateItem = () => {
+    if (!itemToDuplicate || duplicateItemName.trim() === '') return;
+
+    const updatedItems = createFile(
+      items,
+      duplicateItemName,
+      itemToDuplicate.reportId, // 使用原文件的 reportId
+      itemToDuplicate.parentId // 使用原文件的父级 ID
+    );
+
+    onItemsChange(updatedItems);
+    setIsDuplicateDialogOpen(false);
   };
 
   // 拖拽开始
@@ -330,6 +357,10 @@ export function FileExplorer({
               <Trash className='mr-2 h-4 w-4' />
               <span>删除</span>
             </ContextMenuItem>
+            <ContextMenuItem onClick={() => openDuplicateDialog(item)}>
+              <File className='mr-2 h-4 w-4' />
+              <span>复制文件</span>
+            </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>
 
@@ -470,6 +501,34 @@ export function FileExplorer({
               取消
             </Button>
             <Button onClick={handleDeleteItem}>删除</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 复制文件对话框 */}
+      <Dialog
+        open={isDuplicateDialogOpen}
+        onOpenChange={setIsDuplicateDialogOpen}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>复制文件</DialogTitle>
+            <DialogDescription>请输入新文件名</DialogDescription>
+          </DialogHeader>
+          <Input
+            value={duplicateItemName}
+            onChange={(e) => setDuplicateItemName(e.target.value)}
+            placeholder='新文件名'
+            autoFocus
+          />
+          <DialogFooter>
+            <Button
+              variant='outline'
+              onClick={() => setIsDuplicateDialogOpen(false)}
+            >
+              取消
+            </Button>
+            <Button onClick={handleDuplicateItem}>确定</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

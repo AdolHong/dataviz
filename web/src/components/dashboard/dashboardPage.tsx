@@ -15,7 +15,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-
+import DashboardContent from '@/components/dashboard/DashboardContent';
 const demoReportResponse: ReportResponse = {
   id: 'report-1',
   title: '销售报表',
@@ -278,12 +278,6 @@ export function DashboardPage() {
     }
   };
 
-  // 处理图表项点击
-  const handleChartItemClick = (itemId: string) => {
-    console.log('点击了图表项:', itemId);
-    // 这里可以添加查看或编辑图表的逻辑
-  };
-
   // 修改handleQuerySubmit函数，接收文件参数为对象
   const handleQuerySubmit = (
     values: Record<string, any>,
@@ -349,53 +343,16 @@ export function DashboardPage() {
         </div>
 
         {/* 右侧内容区 */}
-        <div className='flex-1 w-0 min-w-0 overflow-auto'>
-          <div className='container max-w-full py-6 px-4 md:px-8 space-y-6'>
-            {selectedItem && selectedItem.type === 'file' && (
-              // 显示选中的报表
-              <>
-                <div>
-                  <div className='space-y-2'>
-                    <Tooltip>
-                      <TooltipTrigger>
-                        <h1 className='text-2xl font-semibold'>
-                          {demoReportResponse.title}
-                        </h1>
-                      </TooltipTrigger>
-                      {demoReportResponse.description && (
-                        <TooltipContent>
-                          <p>{demoReportResponse.description}</p>
-                        </TooltipContent>
-                      )}
-                    </Tooltip>
-                  </div>
-                </div>
-
-                {/* 参数区域 */}
-                <div className='space-y-2'>
-                  <ParameterQueryArea
-                    parameters={dashboardData?.parameters || []}
-                    dataSources={dashboardData?.dataSources || []}
-                    onSubmit={handleQuerySubmit}
-                  />
-                </div>
-
-                {/* 展示区域 */}
-                <div className='space-y-4'>
-                  <div className='flex items-center justify-between'>
-                    <h2 className='text-lg font-medium'>数据可视化</h2>
-                  </div>
-                  {layout && layout.items.length > 0 && (
-                    <LayoutGrid
-                      layout={layout}
-                      onItemClick={handleChartItemClick}
-                    />
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+        {selectedItem && selectedItem.type === 'file' && (
+          <DashboardContent
+            title={demoReportResponse.title}
+            description={demoReportResponse?.description || ''}
+            parameters={demoReportResponse?.parameters || []}
+            dataSources={demoReportResponse?.dataSources || []}
+            layout={demoReportResponse?.layout || []}
+            handleQuerySubmit={handleQuerySubmit}
+          />
+        )}
       </div>
     </div>
   );

@@ -1,11 +1,4 @@
-import React from 'react';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { type Layout, type LayoutItem } from '@/types/models/layout';
 import { cn } from '@/lib/utils';
 import { TooltipContent } from '@/components/ui/tooltip';
@@ -13,10 +6,9 @@ import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 
 interface LayoutGridProps {
   layout: Layout;
-  onItemClick?: (itemId: string) => void;
 }
 
-export function LayoutGrid({ layout, onItemClick }: LayoutGridProps) {
+export function LayoutGrid({ layout }: LayoutGridProps) {
   // 创建一个二维数组表示网格
   const grid = Array(layout.rows)
     .fill(null)
@@ -40,12 +32,7 @@ export function LayoutGrid({ layout, onItemClick }: LayoutGridProps) {
     };
 
     return (
-      <div
-        key={item.id}
-        className={cn('min-h-80 max-h-120')}
-        style={itemStyle}
-        onClick={() => onItemClick?.(item.id)}
-      >
+      <div key={item.id} className={cn('min-h-80 max-h-120')} style={itemStyle}>
         <Card className='h-full overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300'>
           <CardHeader className='h-5 flex items-center justify-between'>
             <div>

@@ -1,1 +1,32 @@
-[]
+[
+  {
+    "id": "folder-1743428113723",
+    "name": "adol",
+    "type": "folder",
+    "parentId": null,
+    "createdAt": "2025-03-31T21:35:13.729323",
+    "updatedAt": "2025-03-31T21:35:13.729323",
+    "reportId": null,
+    "referenceTo": null
+  },
+  {
+    "id": "folder-1743428144742",
+    "name": "山姆云仓",
+    "type": "folder",
+    "parentId": "folder-1743428113723",
+    "createdAt": "2025-03-31T21:35:44.749548",
+    "updatedAt": "2025-03-31T21:35:44.749548",
+    "reportId": null,
+    "referenceTo": null
+  },
+  {
+    "id": "file-1743428151348",
+    "name": "T0",
+    "type": "file",
+    "parentId": "folder-1743428144742",
+    "createdAt": "2025-03-31T21:35:51.356027",
+    "updatedAt": "2025-03-31T21:35:51.356027",
+    "reportId": "report-1743428151348",
+    "referenceTo": null
+  }
+]

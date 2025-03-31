@@ -6,7 +6,6 @@ import type { ReportResponse } from '@/types';
 import type { Layout } from '@/types/models/layout';
 import { ChevronLeft, ChevronRight, X, Edit } from 'lucide-react';
 import { demoReportResponse } from '@/data/demoReport';
-import { cn } from '@/lib/utils';
 import { fsApi } from '@/api/fs';
 import { DashboardContent } from '@/components/dashboard/DashboardContent';
 import EditModal from '@/components/edit/EditModal';
@@ -259,12 +258,11 @@ export function DashboardPage() {
               {openTabs.map((tab) => (
                 <div
                   key={tab.id}
-                  className={cn(
-                    'flex items-center px-4 py-2 cursor-pointer border-r border-border relative min-w-[150px] max-w-[200px]',
+                  className={`flex items-center px-4 py-2 cursor-pointer border-r border-border relative min-w-[150px] max-w-[200px] ${
                     tab.id === activeTabId
                       ? 'bg-background'
                       : 'bg-muted/50 hover:bg-muted'
-                  )}
+                  }`}
                   onClick={() => setActiveTabId(tab.id)}
                 >
                   <div className='truncate flex-1'>{tab.title}</div>
@@ -290,10 +288,9 @@ export function DashboardPage() {
                   <div>
                     <div
                       key={tab.id}
-                      className={cn(
-                        'h-full',
+                      className={`h-full ${
                         tab.id === activeTabId ? 'block' : 'hidden'
-                      )}
+                      }`}
                     >
                       {/* 添加编辑按钮 */}
                       <div className='absolute top-4 right-4 z-10'>

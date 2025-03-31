@@ -586,7 +586,15 @@ export function FileExplorer({
       {/* 添加根目录右键菜单 */}
       <ContextMenu>
         <ContextMenuTrigger className='flex-1 overflow-auto pr-1 min-w-0'>
-          <div className='space-y-0.5'>{renderItems(null)}</div>
+          <div className='space-y-0.5'>
+            {renderItems(null)}
+            {/* 如果没有任何项目，添加一个提示 */}
+            {fsItems.length === 0 && (
+              <div className='text-center text-muted-foreground py-4'>
+                右键添加文件或文件夹
+              </div>
+            )}
+          </div>
         </ContextMenuTrigger>
         <ContextMenuContent className='w-56'>
           <ContextMenuItem

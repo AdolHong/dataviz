@@ -5,41 +5,40 @@ export const Route = createFileRoute('/dev/fileExplorer')({
   component: FileExplorer,
 });
 
-import { demoFileSystemData } from '@/data/demoFileSystem';
 import { useEffect, useState } from 'react';
 import { fsApi } from '@/api/fs';
 import type { FileSystemItem } from '@/types/models/fileSystem';
 
 function FileExplorer() {
   const [fileSystemItems, setFileSystemItems] = useState<FileSystemItem[]>([]);
+  const [isReloadFileSystem, setIsReloadFileSystem] = useState(false);
 
-  // 是否用demo数据进行展示
-  const isDemo = false;
-
+  // 初始化加载文件系统项目
   useEffect(() => {
-    if (isDemo) {
-      setFileSystemItems(demoFileSystemData);
-    } else {
-      fsApi.getAllItems().then((items) => {
-        setFileSystemItems(items);
-      });
-    }
+    const loadItems = async () => {
+      const items = await fsApi.getAllItems();
+      setFileSystemItems(items);
+    };
+    loadItems();
   }, []);
 
+  // 监听 isReloadFileSystem 状态，重新加载文件系统项目
   useEffect(() => {
-    if (!isDemo) {
+    if (isReloadFileSystem) {
       fsApi.getAllItems().then((items) => {
         setFileSystemItems(items);
+        setIsReloadFileSystem(false); // 重置状态
       });
     }
-  }, [fileSystemItems]);
+  }, [isReloadFileSystem]);
 
   return (
     <FileExplorerComponent
       fsItems={fileSystemItems}
       setFsItems={(items) => {
-        fsApi.saveFileSystemChanges(fileSystemItems, items);
-        setFileSystemItems(items);
+        fsApi.saveFileSystemChanges(fileSystemItems, items).then(() => {
+          setIsReloadFileSystem(true);
+        });
       }}
     />
   );

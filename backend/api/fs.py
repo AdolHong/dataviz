@@ -1,29 +1,19 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional, Union, Dict, Any
-from enum import Enum
+# backend/api/fs.py
 import os
 import json
-import shutil
 from datetime import datetime
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from typing import List, Optional, Dict,Any
+from pydantic import BaseModel
+from enum import Enum
+from typing import Optional, List
 import uuid
 
-app = FastAPI()
 
-# 配置 CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # React 开发服务器
-        "http://127.0.0.1:3000",
-        "https://localhost:3000",
-        "https://127.0.0.1:3000",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],  # 允许所有方法
-    allow_headers=["*"],  # 允许所有请求头
-)
+
+router = APIRouter()
+
 
 # 数据文件路径
 DATA_DIR = "data"
@@ -79,6 +69,7 @@ class FileSystemDiff(BaseModel):
 # 批量操作请求模型
 class BatchOperationRequest(BaseModel):
     operations: List[FileSystemDiff]
+
 
 # 辅助函数：加载文件系统数据
 def load_fs_data() -> List[FileSystemItem]:
@@ -138,12 +129,12 @@ def get_item_path(item: FileSystemItem) -> str:
         return ""  # 引用类型没有实际文件
 
 # API端点：获取所有文件系统项目
-@app.get("/api/fs/items", response_model=List[FileSystemItem])
+@router.get("/api/fs/items", response_model=List[FileSystemItem])
 def get_fs_items():
     return load_fs_data()
 
 # API端点：创建文件
-@app.post("/api/fs/operations/create-file", response_model=FileSystemItem)
+@router.post("/api/fs/operations/create-file", response_model=FileSystemItem)
 def create_file(item: FileSystemItem):
     items = load_fs_data()
     
@@ -171,7 +162,7 @@ def create_file(item: FileSystemItem):
     return item
 
 # API端点：创建文件夹
-@app.post("/api/fs/operations/create-folder", response_model=FileSystemItem)
+@router.post("/api/fs/operations/create-folder", response_model=FileSystemItem)
 def create_folder(item: FileSystemItem):
     items = load_fs_data()
     
@@ -194,7 +185,7 @@ def create_folder(item: FileSystemItem):
     return item
 
 # API端点：创建引用
-@app.post("/api/fs/operations/create-reference", response_model=FileSystemItem)
+@router.post("/api/fs/operations/create-reference", response_model=FileSystemItem)
 def create_reference(item: FileSystemItem):
     items = load_fs_data()
     
@@ -225,7 +216,7 @@ def create_reference(item: FileSystemItem):
     return item
 
 # API端点：删除文件
-@app.delete("/api/fs/operations/delete-file/{file_id}", response_model=Dict[str, bool])
+@router.delete("/api/fs/operations/delete-file/{file_id}", response_model=Dict[str, bool])
 def delete_file(file_id: str):
     items = load_fs_data()
     
@@ -249,7 +240,7 @@ def delete_file(file_id: str):
     return {"success": True}
 
 # API端点：删除文件夹
-@app.delete("/api/fs/operations/delete-folder/{folder_id}", response_model=Dict[str, bool])
+@router.delete("/api/fs/operations/delete-folder/{folder_id}", response_model=Dict[str, bool])
 def delete_folder(folder_id: str, recursive: bool = False):
     items = load_fs_data()
     
@@ -271,11 +262,6 @@ def delete_folder(folder_id: str, recursive: bool = False):
         
         # 删除指向已删除文件的所有引用
         items = [item for item in items if item.type != FileSystemItemType.REFERENCE or item.referenceTo not in ids_to_remove]
-
-        # 实际删除文件
-        for item_id in [item_id for item_id in ids_to_remove if 'file' in item_id]:
-            delete_file(item_id)
-
     else:
         # 只删除文件夹本身
         items = [item for item in items if item.id != folder_id]
@@ -284,7 +270,7 @@ def delete_folder(folder_id: str, recursive: bool = False):
     return {"success": True}
 
 # API端点：删除引用
-@app.delete("/api/fs/operations/delete-reference/{reference_id}", response_model=Dict[str, bool])
+@router.delete("/api/fs/operations/delete-reference/{reference_id}", response_model=Dict[str, bool])
 def delete_reference(reference_id: str):
     items = load_fs_data()
     
@@ -300,7 +286,7 @@ def delete_reference(reference_id: str):
     return {"success": True}
 
 # API端点：重命名文件夹
-@app.put("/api/fs/operations/rename-folder/{folder_id}", response_model=FileSystemItem)
+@router.put("/api/fs/operations/rename-folder/{folder_id}", response_model=FileSystemItem)
 def rename_folder(folder_id: str, new_name: str):
     items = load_fs_data()
     
@@ -317,7 +303,7 @@ def rename_folder(folder_id: str, new_name: str):
     return items[folder_idx]
 
 # API端点：重命名文件
-@app.put("/api/fs/operations/rename-file/{file_id}", response_model=FileSystemItem)
+@router.put("/api/fs/operations/rename-file/{file_id}", response_model=FileSystemItem)
 def rename_file(file_id: str, new_name: str):
     items = load_fs_data()
     
@@ -334,7 +320,7 @@ def rename_file(file_id: str, new_name: str):
     return items[file_idx]
 
 # API端点：重命名引用
-@app.put("/api/fs/operations/rename-reference/{reference_id}", response_model=FileSystemItem)
+@router.put("/api/fs/operations/rename-reference/{reference_id}", response_model=FileSystemItem)
 def rename_reference(reference_id: str, new_name: str):
     items = load_fs_data()
     
@@ -351,7 +337,7 @@ def rename_reference(reference_id: str, new_name: str):
     return items[ref_idx]
 
 # API端点：移动项目
-@app.put("/api/fs/operations/move-item/{item_id}", response_model=FileSystemItem)
+@router.put("/api/fs/operations/move-item/{item_id}", response_model=FileSystemItem)
 def move_item(item_id: str, new_parent_id: Optional[str] = None):
     items = load_fs_data()
     
@@ -380,15 +366,12 @@ def move_item(item_id: str, new_parent_id: Optional[str] = None):
     return items[item_idx]
 
 # API端点：批量处理操作
-@app.post("/api/fs/batch", response_model=Dict[str, Any])
+@router.post("/api/fs/batch", response_model=Dict[str, Any])
 def batch_operations(request: BatchOperationRequest):
+    """
+    批量处理操作
+    """
     results = []
-    
-    
-    print("多少操作", len(request.operations))
-    print("操作", request.operations)
-
-
     for operation in request.operations:
         try:
             if operation.type == FileSystemOperation.CREATE_FILE:
@@ -419,13 +402,3 @@ def batch_operations(request: BatchOperationRequest):
             results.append({"success": False, "error": e.detail})
     
     return {"results": results}
-
-# 启动初始化：如果数据文件不存在，创建一个空的文件系统
-@app.on_event("startup")
-def startup_event():
-    if not os.path.exists(FS_DATA_FILE):
-        save_fs_data([])
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)

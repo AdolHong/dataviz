@@ -2,14 +2,26 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { ParameterQueryArea } from './ParameterQueryArea';
 import { LayoutGrid } from './LayoutGrid';
 
-export default function DashboardContent(
-  title: string,
-  description: string,
-  parameters: any,
-  dataSources: any,
-  layout: any,
-  handleQuerySubmit: any
-) {
+interface DashboardContentProps {
+  title: string;
+  description: string;
+  parameters: any[]; // 根据实际类型定义
+  dataSources: any[]; // 根据实际类型定义
+  layout: any; // 根据实际类型定义
+  handleQuerySubmit: (
+    values: Record<string, any>,
+    files?: Record<string, File[]>
+  ) => void;
+}
+
+export const DashboardContent: DashboardContentProps = ({
+  title,
+  description,
+  parameters,
+  dataSources,
+  layout,
+  handleQuerySubmit,
+}: DashboardContentProps) => {
   return (
     <div className='flex-1 w-0 min-w-0 overflow-auto'>
       <div className='container max-w-full py-6 px-4 md:px-8 space-y-6'>
@@ -52,4 +64,4 @@ export default function DashboardContent(
       </div>
     </div>
   );
-}
+};

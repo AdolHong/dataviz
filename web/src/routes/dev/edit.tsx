@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState } from 'react';
-import EditModal from '@/pages/edit/EditModal';
+import EditModal from '@/components/edit/EditModal';
 
 export const Route = createFileRoute('/dev/edit')({
   component: Edit,

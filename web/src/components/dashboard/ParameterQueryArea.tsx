@@ -32,7 +32,7 @@ import {
   CommandInput,
   CommandItem,
 } from '@/components/ui/command';
-import { FileUploadArea } from '@/pages/dashboard/FileUploadArea';
+import { FileUploadArea } from '@/components/dashboard/FileUploadArea';
 import type { DataSource } from '@/types';
 import { toast } from 'sonner';
 import {

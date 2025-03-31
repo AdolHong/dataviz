@@ -1,15 +1,15 @@
 import { Button } from '@/components/ui/button';
 import { useState, useEffect } from 'react';
 import { useStore } from '@/lib/store';
-import { FileExplorer } from '@/pages/dashboard/FileExplorer';
-import { LayoutGrid } from '@/pages/dashboard/LayoutGrid';
+import { FileExplorer } from '@/components/dashboard/FileExplorer';
+import { LayoutGrid } from '@/components/dashboard/LayoutGrid';
 import { demoFileSystemData } from '@/data/demoFileSystem';
 import type { FileSystemItem } from '@/types/models/fileSystem';
 import type { ReportResponse } from '@/types';
 import type { Layout } from '@/types/models/layout';
 import { toast } from 'sonner';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { ParameterQueryArea } from '@/pages/dashboard/ParameterQueryArea';
+import { ParameterQueryArea } from '@/components/dashboard/ParameterQueryArea';
 import {
   Tooltip,
   TooltipContent,

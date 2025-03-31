@@ -8,31 +8,39 @@ export const Route = createFileRoute('/dev/fileExplorer')({
 import { demoFileSystemData } from '@/data/demoFileSystem';
 import { useEffect, useState } from 'react';
 import { fsApi } from '@/api/fs';
+import type { FileSystemItem } from '@/types/models/fileSystem';
 
 function FileExplorer() {
-  const [fileSystemData, setFileSystemData] = useState(demoFileSystemData);
+  const [fileSystemData, setFileSystemData] = useState<FileSystemItem[]>([]);
+
+  // 是否用demo数据进行展示
+  const isDemo = true;
 
   useEffect(() => {
-    fsApi.getAllItems().then((items) => {
-      setFileSystemData(items);
-    });
+    if (isDemo) {
+      setFileSystemData(demoFileSystemData);
+    } else {
+      fsApi.getAllItems().then((items) => {
+        setFileSystemData(items);
+      });
+    }
   }, []);
 
   useEffect(() => {
-    fsApi.getAllItems().then((items) => {
-      setFileSystemData(items);
-    });
+    if (!isDemo) {
+      fsApi.getAllItems().then((items) => {
+        setFileSystemData(items);
+      });
+    }
   }, [fileSystemData]);
 
   return (
-    <div className='parent-container'>
-      <FileExplorerComponent
-        fsItems={fileSystemData}
-        setFsItems={(items) => {
-          fsApi.saveFileSystemChanges(fileSystemData, items);
-          setFileSystemData(items);
-        }}
-      />
-    </div>
+    <FileExplorerComponent
+      fsItems={fileSystemData}
+      setFsItems={(items) => {
+        fsApi.saveFileSystemChanges(fileSystemData, items);
+        setFileSystemData(items);
+      }}
+    />
   );
 }

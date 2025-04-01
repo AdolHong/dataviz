@@ -11,13 +11,11 @@ import type { Layout } from '@/types/models/layout';
 import { ChevronLeft, ChevronRight, X, Edit } from 'lucide-react';
 import { demoReportResponse } from '@/data/demoReport';
 import { fsApi } from '@/api/fs';
-import { DashboardContent } from '@/components/dashboard/DashboardContent';
 import EditModal from '@/components/edit/EditModal';
 import { reportApi } from '@/api/report';
 import { useSessionTabsStore } from '@/store/useSessionTabsStore';
-
-// 这个接口定义可以删除，因为我们已经在 store 中定义了 DashboardTab
-// interface TabItem { ... }
+import { ParameterQueryArea } from '@/components/dashboard/ParameterQueryArea';
+import { LayoutGrid } from '@/components/dashboard/LayoutGrid';
 
 export function DashboardPage() {
   const [fileSystemItems, setFileSystemItems] = useState<FileSystemItem[]>([]);
@@ -31,7 +29,6 @@ export function DashboardPage() {
     tabs: openTabs,
     activeTabId,
     tabReports,
-    setTabs,
     addTab,
     removeTab,
     setActiveTab,
@@ -80,11 +77,6 @@ export function DashboardPage() {
         // 加载失败时使用演示数据
         setTabReport(tab.id, demoReportResponse);
       });
-  };
-
-  // 切换导航栏显示状态
-  const toggleNavbar = () => {
-    setNavbarVisible(!navbarVisible);
   };
 
   // 根据选中文件的文件名长度调整导航栏宽度
@@ -274,7 +266,7 @@ export function DashboardPage() {
                   variant='ghost'
                   size='icon'
                   className='h-8 w-8 rounded-full'
-                  onClick={toggleNavbar}
+                  onClick={() => setNavbarVisible(!navbarVisible)}
                 >
                   {navbarVisible ? (
                     <ChevronLeft size={16} />
@@ -331,21 +323,26 @@ export function DashboardPage() {
                           <Edit className='h-4 w-4' />
                         </Button>
                       </div>
-                      {/* 使用 DashboardContent 组件替换原有内容 */}
-                      <DashboardContent
-                        title={reportData.title || '报表'}
-                        description={reportData.description || ''}
-                        parameters={reportData.parameters || []}
-                        dataSources={reportData.dataSources || []}
-                        layout={
-                          reportData.layout || {
-                            items: [],
-                            columns: 1,
-                            rows: 1,
-                          }
-                        }
-                        handleQuerySubmit={handleQuerySubmit}
-                      />
+
+                      {/* 展示区域 */}
+                      <div className='flex-1 overflow-auto'>
+                        <div className='container max-w-full py-6 px-4 md:px-8 space-y-6'>
+                          {/* 参数区域 */}
+                          <div className='space-y-2'>
+                            <ParameterQueryArea
+                              parameters={reportData.parameters || []}
+                              dataSources={reportData.dataSources || []}
+                              onSubmit={handleQuerySubmit}
+                            />
+                          </div>
+
+                          {/* 展示区域 */}
+                          {reportData.layout &&
+                            reportData.layout.items.length > 0 && (
+                              <LayoutGrid layout={reportData.layout} />
+                            )}
+                        </div>
+                      </div>
                     </div>
                   );
                 })}

@@ -17,13 +17,18 @@ interface SessionTabsState {
   tabReports: Record<string, ReportResponse>;
 
   // 操作方法
-  setTabs: (tabs: DashboardTab[]) => void;
   addTab: (tab: DashboardTab) => void;
   removeTab: (tabId: string) => void;
+
+  // 设置激活标签
   setActiveTab: (tabId: string | null) => void;
   getActiveTab: () => DashboardTab | undefined;
+
+  // 设置报表
   setTabReport: (tabId: string, report: ReportResponse) => void;
   getTabReport: (tabId: string) => ReportResponse | undefined;
+
+  // 清除
   clear: () => void;
 }
 
@@ -34,8 +39,6 @@ export const useSessionTabsStore = create<SessionTabsState>()(
       tabs: [],
       activeTabId: null,
       tabReports: {},
-
-      setTabs: (tabs: DashboardTab[]) => set({ tabs }),
 
       addTab: (tab: DashboardTab) =>
         set((state) => ({

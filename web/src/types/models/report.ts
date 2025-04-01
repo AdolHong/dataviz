@@ -17,6 +17,8 @@ export interface Report {
   parameters: Parameter[]; // 使用之前定义的 Parameter 接口
   artifacts: Artifact[];
   layout: Layout;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // 添加数据源

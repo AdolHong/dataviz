@@ -34,7 +34,9 @@ def get_report(file_id: str):
             "dataSources": [],
             "parameters": [],
             "artifacts": [],
-            "layout": {"items": []}
+            "layout": {"items": []},
+            "createdAt": datetime.now().isoformat(),
+            "updatedAt": datetime.now().isoformat(),
         }
 
         print("重建了？？？？")

@@ -42,6 +42,8 @@ interface EditModalProps {
   handleSave: (
     title: string,
     description: string,
+    createdAt: string,
+    updatedAt: string,
     parameters: Parameter[],
     artifacts: Artifact[],
     dataSources: DataSource[],
@@ -62,6 +64,8 @@ const EditModal = ({ open, onClose, report, handleSave }: EditModalProps) => {
   const [dataSources, setDataSources] = useState<DataSource[]>([]);
   const [parameters, setParameters] = useState<Parameter[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [createdAt, setCreatedAt] = useState<string>('');
+  const [updatedAt, setUpdatedAt] = useState<string>('');
   const [layout, setLayout] = useState<Layout>({
     items: [],
     columns: 1,
@@ -76,6 +80,8 @@ const EditModal = ({ open, onClose, report, handleSave }: EditModalProps) => {
       setParameters(report?.parameters || []);
       setArtifacts(report?.artifacts || []);
       setLayout(report?.layout || { items: [], columns: 1, rows: 1 });
+      setCreatedAt(report?.createdAt || new Date().toISOString());
+      setUpdatedAt(report?.updatedAt || new Date().toISOString());
     }
   }, [report]);
 
@@ -361,6 +367,8 @@ const EditModal = ({ open, onClose, report, handleSave }: EditModalProps) => {
                 handleSave(
                   title,
                   description,
+                  createdAt,
+                  new Date().toISOString(), // 更新时间
                   parameters,
                   artifacts,
                   dataSources,

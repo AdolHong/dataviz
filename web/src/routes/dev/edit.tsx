@@ -12,7 +12,7 @@ export const Route = createFileRoute('/dev/edit')({
   component: Edit,
 });
 
-function Edit({ reportId = 'file-1743438797184' }: { reportId?: string }) {
+function Edit({ reportId = 'file-1743436362131' }: { reportId?: string }) {
   const [isModalOpen, setIsModalOpen] = useState(true);
   const [editReport, setEditReport] = useState<Report>();
 
@@ -22,50 +22,35 @@ function Edit({ reportId = 'file-1743438797184' }: { reportId?: string }) {
     });
   }, [reportId]);
 
-  const handleSave = (
-    title: string,
-    description: string,
-    parameters: Parameter[],
-    artifacts: Artifact[],
-    dataSources: DataSource[],
-    layout: Layout
-  ) => {
-    const report = {
-      id: reportId,
-      title: title,
-      description: description,
-      parameters,
-      artifacts,
-      dataSources,
-      layout,
-    };
-
-    console.log('report保存', report);
-    reportApi.updateReport(reportId, report).then((res) => {
-      console.log('res', res);
-    });
-  };
-
   return (
     <EditModal
       open={isModalOpen}
       report={editReport as Report}
       handleSave={(
-        title,
-        description,
-        parameters,
-        artifacts,
-        dataSources,
-        layout
+        title: string,
+        description: string,
+        createdAt: string,
+        updatedAt: string,
+        parameters: Parameter[],
+        artifacts: Artifact[],
+        dataSources: DataSource[],
+        layout: Layout
       ) => {
-        handleSave(
+        const report = {
+          id: reportId,
           title,
           description,
           parameters,
           artifacts,
           dataSources,
-          layout
-        );
+          layout,
+          createdAt,
+          updatedAt,
+        };
+        console.log('report保存', report);
+        reportApi.updateReport(reportId, report).then((res) => {
+          console.log('res', res);
+        });
         setIsModalOpen(false);
       }}
       onClose={() => setIsModalOpen(false)}

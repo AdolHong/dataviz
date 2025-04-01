@@ -145,6 +145,8 @@ class Report(BaseModel):
     parameters: List[Parameter] = []
     artifacts: List[Artifact] = []
     layout: Layout
+    createdAt: str
+    updatedAt: str
 
     class Config:
         extra = "allow"  # 允许额外字段

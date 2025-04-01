@@ -23,19 +23,6 @@ export function DashboardPage() {
   const [dashboardData, setDashboardData] = useState<ReportResponse | null>(
     null
   );
-
-  // 使用 store 来管理标签页
-  const {
-    tabs: openTabs,
-    activeTabId,
-    tabReports,
-    addTab,
-    removeTab,
-    setActiveTab,
-    addTabReport,
-    removeTabReport,
-  } = useSessionTabsStore();
-
   // 其他状态保持不变
   const [navbarVisible, setNavbarVisible] = useState(true);
   const [navbarWidth, setNavbarWidth] = useState(256); // 默认宽度为256px
@@ -50,6 +37,18 @@ export function DashboardPage() {
   const [currentEditingTabId, setCurrentEditingTabId] = useState<string | null>(
     null
   );
+
+  // 使用 store 来管理标签页
+  const {
+    tabs: openTabs,
+    activeTabId,
+    tabReports,
+    addTab,
+    removeTab,
+    setActiveTab,
+    addTabReport,
+    removeTabReport,
+  } = useSessionTabsStore();
 
   // 初始化
   useEffect(() => {
@@ -66,19 +65,7 @@ export function DashboardPage() {
     }
   }, []);
 
-  // 为标签加载报表数据的函数
-  const loadReportForTab = (tab: (typeof openTabs)[0]) => {
-    reportApi
-      .getReportByFileId(tab.fileId)
-      .then((report) => {
-        addTabReport(tab.id, report);
-      })
-      .catch((err) => {
-        console.error('加载报表失败:', err);
-      });
-  };
-
-  // 根据选中文件的文件名长度调整导航栏宽度
+  // 加载了文件系统，就更新navbar宽度
   useEffect(() => {
     // todo: 没有考虑文件夹的长度
     if (selectedItem && selectedItem.name) {
@@ -87,16 +74,20 @@ export function DashboardPage() {
       const calculatedWidth = Math.min(Math.max(256, nameLength * 10), 400);
       setNavbarWidth(calculatedWidth);
     }
-  }, [selectedItem]);
+  }, [fileSystemItems]);
 
-  // 使用 demoReportResponse 作为默认选择的报表数据
-  useEffect(() => {
-    if (!selectedItem || selectedItem.type !== 'file') {
-      // 设置默认的demoReportResponse
-      setDashboardData(demoReportResponse);
-      setLayout(demoReportResponse.layout);
-    }
-  }, [selectedItem]);
+  // 为标签加载报表数据的函数
+  const loadReportForTab = (tab: (typeof openTabs)[0]) => {
+    reportApi
+      .getReportByFileId(tab.fileId)
+      .then((report) => {
+        console.info('加载报表???', report);
+        addTabReport(tab.id, report);
+      })
+      .catch((err) => {
+        console.error('加载报表失败:', err);
+      });
+  };
 
   // 打开报表标签页 - 修改为使用 store
   const openReportTab = (item: FileSystemItem) => {

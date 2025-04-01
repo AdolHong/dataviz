@@ -10,14 +10,10 @@ import { fsApi } from '@/api/fs';
 import { DashboardContent } from '@/components/dashboard/DashboardContent';
 import EditModal from '@/components/edit/EditModal';
 import { reportApi } from '@/api/report';
+import { useSessionTabsStore } from '@/store/useSessionTabsStore';
 
-// 定义标签页类型
-interface TabItem {
-  id: string;
-  title: string;
-  fileId: string;
-  reportId: string;
-}
+// 这个接口定义可以删除，因为我们已经在 store 中定义了 DashboardTab
+// interface TabItem { ... }
 
 export function DashboardPage() {
   const [fileSystemItems, setFileSystemItems] = useState<FileSystemItem[]>([]);
@@ -26,11 +22,24 @@ export function DashboardPage() {
     null
   );
 
-  // 标签页相关状态
-  const [openTabs, setOpenTabs] = useState<TabItem[]>([]);
-  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  // 使用 store 来管理标签页
+  const {
+    tabs: openTabs,
+    activeTabId,
+    tabReports,
+    setTabs,
+    addTab,
+    removeTab,
+    setActiveTab,
+    setTabReport,
+  } = useSessionTabsStore();
 
-  // 添加导航栏显示控制状态
+  // 删除原来的标签状态管理
+  // const [openTabs, setOpenTabs] = useState<TabItem[]>([]);
+  // const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  // const [tabReports, setTabReports] = useState<Record<string, ReportResponse>>({});
+
+  // 其他状态保持不变
   const [navbarVisible, setNavbarVisible] = useState(true);
   const [navbarWidth, setNavbarWidth] = useState(256); // 默认宽度为256px
 
@@ -38,18 +47,9 @@ export function DashboardPage() {
     null
   );
   const [layout, setLayout] = useState<Layout | null>(null);
-
-  // 添加编辑模态框状态
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [currentEditReport, setCurrentEditReport] =
     useState<ReportResponse | null>(null);
-
-  // 添加一个状态来存储每个标签对应的报表数据
-  const [tabReports, setTabReports] = useState<Record<string, ReportResponse>>(
-    {}
-  );
-
-  // 添加一个状态来跟踪当前正在编辑的标签
   const [currentEditingTabId, setCurrentEditingTabId] = useState<string | null>(
     null
   );
@@ -59,7 +59,29 @@ export function DashboardPage() {
     fsApi.getAllItems().then((items) => {
       setFileSystemItems(items);
     });
+
+    // 如果有活动标签，尝试加载其报表数据
+    if (activeTabId) {
+      const activeTab = openTabs.find((tab) => tab.id === activeTabId);
+      if (activeTab && !tabReports[activeTabId]) {
+        loadReportForTab(activeTab);
+      }
+    }
   }, []);
+
+  // 为标签加载报表数据的函数
+  const loadReportForTab = (tab: (typeof openTabs)[0]) => {
+    reportApi
+      .getReportByFileId(tab.fileId)
+      .then((report) => {
+        setTabReport(tab.id, report);
+      })
+      .catch((err) => {
+        console.error('加载报表失败:', err);
+        // 加载失败时使用演示数据
+        setTabReport(tab.id, demoReportResponse);
+      });
+  };
 
   // 切换导航栏显示状态
   const toggleNavbar = () => {
@@ -85,19 +107,17 @@ export function DashboardPage() {
     }
   }, [selectedItem]);
 
-  // 打开报表标签页
+  // 打开报表标签页 - 修改为使用 store
   const openReportTab = (item: FileSystemItem) => {
     // 检查是否已经打开
-    const existingTabIndex = openTabs.findIndex(
-      (tab) => tab.fileId === item.id
-    );
+    const existingTab = openTabs.find((tab) => tab.fileId === item.id);
 
-    if (existingTabIndex !== -1) {
+    if (existingTab) {
       // 已经打开，激活该标签页
-      setActiveTabId(openTabs[existingTabIndex].id);
+      setActiveTab(existingTab.id);
     } else {
       // 没有打开，创建新标签页
-      const newTab: TabItem = {
+      const newTab = {
         id: `tab-${Date.now()}`, // 生成唯一ID
         title: item.name,
         fileId: item.id,
@@ -105,63 +125,19 @@ export function DashboardPage() {
           'file' === item.type ? item.reportId : (item as any).referenceTo,
       };
 
-      setOpenTabs([...openTabs, newTab]);
-      setActiveTabId(newTab.id);
+      addTab(newTab);
 
       // 获取该标签对应的报表数据
       if (newTab.reportId) {
-        reportApi.getReportByFileId(newTab.fileId).then((report) => {
-          setTabReports((prev) => ({
-            ...prev,
-            [newTab.id]: report,
-          }));
-        });
+        loadReportForTab(newTab);
       }
     }
   };
 
-  // 加载活动标签的报表数据
-  useEffect(() => {
-    if (activeTabId && !tabReports[activeTabId]) {
-      // 找到当前活动的标签
-      const activeTab = openTabs.find((tab) => tab.id === activeTabId);
-      if (activeTab && activeTab.reportId) {
-        // 如果是真实环境，这里应该从API获取报表数据
-        // reportApi.getReportByFileId(activeTab.reportId).then((report) => {
-        //   setTabReports(prev => ({...prev, [activeTabId]: report}));
-        // });
-
-        // 为了演示，我们使用demoReportResponse
-        setTabReports((prev) => ({
-          ...prev,
-          [activeTabId]: demoReportResponse,
-        }));
-      }
-    }
-  }, [activeTabId, openTabs, tabReports]);
-
-  // 关闭标签页
+  // 关闭标签页 - 使用 store 的 removeTab
   const closeTab = (tabId: string, e: React.MouseEvent) => {
     e.stopPropagation(); // 阻止冒泡，避免触发标签切换
-
-    // 找到要关闭的标签索引
-    const tabIndex = openTabs.findIndex((tab) => tab.id === tabId);
-    if (tabIndex === -1) return;
-
-    // 创建新的标签数组（移除要关闭的标签）
-    const newTabs = openTabs.filter((tab) => tab.id !== tabId);
-    setOpenTabs(newTabs);
-
-    // 如果关闭的是当前标签，则激活其他标签
-    if (tabId === activeTabId) {
-      if (newTabs.length > 0) {
-        // 激活相邻标签（优先右侧，其次左侧）
-        const newActiveIndex = Math.min(tabIndex, newTabs.length - 1);
-        setActiveTabId(newTabs[newActiveIndex].id);
-      } else {
-        setActiveTabId(null);
-      }
-    }
+    removeTab(tabId);
   };
 
   // 处理选择文件系统项目
@@ -221,25 +197,26 @@ export function DashboardPage() {
 
     // 更新当前标签的报表数据
     if (currentEditingTabId) {
-      const updatedReport = {
-        ...tabReports[currentEditingTabId],
-        title,
-        description,
-        parameters,
-        artifacts,
-        dataSources,
-        layout,
-      };
+      const currentReport = tabReports[currentEditingTabId];
+      if (currentReport) {
+        const updatedReport = {
+          ...currentReport,
+          title,
+          description,
+          parameters,
+          artifacts,
+          dataSources,
+          layout,
+        };
 
-      setTabReports((prev) => ({
-        ...prev,
-        [currentEditingTabId]: updatedReport,
-      }));
+        // 使用 store 的方法更新报表数据
+        setTabReport(currentEditingTabId, updatedReport);
 
-      // 同时更新dashboardData以便其他组件使用
-      setDashboardData(updatedReport);
-      setLayout(layout);
-      setCurrentEditingTabId(null);
+        // 同时更新其他状态
+        setDashboardData(updatedReport);
+        setLayout(layout);
+        setCurrentEditingTabId(null);
+      }
     }
   };
 
@@ -286,10 +263,10 @@ export function DashboardPage() {
 
         {/* 右侧内容区 */}
         <div className='flex-1 w-0 min-w-0 overflow-hidden flex flex-col'>
-          {/* 标签页栏 - 现在包含导航切换按钮作为第一个元素 */}
+          {/* 标签页栏 */}
           <div className='border-b bg-muted/30'>
             <div className='flex overflow-x-auto items-center'>
-              {/* 导航栏切换按钮 - 现在放在标签栏的开头 */}
+              {/* 导航栏切换按钮 */}
               <div className='flex items-center border-r border-border px-2'>
                 <Button
                   variant='ghost'
@@ -305,7 +282,7 @@ export function DashboardPage() {
                 </Button>
               </div>
 
-              {/* 标签页 */}
+              {/* 标签页 - 使用 store 中的 openTabs */}
               {openTabs.map((tab) => (
                 <div
                   key={tab.id}
@@ -314,7 +291,7 @@ export function DashboardPage() {
                       ? 'bg-background'
                       : 'bg-muted/50 hover:bg-muted'
                   }`}
-                  onClick={() => setActiveTabId(tab.id)}
+                  onClick={() => setActiveTab(tab.id)}
                 >
                   <div className='truncate flex-1'>{tab.title}</div>
                   <Button

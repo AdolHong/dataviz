@@ -47,13 +47,14 @@ import { type DatePickerParamConfig } from '@/types/models/parameter';
 import dayjs from 'dayjs';
 import { useTabFilesStore } from '@/lib/store/useFileSessionStore';
 import { useTabsSessionStore } from '@/lib/store/useTabsSessionStore';
+import { type FileCache } from '@/lib/store/useFileSessionStore';
 
 interface ParameterQueryAreaProps {
   parameters: Parameter[];
   dataSources?: DataSource[];
   onSubmit: (
     values: Record<string, any>,
-    files?: Record<string, File[]>
+    files?: Record<string, FileCache>
   ) => void;
   onEditReport: () => void;
 }
@@ -121,7 +122,19 @@ export function ParameterQueryArea({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!activeTabId) {
+      toast.error('请先打开一个标签页');
+      return;
+    }
 
+    const files = getTabIdFiles(activeTabId) || {};
+    if (
+      requireFileUpload &&
+      Object.keys(files).length !== csvDataSources.length
+    ) {
+      toast.error('请上传文件');
+      return;
+    }
     onSubmit(values, files);
   };
 

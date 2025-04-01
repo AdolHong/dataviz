@@ -18,13 +18,17 @@ import {
 } from '@tanstack/react-table';
 import Papa from 'papaparse';
 import { toast } from 'sonner';
+import { type FileCache } from '@/lib/store/useFileSessionStore';
+
+import { type CSVUploaderSourceExecutor } from '@/types/models/dataSource';
+
 interface FileUploadAreaProps {
   dataSources: DataSource[];
   // files: Record<string, File[]>;
   // setFiles: (files: Record<string, File[]>) => void;
 
-  setFileCache: (sourceId: string, file: File) => void;
-  getFileCache: (sourceId: string) => File | null;
+  setFileCache: (sourceId: string, fileCache: FileCache) => void;
+  getFileCache: (sourceId: string) => FileCache | null;
   removeFileCache: (sourceId: string) => void;
 }
 
@@ -72,8 +76,42 @@ export function FileUploadArea({
         return;
       }
 
+      // 读取文件内容, 并解析
       const content = await readFileContent(e.target.files[0]);
-      setFileCache(sourceId, e.target.files[0]);
+      const contentParsed = Papa.parse(content, { header: true });
+      const contentFields = contentParsed?.meta.fields || [];
+      if (!contentFields || contentFields.length === 0) {
+        toast.error('文件内容不符合要求, 列数不能为空');
+        return;
+      }
+
+      // 解析demoData
+      const csvDataSource = dataSources.find((ds) => ds.id === sourceId);
+      const demoData = (csvDataSource?.executor as CSVUploaderSourceExecutor)
+        .demoData;
+      const demoDataParsed = Papa.parse(demoData, { header: true });
+      const demoFields = demoDataParsed?.meta.fields || [];
+
+      const hasSameFields = demoFields.every((field) =>
+        contentFields.includes(field)
+      );
+
+      // 比较列名
+      if (!hasSameFields) {
+        toast.error('上传文件，没有包含示例数据中的全部列数');
+        return;
+      }
+
+      // 保留文件cache
+      const fileCache: FileCache = {
+        fileName: e.target.files[0].name,
+        fileSize: e.target.files[0].size,
+        fileType: e.target.files[0].type,
+        fileContent: content,
+      };
+
+      setFileCache(sourceId, fileCache);
+      setSourceId2existFile((prev) => ({ ...prev, [sourceId]: true }));
     }
   };
 
@@ -84,6 +122,11 @@ export function FileUploadArea({
     if (fileInputRefs.current[sourceId]) {
       fileInputRefs.current[sourceId]!.value = '';
     }
+    setSourceId2existFile((prev) => {
+      const newState = { ...prev };
+      delete newState[sourceId];
+      return newState;
+    });
   };
 
   // 显示数据预览对话框
@@ -186,7 +229,7 @@ export function FileUploadArea({
                   <div className='space-y-2'>
                     <div className='flex items-center justify-between'>
                       <span className='text-sm truncate'>
-                        {getFileCache(source.id)?.name}
+                        {getFileCache(source.id)?.fileName}
                       </span>
                       <div className='flex space-x-1'>
                         <Button
@@ -204,10 +247,10 @@ export function FileUploadArea({
                       </div>
                     </div>
                     <div className='text-xs text-muted-foreground'>
-                      {getFileCache(source.id)?.size
-                        ? (getFileCache(source.id)?.size / 1024).toFixed(2)
+                      {getFileCache(source.id)?.fileSize
+                        ? (getFileCache(source.id)?.fileSize / 1024).toFixed(2)
                         : '未知'}{' '}
-                      KB •{getFileCache(source.id)?.type || '未知类型'}
+                      KB •{getFileCache(source.id)?.fileType || '未知类型'}
                     </div>
                   </div>
                 ) : (
@@ -393,32 +436,16 @@ function UploadedFilePreview({
 }: {
   sourceId: string;
   sourceId2existFile: Record<string, boolean>;
-  getFileCache: (sourceId: string) => File | null;
+  getFileCache: (sourceId: string) => FileCache | null;
 }) {
   const [fileContent, setFileContent] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
   React.useEffect(() => {
-    const loadContent = async () => {
-      try {
-        setLoading(true);
-        const file = getFileCache(sourceId);
-        if (!file) {
-          setFileContent('');
-          setLoading(false);
-          return;
-        }
-        const content = await readFileContent(file);
-        setFileContent(content || '');
-      } catch (error) {
-        console.error('读取文件失败', error);
-        setFileContent('');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadContent();
+    if (sourceId2existFile[sourceId]) {
+      setFileContent(getFileCache(sourceId)?.fileContent || '');
+      setLoading(false);
+    }
   }, [sourceId, sourceId2existFile]);
 
   if (loading) {

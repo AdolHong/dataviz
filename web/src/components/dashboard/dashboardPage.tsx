@@ -334,26 +334,7 @@ export function DashboardPage() {
                               }
                             />
                           </div>
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger>
-                                <CardTitle className='text-sm font-medium'>
-                                  <h1 className='text-2xl font-bold'>
-                                    {tab?.title}
-                                  </h1>
-                                </CardTitle>
-                              </TooltipTrigger>
-
-                              <TooltipContent>
-                                {reportData?.description && (
-                                  <p className='text-sm text-muted-foreground'>
-                                    {reportData.description}
-                                  </p>
-                                )}
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-
+                          <h1 className='text-2xl font-bold'>{tab?.title}</h1>
                           {/* 展示区域 */}
                           {reportData?.layout &&
                             reportData.layout.items.length > 0 && (

@@ -1,7 +1,11 @@
 import { Button } from '@/components/ui/button';
 import { useState, useEffect } from 'react';
 import { FileExplorer } from '@/components/dashboard/FileExplorer';
-import type { FileSystemItem } from '@/types/models/fileSystem';
+import type {
+  FileItem,
+  FileSystemItem,
+  ReferenceItem,
+} from '@/types/models/fileSystem';
 import type { ReportResponse } from '@/types';
 import type { Layout } from '@/types/models/layout';
 import { ChevronLeft, ChevronRight, X, Edit } from 'lucide-react';
@@ -117,10 +121,11 @@ export function DashboardPage() {
         title: item.name,
         fileId: item.id,
         reportId:
-          'file' === item.type ? item.reportId : (item as any).referenceTo,
+          item.type === 'file'
+            ? (item as FileItem).reportId
+            : (item as ReferenceItem).reportId,
       };
 
-      console.log('打开报表2', newTab);
       addTab(newTab);
 
       // 获取该标签对应的报表数据

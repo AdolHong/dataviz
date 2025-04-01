@@ -17,11 +17,14 @@ def get_report(file_id: str):
     
     # 查找文件
     file_item = find_item_by_id(items, file_id)
-    if not file_item or file_item.type != FileSystemItemType.FILE:
+    if not file_item or file_item.type not in( FileSystemItemType.FILE, FileSystemItemType.REFERENCE ):
         raise HTTPException(status_code=404, detail="报表文件不存在")
 
+    # 获取报表文件ID(文件或引用)
+    report_file_id = file_item.reportId if file_item.type == FileSystemItemType.FILE else file_item.referenceTo
+
     # 获取报表内容
-    report_content = get_report_content(file_id)
+    report_content = get_report_content(report_file_id)
     if not report_content:
         # 如果文件为空，初始化一个默认的报表结构
         default_report = {

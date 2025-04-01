@@ -20,14 +20,15 @@ import Papa from 'papaparse';
 
 interface FileUploadAreaProps {
   dataSources: DataSource[];
-  onFilesChange: (files: Record<string, File[]>) => void;
+  files: Record<string, File[]>;
+  setFiles: (files: Record<string, File[]>) => void;
 }
 
 export function FileUploadArea({
   dataSources,
-  onFilesChange,
+  files,
+  setFiles,
 }: FileUploadAreaProps) {
-  const [files, setFiles] = useState<Record<string, File[]>>({});
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
   const [previewSource, setPreviewSource] = useState<DataSource | null>(null);
   const [previewTab, setPreviewTab] = useState<'demo' | 'uploaded'>('demo');
@@ -60,7 +61,6 @@ export function FileUploadArea({
         [sourceId]: Array.from(e.target.files),
       };
       setFiles(newFiles);
-      onFilesChange(newFiles);
     }
   };
 
@@ -68,7 +68,6 @@ export function FileUploadArea({
     const newFiles = { ...files };
     delete newFiles[sourceId];
     setFiles(newFiles);
-    onFilesChange(newFiles);
 
     // 清空文件输入框，以便重新上传相同的文件
     if (fileInputRefs.current[sourceId]) {

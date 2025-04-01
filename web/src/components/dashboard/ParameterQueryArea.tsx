@@ -113,10 +113,6 @@ export function ParameterQueryArea({
     setValues((prev) => ({ ...prev, [id]: value }));
   };
 
-  const handleFilesChange = (newFiles: Record<string, File[]>) => {
-    setFiles(newFiles);
-  };
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -419,7 +415,8 @@ export function ParameterQueryArea({
                   <TabsContent value='upload' className='mt-2'>
                     <FileUploadArea
                       dataSources={csvDataSources}
-                      onFilesChange={handleFilesChange}
+                      files={files}
+                      setFiles={setFiles}
                     />
                   </TabsContent>
                 )}

@@ -34,11 +34,6 @@ export function DashboardPage() {
     setTabReport,
   } = useSessionTabsStore();
 
-  // 删除原来的标签状态管理
-  // const [openTabs, setOpenTabs] = useState<TabItem[]>([]);
-  // const [activeTabId, setActiveTabId] = useState<string | null>(null);
-  // const [tabReports, setTabReports] = useState<Record<string, ReportResponse>>({});
-
   // 其他状态保持不变
   const [navbarVisible, setNavbarVisible] = useState(true);
   const [navbarWidth, setNavbarWidth] = useState(256); // 默认宽度为256px
@@ -125,6 +120,7 @@ export function DashboardPage() {
           'file' === item.type ? item.reportId : (item as any).referenceTo,
       };
 
+      console.log('打开报表2', newTab);
       addTab(newTab);
 
       // 获取该标签对应的报表数据
@@ -152,6 +148,7 @@ export function DashboardPage() {
   // 处理双击文件系统项目
   const handleItemDoubleClick = (item: FileSystemItem) => {
     if (item.type === 'file' || item.type === 'reference') {
+      console.log('打开报表', item);
       openReportTab(item);
     }
   };

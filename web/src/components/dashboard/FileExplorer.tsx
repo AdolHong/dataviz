@@ -310,7 +310,8 @@ export function FileExplorer({
       fsItems,
       referenceItemName,
       fileToReference.id,
-      fileToReference.parentId
+      fileToReference.parentId,
+      fileToReference.reportId
     );
 
     setFsItems(updatedItems);

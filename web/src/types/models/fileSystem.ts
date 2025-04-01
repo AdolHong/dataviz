@@ -30,6 +30,7 @@ export interface FolderItem extends FileSystemItemBase {
 export interface ReferenceItem extends FileSystemItemBase {
   type: FileSystemItemType.REFERENCE;
   referenceTo: string; // 指向原始文件的ID
+  reportId: string; // 关联的报表ID
 }
 
 // 统一文件系统项类型
@@ -152,7 +153,8 @@ export const createReference = (
   items: FileSystemItem[],
   name: string,
   referencedFileId: string,
-  parentId: string | null = null
+  parentId: string | null = null,
+  reportId: string
 ): FileSystemItem[] => {
   const newReference: ReferenceItem = {
     id: `ref-${Date.now()}`,
@@ -160,6 +162,7 @@ export const createReference = (
     type: FileSystemItemType.REFERENCE,
     parentId,
     referenceTo: referencedFileId,
+    reportId,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };

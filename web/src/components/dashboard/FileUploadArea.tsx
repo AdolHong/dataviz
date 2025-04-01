@@ -17,6 +17,7 @@ import {
   createColumnHelper,
 } from '@tanstack/react-table';
 import Papa from 'papaparse';
+import { toast } from 'sonner';
 
 interface FileUploadAreaProps {
   dataSources: DataSource[];
@@ -56,6 +57,12 @@ export function FileUploadArea({
     sourceId: string
   ) => {
     if (e.target.files && e.target.files.length > 0) {
+      //文件超出1mb
+      if (e.target.files[0].size > 1024 * 1024) {
+        toast.error('文件超出1mb');
+        return;
+      }
+
       const newFiles = {
         ...files,
         [sourceId]: Array.from(e.target.files),

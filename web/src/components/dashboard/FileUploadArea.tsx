@@ -18,21 +18,30 @@ import {
 } from '@tanstack/react-table';
 import Papa from 'papaparse';
 import { toast } from 'sonner';
-
 interface FileUploadAreaProps {
   dataSources: DataSource[];
-  files: Record<string, File[]>;
-  setFiles: (files: Record<string, File[]>) => void;
+  // files: Record<string, File[]>;
+  // setFiles: (files: Record<string, File[]>) => void;
+
+  setFileCache: (sourceId: string, file: File) => void;
+  getFileCache: (sourceId: string) => File | null;
+  removeFileCache: (sourceId: string) => void;
 }
 
 export function FileUploadArea({
   dataSources,
-  files,
-  setFiles,
+  // files,
+  // setFiles,
+  setFileCache,
+  getFileCache,
+  removeFileCache,
 }: FileUploadAreaProps) {
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
   const [previewSource, setPreviewSource] = useState<DataSource | null>(null);
   const [previewTab, setPreviewTab] = useState<'demo' | 'uploaded'>('demo');
+  const [sourceId2existFile, setSourceId2existFile] = useState<
+    Record<string, boolean>
+  >({});
 
   // 筛选不同类型的数据源
   const uploaderSources = dataSources.filter(
@@ -52,29 +61,24 @@ export function FileUploadArea({
     []
   );
 
-  const handleFileChange = (
+  const handleFileChange = async (
     e: React.ChangeEvent<HTMLInputElement>,
     sourceId: string
   ) => {
     if (e.target.files && e.target.files.length > 0) {
-      //文件超出1mb
       if (e.target.files[0].size > 1024 * 1024) {
-        toast.error('文件超出1mb');
+        // 如果文件大小超过1mb，则不保存
+        toast.error('文件大小超过1mb，请重新选择文件');
         return;
       }
 
-      const newFiles = {
-        ...files,
-        [sourceId]: Array.from(e.target.files),
-      };
-      setFiles(newFiles);
+      const content = await readFileContent(e.target.files[0]);
+      setFileCache(sourceId, e.target.files[0]);
     }
   };
 
   const handleRemoveFile = (sourceId: string) => {
-    const newFiles = { ...files };
-    delete newFiles[sourceId];
-    setFiles(newFiles);
+    removeFileCache(sourceId);
 
     // 清空文件输入框，以便重新上传相同的文件
     if (fileInputRefs.current[sourceId]) {
@@ -162,7 +166,7 @@ export function FileUploadArea({
                       handleShowPreview(
                         source,
                         source.executor.type === 'csv_uploader' &&
-                          files[source.id]
+                          getFileCache(source.id)
                           ? 'uploaded'
                           : 'demo'
                       );
@@ -178,11 +182,11 @@ export function FileUploadArea({
               </div>
 
               {source.executor.type === 'csv_uploader' ? (
-                files[source.id] ? (
+                getFileCache(source.id) ? (
                   <div className='space-y-2'>
                     <div className='flex items-center justify-between'>
                       <span className='text-sm truncate'>
-                        {files[source.id][0].name}
+                        {getFileCache(source.id)?.name}
                       </span>
                       <div className='flex space-x-1'>
                         <Button
@@ -200,8 +204,10 @@ export function FileUploadArea({
                       </div>
                     </div>
                     <div className='text-xs text-muted-foreground'>
-                      {(files[source.id][0].size / 1024).toFixed(2)} KB •{' '}
-                      {files[source.id][0].type || '未知类型'}
+                      {getFileCache(source.id)?.size
+                        ? (getFileCache(source.id)?.size / 1024).toFixed(2)
+                        : '未知'}{' '}
+                      KB •{getFileCache(source.id)?.type || '未知类型'}
                     </div>
                   </div>
                 ) : (
@@ -247,7 +253,7 @@ export function FileUploadArea({
 
           {previewSource &&
           previewSource.executor.type === 'csv_uploader' &&
-          files[previewSource.id] ? (
+          getFileCache(previewSource.id) ? (
             <Tabs
               defaultValue={previewTab}
               className='min-w-[300px] max-w-[800px]'
@@ -262,7 +268,8 @@ export function FileUploadArea({
               <TabsContent value='uploaded' className='w-full'>
                 <UploadedFilePreview
                   sourceId={previewSource.id}
-                  files={files}
+                  sourceId2existFile={sourceId2existFile}
+                  getFileCache={getFileCache}
                 />
               </TabsContent>
             </Tabs>
@@ -381,10 +388,12 @@ function CSVPreview({ csvData }: { csvData: string }) {
 // 修改 UploadedFilePreview 组件使用新的 CSVPreview 组件
 function UploadedFilePreview({
   sourceId,
-  files,
+  sourceId2existFile,
+  getFileCache,
 }: {
   sourceId: string;
-  files: Record<string, File[]>;
+  sourceId2existFile: Record<string, boolean>;
+  getFileCache: (sourceId: string) => File | null;
 }) {
   const [fileContent, setFileContent] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -393,7 +402,13 @@ function UploadedFilePreview({
     const loadContent = async () => {
       try {
         setLoading(true);
-        const content = await readFileContent(files[sourceId]?.[0]);
+        const file = getFileCache(sourceId);
+        if (!file) {
+          setFileContent('');
+          setLoading(false);
+          return;
+        }
+        const content = await readFileContent(file);
         setFileContent(content || '');
       } catch (error) {
         console.error('读取文件失败', error);
@@ -404,7 +419,7 @@ function UploadedFilePreview({
     };
 
     loadContent();
-  }, [sourceId, files]);
+  }, [sourceId, sourceId2existFile]);
 
   if (loading) {
     return <div className='py-4 text-center'>正在加载文件内容...</div>;

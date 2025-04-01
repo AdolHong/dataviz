@@ -45,6 +45,8 @@ import { Card } from '../ui/card';
 import { CardContent } from '../ui/card';
 import { type DatePickerParamConfig } from '@/types/models/parameter';
 import dayjs from 'dayjs';
+import { useTabFilesStore } from '@/lib/store/useFileSessionStore';
+import { useTabsSessionStore } from '@/lib/store/useTabsSessionStore';
 
 interface ParameterQueryAreaProps {
   parameters: Parameter[];
@@ -63,12 +65,16 @@ export function ParameterQueryArea({
   onEditReport,
 }: ParameterQueryAreaProps) {
   const [values, setValues] = useState<Record<string, any>>({});
-  const [files, setFiles] = useState<Record<string, File[]>>({});
+  // const [files, setFiles] = useState<Record<string, File[]>>({});
   const [parametersExpanded, setParametersExpanded] = useState(true);
   const [activeTab, setActiveTab] = useState<string>('parameters');
   const [selectedDataSourceIndex, setSelectedDataSourceIndex] = useState<
     number | null
   >(null);
+
+  // 使用 store 来管理标签页
+  const { activeTabId } = useTabsSessionStore();
+  const { getTabIdFiles, setTabIdFiles } = useTabFilesStore();
 
   // 检查需要文件上传的数据源
   const csvDataSources = dataSources.filter(
@@ -415,8 +421,32 @@ export function ParameterQueryArea({
                   <TabsContent value='upload' className='mt-2'>
                     <FileUploadArea
                       dataSources={csvDataSources}
-                      files={files}
-                      setFiles={setFiles}
+                      getFileCache={(sourceId: string) => {
+                        if (!activeTabId) {
+                          console.error('activeTabId is null');
+                          return null;
+                        }
+                        return getTabIdFiles(activeTabId)?.[sourceId] || null;
+                      }}
+                      setFileCache={(sourceId: string, file: File) => {
+                        if (!activeTabId) {
+                          console.error('activeTabId is null');
+                          return;
+                        }
+                        setTabIdFiles(activeTabId, {
+                          ...getTabIdFiles(activeTabId),
+                          [sourceId]: file,
+                        });
+                      }}
+                      removeFileCache={(sourceId: string) => {
+                        if (!activeTabId) {
+                          console.error('activeTabId is null');
+                          return;
+                        }
+                        const newFiles = getTabIdFiles(activeTabId);
+                        delete newFiles[sourceId];
+                        setTabIdFiles(activeTabId, newFiles);
+                      }}
                     />
                   </TabsContent>
                 )}

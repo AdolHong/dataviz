@@ -6,10 +6,15 @@ import type {
   FileSystemItem,
   ReferenceItem,
 } from '@/types/models/fileSystem';
-import type { ReportResponse } from '@/types';
+import type {
+  Artifact,
+  DataSource,
+  Parameter,
+  Report,
+  ReportResponse,
+} from '@/types';
 import type { Layout } from '@/types/models/layout';
 import { ChevronLeft, ChevronRight, X, Edit } from 'lucide-react';
-import { demoReportResponse } from '@/data/demoReport';
 import { fsApi } from '@/api/fs';
 import EditModal from '@/components/edit/EditModal';
 import { reportApi } from '@/api/report';
@@ -20,20 +25,15 @@ import { LayoutGrid } from '@/components/dashboard/LayoutGrid';
 export function DashboardPage() {
   const [fileSystemItems, setFileSystemItems] = useState<FileSystemItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<FileSystemItem | null>(null);
-  const [dashboardData, setDashboardData] = useState<ReportResponse | null>(
-    null
-  );
+
   // 其他状态保持不变
   const [navbarVisible, setNavbarVisible] = useState(true);
   const [navbarWidth, setNavbarWidth] = useState(256); // 默认宽度为256px
 
-  const [queryResults, setQueryResults] = useState<Record<string, any> | null>(
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [currentEditReport, setCurrentEditReport] = useState<Report | null>(
     null
   );
-  const [layout, setLayout] = useState<Layout | null>(null);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [currentEditReport, setCurrentEditReport] =
-    useState<ReportResponse | null>(null);
   const [currentEditingTabId, setCurrentEditingTabId] = useState<string | null>(
     null
   );
@@ -81,7 +81,6 @@ export function DashboardPage() {
     reportApi
       .getReportByFileId(tab.fileId)
       .then((report) => {
-        console.info('加载报表???', report);
         addTabReport(tab.id, report);
       })
       .catch((err) => {
@@ -109,6 +108,7 @@ export function DashboardPage() {
             : (item as ReferenceItem).reportId,
       };
 
+      // 新增tab
       addTab(newTab);
 
       // 获取该标签对应的报表数据
@@ -121,24 +121,12 @@ export function DashboardPage() {
   // 关闭标签页 - 使用 store 的 removeTab
   const closeTab = (tabId: string, e: React.MouseEvent) => {
     e.stopPropagation(); // 阻止冒泡，避免触发标签切换
+
+    // 删除tab
     removeTab(tabId);
-  };
 
-  // 处理选择文件系统项目
-  const handleSelectItem = (item: FileSystemItem) => {
-    setSelectedItem(item);
-    // 如果选择的是文件，将其报表ID保存到状态中
-    if (item.type === 'file') {
-      setDashboardData(demoReportResponse); // 使用演示数据
-    }
-  };
-
-  // 处理双击文件系统项目
-  const handleItemDoubleClick = (item: FileSystemItem) => {
-    if (item.type === 'file' || item.type === 'reference') {
-      console.log('打开报表', item);
-      openReportTab(item);
-    }
+    // 删除tab对应的报表
+    removeTabReport(tabId);
   };
 
   // 修改handleQuerySubmit函数，接收文件参数为对象
@@ -148,8 +136,6 @@ export function DashboardPage() {
   ) => {
     console.log('查询参数:', values);
     console.log('上传文件:', files);
-    setQueryResults(values);
-    // 这里可以添加API调用逻辑
   };
 
   // 处理编辑报表
@@ -164,20 +150,13 @@ export function DashboardPage() {
   const handleSaveReport = (
     title: string,
     description: string,
-    parameters: any[],
-    artifacts: any[],
-    dataSources: any[],
+    createdAt: string,
+    updatedAt: string,
+    parameters: Parameter[],
+    artifacts: Artifact[],
+    dataSources: DataSource[],
     layout: Layout
   ) => {
-    // 这里可以添加保存报表的逻辑
-    console.log('保存报表', {
-      title,
-      description,
-      parameters,
-      artifacts,
-      dataSources,
-      layout,
-    });
     setIsEditModalOpen(false);
 
     // 更新当前标签的报表数据
@@ -188,16 +167,21 @@ export function DashboardPage() {
           ...currentReport,
           title,
           description,
+          createdAt,
+          updatedAt,
           parameters,
           artifacts,
           dataSources,
           layout,
         };
 
+        console.log('更新报表', updatedReport);
+        // api: 更新报表
+        reportApi.updateReport(updatedReport.id, updatedReport);
+
         // 同时更新其他状态
-        setDashboardData(updatedReport);
-        setLayout(layout);
-        setCurrentEditingTabId(null);
+        tabReports[currentEditingTabId] = updatedReport; //更新tabReports
+        setCurrentEditingTabId(null); //清空当前编辑的标签ID
       }
     }
   };
@@ -238,8 +222,13 @@ export function DashboardPage() {
               fsApi.saveFileSystemChanges(fileSystemItems, items);
               setFileSystemItems(items);
             }}
-            onSelectItem={handleSelectItem}
-            onItemDoubleClick={handleItemDoubleClick}
+            onSelectItem={setSelectedItem}
+            onItemDoubleClick={(item) => {
+              if (item.type === 'file' || item.type === 'reference') {
+                console.log('打开报表', item);
+                openReportTab(item);
+              }
+            }}
           />
         </div>
 
@@ -323,6 +312,14 @@ export function DashboardPage() {
                               onSubmit={handleQuerySubmit}
                             />
                           </div>
+                          <h1 className='text-2xl font-bold'>
+                            {reportData.title}
+                          </h1>
+                          {reportData.description && (
+                            <h2 className='text-sm text-muted-foreground'>
+                              {reportData.description}
+                            </h2>
+                          )}
 
                           {/* 展示区域 */}
                           {reportData.layout &&

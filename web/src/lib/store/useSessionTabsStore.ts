@@ -92,8 +92,9 @@ export const useSessionTabsStore = create<SessionTabsState>()(
       partialize: (state) => ({
         tabs: state.tabs,
         activeTabId: state.activeTabId,
+
         // 我们也可以选择不持久化报表数据，以减少存储大小
-        // tabReports: state.tabReports
+        tabReports: state.tabReports,
       }),
     }
   )

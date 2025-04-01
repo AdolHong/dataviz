@@ -43,6 +43,8 @@ import {
 import { DatePicker } from '@/components/ui/datepicker';
 import { Card } from '../ui/card';
 import { CardContent } from '../ui/card';
+import { type DatePickerParamConfig } from '@/types/models/parameter';
+import dayjs from 'dayjs';
 
 interface ParameterQueryAreaProps {
   parameters: Parameter[];
@@ -84,7 +86,7 @@ export function ParameterQueryArea({
         param.config.type === 'multi_select' ||
         param.config.type === 'multi_input'
       ) {
-        initialValues[param.id] = param.config.default || [];
+        initialValues[param.name] = param.config.default || [];
       }
       // 对于单选和单输入类型，使用默认值
       else if (
@@ -92,7 +94,7 @@ export function ParameterQueryArea({
         param.config.type === 'single_input' ||
         param.config.type === 'date_picker'
       ) {
-        initialValues[param.id] = param.config.default;
+        initialValues[param.name] = param.config.default;
       }
     });
 
@@ -117,6 +119,7 @@ export function ParameterQueryArea({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
     onSubmit(values, files);
   };
 
@@ -135,11 +138,11 @@ export function ParameterQueryArea({
     if (e.key === 'Enter' && e.currentTarget.value.trim() !== '') {
       e.preventDefault();
       const newValue = e.currentTarget.value.trim();
-      const currentValues = values[param.id] || [];
+      const currentValues = values[param.name] || [];
 
       // 检查是否已存在该值
       if (!currentValues.includes(newValue)) {
-        handleValueChange(param.id, [...currentValues, newValue]);
+        handleValueChange(param.name, [...currentValues, newValue]);
         e.currentTarget.value = '';
       } else {
         // 可选：添加重复值的提示
@@ -150,10 +153,10 @@ export function ParameterQueryArea({
 
   // 删除多输入框中的项
   const removeMultiInputItem = (param: Parameter, index: number) => {
-    const currentValues = values[param.id] || [];
+    const currentValues = values[param.name] || [];
     const newValues = [...currentValues];
     newValues.splice(index, 1);
-    handleValueChange(param.id, newValues);
+    handleValueChange(param.name, newValues);
   };
 
   const renderParameterInput = (param: Parameter) => {
@@ -165,7 +168,7 @@ export function ParameterQueryArea({
           return (
             <Select
               defaultValue={param.config.default}
-              onValueChange={(value) => handleValueChange(param.id, value)}
+              onValueChange={(value) => handleValueChange(param.name, value)}
             >
               <SelectTrigger className='w-full'>
                 <SelectValue placeholder='请选择' />
@@ -186,8 +189,8 @@ export function ParameterQueryArea({
               <PopoverTrigger asChild>
                 <Button variant='outline' className='w-full justify-between'>
                   <span className='truncate'>
-                    {values[param.id]?.length
-                      ? `已选择 ${values[param.id].length} 项`
+                    {values[param.name]?.length
+                      ? `已选择 ${values[param.name].length} 项`
                       : '请选择'}
                   </span>
                   <ChevronDown className='ml-2 h-4 w-4 shrink-0 opacity-50' />
@@ -202,7 +205,7 @@ export function ParameterQueryArea({
                       // 使用 param.config.default 初始化多选值
                       const initialValues = param.config.default || [];
                       const isSelected = (
-                        values[param.id] || initialValues
+                        values[param.name] || initialValues
                       ).includes(choice);
 
                       return (
@@ -210,13 +213,13 @@ export function ParameterQueryArea({
                           key={choice}
                           onSelect={() => {
                             const currentValues =
-                              values[param.id] || initialValues;
+                              values[param.name] || initialValues;
                             const newValues = isSelected
                               ? currentValues.filter(
                                   (v: string) => v !== choice
                                 )
                               : [...currentValues, choice];
-                            handleValueChange(param.id, newValues);
+                            handleValueChange(param.name, newValues);
                           }}
                         >
                           <div className='flex items-center gap-2 w-full'>
@@ -246,8 +249,23 @@ export function ParameterQueryArea({
         case 'date_picker':
           return (
             <DatePicker
-              date={values[param.id] ? new Date(values[param.id]) : undefined}
-              setDate={(date) => handleValueChange(param.id, date)}
+              date={
+                values[param.name] ? new Date(values[param.name]) : undefined
+              }
+              setDate={(date) => {
+                if (date) {
+                  let dateFormat = (param.config as DatePickerParamConfig)
+                    .dateFormat;
+                  dateFormat =
+                    dateFormat === 'YYYYMMDD' ? 'YYYYMMDD' : 'YYYY-MM-DD';
+
+                  // 使用 dayjs 替换 toLocaleDateString
+                  const dateString = dayjs(date).format(dateFormat);
+                  handleValueChange(param.name, dateString);
+                } else {
+                  handleValueChange(param.name, '');
+                }
+              }}
             />
           );
 
@@ -259,7 +277,7 @@ export function ParameterQueryArea({
                 onKeyDown={(e) => handleMultiInputKeyDown(e, param)}
               />
               <div className='flex flex-wrap gap-2 mb-2'>
-                {(values[param.id] || []).map(
+                {(values[param.name] || []).map(
                   (value: string, index: number) => (
                     <div
                       key={`${value}-${index}`}
@@ -286,7 +304,7 @@ export function ParameterQueryArea({
           return (
             <Input
               defaultValue={param.config.default}
-              onChange={(e) => handleValueChange(param.id, e.target.value)}
+              onChange={(e) => handleValueChange(param.name, e.target.value)}
             />
           );
       }
@@ -299,7 +317,7 @@ export function ParameterQueryArea({
             <TooltipProvider delayDuration={1000}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Label htmlFor={param.id}>{label}</Label>
+                  <Label htmlFor={param.name}>{label}</Label>
                 </TooltipTrigger>
                 <TooltipContent>
                   <p>{param.description}</p>
@@ -307,7 +325,7 @@ export function ParameterQueryArea({
               </Tooltip>
             </TooltipProvider>
           ) : (
-            <Label htmlFor={param.id}>{label}</Label>
+            <Label htmlFor={param.name}>{label}</Label>
           )}
         </div>
         {inputComponent}
@@ -357,6 +375,9 @@ export function ParameterQueryArea({
                 </div>
               </div>
               <div className='flex items-center space-x-2'>
+                <Button type='submit' size='sm' className='h-8 w-15 px-2'>
+                  查询
+                </Button>
                 <Button
                   variant='outline'
                   size='sm'
@@ -365,14 +386,12 @@ export function ParameterQueryArea({
                 >
                   编辑
                 </Button>
-                <Button type='submit' size='sm'>
-                  查询
-                </Button>
+
                 <Button
                   variant='ghost'
                   size='sm'
                   onClick={toggleParametersExpanded}
-                  className='h-8 w-15 px-2'
+                  className='border-1'
                 >
                   {parametersExpanded ? (
                     <ChevronUp size={16} className='text-muted-foreground' />
@@ -389,7 +408,7 @@ export function ParameterQueryArea({
                 <TabsContent value='parameters' className='mt-2 space-y-4'>
                   <div className='grid grid-cols-2 md:grid-cols-4 gap-x-10 gap-y-3'>
                     {parameters.map((param) => (
-                      <div key={param.id} className='col-span-1'>
+                      <div key={param.name} className='col-span-1'>
                         {renderParameterInput(param)}
                       </div>
                     ))}

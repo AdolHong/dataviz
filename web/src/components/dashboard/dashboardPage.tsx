@@ -19,14 +19,7 @@ import { useSessionIdStore } from '@/lib/store/useSessionIdStore';
 import { ParameterQueryArea } from '@/components/dashboard/ParameterQueryArea';
 import { LayoutGrid } from '@/components/dashboard/LayoutGrid';
 import { type TabDetail } from '@/lib/store/useTabsSessionStore';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipPortal,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@radix-ui/react-tooltip';
-import { CardTitle } from '../ui/card';
+import { toast } from 'sonner';
 
 export function DashboardPage() {
   const [fileSystemItems, setFileSystemItems] = useState<FileSystemItem[]>([]);
@@ -145,6 +138,12 @@ export function DashboardPage() {
     values: Record<string, any>,
     files?: Record<string, File[]>
   ) => {
+    // 如果文件为空，则不进行查询
+    if (!files || Object.keys(files).length === 0) {
+      toast.error('请上传文件');
+      return;
+    }
+
     console.log('查询参数:', values);
     console.log('上传文件:', files);
   };

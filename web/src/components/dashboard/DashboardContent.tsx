@@ -37,14 +37,8 @@ export function DashboardContent({
           </div>
 
           {/* 展示区域 */}
-          <div className='space-y-4'>
-            <div className='flex items-center justify-between'>
-              <h2 className='text-lg font-medium'>数据可视化</h2>
-            </div>
-            {layout && layout.items.length > 0 && (
-              <LayoutGrid layout={layout} />
-            )}
-          </div>
+
+          {layout && layout.items.length > 0 && <LayoutGrid layout={layout} />}
         </>
       </div>
     </div>

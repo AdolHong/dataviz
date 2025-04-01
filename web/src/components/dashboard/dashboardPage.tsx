@@ -6,19 +6,16 @@ import type {
   FileSystemItem,
   ReferenceItem,
 } from '@/types/models/fileSystem';
-import type {
-  Artifact,
-  DataSource,
-  Parameter,
-  Report,
-  ReportResponse,
-} from '@/types';
+import type { Artifact, DataSource, Parameter, Report } from '@/types';
 import type { Layout } from '@/types/models/layout';
 import { ChevronLeft, ChevronRight, X, Edit } from 'lucide-react';
 import { fsApi } from '@/api/fs';
 import EditModal from '@/components/edit/EditModal';
 import { reportApi } from '@/api/report';
-import { useSessionTabsStore } from '@/lib/store/useSessionTabsStore';
+import { useTabsSessionStore } from '@/lib/store/useTabsSessionStore';
+import { useTabReportsSessionStore } from '@/lib/store/useTabReportsSessionStore';
+import { useSessionIdStore } from '@/lib/store/useSessionIdStore';
+
 import { ParameterQueryArea } from '@/components/dashboard/ParameterQueryArea';
 import { LayoutGrid } from '@/components/dashboard/LayoutGrid';
 
@@ -42,14 +39,17 @@ export function DashboardPage() {
   const {
     tabs: openTabs,
     activeTabId,
-    tabReports,
     addTab,
     removeTab,
     setActiveTab,
-    addTabReport,
-    removeTabReport,
-  } = useSessionTabsStore();
+  } = useTabsSessionStore();
 
+  const { tabReports, getReport, setReport, removeReport } =
+    useTabReportsSessionStore();
+
+  const { getSessionId } = useSessionIdStore();
+
+  // 初始化
   // 初始化
   useEffect(() => {
     fsApi.getAllItems().then((items) => {
@@ -58,8 +58,8 @@ export function DashboardPage() {
 
     // 如果有活动标签，尝试加载其报表数据
     if (activeTabId) {
-      const activeTab = openTabs.find((tab) => tab.id === activeTabId);
-      if (activeTab && !tabReports[activeTabId]) {
+      const activeTab = openTabs.find((tab) => tab.tabId === activeTabId);
+      if (activeTab && !getReport(activeTab.tabId)) {
         loadReportForTab(activeTab);
       }
     }
@@ -81,7 +81,7 @@ export function DashboardPage() {
     reportApi
       .getReportByFileId(tab.fileId)
       .then((report) => {
-        addTabReport(tab.id, report);
+        setReport(tab.tabId, report);
       })
       .catch((err) => {
         console.error('加载报表失败:', err);
@@ -95,11 +95,11 @@ export function DashboardPage() {
 
     if (existingTab) {
       // 已经打开，激活该标签页
-      setActiveTab(existingTab.id);
+      setActiveTab(existingTab.tabId);
     } else {
       // 没有打开，创建新标签页
       const newTab = {
-        id: `tab-${Date.now()}`, // 生成唯一ID
+        tabId: `tab-${Date.now()}`, // 生成唯一ID
         title: item.name,
         fileId: item.id,
         reportId:
@@ -126,7 +126,7 @@ export function DashboardPage() {
     removeTab(tabId);
 
     // 删除tab对应的报表
-    removeTabReport(tabId);
+    removeReport(tabId);
   };
 
   // 修改handleQuerySubmit函数，接收文件参数为对象
@@ -139,11 +139,13 @@ export function DashboardPage() {
   };
 
   // 处理编辑报表
-  const handleEditReport = (report: ReportResponse, tabId: string) => {
-    setCurrentEditReport(report);
-    setIsEditModalOpen(true);
-    // 保存当前编辑的标签ID，以便保存时更新正确的标签数据
-    setCurrentEditingTabId(tabId);
+  const handleEditReport = (report: Report | undefined, tabId: string) => {
+    if (report) {
+      setCurrentEditReport(report);
+      setIsEditModalOpen(true);
+      // 保存当前编辑的标签ID，以便保存时更新正确的标签数据
+      setCurrentEditingTabId(tabId);
+    }
   };
 
   // 处理保存报表
@@ -161,7 +163,7 @@ export function DashboardPage() {
 
     // 更新当前标签的报表数据
     if (currentEditingTabId) {
-      const currentReport = tabReports[currentEditingTabId];
+      const currentReport = getReport(currentEditingTabId);
       if (currentReport) {
         const updatedReport = {
           ...currentReport,
@@ -180,7 +182,7 @@ export function DashboardPage() {
         reportApi.updateReport(updatedReport.id, updatedReport);
 
         // 同时更新其他状态
-        tabReports[currentEditingTabId] = updatedReport; //更新tabReports
+        setReport(currentEditingTabId, updatedReport); //更新tabReports
         setCurrentEditingTabId(null); //清空当前编辑的标签ID
       }
     }
@@ -256,20 +258,20 @@ export function DashboardPage() {
               {/* 标签页 - 使用 store 中的 openTabs */}
               {openTabs.map((tab) => (
                 <div
-                  key={tab.id}
+                  key={tab.tabId}
                   className={`flex items-center px-4 py-2 cursor-pointer border-r border-border relative min-w-[150px] max-w-[200px] ${
-                    tab.id === activeTabId
+                    tab.tabId === activeTabId
                       ? 'bg-background'
                       : 'bg-muted/50 hover:bg-muted'
                   }`}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => setActiveTab(tab.tabId)}
                 >
                   <div className='truncate flex-1'>{tab.title}</div>
                   <Button
                     variant='ghost'
                     size='icon'
                     className='h-4 w-4 ml-2 opacity-60 hover:opacity-100'
-                    onClick={(e) => closeTab(tab.id, e)}
+                    onClick={(e) => closeTab(tab.tabId, e)}
                   >
                     <X size={14} />
                   </Button>
@@ -284,18 +286,20 @@ export function DashboardPage() {
               <div className='h-full'>
                 {/* 为每个报表渲染内容组件 */}
                 {openTabs.map((tab) => {
-                  const reportData = tabReports[tab.id] || {};
+                  const reportData = tabReports[tab.tabId];
                   return (
                     <div
-                      key={tab.id}
-                      className={`h-full ${tab.id === activeTabId ? 'block' : 'hidden'}`}
+                      key={tab.tabId}
+                      className={`h-full ${tab.tabId === activeTabId ? 'block' : 'hidden'}`}
                     >
                       {/* 添加编辑按钮 */}
                       <div className='absolute top-4 right-4 z-10'>
                         <Button
                           variant='outline'
                           size='icon'
-                          onClick={() => handleEditReport(reportData, tab.id)}
+                          onClick={() =>
+                            handleEditReport(tabReports[tab.tabId], tab.tabId)
+                          }
                         >
                           <Edit className='h-4 w-4' />
                         </Button>
@@ -307,22 +311,22 @@ export function DashboardPage() {
                           {/* 参数区域 */}
                           <div className='space-y-2'>
                             <ParameterQueryArea
-                              parameters={reportData.parameters || []}
-                              dataSources={reportData.dataSources || []}
+                              parameters={reportData?.parameters || []}
+                              dataSources={reportData?.dataSources || []}
                               onSubmit={handleQuerySubmit}
                             />
                           </div>
                           <h1 className='text-2xl font-bold'>
-                            {reportData.title}
+                            {reportData?.title}
                           </h1>
-                          {reportData.description && (
+                          {reportData?.description && (
                             <h2 className='text-sm text-muted-foreground'>
                               {reportData.description}
                             </h2>
                           )}
 
                           {/* 展示区域 */}
-                          {reportData.layout &&
+                          {reportData?.layout &&
                             reportData.layout.items.length > 0 && (
                               <LayoutGrid layout={reportData.layout} />
                             )}

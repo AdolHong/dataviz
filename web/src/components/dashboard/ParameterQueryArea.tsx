@@ -1,5 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Card, CardContent } from '@/components/ui/card';
+import React, { useState, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -42,6 +41,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { DatePicker } from '@/components/ui/datepicker';
+import { Card } from '../ui/card';
+import { CardContent } from '../ui/card';
 
 interface ParameterQueryAreaProps {
   parameters: Parameter[];
@@ -314,15 +315,15 @@ export function ParameterQueryArea({
 
   return (
     <Card className='w-full'>
-      <CardContent className='pt-4 pb-2'>
+      <CardContent>
         <form onSubmit={handleSubmit}>
           <Tabs
             defaultValue='parameters'
             value={activeTab}
             onValueChange={setActiveTab}
-            className='w-full'
           >
-            <div className='flex justify-between items-center mb-2'>
+            {/* tabs */}
+            <div className='flex justify-between items-center mb-2 '>
               <div className='flex items-center'>
                 <TabsList>
                   <TabsTrigger
@@ -330,7 +331,7 @@ export function ParameterQueryArea({
                     className='flex items-center gap-1'
                   >
                     <Search size={14} />
-                    <span>查询参数</span>
+                    查询参数
                   </TabsTrigger>
                   {requireFileUpload && (
                     <TabsTrigger
@@ -372,8 +373,9 @@ export function ParameterQueryArea({
               </div>
             </div>
 
+            {/* 参数 */}
             {parametersExpanded ? (
-              <>
+              <div>
                 <TabsContent value='parameters' className='mt-2 space-y-4'>
                   <div className='grid grid-cols-2 md:grid-cols-4 gap-x-10 gap-y-3'>
                     {parameters.map((param) => (
@@ -392,7 +394,7 @@ export function ParameterQueryArea({
                     />
                   </TabsContent>
                 )}
-              </>
+              </div>
             ) : null}
           </Tabs>
         </form>

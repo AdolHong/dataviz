@@ -19,6 +19,14 @@ import { useSessionIdStore } from '@/lib/store/useSessionIdStore';
 import { ParameterQueryArea } from '@/components/dashboard/ParameterQueryArea';
 import { LayoutGrid } from '@/components/dashboard/LayoutGrid';
 import { type TabDetail } from '@/lib/store/useTabsSessionStore';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipPortal,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@radix-ui/react-tooltip';
+import { CardTitle } from '../ui/card';
 
 export function DashboardPage() {
   const [fileSystemItems, setFileSystemItems] = useState<FileSystemItem[]>([]);
@@ -242,6 +250,12 @@ export function DashboardPage() {
                 });
               });
             }}
+            useDeleteItemEffect={(item) => {
+              const tabs = findTabsByFileId(item.id);
+              tabs.forEach((tab) => {
+                removeTab(tab.tabId);
+              });
+            }}
           />
         </div>
 
@@ -303,19 +317,6 @@ export function DashboardPage() {
                       key={tab.tabId}
                       className={`h-full ${tab.tabId === activeTabId ? 'block' : 'hidden'}`}
                     >
-                      {/* 添加编辑按钮 */}
-                      <div className='absolute top-4 right-4 z-10'>
-                        <Button
-                          variant='outline'
-                          size='icon'
-                          onClick={() =>
-                            handleEditReport(tabReports[tab.tabId], tab.tabId)
-                          }
-                        >
-                          <Edit className='h-4 w-4' />
-                        </Button>
-                      </div>
-
                       {/* 展示区域 */}
                       <div className='flex-1 overflow-auto'>
                         <div className='container max-w-full py-6 px-4 md:px-8 space-y-6'>
@@ -325,14 +326,33 @@ export function DashboardPage() {
                               parameters={reportData?.parameters || []}
                               dataSources={reportData?.dataSources || []}
                               onSubmit={handleQuerySubmit}
+                              onEditReport={() =>
+                                handleEditReport(
+                                  tabReports[tab.tabId],
+                                  tab.tabId
+                                )
+                              }
                             />
                           </div>
-                          <h1 className='text-2xl font-bold'>{tab?.title}</h1>
-                          {reportData?.description && (
-                            <h2 className='text-sm text-muted-foreground'>
-                              {reportData.description}
-                            </h2>
-                          )}
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger>
+                                <CardTitle className='text-sm font-medium'>
+                                  <h1 className='text-2xl font-bold'>
+                                    {tab?.title}
+                                  </h1>
+                                </CardTitle>
+                              </TooltipTrigger>
+
+                              <TooltipContent>
+                                {reportData?.description && (
+                                  <p className='text-sm text-muted-foreground'>
+                                    {reportData.description}
+                                  </p>
+                                )}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
 
                           {/* 展示区域 */}
                           {reportData?.layout &&

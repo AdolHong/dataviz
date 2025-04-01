@@ -51,12 +51,14 @@ interface ParameterQueryAreaProps {
     values: Record<string, any>,
     files?: Record<string, File[]>
   ) => void;
+  onEditReport: () => void;
 }
 
 export function ParameterQueryArea({
   parameters,
   dataSources = [],
   onSubmit,
+  onEditReport,
 }: ParameterQueryAreaProps) {
   const [values, setValues] = useState<Record<string, any>>({});
   const [files, setFiles] = useState<Record<string, File[]>>({});
@@ -331,7 +333,7 @@ export function ParameterQueryArea({
                     className='flex items-center gap-1'
                   >
                     <Search size={14} />
-                    查询参数
+                    查询参数 ({parameters.length})
                   </TabsTrigger>
                   {requireFileUpload && (
                     <TabsTrigger
@@ -355,6 +357,14 @@ export function ParameterQueryArea({
                 </div>
               </div>
               <div className='flex items-center space-x-2'>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  className='h-8 w-15 px-2'
+                  onClick={onEditReport}
+                >
+                  编辑
+                </Button>
                 <Button type='submit' size='sm'>
                   查询
                 </Button>
@@ -362,7 +372,7 @@ export function ParameterQueryArea({
                   variant='ghost'
                   size='sm'
                   onClick={toggleParametersExpanded}
-                  className='h-8 px-2'
+                  className='h-8 w-15 px-2'
                 >
                   {parametersExpanded ? (
                     <ChevronUp size={16} className='text-muted-foreground' />

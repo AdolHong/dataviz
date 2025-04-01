@@ -173,7 +173,8 @@ export const createReference = (
 // 修改删除项目函数，处理引用的情况
 export const deleteItem = (
   items: FileSystemItem[],
-  itemId: string
+  itemId: string,
+  recursive: boolean = false
 ): FileSystemItem[] => {
   const itemToDelete = findItemById(items, itemId);
   if (!itemToDelete) return items;
@@ -192,16 +193,24 @@ export const deleteItem = (
     idsToDelete = [...idsToDelete, ...references.map((ref) => ref.id)];
   }
 
+  console.log('idsToDelete', idsToDelete);
   // 如果是文件夹，递归删除所有子项
   if (itemToDelete.type === FileSystemItemType.FOLDER) {
     const childrenIds = getChildItems(items, itemId).map((child) => child.id);
-    let result = [...items];
 
-    for (const childId of childrenIds) {
-      result = deleteItem(result, childId);
+    // 如果递归删除，则删除所有子项
+    if (recursive) {
+      let result = [...items];
+      for (const childId of childrenIds) {
+        result = deleteItem(result, childId);
+      }
+      return result.filter((item) => item.id !== itemId);
+    } else if (childrenIds.length === 0) {
+      // 如果文件夹为空，则删除文件夹
+      return items.filter((item) => item.id !== itemId);
+    } else {
+      throw new Error('文件夹不为空，无法删除');
     }
-
-    return result.filter((item) => item.id !== itemId);
   }
 
   // 删除所有标记的项目

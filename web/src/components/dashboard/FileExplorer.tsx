@@ -54,6 +54,7 @@ interface FileExplorerProps {
   onSelectItem?: (item: FileSystemItem) => void;
   onItemDoubleClick?: (item: FileSystemItem) => void;
   useRenameItemEffect?: (item: FileSystemItem) => void;
+  useDeleteItemEffect?: (item: FileSystemItem) => void;
 }
 
 export function FileExplorer({
@@ -62,6 +63,7 @@ export function FileExplorer({
   onSelectItem,
   onItemDoubleClick,
   useRenameItemEffect,
+  useDeleteItemEffect,
 }: FileExplorerProps) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
     new Set()
@@ -336,25 +338,25 @@ export function FileExplorer({
     if (!selectedItem) return;
 
     // 如果是文件，检查是否有引用
-    if (selectedItem.type === FileSystemItemType.FILE) {
-      const references = fsItems.filter(
-        (item) =>
-          item.type === FileSystemItemType.REFERENCE &&
-          (item as any).referenceTo === selectedItem.id
-      );
-
-      // 如果存在引用，直接删除文件和所有引用
-      if (references.length > 0) {
-        const updatedItems = deleteItem(fsItems, selectedItem.id);
-        setFsItems(updatedItems);
-        setIsDeleteDialogOpen(false);
-        return;
+    if (
+      selectedItem.type === FileSystemItemType.FILE ||
+      selectedItem.type === FileSystemItemType.REFERENCE
+    ) {
+      const updatedItems = deleteItem(fsItems, selectedItem.id);
+      setFsItems(updatedItems);
+      if (useDeleteItemEffect) {
+        useDeleteItemEffect(selectedItem);
       }
     }
 
-    // 常规删除逻辑
-    const updatedItems = deleteItem(fsItems, selectedItem.id);
-    setFsItems(updatedItems);
+    if (selectedItem.type === FileSystemItemType.FOLDER) {
+      try {
+        const updatedItems = deleteItem(fsItems, selectedItem.id, false);
+        setFsItems(updatedItems);
+      } catch (e: any) {
+        toast.error(e.message);
+      }
+    }
     setIsDeleteDialogOpen(false);
   };
 

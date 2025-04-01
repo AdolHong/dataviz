@@ -28,5 +28,25 @@
     "updatedAt": "2025-04-01T00:21:04.446798",
     "reportId": "report-1743436362131",
     "referenceTo": null
+  },
+  {
+    "id": "file-1743438797184",
+    "name": "bb",
+    "type": "file",
+    "parentId": "folder-1743435936634",
+    "createdAt": "2025-04-01T00:33:17.194441",
+    "updatedAt": "2025-04-01T00:33:17.194441",
+    "reportId": "report-1743438797184",
+    "referenceTo": null
+  },
+  {
+    "id": "ref-1743472212894",
+    "name": "bb 的引用",
+    "type": "reference",
+    "parentId": "folder-1743435936634",
+    "createdAt": "2025-04-01T09:50:12.903101",
+    "updatedAt": "2025-04-01T09:50:12.903101",
+    "reportId": null,
+    "referenceTo": "file-1743438797184"
   }
 ]

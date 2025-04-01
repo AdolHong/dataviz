@@ -9,6 +9,7 @@ import { demoReportResponse } from '@/data/demoReport';
 import { fsApi } from '@/api/fs';
 import { DashboardContent } from '@/components/dashboard/DashboardContent';
 import EditModal from '@/components/edit/EditModal';
+import { reportApi } from '@/api/report';
 
 // 定义标签页类型
 interface TabItem {
@@ -42,6 +43,16 @@ export function DashboardPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [currentEditReport, setCurrentEditReport] =
     useState<ReportResponse | null>(null);
+
+  // 添加一个状态来存储每个标签对应的报表数据
+  const [tabReports, setTabReports] = useState<Record<string, ReportResponse>>(
+    {}
+  );
+
+  // 添加一个状态来跟踪当前正在编辑的标签
+  const [currentEditingTabId, setCurrentEditingTabId] = useState<string | null>(
+    null
+  );
 
   // 初始化
   useEffect(() => {
@@ -96,8 +107,38 @@ export function DashboardPage() {
 
       setOpenTabs([...openTabs, newTab]);
       setActiveTabId(newTab.id);
+
+      // 获取该标签对应的报表数据
+      if (newTab.reportId) {
+        reportApi.getReportByFileId(newTab.fileId).then((report) => {
+          setTabReports((prev) => ({
+            ...prev,
+            [newTab.id]: report,
+          }));
+        });
+      }
     }
   };
+
+  // 加载活动标签的报表数据
+  useEffect(() => {
+    if (activeTabId && !tabReports[activeTabId]) {
+      // 找到当前活动的标签
+      const activeTab = openTabs.find((tab) => tab.id === activeTabId);
+      if (activeTab && activeTab.reportId) {
+        // 如果是真实环境，这里应该从API获取报表数据
+        // reportApi.getReportByFileId(activeTab.reportId).then((report) => {
+        //   setTabReports(prev => ({...prev, [activeTabId]: report}));
+        // });
+
+        // 为了演示，我们使用demoReportResponse
+        setTabReports((prev) => ({
+          ...prev,
+          [activeTabId]: demoReportResponse,
+        }));
+      }
+    }
+  }, [activeTabId, openTabs, tabReports]);
 
   // 关闭标签页
   const closeTab = (tabId: string, e: React.MouseEvent) => {
@@ -151,9 +192,11 @@ export function DashboardPage() {
   };
 
   // 处理编辑报表
-  const handleEditReport = (report: ReportResponse) => {
+  const handleEditReport = (report: ReportResponse, tabId: string) => {
     setCurrentEditReport(report);
     setIsEditModalOpen(true);
+    // 保存当前编辑的标签ID，以便保存时更新正确的标签数据
+    setCurrentEditingTabId(tabId);
   };
 
   // 处理保存报表
@@ -176,18 +219,27 @@ export function DashboardPage() {
     });
     setIsEditModalOpen(false);
 
-    // 更新当前报表数据
-    if (dashboardData) {
-      setDashboardData({
-        ...dashboardData,
+    // 更新当前标签的报表数据
+    if (currentEditingTabId) {
+      const updatedReport = {
+        ...tabReports[currentEditingTabId],
         title,
         description,
         parameters,
         artifacts,
         dataSources,
         layout,
-      });
+      };
+
+      setTabReports((prev) => ({
+        ...prev,
+        [currentEditingTabId]: updatedReport,
+      }));
+
+      // 同时更新dashboardData以便其他组件使用
+      setDashboardData(updatedReport);
       setLayout(layout);
+      setCurrentEditingTabId(null);
     }
   };
 
@@ -283,39 +335,41 @@ export function DashboardPage() {
             {openTabs.length > 0 && activeTabId ? (
               <div className='h-full'>
                 {/* 为每个报表渲染内容组件 */}
-                {openTabs.map((tab) => (
-                  <div
-                    key={tab.id}
-                    className={`h-full ${tab.id === activeTabId ? 'block' : 'hidden'}`}
-                  >
-                    {/* 添加编辑按钮 */}
-                    <div className='absolute top-4 right-4 z-10'>
-                      <Button
-                        variant='outline'
-                        size='icon'
-                        onClick={() => handleEditReport(demoReportResponse)}
-                      >
-                        <Edit className='h-4 w-4' />
-                      </Button>
-                    </div>
-
-                    {/* 使用 DashboardContent 组件替换原有内容 */}
-                    <DashboardContent
-                      title={demoReportResponse.title || 'hi'}
-                      description={demoReportResponse.description || ''}
-                      parameters={demoReportResponse.parameters || []}
-                      dataSources={demoReportResponse.dataSources || []}
-                      layout={
-                        demoReportResponse.layout || {
-                          items: [],
-                          columns: 1,
-                          rows: 1,
+                {openTabs.map((tab) => {
+                  const reportData = tabReports[tab.id] || demoReportResponse;
+                  return (
+                    <div
+                      key={tab.id}
+                      className={`h-full ${tab.id === activeTabId ? 'block' : 'hidden'}`}
+                    >
+                      {/* 添加编辑按钮 */}
+                      <div className='absolute top-4 right-4 z-10'>
+                        <Button
+                          variant='outline'
+                          size='icon'
+                          onClick={() => handleEditReport(reportData, tab.id)}
+                        >
+                          <Edit className='h-4 w-4' />
+                        </Button>
+                      </div>
+                      {/* 使用 DashboardContent 组件替换原有内容 */}
+                      <DashboardContent
+                        title={reportData.title || '报表'}
+                        description={reportData.description || ''}
+                        parameters={reportData.parameters || []}
+                        dataSources={reportData.dataSources || []}
+                        layout={
+                          reportData.layout || {
+                            items: [],
+                            columns: 1,
+                            rows: 1,
+                          }
                         }
-                      }
-                      handleQuerySubmit={handleQuerySubmit}
-                    />
-                  </div>
-                ))}
+                        handleQuerySubmit={handleQuerySubmit}
+                      />
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <div className='flex items-center justify-center h-full text-muted-foreground'>

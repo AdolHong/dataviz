@@ -49,6 +49,7 @@ interface EditModalProps {
     dataSources: DataSource[],
     layout: Layout
   ) => void;
+  titleEdiable?: boolean;
 }
 
 import { demoReportResponse as demoReport } from '@/data/demoReport';
@@ -57,7 +58,13 @@ import {
   demoArtifactEngineChoices,
 } from '@/data/demoEngine';
 
-const EditModal = ({ open, onClose, report, handleSave }: EditModalProps) => {
+const EditModal = ({
+  open,
+  onClose,
+  report,
+  handleSave,
+  titleEdiable = false,
+}: EditModalProps) => {
   const [activeTab, setActiveTab] = useState('info');
   const [title, setTitle] = useState<string>('');
   const [description, setDescription] = useState<string>('');
@@ -323,6 +330,7 @@ const EditModal = ({ open, onClose, report, handleSave }: EditModalProps) => {
                   title={title}
                   description={description}
                   onUpdate={handleUpdateBasicInfo}
+                  titleEditable={false}
                 />
               )}
 

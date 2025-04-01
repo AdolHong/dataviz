@@ -18,6 +18,7 @@ import { useSessionIdStore } from '@/lib/store/useSessionIdStore';
 
 import { ParameterQueryArea } from '@/components/dashboard/ParameterQueryArea';
 import { LayoutGrid } from '@/components/dashboard/LayoutGrid';
+import { type TabDetail } from '@/lib/store/useTabsSessionStore';
 
 export function DashboardPage() {
   const [fileSystemItems, setFileSystemItems] = useState<FileSystemItem[]>([]);
@@ -39,7 +40,9 @@ export function DashboardPage() {
   const {
     tabs: openTabs,
     activeTabId,
-    addTab,
+    getTab,
+    setTab,
+    findTabsByFileId,
     removeTab,
     setActiveTab,
   } = useTabsSessionStore();
@@ -58,7 +61,7 @@ export function DashboardPage() {
 
     // 如果有活动标签，尝试加载其报表数据
     if (activeTabId) {
-      const activeTab = openTabs.find((tab) => tab.tabId === activeTabId);
+      const activeTab = getTab(activeTabId);
       if (activeTab && !getReport(activeTab.tabId)) {
         loadReportForTab(activeTab);
       }
@@ -77,7 +80,7 @@ export function DashboardPage() {
   }, [fileSystemItems]);
 
   // 为标签加载报表数据的函数
-  const loadReportForTab = (tab: (typeof openTabs)[0]) => {
+  const loadReportForTab = (tab: TabDetail) => {
     reportApi
       .getReportByFileId(tab.fileId)
       .then((report) => {
@@ -91,11 +94,11 @@ export function DashboardPage() {
   // 打开报表标签页 - 修改为使用 store
   const openReportTab = (item: FileSystemItem) => {
     // 检查是否已经打开
-    const existingTab = openTabs.find((tab) => tab.fileId === item.id);
+    const tabs = findTabsByFileId(item.id);
 
-    if (existingTab) {
+    if (tabs && tabs.length > 0) {
       // 已经打开，激活该标签页
-      setActiveTab(existingTab.tabId);
+      setActiveTab(tabs[0].tabId);
     } else {
       // 没有打开，创建新标签页
       const newTab = {
@@ -109,7 +112,7 @@ export function DashboardPage() {
       };
 
       // 新增tab
-      addTab(newTab);
+      setTab(newTab.tabId, newTab);
 
       // 获取该标签对应的报表数据
       if (newTab.reportId) {
@@ -227,9 +230,17 @@ export function DashboardPage() {
             onSelectItem={setSelectedItem}
             onItemDoubleClick={(item) => {
               if (item.type === 'file' || item.type === 'reference') {
-                console.log('打开报表', item);
                 openReportTab(item);
               }
+            }}
+            useRenameItemEffect={(item) => {
+              const tabs = findTabsByFileId(item.id);
+              tabs.forEach((tab) => {
+                setTab(tab.tabId, {
+                  ...tab,
+                  title: item.name,
+                });
+              });
             }}
           />
         </div>
@@ -256,7 +267,7 @@ export function DashboardPage() {
               </div>
 
               {/* 标签页 - 使用 store 中的 openTabs */}
-              {openTabs.map((tab) => (
+              {Object.values(openTabs).map((tab) => (
                 <div
                   key={tab.tabId}
                   className={`flex items-center px-4 py-2 cursor-pointer border-r border-border relative min-w-[150px] max-w-[200px] ${
@@ -282,10 +293,10 @@ export function DashboardPage() {
 
           {/* 标签内容区 */}
           <div className='flex-1 overflow-auto'>
-            {openTabs.length > 0 && activeTabId ? (
+            {Object.values(openTabs).length > 0 && activeTabId ? (
               <div className='h-full'>
                 {/* 为每个报表渲染内容组件 */}
-                {openTabs.map((tab) => {
+                {Object.values(openTabs).map((tab) => {
                   const reportData = tabReports[tab.tabId];
                   return (
                     <div
@@ -316,9 +327,7 @@ export function DashboardPage() {
                               onSubmit={handleQuerySubmit}
                             />
                           </div>
-                          <h1 className='text-2xl font-bold'>
-                            {reportData?.title}
-                          </h1>
+                          <h1 className='text-2xl font-bold'>{tab?.title}</h1>
                           {reportData?.description && (
                             <h2 className='text-sm text-muted-foreground'>
                               {reportData.description}

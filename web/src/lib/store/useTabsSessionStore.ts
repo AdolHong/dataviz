@@ -12,8 +12,10 @@ interface TabDetail {
 // 定义 store 的状态类型
 interface TabsState {
   // 操作方法
-  tabs: TabDetail[];
-  addTab: (tab: TabDetail) => void;
+  tabs: Record<string, TabDetail>;
+  getTab: (tabId: string) => TabDetail | undefined;
+  setTab: (tabId: string, tab: TabDetail) => void;
+  findTabsByFileId: (fileId: string) => TabDetail[];
   removeTab: (tabId: string) => void;
 
   // 设置激活标签
@@ -29,43 +31,46 @@ interface TabsState {
 export const useTabsSessionStore = create<TabsState>()(
   persist(
     (set, get) => ({
-      tabs: [],
+      tabs: {},
       activeTabId: null,
 
-      addTab: (tab: TabDetail) =>
+      getTab: (tabId: string) => get().tabs[tabId],
+      setTab: (tabId: string, tab: TabDetail) =>
         set((state) => ({
-          tabs: [...state.tabs, tab],
+          tabs: { ...state.tabs, [tabId]: tab },
           activeTabId: tab.tabId,
         })),
 
+      findTabsByFileId: (fileId: string) =>
+        Object.values(get().tabs).filter((tab) => tab.fileId === fileId),
+
       removeTab: (tabId: string) =>
         set((state) => {
-          const newTabs = state.tabs.filter((tab) => tab.tabId !== tabId);
+          const oldTabs = state.tabs;
+          delete oldTabs[tabId];
 
-          // 如果删除的是当前活动标签，需要设置新的活动标签
-          let newActiveTabId = state.activeTabId;
+          // 若删除的是正在激活的tab
           if (tabId === state.activeTabId) {
-            const tabIndex = state.tabs.findIndex((tab) => tab.tabId === tabId);
-            if (newTabs.length > 0) {
-              // 选择相邻标签（优先右侧，其次左侧）
-              const newActiveIndex = Math.min(tabIndex, newTabs.length - 1);
-              newActiveTabId = newTabs[newActiveIndex].tabId;
-            } else {
-              newActiveTabId = null;
-            }
-          }
+            const keysList = Object.keys(oldTabs);
+            const minTabId =
+              keysList.length === 0
+                ? null
+                : keysList.reduce((a, b) => (a < b ? a : b));
 
-          return { tabs: newTabs, activeTabId: newActiveTabId };
+            return { tabs: oldTabs, activeTabId: minTabId };
+          } else {
+            return { tabs: oldTabs };
+          }
         }),
 
       setActiveTab: (tabId: string | null) => set({ activeTabId: tabId }),
 
       getActiveTab: () => {
         const { tabs, activeTabId } = get();
-        return tabs.find((tab) => tab.tabId === activeTabId);
+        return activeTabId ? tabs[activeTabId] : undefined;
       },
 
-      clear: () => set({ tabs: [], activeTabId: null }),
+      clear: () => set({ tabs: {}, activeTabId: null }),
     }),
     {
       name: 'tabs-session-storage', // localStorage 中的 key 名称

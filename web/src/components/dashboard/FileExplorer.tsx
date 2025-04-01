@@ -53,6 +53,7 @@ interface FileExplorerProps {
   setFsItems: (items: FileSystemItem[]) => void;
   onSelectItem?: (item: FileSystemItem) => void;
   onItemDoubleClick?: (item: FileSystemItem) => void;
+  useRenameItemEffect?: (item: FileSystemItem) => void;
 }
 
 export function FileExplorer({
@@ -60,6 +61,7 @@ export function FileExplorer({
   setFsItems,
   onSelectItem,
   onItemDoubleClick,
+  useRenameItemEffect,
 }: FileExplorerProps) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
     new Set()
@@ -247,6 +249,16 @@ export function FileExplorer({
 
     const updatedItems = renameItem(fsItems, selectedItem.id, newItemName);
     setFsItems(updatedItems);
+
+    // 如果存在重命名效果，则执行
+    if (useRenameItemEffect) {
+      useRenameItemEffect(
+        updatedItems.find(
+          (item) => item.id === selectedItem.id
+        ) as FileSystemItem
+      );
+    }
+
     setIsRenameDialogOpen(false);
   };
 
@@ -275,7 +287,8 @@ export function FileExplorer({
         fsItems,
         duplicateItemName,
         referencedFileId,
-        itemToDuplicate.parentId
+        itemToDuplicate.parentId,
+        (itemToDuplicate as any).reportId
       );
     } else {
       // 普通文件复制
@@ -311,7 +324,7 @@ export function FileExplorer({
       referenceItemName,
       fileToReference.id,
       fileToReference.parentId,
-      fileToReference.reportId
+      (fileToReference as any).reportId
     );
 
     setFsItems(updatedItems);

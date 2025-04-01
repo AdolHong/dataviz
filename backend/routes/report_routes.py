@@ -73,6 +73,15 @@ def update_report(file_id: str, report: Report):
     
     return report
 
+def update_report_title(file_id: str, title: str):
+    report_content = get_report_content(file_id)
+    if report_content:
+        report_content["title"] = title
+        save_report_content(file_id, report_content)
+
+    save_report_content(file_id, report_content)
+
+
 # API端点：创建一个新的报表文件
 @router.post("/reports", response_model=Report)
 def create_report(report: Report, parent_id: Optional[str] = None):

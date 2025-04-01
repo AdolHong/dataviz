@@ -20,6 +20,7 @@ from utils.fs_utils import (
     get_references_to_file,
     get_item_path
 )
+from routes.report_routes import update_report_title
 
 router = APIRouter(tags=["file-system"])
 
@@ -223,7 +224,11 @@ def rename_file(file_id: str, new_name: str):
     # 更新名称
     items[file_idx].name = new_name
     items[file_idx].updatedAt = datetime.now().isoformat()
-    
+
+    # 更新report的文件名
+    update_report_title(file_id, new_name)
+
+    # 更新目录结构
     save_fs_data(items)
     return items[file_idx]
 

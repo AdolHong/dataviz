@@ -11,11 +11,17 @@ interface TabBasicInfoProps {
   title: string;
   description: string;
   onUpdate: (title: string, description: string) => void;
+  titleEditable?: boolean;
 }
 
-const TabBasicInfo = ({ title, description, onUpdate }: TabBasicInfoProps) => {
+const TabBasicInfo = ({
+  title,
+  description,
+  onUpdate,
+  titleEditable,
+}: TabBasicInfoProps) => {
   const [isEditing, setIsEditing] = useState(false);
-  const [newTitle, setNewTitle] = useState(title);
+  const [newTitle, setNewTitle] = useState(title || 'default_title');
   const [newDescription, setNewDescription] = useState(description || '');
 
   const handleSave = () => {
@@ -36,8 +42,6 @@ const TabBasicInfo = ({ title, description, onUpdate }: TabBasicInfoProps) => {
   };
 
   const handleCancel = () => {
-    setNewTitle(title);
-    setNewDescription(description || '');
     setIsEditing(false);
   };
 
@@ -48,17 +52,22 @@ const TabBasicInfo = ({ title, description, onUpdate }: TabBasicInfoProps) => {
           {isEditing ? (
             <div className='space-y-4'>
               <div className='grid grid-cols-4 items-center gap-4'>
-                <Label htmlFor='title' className='text-right font-medium'>
-                  报表标题<span className='text-red-500'>*</span>
-                </Label>
-                <Input
-                  id='title'
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  className='col-span-3'
-                  placeholder='请输入报表标题'
-                  required
-                />
+                {titleEditable && (
+                  <>
+                    <Label htmlFor='title' className='text-right font-medium'>
+                      报表标题<span className='text-red-500'>*</span>
+                    </Label>
+
+                    <Input
+                      id='title'
+                      value={newTitle}
+                      onChange={(e) => setNewTitle(e.target.value)}
+                      className='col-span-3'
+                      placeholder='请输入报表标题'
+                      required
+                    />
+                  </>
+                )}
               </div>
 
               <div className='grid grid-cols-4 items-start gap-4'>
@@ -88,10 +97,12 @@ const TabBasicInfo = ({ title, description, onUpdate }: TabBasicInfoProps) => {
             </div>
           ) : (
             <div className='space-y-4'>
-              <div className='grid grid-cols-4 gap-4'>
-                <div className='text-right font-medium'>报表标题:</div>
-                <div className='col-span-3'>{title}</div>
-              </div>
+              {titleEditable && (
+                <div className='grid grid-cols-4 gap-4'>
+                  <div className='text-right font-medium'>报表标题:</div>
+                  <div className='col-span-3'>{title}</div>
+                </div>
+              )}
 
               <div className='grid grid-cols-4 gap-4'>
                 <div className='text-right font-medium'>报表描述:</div>

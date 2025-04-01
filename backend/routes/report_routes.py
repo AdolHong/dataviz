@@ -21,7 +21,7 @@ def get_report(file_id: str):
         raise HTTPException(status_code=404, detail="报表文件不存在")
 
     # 获取报表文件ID(文件或引用)
-    report_file_id = file_item.reportId if file_item.type == FileSystemItemType.FILE else file_item.referenceTo
+    report_file_id = file_item.id if file_item.type == FileSystemItemType.FILE else file_item.referenceTo
 
     # 获取报表内容
     report_content = get_report_content(report_file_id)
@@ -36,6 +36,8 @@ def get_report(file_id: str):
             "artifacts": [],
             "layout": {"items": []}
         }
+
+        print("重建了？？？？")
         save_report_content(file_id, default_report)
         return Report(**default_report)
     return Report(**report_content)

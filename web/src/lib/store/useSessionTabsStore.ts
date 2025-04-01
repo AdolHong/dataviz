@@ -25,8 +25,8 @@ interface SessionTabsState {
   getActiveTab: () => DashboardTab | undefined;
 
   // 设置报表
-  setTabReport: (tabId: string, report: ReportResponse) => void;
-  getTabReport: (tabId: string) => ReportResponse | undefined;
+  addTabReport: (tabId: string, report: ReportResponse) => void;
+  removeTabReport: (tabId: string) => void;
 
   // 清除
   clear: () => void;
@@ -73,14 +73,16 @@ export const useSessionTabsStore = create<SessionTabsState>()(
         return tabs.find((tab) => tab.id === activeTabId);
       },
 
-      setTabReport: (tabId: string, report: ReportResponse) =>
+      addTabReport: (tabId: string, report: ReportResponse) =>
         set((state) => ({
           tabReports: { ...state.tabReports, [tabId]: report },
         })),
 
-      getTabReport: (tabId: string) => {
-        return get().tabReports[tabId];
-      },
+      removeTabReport: (tabId: string) =>
+        set((state) => {
+          const { [tabId]: _, ...rest } = state.tabReports;
+          return { tabReports: rest };
+        }),
 
       clear: () => set({ tabs: [], activeTabId: null, tabReports: {} }),
     }),

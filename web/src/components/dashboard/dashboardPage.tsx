@@ -13,7 +13,7 @@ import { demoReportResponse } from '@/data/demoReport';
 import { fsApi } from '@/api/fs';
 import EditModal from '@/components/edit/EditModal';
 import { reportApi } from '@/api/report';
-import { useSessionTabsStore } from '@/store/useSessionTabsStore';
+import { useSessionTabsStore } from '@/lib/store/useSessionTabsStore';
 import { ParameterQueryArea } from '@/components/dashboard/ParameterQueryArea';
 import { LayoutGrid } from '@/components/dashboard/LayoutGrid';
 
@@ -32,7 +32,8 @@ export function DashboardPage() {
     addTab,
     removeTab,
     setActiveTab,
-    setTabReport,
+    addTabReport,
+    removeTabReport,
   } = useSessionTabsStore();
 
   // 其他状态保持不变
@@ -70,17 +71,16 @@ export function DashboardPage() {
     reportApi
       .getReportByFileId(tab.fileId)
       .then((report) => {
-        setTabReport(tab.id, report);
+        addTabReport(tab.id, report);
       })
       .catch((err) => {
         console.error('加载报表失败:', err);
-        // 加载失败时使用演示数据
-        setTabReport(tab.id, demoReportResponse);
       });
   };
 
   // 根据选中文件的文件名长度调整导航栏宽度
   useEffect(() => {
+    // todo: 没有考虑文件夹的长度
     if (selectedItem && selectedItem.name) {
       // 计算一个基础宽度，每个字符大约10px，最小256px，最大400px
       const nameLength = selectedItem.name.length;
@@ -203,9 +203,6 @@ export function DashboardPage() {
           layout,
         };
 
-        // 使用 store 的方法更新报表数据
-        setTabReport(currentEditingTabId, updatedReport);
-
         // 同时更新其他状态
         setDashboardData(updatedReport);
         setLayout(layout);
@@ -307,7 +304,7 @@ export function DashboardPage() {
               <div className='h-full'>
                 {/* 为每个报表渲染内容组件 */}
                 {openTabs.map((tab) => {
-                  const reportData = tabReports[tab.id] || demoReportResponse;
+                  const reportData = tabReports[tab.id] || {};
                   return (
                     <div
                       key={tab.id}

@@ -12,7 +12,7 @@ export const Route = createFileRoute('/dev/edit')({
   component: Edit,
 });
 
-function Edit({ reportId = 'file-1743436362131' }: { reportId?: string }) {
+function Edit({ reportId = 'file-1743438797184' }: { reportId?: string }) {
   const [isModalOpen, setIsModalOpen] = useState(true);
   const [editReport, setEditReport] = useState<Report>();
 
@@ -40,6 +40,7 @@ function Edit({ reportId = 'file-1743436362131' }: { reportId?: string }) {
       layout,
     };
 
+    console.log('report保存', report);
     reportApi.updateReport(reportId, report).then((res) => {
       console.log('res', res);
     });

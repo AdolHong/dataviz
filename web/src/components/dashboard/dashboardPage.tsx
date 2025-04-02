@@ -92,8 +92,9 @@ export function DashboardPage() {
   // 为标签加载报表数据的函数
   const loadReportForTab = (tab: TabDetail) => {
     reportApi
-      .getReportByFileId(tab.fileId)
+      .getReportByReportId(tab.reportId)
       .then((report) => {
+        console.log('report111', report);
         setReport(tab.tabId, report);
       })
       .catch((err) => {
@@ -166,6 +167,8 @@ export function DashboardPage() {
     console.log('你点击了查询');
 
     const report = getReport(tabId);
+    console.log('report', report);
+
     if (report) {
       setIsQuerying(true);
       const promises = report.dataSources

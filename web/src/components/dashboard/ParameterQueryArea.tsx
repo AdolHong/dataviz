@@ -444,7 +444,12 @@ export function ParameterQueryArea({
                 </div>
               </div>
               <div className='flex items-center space-x-2'>
-                <Button type='submit' size='sm' className='h-8 w-15 px-2'>
+                <Button
+                  type='submit'
+                  size='sm'
+                  className='h-8 w-15 px-2'
+                  disabled={isQuerying}
+                >
                   查询
                 </Button>
                 <Button

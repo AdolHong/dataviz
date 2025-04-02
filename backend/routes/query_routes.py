@@ -19,6 +19,8 @@ async def query_by_source_id(request: QueryBySourceRequest):
     try:
         # 获取报表信息
         report = get_report_content(request.fileId)
+        print(request.fileId)
+        print(report)
         if not report:
             return QueryResponse(
                 status="error",

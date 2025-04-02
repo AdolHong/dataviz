@@ -8,6 +8,14 @@ export const reportApi = {
     return data;
   },
 
+  // 根据报表ID获取报表配置
+  async getReportByReportId(reportId: string): Promise<Report> {
+    const { data } = await axiosInstance.get(
+      `/report/by_report_id/${reportId}`
+    );
+    return data;
+  },
+
   // 更新报表配置
   async updateReport(fileId: string, report: Report): Promise<Report> {
     const { data } = await axiosInstance.post(`/report/${fileId}`, report);

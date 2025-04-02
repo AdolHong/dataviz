@@ -20,6 +20,9 @@ import { ParameterQueryArea } from '@/components/dashboard/ParameterQueryArea';
 import { LayoutGrid } from '@/components/dashboard/LayoutGrid';
 import { type TabDetail } from '@/lib/store/useTabsSessionStore';
 import { toast } from 'sonner';
+import type { FileCache } from '@/lib/store/useFileSessionStore';
+import { useTabFilesStore } from '@/lib/store/useFileSessionStore';
+import { useTabParamValuesStore } from '@/lib/store/useParamValuesStore';
 
 export function DashboardPage() {
   const [fileSystemItems, setFileSystemItems] = useState<FileSystemItem[]>([]);
@@ -50,6 +53,9 @@ export function DashboardPage() {
 
   const { tabReports, getReport, setReport, removeReport } =
     useTabReportsSessionStore();
+
+  const { tabIdFiles, removeTabIdFiles } = useTabFilesStore();
+  const { tabIdParamValues, removeTabIdParamValues } = useTabParamValuesStore();
 
   const { getSessionId } = useSessionIdStore();
 
@@ -131,12 +137,21 @@ export function DashboardPage() {
 
     // 删除tab对应的报表
     removeReport(tabId);
+
+    // 删除tab对应的文件缓存
+    removeTabIdFiles(tabId);
+
+    // 删除tab对应的参数值
+    removeTabIdParamValues(tabId);
+
+    console.log('删除tab之后, tabIdFiles', tabIdFiles);
+    console.log('删除tab之后, tabIdParamValues', tabIdParamValues);
   };
 
   // 修改handleQuerySubmit函数，接收文件参数为对象
   const handleQuerySubmit = (
     values: Record<string, any>,
-    files?: Record<string, File[]>
+    files?: Record<string, FileCache>
   ) => {
     // 如果文件为空，则不进行查询
     if (!files || Object.keys(files).length === 0) {

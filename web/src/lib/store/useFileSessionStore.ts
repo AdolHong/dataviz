@@ -14,6 +14,8 @@ interface TabFilesState {
   tabIdFiles: Record<string, Record<string, FileCache>>;
   getTabIdFiles: (tabId: string) => Record<string, FileCache>;
   setTabIdFiles: (tabId: string, files: Record<string, FileCache>) => void;
+
+  removeTabIdFiles: (tabId: string) => void;
 }
 
 // 创建 Zustand Store
@@ -31,10 +33,16 @@ export const useTabFilesStore = create<TabFilesState>()(
           tabIdFiles: { ...state.tabIdFiles, [tabId]: files },
         }));
       },
+
+      removeTabIdFiles: (tabId: string) => {
+        const oldTabIdFiles = get().tabIdFiles;
+        delete oldTabIdFiles[tabId];
+        set({ tabIdFiles: oldTabIdFiles });
+      },
     }),
     {
-      name: 'tabIdFiles-session-storage', // localStorage 中的 key 名称
-      storage: createJSONStorage(() => sessionStorage), // 使用 localStorage 进行存储
+      name: 'tabIdFiles-session-storage', // sessionStorage 中的 key 名称
+      storage: createJSONStorage(() => sessionStorage), // 使用 sessionStorage 进行存储
       partialize: (state) => ({
         tabIdFiles: state.tabIdFiles,
       }),

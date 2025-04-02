@@ -65,7 +65,7 @@ export function ParameterQueryArea({
   onSubmit,
   onEditReport,
 }: ParameterQueryAreaProps) {
-  const [values, setValues] = useState<Record<string, any>>({});
+  // const [values, setValues] = useState<Record<string, any>>({});
   // const [files, setFiles] = useState<Record<string, File[]>>({});
   const [parametersExpanded, setParametersExpanded] = useState(true);
   const [activeTab, setActiveTab] = useState<string>('parameters');

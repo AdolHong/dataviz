@@ -84,14 +84,15 @@ export function replaceParametersInCode(
     }
   }
 
-  // 处理日期格式参数
-  const dateRegex = /\$\{([yMd-]+[+-]?\d*[d]?)\}/g;
-  let match;
+  // 使用更可靠的方法处理所有日期格式
+  // 先找出所有匹配的日期模式
+  const datePattern = /\$\{(yyyy-MM-dd|yyyyMMdd)(?:[+-]\d+[dMy])?\}/g;
+  const matches = result.match(datePattern) || [];
 
-  while ((match = dateRegex.exec(result)) !== null) {
-    const pattern = match[0];
-    const dateFormat = match[1];
-    result = result.replace(pattern, parseDateParameter(dateFormat));
+  // 对每个匹配项进行替换
+  for (const match of [...new Set(matches)]) {
+    const parsedDate = parseDynamicDate(match);
+    result = result.replace(new RegExp(escapeRegExp(match), 'g'), parsedDate);
   }
 
   return result;
@@ -104,64 +105,4 @@ export function replaceParametersInCode(
  */
 function escapeRegExp(string: string): string {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * 解析日期参数
- * @param pattern 日期格式模式
- * @returns 格式化后的日期字符串
- */
-function parseDateParameter(pattern: string): string {
-  // 提取日期格式和偏移量
-  const formatMatch = pattern.match(/([yMd-]+)([+-]\d+[d])?/);
-  if (!formatMatch) return pattern;
-
-  const format = formatMatch[1];
-  const offset = formatMatch[2] || '';
-
-  // 创建日期对象
-  let date = new Date();
-
-  // 处理日期偏移
-  if (offset) {
-    const offsetMatch = offset.match(/([+-])(\d+)([d])?/);
-    if (offsetMatch) {
-      const sign = offsetMatch[1] === '+' ? 1 : -1;
-      const value = parseInt(offsetMatch[2], 10);
-      const unit = offsetMatch[3] || 'd'; // 默认为天
-
-      if (unit === 'd') {
-        date.setDate(date.getDate() + sign * value);
-      }
-    }
-  }
-
-  // 格式化日期
-  return formatDate(date, format);
-}
-
-/**
- * 格式化日期
- * @param date 日期对象
- * @param format 格式字符串
- * @returns 格式化后的日期字符串
- */
-function formatDate(date: Date, format: string): string {
-  const year = date.getFullYear();
-  const month = date.getMonth() + 1;
-  const day = date.getDate();
-
-  // 替换年份
-  let result = format.replace(/yyyy/g, year.toString());
-  result = result.replace(/yy/g, year.toString().slice(-2));
-
-  // 替换月份
-  result = result.replace(/MM/g, month.toString().padStart(2, '0'));
-  result = result.replace(/M/g, month.toString());
-
-  // 替换日
-  result = result.replace(/dd/g, day.toString().padStart(2, '0'));
-  result = result.replace(/d/g, day.toString());
-
-  return result;
 }

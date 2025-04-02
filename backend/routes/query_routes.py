@@ -17,6 +17,7 @@ async def query_by_source_id(request: QueryBySourceRequest):
     根据数据源ID执行查询
     """
     try:
+        print("hi")
         
         # 获取报表信息
         report = get_report_content(request.fileId)
@@ -56,14 +57,14 @@ async def query_by_source_id(request: QueryBySourceRequest):
             print("#########################")
             execute_sql_query(
                 request.code,
-                request.param_values,
+                request.paramValues,
                 data_source.executor.engine
             )
             
         elif data_source.executor.type == "python":
             execute_python_query(
                 request.code,
-                request.param_values,
+                request.paramValues,
                 data_source.executor.engine
             )
         elif data_source.executor.type == "csv_uploader":

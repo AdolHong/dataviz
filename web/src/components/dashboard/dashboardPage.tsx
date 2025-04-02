@@ -164,10 +164,10 @@ export function DashboardPage() {
     setTabIdFiles(tabId, files || {});
 
     const report = getReport(tabId);
-    console.info('report', report);
     report?.dataSources.forEach(async (dataSource) => {
       if (dataSource.executor.type === 'sql') {
         const code = replaceParametersInCode(dataSource.executor.code, values);
+        console.info('code', code);
         const response = await queryApi.executeQueryBySourceId(
           report.id,
           dataSource.id,

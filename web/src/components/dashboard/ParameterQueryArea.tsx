@@ -108,6 +108,9 @@ export function ParameterQueryArea({
 
   // 使用 useEffect 在初始渲染时设置默认值
   useEffect(() => {
+    // 清空文件
+    setFiles({});
+
     // 初始化参数值
     initialValues();
 

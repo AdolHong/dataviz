@@ -89,6 +89,7 @@ export function DashboardPage() {
     reportApi
       .getReportByReportId(tab.reportId)
       .then((report) => {
+        setReport(report);
         setCachedReport(tab.tabId, report);
       })
       .catch((err) => {
@@ -160,6 +161,8 @@ export function DashboardPage() {
     setTabIdFiles(tabId, files || {});
 
     console.log('你点击了查询');
+    console.log('files', files);
+    console.log('values', values);
 
     if (report) {
       setIsQuerying(true);
@@ -302,6 +305,9 @@ export function DashboardPage() {
           <FileExplorer
             onSelectItem={setSelectedItem}
             onItemDoubleClick={(item) => {
+              if (item.id === activeTabId) {
+                return;
+              }
               if (item.type === 'file' || item.type === 'reference') {
                 openReportTab(item);
               }

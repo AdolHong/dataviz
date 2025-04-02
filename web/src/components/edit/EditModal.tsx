@@ -38,7 +38,7 @@ import {
 interface EditModalProps {
   open: boolean;
   onClose: () => void;
-  report: Report;
+  report: Report | null;
   handleSave: (
     title: string,
     description: string,

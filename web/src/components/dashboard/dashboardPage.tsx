@@ -42,9 +42,6 @@ export function DashboardPage() {
   const [currentEditReport, setCurrentEditReport] = useState<Report | null>(
     null
   );
-  const [currentEditingTabId, setCurrentEditingTabId] = useState<string | null>(
-    null
-  );
   const [isQuerying, setIsQuerying] = useState(false);
   // 使用 store 来管理标签页
 
@@ -225,12 +222,10 @@ export function DashboardPage() {
   };
 
   // 处理编辑报表
-  const handleEditReport = (report: Report | undefined, tabId: string) => {
+  const handleEditReport = (report: Report | null) => {
     if (report) {
       setCurrentEditReport(report);
       setIsEditModalOpen(true);
-      // 保存当前编辑的标签ID，以便保存时更新正确的标签数据
-      setCurrentEditingTabId(tabId);
     }
   };
 
@@ -249,9 +244,9 @@ export function DashboardPage() {
 
     // 更新当前标签的报表数据
 
-    if (report) {
+    if (currentEditReport) {
       const updatedReport = {
-        ...report,
+        ...currentEditReport,
         title,
         description,
         createdAt,
@@ -272,7 +267,7 @@ export function DashboardPage() {
       //更新tabReports
 
       setCachedReport(activeTabId, updatedReport);
-      setCurrentEditingTabId(null); //清空当前编辑的标签ID
+      setCurrentEditReport(null);
     }
   };
 
@@ -416,7 +411,7 @@ export function DashboardPage() {
                                 handleQuerySubmit(tab.tabId, values, files)
                               }
                               onEditReport={() =>
-                                handleEditReport(reportData, tab.tabId)
+                                reportData && handleEditReport(reportData)
                               }
                             />
                           </div>
@@ -446,16 +441,10 @@ export function DashboardPage() {
         <EditModal
           open={isEditModalOpen}
           onClose={() => setIsEditModalOpen(false)}
-          report={report}
+          report={currentEditReport}
           handleSave={handleSaveReport}
         />
       )}
     </div>
   );
-}
-
-interface TabsAreaProps {
-  activeTabId: string;
-  setActiveTab: (tabId: string) => void;
-  closeTab: (tabId: string, e: React.MouseEvent<Element, MouseEvent>) => void;
 }

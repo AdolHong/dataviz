@@ -57,6 +57,7 @@ export function DashboardPage() {
     findTabsByFileId,
     getTab,
     setTab,
+    tabs: openTabs,
     removeTab: removeCachedTab,
   } = useTabsSessionStore();
   const { getSessionId } = useSessionIdStore();
@@ -358,11 +359,29 @@ export function DashboardPage() {
               </div>
 
               {/* 标签页 - 使用 store 中的 openTabs */}
-              <TabsArea
-                activeTabId={activeTabId}
-                setActiveTab={setActiveTab}
-                closeTab={closeTab}
-              />
+              <>
+                {Object.values(openTabs).map((tab) => (
+                  <div
+                    key={tab.tabId}
+                    className={`flex items-center px-4 py-2 cursor-pointer border-r border-border relative min-w-[150px] max-w-[200px] ${
+                      tab.tabId === activeTabId
+                        ? 'bg-background'
+                        : 'bg-muted/50 hover:bg-muted'
+                    }`}
+                    onClick={() => setActiveTab(tab.tabId)}
+                  >
+                    <div className='truncate flex-1'>{tab.title}</div>
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      className='h-4 w-4 ml-2 opacity-60 hover:opacity-100'
+                      onClick={(e) => closeTab(tab.tabId, e)}
+                    >
+                      <X size={14} />
+                    </Button>
+                  </div>
+                ))}
+              </>
             </div>
           </div>
 
@@ -426,36 +445,4 @@ interface TabsAreaProps {
   activeTabId: string;
   setActiveTab: (tabId: string) => void;
   closeTab: (tabId: string, e: React.MouseEvent<Element, MouseEvent>) => void;
-}
-
-function TabsArea({ activeTabId, setActiveTab, closeTab }: TabsAreaProps) {
-  const { tabs: openTabs } = useTabsSessionStore();
-
-  return (
-    /* 标签页 - 使用 store 中的 openTabs */
-
-    <>
-      {Object.values(openTabs).map((tab) => (
-        <div
-          key={tab.tabId}
-          className={`flex items-center px-4 py-2 cursor-pointer border-r border-border relative min-w-[150px] max-w-[200px] ${
-            tab.tabId === activeTabId
-              ? 'bg-background'
-              : 'bg-muted/50 hover:bg-muted'
-          }`}
-          onClick={() => setActiveTab(tab.tabId)}
-        >
-          <div className='truncate flex-1'>{tab.title}</div>
-          <Button
-            variant='ghost'
-            size='icon'
-            className='h-4 w-4 ml-2 opacity-60 hover:opacity-100'
-            onClick={(e) => closeTab(tab.tabId, e)}
-          >
-            <X size={14} />
-          </Button>
-        </div>
-      ))}
-    </>
-  );
 }

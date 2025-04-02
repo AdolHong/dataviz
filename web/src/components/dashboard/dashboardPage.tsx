@@ -25,6 +25,8 @@ import { useTabFilesStore } from '@/lib/store/useFileSessionStore';
 import { useTabParamValuesStore } from '@/lib/store/useParamValuesStore';
 import { queryApi } from '@/api/query';
 import { replaceParametersInCode } from '@/utils/parser';
+import { useTabQueryStatusStore } from '@/lib/store/useTabQueryStatusStore';
+import type { QueryStatus } from '@/lib/store/useTabQueryStatusStore';
 
 export function DashboardPage() {
   const [fileSystemItems, setFileSystemItems] = useState<FileSystemItem[]>([]);
@@ -52,6 +54,10 @@ export function DashboardPage() {
     removeTab,
     setActiveTab,
   } = useTabsSessionStore();
+
+  const { tabQueryStatus, getQueryStatus, setQueryStatus, clearQueryStatus } =
+    useTabQueryStatusStore();
+  const [statusDict, setStatusDict] = useState<Record<string, QueryStatus>>({});
 
   const { tabReports, getReport, setReport, removeReport } =
     useTabReportsSessionStore();
@@ -148,8 +154,12 @@ export function DashboardPage() {
     // 删除tab对应的参数值
     removeTabIdParamValues(tabId);
 
+    // 删除tab对应的查询状态
+    clearQueryStatus(tabId);
+
     console.log('删除tab之后, tabIdFiles', tabIdFiles);
     console.log('删除tab之后, tabIdParamValues', tabIdParamValues);
+    console.log('删除tab之后, tabQueryStatus', tabQueryStatus);
   };
 
   // 修改handleQuerySubmit函数，接收文件参数为对象
@@ -189,6 +199,7 @@ export function DashboardPage() {
     // sessionId + tabId + dataSourceId (标识此处请求是唯一的)
     const uniqueId = getSessionId() + '_' + activeTabId + '_' + dataSource.id;
 
+    let response = null;
     if (dataSource.executor.type === 'sql') {
       const code = replaceParametersInCode(dataSource.executor.code, values);
       const request = {
@@ -200,8 +211,24 @@ export function DashboardPage() {
         code: code,
         dataContent: null,
       };
-      const response = await queryApi.executeQueryBySourceId(request);
-      console.info('response', response);
+      response = await queryApi.executeQueryBySourceId(request);
+    }
+
+    // 更新查询状态
+    if (response.status === 'success') {
+      setStatusDict((prev) => ({
+        ...prev,
+        [dataSource.id]: {
+          status: 'success',
+        } as QueryStatus,
+      }));
+      setQueryStatus(activeTabId, dataSource.id, {
+        status: 'success',
+      });
+    } else {
+      setQueryStatus(activeTabId, dataSource.id, {
+        status: 'error',
+      });
     }
   };
 
@@ -382,6 +409,8 @@ export function DashboardPage() {
                               parameters={reportData?.parameters || []}
                               dataSources={reportData?.dataSources || []}
                               isQuerying={isQuerying}
+                              statusDict={statusDict}
+                              setStatusDict={setStatusDict}
                               onSubmit={(values, files) =>
                                 handleQuerySubmit(tab.tabId, values, files)
                               }

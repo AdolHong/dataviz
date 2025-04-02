@@ -59,9 +59,16 @@ interface ParameterQueryAreaProps {
   onEditReport: () => void;
   cachedParamValues: Record<string, any>;
   cachedFiles: Record<string, FileCache>;
+  statusDict: Record<string, QueryStatus>;
+  setStatusDict: (statusDict: Record<string, QueryStatus>) => void;
 }
 
 import { parseDynamicDate } from '@/utils/parser';
+import {
+  useTabQueryStatusStore,
+  type QueryStatus,
+  type DataSourceStatus,
+} from '@/lib/store/useTabQueryStatusStore';
 
 export function ParameterQueryArea({
   isQuerying,
@@ -71,6 +78,8 @@ export function ParameterQueryArea({
   onEditReport,
   cachedParamValues,
   cachedFiles,
+  statusDict,
+  setStatusDict,
 }: ParameterQueryAreaProps) {
   const [parametersExpanded, setParametersExpanded] = useState(true);
   const [activeTab, setActiveTab] = useState<string>('parameters');
@@ -80,6 +89,7 @@ export function ParameterQueryArea({
 
   const [values, setValues] = useState<Record<string, any>>({});
   const [files, setFiles] = useState<Record<string, FileCache>>({});
+
   const [nameToChoices, setNameToChoices] = useState<
     Record<string, Record<string, string>[]>
   >({});
@@ -94,6 +104,8 @@ export function ParameterQueryArea({
   );
   const requireFileUpload = csvDataSources.length > 0;
 
+  const { getQueryStatus } = useTabQueryStatusStore();
+
   // 使用 useEffect 在初始渲染时设置默认值
   useEffect(() => {
     // 初始化参数值
@@ -101,6 +113,9 @@ export function ParameterQueryArea({
 
     // 初始化文件
     initialChoices();
+
+    // 初始化查询状态
+    initialQueryStatus();
   }, [parameters]);
 
   const initialValues = () => {
@@ -158,6 +173,17 @@ export function ParameterQueryArea({
     });
     setNameToChoices(nameToChoices);
     console.log('nameToChoices, ', nameToChoices);
+  };
+
+  const initialQueryStatus = () => {
+    const initialStatusDict = dataSources.reduce(
+      (acc, ds) => {
+        acc[ds.id] = getQueryStatus(activeTabId, ds.id);
+        return acc;
+      },
+      {} as Record<string, QueryStatus>
+    );
+    setStatusDict(initialStatusDict);
   };
 
   const toggleParametersExpanded = () => {

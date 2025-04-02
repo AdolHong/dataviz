@@ -24,29 +24,20 @@ import { type CSVUploaderSourceExecutor } from '@/types/models/dataSource';
 
 interface FileUploadAreaProps {
   dataSources: DataSource[];
-  // files: Record<string, File[]>;
-  // setFiles: (files: Record<string, File[]>) => void;
-
-  setFileCache: (sourceId: string, fileCache: FileCache) => void;
-  getFileCache: (sourceId: string) => FileCache | null;
-  removeFileCache: (sourceId: string) => void;
+  files: Record<string, FileCache>;
+  setFiles: (files: Record<string, FileCache>) => void;
+  cachedFiles: Record<string, FileCache>;
 }
 
 export function FileUploadArea({
   dataSources,
-  // files,
-  // setFiles,
-  setFileCache,
-  getFileCache,
-  removeFileCache,
+  files,
+  setFiles,
+  cachedFiles,
 }: FileUploadAreaProps) {
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
   const [previewSource, setPreviewSource] = useState<DataSource | null>(null);
   const [previewTab, setPreviewTab] = useState<'demo' | 'uploaded'>('demo');
-  const [sourceId2existFile, setSourceId2existFile] = useState<
-    Record<string, boolean>
-  >({});
-
   // 筛选不同类型的数据源
   const uploaderSources = dataSources.filter(
     (ds) => ds.executor.type === 'csv_uploader'
@@ -110,23 +101,19 @@ export function FileUploadArea({
         fileContent: content,
       };
 
-      setFileCache(sourceId, fileCache);
-      setSourceId2existFile((prev) => ({ ...prev, [sourceId]: true }));
+      setFiles({ ...files, [sourceId]: fileCache });
     }
   };
 
   const handleRemoveFile = (sourceId: string) => {
-    removeFileCache(sourceId);
+    const newFiles = { ...files };
+    delete newFiles[sourceId];
+    setFiles(newFiles);
 
     // 清空文件输入框，以便重新上传相同的文件
     if (fileInputRefs.current[sourceId]) {
       fileInputRefs.current[sourceId]!.value = '';
     }
-    setSourceId2existFile((prev) => {
-      const newState = { ...prev };
-      delete newState[sourceId];
-      return newState;
-    });
   };
 
   // 显示数据预览对话框
@@ -209,7 +196,7 @@ export function FileUploadArea({
                       handleShowPreview(
                         source,
                         source.executor.type === 'csv_uploader' &&
-                          getFileCache(source.id)
+                          files[source.id]
                           ? 'uploaded'
                           : 'demo'
                       );
@@ -225,11 +212,11 @@ export function FileUploadArea({
               </div>
 
               {source.executor.type === 'csv_uploader' ? (
-                getFileCache(source.id) ? (
+                files ? (
                   <div className='space-y-2'>
                     <div className='flex items-center justify-between'>
                       <span className='text-sm truncate'>
-                        {getFileCache(source.id)?.fileName}
+                        {files[source.id]?.fileName}
                       </span>
                       <div className='flex space-x-1'>
                         <Button
@@ -247,10 +234,10 @@ export function FileUploadArea({
                       </div>
                     </div>
                     <div className='text-xs text-muted-foreground'>
-                      {getFileCache(source.id)?.fileSize
-                        ? (getFileCache(source.id)?.fileSize / 1024).toFixed(2)
+                      {files[source.id]?.fileSize
+                        ? (files[source.id]?.fileSize / 1024).toFixed(2)
                         : '未知'}{' '}
-                      KB •{getFileCache(source.id)?.fileType || '未知类型'}
+                      KB •{files[source.id]?.fileType || '未知类型'}
                     </div>
                   </div>
                 ) : (
@@ -296,7 +283,7 @@ export function FileUploadArea({
 
           {previewSource &&
           previewSource.executor.type === 'csv_uploader' &&
-          getFileCache(previewSource.id) ? (
+          files[previewSource.id] ? (
             <Tabs
               defaultValue={previewTab}
               className='min-w-[300px] max-w-[800px]'
@@ -311,8 +298,7 @@ export function FileUploadArea({
               <TabsContent value='uploaded' className='w-full'>
                 <UploadedFilePreview
                   sourceId={previewSource.id}
-                  sourceId2existFile={sourceId2existFile}
-                  getFileCache={getFileCache}
+                  files={files}
                 />
               </TabsContent>
             </Tabs>
@@ -430,23 +416,21 @@ function CSVPreview({ csvData }: { csvData: string }) {
 
 // 修改 UploadedFilePreview 组件使用新的 CSVPreview 组件
 function UploadedFilePreview({
+  files,
   sourceId,
-  sourceId2existFile,
-  getFileCache,
 }: {
+  files: Record<string, FileCache>;
   sourceId: string;
-  sourceId2existFile: Record<string, boolean>;
-  getFileCache: (sourceId: string) => FileCache | null;
 }) {
   const [fileContent, setFileContent] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
   React.useEffect(() => {
-    if (sourceId2existFile[sourceId]) {
-      setFileContent(getFileCache(sourceId)?.fileContent || '');
+    if (files[sourceId]) {
+      setFileContent(files[sourceId]?.fileContent || '');
       setLoading(false);
     }
-  }, [sourceId, sourceId2existFile]);
+  }, [files]);
 
   if (loading) {
     return <div className='py-4 text-center'>正在加载文件内容...</div>;

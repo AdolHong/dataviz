@@ -45,7 +45,6 @@ import { Card } from '../ui/card';
 import { CardContent } from '../ui/card';
 import { type DatePickerParamConfig } from '@/types/models/parameter';
 import dayjs from 'dayjs';
-import { useTabFilesStore } from '@/lib/store/useFileSessionStore';
 import { useTabsSessionStore } from '@/lib/store/useTabsSessionStore';
 import { type FileCache } from '@/lib/store/useFileSessionStore';
 
@@ -57,6 +56,8 @@ interface ParameterQueryAreaProps {
     files?: Record<string, FileCache>
   ) => void;
   onEditReport: () => void;
+  cachedParamValues: Record<string, any>;
+  cachedFiles: Record<string, FileCache>;
 }
 
 export function ParameterQueryArea({
@@ -64,6 +65,8 @@ export function ParameterQueryArea({
   dataSources = [],
   onSubmit,
   onEditReport,
+  cachedParamValues,
+  cachedFiles,
 }: ParameterQueryAreaProps) {
   const [parametersExpanded, setParametersExpanded] = useState(true);
   const [activeTab, setActiveTab] = useState<string>('parameters');
@@ -72,10 +75,10 @@ export function ParameterQueryArea({
   >(null);
 
   const [values, setValues] = useState<Record<string, any>>({});
+  const [files, setFiles] = useState<Record<string, FileCache>>({});
 
   // 使用 store 来管理标签页
   const { activeTabId } = useTabsSessionStore();
-  const { getTabIdFiles, setTabIdFiles } = useTabFilesStore();
 
   // 检查需要文件上传的数据源
   const csvDataSources = dataSources.filter(
@@ -107,6 +110,7 @@ export function ParameterQueryArea({
       });
       const newValues = {
         ...initialValues,
+        ...cachedParamValues,
       };
       setValues(newValues);
       console.log('initialValues', initialValues);
@@ -129,7 +133,6 @@ export function ParameterQueryArea({
       return;
     }
 
-    const files = getTabIdFiles(activeTabId) || {};
     if (
       requireFileUpload &&
       Object.keys(files).length !== csvDataSources.length
@@ -437,35 +440,9 @@ export function ParameterQueryArea({
                   <TabsContent value='upload' className='mt-2'>
                     <FileUploadArea
                       dataSources={csvDataSources}
-                      getFileCache={(sourceId: string) => {
-                        if (!activeTabId) {
-                          console.error('activeTabId is null');
-                          return null;
-                        }
-                        return getTabIdFiles(activeTabId)?.[sourceId] || null;
-                      }}
-                      setFileCache={(
-                        sourceId: string,
-                        fileCache: FileCache
-                      ) => {
-                        if (!activeTabId) {
-                          console.error('activeTabId is null');
-                          return;
-                        }
-                        setTabIdFiles(activeTabId, {
-                          ...getTabIdFiles(activeTabId),
-                          [sourceId]: fileCache,
-                        });
-                      }}
-                      removeFileCache={(sourceId: string) => {
-                        if (!activeTabId) {
-                          console.error('activeTabId is null');
-                          return;
-                        }
-                        const newFiles = getTabIdFiles(activeTabId);
-                        delete newFiles[sourceId];
-                        setTabIdFiles(activeTabId, newFiles);
-                      }}
+                      files={files}
+                      setFiles={setFiles}
+                      cachedFiles={cachedFiles}
                     />
                   </TabsContent>
                 )}

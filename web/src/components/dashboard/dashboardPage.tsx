@@ -155,11 +155,15 @@ export function DashboardPage() {
     values: Record<string, any>,
     files?: Record<string, FileCache>
   ) => {
-    // 保存参数
+    // 缓存参数
     setTabIdParamValues(tabId, values);
 
-    // 保存文件
+    // 缓存文件
     setTabIdFiles(tabId, files || {});
+
+    console.log('你点击了查询');
+    console.log('values', values);
+    console.log('files', files);
   };
 
   // 处理编辑报表
@@ -347,6 +351,10 @@ export function DashboardPage() {
                                   tab.tabId
                                 )
                               }
+                              cachedParamValues={
+                                tabIdParamValues[tab.tabId] || {}
+                              }
+                              cachedFiles={tabIdFiles[tab.tabId] || {}}
                             />
                           </div>
                           <h1 className='text-2xl font-bold'>{tab?.title}</h1>

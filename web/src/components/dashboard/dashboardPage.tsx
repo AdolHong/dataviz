@@ -41,7 +41,7 @@ export function DashboardPage() {
   const [currentEditingTabId, setCurrentEditingTabId] = useState<string | null>(
     null
   );
-
+  const [isQuerying, setIsQuerying] = useState(false);
   // 使用 store 来管理标签页
   const {
     tabs: openTabs,
@@ -152,7 +152,7 @@ export function DashboardPage() {
   };
 
   // 修改handleQuerySubmit函数，接收文件参数为对象
-  const handleQuerySubmit = (
+  const handleQuerySubmit = async (
     tabId: string,
     values: Record<string, any>,
     files?: Record<string, FileCache>
@@ -163,26 +163,38 @@ export function DashboardPage() {
     // 缓存文件
     setTabIdFiles(tabId, files || {});
 
-    const report = getReport(tabId);
-    report?.dataSources.forEach(async (dataSource) => {
-      if (dataSource.executor.type === 'sql') {
-        const code = replaceParametersInCode(dataSource.executor.code, values);
-        console.info('code', code);
-        const response = await queryApi.executeQueryBySourceId(
-          report.id,
-          dataSource.id,
-          report.updatedAt,
-          values,
-          code,
-          'dataContent'
-        );
-        console.info('response', response);
-      }
-    });
-
     console.log('你点击了查询');
-    console.log('values', values);
-    console.log('files', files);
+
+    const report = getReport(tabId);
+    if (report) {
+      setIsQuerying(true);
+      const promises = report.dataSources
+        .filter((dataSource) => dataSource.executor.type === 'sql')
+        .map((dataSource) => handleQueryRequest(report, dataSource, values));
+      await Promise.all(promises);
+      setIsQuerying(false);
+
+      console.log('查询完成or失败, who knows?');
+    }
+  };
+
+  const handleQueryRequest = async (
+    report: Report,
+    dataSource: DataSource,
+    values: Record<string, any>
+  ) => {
+    if (dataSource.executor.type === 'sql') {
+      const code = replaceParametersInCode(dataSource.executor.code, values);
+      const response = await queryApi.executeQueryBySourceId(
+        report.id,
+        dataSource.id,
+        report.updatedAt,
+        values,
+        code,
+        null
+      );
+      console.info('response', response);
+    }
   };
 
   // 处理编辑报表
@@ -361,6 +373,7 @@ export function DashboardPage() {
                             <ParameterQueryArea
                               parameters={reportData?.parameters || []}
                               dataSources={reportData?.dataSources || []}
+                              isQuerying={isQuerying}
                               onSubmit={(values, files) =>
                                 handleQuerySubmit(tab.tabId, values, files)
                               }

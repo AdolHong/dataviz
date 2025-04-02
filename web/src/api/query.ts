@@ -33,7 +33,7 @@ export const queryApi = {
     updateTime: string,
     paramValues: Record<string, any> = {},
     code: string,
-    dataContent: string = ''
+    dataContent: string | null
   ): Promise<any> {
     const { data } = await axiosInstance.post('/query_by_source_id', {
       fileId: fileId,

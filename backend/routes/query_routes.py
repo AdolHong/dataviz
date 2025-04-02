@@ -17,8 +17,6 @@ async def query_by_source_id(request: QueryBySourceRequest):
     根据数据源ID执行查询
     """
     try:
-        print("hi")
-        
         # 获取报表信息
         report = get_report_content(request.fileId)
         if not report:
@@ -52,9 +50,6 @@ async def query_by_source_id(request: QueryBySourceRequest):
         # 根据数据源类型执行不同的查询
         result = None
         if data_source.executor.type == "sql":
-            print("#########################")
-            print("sql code:", request.code)
-            print("#########################")
             execute_sql_query(
                 request.code,
                 request.paramValues,

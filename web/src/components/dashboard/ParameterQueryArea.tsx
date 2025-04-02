@@ -214,6 +214,7 @@ export function ParameterQueryArea({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('sm??, ');
     if (!activeTabId) {
       toast.error('请先打开一个标签页');
       return;
@@ -494,6 +495,7 @@ export function ParameterQueryArea({
                   size='sm'
                   className='h-8 w-15 px-2'
                   onClick={onEditReport}
+                  type='button'
                 >
                   编辑
                 </Button>

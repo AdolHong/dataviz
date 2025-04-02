@@ -3,10 +3,11 @@ from datetime import datetime
 from typing import Dict, Any
 from models.query_models import QueryBySourceRequest, QueryResponse
 from models.report_models import Report
-from utils.fs_utils import  get_report_content, find_item_by_id
+from utils.report_utils import get_report_content
 
-execute_sql_query = None
-execute_python_query = None
+
+execute_sql_query = lambda code, param_values, engine: print("hi sql")
+execute_python_query = lambda code, param_values, engine: print("hi python")
 
 router = APIRouter()
 
@@ -17,8 +18,8 @@ async def query_by_source_id(request: QueryBySourceRequest):
     """
     try:
         # 获取报表信息
-        report_content = get_report_content(request.fileId)
-        if not report_content:
+        report = get_report_content(request.fileId)
+        if not report:
             return QueryResponse(
                 status="error",
                 message="Report not found",
@@ -26,8 +27,7 @@ async def query_by_source_id(request: QueryBySourceRequest):
             )
 
         # 检查更新时间是否匹配
-        report_update_time = datetime.fromisoformat(report.updatedAt)
-        if report_update_time != request.update_time:
+        if report.updatedAt != request.updateTime:
             return QueryResponse(
                 status="error",
                 message="Report has been updated, please refresh the page",
@@ -36,7 +36,7 @@ async def query_by_source_id(request: QueryBySourceRequest):
 
         # 查找对应的数据源
         data_source = next(
-            (ds for ds in report.dataSources if ds.id == request.fileId),
+            (ds for ds in report.dataSources if ds.id == request.sourceId),
             None
         )
         
@@ -50,18 +50,22 @@ async def query_by_source_id(request: QueryBySourceRequest):
         # 根据数据源类型执行不同的查询
         result = None
         if data_source.executor.type == "sql":
-            result = await execute_sql_query(
+            execute_sql_query(
                 request.code,
                 request.param_values,
                 data_source.executor.engine
             )
+            
         elif data_source.executor.type == "python":
-            result = await execute_python_query(
+            execute_python_query(
                 request.code,
                 request.param_values,
-                request.data,
                 data_source.executor.engine
             )
+        elif data_source.executor.type == "csv_uploader":
+            print("todo: uploader")
+        elif data_source.executor.type == "csv_data":
+            print("todo: csv_data")
         else:
             return QueryResponse(
                 status="error",

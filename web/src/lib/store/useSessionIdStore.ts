@@ -5,18 +5,19 @@ import { v4 as uuidv4 } from 'uuid';
 // 定义 store 的状态类型
 interface SessionIdState {
   // 操作方法
-  sessionId: string | null;
-  getSessionId: () => string | null;
+  sessionId: string;
+  getSessionId: () => string;
 }
 
 // 创建 Zustand Store
 export const useSessionIdStore = create<SessionIdState>()(
   persist(
     (set, get) => ({
-      sessionId: null,
+      sessionId: '',
       getSessionId: () => {
         const oldSessionId = get().sessionId;
-        const uuid = oldSessionId ? oldSessionId : uuidv4();
+        const uuid =
+          oldSessionId && oldSessionId !== '' ? oldSessionId : uuidv4();
         if (oldSessionId !== uuid) {
           set({ sessionId: uuid });
         }

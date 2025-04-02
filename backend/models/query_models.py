@@ -5,8 +5,9 @@ class QueryBySourceRequest(BaseModel):
     fileId: str
     sourceId: str
     updateTime: str
-    paramValues: Dict[str, Any]
-    code: str
+    uniqueId: str
+    paramValues: Optional[Dict[str, Any]] = None
+    code: Optional[str] = None
     dataContent: Optional[str] = None
 
 class QueryResponse(BaseModel):

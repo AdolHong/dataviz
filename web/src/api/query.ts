@@ -5,9 +5,10 @@ export interface QueryBySourceRequest {
   fileId: string;
   sourceId: string;
   updateTime: string;
-  paramValues: Record<string, any>;
-  code: string;
-  data_content?: string;
+  uniqueId: string;
+  paramValues: Record<string, any> | null;
+  code: string | null;
+  dataContent: string | null;
 }
 
 export interface QueryResponse {
@@ -17,32 +18,9 @@ export interface QueryResponse {
 }
 
 export const queryApi = {
-  // 根据数据源ID执行查询
-  async queryBySourceId(request: QueryBySourceRequest): Promise<QueryResponse> {
-    const response = await axiosInstance.post('/query_by_source_id', request);
-
-    console.log(response.data);
-
-    return response.data;
-  },
-
-  // 执行SQL查询并缓存结果
-  async executeQueryBySourceId(
-    fileId: string,
-    sourceId: string,
-    updateTime: string,
-    paramValues: Record<string, any> = {},
-    code: string,
-    dataContent: string | null
-  ): Promise<any> {
-    const { data } = await axiosInstance.post('/query_by_source_id', {
-      fileId: fileId,
-      sourceId: sourceId,
-      updateTime: updateTime,
-      paramValues: paramValues,
-      code: code,
-      dataContent: dataContent,
-    });
+  // 执行查询
+  async executeQueryBySourceId(request: QueryBySourceRequest): Promise<any> {
+    const { data } = await axiosInstance.post('/query_by_source_id', request);
     return data;
   },
 

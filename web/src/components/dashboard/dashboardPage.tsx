@@ -186,16 +186,21 @@ export function DashboardPage() {
     dataSource: DataSource,
     values: Record<string, any>
   ) => {
+    // sessionId + tabId + dataSourceId (标识此处请求是唯一的)
+    const uniqueId = getSessionId() + '_' + activeTabId + '_' + dataSource.id;
+
     if (dataSource.executor.type === 'sql') {
       const code = replaceParametersInCode(dataSource.executor.code, values);
-      const response = await queryApi.executeQueryBySourceId(
-        report.id,
-        dataSource.id,
-        report.updatedAt,
-        values,
-        code,
-        null
-      );
+      const request = {
+        fileId: report.id,
+        sourceId: dataSource.id,
+        updateTime: report.updatedAt,
+        uniqueId: uniqueId,
+        paramValues: values,
+        code: code,
+        dataContent: null,
+      };
+      const response = await queryApi.executeQueryBySourceId(request);
       console.info('response', response);
     }
   };

@@ -17,10 +17,10 @@ async def query_by_source_id(request: QueryBySourceRequest):
     根据数据源ID执行查询
     """
     try:
-        # 获取报表信息
+
+        print("uniqueId", request.uniqueId)
+        # 根据report id 获取报表信息
         report = get_report_content(request.fileId)
-        print(request.fileId)
-        print(report)
         if not report:
             return QueryResponse(
                 status="error",
@@ -52,11 +52,16 @@ async def query_by_source_id(request: QueryBySourceRequest):
         # 根据数据源类型执行不同的查询
         result = None
         if data_source.executor.type == "sql":
-            execute_sql_query(
-                request.code,
-                request.paramValues,
-                data_source.executor.engine
-            )
+            # execute_sql_query(
+            #     request.code,
+            #     request.paramValues,
+            #     data_source.executor.engine
+            # )
+            print("??1")
+            from engine_config import sql_engine
+            result = sql_engine["default"](request.code)
+            print("result", result)
+            print("??2")
             
         elif data_source.executor.type == "python":
             execute_python_query(
@@ -82,6 +87,7 @@ async def query_by_source_id(request: QueryBySourceRequest):
         )
 
     except Exception as e:
+        print("error", e)
         return QueryResponse(
             status="error",
             message=str(e),

@@ -43,11 +43,13 @@ def get_report(file_id: str):
     return report_content
 
 # API端点：获取报表数据
-@router.get("/report/by_report_id/{report_id}}", response_model=Report)
+@router.get("/report/by_report_id/{report_id}", response_model=Report)
 def get_report_by_report_id(report_id: str):
     items = load_fs_data()
 
-    file_items = [item for item in items if item.type == FileSystemItemType.FILE]
+    file_items = [item for item in items if item.type == FileSystemItemType.FILE and item.reportId == report_id]
+
+
     if len(file_items) == 0:
         raise HTTPException(status_code=404, detail="报表文件不存在")
     elif len(file_items) > 1:

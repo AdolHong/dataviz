@@ -40,6 +40,7 @@ import {
 import type { FileSystemItem } from '@/types/models/fileSystem';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { fsApi } from '@/api/fs';
 
 // 拖放类型定义
 interface DragItem {
@@ -49,8 +50,10 @@ interface DragItem {
 }
 
 interface FileExplorerProps {
-  fsItems: FileSystemItem[];
-  setFsItems: (items: FileSystemItem[]) => void;
+  useFileSystemChangeEffect?: (
+    oldItems: FileSystemItem[],
+    newItems: FileSystemItem[]
+  ) => void;
   onSelectItem?: (item: FileSystemItem) => void;
   onItemDoubleClick?: (item: FileSystemItem) => void;
   useRenameItemEffect?: (item: FileSystemItem) => void;
@@ -58,13 +61,13 @@ interface FileExplorerProps {
 }
 
 export function FileExplorer({
-  fsItems,
-  setFsItems,
   onSelectItem,
   onItemDoubleClick,
   useRenameItemEffect,
   useDeleteItemEffect,
+  useFileSystemChangeEffect,
 }: FileExplorerProps) {
+  const [fsItems, setFsItems] = useState<FileSystemItem[]>([]);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
     new Set()
   );
@@ -95,9 +98,25 @@ export function FileExplorer({
   const [fileToReference, setFileToReference] = useState<FileSystemItem | null>(
     null
   );
-
   // 在组件内添加一个新的 state 用于存储引用路径
   const [referencePaths, setReferencePaths] = useState<string[]>([]);
+
+  // 初始化文件系统
+  useEffect(() => {
+    fsApi.getAllItems().then((items) => {
+      setFsItems(items);
+    });
+  }, []);
+
+  const handleFileSystemChange = (
+    oldItems: FileSystemItem[],
+    newItems: FileSystemItem[]
+  ) => {
+    if (useFileSystemChangeEffect) {
+      useFileSystemChangeEffect(oldItems, newItems);
+    }
+    setFsItems(newItems);
+  };
 
   // 展开/折叠文件夹
   const toggleFolder = (folderId: string) => {
@@ -226,7 +245,7 @@ export function FileExplorer({
       );
     }
 
-    setFsItems(updatedItems);
+    handleFileSystemChange(fsItems, updatedItems);
     setIsNewItemDialogOpen(false);
 
     // 如果是在文件夹内创建，确保文件夹是展开的
@@ -250,7 +269,7 @@ export function FileExplorer({
     }
 
     const updatedItems = renameItem(fsItems, selectedItem.id, newItemName);
-    setFsItems(updatedItems);
+    handleFileSystemChange(fsItems, updatedItems);
 
     // 如果存在重命名效果，则执行
     if (useRenameItemEffect) {
@@ -302,7 +321,7 @@ export function FileExplorer({
       );
     }
 
-    setFsItems(updatedItems);
+    handleFileSystemChange(fsItems, updatedItems);
     setIsDuplicateDialogOpen(false);
   };
 
@@ -329,7 +348,7 @@ export function FileExplorer({
       (fileToReference as any).reportId
     );
 
-    setFsItems(updatedItems);
+    handleFileSystemChange(fsItems, updatedItems);
     setIsCreateReferenceDialogOpen(false);
   };
 
@@ -343,7 +362,7 @@ export function FileExplorer({
       selectedItem.type === FileSystemItemType.REFERENCE
     ) {
       const updatedItems = deleteItem(fsItems, selectedItem.id);
-      setFsItems(updatedItems);
+      handleFileSystemChange(fsItems, updatedItems);
       if (useDeleteItemEffect) {
         useDeleteItemEffect(selectedItem);
       }
@@ -352,7 +371,7 @@ export function FileExplorer({
     if (selectedItem.type === FileSystemItemType.FOLDER) {
       try {
         const updatedItems = deleteItem(fsItems, selectedItem.id, false);
-        setFsItems(updatedItems);
+        handleFileSystemChange(fsItems, updatedItems);
       } catch (e: any) {
         toast.error(e.message);
       }
@@ -425,7 +444,7 @@ export function FileExplorer({
 
     // 移动项目
     const updatedItems = moveItem(fsItems, draggedItem.id, targetFolder.id);
-    setFsItems(updatedItems);
+    handleFileSystemChange(fsItems, updatedItems);
 
     // 确保目标文件夹是展开的
     setExpandedFolders((prev) => new Set([...prev, targetFolder.id]));

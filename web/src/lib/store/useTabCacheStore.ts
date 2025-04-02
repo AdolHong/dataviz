@@ -8,8 +8,25 @@ export interface FileCache {
   fileContent: string;
 }
 
+// 定义文件系统中的项目类型：文件夹或文件
+export enum DataSourceStatus {
+  RUNNING = 'running',
+  SCHEDULED = 'scheduled',
+  SUCCESS = 'success',
+  ERROR = 'error',
+  INIT = 'init',
+}
+
+export interface QueryStatus {
+  status: DataSourceStatus;
+  error?: string;
+  rowCount?: number;
+  demoData?: string;
+}
+
 export interface TabCache {
   tabId: string;
+  report: Report;
 }
 
 // 定义 store 的状态类型

@@ -29,10 +29,9 @@ import { useTabQueryStatusStore } from '@/lib/store/useTabQueryStatusStore';
 import type { QueryStatus } from '@/lib/store/useTabQueryStatusStore';
 
 export function DashboardPage() {
-  const [fileSystemItems, setFileSystemItems] = useState<FileSystemItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<FileSystemItem | null>(null);
+  const [report, setReport] = useState<Report | null>(null);
 
-  // 其他状态保持不变
   const [navbarVisible, setNavbarVisible] = useState(true);
   const [navbarWidth, setNavbarWidth] = useState(256); // 默认宽度为256px
 
@@ -48,37 +47,35 @@ export function DashboardPage() {
 
   const [statusDict, setStatusDict] = useState<Record<string, QueryStatus>>({});
 
-  const {
-    tabs: openTabs,
-    activeTabId,
-    getTab,
-    setTab,
-    findTabsByFileId,
-    removeTab,
-    setActiveTab,
-  } = useTabsSessionStore();
+  // const {
+  //   tabs: openTabs,
+  //   activeTabId,
+  //   getTab,
+  //   setTab,
+  //   findTabsByFileId,
+  //   removeTab,
+  //   setActiveTab,
+  // } = useTabsSessionStore();
 
-  const {
-    tabQueryStatus,
-    getQueryStatusByTabId,
-    setQueryStatus,
-    clearQueryByTabId,
-  } = useTabQueryStatusStore();
-  const { tabReports, getReport, setReport, removeReport } =
-    useTabReportsSessionStore();
+  // const {
+  //   tabQueryStatus,
+  //   getQueryStatusByTabId,
+  //   setQueryStatus,
+  //   clearQueryByTabId,
+  // } = useTabQueryStatusStore();
+  // const { tabReports, getReport, setReport, removeReport } =
+  //   useTabReportsSessionStore();
 
-  const { tabIdFiles, setTabIdFiles, getTabIdFiles, removeTabIdFiles } =
-    useTabFilesStore();
-  const { tabIdParamValues, removeTabIdParamValues, setTabIdParamValues } =
-    useTabParamValuesStore();
+  // const { tabIdFiles, setTabIdFiles, getTabIdFiles, removeTabIdFiles } =
+  //   useTabFilesStore();
+  // const { tabIdParamValues, removeTabIdParamValues, setTabIdParamValues } =
+  //   useTabParamValuesStore();
 
-  const { getSessionId } = useSessionIdStore();
+  // const { getSessionId } = useSessionIdStore();
 
   // 初始化
   useEffect(() => {
-    fsApi.getAllItems().then((items) => {
-      setFileSystemItems(items);
-    });
+    const { activeTabId, getTab } = useTabsSessionStore();
 
     // 如果有活动标签，尝试加载其报表数据
     if (activeTabId) {
@@ -88,17 +85,6 @@ export function DashboardPage() {
       }
     }
   }, []);
-
-  // 加载了文件系统，就更新navbar宽度
-  useEffect(() => {
-    // todo: 没有考虑文件夹的长度
-    if (selectedItem && selectedItem.name) {
-      // 计算一个基础宽度，每个字符大约10px，最小256px，最大400px
-      const nameLength = selectedItem.name.length;
-      const calculatedWidth = Math.min(Math.max(256, nameLength * 10), 400);
-      setNavbarWidth(calculatedWidth);
-    }
-  }, [fileSystemItems]);
 
   // 为标签加载报表数据的函数
   const loadReportForTab = (tab: TabDetail) => {
@@ -318,18 +304,20 @@ export function DashboardPage() {
           }}
         >
           <FileExplorer
-            fsItems={fileSystemItems}
-            setFsItems={(items) => {
-              fsApi.saveFileSystemChanges(fileSystemItems, items);
-              setFileSystemItems(items);
-            }}
             onSelectItem={setSelectedItem}
             onItemDoubleClick={(item) => {
               if (item.type === 'file' || item.type === 'reference') {
                 openReportTab(item);
               }
             }}
+            useFileSystemChangeEffect={(
+              oldItems: FileSystemItem[],
+              newItems: FileSystemItem[]
+            ) => {
+              fsApi.saveFileSystemChanges(oldItems, newItems);
+            }}
             useRenameItemEffect={(item) => {
+              const { findTabsByFileId, setTab } = useTabsSessionStore();
               const tabs = findTabsByFileId(item.id);
               tabs.forEach((tab) => {
                 setTab(tab.tabId, {
@@ -339,6 +327,8 @@ export function DashboardPage() {
               });
             }}
             useDeleteItemEffect={(item) => {
+              const { findTabsByFileId, removeTab } = useTabsSessionStore();
+
               const tabs = findTabsByFileId(item.id);
               tabs.forEach((tab) => {
                 removeTab(tab.tabId);

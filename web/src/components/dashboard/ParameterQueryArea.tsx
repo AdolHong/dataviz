@@ -96,17 +96,12 @@ export function ParameterQueryArea({
     Record<string, Record<string, string>[]>
   >({});
 
-  // 使用 store 来管理标签页
-  // const { activeTabId } = useTabsSessionStore();
-
   // 检查需要文件上传的数据源
   const csvDataSources = dataSources.filter(
     (ds) =>
       ds.executor.type === 'csv_uploader' || ds.executor.type === 'csv_data'
   );
   const requireFileUpload = csvDataSources.length > 0;
-
-  const { getQueryStatusByTabId } = useTabQueryStatusStore();
 
   // 使用 useEffect 在初始渲染时设置默认值
   useEffect(() => {
@@ -179,6 +174,7 @@ export function ParameterQueryArea({
 
   const initialQueryStatus = () => {
     console.log('activate_id, ', tabId);
+    const { getQueryStatusByTabId } = useTabQueryStatusStore();
     const statusDict = getQueryStatusByTabId(tabId);
     if (statusDict) {
       setStatusDict(statusDict);

@@ -4,7 +4,17 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 // 定义 store 的状态类型
 interface TabQueryStatusState {
   tabQueryStatus: Record<string, Record<string, QueryStatus>>;
+  getQueryStatus: (tabId: string, sourceId: string) => QueryStatus;
+  setQueryStatus: (
+    tabId: string,
+    sourceId: string,
+    status: QueryStatus
+  ) => void;
+  getQueryStatusByTabId: (tabId: string) => Record<string, QueryStatus>;
+  clearQueryByTabId: (tabId: string) => void;
+  clear: () => void;
 }
+
 // 定义文件系统中的项目类型：文件夹或文件
 export enum DataSourceStatus {
   RUNNING = 'running',

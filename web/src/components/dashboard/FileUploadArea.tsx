@@ -64,8 +64,9 @@ export function FileUploadArea({
 
   // 如果cachedFiles有值，则设置files
   useEffect(() => {
-    if (cachedFiles) {
-      setFiles(cachedFiles);
+    if (cachedFiles && Object.keys(cachedFiles).length > 0) {
+      const newFiles = { ...files, ...cachedFiles };
+      setFiles(newFiles);
     }
   }, []);
 

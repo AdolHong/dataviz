@@ -162,7 +162,11 @@ export function ParameterQueryArea({
           param.config.type === 'multi_select' ||
           param.config.type === 'multi_input'
         ) {
-          initialValues[param.name] = param.config.default || [];
+          const defaultVal = param.config.default || [];
+          const parsedVal = defaultVal.map((val: string) =>
+            parseDynamicDate(val)
+          );
+          initialValues[param.name] = parsedVal;
         }
         // 对于单选和单输入类型，使用默认值
         else if (

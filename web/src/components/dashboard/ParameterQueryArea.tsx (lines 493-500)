@@ -1,8 +1,0 @@
-<Button
-  variant='outline'
-  size='sm'
-  className='h-8 w-15 px-2'
-  onClick={onEditReport}
->
-  编辑
-</Button> 

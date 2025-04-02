@@ -27,7 +27,7 @@ def get_report(file_id: str):
     report_content = get_report_content(report_file_id)
     if not report_content:
         # 如果文件为空，初始化一个默认的报表结构
-        default_report = {
+        default_report = Report(**{
             "id": file_id,
             "title": file_item.name,
             "description": "",
@@ -37,12 +37,10 @@ def get_report(file_id: str):
             "layout": {"items": []},
             "createdAt": datetime.now().isoformat(),
             "updatedAt": datetime.now().isoformat(),
-        }
-
-        print("重建了？？？？")
+        })
         save_report_content(file_id, default_report)
-        return Report(**default_report)
-    return Report(**report_content)
+        return default_report
+    return report_content
 
 # API端点：更新报表数据
 @router.post("/report/{file_id}", response_model=Report)
@@ -61,7 +59,7 @@ def update_report(file_id: str, report: Report):
         report.id = file_id
     
     # 保存报表内容
-    save_report_content(file_id, report.dict())
+    save_report_content(file_id, report)
     
     # 更新文件系统项目的更新时间
     for i, item in enumerate(items):
@@ -76,10 +74,8 @@ def update_report(file_id: str, report: Report):
 def update_report_title(file_id: str, title: str):
     report_content = get_report_content(file_id)
     if report_content:
-        report_content["title"] = title
+        report_content.title = title
         save_report_content(file_id, report_content)
-
-    save_report_content(file_id, report_content)
 
 
 # API端点：创建一个新的报表文件
@@ -115,7 +111,7 @@ def create_report(report: Report, parent_id: Optional[str] = None):
     save_fs_data(items)
     
     # 保存报表内容
-    save_report_content(file_id, report.dict())
+    save_report_content(file_id, report)
     
     return report
 
@@ -134,8 +130,8 @@ def list_reports():
         if report_content:
             result.append({
                 "id": item.id,
-                "title": report_content.get("title", item.name),
-                "description": report_content.get("description", ""),
+                "title": report_content.title,
+                "description": report_content.description,
                 "updatedAt": item.updatedAt,
                 "createdAt": item.createdAt
             })

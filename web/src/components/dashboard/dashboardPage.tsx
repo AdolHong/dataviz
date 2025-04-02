@@ -62,7 +62,6 @@ export function DashboardPage() {
   const { getSessionId } = useSessionIdStore();
 
   // 初始化
-  // 初始化
   useEffect(() => {
     fsApi.getAllItems().then((items) => {
       setFileSystemItems(items);

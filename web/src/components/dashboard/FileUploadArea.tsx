@@ -18,26 +18,23 @@ import {
 } from '@tanstack/react-table';
 import Papa from 'papaparse';
 import { toast } from 'sonner';
-import { type FileCache } from '@/lib/store/useFileSessionStore';
-
-import { type CSVUploaderSourceExecutor } from '@/types/models/dataSource';
+import type { FileCache } from '@/lib/store/useFileSessionStore';
 
 interface FileUploadAreaProps {
   dataSources: DataSource[];
   files: Record<string, FileCache>;
   setFiles: (files: Record<string, FileCache>) => void;
-  cachedFiles: Record<string, FileCache>;
 }
 
 export function FileUploadArea({
   dataSources,
   files,
   setFiles,
-  cachedFiles,
 }: FileUploadAreaProps) {
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
   const [previewSource, setPreviewSource] = useState<DataSource | null>(null);
   const [previewTab, setPreviewTab] = useState<'demo' | 'uploaded'>('demo');
+
   // 筛选不同类型的数据源
   const uploaderSources = dataSources.filter(
     (ds) => ds.executor.type === 'csv_uploader'
@@ -61,47 +58,24 @@ export function FileUploadArea({
     sourceId: string
   ) => {
     if (e.target.files && e.target.files.length > 0) {
+      //文件超出1mb
       if (e.target.files[0].size > 1024 * 1024) {
-        // 如果文件大小超过1mb，则不保存
-        toast.error('文件大小超过1mb，请重新选择文件');
+        toast.error('文件超出1mb');
         return;
       }
-
-      // 读取文件内容, 并解析
       const content = await readFileContent(e.target.files[0]);
-      const contentParsed = Papa.parse(content, { header: true });
-      const contentFields = contentParsed?.meta.fields || [];
-      if (!contentFields || contentFields.length === 0) {
-        toast.error('文件内容不符合要求, 列数不能为空');
-        return;
-      }
-
-      // 解析demoData
-      const csvDataSource = dataSources.find((ds) => ds.id === sourceId);
-      const demoData = (csvDataSource?.executor as CSVUploaderSourceExecutor)
-        .demoData;
-      const demoDataParsed = Papa.parse(demoData, { header: true });
-      const demoFields = demoDataParsed?.meta.fields || [];
-
-      const hasSameFields = demoFields.every((field) =>
-        contentFields.includes(field)
-      );
-
-      // 比较列名
-      if (!hasSameFields) {
-        toast.error('上传文件，没有包含示例数据中的全部列数');
-        return;
-      }
-
-      // 保留文件cache
-      const fileCache: FileCache = {
-        fileName: e.target.files[0].name,
-        fileSize: e.target.files[0].size,
+      const fileCache = {
         fileType: e.target.files[0].type,
+        fileSize: e.target.files[0].size,
         fileContent: content,
+        fileName: e.target.files[0].name, // 添加fileName属性以符合FileCache类型
       };
 
-      setFiles({ ...files, [sourceId]: fileCache });
+      const newFiles = {
+        ...files,
+        [sourceId]: fileCache,
+      };
+      setFiles(newFiles);
     }
   };
 
@@ -212,11 +186,11 @@ export function FileUploadArea({
               </div>
 
               {source.executor.type === 'csv_uploader' ? (
-                files ? (
+                files[source.id] ? (
                   <div className='space-y-2'>
                     <div className='flex items-center justify-between'>
                       <span className='text-sm truncate'>
-                        {files[source.id]?.fileName}
+                        {files[source.id].fileName}
                       </span>
                       <div className='flex space-x-1'>
                         <Button
@@ -234,10 +208,8 @@ export function FileUploadArea({
                       </div>
                     </div>
                     <div className='text-xs text-muted-foreground'>
-                      {files[source.id]?.fileSize
-                        ? (files[source.id]?.fileSize / 1024).toFixed(2)
-                        : '未知'}{' '}
-                      KB •{files[source.id]?.fileType || '未知类型'}
+                      {(files[source.id].fileSize / 1024).toFixed(2)} KB •{' '}
+                      {files[source.id].fileType || '未知类型'}
                     </div>
                   </div>
                 ) : (
@@ -416,21 +388,19 @@ function CSVPreview({ csvData }: { csvData: string }) {
 
 // 修改 UploadedFilePreview 组件使用新的 CSVPreview 组件
 function UploadedFilePreview({
-  files,
   sourceId,
+  files,
 }: {
-  files: Record<string, FileCache>;
   sourceId: string;
+  files: Record<string, FileCache>;
 }) {
   const [fileContent, setFileContent] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
   React.useEffect(() => {
-    if (files[sourceId]) {
-      setFileContent(files[sourceId]?.fileContent || '');
-      setLoading(false);
-    }
-  }, [files]);
+    const fileCache = files[sourceId];
+    setFileContent(fileCache.fileContent);
+  }, [sourceId, files]);
 
   if (loading) {
     return <div className='py-4 text-center'>正在加载文件内容...</div>;

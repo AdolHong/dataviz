@@ -176,6 +176,7 @@ export function ParameterQueryArea({
   };
 
   const initialQueryStatus = () => {
+    console.log('activeTabId, ', activeTabId);
     const initialStatusDict = dataSources.reduce(
       (acc, ds) => {
         acc[ds.id] = getQueryStatus(activeTabId, ds.id);

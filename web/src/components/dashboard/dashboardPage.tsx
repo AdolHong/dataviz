@@ -55,8 +55,8 @@ export function DashboardPage() {
     setActiveTab,
   } = useTabsSessionStore();
 
-  const { tabQueryStatus, getQueryStatus, setQueryStatus, clearQueryStatus } =
-    useTabQueryStatusStore();
+  // const { tabQueryStatus, getQueryStatus, setQueryStatus, clearQueryStatus } =
+  //   useTabQueryStatusStore();
   const [statusDict, setStatusDict] = useState<Record<string, QueryStatus>>({});
 
   const { tabReports, getReport, setReport, removeReport } =

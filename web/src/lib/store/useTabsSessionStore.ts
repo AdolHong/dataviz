@@ -19,7 +19,7 @@ interface TabsState {
   removeTab: (tabId: string) => void;
 
   // 设置激活标签
-  activeTabId: string | null;
+  activeTabId: string;
   setActiveTab: (tabId: string | null) => void;
   getActiveTab: () => TabDetail | undefined;
 
@@ -32,8 +32,7 @@ export const useTabsSessionStore = create<TabsState>()(
   persist(
     (set, get) => ({
       tabs: {},
-      activeTabId: null,
-
+      activeTabId: '',
       getTab: (tabId: string) => get().tabs[tabId],
       setTab: (tabId: string, tab: TabDetail) =>
         set((state) => ({
@@ -57,20 +56,20 @@ export const useTabsSessionStore = create<TabsState>()(
                 ? null
                 : keysList.reduce((a, b) => (a < b ? a : b));
 
-            return { tabs: oldTabs, activeTabId: minTabId };
+            return { tabs: oldTabs, activeTabId: minTabId || '' };
           } else {
             return { tabs: oldTabs };
           }
         }),
 
-      setActiveTab: (tabId: string | null) => set({ activeTabId: tabId }),
+      setActiveTab: (tabId: string | null) => set({ activeTabId: tabId || '' }),
 
       getActiveTab: () => {
         const { tabs, activeTabId } = get();
         return activeTabId ? tabs[activeTabId] : undefined;
       },
 
-      clear: () => set({ tabs: {}, activeTabId: null }),
+      clear: () => set({ tabs: {}, activeTabId: '' }),
     }),
     {
       name: 'tabs-session-storage', // localStorage 中的 key 名称

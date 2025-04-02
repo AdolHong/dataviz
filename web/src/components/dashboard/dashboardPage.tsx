@@ -26,9 +26,9 @@ import { useTabParamValuesStore } from '@/lib/store/useParamValuesStore';
 import { queryApi } from '@/api/query';
 import { replaceParametersInCode } from '@/utils/parser';
 import { useTabQueryStatusStore } from '@/lib/store/useTabQueryStatusStore';
-import type {
+import {
+  type QueryStatus,
   DataSourceStatus,
-  QueryStatus,
 } from '@/lib/store/useTabQueryStatusStore';
 
 export function DashboardPage() {
@@ -50,27 +50,26 @@ export function DashboardPage() {
 
   const [statusDict, setStatusDict] = useState<Record<string, QueryStatus>>({});
 
-  const { activeTabId, setActiveTab } = useTabsSessionStore();
+  const {
+    activeTabId,
+    setActiveTab,
+    getActiveTab,
+    findTabsByFileId,
+    getTab,
+    setTab,
+    removeTab: removeCachedTab,
+  } = useTabsSessionStore();
   const { getSessionId } = useSessionIdStore();
-
-  // const {
-  //   tabQueryStatus,
-  //   getQueryStatusByTabId,
-  //   setQueryStatus,
-  //   clearQueryByTabId,
-  // } = useTabQueryStatusStore();
-  // const { tabReports, getReport, setReport, removeReport } =
-  //   useTabReportsSessionStore();
-
-  // const { tabIdFiles, setTabIdFiles, getTabIdFiles, removeTabIdFiles } =
-  //   useTabFilesStore();
-  // const { tabIdParamValues, removeTabIdParamValues, setTabIdParamValues } =
-  //   useTabParamValuesStore();
+  const { setReport: setCachedReport, removeReport: removeCachedReport } =
+    useTabReportsSessionStore();
+  const { removeTabIdFiles, tabIdFiles, setTabIdFiles } = useTabFilesStore();
+  const { removeTabIdParamValues, tabIdParamValues, setTabIdParamValues } =
+    useTabParamValuesStore();
+  const { clearQueryByTabId, tabQueryStatus, setQueryStatus } =
+    useTabQueryStatusStore();
 
   // 初始化
   useEffect(() => {
-    const { activeTabId, getTab } = useTabsSessionStore();
-
     // 如果sesion storage中有活动标签，尝试加载其报表数据
     if (!activeTabId) {
       return;
@@ -87,7 +86,6 @@ export function DashboardPage() {
 
   // 为标签加载报表数据的函数
   const loadReportForTab = (tab: TabDetail) => {
-    const { setReport: setCachedReport } = useTabReportsSessionStore();
     reportApi
       .getReportByReportId(tab.reportId)
       .then((report) => {
@@ -100,7 +98,6 @@ export function DashboardPage() {
 
   // 打开报表标签页 - 修改为使用 store
   const openReportTab = (item: FileSystemItem) => {
-    const { findTabsByFileId, setTab, setActiveTab } = useTabsSessionStore();
     // 检查是否已经打开
     const tabs = findTabsByFileId(item.id);
 
@@ -132,21 +129,12 @@ export function DashboardPage() {
   // 关闭标签页 - 使用 store 的 removeTab
   const closeTab = (tabId: string, e: React.MouseEvent) => {
     e.stopPropagation(); // 阻止冒泡，避免触发标签切换
-    const { removeReport: removeCachedReport } = useTabReportsSessionStore();
-    const { removeTab: removeCachedTab } = useTabsSessionStore();
-    const { removeTabIdFiles, tabIdFiles } = useTabFilesStore();
-    const { removeTabIdParamValues, tabIdParamValues } =
-      useTabParamValuesStore();
-    const { clearQueryByTabId, tabQueryStatus } = useTabQueryStatusStore();
 
     // 删除tab
     removeCachedTab(tabId);
 
     // 删除tab对应的报表
     removeCachedReport(tabId);
-
-    // 删除tab对应的文件缓存
-    removeTabIdFiles(tabId);
 
     // 删除tab对应的参数值
     removeTabIdParamValues(tabId);
@@ -165,9 +153,6 @@ export function DashboardPage() {
     values: Record<string, any>,
     files?: Record<string, FileCache>
   ) => {
-    const { setTabIdParamValues } = useTabParamValuesStore();
-    const { setTabIdFiles } = useTabFilesStore();
-
     // 缓存参数
     setTabIdParamValues(tabId, values);
 
@@ -214,21 +199,20 @@ export function DashboardPage() {
       response = await queryApi.executeQueryBySourceId(request);
     }
 
-    const { setQueryStatus } = useTabQueryStatusStore();
     // 更新查询状态
     if (response.status === 'success') {
       setStatusDict((prev) => ({
         ...prev,
         [dataSource.id]: {
-          status: 'success',
+          status: DataSourceStatus.SUCCESS,
         } as QueryStatus,
       }));
       setQueryStatus(tabId, dataSource.id, {
-        status: 'success',
+        status: DataSourceStatus.SUCCESS,
       });
     } else {
       setQueryStatus(tabId, dataSource.id, {
-        status: 'error',
+        status: DataSourceStatus.ERROR,
       });
     }
   };
@@ -257,29 +241,31 @@ export function DashboardPage() {
     setIsEditModalOpen(false);
 
     // 更新当前标签的报表数据
-    if (currentEditingTabId) {
-      const currentReport = getReport(currentEditingTabId);
-      if (currentReport) {
-        const updatedReport = {
-          ...currentReport,
-          title,
-          description,
-          createdAt,
-          updatedAt,
-          parameters,
-          artifacts,
-          dataSources,
-          layout,
-        };
 
-        console.log('更新报表', updatedReport);
-        // api: 更新报表
-        reportApi.updateReport(updatedReport.id, updatedReport);
+    if (report) {
+      const updatedReport = {
+        ...report,
+        title,
+        description,
+        createdAt,
+        updatedAt,
+        parameters,
+        artifacts,
+        dataSources,
+        layout,
+      };
 
-        // 同时更新其他状态
-        setReport(currentEditingTabId, updatedReport); //更新tabReports
-        setCurrentEditingTabId(null); //清空当前编辑的标签ID
-      }
+      console.log('更新报表', updatedReport);
+      // api: 更新报表
+      reportApi.updateReport(updatedReport.id, updatedReport);
+
+      // 同时更新其他状态
+      setReport(updatedReport);
+
+      //更新tabReports
+
+      setCachedReport(activeTabId, updatedReport);
+      setCurrentEditingTabId(null); //清空当前编辑的标签ID
     }
   };
 
@@ -327,7 +313,6 @@ export function DashboardPage() {
               fsApi.saveFileSystemChanges(oldItems, newItems);
             }}
             useRenameItemEffect={(item) => {
-              const { findTabsByFileId, setTab } = useTabsSessionStore();
               const tabs = findTabsByFileId(item.id);
               tabs.forEach((tab) => {
                 setTab(tab.tabId, {
@@ -337,11 +322,9 @@ export function DashboardPage() {
               });
             }}
             useDeleteItemEffect={(item) => {
-              const { findTabsByFileId, removeTab } = useTabsSessionStore();
-
               const tabs = findTabsByFileId(item.id);
               tabs.forEach((tab) => {
-                removeTab(tab.tabId);
+                removeCachedTab(tab.tabId);
               });
             }}
           />
@@ -379,51 +362,37 @@ export function DashboardPage() {
 
           {/* 标签内容区 */}
           <div className='flex-1 overflow-auto'>
-            {Object.values(openTabs).length > 0 && activeTabId ? (
+            {activeTabId ? (
               <div className='h-full'>
-                {/* 为每个报表渲染内容组件 */}
-                {Object.values(openTabs).map((tab) => {
-                  const reportData = getReport(tab.tabId);
-                  return (
-                    <div
-                      key={tab.tabId}
-                      className={`h-full ${tab.tabId === activeTabId ? 'block' : 'hidden'}`}
-                    >
-                      {/* 展示区域 */}
-                      <div className='flex-1 overflow-auto'>
-                        <div className='container max-w-full py-6 px-4 md:px-8 space-y-6'>
-                          {/* 参数区域 */}
-                          <div className='space-y-2'>
-                            <ParameterQueryArea
-                              tabId={tab.tabId}
-                              parameters={reportData?.parameters || []}
-                              dataSources={reportData?.dataSources || []}
-                              isQuerying={isQuerying}
-                              statusDict={statusDict}
-                              setStatusDict={setStatusDict}
-                              onSubmit={(values, files) =>
-                                handleQuerySubmit(tab.tabId, values, files)
-                              }
-                              onEditReport={() =>
-                                handleEditReport(reportData, tab.tabId)
-                              }
-                              cachedParamValues={
-                                tabIdParamValues[tab.tabId] || {}
-                              }
-                              cachedFiles={getTabIdFiles(tab.tabId) || {}}
-                            />
-                          </div>
-                          <h1 className='text-2xl font-bold'>{tab?.title}</h1>
-                          {/* 展示区域 */}
-                          {reportData?.layout &&
-                            reportData.layout.items.length > 0 && (
-                              <LayoutGrid layout={reportData.layout} />
-                            )}
-                        </div>
-                      </div>
+                {/* 展示区域 */}
+                <div className='flex-1 overflow-auto'>
+                  <div className='container max-w-full py-6 px-4 md:px-8 space-y-6'>
+                    {/* 参数区域 */}
+                    <div className='space-y-2'>
+                      <ParameterQueryArea
+                        tabId={activeTabId}
+                        parameters={report?.parameters || []}
+                        dataSources={report?.dataSources || []}
+                        isQuerying={isQuerying}
+                        statusDict={statusDict}
+                        setStatusDict={setStatusDict}
+                        onSubmit={(values, files) =>
+                          handleQuerySubmit(activeTabId, values, files)
+                        }
+                        onEditReport={() =>
+                          report && handleEditReport(report, activeTabId)
+                        }
+                      />
                     </div>
-                  );
-                })}
+                    <h1 className='text-2xl font-bold'>
+                      {getActiveTab()?.title}
+                    </h1>
+                    {/* 展示区域 */}
+                    {report?.layout && report.layout.items.length > 0 && (
+                      <LayoutGrid layout={report.layout} />
+                    )}
+                  </div>
+                </div>
               </div>
             ) : (
               <div className='flex items-center justify-center h-full text-muted-foreground'>
@@ -435,11 +404,11 @@ export function DashboardPage() {
       </div>
 
       {/* 添加 EditModal 组件 */}
-      {currentEditReport && (
+      {report && (
         <EditModal
           open={isEditModalOpen}
           onClose={() => setIsEditModalOpen(false)}
-          report={currentEditReport}
+          report={report}
           handleSave={handleSaveReport}
         />
       )}
@@ -447,35 +416,40 @@ export function DashboardPage() {
   );
 }
 
-function TabsArea(
-  activeTabId: string,
-  setActiveTab: (tabId: string) => void,
-  closeTab: (tabId: string, e: React.MouseEvent) => void
-) {
+interface TabsAreaProps {
+  activeTabId: string;
+  setActiveTab: (tabId: string) => void;
+  closeTab: (tabId: string, e: React.MouseEvent<Element, MouseEvent>) => void;
+}
+
+function TabsArea({ activeTabId, setActiveTab, closeTab }: TabsAreaProps) {
   const { tabs: openTabs } = useTabsSessionStore();
 
-  return(
-  /* 标签页 - 使用 store 中的 openTabs */
+  return (
+    /* 标签页 - 使用 store 中的 openTabs */
 
-  Object.values(openTabs).map((tab) => (
-    <div
-      key={tab.tabId}
-      className={`flex items-center px-4 py-2 cursor-pointer border-r border-border relative min-w-[150px] max-w-[200px] ${
-        tab.tabId === activeTabId
-          ? 'bg-background'
-          : 'bg-muted/50 hover:bg-muted'
-      }`}
-      onClick={() => setActiveTab(tab.tabId)}
-    >
-      <div className='truncate flex-1'>{tab.title}</div>
-      <Button
-        variant='ghost'
-        size='icon'
-        className='h-4 w-4 ml-2 opacity-60 hover:opacity-100'
-        onClick={(e) => closeTab(tab.tabId, e)}
-      >
-        <X size={14} />
-      </Button>
-    </div>
-  ));
+    <>
+      {Object.values(openTabs).map((tab) => (
+        <div
+          key={tab.tabId}
+          className={`flex items-center px-4 py-2 cursor-pointer border-r border-border relative min-w-[150px] max-w-[200px] ${
+            tab.tabId === activeTabId
+              ? 'bg-background'
+              : 'bg-muted/50 hover:bg-muted'
+          }`}
+          onClick={() => setActiveTab(tab.tabId)}
+        >
+          <div className='truncate flex-1'>{tab.title}</div>
+          <Button
+            variant='ghost'
+            size='icon'
+            className='h-4 w-4 ml-2 opacity-60 hover:opacity-100'
+            onClick={(e) => closeTab(tab.tabId, e)}
+          >
+            <X size={14} />
+          </Button>
+        </div>
+      ))}
+    </>
+  );
 }

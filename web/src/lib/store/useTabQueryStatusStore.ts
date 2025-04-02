@@ -1,6 +1,13 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
+export interface QueryStatus {
+  status: DataSourceStatus;
+  error?: string;
+  rowCount?: number;
+  demoData?: string;
+}
+
 // 定义 store 的状态类型
 interface TabQueryStatusState {
   tabQueryStatus: Record<string, Record<string, QueryStatus>>;
@@ -22,13 +29,6 @@ export enum DataSourceStatus {
   SUCCESS = 'success',
   ERROR = 'error',
   INIT = 'init',
-}
-
-export interface QueryStatus {
-  status: DataSourceStatus;
-  error?: string;
-  rowCount?: number;
-  demoData?: string;
 }
 
 // 创建 Zustand Store

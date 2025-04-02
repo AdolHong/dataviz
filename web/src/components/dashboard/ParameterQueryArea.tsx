@@ -45,7 +45,10 @@ import { Card } from '../ui/card';
 import { CardContent } from '../ui/card';
 import { type DatePickerParamConfig } from '@/types/models/parameter';
 import dayjs from 'dayjs';
-import { type FileCache } from '@/lib/store/useFileSessionStore';
+import {
+  useTabFilesStore,
+  type FileCache,
+} from '@/lib/store/useFileSessionStore';
 
 interface ParameterQueryAreaProps {
   tabId: string;
@@ -57,8 +60,6 @@ interface ParameterQueryAreaProps {
     files?: Record<string, FileCache>
   ) => void;
   onEditReport: () => void;
-  cachedParamValues: Record<string, any>;
-  cachedFiles: Record<string, FileCache>;
   statusDict: Record<string, QueryStatus>;
   setStatusDict: (statusDict: Record<string, QueryStatus>) => void;
 }
@@ -69,6 +70,7 @@ import {
   type QueryStatus,
   type DataSourceStatus,
 } from '@/lib/store/useTabQueryStatusStore';
+import { useTabParamValuesStore } from '@/lib/store/useParamValuesStore';
 
 export function ParameterQueryArea({
   tabId,
@@ -77,8 +79,6 @@ export function ParameterQueryArea({
   dataSources = [],
   onSubmit,
   onEditReport,
-  cachedParamValues,
-  cachedFiles,
   statusDict,
   setStatusDict,
 }: ParameterQueryAreaProps) {
@@ -87,6 +87,10 @@ export function ParameterQueryArea({
   const [selectedDataSourceIndex, setSelectedDataSourceIndex] = useState<
     number | null
   >(null);
+
+  const { tabIdParamValues } = useTabParamValuesStore();
+  const { getTabIdFiles } = useTabFilesStore();
+  const { getQueryStatusByTabId } = useTabQueryStatusStore();
 
   const [values, setValues] = useState<Record<string, any>>({});
   const [files, setFiles] = useState<Record<string, FileCache>>({});
@@ -141,6 +145,7 @@ export function ParameterQueryArea({
         }
       });
 
+      const cachedParamValues = tabIdParamValues[tabId] || {};
       const newValues = {
         ...initialValues,
         ...cachedParamValues,
@@ -173,7 +178,7 @@ export function ParameterQueryArea({
 
   const initialQueryStatus = () => {
     console.log('activate_id, ', tabId);
-    const { getQueryStatusByTabId } = useTabQueryStatusStore();
+
     const statusDict = getQueryStatusByTabId(tabId);
     if (statusDict) {
       setStatusDict(statusDict);
@@ -516,7 +521,7 @@ export function ParameterQueryArea({
                       dataSources={csvDataSources}
                       files={files}
                       setFiles={setFiles}
-                      cachedFiles={cachedFiles}
+                      cachedFiles={getTabIdFiles(tabId) || {}}
                     />
                   </TabsContent>
                 )}

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 import uvicorn
 
-from routes import fs_routes, report_routes
+from routes import fs_routes, report_routes,query_routes
 from utils.fs_utils import DATA_DIR, FS_DATA_FILE, FILE_STORAGE_PATH, save_fs_data
 
 app = FastAPI()
@@ -20,6 +20,7 @@ app.add_middleware(
 # 注册路由
 app.include_router(fs_routes.router, prefix="/api")
 app.include_router(report_routes.router, prefix="/api")
+app.include_router(query_routes.router, prefix="/api")
 
 # 启动初始化：如果数据文件不存在，创建一个空的文件系统
 @app.on_event("startup")

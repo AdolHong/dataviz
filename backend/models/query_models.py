@@ -1,11 +1,10 @@
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
-from datetime import datetime
 
 class QueryBySourceRequest(BaseModel):
     fileId: str
     sourceId: str
-    updateTime: datetime
+    updateTime: str
     paramValues: Dict[str, Any]
     code: str
     dataContent: Optional[str] = None

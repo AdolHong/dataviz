@@ -54,7 +54,7 @@ export function DashboardPage() {
   const { tabReports, getReport, setReport, removeReport } =
     useTabReportsSessionStore();
 
-  const { tabIdFiles, setTabIdFiles, removeTabIdFiles } = useTabFilesStore();
+  const { tabIdFiles, setTabIdFiles, getTabIdFiles } = useTabFilesStore();
   const { tabIdParamValues, removeTabIdParamValues, setTabIdParamValues } =
     useTabParamValuesStore();
 
@@ -354,7 +354,7 @@ export function DashboardPage() {
                               cachedParamValues={
                                 tabIdParamValues[tab.tabId] || {}
                               }
-                              cachedFiles={tabIdFiles[tab.tabId] || {}}
+                              cachedFiles={getTabIdFiles(tab.tabId) || {}}
                             />
                           </div>
                           <h1 className='text-2xl font-bold'>{tab?.title}</h1>

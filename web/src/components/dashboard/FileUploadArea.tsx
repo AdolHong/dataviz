@@ -1,4 +1,10 @@
-import React, { useRef, useState, useCallback, useMemo } from 'react';
+import React, {
+  useRef,
+  useState,
+  useCallback,
+  useMemo,
+  useEffect,
+} from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { FileText, FileUp, Eye, Download, RefreshCw, X } from 'lucide-react';
@@ -19,17 +25,20 @@ import {
 import Papa from 'papaparse';
 import { toast } from 'sonner';
 import type { FileCache } from '@/lib/store/useFileSessionStore';
+import { type CSVUploaderSourceExecutor } from '@/types/models/dataSource';
 
 interface FileUploadAreaProps {
   dataSources: DataSource[];
   files: Record<string, FileCache>;
   setFiles: (files: Record<string, FileCache>) => void;
+  cachedFiles: Record<string, FileCache>;
 }
 
 export function FileUploadArea({
   dataSources,
   files,
   setFiles,
+  cachedFiles,
 }: FileUploadAreaProps) {
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
   const [previewSource, setPreviewSource] = useState<DataSource | null>(null);
@@ -53,6 +62,13 @@ export function FileUploadArea({
     []
   );
 
+  // 如果cachedFiles有值，则设置files
+  useEffect(() => {
+    if (cachedFiles) {
+      setFiles(cachedFiles);
+    }
+  }, []);
+
   const handleFileChange = async (
     e: React.ChangeEvent<HTMLInputElement>,
     sourceId: string
@@ -63,12 +79,37 @@ export function FileUploadArea({
         toast.error('文件超出1mb');
         return;
       }
+
+      // 读取文件内容, 并解析
       const content = await readFileContent(e.target.files[0]);
-      const fileCache = {
-        fileType: e.target.files[0].type,
+      const contentParsed = Papa.parse(content, { header: true });
+      const contentFields = contentParsed?.meta.fields || [];
+      if (!contentFields || contentFields.length === 0) {
+        toast.error('文件内容不符合要求, 列数不能为空');
+        return;
+      }
+
+      // 解析demoData
+      const csvDataSource = dataSources.find((ds) => ds.id === sourceId);
+      const demoData = (csvDataSource?.executor as CSVUploaderSourceExecutor)
+        .demoData;
+      const demoDataParsed = Papa.parse(demoData, { header: true });
+      const demoFields = demoDataParsed?.meta.fields || [];
+
+      const hasSameFields = demoFields.every((field) =>
+        contentFields.includes(field)
+      );
+
+      // 比较列名
+      if (!hasSameFields) {
+        toast.error('上传文件，没有包含示例数据中的全部列数');
+        return;
+      }
+      const fileCache: FileCache = {
+        fileName: e.target.files[0].name,
         fileSize: e.target.files[0].size,
+        fileType: e.target.files[0].type,
         fileContent: content,
-        fileName: e.target.files[0].name, // 添加fileName属性以符合FileCache类型
       };
 
       const newFiles = {

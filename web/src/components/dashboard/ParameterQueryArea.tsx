@@ -60,6 +60,60 @@ interface ParameterQueryAreaProps {
   cachedFiles: Record<string, FileCache>;
 }
 
+// 动态日期解析函数
+const parseDynamicDate = (value: string) => {
+  if (!value || typeof value !== 'string') {
+    return value;
+  }
+
+  // 匹配三种格式：
+  // 1. ${yyyyMMdd} - 当前日期，无偏移
+  // 2. ${yyyy-MM-dd+Nd} - 当前日期加N天
+  // 3. ${yyyy-MM-dd-Nd} - 当前日期减N天
+  const dateMatch = value.match(
+    /\$\{(yyyy-MM-dd|yyyyMMdd)(?:([+-])(\d+)([dMy]))?\}/
+  );
+
+  if (dateMatch) {
+    const format = dateMatch[1];
+    const operation = dateMatch[2] || ''; // '+', '-' 或空字符串
+    const amount = dateMatch[3] ? parseInt(dateMatch[3]) : 0;
+    const unit = dateMatch[4] || 'd'; // 如果没有指定单位，默认为天
+
+    let date = dayjs();
+
+    // 根据操作符处理日期
+    if (operation === '+') {
+      // 加上相应的时间
+      if (unit === 'd') {
+        date = date.add(amount, 'day');
+      } else if (unit === 'M') {
+        date = date.add(amount, 'month');
+      } else if (unit === 'y') {
+        date = date.add(amount, 'year');
+      }
+    } else if (operation === '-') {
+      // 减去相应的时间
+      if (unit === 'd') {
+        date = date.subtract(amount, 'day');
+      } else if (unit === 'M') {
+        date = date.subtract(amount, 'month');
+      } else if (unit === 'y') {
+        date = date.subtract(amount, 'year');
+      }
+    }
+
+    // 根据格式返回日期
+    if (format === 'yyyy-MM-dd') {
+      return date.format('YYYY-MM-DD');
+    } else if (format === 'yyyyMMdd') {
+      return date.format('YYYYMMDD');
+    }
+  }
+
+  return value;
+};
+
 export function ParameterQueryArea({
   parameters,
   dataSources = [],
@@ -76,6 +130,7 @@ export function ParameterQueryArea({
 
   const [values, setValues] = useState<Record<string, any>>({});
   const [files, setFiles] = useState<Record<string, FileCache>>({});
+  const [nameToChoices, setNameToChoices] = useState<Record<string, string[]>>({});
 
   // 使用 store 来管理标签页
   const { activeTabId } = useTabsSessionStore();
@@ -89,6 +144,14 @@ export function ParameterQueryArea({
 
   // 使用 useEffect 在初始渲染时设置默认值
   useEffect(() => {
+    // 初始化参数值
+    initialValues();
+
+    // 初始化文件
+    initialChoices();
+  }, [parameters]);
+
+  const initialValues = () => {
     if (values && Object.keys(values).length === 0) {
       const initialValues: Record<string, any> = {};
       parameters.forEach((param) => {
@@ -105,17 +168,32 @@ export function ParameterQueryArea({
           param.config.type === 'single_input' ||
           param.config.type === 'date_picker'
         ) {
-          initialValues[param.name] = param.config.default;
+          const defaultVal = param.config.default;
+          const parseVal = parseDynamicDate(defaultVal);
+          initialValues[param.name] = parseVal;
         }
       });
+
       const newValues = {
         ...initialValues,
         ...cachedParamValues,
       };
       setValues(newValues);
-      console.log('initialValues', initialValues);
-    }
-  }, [parameters]);
+  };
+
+  const initialChoices = () => {
+    parameters.forEach((param) => {
+      if (param.config.type === 'single_select' || param.config.type === 'multi_select') {
+        const choices: string[] = param.config.choices;
+        const newChoices = choices.map((choice) => {
+          return parseDynamicDate(choice);
+        });
+
+        nameToChoices[param.name] = newChoices;
+      }
+    });
+    setNameToChoices(nameToChoices);
+  };
 
   const toggleParametersExpanded = () => {
     setParametersExpanded(!parametersExpanded);
@@ -195,7 +273,7 @@ export function ParameterQueryArea({
                 <SelectValue placeholder='请选择' />
               </SelectTrigger>
               <SelectContent>
-                {param.config.choices.map((choice) => (
+                {nameToChoices[param.name].map((choice) => (
                   <SelectItem key={choice} value={choice}>
                     {choice}
                   </SelectItem>
@@ -222,7 +300,7 @@ export function ParameterQueryArea({
                   <CommandInput placeholder='搜索选项...' />
                   <CommandEmpty>未找到结果</CommandEmpty>
                   <CommandGroup className='max-h-64 overflow-auto'>
-                    {param.config.choices.map((choice) => {
+                    {nameToChoices[param.name].map((choice) => {
                       // 使用 param.config.default 初始化多选值
                       const initialValues = param.config.default || [];
                       const isSelected = (
@@ -324,7 +402,7 @@ export function ParameterQueryArea({
         default:
           return (
             <Input
-              defaultValue={param.config.default}
+              defaultValue={values[param.name] || ''}
               onChange={(e) => handleValueChange(param.name, e.target.value)}
             />
           );

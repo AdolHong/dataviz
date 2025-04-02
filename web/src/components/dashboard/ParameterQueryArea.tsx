@@ -65,13 +65,13 @@ export function ParameterQueryArea({
   onSubmit,
   onEditReport,
 }: ParameterQueryAreaProps) {
-  // const [values, setValues] = useState<Record<string, any>>({});
-  // const [files, setFiles] = useState<Record<string, File[]>>({});
   const [parametersExpanded, setParametersExpanded] = useState(true);
   const [activeTab, setActiveTab] = useState<string>('parameters');
   const [selectedDataSourceIndex, setSelectedDataSourceIndex] = useState<
     number | null
   >(null);
+
+  const [values, setValues] = useState<Record<string, any>>({});
 
   // 使用 store 来管理标签页
   const { activeTabId } = useTabsSessionStore();
@@ -86,30 +86,31 @@ export function ParameterQueryArea({
 
   // 使用 useEffect 在初始渲染时设置默认值
   useEffect(() => {
-    const initialValues: Record<string, any> = {};
-    parameters.forEach((param) => {
-      // 对于多选和多输入类型，使用默认数组
-      if (
-        param.config.type === 'multi_select' ||
-        param.config.type === 'multi_input'
-      ) {
-        initialValues[param.name] = param.config.default || [];
-      }
-      // 对于单选和单输入类型，使用默认值
-      else if (
-        param.config.type === 'single_select' ||
-        param.config.type === 'single_input' ||
-        param.config.type === 'date_picker'
-      ) {
-        initialValues[param.name] = param.config.default;
-      }
-    });
-
-    // 更新 values 状态
-    setValues((prev) => ({
-      ...prev,
-      ...initialValues,
-    }));
+    if (values && Object.keys(values).length === 0) {
+      const initialValues: Record<string, any> = {};
+      parameters.forEach((param) => {
+        // 对于多选和多输入类型，使用默认数组
+        if (
+          param.config.type === 'multi_select' ||
+          param.config.type === 'multi_input'
+        ) {
+          initialValues[param.name] = param.config.default || [];
+        }
+        // 对于单选和单输入类型，使用默认值
+        else if (
+          param.config.type === 'single_select' ||
+          param.config.type === 'single_input' ||
+          param.config.type === 'date_picker'
+        ) {
+          initialValues[param.name] = param.config.default;
+        }
+      });
+      const newValues = {
+        ...initialValues,
+      };
+      setValues(newValues);
+      console.log('initialValues', initialValues);
+    }
   }, [parameters]);
 
   const toggleParametersExpanded = () => {
@@ -117,7 +118,8 @@ export function ParameterQueryArea({
   };
 
   const handleValueChange = (id: string, value: any) => {
-    setValues((prev) => ({ ...prev, [id]: value }));
+    const newValues = { ...values, [id]: value };
+    setValues(newValues);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -135,6 +137,7 @@ export function ParameterQueryArea({
       toast.error('请上传文件');
       return;
     }
+
     onSubmit(values, files);
   };
 
@@ -441,14 +444,17 @@ export function ParameterQueryArea({
                         }
                         return getTabIdFiles(activeTabId)?.[sourceId] || null;
                       }}
-                      setFileCache={(sourceId: string, file: File) => {
+                      setFileCache={(
+                        sourceId: string,
+                        fileCache: FileCache
+                      ) => {
                         if (!activeTabId) {
                           console.error('activeTabId is null');
                           return;
                         }
                         setTabIdFiles(activeTabId, {
                           ...getTabIdFiles(activeTabId),
-                          [sourceId]: file,
+                          [sourceId]: fileCache,
                         });
                       }}
                       removeFileCache={(sourceId: string) => {

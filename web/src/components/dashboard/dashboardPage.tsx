@@ -54,8 +54,9 @@ export function DashboardPage() {
   const { tabReports, getReport, setReport, removeReport } =
     useTabReportsSessionStore();
 
-  const { tabIdFiles, removeTabIdFiles } = useTabFilesStore();
-  const { tabIdParamValues, removeTabIdParamValues } = useTabParamValuesStore();
+  const { tabIdFiles, setTabIdFiles, removeTabIdFiles } = useTabFilesStore();
+  const { tabIdParamValues, removeTabIdParamValues, setTabIdParamValues } =
+    useTabParamValuesStore();
 
   const { getSessionId } = useSessionIdStore();
 
@@ -150,17 +151,15 @@ export function DashboardPage() {
 
   // 修改handleQuerySubmit函数，接收文件参数为对象
   const handleQuerySubmit = (
+    tabId: string,
     values: Record<string, any>,
     files?: Record<string, FileCache>
   ) => {
-    // 如果文件为空，则不进行查询
-    if (!files || Object.keys(files).length === 0) {
-      toast.error('请上传文件');
-      return;
-    }
+    // 保存参数
+    setTabIdParamValues(tabId, values);
 
-    console.log('查询参数:', values);
-    console.log('上传文件:', files);
+    // 保存文件
+    setTabIdFiles(tabId, files || {});
   };
 
   // 处理编辑报表
@@ -339,7 +338,9 @@ export function DashboardPage() {
                             <ParameterQueryArea
                               parameters={reportData?.parameters || []}
                               dataSources={reportData?.dataSources || []}
-                              onSubmit={handleQuerySubmit}
+                              onSubmit={(values, files) =>
+                                handleQuerySubmit(tab.tabId, values, files)
+                              }
                               onEditReport={() =>
                                 handleEditReport(
                                   tabReports[tab.tabId],

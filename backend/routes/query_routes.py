@@ -1,15 +1,28 @@
+import json
+import os
 from fastapi import APIRouter, HTTPException
 from datetime import datetime
 from typing import Dict, Any
 from models.query_models import QueryBySourceRequest, QueryResponse
 from models.report_models import Report
 from utils.report_utils import get_report_content
-
+from pathlib import Path
+import pandas as pd
 
 execute_sql_query = lambda code, param_values, engine: print("hi sql")
 execute_python_query = lambda code, param_values, engine: print("hi python")
 
 router = APIRouter(tags=["query"])
+
+def save_query_result(uniqueId:str, result:str):
+    os.makedirs(Path(__file__).parent.parent / "cachedData", exist_ok=True)
+    with open(Path(__file__).parent.parent / "cachedData"  / f"{uniqueId}.data", "w") as f:
+        json.dump(json.loads(result), f)
+
+def load_query_result(uniqueId:str)->pd.DataFrame:
+    with open(Path(__file__).parent.parent / "cachedData"  / f"{uniqueId}.data", "r") as f:
+        return pd.read_json(f)
+
 
 @router.post("/query_by_source_id", response_model=QueryResponse)
 async def query_by_source_id(request: QueryBySourceRequest):
@@ -57,12 +70,8 @@ async def query_by_source_id(request: QueryBySourceRequest):
             #     request.paramValues,
             #     data_source.executor.engine
             # )
-            print("??1")
             from engine_config import sql_engine
-            result = sql_engine["default"](request.code)
-            print("result", result)
-            print("??2")
-            
+            result = sql_engine[data_source.executor.engine](request.code)
         elif data_source.executor.type == "python":
             execute_python_query(
                 request.code,
@@ -79,11 +88,15 @@ async def query_by_source_id(request: QueryBySourceRequest):
                 message="Unsupported executor type",
                 error=f"Unsupported executor type: {data_source.executor.type}"
             )
+        
+        if result is not None:
+            save_query_result(request.uniqueId, result.to_json(orient='records'))
+
 
         return QueryResponse(
             status="success",
             message="Query executed successfully",
-            data=result
+            data=None
         )
 
     except Exception as e:

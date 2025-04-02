@@ -8,7 +8,7 @@ class QueryBySourceRequest(BaseModel):
     updateTime: datetime
     paramValues: Dict[str, Any]
     code: str
-    data_contetn: Optional[str] = None
+    dataContent: Optional[str] = None
 
 class QueryResponse(BaseModel):
     status: str

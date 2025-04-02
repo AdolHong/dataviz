@@ -23,6 +23,7 @@ import { toast } from 'sonner';
 import type { FileCache } from '@/lib/store/useFileSessionStore';
 import { useTabFilesStore } from '@/lib/store/useFileSessionStore';
 import { useTabParamValuesStore } from '@/lib/store/useParamValuesStore';
+import { queryApi } from '@/api/query';
 
 export function DashboardPage() {
   const [fileSystemItems, setFileSystemItems] = useState<FileSystemItem[]>([]);
@@ -160,6 +161,15 @@ export function DashboardPage() {
 
     // 缓存文件
     setTabIdFiles(tabId, files || {});
+
+    queryApi.executeQueryBySourceId(
+      tabId,
+      'sourceId',
+      'updateTime',
+      values,
+      'code',
+      'dataContent'
+    );
 
     console.log('你点击了查询');
     console.log('values', values);

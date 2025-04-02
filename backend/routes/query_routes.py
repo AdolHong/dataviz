@@ -9,7 +9,7 @@ from utils.report_utils import get_report_content
 execute_sql_query = lambda code, param_values, engine: print("hi sql")
 execute_python_query = lambda code, param_values, engine: print("hi python")
 
-router = APIRouter()
+router = APIRouter(tags=["query"])
 
 @router.post("/query_by_source_id", response_model=QueryResponse)
 async def query_by_source_id(request: QueryBySourceRequest):
@@ -17,6 +17,7 @@ async def query_by_source_id(request: QueryBySourceRequest):
     根据数据源ID执行查询
     """
     try:
+        print("hi sql")
         # 获取报表信息
         report = get_report_content(request.fileId)
         if not report:

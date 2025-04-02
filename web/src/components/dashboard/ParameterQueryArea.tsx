@@ -130,7 +130,9 @@ export function ParameterQueryArea({
 
   const [values, setValues] = useState<Record<string, any>>({});
   const [files, setFiles] = useState<Record<string, FileCache>>({});
-  const [nameToChoices, setNameToChoices] = useState<Record<string, string[]>>({});
+  const [nameToChoices, setNameToChoices] = useState<Record<string, string[]>>(
+    {}
+  );
 
   // 使用 store 来管理标签页
   const { activeTabId } = useTabsSessionStore();
@@ -179,11 +181,16 @@ export function ParameterQueryArea({
         ...cachedParamValues,
       };
       setValues(newValues);
+      console.log('newValues, ', newValues);
+    }
   };
 
   const initialChoices = () => {
     parameters.forEach((param) => {
-      if (param.config.type === 'single_select' || param.config.type === 'multi_select') {
+      if (
+        param.config.type === 'single_select' ||
+        param.config.type === 'multi_select'
+      ) {
         const choices: string[] = param.config.choices;
         const newChoices = choices.map((choice) => {
           return parseDynamicDate(choice);
@@ -193,6 +200,7 @@ export function ParameterQueryArea({
       }
     });
     setNameToChoices(nameToChoices);
+    console.log('nameToChoices, ', nameToChoices);
   };
 
   const toggleParametersExpanded = () => {
@@ -273,11 +281,13 @@ export function ParameterQueryArea({
                 <SelectValue placeholder='请选择' />
               </SelectTrigger>
               <SelectContent>
-                {nameToChoices[param.name].map((choice) => (
-                  <SelectItem key={choice} value={choice}>
-                    {choice}
-                  </SelectItem>
-                ))}
+                {nameToChoices &&
+                  nameToChoices[param.name] &&
+                  nameToChoices[param.name].map((choice) => (
+                    <SelectItem key={choice} value={choice}>
+                      {choice}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           );
@@ -300,45 +310,47 @@ export function ParameterQueryArea({
                   <CommandInput placeholder='搜索选项...' />
                   <CommandEmpty>未找到结果</CommandEmpty>
                   <CommandGroup className='max-h-64 overflow-auto'>
-                    {nameToChoices[param.name].map((choice) => {
-                      // 使用 param.config.default 初始化多选值
-                      const initialValues = param.config.default || [];
-                      const isSelected = (
-                        values[param.name] || initialValues
-                      ).includes(choice);
+                    {nameToChoices &&
+                      nameToChoices[param.name] &&
+                      nameToChoices[param.name].map((choice) => {
+                        // 使用 param.config.default 初始化多选值
+                        const initialValues = param.config.default || [];
+                        const isSelected = (
+                          values[param.name] || initialValues
+                        ).includes(choice);
 
-                      return (
-                        <CommandItem
-                          key={choice}
-                          onSelect={() => {
-                            const currentValues =
-                              values[param.name] || initialValues;
-                            const newValues = isSelected
-                              ? currentValues.filter(
-                                  (v: string) => v !== choice
-                                )
-                              : [...currentValues, choice];
-                            handleValueChange(param.name, newValues);
-                          }}
-                        >
-                          <div className='flex items-center gap-2 w-full'>
-                            <div
-                              className={cn(
-                                'flex h-4 w-4 items-center justify-center rounded-sm border',
-                                isSelected
-                                  ? 'bg-primary border-primary'
-                                  : 'opacity-50'
-                              )}
-                            >
-                              {isSelected && (
-                                <Check className='h-3 w-3 text-primary-foreground' />
-                              )}
+                        return (
+                          <CommandItem
+                            key={choice}
+                            onSelect={() => {
+                              const currentValues =
+                                values[param.name] || initialValues;
+                              const newValues = isSelected
+                                ? currentValues.filter(
+                                    (v: string) => v !== choice
+                                  )
+                                : [...currentValues, choice];
+                              handleValueChange(param.name, newValues);
+                            }}
+                          >
+                            <div className='flex items-center gap-2 w-full'>
+                              <div
+                                className={cn(
+                                  'flex h-4 w-4 items-center justify-center rounded-sm border',
+                                  isSelected
+                                    ? 'bg-primary border-primary'
+                                    : 'opacity-50'
+                                )}
+                              >
+                                {isSelected && (
+                                  <Check className='h-3 w-3 text-primary-foreground' />
+                                )}
+                              </div>
+                              <span>{choice}</span>
                             </div>
-                            <span>{choice}</span>
-                          </div>
-                        </CommandItem>
-                      );
-                    })}
+                          </CommandItem>
+                        );
+                      })}
                   </CommandGroup>
                 </Command>
               </PopoverContent>

@@ -61,8 +61,11 @@ export function DashboardPage() {
     removeTab: removeCachedTab,
   } = useTabsSessionStore();
   const { getSessionId } = useSessionIdStore();
-  const { setReport: setCachedReport, removeReport: removeCachedReport } =
-    useTabReportsSessionStore();
+  const {
+    getReport: getCachedReport,
+    setReport: setCachedReport,
+    removeReport: removeCachedReport,
+  } = useTabReportsSessionStore();
   const { removeTabIdFiles, tabIdFiles, setTabIdFiles } = useTabFilesStore();
   const { removeTabIdParamValues, tabIdParamValues, setTabIdParamValues } =
     useTabParamValuesStore();
@@ -387,37 +390,47 @@ export function DashboardPage() {
 
           {/* 标签内容区 */}
           <div className='flex-1 overflow-auto'>
-            {activeTabId ? (
+            {Object.values(openTabs).length > 0 && activeTabId ? (
               <div className='h-full'>
-                {/* 展示区域 */}
-                <div className='flex-1 overflow-auto'>
-                  <div className='container max-w-full py-6 px-4 md:px-8 space-y-6'>
-                    {/* 参数区域 */}
-                    <div className='space-y-2'>
-                      <ParameterQueryArea
-                        tabId={activeTabId}
-                        parameters={report?.parameters || []}
-                        dataSources={report?.dataSources || []}
-                        isQuerying={isQuerying}
-                        statusDict={statusDict}
-                        setStatusDict={setStatusDict}
-                        onSubmit={(values, files) =>
-                          handleQuerySubmit(activeTabId, values, files)
-                        }
-                        onEditReport={() =>
-                          report && handleEditReport(report, activeTabId)
-                        }
-                      />
+                {/* 为每个报表渲染内容组件 */}
+                {Object.values(openTabs).map((tab) => {
+                  const reportData = getCachedReport(tab.tabId);
+                  return (
+                    <div
+                      key={tab.tabId}
+                      className={`h-full ${tab.tabId === activeTabId ? 'block' : 'hidden'}`}
+                    >
+                      {/* 展示区域 */}
+                      <div className='flex-1 overflow-auto'>
+                        <div className='container max-w-full py-6 px-4 md:px-8 space-y-6'>
+                          {/* 参数区域 */}
+                          <div className='space-y-2'>
+                            <ParameterQueryArea
+                              tabId={tab.tabId}
+                              parameters={reportData?.parameters || []}
+                              dataSources={reportData?.dataSources || []}
+                              isQuerying={isQuerying}
+                              statusDict={statusDict}
+                              setStatusDict={setStatusDict}
+                              onSubmit={(values, files) =>
+                                handleQuerySubmit(tab.tabId, values, files)
+                              }
+                              onEditReport={() =>
+                                handleEditReport(reportData, tab.tabId)
+                              }
+                            />
+                          </div>
+                          <h1 className='text-2xl font-bold'>{tab?.title}</h1>
+                          {/* 展示区域 */}
+                          {reportData?.layout &&
+                            reportData.layout.items.length > 0 && (
+                              <LayoutGrid layout={reportData.layout} />
+                            )}
+                        </div>
+                      </div>
                     </div>
-                    <h1 className='text-2xl font-bold'>
-                      {getActiveTab()?.title}
-                    </h1>
-                    {/* 展示区域 */}
-                    {report?.layout && report.layout.items.length > 0 && (
-                      <LayoutGrid layout={report.layout} />
-                    )}
-                  </div>
-                </div>
+                  );
+                })}
               </div>
             ) : (
               <div className='flex items-center justify-center h-full text-muted-foreground'>

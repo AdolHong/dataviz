@@ -399,7 +399,12 @@ function UploadedFilePreview({
 
   React.useEffect(() => {
     const fileCache = files[sourceId];
-    setFileContent(fileCache.fileContent);
+    console.log('files', files);
+    console.log('fileCache', fileCache.fileContent);
+    if (fileCache.fileContent) {
+      setFileContent(fileCache.fileContent);
+      setLoading(false);
+    }
   }, [sourceId, files]);
 
   if (loading) {

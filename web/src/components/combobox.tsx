@@ -1,6 +1,6 @@
 'use client';
 
-import * as React from 'react';
+import { useEffect, useState } from 'react';
 import { Check, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -17,9 +17,10 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import { toast } from 'sonner';
 
 interface ComboboxProps {
-  options: string[];
+  options: Record<string, string>[];
   value: string | string[];
   onValueChange: (value: string | string[]) => void;
   placeholder?: string;
@@ -35,7 +36,20 @@ export function Combobox({
   mode = 'single',
   disabled = false,
 }: ComboboxProps) {
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    options.forEach((option) => {
+      const value = option['value'];
+      const key = option['key'];
+      if (!key || key === '') {
+        toast.error('选项必须包含key');
+      }
+      if (!value || value === '') {
+        toast.error('选项必须包含value');
+      }
+    });
+  }, [options]);
 
   const handleSelect = (currentValue: string) => {
     if (mode === 'single') {
@@ -85,23 +99,23 @@ export function Combobox({
             <CommandGroup>
               {options.map((option) => (
                 <CommandItem
-                  key={option}
-                  value={option}
-                  onSelect={() => handleSelect(option)}
+                  key={option.key}
+                  value={option.value}
+                  onSelect={() => handleSelect(option.value)}
                 >
                   <Check
                     className={cn(
                       'mr-2 h-4 w-4',
                       mode === 'single'
-                        ? value === option
+                        ? value === option.value
                           ? 'opacity-100'
                           : 'opacity-0'
-                        : Array.isArray(value) && value.includes(option)
+                        : Array.isArray(value) && value.includes(option.value)
                           ? 'opacity-100'
                           : 'opacity-0'
                     )}
                   />
-                  {option}
+                  {option.value}
                 </CommandItem>
               ))}
             </CommandGroup>

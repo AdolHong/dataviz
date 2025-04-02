@@ -130,9 +130,9 @@ export function ParameterQueryArea({
 
   const [values, setValues] = useState<Record<string, any>>({});
   const [files, setFiles] = useState<Record<string, FileCache>>({});
-  const [nameToChoices, setNameToChoices] = useState<Record<string, string[]>>(
-    {}
-  );
+  const [nameToChoices, setNameToChoices] = useState<
+    Record<string, Record<string, string>[]>
+  >({});
 
   // 使用 store 来管理标签页
   const { activeTabId } = useTabsSessionStore();
@@ -195,9 +195,12 @@ export function ParameterQueryArea({
         param.config.type === 'single_select' ||
         param.config.type === 'multi_select'
       ) {
-        const choices: string[] = param.config.choices;
+        const choices: Record<string, string>[] = param.config.choices;
         const newChoices = choices.map((choice) => {
-          return parseDynamicDate(choice);
+          return {
+            key: choice.key,
+            value: parseDynamicDate(choice.value),
+          };
         });
 
         nameToChoices[param.name] = newChoices;
@@ -289,8 +292,8 @@ export function ParameterQueryArea({
                 {nameToChoices &&
                   nameToChoices[param.name] &&
                   nameToChoices[param.name].map((choice) => (
-                    <SelectItem key={choice} value={choice}>
-                      {choice}
+                    <SelectItem key={choice.key} value={choice.value}>
+                      {choice.value}
                     </SelectItem>
                   ))}
               </SelectContent>
@@ -326,15 +329,15 @@ export function ParameterQueryArea({
 
                         return (
                           <CommandItem
-                            key={choice}
+                            key={choice.key}
                             onSelect={() => {
                               const currentValues =
                                 values[param.name] || initialValues;
                               const newValues = isSelected
                                 ? currentValues.filter(
-                                    (v: string) => v !== choice
+                                    (v: string) => v !== choice.value
                                   )
-                                : [...currentValues, choice];
+                                : [...currentValues, choice.value];
                               handleValueChange(param.name, newValues);
                             }}
                           >
@@ -351,7 +354,7 @@ export function ParameterQueryArea({
                                   <Check className='h-3 w-3 text-primary-foreground' />
                                 )}
                               </div>
-                              <span>{choice}</span>
+                              <span>{choice.value}</span>
                             </div>
                           </CommandItem>
                         );

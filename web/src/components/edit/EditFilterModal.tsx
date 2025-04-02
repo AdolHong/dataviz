@@ -54,14 +54,18 @@ const EditFilterModal = ({
   // single_select
   const [singleSelectChoicesJoined, setSingleSelectChoicesJoined] =
     useState<string>('');
-  const [singleSelectChoices, setSingleSelectChoices] = useState<string[]>([]);
+  const [singleSelectChoices, setSingleSelectChoices] = useState<
+    Record<string, string>[]
+  >([]);
   const [singleSelectDefault, setSingleSelectDefault] = useState('');
   // single_input
   const [singleInputDefault, setSingleInputDefault] = useState('');
   // multi_select
   const [multiSelectChoicesJoined, setMultiSelectChoicesJoined] =
     useState<string>('');
-  const [multiSelectChoices, setMultiSelectChoices] = useState<string[]>([]);
+  const [multiSelectChoices, setMultiSelectChoices] = useState<
+    Record<string, string>[]
+  >([]);
   const [multiSelectDefault, setMultiSelectDefault] = useState<string[]>([]);
   const [multiSelectSep, setMultiSelectSep] = useState(',');
   const [multiSelectWrapper, setMultiSelectWrapper] = useState("'");
@@ -103,12 +107,16 @@ const EditFilterModal = ({
       // 根据类型填充特定配置
       switch (parameter.config.type) {
         case 'single_select':
-          setSingleSelectChoicesJoined(parameter.config.choices.join(','));
+          setSingleSelectChoicesJoined(
+            parameter.config.choices.map((choice) => choice.value).join(',')
+          );
           setSingleSelectChoices(parameter.config.choices);
           setSingleSelectDefault(parameter.config.default);
           break;
         case 'multi_select':
-          setMultiSelectChoicesJoined(parameter.config.choices.join(','));
+          setMultiSelectChoicesJoined(
+            parameter.config.choices.map((choice) => choice.value).join(',')
+          );
           setMultiSelectChoices(parameter.config.choices);
           setMultiSelectDefault(parameter.config.default);
           setMultiSelectSep(parameter.config.sep);
@@ -155,7 +163,9 @@ const EditFilterModal = ({
           // 校验：默认值必须在选项中
           if (
             singleSelectDefault &&
-            !singleSelectChoices.includes(singleSelectDefault)
+            !singleSelectChoices.some(
+              (choice) => choice.value === singleSelectDefault
+            )
           ) {
             toast.error('[PARAM] 异常, 默认值必须在单选清单中');
             config.default = '';
@@ -174,7 +184,7 @@ const EditFilterModal = ({
           };
           // 校验：默认值数组中的每个值都必须在选项中
           const validMultiDefaults = multiSelectDefault.filter((d) =>
-            multiSelectChoices.includes(d)
+            multiSelectChoices.some((choice) => choice.value === d)
           );
           if (validMultiDefaults.length !== multiSelectDefault.length) {
             toast.error('[PARAM] 异常, 默认值必须在多选清单中');
@@ -268,13 +278,17 @@ const EditFilterModal = ({
                   const choices = e.target.value
                     .split(',')
                     .map((s) => s.trim())
-                    .filter(Boolean);
+                    .filter(Boolean)
+                    // 默认是{key: s, value: s}
+                    .map((s) => ({ key: s, value: s }));
                   setSingleSelectChoices(choices);
 
                   // 如果默认值不在选项中，则设置为空
                   if (
                     singleSelectDefault &&
-                    !choices.includes(singleSelectDefault)
+                    !choices.some(
+                      (choice) => choice.value === singleSelectDefault
+                    )
                   ) {
                     setSingleSelectDefault('');
                   }
@@ -317,7 +331,8 @@ const EditFilterModal = ({
                   const choices = e.target.value
                     .split(',')
                     .map((s) => s.trim())
-                    .filter(Boolean);
+                    .filter(Boolean)
+                    .map((s) => ({ key: s, value: s }));
                   setMultiSelectChoices(choices);
 
                   setMultiSelectDefault([]);

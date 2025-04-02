@@ -245,7 +245,10 @@ const EditArtifactModal = ({
             </Label>
             <div className='col-span-3'>
               <Combobox
-                options={engineChoices}
+                options={engineChoices.map((engine) => ({
+                  key: engine,
+                  value: engine,
+                }))}
                 value={executor_engine || 'default'}
                 onValueChange={(value: string | string[]) => {
                   if (Array.isArray(value)) {
@@ -265,7 +268,10 @@ const EditArtifactModal = ({
             <Label className='text-right pt-2'>数据源依赖*</Label>
             <div className='col-span-3'>
               <Combobox
-                options={dataSourceOptions}
+                options={dataSourceOptions.map((option) => ({
+                  key: option,
+                  value: option,
+                }))}
                 value={dependencies}
                 onValueChange={(value: string | string[]) => {
                   if (Array.isArray(value)) {

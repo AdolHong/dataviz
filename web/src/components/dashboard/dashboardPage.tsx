@@ -54,7 +54,8 @@ export function DashboardPage() {
   const { tabReports, getReport, setReport, removeReport } =
     useTabReportsSessionStore();
 
-  const { tabIdFiles, setTabIdFiles, getTabIdFiles } = useTabFilesStore();
+  const { tabIdFiles, setTabIdFiles, getTabIdFiles, removeTabIdFiles } =
+    useTabFilesStore();
   const { tabIdParamValues, removeTabIdParamValues, setTabIdParamValues } =
     useTabParamValuesStore();
 
@@ -328,7 +329,7 @@ export function DashboardPage() {
               <div className='h-full'>
                 {/* 为每个报表渲染内容组件 */}
                 {Object.values(openTabs).map((tab) => {
-                  const reportData = tabReports[tab.tabId];
+                  const reportData = getReport(tab.tabId);
                   return (
                     <div
                       key={tab.tabId}
@@ -346,10 +347,7 @@ export function DashboardPage() {
                                 handleQuerySubmit(tab.tabId, values, files)
                               }
                               onEditReport={() =>
-                                handleEditReport(
-                                  tabReports[tab.tabId],
-                                  tab.tabId
-                                )
+                                handleEditReport(reportData, tab.tabId)
                               }
                               cachedParamValues={
                                 tabIdParamValues[tab.tabId] || {}

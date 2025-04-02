@@ -46,12 +46,12 @@ class DataSource(BaseModel):
 # Parameter 相关模型
 class SingleSelectParamConfig(BaseModel):
     type: Literal["single_select"]
-    choices: List[str]
+    choices: List[Dict[str, str]]
     default: str
 
 class MultiSelectParamConfig(BaseModel):
     type: Literal["multi_select"]
-    choices: List[str]
+    choices: List[Dict[str, str]]
     default: List[str]
     sep: str
     wrapper: str

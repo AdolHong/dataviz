@@ -412,7 +412,10 @@ const EditArtifactParamModal = ({
                   </Label>
                   <div className='col-span-3'>
                     <Combobox
-                      options={plainChoices}
+                      options={plainChoices.map((choice) => ({
+                        key: choice,
+                        value: choice,
+                      }))}
                       value={plainDefault}
                       onValueChange={(value: string | string[]) => {
                         if (!Array.isArray(value)) {
@@ -438,7 +441,10 @@ const EditArtifactParamModal = ({
                   </Label>
                   <div className='col-span-3'>
                     <Combobox
-                      options={plainChoices}
+                      options={plainChoices.map((choice) => ({
+                        key: choice,
+                        value: choice,
+                      }))}
                       value={plainDefaultMultiple}
                       onValueChange={(value: string | string[]) => {
                         if (Array.isArray(value)) {
@@ -467,7 +473,10 @@ const EditArtifactParamModal = ({
                 </Label>
                 <div className='col-span-3'>
                   <Combobox
-                    options={dependencies}
+                    options={dependencies.map((dependency) => ({
+                      key: dependency,
+                      value: dependency,
+                    }))}
                     value={cascaderDfAlias}
                     onValueChange={(value: string | string[]) => {
                       if (Array.isArray(value)) {

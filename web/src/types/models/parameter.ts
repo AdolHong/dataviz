@@ -14,13 +14,13 @@ export interface Parameter {
 
 export interface SingleSelectParamConfig {
   type: 'single_select';
-  choices: string[];
+  choices: Record<string, string>[];
   default: string;
 }
 
 export interface MultiSelectParamConfig {
   type: 'multi_select';
-  choices: string[];
+  choices: Record<string, string>[];
   default: string[];
   sep: string;
   wrapper: string;

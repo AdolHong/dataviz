@@ -24,6 +24,7 @@ import type { FileCache } from '@/lib/store/useFileSessionStore';
 import { useTabFilesStore } from '@/lib/store/useFileSessionStore';
 import { useTabParamValuesStore } from '@/lib/store/useParamValuesStore';
 import { queryApi } from '@/api/query';
+import { replaceParametersInCode } from '@/utils/parser';
 
 export function DashboardPage() {
   const [fileSystemItems, setFileSystemItems] = useState<FileSystemItem[]>([]);
@@ -162,14 +163,22 @@ export function DashboardPage() {
     // 缓存文件
     setTabIdFiles(tabId, files || {});
 
-    queryApi.executeQueryBySourceId(
-      tabId,
-      'sourceId',
-      'updateTime',
-      values,
-      'code',
-      'dataContent'
-    );
+    const report = getReport(tabId);
+    console.info('report', report);
+    report?.dataSources.forEach(async (dataSource) => {
+      if (dataSource.executor.type === 'sql') {
+        const code = replaceParametersInCode(dataSource.executor.code, values);
+        const response = await queryApi.executeQueryBySourceId(
+          report.id,
+          dataSource.id,
+          report.updatedAt,
+          values,
+          code,
+          'dataContent'
+        );
+        console.info('response', response);
+      }
+    });
 
     console.log('你点击了查询');
     console.log('values', values);

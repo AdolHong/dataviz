@@ -45,7 +45,6 @@ import { Card } from '../ui/card';
 import { CardContent } from '../ui/card';
 import { type DatePickerParamConfig } from '@/types/models/parameter';
 import dayjs from 'dayjs';
-import { useTabsSessionStore } from '@/lib/store/useTabsSessionStore';
 import { type FileCache } from '@/lib/store/useFileSessionStore';
 
 interface ParameterQueryAreaProps {

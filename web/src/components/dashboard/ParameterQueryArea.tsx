@@ -49,6 +49,7 @@ import { useTabsSessionStore } from '@/lib/store/useTabsSessionStore';
 import { type FileCache } from '@/lib/store/useFileSessionStore';
 
 interface ParameterQueryAreaProps {
+  tabId: string;
   isQuerying: boolean;
   parameters: Parameter[];
   dataSources?: DataSource[];
@@ -71,6 +72,7 @@ import {
 } from '@/lib/store/useTabQueryStatusStore';
 
 export function ParameterQueryArea({
+  tabId,
   isQuerying,
   parameters,
   dataSources = [],
@@ -95,7 +97,7 @@ export function ParameterQueryArea({
   >({});
 
   // 使用 store 来管理标签页
-  const { activeTabId } = useTabsSessionStore();
+  // const { activeTabId } = useTabsSessionStore();
 
   // 检查需要文件上传的数据源
   const csvDataSources = dataSources.filter(
@@ -104,7 +106,7 @@ export function ParameterQueryArea({
   );
   const requireFileUpload = csvDataSources.length > 0;
 
-  const { getQueryStatus } = useTabQueryStatusStore();
+  const { getQueryStatusByTabId } = useTabQueryStatusStore();
 
   // 使用 useEffect 在初始渲染时设置默认值
   useEffect(() => {
@@ -176,15 +178,11 @@ export function ParameterQueryArea({
   };
 
   const initialQueryStatus = () => {
-    console.log('activeTabId, ', activeTabId);
-    const initialStatusDict = dataSources.reduce(
-      (acc, ds) => {
-        acc[ds.id] = getQueryStatus(activeTabId, ds.id);
-        return acc;
-      },
-      {} as Record<string, QueryStatus>
-    );
-    setStatusDict(initialStatusDict);
+    console.log('activate_id, ', tabId);
+    const statusDict = getQueryStatusByTabId(tabId);
+    if (statusDict) {
+      setStatusDict(statusDict);
+    }
   };
 
   const toggleParametersExpanded = () => {
@@ -198,8 +196,7 @@ export function ParameterQueryArea({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('sm??, ');
-    if (!activeTabId) {
+    if (!tabId) {
       toast.error('请先打开一个标签页');
       return;
     }

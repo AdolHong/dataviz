@@ -93,6 +93,10 @@ export const useTabQueryStatusStore = create<TabQueryStatusState>()(
         }
       },
 
+      getQueryStatusByTabId: (tabId: string) => {
+        return get().tabQueryStatus[tabId];
+      },
+
       // 根据tabId清除所有查询状态
       clearQueryByTabId: (tabId: string) =>
         set((state) => ({

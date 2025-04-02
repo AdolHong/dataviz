@@ -45,6 +45,9 @@ export function DashboardPage() {
   );
   const [isQuerying, setIsQuerying] = useState(false);
   // 使用 store 来管理标签页
+
+  const [statusDict, setStatusDict] = useState<Record<string, QueryStatus>>({});
+
   const {
     tabs: openTabs,
     activeTabId,
@@ -55,10 +58,12 @@ export function DashboardPage() {
     setActiveTab,
   } = useTabsSessionStore();
 
-  // const { tabQueryStatus, getQueryStatus, setQueryStatus, clearQueryStatus } =
-  //   useTabQueryStatusStore();
-  const [statusDict, setStatusDict] = useState<Record<string, QueryStatus>>({});
-
+  const {
+    tabQueryStatus,
+    getQueryStatusByTabId,
+    setQueryStatus,
+    clearQueryByTabId,
+  } = useTabQueryStatusStore();
   const { tabReports, getReport, setReport, removeReport } =
     useTabReportsSessionStore();
 
@@ -155,7 +160,7 @@ export function DashboardPage() {
     removeTabIdParamValues(tabId);
 
     // 删除tab对应的查询状态
-    clearQueryStatus(tabId);
+    clearQueryByTabId(tabId);
 
     console.log('删除tab之后, tabIdFiles', tabIdFiles);
     console.log('删除tab之后, tabIdParamValues', tabIdParamValues);
@@ -406,6 +411,7 @@ export function DashboardPage() {
                           {/* 参数区域 */}
                           <div className='space-y-2'>
                             <ParameterQueryArea
+                              tabId={tab.tabId}
                               parameters={reportData?.parameters || []}
                               dataSources={reportData?.dataSources || []}
                               isQuerying={isQuerying}

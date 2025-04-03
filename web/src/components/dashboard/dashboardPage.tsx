@@ -308,8 +308,7 @@ export function DashboardPage() {
           }}
         >
           <FileExplorer
-            onSelectItem={setSelectedItem}
-            onItemDoubleClick={(item) => {
+            onDoubleClick={(item) => {
               if (item.id === activeTabId) {
                 return;
               }

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import * as React from 'react';
 import {
   ChevronRight,
@@ -55,14 +55,14 @@ interface FileExplorerProps {
     newItems: FileSystemItem[]
   ) => void;
   onSelectItem?: (item: FileSystemItem) => void;
-  onItemDoubleClick?: (item: FileSystemItem) => void;
+  onDoubleClick?: (item: FileSystemItem) => void;
   useRenameItemEffect?: (item: FileSystemItem) => void;
   useDeleteItemEffect?: (item: FileSystemItem) => void;
 }
 
 export function FileExplorer({
   onSelectItem,
-  onItemDoubleClick,
+  onDoubleClick,
   useRenameItemEffect,
   useDeleteItemEffect,
   useFileSystemChangeEffect,
@@ -477,7 +477,7 @@ export function FileExplorer({
                     : 'hover:bg-secondary/50'
               )}
               onClick={() => handleItemClick(item)}
-              onDoubleClick={() => onItemDoubleClick && onItemDoubleClick(item)}
+              onDoubleClick={() => onDoubleClick && onDoubleClick(item)}
               draggable
               onDragStart={(e) => handleDragStart(e, item)}
               onDragEnd={handleDragEnd}

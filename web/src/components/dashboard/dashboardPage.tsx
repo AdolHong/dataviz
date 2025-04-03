@@ -161,11 +161,9 @@ export function DashboardPage() {
   };
 
   // 处理编辑报表
-  const handleEditReport = (report: Report | null) => {
-    if (report) {
-      setCurrentEditReport(report);
-      setIsEditModalOpen(true);
-    }
+  const handleEditReport = (report: Report) => {
+    setCurrentEditReport(report);
+    setIsEditModalOpen(true);
   };
 
   // 处理保存报表
@@ -316,7 +314,8 @@ export function DashboardPage() {
                     <div className='space-y-2'>
                       {report && (
                         <ParameterQueryArea
-                          report={report}
+                          reportId={report.id}
+                          reportUpdatedAt={report.updatedAt}
                           parameters={report.parameters || []}
                           dataSources={report.dataSources || []}
                           onEditReport={() => handleEditReport(report)}

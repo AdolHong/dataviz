@@ -50,11 +50,11 @@ import {
   type FileCache,
 } from '@/lib/store/useFileSessionStore';
 
-import { type Report } from '@/types/models/report';
 import { DataSourceStatus } from '@/lib/store/useTabQueryStatusStore';
 
 interface ParameterQueryAreaProps {
-  report: Report;
+  reportId: string;
+  reportUpdatedAt: string;
   parameters: Parameter[];
   dataSources?: DataSource[];
   onEditReport: () => void;
@@ -71,21 +71,21 @@ import { useSessionIdStore } from '@/lib/store/useSessionIdStore';
 import { queryApi } from '@/api/query';
 
 export function ParameterQueryArea({
-  report,
+  reportId,
+  reportUpdatedAt,
   parameters,
   dataSources = [],
   onEditReport,
 }: ParameterQueryAreaProps) {
   console.info('hi, parameterQueryArea');
-  console.info('report', report);
-  console.info('parameters', parameters);
-  console.info('dataSources', dataSources);
 
   const [parametersExpanded, setParametersExpanded] = useState(true);
   const [selectedDataSourceIndex, setSelectedDataSourceIndex] = useState<
     number | null
   >(null);
 
+  // 当前标签: parameters or upload
+  const [activeParameterTab, setActiveParameterTab] = useState('parameters');
   const activeTabId = useTabsSessionStore((state) => state.activeTabId);
   const setActiveTabId = useTabsSessionStore((state) => state.setActiveTabId);
   const [isQuerying, setIsQuerying] = useState(false);
@@ -144,9 +144,9 @@ export function ParameterQueryArea({
     if (dataSource.executor.type === 'sql') {
       const code = replaceParametersInCode(dataSource.executor.code, values);
       const request = {
-        fileId: report.id,
+        fileId: reportId,
         sourceId: dataSource.id,
-        updateTime: report.updatedAt,
+        updateTime: reportUpdatedAt,
         uniqueId: uniqueId,
         paramValues: values,
         code: code,
@@ -198,6 +198,7 @@ export function ParameterQueryArea({
 
   // 使用 useEffect 在初始渲染时设置默认值
   useEffect(() => {
+    console.info('useEffect, parameters', parameters);
     // 清空文件
     setFiles({});
 
@@ -244,7 +245,6 @@ export function ParameterQueryArea({
         ...cachedParamValues,
       };
       setValues(newValues);
-      console.log('newValues, ', newValues);
     }
   };
 
@@ -525,8 +525,8 @@ export function ParameterQueryArea({
         <form onSubmit={handleSubmit}>
           <Tabs
             defaultValue='parameters'
-            value={activeTabId}
-            onValueChange={(value) => setActiveTabId(value)}
+            value={activeParameterTab}
+            onValueChange={(value) => setActiveParameterTab(value)}
           >
             {/* tabs */}
             <div className='flex justify-between items-center mb-2 '>

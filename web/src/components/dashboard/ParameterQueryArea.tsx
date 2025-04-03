@@ -60,6 +60,7 @@ import {
 import { useTabParamValuesStore } from '@/lib/store/useParamValuesStore';
 import { useSessionIdStore } from '@/lib/store/useSessionIdStore';
 import { queryApi } from '@/api/query';
+import { Combobox } from '../combobox';
 
 interface ParameterQueryAreaProps {
   activeTabId: string;
@@ -343,88 +344,38 @@ export const ParameterQueryArea = memo(
         switch (param.config.type) {
           case 'single_select':
             return (
-              <Select
-                value={values[param.name] || ''}
-                onValueChange={(value) => handleValueChange(param.name, value)}
-              >
-                <SelectTrigger className='w-full'>
-                  <SelectValue placeholder='请选择' />
-                </SelectTrigger>
-                <SelectContent>
-                  {nameToChoices &&
-                    nameToChoices[param.name] &&
-                    nameToChoices[param.name].map((choice) => (
-                      <SelectItem key={choice.key} value={choice.value}>
-                        {choice.value}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+              <Combobox
+                options={
+                  nameToChoices[param.name]?.map((choice) => ({
+                    key: choice.value,
+                    value: choice.value,
+                  })) || []
+                }
+                value={values[param.name] || []}
+                placeholder='请选择'
+                onValueChange={(value) =>
+                  handleValueChange(param.name, value as string[])
+                }
+                mode='single'
+              />
             );
 
           case 'multi_select':
             return (
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant='outline' className='w-full justify-between'>
-                    <span className='truncate'>
-                      {values[param.name]?.length
-                        ? `已选择 ${values[param.name].length} 项`
-                        : '请选择'}
-                    </span>
-                    <ChevronDown className='ml-2 h-4 w-4 shrink-0 opacity-50' />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className='w-full p-0' align='start'>
-                  <Command>
-                    <CommandInput placeholder='搜索选项...' />
-                    <CommandEmpty>未找到结果</CommandEmpty>
-                    <CommandGroup className='max-h-64 overflow-auto'>
-                      {nameToChoices &&
-                        nameToChoices[param.name] &&
-                        nameToChoices[param.name].map((choice) => {
-                          // 使用 param.config.default 初始化多选值
-                          const initialValues = param.config.default || [];
-                          const isSelected = (
-                            values[param.name] || initialValues
-                          ).includes(choice);
-
-                          return (
-                            <CommandItem
-                              key={choice.key}
-                              onSelect={() => {
-                                const currentValues =
-                                  values[param.name] || initialValues;
-                                const newValues = isSelected
-                                  ? currentValues.filter(
-                                      (v: string) => v !== choice.value
-                                    )
-                                  : [...currentValues, choice.value];
-                                handleValueChange(param.name, newValues);
-                              }}
-                            >
-                              <div className='flex items-center gap-2 w-full'>
-                                <div
-                                  className={cn(
-                                    'flex h-4 w-4 items-center justify-center rounded-sm border',
-                                    isSelected
-                                      ? 'bg-primary border-primary'
-                                      : 'opacity-50'
-                                  )}
-                                >
-                                  {isSelected && (
-                                    <Check className='h-3 w-3 text-primary-foreground' />
-                                  )}
-                                </div>
-                                <span>{choice.value}</span>
-                              </div>
-                            </CommandItem>
-                          );
-                        })}
-                    </CommandGroup>
-                  </Command>
-                </PopoverContent>
-              </Popover>
+              <Combobox
+                options={
+                  nameToChoices[param.name]?.map((choice) => ({
+                    key: choice.value,
+                    value: choice.value,
+                  })) || []
+                }
+                value={values[param.name] || []}
+                placeholder='请选择'
+                onValueChange={(value) =>
+                  handleValueChange(param.name, value as string[])
+                }
+                mode='multiple'
+              />
             );
 
           case 'date_picker':

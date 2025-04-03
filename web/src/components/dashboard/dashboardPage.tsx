@@ -316,8 +316,8 @@ export function DashboardPage() {
                         <ParameterQueryArea
                           reportId={report.id}
                           reportUpdatedAt={report.updatedAt}
-                          parameters={report.parameters || []}
-                          dataSources={report.dataSources || []}
+                          parameters={report.parameters}
+                          dataSources={report.dataSources}
                           onEditReport={() => handleEditReport(report)}
                         />
                       )}

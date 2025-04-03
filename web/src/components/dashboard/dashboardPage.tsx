@@ -33,7 +33,6 @@ import {
 import { shallow } from '@tanstack/react-router';
 
 export function DashboardPage() {
-  const [selectedItem, setSelectedItem] = useState<FileSystemItem | null>(null);
   const [report, setReport] = useState<Report | null>(null);
 
   const [navbarVisible, setNavbarVisible] = useState(true);

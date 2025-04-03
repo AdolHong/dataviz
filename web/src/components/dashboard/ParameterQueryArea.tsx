@@ -88,8 +88,6 @@ export const ParameterQueryArea = memo(
 
     // 当前标签: parameters or upload
     const [activeParameterTab, setActiveParameterTab] = useState('parameters');
-    // const activeTabId = useTabsSessionStore((state) => state.activeTabId);
-    // const activeTabId = 'tab-1743665449791';
     const [isQuerying, setIsQuerying] = useState(false);
     // 使用 store 来管理标签页
     const [statusDict, setStatusDict] = useState<Record<string, QueryStatus>>(
@@ -199,9 +197,8 @@ export const ParameterQueryArea = memo(
 
     // 使用 useEffect 在初始渲染时设置默认值
     useEffect(() => {
-      console.info('hi, parameterQueryArea[2nd 初始化参数] ', parameters);
-      setValues({});
-
+      // console.info('hi, parameterQueryArea[2nd 初始化参数] ', parameters);
+      // setValues({});
       // // 初始化参数值
       // initiateValues();
       // // 初始化文件
@@ -242,7 +239,7 @@ export const ParameterQueryArea = memo(
         ...cachedParamValues,
       };
 
-      setValues(newValues);
+      // setValues(newValues);
 
       // 延迟1秒后打印newValues
       console.log('newValues之前', newValues);
@@ -287,7 +284,7 @@ export const ParameterQueryArea = memo(
       const newValues = { ...values, [id]: value };
 
       console.info('你改啥了', newValues);
-      setValues(newValues);
+      // setValues(newValues);
     };
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -483,8 +480,8 @@ export const ParameterQueryArea = memo(
           default:
             return (
               <Input
-                defaultValue={values[param.name] || ''}
-                onChange={(e) => handleValueChange(param.name, e.target.value)}
+                defaultValue={''}
+                // onChange={}
               />
             );
         }
@@ -510,7 +507,9 @@ export const ParameterQueryArea = memo(
               </TooltipProvider>
             ) : (
               <Label htmlFor={param.name}>
-                {param.alias ? `${param.alias}(${param.name})` : param.name}
+                <div>
+                  {param.alias ? `${param.alias}(${param.name})` : param.name}
+                </div>
               </Label>
             )}
           </div>
@@ -606,7 +605,7 @@ export const ParameterQueryArea = memo(
                   <TabsContent value='parameters' className='mt-2 space-y-4'>
                     <div className='grid grid-cols-2 md:grid-cols-4 gap-x-10 gap-y-3'>
                       {parameters?.map((param) => (
-                        <div key={param.name} className='col-span-1'>
+                        <div key={'a'} className='col-span-1'>
                           {renderParameterInput(param)}
                         </div>
                       ))}

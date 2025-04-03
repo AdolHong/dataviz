@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button';
-import { useState, useEffect, act } from 'react';
+import { useState, useEffect, memo } from 'react';
 import { FileExplorer } from '@/components/dashboard/FileExplorer';
 import type {
   FileItem,
@@ -481,77 +481,88 @@ export function DashboardPage() {
   );
 }
 
-function TabsArea(
-  navbarVisible: boolean,
-  onToggleNavbarVisible: () => void,
-  onCloseTab: (tabId: string) => void,
-  onClickTab: (tabId: string) => void
-) {
-  const { openTabs } = useTabsSessionStore((state) => state.tabs);
-  const activateTabId = useTabsSessionStore((state) => state.activeTabId);
-  const setActivateTabId = useTabsSessionStore(
-    (state) => state.setActivateTabId
-  );
+// 标签栏组件
+interface TabsAreaProps {
+  navbarVisible: boolean;
+  onToggleNavbarVisible: () => void;
+  onCloseTab: (tabId: string) => void;
+  onClickTab: (tabId: string) => void;
+}
 
-  return (
-    <div className='border-b bg-muted/30'>
-      <div className='flex overflow-x-auto items-center'>
-        {/* 导航栏切换按钮 */}
-        <div className='flex items-center border-r border-border px-2'>
-          <Button
-            variant='ghost'
-            size='icon'
-            className='h-8 w-8 rounded-full'
-            onClick={onToggleNavbarVisible}
-          >
-            {navbarVisible ? (
-              <ChevronLeft size={16} />
-            ) : (
-              <ChevronRight size={16} />
-            )}
-          </Button>
-        </div>
+// 标签栏组件
+const TabsArea = memo(
+  ({
+    navbarVisible,
+    onToggleNavbarVisible,
+    onCloseTab,
+    onClickTab,
+  }: TabsAreaProps) => {
+    const { openTabs } = useTabsSessionStore((state) => state.tabs);
+    const activateTabId = useTabsSessionStore((state) => state.activeTabId);
+    const setActivateTabId = useTabsSessionStore(
+      (state) => state.setActivateTabId
+    );
 
-        {/* 标签页 - 使用 store 中的 openTabs */}
-        <>
-          {Object.values(openTabs).map(
-            (tab) => (
-              console.log('hi, tab areaa'),
-              (
-                <div
-                  key={tab.tabId}
-                  className={`flex items-center px-4 py-2 cursor-pointer border-r border-border relative min-w-[150px] max-w-[200px] ${
-                    tab.tabId === activateTabId
-                      ? 'bg-background'
-                      : 'bg-muted/50 hover:bg-muted'
-                  }`}
-                  onClick={() => {
-                    if (tab.tabId != activateTabId) {
-                      setActivateTabId(tab.tabId);
-                      onClickTab(tab.tabId);
-                    }
-                  }}
-                >
-                  <div className='truncate flex-1'>{tab.title}</div>
-                  <Button
-                    variant='ghost'
-                    size='icon'
-                    className='h-4 w-4 ml-2 opacity-60 hover:opacity-100'
-                    onClick={(e) => {
-                      // 阻止冒泡，避免触发标签切换
-                      e.stopPropagation();
+    return (
+      <div className='border-b bg-muted/30'>
+        <div className='flex overflow-x-auto items-center'>
+          {/* 导航栏切换按钮 */}
+          <div className='flex items-center border-r border-border px-2'>
+            <Button
+              variant='ghost'
+              size='icon'
+              className='h-8 w-8 rounded-full'
+              onClick={onToggleNavbarVisible}
+            >
+              {navbarVisible ? (
+                <ChevronLeft size={16} />
+              ) : (
+                <ChevronRight size={16} />
+              )}
+            </Button>
+          </div>
 
-                      onCloseTab(tab.tabId);
+          {/* 标签页 - 使用 store 中的 openTabs */}
+          <>
+            {Object.values(openTabs).map(
+              (tab) => (
+                console.log('hi, tab areaa'),
+                (
+                  <div
+                    key={tab.tabId}
+                    className={`flex items-center px-4 py-2 cursor-pointer border-r border-border relative min-w-[150px] max-w-[200px] ${
+                      tab.tabId === activateTabId
+                        ? 'bg-background'
+                        : 'bg-muted/50 hover:bg-muted'
+                    }`}
+                    onClick={() => {
+                      if (tab.tabId != activateTabId) {
+                        setActivateTabId(tab.tabId);
+                        onClickTab(tab.tabId);
+                      }
                     }}
                   >
-                    <X size={14} />
-                  </Button>
-                </div>
+                    <div className='truncate flex-1'>{tab.title}</div>
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      className='h-4 w-4 ml-2 opacity-60 hover:opacity-100'
+                      onClick={(e) => {
+                        // 阻止冒泡，避免触发标签切换
+                        e.stopPropagation();
+
+                        onCloseTab(tab.tabId);
+                      }}
+                    >
+                      <X size={14} />
+                    </Button>
+                  </div>
+                )
               )
-            )
-          )}
-        </>
+            )}
+          </>
+        </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
+);

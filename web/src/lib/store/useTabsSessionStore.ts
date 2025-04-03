@@ -13,14 +13,14 @@ interface TabDetail {
 interface TabsState {
   // 操作方法
   tabs: Record<string, TabDetail>;
-  getTab: (tabId: string) => TabDetail | undefined;
-  setTab: (tabId: string, tab: TabDetail) => void;
+  getCachedTab: (tabId: string) => TabDetail | undefined;
+  setCachedTab: (tabId: string, tab: TabDetail) => void;
   findTabsByFileId: (fileId: string) => TabDetail[];
-  removeTab: (tabId: string) => void;
+  removeCachedTab: (tabId: string) => void;
 
   // 设置激活标签
   activeTabId: string;
-  setActivateId: (tabId: string) => void;
+  setActivateTabId: (tabId: string) => void;
 
   // 清除
   clear: () => void;
@@ -32,8 +32,8 @@ export const useTabsSessionStore = create<TabsState>()(
     (set, get) => ({
       tabs: {},
       activeTabId: '',
-      getTab: (tabId: string) => get().tabs[tabId],
-      setTab: (tabId: string, tab: TabDetail) =>
+      getCachedTab: (tabId: string) => get().tabs[tabId],
+      setCachedTab: (tabId: string, tab: TabDetail) =>
         set((state) => ({
           tabs: { ...state.tabs, [tabId]: tab },
           activeTabId: tab.tabId,
@@ -42,7 +42,7 @@ export const useTabsSessionStore = create<TabsState>()(
       findTabsByFileId: (fileId: string) =>
         Object.values(get().tabs).filter((tab) => tab.fileId === fileId),
 
-      removeTab: (tabId: string) =>
+      removeCachedTab: (tabId: string) =>
         set((state) => {
           const oldTabs = state.tabs;
           delete oldTabs[tabId];
@@ -60,7 +60,7 @@ export const useTabsSessionStore = create<TabsState>()(
             return { tabs: oldTabs };
           }
         }),
-      setActivateId: (tabId: string) => set({ activeTabId: tabId }),
+      setActivateTabId: (tabId: string) => set({ activeTabId: tabId }),
 
       clear: () => set({ tabs: {}, activeTabId: '' }),
     }),

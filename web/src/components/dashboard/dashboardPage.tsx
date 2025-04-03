@@ -52,14 +52,20 @@ export function DashboardPage() {
   const {
     activeTabId,
 
-    findTabsByFileId,
-    getTab,
-    setTab,
     tabs: openTabs,
-    removeTab: removeCachedTab,
   } = useTabsSessionStore();
 
-  const { setActivateId } = useTabsSessionStore((state) => state.setActivateId);
+  const setActivateTabId = useTabsSessionStore(
+    (state) => state.setActivateTabId
+  );
+
+  // tabs相关函数
+  const findTabsByFileId = useTabsSessionStore(
+    (state) => state.findTabsByFileId
+  );
+  const setCachedTab = useTabsSessionStore((state) => state.setCachedTab);
+  const removeCachedTab = useTabsSessionStore((state) => state.removeCachedTab);
+  const getCachedTab = useTabsSessionStore((state) => state.getCachedTab);
 
   const { getSessionId } = useSessionIdStore();
 
@@ -77,13 +83,6 @@ export function DashboardPage() {
 
   console.info('hi, dashboardPage');
 
-  const handleFileSystemChange = useCallback(
-    (oldItems: FileSystemItem[], newItems: FileSystemItem[]) => {
-      fsApi.saveFileSystemChanges(oldItems, newItems);
-    },
-    []
-  );
-
   // 初始化
   useEffect(() => {
     // 如果sesion storage中有活动标签，尝试加载其报表数据
@@ -91,7 +90,7 @@ export function DashboardPage() {
       return;
     }
 
-    const activeTab = getTab(activeTabId);
+    const activeTab = getCachedTab(activeTabId);
     if (!activeTab) {
       return;
     }
@@ -120,7 +119,7 @@ export function DashboardPage() {
 
     if (tabs && tabs.length > 0) {
       // 已经打开，激活该标签页
-      setActivateId(tabs[0].tabId);
+      setActivateTabId(tabs[0].tabId);
     } else {
       // 没有打开，创建新标签页
       const newTab = {
@@ -134,7 +133,7 @@ export function DashboardPage() {
       };
 
       // 新增tab
-      setTab(newTab.tabId, newTab);
+      setCachedTab(newTab.tabId, newTab);
 
       // 获取该标签对应的报表数据
       if (newTab.reportId) {
@@ -286,6 +285,43 @@ export function DashboardPage() {
     }
   };
 
+  // fileexplorer: 双击文件或引用
+  const handleDoubleClickFileItem = useCallback((item: FileSystemItem) => {
+    if (item.id === activeTabId) {
+      return;
+    }
+    // 这里可以添加其他逻辑，例如打开文件或引用
+    if (item.type === 'file' || item.type === 'reference') {
+      openReportTab(item);
+    }
+  }, []);
+
+  // fileexplorer: 重命名文件或引用
+  const handleRenameItem = useCallback((item: FileSystemItem) => {
+    const tabs = findTabsByFileId(item.id);
+    tabs.forEach((tab) => {
+      setCachedTab(tab.tabId, {
+        ...tab,
+        title: item.name,
+      });
+    });
+  }, []);
+
+  // fileexplorer: 删除文件
+  const handleDeleteItem = useCallback((item: FileSystemItem) => {
+    const tabs = findTabsByFileId(item.id);
+    tabs.forEach((tab) => {
+      removeCachedTab(tab.tabId);
+    });
+  }, []);
+
+  const handleFileSystemChange = useCallback(
+    (oldItems: FileSystemItem[], newItems: FileSystemItem[]) => {
+      fsApi.saveFileSystemChanges(oldItems, newItems);
+    },
+    []
+  );
+
   return (
     <div className='flex flex-col h-screen relative'>
       {/* 顶部Header */}
@@ -317,30 +353,10 @@ export function DashboardPage() {
           }}
         >
           <FileExplorer
-            onDoubleClick={(item) => {
-              if (item.id === activeTabId) {
-                return;
-              }
-              if (item.type === 'file' || item.type === 'reference') {
-                openReportTab(item);
-              }
-            }}
+            onDoubleClick={handleDoubleClickFileItem}
             useFileSystemChangeEffect={handleFileSystemChange}
-            useRenameItemEffect={(item) => {
-              const tabs = findTabsByFileId(item.id);
-              tabs.forEach((tab) => {
-                setTab(tab.tabId, {
-                  ...tab,
-                  title: item.name,
-                });
-              });
-            }}
-            useDeleteItemEffect={(item) => {
-              const tabs = findTabsByFileId(item.id);
-              tabs.forEach((tab) => {
-                removeCachedTab(tab.tabId);
-              });
-            }}
+            useRenameItemEffect={handleRenameItem}
+            useDeleteItemEffect={handleDeleteItem}
           />
         </div>
 
@@ -375,7 +391,7 @@ export function DashboardPage() {
                         ? 'bg-background'
                         : 'bg-muted/50 hover:bg-muted'
                     }`}
-                    onClick={() => setActivateId(tab.tabId)}
+                    onClick={() => setActivateTabId(tab.tabId)}
                   >
                     <div className='truncate flex-1'>{tab.title}</div>
                     <Button

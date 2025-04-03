@@ -46,7 +46,6 @@ export function DashboardPage() {
 
   // zustand 相关取值
   const activeTabId = useTabsSessionStore((state) => state.activeTabId);
-  const openTabs = useTabsSessionStore((state) => state.tabs);
 
   // zustand 相关函数
   const setActiveTabId = useTabsSessionStore((state) => state.setActiveTabId);
@@ -56,14 +55,6 @@ export function DashboardPage() {
   const setCachedTab = useTabsSessionStore((state) => state.setCachedTab);
   const removeCachedTab = useTabsSessionStore((state) => state.removeCachedTab);
   const getCachedTab = useTabsSessionStore((state) => state.getCachedTab);
-
-  const removeTabIdParamValues = useTabParamValuesStore(
-    (state) => state.removeTabIdParamValues
-  );
-
-  const clearQueryByTabId = useTabQueryStatusStore(
-    (state) => state.clearQueryByTabId
-  );
 
   // 初始化
   useEffect(() => {
@@ -121,17 +112,13 @@ export function DashboardPage() {
   // 关闭标签页 - 使用 store 的 removeTab
   const closeTab = (tabId: string) => {
     // 删除tab
-    removeCachedTab(tabId);
-
-    // 删除tab对应的报表
-    // removeCachedReport(tabId);
-
-    // 删除tab对应的参数值
-    removeTabIdParamValues(tabId);
-
-    // 删除tab对应的查询状态
-    clearQueryByTabId(tabId);
-
+    // removeCachedTab(tabId);
+    // // 删除tab对应的报表
+    // // removeCachedReport(tabId);
+    // // 删除tab对应的参数值
+    // removeTabIdParamValues(tabId);
+    // // 删除tab对应的查询状态
+    // clearQueryByTabId(tabId);
     // console.log('删除tab之后, tabIdFiles', tabIdFiles);
     // console.log('删除tab之后, tabIdParamValues', tabIdParamValues);
     // console.log('删除tab之后, tabQueryStatus', tabQueryStatus);
@@ -293,7 +280,7 @@ export function DashboardPage() {
 
           {/* 标签内容区 */}
           <div className='flex-1 overflow-auto'>
-            {Object.values(openTabs).length > 0 && activeTabId ? (
+            {activeTabId ? (
               <div className='h-full'>
                 {/* 为每个报表渲染内容组件 */}
                 {/* 展示区域 */}
@@ -398,6 +385,7 @@ const TabsArea = memo(
                       : 'bg-muted/50 hover:bg-muted'
                   }`}
                   onClick={async () => {
+                    console.info('hi,触发了什么');
                     if (tab.tabId !== activeTabId) {
                       // setActiveTabId(tab.tabId); // PS: 两次渲染，导致report数据重复加载(AI不要删我注释)
                       if (setReport) {

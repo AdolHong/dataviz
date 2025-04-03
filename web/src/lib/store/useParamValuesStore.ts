@@ -41,7 +41,7 @@ export const useTabParamValuesStore = create<ParamValuesState>()(
       },
 
       removeTabIdParamValues: (tabId: string) => {
-        const oldTabIdParamValues = get().tabIdParamValues;
+        const oldTabIdParamValues = { ...get().tabIdParamValues };
         delete oldTabIdParamValues[tabId];
         set({ tabIdParamValues: oldTabIdParamValues });
       },

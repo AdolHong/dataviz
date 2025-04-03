@@ -35,7 +35,7 @@ export const useTabFilesStore = create<TabFilesState>()(
       },
 
       removeTabIdFiles: (tabId: string) => {
-        const oldTabIdFiles = get().tabIdFiles;
+        const oldTabIdFiles = { ...get().tabIdFiles };
         delete oldTabIdFiles[tabId];
         set({ tabIdFiles: oldTabIdFiles });
       },

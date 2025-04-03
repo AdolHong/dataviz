@@ -143,7 +143,7 @@ export function DashboardPage() {
   };
 
   // 关闭标签页 - 使用 store 的 removeTab
-  const closeTab = (tabId: string, e: React.MouseEvent) => {
+  const closeTab = (tabId: string) => {
     // 删除tab
     removeCachedTab(tabId);
 
@@ -361,59 +361,12 @@ export function DashboardPage() {
         {/* 右侧内容区 */}
         <div className='flex-1 w-0 min-w-0 overflow-hidden flex flex-col'>
           {/* 标签页栏 */}
-          <div className='border-b bg-muted/30'>
-            <div className='flex overflow-x-auto items-center'>
-              {/* 导航栏切换按钮 */}
-              <div className='flex items-center border-r border-border px-2'>
-                <Button
-                  variant='ghost'
-                  size='icon'
-                  className='h-8 w-8 rounded-full'
-                  onClick={() => setNavbarVisible(!navbarVisible)}
-                >
-                  {navbarVisible ? (
-                    <ChevronLeft size={16} />
-                  ) : (
-                    <ChevronRight size={16} />
-                  )}
-                </Button>
-              </div>
-
-              {/* 标签页 - 使用 store 中的 openTabs */}
-              <>
-                {Object.values(openTabs).map(
-                  (tab) => (
-                    console.log('hi, tab areaa'),
-                    (
-                      <div
-                        key={tab.tabId}
-                        className={`flex items-center px-4 py-2 cursor-pointer border-r border-border relative min-w-[150px] max-w-[200px] ${
-                          tab.tabId === activeTabId
-                            ? 'bg-background'
-                            : 'bg-muted/50 hover:bg-muted'
-                        }`}
-                        onClick={() => {
-                          if (tab.fileId) {
-                            setActivateTabId(tab.tabId);
-                          }
-                        }}
-                      >
-                        <div className='truncate flex-1'>{tab.title}</div>
-                        <Button
-                          variant='ghost'
-                          size='icon'
-                          className='h-4 w-4 ml-2 opacity-60 hover:opacity-100'
-                          onClick={(e) => closeTab(tab.tabId, e)}
-                        >
-                          <X size={14} />
-                        </Button>
-                      </div>
-                    )
-                  )
-                )}
-              </>
-            </div>
-          </div>
+          <TabsArea
+            navbarVisible={navbarVisible}
+            onToggleNavbarVisible={() => setNavbarVisible(!navbarVisible)}
+            onCloseTab={closeTab}
+            // onClickTab={openReportTab}
+          />
 
           {/* 标签内容区 */}
           <div className='flex-1 overflow-auto'>
@@ -538,7 +491,9 @@ const TabsArea = memo(
                     onClick={() => {
                       if (tab.tabId != activateTabId) {
                         setActivateTabId(tab.tabId);
-                        onClickTab(tab.tabId);
+                        if (onClickTab) {
+                          onClickTab(tab.tabId);
+                        }
                       }
                     }}
                   >

@@ -379,7 +379,9 @@ export function DashboardPage() {
             {Object.values(openTabs).length > 0 && activeTabId ? (
               <div className='h-full'>
                 {/* 为每个报表渲染内容组件 */}
-                {Object.values(openTabs).map((tab) => {
+                
+                
+                {
                   const reportData = getCachedReport(tab.tabId);
                   return (
                     <div
@@ -416,7 +418,9 @@ export function DashboardPage() {
                       </div>
                     </div>
                   );
-                })}
+                }
+                
+
               </div>
             ) : (
               <div className='flex items-center justify-center h-full text-muted-foreground'>

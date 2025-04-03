@@ -127,12 +127,17 @@ export const ParameterQueryArea = memo(
       values: Record<string, any>,
       files?: Record<string, FileCache>
     ) => {
-      console.info('values', values);
       // 缓存参数
       setTabIdParamValues(activeTabId, values);
 
       // 缓存文件
       setTabIdFiles(activeTabId, files || {});
+
+      console.info('values', values);
+      console.info(
+        'getTabIdParamValues(activeTabId)',
+        getTabIdParamValues(activeTabId)
+      );
 
       // if (dataSources && dataSources.length > 0) {
       //   setIsQuerying(true);
@@ -197,14 +202,14 @@ export const ParameterQueryArea = memo(
 
     // 使用 useEffect 在初始渲染时设置默认值
     useEffect(() => {
-      // console.info('hi, parameterQueryArea[2nd 初始化参数] ', parameters);
-      // setValues({});
-      // // 初始化参数值
-      // initiateValues();
-      // // 初始化文件
-      // initialChoices();
-      // // 初始化查询状态
-      // initialQueryStatus();
+      console.info('hi, parameterQueryArea[2nd 初始化参数] ', parameters);
+
+      // 初始化参数值
+      initiateValues();
+      // 初始化文件
+      initialChoices();
+      // 初始化查询状态
+      initialQueryStatus();
     }, [parameters]);
 
     const initiateValues = () => {
@@ -239,7 +244,7 @@ export const ParameterQueryArea = memo(
         ...cachedParamValues,
       };
 
-      // setValues(newValues);
+      setValues(newValues);
 
       // 延迟1秒后打印newValues
       console.log('newValues之前', newValues);
@@ -282,9 +287,8 @@ export const ParameterQueryArea = memo(
 
     const handleValueChange = (id: string, value: any) => {
       const newValues = { ...values, [id]: value };
-
+      setValues(newValues);
       console.info('你改啥了', newValues);
-      // setValues(newValues);
     };
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -340,7 +344,7 @@ export const ParameterQueryArea = memo(
           case 'single_select':
             return (
               <Select
-                defaultValue={values[param.name]}
+                defaultValue={values[param.name] || ''}
                 onValueChange={(value) => handleValueChange(param.name, value)}
               >
                 <SelectTrigger className='w-full'>
@@ -480,8 +484,8 @@ export const ParameterQueryArea = memo(
           default:
             return (
               <Input
-                defaultValue={''}
-                // onChange={}
+                defaultValue={values[param.name] || ''}
+                onChange={(e) => handleValueChange(param.name, e.target.value)}
               />
             );
         }
@@ -605,7 +609,7 @@ export const ParameterQueryArea = memo(
                   <TabsContent value='parameters' className='mt-2 space-y-4'>
                     <div className='grid grid-cols-2 md:grid-cols-4 gap-x-10 gap-y-3'>
                       {parameters?.map((param) => (
-                        <div key={'a'} className='col-span-1'>
+                        <div key={param.name} className='col-span-1'>
                           {renderParameterInput(param)}
                         </div>
                       ))}

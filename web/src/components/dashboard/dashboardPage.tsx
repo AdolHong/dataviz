@@ -281,7 +281,7 @@ export function DashboardPage() {
               <div className='h-full'>
                 {/* 为每个报表渲染内容组件 */}
                 {/* 展示区域 */}
-                <div className='flex-1 overflow-auto'>
+                <div key={activeTabId} className='flex-1 overflow-auto'>
                   <div className='container max-w-full py-6 px-4 md:px-8 space-y-6'>
                     {/* 参数区域 */}
                     <div className='space-y-2'>

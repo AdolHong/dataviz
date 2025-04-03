@@ -58,7 +58,6 @@ import {
   type QueryStatus,
 } from '@/lib/store/useTabQueryStatusStore';
 import { useTabParamValuesStore } from '@/lib/store/useParamValuesStore';
-import { useTabsSessionStore } from '@/lib/store/useTabsSessionStore';
 import { useSessionIdStore } from '@/lib/store/useSessionIdStore';
 import { queryApi } from '@/api/query';
 
@@ -124,14 +123,6 @@ export const ParameterQueryArea = memo(
     const setQueryStatus = useTabQueryStatusStore(
       (state) => state.setQueryStatus
     );
-
-    // console.info('activeTabId:', activeTabId);
-    // console.log('你点击了查询');
-    // console.log('files', files);
-    // console.log('values', values);
-    // console.log('activeTabId', activeTabId);
-    // console.log('cachedParamValues', getTabIdParamValues(activeTabId) || {});
-    // console.log('cachedFiles', getTabIdFiles(activeTabId) || {});
 
     // 修改handleQuerySubmit函数，接收文件参数为对象
     const handleQuerySubmit = async (
@@ -209,17 +200,17 @@ export const ParameterQueryArea = memo(
     // 使用 useEffect 在初始渲染时设置默认值
     useEffect(() => {
       console.info('hi, parameterQueryArea[2nd 初始化参数] ', parameters);
-      // 初始化参数值
-      initialValues();
+      setValues({});
 
-      // 初始化文件
-      initialChoices();
-
-      // 初始化查询状态
-      initialQueryStatus();
+      // // 初始化参数值
+      // initiateValues();
+      // // 初始化文件
+      // initialChoices();
+      // // 初始化查询状态
+      // initialQueryStatus();
     }, [parameters]);
 
-    const initialValues = () => {
+    const initiateValues = () => {
       const initialValues: Record<string, any> = {};
       parameters?.forEach((param) => {
         // 对于多选和多输入类型，使用默认数组
@@ -257,6 +248,7 @@ export const ParameterQueryArea = memo(
       console.log('newValues之前', newValues);
       setTimeout(() => {
         console.log('newValues之后', newValues);
+        console.log('之后initialValues', initialValues);
       }, 1000);
     };
 
@@ -293,6 +285,8 @@ export const ParameterQueryArea = memo(
 
     const handleValueChange = (id: string, value: any) => {
       const newValues = { ...values, [id]: value };
+
+      console.info('你改啥了', newValues);
       setValues(newValues);
     };
 
@@ -349,7 +343,7 @@ export const ParameterQueryArea = memo(
           case 'single_select':
             return (
               <Select
-                defaultValue={param.config.default}
+                defaultValue={values[param.name]}
                 onValueChange={(value) => handleValueChange(param.name, value)}
               >
                 <SelectTrigger className='w-full'>
@@ -525,10 +519,12 @@ export const ParameterQueryArea = memo(
       );
     };
 
+    console.info('activeTabId', activeTabId);
+
     return (
       <Card className='w-full'>
         <CardContent>
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} id={`form-${activeTabId}`}>
             <Tabs
               defaultValue='parameters'
               value={activeParameterTab}

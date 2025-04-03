@@ -11,13 +11,22 @@ export interface QueryStatus {
 // 定义 store 的状态类型
 interface TabQueryStatusState {
   tabQueryStatus: Record<string, Record<string, QueryStatus>>;
-  getQueryStatus: (tabId: string, sourceId: string) => QueryStatus;
-  setQueryStatus: (
+  getQueryStatusByTabId: (tabId: string) => Record<string, QueryStatus>;
+  setQueryStatusByTabId: (
+    tabId: string,
+    status: Record<string, QueryStatus>
+  ) => void;
+
+  setQueryStatusByTabIdAndSourceId: (
     tabId: string,
     sourceId: string,
     status: QueryStatus
   ) => void;
-  getQueryStatusByTabId: (tabId: string) => Record<string, QueryStatus>;
+  getQueryStatusByTabIdAndSourceId: (
+    tabId: string,
+    sourceId: string
+  ) => QueryStatus;
+
   clearQueryByTabId: (tabId: string) => void;
   clear: () => void;
 }
@@ -37,74 +46,27 @@ export const useTabQueryStatusStore = create<TabQueryStatusState>()(
     (set, get) => ({
       tabQueryStatus: {},
 
-      // 查询状态
-      getQueryStatus: (tabId: string, sourceId: string) => {
-        const statusDict = get().tabQueryStatus[tabId];
-        // 若tabId不存在，则创建一个
-        if (!statusDict) {
-          const newStatusDict = {
-            [sourceId]: {
-              status: DataSourceStatus.INIT,
-            },
-          };
-          set((state) => ({
-            tabQueryStatus: {
-              ...state.tabQueryStatus,
-              [tabId]: newStatusDict,
-            },
-          }));
-          return newStatusDict[sourceId];
-        } else if (!statusDict[sourceId]) {
-          // 若sourceId不存在，则创建一个
-          const newStatusDict = {
-            ...statusDict,
-            [sourceId]: {
-              status: DataSourceStatus.INIT,
-            },
-          };
-          set((state) => ({
-            tabQueryStatus: {
-              ...state.tabQueryStatus,
-              [tabId]: newStatusDict,
-            },
-          }));
-          return newStatusDict[sourceId];
-        }
-        return statusDict[sourceId];
-      },
-
-      // 设置查询状态
-      setQueryStatus: (
-        tabId: string,
-        sourceId: string,
-        status: QueryStatus
-      ) => {
-        const statusDict = get().tabQueryStatus[tabId];
-        if (!statusDict) {
-          const newStatusDict = {
-            [sourceId]: status,
-          };
-          set((state) => ({
-            tabQueryStatus: {
-              ...state.tabQueryStatus,
-              [tabId]: newStatusDict,
-            },
-          }));
-        } else {
-          set((state) => ({
-            tabQueryStatus: {
-              ...state.tabQueryStatus,
-              [tabId]: {
-                ...statusDict,
-                [sourceId]: status,
-              },
-            },
-          }));
-        }
-      },
-
       getQueryStatusByTabId: (tabId: string) => {
+        if (!get().tabQueryStatus[tabId]) {
+          set((state) => ({
+            tabQueryStatus: {
+              ...state.tabQueryStatus,
+              [tabId]: {},
+            },
+          }));
+        }
         return get().tabQueryStatus[tabId];
+      },
+      setQueryStatusByTabId: (
+        tabId: string,
+        status: Record<string, QueryStatus>
+      ) => {
+        set((state) => ({
+          tabQueryStatus: {
+            ...state.tabQueryStatus,
+            [tabId]: status,
+          },
+        }));
       },
 
       // 根据tabId清除所有查询状态
@@ -116,6 +78,50 @@ export const useTabQueryStatusStore = create<TabQueryStatusState>()(
             )
           ),
         })),
+
+      getQueryStatusByTabIdAndSourceId: (tabId: string, sourceId: string) => {
+        if (!get().tabQueryStatus[tabId]) {
+          set((state) => ({
+            tabQueryStatus: {
+              ...state.tabQueryStatus,
+              [tabId]: {},
+            },
+          }));
+        }
+        return (
+          get().tabQueryStatus[tabId][sourceId] || {
+            status: DataSourceStatus.INIT,
+          }
+        );
+      },
+
+      setQueryStatusByTabIdAndSourceId: (
+        tabId: string,
+        sourceId: string,
+        status: QueryStatus
+      ) => {
+        // 如果tabId不存在, 则创建一个空的tabQueryStatus
+        if (!get().tabQueryStatus[tabId]) {
+          set((state) => ({
+            tabQueryStatus: {
+              ...state.tabQueryStatus,
+              [tabId]: {
+                [sourceId]: status,
+              },
+            },
+          }));
+          return;
+        }
+        set((state) => ({
+          tabQueryStatus: {
+            ...state.tabQueryStatus,
+            [tabId]: {
+              ...state.tabQueryStatus[tabId],
+              [sourceId]: status,
+            },
+          },
+        }));
+      },
 
       // 清除所有查询状态
       clear: () => set({ tabQueryStatus: {} }),

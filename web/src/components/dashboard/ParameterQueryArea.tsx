@@ -1,4 +1,4 @@
-import React, { useState, useEffect, memo, useCallback } from 'react';
+import React, { useState, useEffect, memo, use, useCallback } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -63,6 +63,7 @@ export const ParameterQueryArea = memo(
   }: ParameterQueryAreaProps) => {
     console.info('hi, parameterQueryArea');
 
+    const { getSessionId } = useSessionIdStore();
     const [parametersExpanded, setParametersExpanded] = useState(true);
     const [selectedDataSourceIndex, setSelectedDataSourceIndex] = useState<
       number | null
@@ -71,106 +72,50 @@ export const ParameterQueryArea = memo(
     // 当前标签: parameters or upload
     const [activeParameterTab, setActiveParameterTab] = useState('parameters');
     const [isQuerying, setIsQuerying] = useState(false);
-    // 使用 store 来管理标签页
-    const [statusDict, setStatusDict] = useState<Record<string, QueryStatus>>(
-      {}
-    );
 
-    const getQueryStatusByTabId = useTabQueryStatusStore(
-      (state) => state.getQueryStatusByTabId
-    );
-
-    // const [files, setFiles] = useState<Record<string, FileCache>>({});
+    // 表单
+    const [values, setValues] = useState<Record<string, any>>({});
+    const [files, setFiles] = useState<Record<string, FileCache>>({});
 
     const [nameToChoices, setNameToChoices] = useState<
       Record<string, Record<string, string>[]>
     >({});
 
-    const { getSessionId } = useSessionIdStore();
-
     // zustand: values, setValues
     const setTabIdParamValues = useTabParamValuesStore(
       (state) => state.setTabIdParamValues
     );
-    const values: Record<string, any> = useTabParamValuesStore((state) =>
+    const cachedValues: Record<string, any> = useTabParamValuesStore((state) =>
       state.getTabIdParamValues(activeTabId)
     );
-    const setValues = useCallback(
+    const setCachedValues = useCallback(
       (values: Record<string, any>) => setTabIdParamValues(activeTabId, values),
       [activeTabId, setTabIdParamValues]
     );
 
     // zustand: files, setFiles
     const setTabIdFiles = useTabFilesStore((state) => state.setTabIdFiles);
-    const files: Record<string, FileCache> = useTabFilesStore((state) =>
+    const cachedFiles: Record<string, FileCache> = useTabFilesStore((state) =>
       state.getTabIdFiles(activeTabId)
     );
-    const setFiles = useCallback(
+    const setCachedFiles = useCallback(
       (files: Record<string, FileCache>) => setTabIdFiles(activeTabId, files),
       [activeTabId, setTabIdFiles]
     );
 
-    const setQueryStatus = useTabQueryStatusStore(
-      (state) => state.setQueryStatus
+    // zustand: queryStatus, setQueryStatus
+    const setQueryStatusByTabIdAndSourceId = useTabQueryStatusStore(
+      (state) => state.setQueryStatusByTabIdAndSourceId
+    );
+    const setQueryStatus = useCallback(
+      (sourceId: string, status: QueryStatus) =>
+        setQueryStatusByTabIdAndSourceId(activeTabId, sourceId, status),
+      [activeTabId, setQueryStatusByTabIdAndSourceId]
     );
 
-    // 修改handleQuerySubmit函数，接收文件参数为对象
-    const handleQuerySubmit = async (
-      values: Record<string, any>,
-      files?: Record<string, FileCache>
-    ) => {
-      // if (dataSources && dataSources.length > 0) {
-      //   setIsQuerying(true);
-      //   const promises = dataSources
-      //     .filter((dataSource) => dataSource.executor.type === 'sql')
-      //     .map((dataSource) =>
-      //       handleQueryRequest(dataSource, values, activeTabId)
-      //     );
-      //   await Promise.all(promises);
-      //   setIsQuerying(false);
-      // }
-    };
-
-    const handleQueryRequest = async (
-      dataSource: DataSource,
-      values: Record<string, any>,
-      tabId: string
-    ) => {
-      // sessionId + tabId + dataSourceId (标识此处请求是唯一的)
-      const uniqueId = getSessionId() + '_' + tabId + '_' + dataSource.id;
-
-      let response = null;
-      if (dataSource.executor.type === 'sql') {
-        const code = replaceParametersInCode(dataSource.executor.code, values);
-        const request = {
-          fileId: reportId,
-          sourceId: dataSource.id,
-          updateTime: reportUpdatedAt,
-          uniqueId: uniqueId,
-          paramValues: values,
-          code: code,
-          dataContent: null,
-        };
-        response = await queryApi.executeQueryBySourceId(request);
-      }
-
-      // 更新查询状态
-      if (response.status === 'success') {
-        setStatusDict((prev) => ({
-          ...prev,
-          [dataSource.id]: {
-            status: DataSourceStatus.SUCCESS,
-          } as QueryStatus,
-        }));
-        setQueryStatus(activeTabId, dataSource.id, {
-          status: DataSourceStatus.SUCCESS,
-        });
-      } else {
-        setQueryStatus(activeTabId, dataSource.id, {
-          status: DataSourceStatus.ERROR,
-        });
-      }
-    };
+    const queryStatus = useTabQueryStatusStore((state) =>
+      state.getQueryStatusByTabId(activeTabId)
+    );
 
     // 检查需要文件上传的数据源
     const csvDataSources =
@@ -189,13 +134,15 @@ export const ParameterQueryArea = memo(
 
       // 初始化选项
       initialChoices();
+
+      // 初始化文件
+      initialFiles();
     }, [parameters]);
 
     const initiateValues = () => {
-      if (values && Object.keys(values).length > 0) {
-        return;
-      }
-
+      // if (values && Object.keys(values).length > 0) {
+      //   return;
+      // }
       const initValues: Record<string, any> = {};
       parameters?.forEach((param) => {
         // 对于多选和多输入类型，使用默认数组
@@ -221,7 +168,8 @@ export const ParameterQueryArea = memo(
         }
       });
 
-      setValues(initValues);
+      const updatedValues = { ...initValues, ...cachedValues };
+      setValues(updatedValues);
     };
 
     const initialChoices = () => {
@@ -244,6 +192,70 @@ export const ParameterQueryArea = memo(
       setNameToChoices(nameToChoices);
     };
 
+    const initialFiles = () => {
+      csvDataSources.forEach((ds) => {
+        files[ds.id] = cachedFiles[ds.id] || {};
+      });
+    };
+
+    // 修改handleQuerySubmit函数，接收文件参数为对象
+    const handleQuerySubmit = async () => {
+      if (dataSources && dataSources.length > 0) {
+        setCachedValues(values);
+        setCachedFiles(files);
+
+        setIsQuerying(true);
+        const promises = dataSources.map((dataSource) =>
+          handleQueryRequest(dataSource)
+        );
+        await Promise.all(promises);
+        setIsQuerying(false);
+
+        console.info('status', queryStatus);
+      }
+    };
+
+    const handleQueryRequest = async (dataSource: DataSource) => {
+      // sessionId + tabId + dataSourceId (标识此处请求是唯一的)
+      const uniqueId = getSessionId() + '_' + activeTabId + '_' + dataSource.id;
+
+      let response = null;
+      if (dataSource.executor.type === 'sql') {
+        const code = replaceParametersInCode(dataSource.executor.code, values);
+        const request = {
+          fileId: reportId,
+          sourceId: dataSource.id,
+          updateTime: reportUpdatedAt,
+          uniqueId: uniqueId,
+          paramValues: values,
+          code: code,
+          dataContent: null,
+        };
+        response = await queryApi.executeQueryBySourceId(request);
+      } else if (dataSource.executor.type === 'python') {
+        return;
+      } else if (dataSource.executor.type === 'csv_uploader') {
+        return;
+      } else if (dataSource.executor.type === 'csv_data') {
+        return;
+      }
+
+      console.info('response', response);
+      // 更新查询状态
+      if (response.data.status === 'success') {
+        const newStatus = {
+          status: DataSourceStatus.SUCCESS,
+        } as QueryStatus;
+        setQueryStatus(dataSource.id, newStatus);
+      } else {
+        const newStatus = {
+          status: DataSourceStatus.ERROR,
+        } as QueryStatus;
+
+        setQueryStatus(dataSource.id, newStatus);
+      }
+    };
+
     const toggleParametersExpanded = () => {
       setParametersExpanded(!parametersExpanded);
     };
@@ -256,11 +268,11 @@ export const ParameterQueryArea = memo(
 
     const handleSubmit = (e: React.FormEvent) => {
       e.preventDefault();
+
       if (!activeTabId) {
         toast.error('请先打开一个标签页');
         return;
       }
-
       if (
         requireFileUpload &&
         Object.keys(files).length !== csvDataSources.length
@@ -269,7 +281,12 @@ export const ParameterQueryArea = memo(
         return;
       }
 
-      handleQuerySubmit(values, files);
+      if (dataSources?.length === 0) {
+        toast.error('请先添加数据源');
+        return;
+      }
+
+      handleQuerySubmit();
     };
 
     // 多输入框键盘事件处理

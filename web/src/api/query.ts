@@ -20,8 +20,8 @@ export interface QueryResponse {
 export const queryApi = {
   // 执行查询
   async executeQueryBySourceId(request: QueryBySourceRequest): Promise<any> {
-    const { data } = await axiosInstance.post('/query_by_source_id', request);
-    return data;
+    const respoonse = await axiosInstance.post('/query_by_source_id', request);
+    return respoonse;
   },
 
   // 根据查询哈希获取缓存的查询结果

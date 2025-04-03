@@ -65,6 +65,8 @@ async def query_by_source_id(request: QueryBySourceRequest):
         # 根据数据源类型执行不同的查询
         result = None
         if data_source.executor.type == "sql":
+
+            print("sql code: ", request.code)
             # execute_sql_query(
             #     request.code,
             #     request.paramValues,

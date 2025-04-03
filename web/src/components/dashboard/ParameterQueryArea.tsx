@@ -473,8 +473,6 @@ export const ParameterQueryArea = memo(
       );
     };
 
-    console.info('activeTabId', activeTabId);
-
     return (
       <Card className='w-full'>
         <CardContent>

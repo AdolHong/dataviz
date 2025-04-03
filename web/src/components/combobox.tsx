@@ -67,11 +67,39 @@ export function Combobox({
     }
   };
 
+  // 新增：全选/清空功能
+  const handleSelectAll = () => {
+    if (mode === 'multiple') {
+      const allValues = options.map((option) => option.value);
+      const currentValues = Array.isArray(value) ? value : [];
+
+      // 如果当前选中的值与全部值相同，则清空；否则全选
+      const newValues =
+        currentValues.length === allValues.length ? [] : allValues;
+
+      onValueChange(newValues);
+    }
+  };
+
+  // 新增：反选功能
+  const handleInvertSelection = () => {
+    if (mode === 'multiple') {
+      const currentValues = Array.isArray(value) ? value : [];
+      const invertedValues = options
+        .map((option) => option.value)
+        .filter((optionValue) => !currentValues.includes(optionValue));
+
+      onValueChange(invertedValues);
+    }
+  };
+
   const displayValue =
     mode === 'single'
       ? (value as string) || placeholder
       : (value as string[]).length > 0
-        ? (value as string[]).join(', ')
+        ? (value as string[]).length === options.length
+          ? '全部'
+          : `已选 ${(value as string[]).length} 项`
         : placeholder;
 
   return (
@@ -84,16 +112,36 @@ export function Combobox({
           className='w-full justify-between'
           disabled={disabled || options.length === 0}
         >
-          {displayValue}
+          <div className='truncate max-w-[calc(100%-40px)]'>{displayValue}</div>
           <ChevronsUpDown className='ml-2 h-4 w-4 shrink-0 opacity-50' />
         </Button>
       </PopoverTrigger>
+
       <PopoverContent className='w-full p-0'>
         <Command>
           <CommandInput
             placeholder='搜索选项...'
             disabled={options.length === 0}
           />
+
+          {mode === 'multiple' && (
+            <div className='flex justify-end p-2'>
+              <Button
+                className='w-full'
+                size='sm'
+                variant='outline'
+                onClick={handleSelectAll}
+                disabled={options.length === 0}
+              >
+                {value &&
+                Array.isArray(value) &&
+                value.length === options.length
+                  ? '清空'
+                  : '全选'}
+              </Button>
+            </div>
+          )}
+
           <CommandList>
             <CommandEmpty>没有找到选项</CommandEmpty>
             <CommandGroup>

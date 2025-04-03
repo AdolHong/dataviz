@@ -344,7 +344,7 @@ export const ParameterQueryArea = memo(
           case 'single_select':
             return (
               <Select
-                defaultValue={values[param.name] || ''}
+                value={values[param.name] || ''}
                 onValueChange={(value) => handleValueChange(param.name, value)}
               >
                 <SelectTrigger className='w-full'>
@@ -604,7 +604,9 @@ export const ParameterQueryArea = memo(
               </div>
 
               {/* 参数 */}
-              {parametersExpanded ? (
+              {parametersExpanded &&
+              values &&
+              Object.keys(values).length > 0 ? (
                 <div>
                   <TabsContent value='parameters' className='mt-2 space-y-4'>
                     <div className='grid grid-cols-2 md:grid-cols-4 gap-x-10 gap-y-3'>

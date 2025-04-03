@@ -12,6 +12,7 @@ export interface FileCache {
 interface ParamValuesState {
   // 操作方法
   tabIdParamValues: Record<string, Record<string, any>>;
+
   getTabIdParamValues: (tabId: string) => Record<string, any>;
   setTabIdParamValues: (
     tabId: string,
@@ -31,9 +32,6 @@ export const useTabParamValuesStore = create<ParamValuesState>()(
         if (!get().tabIdParamValues[tabId]) {
           return {};
         }
-
-        // console.log('getTabIdParamValues', get().tabIdParamValues);
-
         return get().tabIdParamValues[tabId];
       },
 

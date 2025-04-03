@@ -1,36 +1,17 @@
-import React, { useState, useEffect, memo } from 'react';
+import React, { useState, useEffect, memo, useCallback } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
-import { X, ChevronUp, ChevronDown, Upload, Search, Check } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { X, ChevronUp, ChevronDown, Upload, Search } from 'lucide-react';
 import { type Parameter } from '@/types/models/parameter';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-} from '@/components/ui/command';
+
 import { FileUploadArea } from '@/components/dashboard/FileUploadArea';
 import type { DataSource } from '@/types';
 import { toast } from 'sonner';
@@ -95,8 +76,17 @@ export const ParameterQueryArea = memo(
       {}
     );
 
-    const getTabIdParamValues = useTabParamValuesStore(
-      (state) => state.getTabIdParamValues
+    const setTabIdParamValues = useTabParamValuesStore(
+      (state) => state.setTabIdParamValues
+    );
+
+    // const [_, setValues] = useState<Record<string, any>>({});
+    const values: Record<string, any> = useTabParamValuesStore((state) =>
+      state.getTabIdParamValues(activeTabId)
+    );
+    const setValues = useCallback(
+      (values: Record<string, any>) => setTabIdParamValues(activeTabId, values),
+      [activeTabId, setTabIdParamValues]
     );
 
     const getTabIdFiles = useTabFilesStore((state) => state.getTabIdFiles);
@@ -104,7 +94,6 @@ export const ParameterQueryArea = memo(
       (state) => state.getQueryStatusByTabId
     );
 
-    const [values, setValues] = useState<Record<string, any>>({});
     const [files, setFiles] = useState<Record<string, FileCache>>({});
 
     const [nameToChoices, setNameToChoices] = useState<
@@ -115,10 +104,6 @@ export const ParameterQueryArea = memo(
 
     const setTabIdFiles = useTabFilesStore((state) => state.setTabIdFiles);
 
-    const setTabIdParamValues = useTabParamValuesStore(
-      (state) => state.setTabIdParamValues
-    );
-
     const setQueryStatus = useTabQueryStatusStore(
       (state) => state.setQueryStatus
     );
@@ -128,17 +113,8 @@ export const ParameterQueryArea = memo(
       values: Record<string, any>,
       files?: Record<string, FileCache>
     ) => {
-      // 缓存参数
-      setTabIdParamValues(activeTabId, values);
-
       // 缓存文件
       setTabIdFiles(activeTabId, files || {});
-
-      console.info('values', values);
-      console.info(
-        'getTabIdParamValues(activeTabId)',
-        getTabIdParamValues(activeTabId)
-      );
 
       // if (dataSources && dataSources.length > 0) {
       //   setIsQuerying(true);
@@ -207,14 +183,20 @@ export const ParameterQueryArea = memo(
 
       // 初始化参数值
       initiateValues();
-      // 初始化文件
+
+      // 初始化选项
       initialChoices();
+
       // 初始化查询状态
       initialQueryStatus();
     }, [parameters]);
 
     const initiateValues = () => {
-      const initialValues: Record<string, any> = {};
+      if (values && Object.keys(values).length > 0) {
+        return;
+      }
+
+      const initValues: Record<string, any> = {};
       parameters?.forEach((param) => {
         // 对于多选和多输入类型，使用默认数组
         if (
@@ -225,7 +207,7 @@ export const ParameterQueryArea = memo(
           const parsedVal = defaultVal.map((val: string) =>
             parseDynamicDate(val)
           );
-          initialValues[param.name] = parsedVal;
+          initValues[param.name] = parsedVal;
         }
         // 对于单选和单输入类型，使用默认值
         else if (
@@ -235,23 +217,11 @@ export const ParameterQueryArea = memo(
         ) {
           const defaultVal = param.config.default;
           const parseVal = parseDynamicDate(defaultVal);
-          initialValues[param.name] = parseVal;
+          initValues[param.name] = parseVal;
         }
       });
 
-      const cachedParamValues = getTabIdParamValues(activeTabId) || {};
-      const newValues = {
-        ...initialValues,
-        ...cachedParamValues,
-      };
-
-      setValues(newValues);
-      // // 延迟1秒后打印newValues
-      // console.log('newValues之前', newValues);
-      // setTimeout(() => {
-      //   console.log('newValues之后', newValues);
-      //   console.log('之后initialValues', initialValues);
-      // }, 1000);
+      setValues(initValues);
     };
 
     const initialChoices = () => {

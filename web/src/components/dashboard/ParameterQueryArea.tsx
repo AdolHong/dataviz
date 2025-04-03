@@ -203,7 +203,7 @@ export const ParameterQueryArea = memo(
 
     // 使用 useEffect 在初始渲染时设置默认值
     useEffect(() => {
-      console.info('hi, parameterQueryArea[2nd 初始化参数] ', parameters);
+      console.info('hi, parameterQueryArea[2nd 初始化参数] ');
 
       // 初始化参数值
       initiateValues();
@@ -246,13 +246,12 @@ export const ParameterQueryArea = memo(
       };
 
       setValues(newValues);
-
-      // 延迟1秒后打印newValues
-      console.log('newValues之前', newValues);
-      setTimeout(() => {
-        console.log('newValues之后', newValues);
-        console.log('之后initialValues', initialValues);
-      }, 1000);
+      // // 延迟1秒后打印newValues
+      // console.log('newValues之前', newValues);
+      // setTimeout(() => {
+      //   console.log('newValues之后', newValues);
+      //   console.log('之后initialValues', initialValues);
+      // }, 1000);
     };
 
     const initialChoices = () => {

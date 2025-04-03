@@ -26,9 +26,6 @@ import { LayoutGrid } from '@/components/dashboard/LayoutGrid';
 import { type TabDetail } from '@/lib/store/useTabsSessionStore';
 import { toast } from 'sonner';
 
-import { useTabParamValuesStore } from '@/lib/store/useParamValuesStore';
-import { useTabQueryStatusStore } from '@/lib/store/useTabQueryStatusStore';
-
 // 为标签加载报表数据的函数
 const loadReportForTab = async (tab: TabDetail) => {
   const report = await reportApi.getReportByReportId(tab.reportId);
@@ -42,7 +39,7 @@ export function DashboardPage() {
   const [navbarVisible, setNavbarVisible] = useState(true);
   const [navbarWidth, setNavbarWidth] = useState(256); // 默认宽度为256px
 
-  // console.info('hi, dashboardPage');
+  console.info('hi, dashboardPage');
 
   // zustand 相关取值
   const activeTabId = useTabsSessionStore((state) => state.activeTabId);
@@ -68,7 +65,6 @@ export function DashboardPage() {
       return;
     }
 
-    console.info('hi, 加载报表 report:', report);
     // 加载报表
     loadReportForTab(activeTab).then((report) => {
       // 若有tab记录， 重新查询report
@@ -137,7 +133,6 @@ export function DashboardPage() {
         layout,
       };
 
-      console.log('更新报表', updatedReport);
       // api: 更新报表
       reportApi.updateReport(updatedReport.id, updatedReport);
 

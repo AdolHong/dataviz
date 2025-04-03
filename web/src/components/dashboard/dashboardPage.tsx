@@ -6,6 +6,7 @@ import {
   useCallback,
   useMemo,
   useLayoutEffect,
+  useRef,
 } from 'react';
 import { FileExplorer } from '@/components/dashboard/FileExplorer';
 import type {
@@ -53,8 +54,11 @@ export function DashboardPage() {
   const removeCachedTab = useTabsSessionStore((state) => state.removeCachedTab);
   const getCachedTab = useTabsSessionStore((state) => state.getCachedTab);
 
-  // 初始化
+  // 初始化(用useRef, 开发模式也仅渲染一次)
+  const effectCalled = useRef(false);
   useEffect(() => {
+    if (effectCalled.current) return;
+    effectCalled.current = true;
     // 如果session storage中有活动标签，尝试加载其报表数据
     if (!activeTabId) {
       return;

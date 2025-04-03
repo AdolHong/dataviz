@@ -42,10 +42,6 @@ export function DashboardPage() {
   const [currentEditReport, setCurrentEditReport] = useState<Report | null>(
     null
   );
-  const [isQuerying, setIsQuerying] = useState(false);
-  // 使用 store 来管理标签页
-
-  const [statusDict, setStatusDict] = useState<Record<string, QueryStatus>>({});
 
   const activeTabId = useTabsSessionStore((state) => state.activeTabId);
   const openTabs = useTabsSessionStore((state) => state.tabs);
@@ -60,27 +56,17 @@ export function DashboardPage() {
   const removeCachedTab = useTabsSessionStore((state) => state.removeCachedTab);
   const getCachedTab = useTabsSessionStore((state) => state.getCachedTab);
 
-  const { getSessionId } = useSessionIdStore();
-
   const setCachedReport = useTabReportsSessionStore((state) => state.setReport);
   const removeCachedReport = useTabReportsSessionStore(
     (state) => state.removeReport
   );
 
-  const setTabIdFiles = useTabFilesStore((state) => state.setTabIdFiles);
-
-  const setTabIdParamValues = useTabParamValuesStore(
-    (state) => state.setTabIdParamValues
-  );
   const removeTabIdParamValues = useTabParamValuesStore(
     (state) => state.removeTabIdParamValues
   );
 
   const clearQueryByTabId = useTabQueryStatusStore(
     (state) => state.clearQueryByTabId
-  );
-  const setQueryStatus = useTabQueryStatusStore(
-    (state) => state.setQueryStatus
   );
 
   console.info('hi, dashboardPage');
@@ -172,48 +158,6 @@ export function DashboardPage() {
     // console.log('删除tab之后, tabIdFiles', tabIdFiles);
     // console.log('删除tab之后, tabIdParamValues', tabIdParamValues);
     // console.log('删除tab之后, tabQueryStatus', tabQueryStatus);
-  };
-
-  const handleQueryRequest = async (
-    report: Report,
-    dataSource: DataSource,
-    values: Record<string, any>,
-    tabId: string
-  ) => {
-    // sessionId + tabId + dataSourceId (标识此处请求是唯一的)
-    const uniqueId = getSessionId() + '_' + tabId + '_' + dataSource.id;
-
-    let response = null;
-    if (dataSource.executor.type === 'sql') {
-      const code = replaceParametersInCode(dataSource.executor.code, values);
-      const request = {
-        fileId: report.id,
-        sourceId: dataSource.id,
-        updateTime: report.updatedAt,
-        uniqueId: uniqueId,
-        paramValues: values,
-        code: code,
-        dataContent: null,
-      };
-      response = await queryApi.executeQueryBySourceId(request);
-    }
-
-    // 更新查询状态
-    if (response.status === 'success') {
-      setStatusDict((prev) => ({
-        ...prev,
-        [dataSource.id]: {
-          status: DataSourceStatus.SUCCESS,
-        } as QueryStatus,
-      }));
-      setQueryStatus(tabId, dataSource.id, {
-        status: DataSourceStatus.SUCCESS,
-      });
-    } else {
-      setQueryStatus(tabId, dataSource.id, {
-        status: DataSourceStatus.ERROR,
-      });
-    }
   };
 
   // 处理编辑报表
@@ -370,18 +314,14 @@ export function DashboardPage() {
                   <div className='container max-w-full py-6 px-4 md:px-8 space-y-6'>
                     {/* 参数区域 */}
                     <div className='space-y-2'>
-                      <ParameterQueryArea
-                        tabId={activeTabId}
-                        parameters={report?.parameters || []}
-                        dataSources={report?.dataSources || []}
-                        isQuerying={isQuerying}
-                        statusDict={statusDict}
-                        setStatusDict={setStatusDict}
-                        onSubmit={(values, files) =>
-                          handleQuerySubmit(activeTabId, values, files)
-                        }
-                        onEditReport={() => report && handleEditReport(report)}
-                      />
+                      {report && (
+                        <ParameterQueryArea
+                          report={report}
+                          parameters={report.parameters || []}
+                          dataSources={report.dataSources || []}
+                          onEditReport={() => handleEditReport(report)}
+                        />
+                      )}
                     </div>
 
                     {/* 展示区域 */}

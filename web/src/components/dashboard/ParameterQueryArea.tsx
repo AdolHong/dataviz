@@ -50,70 +50,126 @@ import {
   type FileCache,
 } from '@/lib/store/useFileSessionStore';
 
+import { type Report } from '@/types/models/report';
+import { DataSourceStatus } from '@/lib/store/useTabQueryStatusStore';
+
 interface ParameterQueryAreaProps {
-  tabId: string;
-  isQuerying: boolean;
+  report: Report;
   parameters: Parameter[];
   dataSources?: DataSource[];
-
   onEditReport: () => void;
-  statusDict: Record<string, QueryStatus>;
-  setStatusDict: (statusDict: Record<string, QueryStatus>) => void;
 }
 
-import { parseDynamicDate } from '@/utils/parser';
+import { parseDynamicDate, replaceParametersInCode } from '@/utils/parser';
 import {
   useTabQueryStatusStore,
   type QueryStatus,
 } from '@/lib/store/useTabQueryStatusStore';
 import { useTabParamValuesStore } from '@/lib/store/useParamValuesStore';
 import { useTabsSessionStore } from '@/lib/store/useTabsSessionStore';
+import { useSessionIdStore } from '@/lib/store/useSessionIdStore';
+import { queryApi } from '@/api/query';
 
 export function ParameterQueryArea({
-  isQuerying,
+  report,
   parameters,
   dataSources = [],
   onEditReport,
-  statusDict,
-  setStatusDict,
 }: ParameterQueryAreaProps) {
   console.info('hi, parameterQueryArea');
+  console.info('report', report);
+  console.info('parameters', parameters);
+  console.info('dataSources', dataSources);
+
   const [parametersExpanded, setParametersExpanded] = useState(true);
-
-  const activeTabId = useTabsSessionStore((state) => state.activeTabId);
-  const setActiveTabId = useTabsSessionStore((state) => state.setActiveTabId);
-
   const [selectedDataSourceIndex, setSelectedDataSourceIndex] = useState<
     number | null
   >(null);
 
+  const activeTabId = useTabsSessionStore((state) => state.activeTabId);
+  const setActiveTabId = useTabsSessionStore((state) => state.setActiveTabId);
+  const [isQuerying, setIsQuerying] = useState(false);
+  // 使用 store 来管理标签页
+  const [statusDict, setStatusDict] = useState<Record<string, QueryStatus>>({});
+  const { getSessionId } = useSessionIdStore();
+
+  const setTabIdFiles = useTabFilesStore((state) => state.setTabIdFiles);
+
+  const setTabIdParamValues = useTabParamValuesStore(
+    (state) => state.setTabIdParamValues
+  );
+
+  const setQueryStatus = useTabQueryStatusStore(
+    (state) => state.setQueryStatus
+  );
+
   // 修改handleQuerySubmit函数，接收文件参数为对象
   const handleQuerySubmit = async (
-    tabId: string,
     values: Record<string, any>,
     files?: Record<string, FileCache>
   ) => {
     // 缓存参数
-    setTabIdParamValues(tabId, values);
+    setTabIdParamValues(activeTabId, values);
 
     // 缓存文件
-    setTabIdFiles(tabId, files || {});
+    setTabIdFiles(activeTabId, files || {});
 
     console.log('你点击了查询');
     console.log('files', files);
     console.log('values', values);
 
-    if (report) {
+    if (dataSources && dataSources.length > 0) {
       setIsQuerying(true);
-      const promises = report.dataSources
+      const promises = dataSources
         .filter((dataSource) => dataSource.executor.type === 'sql')
         .map((dataSource) =>
-          handleQueryRequest(report, dataSource, values, tabId)
+          handleQueryRequest(dataSource, values, activeTabId)
         );
       await Promise.all(promises);
       setIsQuerying(false);
 
       console.log('查询完成or失败, who knows?');
+    }
+  };
+
+  const handleQueryRequest = async (
+    dataSource: DataSource,
+    values: Record<string, any>,
+    tabId: string
+  ) => {
+    // sessionId + tabId + dataSourceId (标识此处请求是唯一的)
+    const uniqueId = getSessionId() + '_' + tabId + '_' + dataSource.id;
+
+    let response = null;
+    if (dataSource.executor.type === 'sql') {
+      const code = replaceParametersInCode(dataSource.executor.code, values);
+      const request = {
+        fileId: report.id,
+        sourceId: dataSource.id,
+        updateTime: report.updatedAt,
+        uniqueId: uniqueId,
+        paramValues: values,
+        code: code,
+        dataContent: null,
+      };
+      response = await queryApi.executeQueryBySourceId(request);
+    }
+
+    // 更新查询状态
+    if (response.status === 'success') {
+      setStatusDict((prev) => ({
+        ...prev,
+        [dataSource.id]: {
+          status: DataSourceStatus.SUCCESS,
+        } as QueryStatus,
+      }));
+      setQueryStatus(activeTabId, dataSource.id, {
+        status: DataSourceStatus.SUCCESS,
+      });
+    } else {
+      setQueryStatus(activeTabId, dataSource.id, {
+        status: DataSourceStatus.ERROR,
+      });
     }
   };
 
@@ -246,7 +302,7 @@ export function ParameterQueryArea({
       return;
     }
 
-    onSubmit(values, files);
+    handleQuerySubmit(values, files);
   };
 
   const getParameterLabel = (param: Parameter) => {

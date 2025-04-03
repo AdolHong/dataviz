@@ -76,11 +76,22 @@ export const ParameterQueryArea = memo(
       {}
     );
 
+    const getQueryStatusByTabId = useTabQueryStatusStore(
+      (state) => state.getQueryStatusByTabId
+    );
+
+    // const [files, setFiles] = useState<Record<string, FileCache>>({});
+
+    const [nameToChoices, setNameToChoices] = useState<
+      Record<string, Record<string, string>[]>
+    >({});
+
+    const { getSessionId } = useSessionIdStore();
+
+    // zustand: values, setValues
     const setTabIdParamValues = useTabParamValuesStore(
       (state) => state.setTabIdParamValues
     );
-
-    // const [_, setValues] = useState<Record<string, any>>({});
     const values: Record<string, any> = useTabParamValuesStore((state) =>
       state.getTabIdParamValues(activeTabId)
     );
@@ -89,20 +100,15 @@ export const ParameterQueryArea = memo(
       [activeTabId, setTabIdParamValues]
     );
 
-    const getTabIdFiles = useTabFilesStore((state) => state.getTabIdFiles);
-    const getQueryStatusByTabId = useTabQueryStatusStore(
-      (state) => state.getQueryStatusByTabId
-    );
-
-    const [files, setFiles] = useState<Record<string, FileCache>>({});
-
-    const [nameToChoices, setNameToChoices] = useState<
-      Record<string, Record<string, string>[]>
-    >({});
-
-    const { getSessionId } = useSessionIdStore();
-
+    // zustand: files, setFiles
     const setTabIdFiles = useTabFilesStore((state) => state.setTabIdFiles);
+    const files: Record<string, FileCache> = useTabFilesStore((state) =>
+      state.getTabIdFiles(activeTabId)
+    );
+    const setFiles = useCallback(
+      (files: Record<string, FileCache>) => setTabIdFiles(activeTabId, files),
+      [activeTabId, setTabIdFiles]
+    );
 
     const setQueryStatus = useTabQueryStatusStore(
       (state) => state.setQueryStatus
@@ -113,9 +119,6 @@ export const ParameterQueryArea = memo(
       values: Record<string, any>,
       files?: Record<string, FileCache>
     ) => {
-      // 缓存文件
-      setTabIdFiles(activeTabId, files || {});
-
       // if (dataSources && dataSources.length > 0) {
       //   setIsQuerying(true);
       //   const promises = dataSources
@@ -181,14 +184,11 @@ export const ParameterQueryArea = memo(
     useEffect(() => {
       console.info('hi, parameterQueryArea[2nd 初始化参数] ');
 
-      // 初始化参数值
+      // 若values为空, 初始化参数值
       initiateValues();
 
       // 初始化选项
       initialChoices();
-
-      // 初始化查询状态
-      initialQueryStatus();
     }, [parameters]);
 
     const initiateValues = () => {
@@ -242,13 +242,6 @@ export const ParameterQueryArea = memo(
         }
       });
       setNameToChoices(nameToChoices);
-    };
-
-    const initialQueryStatus = () => {
-      const statusDict = getQueryStatusByTabId(activeTabId);
-      if (statusDict) {
-        setStatusDict(statusDict);
-      }
     };
 
     const toggleParametersExpanded = () => {
@@ -542,7 +535,6 @@ export const ParameterQueryArea = memo(
                         dataSources={csvDataSources}
                         files={files}
                         setFiles={setFiles}
-                        cachedFiles={getTabIdFiles(activeTabId) || {}}
                       />
                     </TabsContent>
                   )}

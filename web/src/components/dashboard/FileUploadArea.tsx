@@ -31,14 +31,12 @@ interface FileUploadAreaProps {
   dataSources: DataSource[];
   files: Record<string, FileCache>;
   setFiles: (files: Record<string, FileCache>) => void;
-  cachedFiles: Record<string, FileCache>;
 }
 
 export function FileUploadArea({
   dataSources,
   files,
   setFiles,
-  cachedFiles,
 }: FileUploadAreaProps) {
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
   const [previewSource, setPreviewSource] = useState<DataSource | null>(null);
@@ -61,14 +59,6 @@ export function FileUploadArea({
     },
     []
   );
-
-  // 如果cachedFiles有值，则设置files
-  useEffect(() => {
-    if (cachedFiles && Object.keys(cachedFiles).length > 0) {
-      const newFiles = { ...files, ...cachedFiles };
-      setFiles(newFiles);
-    }
-  }, []);
 
   const handleFileChange = async (
     e: React.ChangeEvent<HTMLInputElement>,

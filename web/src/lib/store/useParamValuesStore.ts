@@ -30,7 +30,9 @@ export const useTabParamValuesStore = create<ParamValuesState>()(
 
       getTabIdParamValues: (tabId: string) => {
         if (!get().tabIdParamValues[tabId]) {
-          return {};
+          set((state) => ({
+            tabIdParamValues: { ...state.tabIdParamValues, [tabId]: {} },
+          }));
         }
         return get().tabIdParamValues[tabId];
       },

@@ -25,6 +25,11 @@ export const useTabFilesStore = create<TabFilesState>()(
       tabIdFiles: {},
 
       getTabIdFiles: (tabId: string) => {
+        if (!get().tabIdFiles[tabId]) {
+          set((state) => ({
+            tabIdFiles: { ...state.tabIdFiles, [tabId]: {} },
+          }));
+        }
         return get().tabIdFiles[tabId];
       },
 

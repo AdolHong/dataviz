@@ -30,6 +30,7 @@ import {
   type QueryStatus,
   DataSourceStatus,
 } from '@/lib/store/useTabQueryStatusStore';
+import { shallow } from '@tanstack/react-router';
 
 export function DashboardPage() {
   const [selectedItem, setSelectedItem] = useState<FileSystemItem | null>(null);
@@ -57,17 +58,22 @@ export function DashboardPage() {
     tabs: openTabs,
     removeTab: removeCachedTab,
   } = useTabsSessionStore();
+
   const { getSessionId } = useSessionIdStore();
+
   const {
     getReport: getCachedReport,
     setReport: setCachedReport,
     removeReport: removeCachedReport,
   } = useTabReportsSessionStore();
-  const { removeTabIdFiles, tabIdFiles, setTabIdFiles } = useTabFilesStore();
+
+  const { tabIdFiles, setTabIdFiles } = useTabFilesStore();
   const { removeTabIdParamValues, tabIdParamValues, setTabIdParamValues } =
     useTabParamValuesStore();
   const { clearQueryByTabId, tabQueryStatus, setQueryStatus } =
     useTabQueryStatusStore();
+
+  console.info('adol, hi');
 
   // 初始化
   useEffect(() => {

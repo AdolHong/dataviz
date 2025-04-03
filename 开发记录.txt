@@ -1,0 +1,68 @@
+
+
+
+
++------------+-----------------------+
+|                  header            |
++------------+-----------------------+
+|            |       tabs(2)         |
+|  navbar(1) |  -------------------  |
+|            |       param area(3)   |
+|            |  ---------------------|
+|            |       layout(4)       |
+|            |                       |
+|            |                       |
+|            |                       |
+|            |                       |
++------------+-----------------------+
+
+
+交互动作， 影响了哪些页面:
+
+1 ->  2, 3, 4:  点击文件，影响了activateTab
+1 ->  2,  4:    文件改名, 影响了tab.title;   不一定是activateTab
+1 ->  2, (3,4):  删除文件
+      分支1 -> 影响了tabList, 若该文件不影响activateTab, 即  1 -> 2
+      分支2 -> 影响了tabList, 若该文件还影响了activateTab, 即  1 -> 2, 3, 4
+
+
+2 -> 3,4   点击了tab, 影响了activateTab
+2 -> 3,4   切换tab, 影响了activateTab
+
+
+3 -> 3, 4: 编辑report...  需要找一个地方存储updateTime
+3 -> 4:    query, 影响了 queryStatus
+3 -> 3:   参数更新， 文件上传等等； 仅影响了自己;
+
+4 -> 4: option选择， 仅影响了自己
+
+
+总结:
+1. 核心的抓手:
+    - activateTab
+    - tab.title
+    - tabsList
+    - paramValues, paramFiles
+    - queryStatus
+    - 哪里存储 report的updateAt
+2. param area和layout，需要memo, 根据activateTab更新;
+3. 各区域需要的hook
+    (1) navbar: 
+        - setActivateTab
+        - setTabList (eg: 删除, 修改文件的操作)
+
+    (2) tabs: 
+        - activateTab
+        - tabsList
+        - ps: 修改title， 不应该重新渲染  param area和layout
+
+    (3) param area:
+        - report
+        - activateTab
+        - paramValues
+        - paramFiles
+        - report.updateAt??
+    (4) layout:
+        - report
+        - activateTab
+        - queryStatus

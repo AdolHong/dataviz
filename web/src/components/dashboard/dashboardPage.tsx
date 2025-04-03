@@ -67,7 +67,7 @@ export function DashboardPage() {
 
   // 初始化
   useEffect(() => {
-    // 如果sesion storage中有活动标签，尝试加载其报表数据
+    // 如果session storage中有活动标签，尝试加载其报表数据
     if (!activeTabId) {
       return;
     }
@@ -77,19 +77,13 @@ export function DashboardPage() {
       return;
     }
 
-    // 若有tab记录， 重新查询report
-    setReport(loadReportForTab(activeTab));
+    console.info('hi, 加载报表 report:', report);
+    // 加载报表
+    loadReportForTab(activeTab).then((report) => {
+      // 若有tab记录， 重新查询report
+      setReport(report);
+    });
   }, []);
-
-  // 切换tab时
-  useEffect(() => {
-    if (activeTabId) {
-      const activeTab = getCachedTab(activeTabId);
-      if (activeTab) {
-        loadReportForTab(activeTab);
-      }
-    }
-  }, [activeTabId]);
 
   // 打开报表标签页 - 修改为使用 store
   const doubleClickedReportTab = (item: FileSystemItem) => {
@@ -396,18 +390,15 @@ const TabsArea = memo(
                       ? 'bg-background'
                       : 'bg-muted/50 hover:bg-muted'
                   }`}
-                  onClick={() => {
-                    if (tab.tabId != activeTabId) {
-                      setActiveTabId(tab.tabId);
+                  onClick={async () => {
+                    if (tab.tabId !== activeTabId) {
                       if (setReport) {
-                        loadReportForTab(tab).then((report) => {
-                          if (report) {
-                            setReport(report);
-                          }
-                          console.info('hi1');
-                        });
+                        const report = await loadReportForTab(tab);
+                        if (report) {
+                          setReport(report);
+                        }
                       }
-                      console.info('hi2');
+                      setActiveTabId(tab.tabId);
                     }
                   }}
                 >

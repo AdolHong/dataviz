@@ -14,23 +14,14 @@ import EditModal from '@/components/edit/EditModal';
 import { reportApi } from '@/api/report';
 import { useTabsSessionStore } from '@/lib/store/useTabsSessionStore';
 import { useTabReportsSessionStore } from '@/lib/store/useTabReportsSessionStore';
-import { useSessionIdStore } from '@/lib/store/useSessionIdStore';
 
 import { ParameterQueryArea } from '@/components/dashboard/ParameterQueryArea';
 import { LayoutGrid } from '@/components/dashboard/LayoutGrid';
 import { type TabDetail } from '@/lib/store/useTabsSessionStore';
 import { toast } from 'sonner';
-import type { FileCache } from '@/lib/store/useFileSessionStore';
-import { useTabFilesStore } from '@/lib/store/useFileSessionStore';
+
 import { useTabParamValuesStore } from '@/lib/store/useParamValuesStore';
-import { queryApi } from '@/api/query';
-import { replaceParametersInCode } from '@/utils/parser';
 import { useTabQueryStatusStore } from '@/lib/store/useTabQueryStatusStore';
-import {
-  type QueryStatus,
-  DataSourceStatus,
-} from '@/lib/store/useTabQueryStatusStore';
-import { shallow } from '@tanstack/react-router';
 
 export function DashboardPage() {
   const [report, setReport] = useState<Report | null>(null);
@@ -255,6 +246,20 @@ export function DashboardPage() {
     closeTab(tabId);
   }, []);
 
+  const memoizedParameters = useMemo(
+    () => report?.parameters,
+    [report?.parameters]
+  );
+  const memoizedDataSources = useMemo(
+    () => report?.dataSources,
+    [report?.dataSources]
+  );
+  const memoizedOnEditReport = useCallback(() => {
+    if (report) {
+      handleEditReport(report);
+    }
+  }, [report]);
+
   return (
     <div className='flex flex-col h-screen relative'>
       {/* 顶部Header */}
@@ -316,9 +321,9 @@ export function DashboardPage() {
                         <ParameterQueryArea
                           reportId={report.id}
                           reportUpdatedAt={report.updatedAt}
-                          parameters={report.parameters}
-                          dataSources={report.dataSources}
-                          onEditReport={() => handleEditReport(report)}
+                          parameters={memoizedParameters}
+                          dataSources={memoizedDataSources}
+                          onEditReport={memoizedOnEditReport}
                         />
                       )}
                     </div>

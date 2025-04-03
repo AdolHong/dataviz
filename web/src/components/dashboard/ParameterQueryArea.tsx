@@ -65,8 +65,8 @@ import { queryApi } from '@/api/query';
 interface ParameterQueryAreaProps {
   reportId: string;
   reportUpdatedAt: string;
-  parameters: Parameter[];
-  dataSources: DataSource[];
+  parameters?: Parameter[];
+  dataSources?: DataSource[];
   onEditReport: () => void;
 }
 
@@ -193,10 +193,11 @@ export const ParameterQueryArea = memo(
     >({});
 
     // 检查需要文件上传的数据源
-    const csvDataSources = dataSources.filter(
-      (ds) =>
-        ds.executor.type === 'csv_uploader' || ds.executor.type === 'csv_data'
-    );
+    const csvDataSources =
+      dataSources?.filter(
+        (ds) =>
+          ds.executor.type === 'csv_uploader' || ds.executor.type === 'csv_data'
+      ) || [];
     const requireFileUpload = csvDataSources.length > 0;
 
     // 使用 useEffect 在初始渲染时设置默认值
@@ -218,7 +219,7 @@ export const ParameterQueryArea = memo(
     const initialValues = () => {
       if (values && Object.keys(values).length === 0) {
         const initialValues: Record<string, any> = {};
-        parameters.forEach((param) => {
+        parameters?.forEach((param) => {
           // 对于多选和多输入类型，使用默认数组
           if (
             param.config.type === 'multi_select' ||
@@ -252,7 +253,7 @@ export const ParameterQueryArea = memo(
     };
 
     const initialChoices = () => {
-      parameters.forEach((param) => {
+      parameters?.forEach((param) => {
         if (
           param.config.type === 'single_select' ||
           param.config.type === 'multi_select'
@@ -540,7 +541,7 @@ export const ParameterQueryArea = memo(
                       className='flex items-center gap-1'
                     >
                       <Search size={14} />
-                      查询参数 ({parameters.length})
+                      查询参数 ({parameters?.length})
                     </TabsTrigger>
                     {requireFileUpload && (
                       <TabsTrigger
@@ -553,7 +554,7 @@ export const ParameterQueryArea = memo(
                     )}
                   </TabsList>
                   <div className='flex space-x-2 ml-4'>
-                    {dataSources.map((source, index) => (
+                    {dataSources?.map((source, index) => (
                       <button
                         key={source.id}
                         type='button'
@@ -606,7 +607,7 @@ export const ParameterQueryArea = memo(
                 <div>
                   <TabsContent value='parameters' className='mt-2 space-y-4'>
                     <div className='grid grid-cols-2 md:grid-cols-4 gap-x-10 gap-y-3'>
-                      {parameters.map((param) => (
+                      {parameters?.map((param) => (
                         <div key={param.name} className='col-span-1'>
                           {renderParameterInput(param)}
                         </div>
@@ -638,7 +639,7 @@ export const ParameterQueryArea = memo(
               <DialogHeader>
                 <DialogTitle>
                   {selectedDataSourceIndex !== null
-                    ? `数据源: ${dataSources[selectedDataSourceIndex].name}`
+                    ? `数据源: ${dataSources?.[selectedDataSourceIndex].name}`
                     : '数据源详情'}
                 </DialogTitle>
               </DialogHeader>

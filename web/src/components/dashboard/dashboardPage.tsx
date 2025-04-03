@@ -117,6 +117,8 @@ export function DashboardPage() {
     // 检查是否已经打开
     const tabs = findTabsByFileId(item.id);
 
+    console.info('tabs', tabs);
+
     if (tabs && tabs.length > 0) {
       // 已经打开，激活该标签页
       setActivateTabId(tabs[0].tabId);
@@ -134,6 +136,8 @@ export function DashboardPage() {
 
       // 新增tab
       setCachedTab(newTab.tabId, newTab);
+
+      console.info('openTabs', openTabs);
 
       // 获取该标签对应的报表数据
       if (newTab.reportId) {
@@ -365,7 +369,7 @@ export function DashboardPage() {
             navbarVisible={navbarVisible}
             onToggleNavbarVisible={() => setNavbarVisible(!navbarVisible)}
             onCloseTab={closeTab}
-            // onClickTab={openReportTab}
+            onClickTab={openReportTab}
           />
 
           {/* 标签内容区 */}
@@ -439,7 +443,7 @@ interface TabsAreaProps {
   navbarVisible: boolean;
   onToggleNavbarVisible: () => void;
   onCloseTab: (tabId: string) => void;
-  onClickTab: (tabId: string) => void;
+  onClickTab?: (tab: TabDetail) => void;
 }
 
 // 标签栏组件
@@ -450,11 +454,13 @@ const TabsArea = memo(
     onCloseTab,
     onClickTab,
   }: TabsAreaProps) => {
-    const { openTabs } = useTabsSessionStore((state) => state.tabs);
+    const openTabs = useTabsSessionStore((state) => state.tabs);
     const activateTabId = useTabsSessionStore((state) => state.activeTabId);
     const setActivateTabId = useTabsSessionStore(
       (state) => state.setActivateTabId
     );
+
+    console.info('hi, tabsArea');
 
     return (
       <div className='border-b bg-muted/30'>
@@ -477,44 +483,45 @@ const TabsArea = memo(
 
           {/* 标签页 - 使用 store 中的 openTabs */}
           <>
-            {Object.values(openTabs).map(
-              (tab) => (
-                console.log('hi, tab areaa'),
-                (
-                  <div
-                    key={tab.tabId}
-                    className={`flex items-center px-4 py-2 cursor-pointer border-r border-border relative min-w-[150px] max-w-[200px] ${
-                      tab.tabId === activateTabId
-                        ? 'bg-background'
-                        : 'bg-muted/50 hover:bg-muted'
-                    }`}
-                    onClick={() => {
-                      if (tab.tabId != activateTabId) {
-                        setActivateTabId(tab.tabId);
-                        if (onClickTab) {
-                          onClickTab(tab.tabId);
+            {openTabs &&
+              Object.values(openTabs).map(
+                (tab) => (
+                  console.log('hi, tab areaa'),
+                  (
+                    <div
+                      key={tab.tabId}
+                      className={`flex items-center px-4 py-2 cursor-pointer border-r border-border relative min-w-[150px] max-w-[200px] ${
+                        tab.tabId === activateTabId
+                          ? 'bg-background'
+                          : 'bg-muted/50 hover:bg-muted'
+                      }`}
+                      onClick={() => {
+                        if (tab.tabId != activateTabId) {
+                          setActivateTabId(tab.tabId);
+                          if (onClickTab) {
+                            onClickTab(tab);
+                          }
                         }
-                      }
-                    }}
-                  >
-                    <div className='truncate flex-1'>{tab.title}</div>
-                    <Button
-                      variant='ghost'
-                      size='icon'
-                      className='h-4 w-4 ml-2 opacity-60 hover:opacity-100'
-                      onClick={(e) => {
-                        // 阻止冒泡，避免触发标签切换
-                        e.stopPropagation();
-
-                        onCloseTab(tab.tabId);
                       }}
                     >
-                      <X size={14} />
-                    </Button>
-                  </div>
+                      <div className='truncate flex-1'>{tab.title}</div>
+                      <Button
+                        variant='ghost'
+                        size='icon'
+                        className='h-4 w-4 ml-2 opacity-60 hover:opacity-100'
+                        onClick={(e) => {
+                          // 阻止冒泡，避免触发标签切换
+                          e.stopPropagation();
+
+                          onCloseTab(tab.tabId);
+                        }}
+                      >
+                        <X size={14} />
+                      </Button>
+                    </div>
+                  )
                 )
-              )
-            )}
+              )}
           </>
         </div>
       </div>

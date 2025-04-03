@@ -63,6 +63,7 @@ import { useSessionIdStore } from '@/lib/store/useSessionIdStore';
 import { queryApi } from '@/api/query';
 
 interface ParameterQueryAreaProps {
+  activeTabId: string;
   reportId: string;
   reportUpdatedAt: string;
   parameters?: Parameter[];
@@ -72,6 +73,7 @@ interface ParameterQueryAreaProps {
 
 export const ParameterQueryArea = memo(
   ({
+    activeTabId,
     reportId,
     reportUpdatedAt,
     parameters,
@@ -87,8 +89,8 @@ export const ParameterQueryArea = memo(
 
     // 当前标签: parameters or upload
     const [activeParameterTab, setActiveParameterTab] = useState('parameters');
-    const activeTabId = useTabsSessionStore((state) => state.activeTabId);
-    const setActiveTabId = useTabsSessionStore((state) => state.setActiveTabId);
+    // const activeTabId = useTabsSessionStore((state) => state.activeTabId);
+    // const activeTabId = 'tab-1743665449791';
     const [isQuerying, setIsQuerying] = useState(false);
     // 使用 store 来管理标签页
     const [statusDict, setStatusDict] = useState<Record<string, QueryStatus>>(

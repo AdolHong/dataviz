@@ -1,5 +1,12 @@
 import { Button } from '@/components/ui/button';
-import { useState, useEffect, memo, useCallback, useMemo } from 'react';
+import {
+  useState,
+  useEffect,
+  memo,
+  useCallback,
+  useMemo,
+  useLayoutEffect,
+} from 'react';
 import { FileExplorer } from '@/components/dashboard/FileExplorer';
 import type {
   FileItem,
@@ -13,7 +20,6 @@ import { fsApi } from '@/api/fs';
 import EditModal from '@/components/edit/EditModal';
 import { reportApi } from '@/api/report';
 import { useTabsSessionStore } from '@/lib/store/useTabsSessionStore';
-import { useTabReportsSessionStore } from '@/lib/store/useTabReportsSessionStore';
 
 import { ParameterQueryArea } from '@/components/dashboard/ParameterQueryArea';
 import { LayoutGrid } from '@/components/dashboard/LayoutGrid';
@@ -23,34 +29,33 @@ import { toast } from 'sonner';
 import { useTabParamValuesStore } from '@/lib/store/useParamValuesStore';
 import { useTabQueryStatusStore } from '@/lib/store/useTabQueryStatusStore';
 
+// 为标签加载报表数据的函数
+const loadReportForTab = async (tab: TabDetail) => {
+  const report = await reportApi.getReportByReportId(tab.reportId);
+  return report;
+};
+
 export function DashboardPage() {
   const [report, setReport] = useState<Report | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
   const [navbarVisible, setNavbarVisible] = useState(true);
   const [navbarWidth, setNavbarWidth] = useState(256); // 默认宽度为256px
 
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [currentEditReport, setCurrentEditReport] = useState<Report | null>(
-    null
-  );
+  console.info('hi, dashboardPage');
 
+  // zustand 相关取值
   const activeTabId = useTabsSessionStore((state) => state.activeTabId);
   const openTabs = useTabsSessionStore((state) => state.tabs);
 
+  // zustand 相关函数
   const setActiveTabId = useTabsSessionStore((state) => state.setActiveTabId);
-
-  // tabs相关函数
   const findTabsByFileId = useTabsSessionStore(
     (state) => state.findTabsByFileId
   );
   const setCachedTab = useTabsSessionStore((state) => state.setCachedTab);
   const removeCachedTab = useTabsSessionStore((state) => state.removeCachedTab);
   const getCachedTab = useTabsSessionStore((state) => state.getCachedTab);
-
-  const setCachedReport = useTabReportsSessionStore((state) => state.setReport);
-  const removeCachedReport = useTabReportsSessionStore(
-    (state) => state.removeReport
-  );
 
   const removeTabIdParamValues = useTabParamValuesStore(
     (state) => state.removeTabIdParamValues
@@ -59,8 +64,6 @@ export function DashboardPage() {
   const clearQueryByTabId = useTabQueryStatusStore(
     (state) => state.clearQueryByTabId
   );
-
-  console.info('hi, dashboardPage');
 
   // 初始化
   useEffect(() => {
@@ -75,13 +78,11 @@ export function DashboardPage() {
     }
 
     // 若有tab记录， 重新查询report
-    loadReportForTab(activeTab);
+    setReport(loadReportForTab(activeTab));
   }, []);
 
   // 切换tab时
   useEffect(() => {
-    console.info('hi, dashboardPage, activeTabId', activeTabId);
-
     if (activeTabId) {
       const activeTab = getCachedTab(activeTabId);
       if (activeTab) {
@@ -90,21 +91,8 @@ export function DashboardPage() {
     }
   }, [activeTabId]);
 
-  // 为标签加载报表数据的函数
-  const loadReportForTab = (tab: TabDetail) => {
-    reportApi
-      .getReportByReportId(tab.reportId)
-      .then((report) => {
-        setReport(report);
-        setCachedReport(tab.tabId, report);
-      })
-      .catch((err) => {
-        console.error('加载报表失败:', err);
-      });
-  };
-
   // 打开报表标签页 - 修改为使用 store
-  const openReportTab = (item: FileSystemItem) => {
+  const doubleClickedReportTab = (item: FileSystemItem) => {
     // 检查是否已经打开
     const tabs = findTabsByFileId(item.id);
 
@@ -138,7 +126,7 @@ export function DashboardPage() {
     removeCachedTab(tabId);
 
     // 删除tab对应的报表
-    removeCachedReport(tabId);
+    // removeCachedReport(tabId);
 
     // 删除tab对应的参数值
     removeTabIdParamValues(tabId);
@@ -149,12 +137,6 @@ export function DashboardPage() {
     // console.log('删除tab之后, tabIdFiles', tabIdFiles);
     // console.log('删除tab之后, tabIdParamValues', tabIdParamValues);
     // console.log('删除tab之后, tabQueryStatus', tabQueryStatus);
-  };
-
-  // 处理编辑报表
-  const handleEditReport = (report: Report) => {
-    setCurrentEditReport(report);
-    setIsEditModalOpen(true);
   };
 
   // 处理保存报表
@@ -172,9 +154,9 @@ export function DashboardPage() {
 
     // 更新当前标签的报表数据
 
-    if (currentEditReport) {
+    if (report) {
       const updatedReport = {
-        ...currentEditReport,
+        ...report,
         title,
         description,
         createdAt,
@@ -191,11 +173,6 @@ export function DashboardPage() {
 
       // 同时更新其他状态
       setReport(updatedReport);
-
-      //更新tabReports
-
-      setCachedReport(activeTabId, updatedReport);
-      setCurrentEditReport(null);
     }
   };
 
@@ -206,7 +183,7 @@ export function DashboardPage() {
     }
     // 这里可以添加其他逻辑，例如打开文件或引用
     if (item.type === 'file' || item.type === 'reference') {
-      openReportTab(item);
+      doubleClickedReportTab(item);
     }
   }, []);
 
@@ -246,13 +223,24 @@ export function DashboardPage() {
     closeTab(tabId);
   }, []);
 
+  const handleSetReport = useCallback((report: Report) => {
+    setReport(report);
+  }, []);
+
+  // query area: 使用 useMemo 优化参数
   const memoizedParameters = useMemo(() => report?.parameters, [report]);
   const memoizedDataSources = useMemo(() => report?.dataSources, [report]);
   const memoizedOnEditReport = useCallback(() => {
     if (report) {
-      handleEditReport(report);
+      setIsEditModalOpen(true);
     }
   }, [report]);
+  const memoizedReportId = useMemo(() => report?.id || '', [report]);
+  const memoizedReportUpdatedAt = useMemo(
+    () => report?.updatedAt || '',
+    [report]
+  );
+  const memoizedActiveTabId = useMemo(() => activeTabId || '', [report]);
 
   return (
     <div className='flex flex-col h-screen relative'>
@@ -296,6 +284,7 @@ export function DashboardPage() {
         <div className='flex-1 w-0 min-w-0 overflow-hidden flex flex-col'>
           {/* 标签页栏 */}
           <TabsArea
+            setReport={handleSetReport}
             navbarVisible={navbarVisible}
             onToggleNavbarVisible={handleToggleNavbarVisible}
             onCloseTab={handleCloseTab}
@@ -313,8 +302,9 @@ export function DashboardPage() {
                     <div className='space-y-2'>
                       {report && (
                         <ParameterQueryArea
-                          reportId={report.id}
-                          reportUpdatedAt={report.updatedAt}
+                          activeTabId={memoizedActiveTabId}
+                          reportId={memoizedReportId}
+                          reportUpdatedAt={memoizedReportUpdatedAt}
                           parameters={memoizedParameters}
                           dataSources={memoizedDataSources}
                           onEditReport={memoizedOnEditReport}
@@ -343,7 +333,7 @@ export function DashboardPage() {
         <EditModal
           open={isEditModalOpen}
           onClose={() => setIsEditModalOpen(false)}
-          report={currentEditReport}
+          report={report}
           handleSave={handleSaveReport}
         />
       )}
@@ -353,6 +343,7 @@ export function DashboardPage() {
 
 // 标签栏组件
 interface TabsAreaProps {
+  setReport: (report: Report) => void;
   navbarVisible: boolean;
   onToggleNavbarVisible: () => void;
   onCloseTab: (tabId: string) => void;
@@ -360,7 +351,12 @@ interface TabsAreaProps {
 
 // 标签栏组件
 const TabsArea = memo(
-  ({ navbarVisible, onToggleNavbarVisible, onCloseTab }: TabsAreaProps) => {
+  ({
+    setReport,
+    navbarVisible,
+    onToggleNavbarVisible,
+    onCloseTab,
+  }: TabsAreaProps) => {
     const openTabs = useTabsSessionStore((state) => state.tabs);
     const removeCachedTab = useTabsSessionStore(
       (state) => state.removeCachedTab
@@ -403,6 +399,15 @@ const TabsArea = memo(
                   onClick={() => {
                     if (tab.tabId != activeTabId) {
                       setActiveTabId(tab.tabId);
+                      if (setReport) {
+                        loadReportForTab(tab).then((report) => {
+                          if (report) {
+                            setReport(report);
+                          }
+                          console.info('hi1');
+                        });
+                      }
+                      console.info('hi2');
                     }
                   }}
                 >

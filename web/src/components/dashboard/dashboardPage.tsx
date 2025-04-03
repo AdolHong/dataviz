@@ -32,6 +32,8 @@ import {
 } from '@/lib/store/useTabQueryStatusStore';
 import { shallow } from '@tanstack/react-router';
 
+import { useCallback } from 'react';
+
 export function DashboardPage() {
   const [report, setReport] = useState<Report | null>(null);
 
@@ -49,14 +51,15 @@ export function DashboardPage() {
 
   const {
     activeTabId,
-    setActiveTab,
-    getActiveTab,
+
     findTabsByFileId,
     getTab,
     setTab,
     tabs: openTabs,
     removeTab: removeCachedTab,
   } = useTabsSessionStore();
+
+  const { setActivateId } = useTabsSessionStore((state) => state.setActivateId);
 
   const { getSessionId } = useSessionIdStore();
 
@@ -72,7 +75,14 @@ export function DashboardPage() {
   const { clearQueryByTabId, tabQueryStatus, setQueryStatus } =
     useTabQueryStatusStore();
 
-  console.info('adol, hi');
+  console.info('hi, dashboardPage');
+
+  const handleFileSystemChange = useCallback(
+    (oldItems: FileSystemItem[], newItems: FileSystemItem[]) => {
+      fsApi.saveFileSystemChanges(oldItems, newItems);
+    },
+    []
+  );
 
   // 初始化
   useEffect(() => {
@@ -110,7 +120,7 @@ export function DashboardPage() {
 
     if (tabs && tabs.length > 0) {
       // 已经打开，激活该标签页
-      setActiveTab(tabs[0].tabId);
+      setActivateId(tabs[0].tabId);
     } else {
       // 没有打开，创建新标签页
       const newTab = {
@@ -315,12 +325,7 @@ export function DashboardPage() {
                 openReportTab(item);
               }
             }}
-            useFileSystemChangeEffect={(
-              oldItems: FileSystemItem[],
-              newItems: FileSystemItem[]
-            ) => {
-              fsApi.saveFileSystemChanges(oldItems, newItems);
-            }}
+            useFileSystemChangeEffect={handleFileSystemChange}
             useRenameItemEffect={(item) => {
               const tabs = findTabsByFileId(item.id);
               tabs.forEach((tab) => {
@@ -370,7 +375,7 @@ export function DashboardPage() {
                         ? 'bg-background'
                         : 'bg-muted/50 hover:bg-muted'
                     }`}
-                    onClick={() => setActiveTab(tab.tabId)}
+                    onClick={() => setActivateId(tab.tabId)}
                   >
                     <div className='truncate flex-1'>{tab.title}</div>
                     <Button

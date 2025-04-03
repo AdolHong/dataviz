@@ -20,8 +20,7 @@ interface TabsState {
 
   // 设置激活标签
   activeTabId: string;
-  setActiveTab: (tabId: string | null) => void;
-  getActiveTab: () => TabDetail | undefined;
+  setActivateId: (tabId: string) => void;
 
   // 清除
   clear: () => void;
@@ -61,13 +60,7 @@ export const useTabsSessionStore = create<TabsState>()(
             return { tabs: oldTabs };
           }
         }),
-
-      setActiveTab: (tabId: string | null) => set({ activeTabId: tabId || '' }),
-
-      getActiveTab: () => {
-        const { tabs, activeTabId } = get();
-        return activeTabId ? tabs[activeTabId] : undefined;
-      },
+      setActivateId: (tabId: string) => set({ activeTabId: tabId }),
 
       clear: () => set({ tabs: {}, activeTabId: '' }),
     }),

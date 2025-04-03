@@ -50,6 +50,10 @@
     (1) navbar: 
         - setActivateTab
         - setTabList (eg: 删除, 修改文件的操作)
+        
+        DONE:
+            - memo
+            - FileSystemItem的任何修改, 需要api同步; 已改为usecallback
 
     (2) tabs: 
         - activateTab

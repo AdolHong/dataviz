@@ -9,6 +9,7 @@ interface LayoutGridProps {
 }
 
 export function LayoutGrid({ layout }: LayoutGridProps) {
+  console.info('hi, layoutGrid');
   // 创建一个二维数组表示网格
   const grid = Array(layout.rows)
     .fill(null)

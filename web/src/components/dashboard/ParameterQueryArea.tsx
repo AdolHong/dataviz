@@ -82,6 +82,7 @@ export function ParameterQueryArea({
   statusDict,
   setStatusDict,
 }: ParameterQueryAreaProps) {
+  console.info('hi, parameterQueryArea');
   const [parametersExpanded, setParametersExpanded] = useState(true);
   const [activeTab, setActiveTab] = useState<string>('parameters');
   const [selectedDataSourceIndex, setSelectedDataSourceIndex] = useState<

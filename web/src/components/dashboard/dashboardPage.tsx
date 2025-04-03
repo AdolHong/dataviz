@@ -246,14 +246,8 @@ export function DashboardPage() {
     closeTab(tabId);
   }, []);
 
-  const memoizedParameters = useMemo(
-    () => report?.parameters,
-    [report?.parameters]
-  );
-  const memoizedDataSources = useMemo(
-    () => report?.dataSources,
-    [report?.dataSources]
-  );
+  const memoizedParameters = useMemo(() => report?.parameters, [report]);
+  const memoizedDataSources = useMemo(() => report?.dataSources, [report]);
   const memoizedOnEditReport = useCallback(() => {
     if (report) {
       handleEditReport(report);

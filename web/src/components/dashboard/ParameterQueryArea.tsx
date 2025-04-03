@@ -96,6 +96,23 @@ export const ParameterQueryArea = memo(
     const [statusDict, setStatusDict] = useState<Record<string, QueryStatus>>(
       {}
     );
+
+    const getTabIdParamValues = useTabParamValuesStore(
+      (state) => state.getTabIdParamValues
+    );
+
+    const getTabIdFiles = useTabFilesStore((state) => state.getTabIdFiles);
+    const getQueryStatusByTabId = useTabQueryStatusStore(
+      (state) => state.getQueryStatusByTabId
+    );
+
+    const [values, setValues] = useState<Record<string, any>>({});
+    const [files, setFiles] = useState<Record<string, FileCache>>({});
+
+    const [nameToChoices, setNameToChoices] = useState<
+      Record<string, Record<string, string>[]>
+    >({});
+
     const { getSessionId } = useSessionIdStore();
 
     const setTabIdFiles = useTabFilesStore((state) => state.setTabIdFiles);
@@ -108,33 +125,36 @@ export const ParameterQueryArea = memo(
       (state) => state.setQueryStatus
     );
 
+    // console.info('activeTabId:', activeTabId);
+    // console.log('你点击了查询');
+    // console.log('files', files);
+    // console.log('values', values);
+    // console.log('activeTabId', activeTabId);
+    // console.log('cachedParamValues', getTabIdParamValues(activeTabId) || {});
+    // console.log('cachedFiles', getTabIdFiles(activeTabId) || {});
+
     // 修改handleQuerySubmit函数，接收文件参数为对象
     const handleQuerySubmit = async (
       values: Record<string, any>,
       files?: Record<string, FileCache>
     ) => {
+      console.info('values', values);
       // 缓存参数
       setTabIdParamValues(activeTabId, values);
 
       // 缓存文件
       setTabIdFiles(activeTabId, files || {});
 
-      console.log('你点击了查询');
-      console.log('files', files);
-      console.log('values', values);
-
-      if (dataSources && dataSources.length > 0) {
-        setIsQuerying(true);
-        const promises = dataSources
-          .filter((dataSource) => dataSource.executor.type === 'sql')
-          .map((dataSource) =>
-            handleQueryRequest(dataSource, values, activeTabId)
-          );
-        await Promise.all(promises);
-        setIsQuerying(false);
-
-        console.log('查询完成or失败, who knows?');
-      }
+      // if (dataSources && dataSources.length > 0) {
+      //   setIsQuerying(true);
+      //   const promises = dataSources
+      //     .filter((dataSource) => dataSource.executor.type === 'sql')
+      //     .map((dataSource) =>
+      //       handleQueryRequest(dataSource, values, activeTabId)
+      //     );
+      //   await Promise.all(promises);
+      //   setIsQuerying(false);
+      // }
     };
 
     const handleQueryRequest = async (
@@ -178,22 +198,6 @@ export const ParameterQueryArea = memo(
       }
     };
 
-    const getTabIdParamValues = useTabParamValuesStore(
-      (state) => state.getTabIdParamValues
-    );
-
-    const getTabIdFiles = useTabFilesStore((state) => state.getTabIdFiles);
-    const getQueryStatusByTabId = useTabQueryStatusStore(
-      (state) => state.getQueryStatusByTabId
-    );
-
-    const [values, setValues] = useState<Record<string, any>>({});
-    const [files, setFiles] = useState<Record<string, FileCache>>({});
-
-    const [nameToChoices, setNameToChoices] = useState<
-      Record<string, Record<string, string>[]>
-    >({});
-
     // 检查需要文件上传的数据源
     const csvDataSources =
       dataSources?.filter(
@@ -204,10 +208,7 @@ export const ParameterQueryArea = memo(
 
     // 使用 useEffect 在初始渲染时设置默认值
     useEffect(() => {
-      console.info('hi, parameterQueryArea[2nd 初始化参数]');
-      // 清空文件
-      setFiles({});
-
+      console.info('hi, parameterQueryArea[2nd 初始化参数] ', parameters);
       // 初始化参数值
       initialValues();
 
@@ -219,39 +220,44 @@ export const ParameterQueryArea = memo(
     }, [parameters]);
 
     const initialValues = () => {
-      if (values && Object.keys(values).length === 0) {
-        const initialValues: Record<string, any> = {};
-        parameters?.forEach((param) => {
-          // 对于多选和多输入类型，使用默认数组
-          if (
-            param.config.type === 'multi_select' ||
-            param.config.type === 'multi_input'
-          ) {
-            const defaultVal = param.config.default || [];
-            const parsedVal = defaultVal.map((val: string) =>
-              parseDynamicDate(val)
-            );
-            initialValues[param.name] = parsedVal;
-          }
-          // 对于单选和单输入类型，使用默认值
-          else if (
-            param.config.type === 'single_select' ||
-            param.config.type === 'single_input' ||
-            param.config.type === 'date_picker'
-          ) {
-            const defaultVal = param.config.default;
-            const parseVal = parseDynamicDate(defaultVal);
-            initialValues[param.name] = parseVal;
-          }
-        });
+      const initialValues: Record<string, any> = {};
+      parameters?.forEach((param) => {
+        // 对于多选和多输入类型，使用默认数组
+        if (
+          param.config.type === 'multi_select' ||
+          param.config.type === 'multi_input'
+        ) {
+          const defaultVal = param.config.default || [];
+          const parsedVal = defaultVal.map((val: string) =>
+            parseDynamicDate(val)
+          );
+          initialValues[param.name] = parsedVal;
+        }
+        // 对于单选和单输入类型，使用默认值
+        else if (
+          param.config.type === 'single_select' ||
+          param.config.type === 'single_input' ||
+          param.config.type === 'date_picker'
+        ) {
+          const defaultVal = param.config.default;
+          const parseVal = parseDynamicDate(defaultVal);
+          initialValues[param.name] = parseVal;
+        }
+      });
 
-        const cachedParamValues = getTabIdParamValues(activeTabId) || {};
-        const newValues = {
-          ...initialValues,
-          ...cachedParamValues,
-        };
-        setValues(newValues);
-      }
+      const cachedParamValues = getTabIdParamValues(activeTabId) || {};
+      const newValues = {
+        ...initialValues,
+        ...cachedParamValues,
+      };
+
+      setValues(newValues);
+
+      // 延迟1秒后打印newValues
+      console.log('newValues之前', newValues);
+      setTimeout(() => {
+        console.log('newValues之后', newValues);
+      }, 1000);
     };
 
     const initialChoices = () => {
@@ -308,13 +314,6 @@ export const ParameterQueryArea = memo(
       handleQuerySubmit(values, files);
     };
 
-    const getParameterLabel = (param: Parameter) => {
-      if (param.alias) {
-        return `${param.alias}(${param.name})`;
-      }
-      return param.name;
-    };
-
     // 多输入框键盘事件处理
     const handleMultiInputKeyDown = (
       e: React.KeyboardEvent<HTMLInputElement>,
@@ -345,8 +344,6 @@ export const ParameterQueryArea = memo(
     };
 
     const renderParameterInput = (param: Parameter) => {
-      const label = getParameterLabel(param);
-
       const inputComponent = (() => {
         switch (param.config.type) {
           case 'single_select':
@@ -506,7 +503,11 @@ export const ParameterQueryArea = memo(
               <TooltipProvider delayDuration={1000}>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Label htmlFor={param.name}>{label}</Label>
+                    <Label htmlFor={param.name}>
+                      {param.alias
+                        ? `${param.alias}(${param.name})`
+                        : param.name}
+                    </Label>
                   </TooltipTrigger>
                   <TooltipContent>
                     <p>{param.description}</p>
@@ -514,7 +515,9 @@ export const ParameterQueryArea = memo(
                 </Tooltip>
               </TooltipProvider>
             ) : (
-              <Label htmlFor={param.name}>{label}</Label>
+              <Label htmlFor={param.name}>
+                {param.alias ? `${param.alias}(${param.name})` : param.name}
+              </Label>
             )}
           </div>
           {inputComponent}

@@ -42,7 +42,7 @@ export function DashboardPage() {
   const [navbarVisible, setNavbarVisible] = useState(true);
   const [navbarWidth, setNavbarWidth] = useState(256); // 默认宽度为256px
 
-  console.info('hi, dashboardPage');
+  // console.info('hi, dashboardPage');
 
   // zustand 相关取值
   const activeTabId = useTabsSessionStore((state) => state.activeTabId);
@@ -349,7 +349,7 @@ const TabsArea = memo(
     const activeTabId = useTabsSessionStore((state) => state.activeTabId);
     const setActiveTabId = useTabsSessionStore((state) => state.setActiveTabId);
 
-    console.info('hi, tabsArea');
+    // console.info('hi, tabsArea');
 
     return (
       <div className='border-b bg-muted/30'>
@@ -401,15 +401,9 @@ const TabsArea = memo(
                     className='h-6 w-6 ml-2 opacity-60 hover:opacity-100'
                     onClick={(e) => {
                       e.stopPropagation();
-                      console.log('点击前 openTabs:', openTabs);
+
                       removeCachedTab(tab.tabId);
                       // 使用setTimeout查看更新后的状态
-                      setTimeout(() => {
-                        console.log(
-                          '点击后 openTabs:',
-                          useTabsSessionStore.getState().tabs
-                        );
-                      }, 0);
                       if (onCloseTab) {
                         onCloseTab(tab.tabId);
                       }

@@ -44,8 +44,13 @@ export const useTabsSessionStore = create<TabsState>()(
 
       removeCachedTab: (tabId: string) =>
         set((state) => {
-          const updatedTabs = { ...state.tabs };
-          delete updatedTabs[tabId];
+          // 若不包含tabId, 则直接返回
+          if (!state.tabs[tabId]) {
+            return { tabs: state.tabs };
+          }
+
+          const oldTabs = { ...state.tabs };
+          delete oldTabs[tabId];
 
           // 若删除的是正在激活的tab
           if (tabId === state.activeTabId) {

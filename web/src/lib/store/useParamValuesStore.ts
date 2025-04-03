@@ -28,6 +28,12 @@ export const useTabParamValuesStore = create<ParamValuesState>()(
       tabIdParamValues: {},
 
       getTabIdParamValues: (tabId: string) => {
+        if (!get().tabIdParamValues[tabId]) {
+          return {};
+        }
+
+        // console.log('getTabIdParamValues', get().tabIdParamValues);
+
         return get().tabIdParamValues[tabId];
       },
 

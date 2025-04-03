@@ -67,7 +67,7 @@ export const FileExplorer = React.memo(
     useDeleteItemEffect,
     useFileSystemChangeEffect,
   }: FileExplorerProps) => {
-    console.info('hi, fileexplorer');
+    // console.info('hi, fileexplorer');
     const [fsItems, setFsItems] = useState<FileSystemItem[]>([]);
     const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
       new Set()

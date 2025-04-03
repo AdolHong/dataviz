@@ -204,7 +204,7 @@ export const ParameterQueryArea = memo(
 
     // 使用 useEffect 在初始渲染时设置默认值
     useEffect(() => {
-      console.info('hi, 来了老弟');
+      console.info('hi, parameterQueryArea[2nd 初始化参数]');
       // 清空文件
       setFiles({});
 
@@ -275,8 +275,6 @@ export const ParameterQueryArea = memo(
     };
 
     const initialQueryStatus = () => {
-      console.log('activate_id, ', activeTabId);
-
       const statusDict = getQueryStatusByTabId(activeTabId);
       if (statusDict) {
         setStatusDict(statusDict);

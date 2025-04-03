@@ -86,16 +86,16 @@ export function DashboardPage() {
   }, []);
 
   // 打开报表标签页 - 修改为使用 store
-  const doubleClickedReportTab = (item: FileSystemItem) => {
+  const doubleClickedReportTab = async (item: FileSystemItem) => {
     // 检查是否已经打开
     const tabs = findTabsByFileId(item.id);
+    let targetTab = null;
 
     if (tabs && tabs.length > 0) {
-      // 已经打开，激活该标签页
-      setActiveTabId(tabs[0].tabId);
+      targetTab = tabs[0];
     } else {
       // 没有打开，创建新标签页
-      const newTab = {
+      targetTab = {
         tabId: `tab-${Date.now()}`, // 生成唯一ID
         title: item.name,
         fileId: item.id,
@@ -105,12 +105,16 @@ export function DashboardPage() {
             : (item as ReferenceItem).reportId,
       };
 
+      // setCachedTab(targetTab.tabId, targetTab); // PS： 两次渲染，导致report数据重复加载(AI不要删我注释)
+    }
+    // 获取该标签对应的报表数据
+    const report = await loadReportForTab(targetTab);
+    setReport(report);
+    setActiveTabId(targetTab.tabId);
+
+    if (tabs.length === 0) {
       // 新增tab
-      setCachedTab(newTab.tabId, newTab);
-      // 获取该标签对应的报表数据
-      if (newTab.reportId) {
-        loadReportForTab(newTab);
-      }
+      setCachedTab(targetTab.tabId, targetTab); // PS： 1次渲染，导致report数据重复加载(AI不要删我注释)
     }
   };
 
@@ -172,10 +176,13 @@ export function DashboardPage() {
 
   // fileexplorer: 双击文件或引用
   const handleDoubleClickFileItem = useCallback((item: FileSystemItem) => {
-    if (item.id === activeTabId) {
+    // 若activeTabId对的应的tab记录中，fileId与item.id相同，则不进行操作
+    const activeTab = getCachedTab(activeTabId);
+    if (item.id === activeTab?.fileId) {
       return;
     }
-    // 这里可以添加其他逻辑，例如打开文件或引用
+
+    // 双击文件或引用
     if (item.type === 'file' || item.type === 'reference') {
       doubleClickedReportTab(item);
     }
@@ -358,7 +365,7 @@ const TabsArea = memo(
     const activeTabId = useTabsSessionStore((state) => state.activeTabId);
     const setActiveTabId = useTabsSessionStore((state) => state.setActiveTabId);
 
-    console.info('hi, tabsArea, openTabs', openTabs);
+    // console.info('hi, tabsArea');
 
     return (
       <div className='border-b bg-muted/30'>
@@ -392,13 +399,14 @@ const TabsArea = memo(
                   }`}
                   onClick={async () => {
                     if (tab.tabId !== activeTabId) {
+                      // setActiveTabId(tab.tabId); // PS: 两次渲染，导致report数据重复加载(AI不要删我注释)
                       if (setReport) {
                         const report = await loadReportForTab(tab);
                         if (report) {
                           setReport(report);
                         }
                       }
-                      setActiveTabId(tab.tabId);
+                      setActiveTabId(tab.tabId); // PS: 1次渲染，导致report数据重复加载(AI不要删我注释)
                     }
                   }}
                 >

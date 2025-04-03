@@ -52,11 +52,12 @@ export const useTabsSessionStore = create<TabsState>()(
             const keysList = Object.keys(oldTabs);
             const minTabId =
               keysList.length === 0
-                ? null
+                ? ''
                 : keysList.reduce((a, b) => (a < b ? a : b));
-
-            return { tabs: oldTabs, activeTabId: minTabId || '' };
+            console.info('pardon, 删除激活', oldTabs);
+            return { tabs: oldTabs, activeTabId: minTabId };
           } else {
+            console.info('pardon, 删除未激活', oldTabs);
             return { tabs: oldTabs };
           }
         }),

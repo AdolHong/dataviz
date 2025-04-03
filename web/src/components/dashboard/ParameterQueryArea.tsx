@@ -1,4 +1,11 @@
-import React, { useState, useEffect, memo, use, useCallback } from 'react';
+import React, {
+  useState,
+  useEffect,
+  memo,
+  use,
+  useCallback,
+  useRef,
+} from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -117,6 +124,8 @@ export const ParameterQueryArea = memo(
       state.getQueryStatusByTabId(activeTabId)
     );
 
+    const queryStatusRef = useRef(queryStatus);
+
     // 检查需要文件上传的数据源
     const csvDataSources =
       dataSources?.filter(
@@ -124,6 +133,10 @@ export const ParameterQueryArea = memo(
           ds.executor.type === 'csv_uploader' || ds.executor.type === 'csv_data'
       ) || [];
     const requireFileUpload = csvDataSources.length > 0;
+
+    useEffect(() => {
+      queryStatusRef.current = queryStatus; // 更新 ref 的值
+    }, [queryStatus]);
 
     // 使用 useEffect 在初始渲染时设置默认值
     useEffect(() => {
@@ -211,7 +224,7 @@ export const ParameterQueryArea = memo(
         await Promise.all(promises);
         setIsQuerying(false);
 
-        console.info('status', queryStatus);
+        console.info('queryStatusRef', queryStatusRef.current);
       }
     };
 
@@ -240,7 +253,6 @@ export const ParameterQueryArea = memo(
         return;
       }
 
-      console.info('response', response);
       // 更新查询状态
       if (response.data.status === 'success') {
         const newStatus = {

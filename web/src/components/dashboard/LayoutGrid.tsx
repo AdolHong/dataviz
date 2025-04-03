@@ -3,6 +3,7 @@ import { type Layout, type LayoutItem } from '@/types/models/layout';
 import { cn } from '@/lib/utils';
 import { TooltipContent } from '@/components/ui/tooltip';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
+import { useTabsSessionStore } from '@/lib/store/useTabsSessionStore';
 
 interface LayoutGridProps {
   layout: Layout;
@@ -23,6 +24,10 @@ export function LayoutGrid({ layout }: LayoutGridProps) {
       }
     }
   });
+
+  const activeTab = useTabsSessionStore(
+    (state) => state.tabs[state.activeTabId]
+  );
 
   // 渲染具体的网格项内容
   const renderGridItem = (item: LayoutItem) => {
@@ -72,16 +77,19 @@ export function LayoutGrid({ layout }: LayoutGridProps) {
   };
 
   return (
-    <div
-      className='grid gap-4 w-full'
-      style={{
-        gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))`,
-        gridTemplateRows: `repeat(${layout.rows}, minmax(200px, auto))`,
-        gridAutoFlow: 'dense',
-      }}
-    >
-      {layout.items.map((item) => renderGridItem(item))}
-    </div>
+    <>
+      <h1 className='text-2xl font-bold'>{activeTab?.title}</h1>
+      <div
+        className='grid gap-4 w-full'
+        style={{
+          gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))`,
+          gridTemplateRows: `repeat(${layout.rows}, minmax(200px, auto))`,
+          gridAutoFlow: 'dense',
+        }}
+      >
+        {layout.items.map((item) => renderGridItem(item))}
+      </div>
+    </>
   );
 }
 

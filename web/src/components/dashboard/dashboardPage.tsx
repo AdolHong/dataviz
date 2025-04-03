@@ -47,15 +47,10 @@ export function DashboardPage() {
 
   const [statusDict, setStatusDict] = useState<Record<string, QueryStatus>>({});
 
-  const {
-    activeTabId,
+  const activeTabId = useTabsSessionStore((state) => state.activeTabId);
+  const openTabs = useTabsSessionStore((state) => state.tabs);
 
-    tabs: openTabs,
-  } = useTabsSessionStore();
-
-  const setActivateTabId = useTabsSessionStore(
-    (state) => state.setActivateTabId
-  );
+  const setActiveTabId = useTabsSessionStore((state) => state.setActiveTabId);
 
   // tabs相关函数
   const findTabsByFileId = useTabsSessionStore(
@@ -67,17 +62,26 @@ export function DashboardPage() {
 
   const { getSessionId } = useSessionIdStore();
 
-  const {
-    getReport: getCachedReport,
-    setReport: setCachedReport,
-    removeReport: removeCachedReport,
-  } = useTabReportsSessionStore();
+  const setCachedReport = useTabReportsSessionStore((state) => state.setReport);
+  const removeCachedReport = useTabReportsSessionStore(
+    (state) => state.removeReport
+  );
 
-  const { tabIdFiles, setTabIdFiles } = useTabFilesStore();
-  const { removeTabIdParamValues, tabIdParamValues, setTabIdParamValues } =
-    useTabParamValuesStore();
-  const { clearQueryByTabId, tabQueryStatus, setQueryStatus } =
-    useTabQueryStatusStore();
+  const setTabIdFiles = useTabFilesStore((state) => state.setTabIdFiles);
+
+  const setTabIdParamValues = useTabParamValuesStore(
+    (state) => state.setTabIdParamValues
+  );
+  const removeTabIdParamValues = useTabParamValuesStore(
+    (state) => state.removeTabIdParamValues
+  );
+
+  const clearQueryByTabId = useTabQueryStatusStore(
+    (state) => state.clearQueryByTabId
+  );
+  const setQueryStatus = useTabQueryStatusStore(
+    (state) => state.setQueryStatus
+  );
 
   console.info('hi, dashboardPage');
 
@@ -96,6 +100,18 @@ export function DashboardPage() {
     // 若有tab记录， 重新查询report
     loadReportForTab(activeTab);
   }, []);
+
+  // 切换tab时
+  useEffect(() => {
+    console.info('hi, dashboardPage, activeTabId', activeTabId);
+
+    if (activeTabId) {
+      const activeTab = getCachedTab(activeTabId);
+      if (activeTab) {
+        loadReportForTab(activeTab);
+      }
+    }
+  }, [activeTabId]);
 
   // 为标签加载报表数据的函数
   const loadReportForTab = (tab: TabDetail) => {
@@ -117,7 +133,7 @@ export function DashboardPage() {
 
     if (tabs && tabs.length > 0) {
       // 已经打开，激活该标签页
-      setActivateTabId(tabs[0].tabId);
+      setActiveTabId(tabs[0].tabId);
     } else {
       // 没有打开，创建新标签页
       const newTab = {
@@ -156,36 +172,6 @@ export function DashboardPage() {
     // console.log('删除tab之后, tabIdFiles', tabIdFiles);
     // console.log('删除tab之后, tabIdParamValues', tabIdParamValues);
     // console.log('删除tab之后, tabQueryStatus', tabQueryStatus);
-  };
-
-  // 修改handleQuerySubmit函数，接收文件参数为对象
-  const handleQuerySubmit = async (
-    tabId: string,
-    values: Record<string, any>,
-    files?: Record<string, FileCache>
-  ) => {
-    // 缓存参数
-    setTabIdParamValues(tabId, values);
-
-    // 缓存文件
-    setTabIdFiles(tabId, files || {});
-
-    console.log('你点击了查询');
-    console.log('files', files);
-    console.log('values', values);
-
-    if (report) {
-      setIsQuerying(true);
-      const promises = report.dataSources
-        .filter((dataSource) => dataSource.executor.type === 'sql')
-        .map((dataSource) =>
-          handleQueryRequest(report, dataSource, values, tabId)
-        );
-      await Promise.all(promises);
-      setIsQuerying(false);
-
-      console.log('查询完成or失败, who knows?');
-    }
   };
 
   const handleQueryRequest = async (
@@ -379,48 +365,31 @@ export function DashboardPage() {
             {Object.values(openTabs).length > 0 && activeTabId ? (
               <div className='h-full'>
                 {/* 为每个报表渲染内容组件 */}
-                
-                
-                {
-                  const reportData = getCachedReport(tab.tabId);
-                  return (
-                    <div
-                      key={tab.tabId}
-                      className={`h-full ${tab.tabId === activeTabId ? 'block' : 'hidden'}`}
-                    >
-                      {/* 展示区域 */}
-                      <div className='flex-1 overflow-auto'>
-                        <div className='container max-w-full py-6 px-4 md:px-8 space-y-6'>
-                          {/* 参数区域 */}
-                          <div className='space-y-2'>
-                            <ParameterQueryArea
-                              tabId={tab.tabId}
-                              parameters={reportData?.parameters || []}
-                              dataSources={reportData?.dataSources || []}
-                              isQuerying={isQuerying}
-                              statusDict={statusDict}
-                              setStatusDict={setStatusDict}
-                              onSubmit={(values, files) =>
-                                handleQuerySubmit(tab.tabId, values, files)
-                              }
-                              onEditReport={() =>
-                                reportData && handleEditReport(reportData)
-                              }
-                            />
-                          </div>
-                          <h1 className='text-2xl font-bold'>{tab?.title}</h1>
-                          {/* 展示区域 */}
-                          {reportData?.layout &&
-                            reportData.layout.items.length > 0 && (
-                              <LayoutGrid layout={reportData.layout} />
-                            )}
-                        </div>
-                      </div>
+                {/* 展示区域 */}
+                <div className='flex-1 overflow-auto'>
+                  <div className='container max-w-full py-6 px-4 md:px-8 space-y-6'>
+                    {/* 参数区域 */}
+                    <div className='space-y-2'>
+                      <ParameterQueryArea
+                        tabId={activeTabId}
+                        parameters={report?.parameters || []}
+                        dataSources={report?.dataSources || []}
+                        isQuerying={isQuerying}
+                        statusDict={statusDict}
+                        setStatusDict={setStatusDict}
+                        onSubmit={(values, files) =>
+                          handleQuerySubmit(activeTabId, values, files)
+                        }
+                        onEditReport={() => report && handleEditReport(report)}
+                      />
                     </div>
-                  );
-                }
-                
 
+                    {/* 展示区域 */}
+                    {report?.layout && report.layout.items.length > 0 && (
+                      <LayoutGrid layout={report.layout} />
+                    )}
+                  </div>
+                </div>
               </div>
             ) : (
               <div className='flex items-center justify-center h-full text-muted-foreground'>
@@ -458,10 +427,8 @@ const TabsArea = memo(
     const removeCachedTab = useTabsSessionStore(
       (state) => state.removeCachedTab
     );
-    const activateTabId = useTabsSessionStore((state) => state.activeTabId);
-    const setActivateTabId = useTabsSessionStore(
-      (state) => state.setActivateTabId
-    );
+    const activeTabId = useTabsSessionStore((state) => state.activeTabId);
+    const setActiveTabId = useTabsSessionStore((state) => state.setActiveTabId);
 
     console.info('hi, tabsArea, openTabs', openTabs);
 
@@ -491,13 +458,13 @@ const TabsArea = memo(
                 <div
                   key={tab.tabId}
                   className={`flex items-center px-4 py-2 cursor-pointer border-r border-border relative min-w-[150px] max-w-[200px] ${
-                    tab.tabId === activateTabId
+                    tab.tabId === activeTabId
                       ? 'bg-background'
                       : 'bg-muted/50 hover:bg-muted'
                   }`}
                   onClick={() => {
-                    if (tab.tabId != activateTabId) {
-                      setActivateTabId(tab.tabId);
+                    if (tab.tabId != activeTabId) {
+                      setActiveTabId(tab.tabId);
                     }
                   }}
                 >

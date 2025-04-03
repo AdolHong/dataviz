@@ -55,10 +55,7 @@ interface ParameterQueryAreaProps {
   isQuerying: boolean;
   parameters: Parameter[];
   dataSources?: DataSource[];
-  onSubmit: (
-    values: Record<string, any>,
-    files?: Record<string, FileCache>
-  ) => void;
+
   onEditReport: () => void;
   statusDict: Record<string, QueryStatus>;
   setStatusDict: (statusDict: Record<string, QueryStatus>) => void;
@@ -68,30 +65,66 @@ import { parseDynamicDate } from '@/utils/parser';
 import {
   useTabQueryStatusStore,
   type QueryStatus,
-  type DataSourceStatus,
 } from '@/lib/store/useTabQueryStatusStore';
 import { useTabParamValuesStore } from '@/lib/store/useParamValuesStore';
+import { useTabsSessionStore } from '@/lib/store/useTabsSessionStore';
 
 export function ParameterQueryArea({
-  tabId,
   isQuerying,
   parameters,
   dataSources = [],
-  onSubmit,
   onEditReport,
   statusDict,
   setStatusDict,
 }: ParameterQueryAreaProps) {
   console.info('hi, parameterQueryArea');
   const [parametersExpanded, setParametersExpanded] = useState(true);
-  const [activeTab, setActiveTab] = useState<string>('parameters');
+
+  const activeTabId = useTabsSessionStore((state) => state.activeTabId);
+  const setActiveTabId = useTabsSessionStore((state) => state.setActiveTabId);
+
   const [selectedDataSourceIndex, setSelectedDataSourceIndex] = useState<
     number | null
   >(null);
 
-  const { tabIdParamValues } = useTabParamValuesStore();
-  const { getTabIdFiles } = useTabFilesStore();
-  const { getQueryStatusByTabId } = useTabQueryStatusStore();
+  // 修改handleQuerySubmit函数，接收文件参数为对象
+  const handleQuerySubmit = async (
+    tabId: string,
+    values: Record<string, any>,
+    files?: Record<string, FileCache>
+  ) => {
+    // 缓存参数
+    setTabIdParamValues(tabId, values);
+
+    // 缓存文件
+    setTabIdFiles(tabId, files || {});
+
+    console.log('你点击了查询');
+    console.log('files', files);
+    console.log('values', values);
+
+    if (report) {
+      setIsQuerying(true);
+      const promises = report.dataSources
+        .filter((dataSource) => dataSource.executor.type === 'sql')
+        .map((dataSource) =>
+          handleQueryRequest(report, dataSource, values, tabId)
+        );
+      await Promise.all(promises);
+      setIsQuerying(false);
+
+      console.log('查询完成or失败, who knows?');
+    }
+  };
+
+  const getTabIdParamValues = useTabParamValuesStore(
+    (state) => state.getTabIdParamValues
+  );
+
+  const getTabIdFiles = useTabFilesStore((state) => state.getTabIdFiles);
+  const getQueryStatusByTabId = useTabQueryStatusStore(
+    (state) => state.getQueryStatusByTabId
+  );
 
   const [values, setValues] = useState<Record<string, any>>({});
   const [files, setFiles] = useState<Record<string, FileCache>>({});
@@ -149,7 +182,7 @@ export function ParameterQueryArea({
         }
       });
 
-      const cachedParamValues = tabIdParamValues[tabId] || {};
+      const cachedParamValues = getTabIdParamValues(activeTabId) || {};
       const newValues = {
         ...initialValues,
         ...cachedParamValues,
@@ -181,9 +214,9 @@ export function ParameterQueryArea({
   };
 
   const initialQueryStatus = () => {
-    console.log('activate_id, ', tabId);
+    console.log('activate_id, ', activeTabId);
 
-    const statusDict = getQueryStatusByTabId(tabId);
+    const statusDict = getQueryStatusByTabId(activeTabId);
     if (statusDict) {
       setStatusDict(statusDict);
     }
@@ -200,7 +233,7 @@ export function ParameterQueryArea({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tabId) {
+    if (!activeTabId) {
       toast.error('请先打开一个标签页');
       return;
     }
@@ -436,8 +469,8 @@ export function ParameterQueryArea({
         <form onSubmit={handleSubmit}>
           <Tabs
             defaultValue='parameters'
-            value={activeTab}
-            onValueChange={setActiveTab}
+            value={activeTabId}
+            onValueChange={(value) => setActiveTabId(value)}
           >
             {/* tabs */}
             <div className='flex justify-between items-center mb-2 '>
@@ -525,7 +558,7 @@ export function ParameterQueryArea({
                       dataSources={csvDataSources}
                       files={files}
                       setFiles={setFiles}
-                      cachedFiles={getTabIdFiles(tabId) || {}}
+                      cachedFiles={getTabIdFiles(activeTabId) || {}}
                     />
                   </TabsContent>
                 )}

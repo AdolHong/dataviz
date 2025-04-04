@@ -86,27 +86,47 @@ export function ArtifactParams({
   ) => {
     const paramKey = `${dfAlias}_${level}`;
 
+    // 根据节点类型和选择状态更新参数值
     setParamValues((prev) => {
+      // 获取当前的值列表
       const currentValues = Array.isArray(prev[paramKey])
         ? [...(prev[paramKey] as string[])]
         : [];
 
-      // 如果选中，添加值；如果取消选中，移除值
-      if (checked) {
-        if (!currentValues.includes(item.name)) {
-          return {
-            ...prev,
-            [paramKey]: [...currentValues, item.name],
-          };
+      // 递归处理节点及其子节点
+      const processNode = (node: TreeViewItem, isChecked: boolean) => {
+        // 只处理叶子节点或最底层节点
+        if (node.type === 'item') {
+          if (isChecked) {
+            // 如果选中且不在当前值列表中，添加它
+            if (!currentValues.includes(node.name)) {
+              currentValues.push(node.name);
+            }
+          } else {
+            // 如果取消选中，从当前值列表中移除
+            const index = currentValues.indexOf(node.name);
+            if (index !== -1) {
+              currentValues.splice(index, 1);
+            }
+          }
         }
-      } else {
-        return {
-          ...prev,
-          [paramKey]: currentValues.filter((val) => val !== item.name),
-        };
-      }
 
-      return prev;
+        // 如果有子节点，递归处理
+        if (node.children && node.children.length > 0) {
+          node.children.forEach((child) => processNode(child, isChecked));
+        }
+      };
+
+      // 处理当前节点
+      processNode(item, checked);
+
+      console.info('hi, currentValues', currentValues);
+
+      // 返回更新后的状态
+      return {
+        ...prev,
+        [paramKey]: currentValues,
+      };
     });
   };
 
@@ -162,10 +182,6 @@ export function ArtifactParams({
                       dependentQueryStatus={dependentQueryStatus}
                       selectedItems={selectedItems}
                       onCheckChange={(item, checked) => {
-                        console.info('hi, item', item);
-                        console.info('hi, checked', checked);
-
-                        // 如果有levels，使用第一个level作为默认
                         if (param.levels && param.levels.length > 0) {
                           handleTreeViewCheckChange(
                             param.dfAlias,

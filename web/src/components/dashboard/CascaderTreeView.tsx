@@ -100,7 +100,8 @@ export function CascaderTreeView({
       name: '全部',
       type: 'root',
       children: [],
-      checked: selectedItems.length > 0,
+      // 默认为未选中状态
+      checked: false,
     };
 
     // 用于跟踪节点，避免重复创建
@@ -128,13 +129,21 @@ export function CascaderTreeView({
           return;
         }
 
+        // 设置正确的节点类型：第一层用levels，之后继续深入层级
+        let nodeType = 'folder';
+        if (colIndex === 0) {
+          nodeType = 'level';
+        } else if (colIndex === columns.length - 1) {
+          nodeType = 'item';
+        }
+
         // 创建新节点
         const newNode: TreeViewItem = {
           id: `${path}_${rowIndex}_${colIndex}`,
           name: value,
-          type: colIndex === columns.length - 1 ? 'item' : 'folder',
+          type: nodeType,
           children: [],
-          // 如果当前项在已选择列表中，则标记为已选中
+          // 只有当该项明确在selectedItems中时才标记为选中
           checked: selectedItems.includes(value),
         };
 
@@ -157,7 +166,31 @@ export function CascaderTreeView({
       });
     });
 
-    // 移除只有一个子节点的中间节点，使树更简洁
+    // 更新root节点的选中状态
+    const updateParentCheckedState = (node: TreeViewItem): boolean => {
+      if (!node.children || node.children.length === 0) {
+        return !!node.checked;
+      }
+
+      // 递归更新子节点状态
+      const childrenCheckedStates = node.children.map((child) =>
+        updateParentCheckedState(child)
+      );
+
+      // 如果所有子节点都被选中，则父节点也被选中
+      const allChildrenChecked = childrenCheckedStates.every((state) => state);
+      const anyChildChecked = childrenCheckedStates.some((state) => state);
+
+      // 只有当所有子节点都被选中，父节点才被标记为选中
+      node.checked = allChildrenChecked;
+
+      return allChildrenChecked;
+    };
+
+    // 更新节点选中状态
+    updateParentCheckedState(root);
+
+    // 简化树
     const simplifyTree = (node: TreeViewItem): TreeViewItem => {
       if (node.children) {
         node.children = node.children.map(simplifyTree);
@@ -180,12 +213,24 @@ export function CascaderTreeView({
 
   // 处理选中项变化，并跟踪选中数量
   const handleCheckChange = (item: TreeViewItem, checked: boolean) => {
-    // 更新选中项计数
-    if (checked) {
-      setSelectedCount((prev) => prev + 1);
-    } else {
-      setSelectedCount((prev) => Math.max(0, prev - 1));
-    }
+    // 递归计算选中项数量
+    const countSelectedItems = (node: TreeViewItem): number => {
+      // 如果是叶子节点，根据checked状态计数
+      if (!node.children || node.children.length === 0) {
+        return node.checked ? 1 : 0;
+      }
+
+      // 如果有子节点，累计子节点的选中数量
+      return node.children.reduce(
+        (count, child) => count + countSelectedItems(child),
+        0
+      );
+    };
+
+    // 更新当前选中项数量
+    setSelectedCount(
+      treeData.reduce((count, node) => count + countSelectedItems(node), 0)
+    );
 
     // 调用父组件的回调
     if (onCheckChange) {
@@ -225,7 +270,7 @@ export function CascaderTreeView({
           className='w-full justify-between text-left font-normal'
         >
           <span className='truncate'>
-            {selectedCount > 0 ? `已选择 ${selectedCount} 项` : '全部'}
+            {selectedCount > 0 ? `已选择 ${selectedCount} 项` : '请选择'}
           </span>
           {selectedCount > 0 && (
             <Badge
@@ -241,8 +286,7 @@ export function CascaderTreeView({
       <DialogContent className='sm:max-w-[550px] max-h-[80vh] overflow-hidden flex flex-col'>
         <DialogHeader>
           <DialogTitle>
-            选择
-            {(cascaderParam.levels && cascaderParam.levels[0]?.name) || '项目'}
+            {`选择${cascaderParam.levels?.[0]?.name || '参数'}`}
           </DialogTitle>
         </DialogHeader>
         <div className='flex-1 overflow-auto py-4'>

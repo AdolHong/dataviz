@@ -269,59 +269,6 @@ export function CascaderTreeView({
     );
   }
 
-  // 级联参数树形视图中选择变化的处理
-  const handleTreeViewCheckChange = (
-    dfAlias: string,
-    level: string,
-    item: TreeViewItem,
-    checked: boolean
-  ) => {
-    const paramKey = `${dfAlias}_${level}`;
-
-    // 根据节点类型和选择状态更新参数值
-    setParamValues((prev) => {
-      // 获取当前的值列表
-      const currentValues = Array.isArray(prev[paramKey])
-        ? [...(prev[paramKey] as string[])]
-        : [];
-
-      // 递归处理节点及其子节点
-      const processNode = (node: TreeViewItem, isChecked: boolean) => {
-        // 只处理叶子节点或最底层节点
-        if (node.type === 'item') {
-          if (isChecked) {
-            // 如果选中且不在当前值列表中，添加它
-            if (!currentValues.includes(node.name)) {
-              currentValues.push(node.name);
-            }
-          } else {
-            // 如果取消选中，从当前值列表中移除
-            const index = currentValues.indexOf(node.name);
-            if (index !== -1) {
-              currentValues.splice(index, 1);
-            }
-          }
-        }
-
-        // 如果有子节点，递归处理
-        if (node.children && node.children.length > 0) {
-          node.children.forEach((child) => processNode(child, isChecked));
-        }
-      };
-
-      // 处理当前节点
-      processNode(item, checked);
-
-      console.info('hi, currentValues', currentValues);
-
-      // 返回更新后的状态
-      return {
-        ...prev,
-        [paramKey]: currentValues,
-      };
-    });
-  };
-
   return (
     <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
       <DialogTrigger asChild>

@@ -215,7 +215,7 @@ const LayoutGridItem = React.memo(
       }
 
       // 确保 DOM 元素已经渲染且有数据
-      if (chartRef.current && artifactResponse?.dataContext?.data) {
+      if (chartRef.current && artifactResponse.dataContext.data) {
         // 如果图表实例不存在，则创建
         if (!chartInstance.current) {
           chartInstance.current = echarts.init(chartRef.current);
@@ -224,14 +224,14 @@ const LayoutGridItem = React.memo(
         // 使用 requestAnimationFrame 确保在下一帧更新
         requestAnimationFrame(() => {
           const option = JSON.parse(artifactResponse?.dataContext?.data);
-          chartInstance.current?.setOption(option);
+          chartInstance.current.setOption(option);
         });
       }
 
       // 清理函数
       return () => {
         if (chartInstance.current) {
-          chartInstance.current.dispose();
+          (chartInstance.current as echarts.ECharts).dispose();
           chartInstance.current = null;
         }
       };
@@ -376,13 +376,18 @@ const LayoutGridItem = React.memo(
           );
 
         case 'echart':
+          console.info('chartRef', chartRef);
           return (
-            <div
-              id='echart-container'
-              data-echart={artifactData.dataContext.data}
-              className='w-full h-full'
-            >
-              EChart图表渲染位置
+            <div className='w-[95%] h-[95%] flex justify-center items-center'>
+              <div
+                ref={chartRef}
+                style={{
+                  width: '100%',
+                  height: '300px',
+                  border: '1px solid #ddd',
+                  borderRadius: '8px',
+                }}
+              />
             </div>
           );
 

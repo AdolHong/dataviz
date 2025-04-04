@@ -43,7 +43,7 @@ async def query_by_source_id(request: QueryRequest):
             )
 
         # 检查更新时间是否匹配
-        if report.updatedAt != request.reportUpdateTime:
+        if report.updatedAt != request.requestContext.reportUpdateTime:
             return QueryResponse(
                 status="error",
                 message="Report has been updated, please refresh the page",
@@ -53,7 +53,7 @@ async def query_by_source_id(request: QueryRequest):
 
         # 查找对应的数据源
         data_source = next(
-            (ds for ds in report.dataSources if ds.id == request.sourceId),
+            (ds for ds in report.dataSources if ds.id == request.requestContext.sourceId),
             None
         )
         
@@ -113,7 +113,8 @@ async def query_by_source_id(request: QueryRequest):
             rowNumber=len(result) if result is not None else 0,
             cascaderContext={}
         )
-        code_context = request.requestContext
+        
+        code_context = construct_code_context(request)
 
         return QueryResponse(
             status="success",
@@ -132,3 +133,13 @@ async def query_by_source_id(request: QueryRequest):
             error=str(e),
             alerts=[Alert(type="error", message=str(e))]
         )
+        
+def construct_code_context(request: QueryRequest):
+    
+
+    return QueryResponseCodeContext(
+        fileId=request.requestContext.fileId,
+        sourceId=request.requestContext.sourceId,
+        reportUpdateTime=request.requestContext.reportUpdateTime,
+        type=request.requestContext.type,
+    )

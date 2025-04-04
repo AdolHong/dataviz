@@ -285,7 +285,9 @@ const LayoutGridItem = React.memo(
                 Object.values(dependentQueryStatus).every(
                   (queryStatus) =>
                     queryStatus.status === DataSourceStatus.SUCCESS
-                ) && <ArtifactParams artifact={artifact} />}
+                ) && (
+                  <ArtifactParams artifact={(artifact, dependentQueryStatus)} />
+                )}
             </div>
           </CardContent>
 

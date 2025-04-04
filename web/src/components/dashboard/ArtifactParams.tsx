@@ -2,12 +2,17 @@ import { type Artifact } from '@/types/models/artifact';
 import { Badge } from '@/components/ui/badge';
 import { useState } from 'react';
 import { Combobox } from '@/components/combobox';
+import type { QueryStatus } from '@/lib/store/useTabQueryStatusStore';
 
 interface ArtifactParamsProps {
   artifact: Artifact;
+  dependentQueryStatus: Record<string, QueryStatus>;
 }
 
-export function ArtifactParams({ artifact }: ArtifactParamsProps) {
+export function ArtifactParams({
+  artifact,
+  dependentQueryStatus,
+}: ArtifactParamsProps) {
   if (!artifact) return null;
 
   // 为每个参数创建状态

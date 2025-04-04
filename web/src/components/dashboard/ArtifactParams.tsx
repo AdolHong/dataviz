@@ -120,18 +120,21 @@ export function ArtifactParams({
                     >
                       级联
                     </Badge>
-                    <span className='text-xs font-medium truncate'>
+                    <span className='text-xs font-medium truncate mr-4'>
                       {param.dfAlias}
                     </span>
+                    <div className='flex flex-row gap-1'>
+                      {param.levels &&
+                        param.levels.map((level, i) => (
+                          <span key={i} className='text-[10px]'>
+                            {level.name || level.dfColumn}
+                            {i < param.levels.length - 1 ? ',' : ''}
+                          </span>
+                        ))}
+                    </div>
                   </div>
 
                   <div className='mt-1'>
-                    {param.levels &&
-                      param.levels.map((level, i) => (
-                        <div key={i} className='mb-1 text-[10px] text-gray-600'>
-                          {level.name || level.dfColumn}
-                        </div>
-                      ))}
                     <CascaderTreeView
                       dfAlias={param.dfAlias}
                       cascaderParam={param}

@@ -82,19 +82,12 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
         layoutItem,
         artifact,
         strDependentQueryStatus: JSON.stringify(dependentQueryStatus),
-        title: activeTab?.title || '',
+        title: artifact?.title || '',
         description: 'todo: description',
         report,
       };
     });
-  }, [
-    layout.items,
-    report.artifacts,
-    report.dataSources,
-    queryStatus,
-    activeTab?.title || '',
-    report,
-  ]);
+  }, [layout.items, report.artifacts, report.dataSources, queryStatus, report]);
 
   // 渲染函数使用 useCallback
   const renderLayoutGridItem = useCallback(

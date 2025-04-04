@@ -196,42 +196,6 @@ export function CascaderTreeView({
   const [value, setValue] = useState<string[]>([]);
   console.info('value', value);
 
-  // // 示例数据
-  // const treeData2 = [
-  //   {
-  //     name: '广东',
-  //     value: '广东',
-  //     children: [
-  //       {
-  //         name: '深圳',
-  //         value: '深圳',
-  //       },
-  //       {
-  //         name: '广州',
-  //         value: '广州',
-  //       },
-  //       {
-  //         name: '汕头',
-  //         value: '汕头',
-  //       },
-  //     ],
-  //   },
-  //   {
-  //     name: '湖南',
-  //     value: '湖南',
-  //     children: [
-  //       {
-  //         name: '佛山',
-  //         value: '佛山',
-  //       },
-  //     ],
-  //   },
-  // ];
-
-  // const values = ['深圳', '汕头', '湖南'];
-  // const result = getChildrenValuesByTargetValues(treeData2, values);
-  // console.log('result', result);
-
   return (
     <TreeSelect
       className='w-full'

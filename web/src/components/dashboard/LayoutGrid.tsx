@@ -206,38 +206,6 @@ const LayoutGridItem = React.memo(
     const [artifactResponse, setArtifactResponse] =
       useState<ArtifactResponse | null>(null);
 
-    const chartRef = useRef(null);
-    const chartInstance = useRef(null);
-
-    useEffect(() => {
-      if (artifactResponse?.dataContext?.type !== 'echart') {
-        return;
-      }
-      console.info('hi, artifactResponse', artifactResponse);
-
-      // 确保 DOM 元素已经渲染且有数据
-      if (chartRef.current && artifactResponse.dataContext.data) {
-        // 如果图表实例不存在，则创建
-        if (!chartInstance.current) {
-          chartInstance.current = echarts.init(chartRef.current);
-        }
-
-        // 使用 requestAnimationFrame 确保在下一帧更新
-        requestAnimationFrame(() => {
-          const option = JSON.parse(artifactResponse?.dataContext?.data);
-          chartInstance.current.setOption(option);
-        });
-      }
-
-      // 清理函数
-      return () => {
-        if (chartInstance.current) {
-          (chartInstance.current as echarts.ECharts).dispose();
-          chartInstance.current = null;
-        }
-      };
-    }, [artifactResponse?.dataContext?.data]); // 当 visualizationData 变化时重新渲染
-
     useEffect(() => {
       if (
         Object.values(dependentQueryStatus).every(
@@ -377,21 +345,7 @@ const LayoutGridItem = React.memo(
           );
 
         case 'echart':
-          console.info('chartRef', chartRef);
-          return (
-            <div className='w-[95%] h-[95%] flex justify-center items-center'>
-              <div>12222</div>
-              <div
-                ref={chartRef}
-                style={{
-                  width: '100%',
-                  height: '300px',
-                  border: '1px solid #ddd',
-                  borderRadius: '8px',
-                }}
-              />
-            </div>
-          );
+          return <EChartComponent optionData={artifactData.dataContext.data} />;
 
         case 'altair':
           return (
@@ -539,3 +493,56 @@ const LayoutGridItem = React.memo(
     );
   }
 );
+
+// ECharts 图表渲染组件
+interface EChartComponentProps {
+  optionData: string; // JSON 字符串格式的 ECharts 配置
+}
+
+const EChartComponent: React.FC<EChartComponentProps> = ({ optionData }) => {
+  const chartRef = useRef<HTMLDivElement>(null);
+  const chartInstance = useRef<echarts.ECharts | null>(null);
+
+  useEffect(() => {
+    let parsedOption: echarts.EChartsOption;
+    try {
+      parsedOption = JSON.parse(optionData);
+    } catch (e) {
+      console.error('Failed to parse ECharts option data:', e);
+      // 可以在这里显示错误提示，或者渲染一个占位符
+      return; // 解析失败则不继续
+    }
+
+    // 初始化或更新图表
+    if (chartRef.current) {
+      // 如果实例不存在或已销毁，则初始化
+      if (!chartInstance.current || chartInstance.current.isDisposed()) {
+        chartInstance.current = echarts.init(chartRef.current);
+      }
+
+      // 设置配置项
+      chartInstance.current.setOption(parsedOption, true); // true 表示不合并，完全替换
+    }
+
+    // 添加窗口大小调整监听器
+    const handleResize = () => {
+      if (chartInstance.current && !chartInstance.current.isDisposed()) {
+        chartInstance.current.resize();
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+
+    // 清理函数：组件卸载时销毁图表实例并移除监听器
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (chartInstance.current && !chartInstance.current.isDisposed()) {
+        chartInstance.current.dispose();
+        chartInstance.current = null; // 清空引用
+      }
+    };
+  }, [optionData]); // 当配置数据变化时，重新执行 effect
+
+  // 返回用于挂载 ECharts 的 div
+  return <div ref={chartRef} style={{ width: '100%', height: '100%' }} />;
+};

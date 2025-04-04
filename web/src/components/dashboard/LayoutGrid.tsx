@@ -46,6 +46,7 @@ export function LayoutGrid({ report }: LayoutGridProps) {
         {layout.items.map((layoutItem) =>
           renderGridItem(
             layoutItem,
+            artifacts.find((artifact) => artifact.id === layoutItem.id),
             // title用tab的
             activeTab.title,
             'todo: description'
@@ -59,9 +60,14 @@ export function LayoutGrid({ report }: LayoutGridProps) {
 // 渲染具体的网格项内容
 const renderGridItem = (
   layoutItem: LayoutItem,
+  artifact: Artifact | undefined,
   title: string,
   description: string
 ) => {
+  if (!artifact) {
+    return <div>没有找到对应的artifact</div>;
+  }
+
   // 计算网格项的样式，包括起始位置和跨度
   const itemStyle = {
     gridColumn: `${layoutItem.x + 1} / span ${layoutItem.width}`,

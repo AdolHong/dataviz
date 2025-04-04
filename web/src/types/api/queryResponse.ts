@@ -1,6 +1,6 @@
 import type { CascaderContext } from './queryRequest';
 
-interface Alert {
+export interface Alert {
   type: 'info' | 'warning' | 'error';
   message: string;
 }

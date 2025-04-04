@@ -1,16 +1,28 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import TreeView from '@/components/tree-view';
 import type { TreeViewItem } from '@/components/tree-view';
 import type { DataSource } from '@/types/models/dataSource';
 import type { QueryStatus } from '@/lib/store/useTabQueryStatusStore';
 import Papa from 'papaparse';
 import type { CascaderParam } from '@/types/models/artifact';
+import { Button } from '@/components/ui/button';
+import { ChevronDown } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
+
 interface CascaderTreeViewProps {
   dfAlias: string;
   dataSources: DataSource[];
   cascaderParam: CascaderParam;
   dependentQueryStatus: Record<string, QueryStatus>;
   onCheckChange?: (item: TreeViewItem, checked: boolean) => void;
+  selectedItems?: string[]; // 已选中的项目名称列表
 }
 
 interface CsvRow {
@@ -23,8 +35,10 @@ export function CascaderTreeView({
   cascaderParam,
   dependentQueryStatus,
   onCheckChange,
+  selectedItems = [],
 }: CascaderTreeViewProps) {
-  console.info('hi, CascaderTreeView');
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [selectedCount, setSelectedCount] = useState(selectedItems.length);
 
   // 1. 根据dfAlias找到对应的dataSource和sourceId
   const dataSource = useMemo(() => {
@@ -35,32 +49,21 @@ export function CascaderTreeView({
   const csvData = useMemo(() => {
     if (!dataSource) return null;
 
-    console.info('hi, dependentQueryStatus', dependentQueryStatus);
-    console.info('hi, dataSource.id', dataSource.id);
-    console.info('hi, dataSources', dataSources);
     const queryStatus = dependentQueryStatus[dataSource.id];
     if (!queryStatus?.queryResponse?.cascaderContext?.inferred) return null;
-    console.info('2');
+
     let cascaderTuple: string[] = [];
     cascaderParam.levels.forEach((level) => {
       cascaderTuple.push(level.dfColumn);
     });
     const cascaderKey = JSON.stringify(cascaderTuple);
-    console.info('3');
-    console.info(
-      'hi, queryStatus.queryResponse.cascaderContext.inferred',
-      queryStatus.queryResponse.cascaderContext.inferred
-    );
-    console.info('hi, cascaderKey', cascaderKey);
+
     const inferredCsvData = queryStatus.queryResponse.cascaderContext.inferred[
       cascaderKey
     ] as string;
 
     return inferredCsvData;
-  }, [dataSource, dependentQueryStatus]);
-
-  console.info('hi, cascaderParam', cascaderParam);
-  console.info('hi, csvData', csvData);
+  }, [dataSource, dependentQueryStatus, cascaderParam]);
 
   // 3. 将CSV数据转换为TreeView格式
   const treeData = useMemo(() => {
@@ -84,6 +87,7 @@ export function CascaderTreeView({
       name: '全部',
       type: 'root',
       children: [],
+      checked: selectedItems.length > 0,
     };
 
     // 用于跟踪节点，避免重复创建
@@ -117,6 +121,8 @@ export function CascaderTreeView({
           name: value,
           type: colIndex === columns.length - 1 ? 'item' : 'folder',
           children: [],
+          // 如果当前项在已选择列表中，则标记为已选中
+          checked: selectedItems.includes(value),
         };
 
         // 将新节点添加到父节点
@@ -149,6 +155,7 @@ export function CascaderTreeView({
           return {
             ...child,
             name: `${node.name} / ${child.name}`,
+            checked: child.checked,
           };
         }
       }
@@ -156,29 +163,89 @@ export function CascaderTreeView({
     };
 
     return [simplifyTree(root)];
-  }, [csvData]);
+  }, [csvData, selectedItems]);
 
-  if (!csvData || treeData.length === 0) {
+  // 处理选中项变化，并跟踪选中数量
+  const handleCheckChange = (item: TreeViewItem, checked: boolean) => {
+    // 更新选中项计数
+    if (checked) {
+      setSelectedCount((prev) => prev + 1);
+    } else {
+      setSelectedCount((prev) => Math.max(0, prev - 1));
+    }
+
+    // 调用父组件的回调
+    if (onCheckChange) {
+      onCheckChange(item, checked);
+    }
+  };
+
+  if (!dataSource) {
     return (
-      <div className='p-4 text-sm text-muted-foreground'>
-        {!dataSource ? '找不到数据源' : '无级联数据可用'}
-      </div>
+      <Button
+        variant='outline'
+        className='w-full justify-between text-left font-normal text-xs'
+        disabled
+      >
+        找不到数据源
+      </Button>
+    );
+  }
+
+  if (!csvData) {
+    return (
+      <Button
+        variant='outline'
+        className='w-full justify-between text-left font-normal text-xs'
+        disabled
+      >
+        无级联数据可用
+      </Button>
     );
   }
 
   return (
-    <div className='max-h-[400px] overflow-auto p-2'>
-      <TreeView
-        data={treeData}
-        showCheckboxes={true}
-        searchPlaceholder='搜索...'
-        selectionText='已选择'
-        checkboxLabels={{
-          check: '全选',
-          uncheck: '取消全选',
-        }}
-        onCheckChange={onCheckChange}
-      />
-    </div>
+    <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+      <DialogTrigger asChild>
+        <Button
+          variant='outline'
+          className='w-full justify-between text-left font-normal'
+        >
+          <span className='truncate'>
+            {selectedCount > 0 ? `已选择 ${selectedCount} 项` : '全部'}
+          </span>
+          {selectedCount > 0 && (
+            <Badge
+              variant='secondary'
+              className='ml-2 mr-2 bg-blue-100 hover:bg-blue-200 text-blue-800'
+            >
+              {selectedCount}
+            </Badge>
+          )}
+          <ChevronDown className='h-4 w-4 opacity-50' />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className='sm:max-w-[550px] max-h-[80vh] overflow-hidden flex flex-col'>
+        <DialogHeader>
+          <DialogTitle>
+            选择
+            {(cascaderParam.levels && cascaderParam.levels[0]?.name) || '项目'}
+          </DialogTitle>
+        </DialogHeader>
+        <div className='flex-1 overflow-auto py-4'>
+          <TreeView
+            data={treeData}
+            showCheckboxes={true}
+            searchPlaceholder='搜索...'
+            selectionText='已选择'
+            checkboxLabels={{
+              check: '全选',
+              uncheck: '取消全选',
+            }}
+            onCheckChange={handleCheckChange}
+          />
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

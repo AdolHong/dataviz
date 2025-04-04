@@ -50,6 +50,7 @@ import { useSessionIdStore } from '@/lib/store/useSessionIdStore';
 import { queryApi } from '@/api/query';
 import { Combobox } from '../combobox';
 import type { QueryRequest, QueryResponse } from '@/types/api/queryRequest';
+import { DataSourceDialog } from './DataSourceDialog';
 
 interface ParameterQueryAreaProps {
   activeTabId: string;
@@ -78,6 +79,7 @@ export const ParameterQueryArea = memo(
     const [selectedDataSourceIndex, setSelectedDataSourceIndex] = useState<
       number | null
     >(null);
+    const [showDataSourceDialog, setShowDataSourceDialog] = useState(false);
 
     // 当前标签: parameters or upload
     const [activeParameterTab, setActiveParameterTab] = useState('parameters');
@@ -587,7 +589,10 @@ export const ParameterQueryArea = memo(
                       <button
                         key={source.id}
                         type='button'
-                        onClick={() => setSelectedDataSourceIndex(index)}
+                        onClick={() => {
+                          setSelectedDataSourceIndex(index);
+                          setShowDataSourceDialog(true);
+                        }}
                         className={`w-3 h-3 rounded-full  shadow-sm   cursor-pointer ${
                           queryStatusRef.current[source.id]?.status
                             ? queryStatusColor(
@@ -667,22 +672,23 @@ export const ParameterQueryArea = memo(
           </form>
 
           {/* 数据源详情对话框 */}
-          <Dialog
-            open={selectedDataSourceIndex !== null}
-            onOpenChange={() => setSelectedDataSourceIndex(null)}
-          >
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>
-                  {selectedDataSourceIndex !== null
-                    ? `数据源: ${dataSources?.[selectedDataSourceIndex].name}`
-                    : '数据源详情'}
-                </DialogTitle>
-              </DialogHeader>
-              {/* 后续可以在这里添加更多详细信息 */}
-              <div className='text-muted-foreground'>数据源详情 - 待完善</div>
-            </DialogContent>
-          </Dialog>
+          <DataSourceDialog
+            open={showDataSourceDialog}
+            onOpenChange={setShowDataSourceDialog}
+            dataSource={
+              selectedDataSourceIndex !== null
+                ? dataSources?.[selectedDataSourceIndex] || null
+                : null
+            }
+            queryStatus={
+              selectedDataSourceIndex !== null &&
+              dataSources?.[selectedDataSourceIndex]
+                ? queryStatusRef.current[
+                    dataSources[selectedDataSourceIndex].id
+                  ]
+                : null
+            }
+          />
         </CardContent>
       </Card>
     );

@@ -110,15 +110,11 @@ async def query_by_source_id(request: QueryRequest):
         
         if result is not None:
             save_query_result(request.uniqueId, result.to_json(orient='records'))
-
-
-
-        
         
         # 创建data context
         data_context = QueryResponseDataContext(
             uniqueId=request.uniqueId,
-            demoData="",
+            demoData= '' if result is None or (isinstance(result, pd.DataFrame) and result.empty) else convert_df_to_csv_string(result.head(5)),
             rowNumber=len(result) if result is not None else 0,
         )
         

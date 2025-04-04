@@ -103,9 +103,9 @@ async def execute_artifact(request: ArtifactRequest):
             if isinstance(result, str):
                 data_context = ArtifactTextDataContext(type="text", data=result)
             # elif isinstance(result, plotly.graph_objs._figure.Figure):
-            elif 'plotly.graph_objs._figure.Figure' in str(type(result)):
+            elif 'plotly' in str(type(result)):
                 data_context = ArtifactPlotlyDataContext(type="plotly", data=result.to_json())
-            elif 'pyecharts.charts.Chart' in str(type(result)):
+            elif 'pyecharts' in str(type(result)):
                 data_context = ArtifactEChartDataContext(type="echart", data=result.dump_options())
             else:
                 # 默认转换为文本

@@ -26,6 +26,7 @@ import type {
 } from '@/types/api/aritifactRequest';
 import { toast } from 'sonner';
 import Plot from 'react-plotly.js';
+import * as echarts from 'echarts';
 
 interface LayoutGridProps {
   report: Report;
@@ -115,12 +116,6 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
 
   return (
     <>
-      <div className='flex items-center'>
-        <hr className='flex-1 border-t border-gray-200' />
-        <span className='mx-4 text-lg font-bold'>展示区域</span>
-        <hr className='flex-1 border-t border-gray-200' />
-        <hr className='flex-1 border-t border-gray-200' />
-      </div>
       <div
         className='grid gap-4 w-full'
         style={{
@@ -210,6 +205,37 @@ const LayoutGridItem = React.memo(
     const [error, setError] = useState<string | null>(null);
     const [artifactResponse, setArtifactResponse] =
       useState<ArtifactResponse | null>(null);
+
+    const chartRef = useRef(null);
+    const chartInstance = useRef(null);
+
+    useEffect(() => {
+      if (artifactResponse?.dataContext?.type !== 'echart') {
+        return;
+      }
+
+      // 确保 DOM 元素已经渲染且有数据
+      if (chartRef.current && artifactResponse?.dataContext?.data) {
+        // 如果图表实例不存在，则创建
+        if (!chartInstance.current) {
+          chartInstance.current = echarts.init(chartRef.current);
+        }
+
+        // 使用 requestAnimationFrame 确保在下一帧更新
+        requestAnimationFrame(() => {
+          const option = JSON.parse(artifactResponse?.dataContext?.data);
+          chartInstance.current?.setOption(option);
+        });
+      }
+
+      // 清理函数
+      return () => {
+        if (chartInstance.current) {
+          chartInstance.current.dispose();
+          chartInstance.current = null;
+        }
+      };
+    }, [artifactResponse]); // 当 visualizationData 变化时重新渲染
 
     useEffect(() => {
       if (
@@ -320,7 +346,8 @@ const LayoutGridItem = React.memo(
                   showlegend: false,
                   autosize: true,
                   height: 300,
-                  margin: { l: 50, r: 50, b: 50, t: 50, pad: 4 },
+                  margin: { l: 20, r: 20, b: 50, t: 50, pad: 4 },
+                  // margin: { l: 0, r: 0, b: 0, t: 0, pad: 4 },
                   font: { family: 'Arial, sans-serif' },
                   sliders: layout.sliders, // 确保滑块配置被传递
                   modebar: {
@@ -377,10 +404,10 @@ const LayoutGridItem = React.memo(
 
     return (
       <div key={layoutItem.id} className='min-h-80 max-h-120' style={itemStyle}>
-        <Card className='h-full overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300'>
+        <Card className='h-full overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300  mt-0 mb-0 py-1 gap-0'>
           <CardHeader
             key={`layoutItem.id-${layoutItem.id}-card-header`}
-            className='h-5 flex items-center justify-between'
+            className='h-10 flex items-center justify-between'
           >
             <div>
               <Tooltip>
@@ -431,7 +458,7 @@ const LayoutGridItem = React.memo(
                 )}
             </div>
           </CardHeader>
-          <CardContent className='p-0 h-[calc(100%-3.5rem)]'>
+          <CardContent className='h-full py-0 px-0'>
             <div className='flex h-full border-t overflow-hidden'>
               {/* 展示内容 */}
               <div className='flex-1 flex items-center justify-center p-4 min-w-0'>

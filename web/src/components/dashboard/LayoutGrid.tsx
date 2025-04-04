@@ -312,23 +312,24 @@ const LayoutGridItem = React.memo(
           );
 
           return (
-            <div className='w-full h-full flex'>
+            <div className='w-[95%] h-[95%] flex justify-center items-center'>
               <Plot
                 data={data}
                 layout={{
                   ...layout,
+                  showlegend: false,
                   autosize: true,
-                  width: undefined,
                   height: 300,
                   margin: { l: 50, r: 50, b: 50, t: 50, pad: 4 },
                   font: { family: 'Arial, sans-serif' },
-                  responsive: true,
+                  sliders: layout.sliders, // 确保滑块配置被传递
                 }}
-                frames={frames}
+                frames={frames} // 明确传递动画帧
                 config={{
                   ...(config || {}),
                   responsive: true,
-                  displayModeBar: true,
+                  displayModeBar: 'hover',
+                  modeBarPosition: 'bottom',
                   displaylogo: false,
                   modeBarButtonsToRemove: ['lasso2d', 'select2d'],
                 }}

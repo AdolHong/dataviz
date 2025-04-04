@@ -7,6 +7,7 @@ import { CascaderTreeView } from './CascaderTreeView';
 import type { TreeViewItem } from '@/components/tree-view';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Combobox } from '@/components/combobox';
+import { parseDynamicDate } from '@/utils/parser';
 
 interface ArtifactParamsProps {
   artifact: Artifact;
@@ -25,6 +26,56 @@ export function ArtifactParams({
   const [paramValues, setParamValues] = useState<
     Record<string, string | string[]>
   >({});
+
+  const [plainParamChoices, setPlainParamChoices] = useState<
+    Record<string, Record<string, string>[]>
+  >({});
+
+  useEffect(() => {
+    console.info('hi, paramValues', paramValues);
+
+    artifact.plainParams?.forEach((param) => {
+      // 先处理choices的动态日期
+      const choices = param.choices.map((choice) => ({
+        key: parseDynamicDate(choice),
+        value: parseDynamicDate(choice),
+      }));
+
+      setPlainParamChoices((prev) => ({
+        ...prev,
+        [param.name]: choices,
+      }));
+
+      // 再处理default
+      if (param.type === 'single') {
+        const defaulVal = parseDynamicDate(param.default);
+        setParamValues((prev) => ({
+          ...prev,
+          [param.name]: defaulVal,
+        }));
+      } else if (param.type === 'multiple') {
+        const defaulVal = param.default.map((val) => parseDynamicDate(val));
+        setParamValues((prev) => ({
+          ...prev,
+          [param.name]: defaulVal,
+        }));
+      }
+    });
+  }, [dependentQueryStatus]);
+
+  // 修改后的代码
+  const handleValueChange = (paramName: string, value: string | string[]) => {
+    setParamValues((prev) => {
+      // 如果值没有变化，不更新状态
+      if (JSON.stringify(prev[paramName]) === JSON.stringify(value)) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [paramName]: value,
+      };
+    });
+  };
 
   // 级联参数树形视图中选择变化的处理
   const handleTreeViewCheckChange = (
@@ -155,18 +206,13 @@ export function ArtifactParams({
 
                   {/* 使用Combobox进行选择 */}
                   <Combobox
-                    options={param.choices.map((choice) => ({
-                      key: choice,
-                      value: choice,
-                    }))}
-                    value={
-                      paramValues[param.name] ||
-                      (param.type === 'single'
-                        ? param.default
-                        : Array.isArray(param.default)
-                          ? param.default
-                          : [param.default])
+                    options={
+                      plainParamChoices[param.name]?.map((choice) => ({
+                        key: choice.key,
+                        value: choice.value,
+                      })) || []
                     }
+                    value={paramValues[param.name] || []}
                     placeholder='请选择'
                     onValueChange={(value) =>
                       handleValueChange(param.name, value)
@@ -182,3 +228,17 @@ export function ArtifactParams({
     </div>
   );
 }
+// <Combobox
+// options={
+//   nameToChoices[param.name]?.map((choice) => ({
+//     key: choice.value,
+//     value: choice.value,
+//   })) || []
+// }
+// value={values[param.name] || []}
+// placeholder='请选择'
+// onValueChange={(value) =>
+//   handleValueChange(param.name, value as string[])
+// }
+// mode='single'
+// />

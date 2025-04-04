@@ -1,90 +1,68 @@
-import React, { useMemo, useState } from 'react';
-import TreeView from '@/components/tree-view';
-import type { TreeViewItem } from '@/components/tree-view';
+import { useMemo, useState } from 'react';
 import type { DataSource } from '@/types/models/dataSource';
 import type { QueryStatus } from '@/lib/store/useTabQueryStatusStore';
 import Papa from 'papaparse';
 import type { CascaderParam } from '@/types/models/artifact';
 import { Button } from '@/components/ui/button';
-import { ChevronDown } from 'lucide-react';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
-import { Badge } from '@/components/ui/badge';
+import { TreeSelect } from '../tree-select/tree-select';
 
-interface CsvRow {
-  [key: string]: string;
-}
-
-interface TreeNode {
-  id: string;
+interface TreeNodeData {
   name: string;
-  type: string;
-  children?: TreeNode[];
+  value: string;
+  children?: TreeNodeData[];
 }
 
-function csvToHierarchicalData(
-  csvRows: CsvRow[],
-  levels: string[]
-): TreeNode[] {
-  // Create the root node
-  const root: TreeNode = {
-    id: '1',
-    name: 'Root',
-    type: 'root',
-    children: [],
-  };
+function csvToTreeData(csvData: string, levels: string[]): TreeNodeData[] {
+  // 使用Papa Parse解析CSV
+  const { data } = Papa.parse(csvData, {
+    header: true,
+    skipEmptyLines: true,
+  });
 
-  // Create maps to track existing nodes at each level
-  const provinceMap: Record<string, TreeNode> = {};
-  const cityMap: Record<string, Record<string, TreeNode>> = {};
+  // 存储结果的树形结构
+  const result: TreeNodeData[] = [];
 
-  // Process each CSV row
-  csvRows.forEach((row) => {
-    const province = row[levels[0]]; // 'province'
-    const city = row[levels[1]]; // 'city'
+  // 遍历CSV的每一行
+  data.forEach((row: any) => {
+    // 从根节点开始处理
+    let currentLevel = result;
+    let parentNode: TreeNodeData | null = null;
 
-    if (!province) return; // Skip if no province value
+    // 遍历每一层级
+    for (let i = 0; i < levels.length; i++) {
+      const level = levels[i];
+      const value = row[level];
 
-    // Handle province level
-    if (!provinceMap[province]) {
-      const provinceId = `1.${Object.keys(provinceMap).length + 1}`;
-      const provinceNode: TreeNode = {
-        id: provinceId,
-        name: province,
-        type: levels[0], // 'province'
-        children: [],
-      };
-      root.children!.push(provinceNode);
-      provinceMap[province] = provinceNode;
-    }
+      // 查找当前值是否已存在于当前层级中
+      let node = currentLevel.find((node) => node.name === value);
 
-    // Handle city level
-    if (city && provinceMap[province]) {
-      if (!cityMap[province]) {
-        cityMap[province] = {};
+      // 如果不存在，创建新节点
+      if (!node) {
+        node = {
+          name: value,
+          value: value.toLowerCase().replace(/\s+/g, '-'), // 根据名称生成value值
+        };
+
+        // 如果不是最后一层，添加children数组
+        if (i < levels.length - 1) {
+          node.children = [];
+        }
+
+        // 将新节点添加到当前层级
+        currentLevel.push(node);
       }
 
-      if (!cityMap[province][city]) {
-        const provinceNode = provinceMap[province];
-        const cityId = `${provinceNode.id}.${(provinceNode.children?.length || 0) + 1}`;
-        const cityNode: TreeNode = {
-          id: cityId,
-          name: city,
-          type: levels[1], // 'city'
-          children: [],
-        };
-        provinceNode.children!.push(cityNode);
-        cityMap[province][city] = cityNode;
+      // 如果不是最后一层，移动到下一层级
+      if (i < levels.length - 1) {
+        if (!node.children) {
+          node.children = [];
+        }
+        currentLevel = node.children;
       }
     }
   });
 
-  return [root];
+  return result;
 }
 
 interface CascaderTreeViewProps {
@@ -92,8 +70,7 @@ interface CascaderTreeViewProps {
   dataSources: DataSource[];
   cascaderParam: CascaderParam;
   dependentQueryStatus: Record<string, QueryStatus>;
-  onCheckChange?: (item: TreeViewItem, checked: boolean) => void;
-  selectedItems?: string[]; // 已选中的项目名称列表
+  onCheckChange?: (selectedValues: string[], treeData: TreeNodeData[]) => void;
 }
 
 export function CascaderTreeView({
@@ -102,11 +79,7 @@ export function CascaderTreeView({
   cascaderParam,
   dependentQueryStatus,
   onCheckChange,
-  selectedItems = [],
 }: CascaderTreeViewProps) {
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [selectedCount, setSelectedCount] = useState(selectedItems.length);
-
   // 1. 根据dfAlias找到对应的dataSource和sourceId
   const dataSource = useMemo(() => {
     return dataSources.find((ds) => ds.alias === dfAlias);
@@ -149,16 +122,8 @@ export function CascaderTreeView({
   const treeData = useMemo(() => {
     if (!csvData) return [];
 
-    // 使用PapaParse解析CSV
-    const { data } = Papa.parse<CsvRow>(csvData, {
-      header: true,
-      skipEmptyLines: true,
-    });
-
-    // Example usage with your data
-    const hierarchicalData = csvToHierarchicalData(data, levels);
-    console.log(JSON.stringify(hierarchicalData, null, 2));
-    return hierarchicalData;
+    const treeData = csvToTreeData(csvData, levels);
+    return treeData;
   }, [csvData]);
 
   if (!dataSource) {
@@ -185,43 +150,63 @@ export function CascaderTreeView({
     );
   }
 
+  const [value, setValue] = useState<string[]>([]);
+  console.info('value', value);
+
+  interface TreeNodeData {
+    name: string;
+    value: string;
+    children?: TreeNodeData[];
+  }
+
+  // 示例数据
+  const treeData2 = [
+    {
+      name: '广东',
+      value: '广东',
+      children: [
+        {
+          name: '深圳',
+          value: '深圳',
+        },
+        {
+          name: '广州',
+          value: '广州',
+        },
+        {
+          name: '汕头',
+          value: '汕头',
+        },
+      ],
+    },
+    {
+      name: '湖南',
+      value: '湖南',
+      children: [
+        {
+          name: '佛山',
+          value: '佛山',
+        },
+      ],
+    },
+  ];
+
+  const values = ['深圳', '汕头', '湖南'];
+  const result = getChildrenValuesByTargetValues(treeData2, values);
+  console.log('result', result);
+  // 输出: ["佛山", "深圳", '汕头']
+
   return (
-    <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-      <DialogTrigger asChild>
-        <Button
-          variant='outline'
-          className='w-full justify-between text-left font-normal'
-        >
-          {selectedCount > 0 && (
-            <Badge
-              variant='secondary'
-              className='ml-2 mr-2 bg-blue-100 hover:bg-blue-200 text-blue-800'
-            >
-              {selectedCount}
-            </Badge>
-          )}
-          <ChevronDown className='h-4 w-4 opacity-50' />
-        </Button>
-      </DialogTrigger>
-      <DialogContent className='sm:max-w-[550px] max-h-[80vh] overflow-hidden flex flex-col'>
-        <DialogHeader>
-          <DialogTitle>
-            {`选择${cascaderParam.levels?.[0]?.name || '参数'}`}
-          </DialogTitle>
-        </DialogHeader>
-        <div className='flex-1 overflow-auto py-4'>
-          <TreeView
-            data={treeData}
-            showCheckboxes={true}
-            searchPlaceholder='搜索...'
-            selectionText='已选择'
-            checkboxLabels={{
-              check: '全选',
-              uncheck: '取消全选',
-            }}
-          />
-        </div>
-      </DialogContent>
-    </Dialog>
+    <TreeSelect
+      className='w-full'
+      data={treeData}
+      value={value}
+      onValueChange={(v: string[]) => {
+        setValue(v);
+        if (onCheckChange) {
+          onCheckChange(v, treeData);
+        }
+      }}
+    />
   );
 }

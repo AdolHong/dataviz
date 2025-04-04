@@ -4,10 +4,10 @@ import { useState, useEffect } from 'react';
 import type { QueryStatus } from '@/lib/store/useTabQueryStatusStore';
 import type { DataSource } from '@/types/models/dataSource';
 import { CascaderTreeView } from './CascaderTreeView';
-import type { TreeViewItem } from '@/components/tree-view';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+
 import { Combobox } from '@/components/combobox';
 import { parseDynamicDate } from '@/utils/parser';
+import type { TreeNodeData } from '../tree-select/types';
 
 interface ArtifactParamsProps {
   artifact: Artifact;
@@ -81,45 +81,15 @@ export function ArtifactParams({
   const handleTreeViewCheckChange = (
     dfAlias: string,
     itemLevel: string,
-    item: TreeViewItem,
-    checked: boolean
+    selectedValues: string[],
+    treeData: TreeNodeData[]
   ) => {
     const paramKey = `cascader,${dfAlias},${itemLevel}`;
 
-    console.info('hi, paramKey', paramKey);
     // 根据节点类型和选择状态更新参数值
     setParamValues((prev) => {
       // 获取当前的值列表
       const currentValues: string[] = [...(prev[paramKey] || [])];
-
-      // 递归处理节点及其子节点
-      const processNode = (node: TreeViewItem, isChecked: boolean) => {
-        // 只处理叶子节点或最底层节点
-        if (node.type === 'item') {
-          if (isChecked) {
-            // 如果选中且不在当前值列表中，添加它
-            if (!currentValues.includes(node.name)) {
-              currentValues.push(node.name);
-            }
-          } else {
-            // 如果取消选中，从当前值列表中移除
-            const index = currentValues.indexOf(node.name);
-            if (index !== -1) {
-              currentValues.splice(index, 1);
-            }
-          }
-        }
-
-        // 如果有子节点，递归处理
-        if (node.children && node.children.length > 0) {
-          node.children.forEach((child) => processNode(child, isChecked));
-        }
-      };
-
-      // 处理当前节点
-      processNode(item, checked);
-
-      console.info('hi, currentValues', currentValues);
 
       // 返回更新后的状态
       return {
@@ -143,20 +113,6 @@ export function ArtifactParams({
         {artifact.cascaderParams && artifact.cascaderParams.length > 0 && (
           <div className='space-y-4'>
             {artifact.cascaderParams.map((param, index) => {
-              // 为每个级联参数计算参数键
-              const firstLevelKey =
-                param.levels && param.levels.length > 0
-                  ? `${param.dfAlias}_${param.levels[0].dfColumn}`
-                  : '';
-
-              // 获取已选中的值列表
-              const selectedItems =
-                firstLevelKey && paramValues[firstLevelKey]
-                  ? Array.isArray(paramValues[firstLevelKey])
-                    ? (paramValues[firstLevelKey] as string[])
-                    : [paramValues[firstLevelKey] as string]
-                  : [];
-
               return (
                 <div key={index} className='bg-gray-50 p-3 rounded-md'>
                   <div className='flex items-center mb-2'>
@@ -183,14 +139,13 @@ export function ArtifactParams({
                       cascaderParam={param}
                       dataSources={dataSources}
                       dependentQueryStatus={dependentQueryStatus}
-                      selectedItems={selectedItems}
-                      onCheckChange={(item, checked) => {
+                      onCheckChange={(selectedValues, treeData) => {
                         if (param.levels && param.levels.length > 0) {
                           handleTreeViewCheckChange(
                             param.dfAlias,
                             param.levels[param.levels.length - 1].dfColumn,
-                            item,
-                            checked
+                            selectedValues,
+                            treeData
                           );
                         }
                       }}
@@ -250,17 +205,3 @@ export function ArtifactParams({
     </div>
   );
 }
-// <Combobox
-// options={
-//   nameToChoices[param.name]?.map((choice) => ({
-//     key: choice.value,
-//     value: choice.value,
-//   })) || []
-// }
-// value={values[param.name] || []}
-// placeholder='请选择'
-// onValueChange={(value) =>
-//   handleValueChange(param.name, value as string[])
-// }
-// mode='single'
-// />

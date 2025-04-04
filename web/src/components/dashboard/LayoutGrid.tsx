@@ -120,15 +120,11 @@ const renderGridItem = (
           </div>
         </CardHeader>
         <CardContent className='p-0 h-[calc(100%-3.5rem)]'>
-          <div className='flex h-full border-t'>
-            <div className='flex-1 flex items-center justify-center p-4'>
+          <div className='flex h-full border-t overflow-hidden'>
+            <div className='flex-1 flex items-center justify-center p-4 min-w-0'>
               <div className='text-muted-foreground text-sm'>{title} 内容</div>
             </div>
-            {showParams && artifact && (
-              <div className='flex-shrink-0 h-full overflow-hidden'>
-                <ArtifactParams artifact={artifact} />
-              </div>
-            )}
+            {showParams && artifact && <ArtifactParams artifact={artifact} />}
           </div>
         </CardContent>
       </Card>

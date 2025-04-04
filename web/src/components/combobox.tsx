@@ -27,6 +27,7 @@ interface ComboboxProps {
   mode?: 'single' | 'multiple';
   disabled?: boolean;
   terminateCancelSelect?: (value: string) => boolean;
+  displayNum?: number;
 }
 
 export function Combobox({
@@ -37,6 +38,7 @@ export function Combobox({
   mode = 'single',
   disabled = false,
   terminateCancelSelect,
+  displayNum = 5,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
 
@@ -99,7 +101,7 @@ export function Combobox({
     mode === 'single'
       ? (value as string) || placeholder
       : (value as string[]).length > 0
-        ? (value as string[]).length <= 5
+        ? (value as string[]).length <= displayNum
           ? (value as string[]).join(', ')
           : (value as string[]).length === options.length
             ? '全部'

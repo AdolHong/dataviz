@@ -234,11 +234,6 @@ export function CascaderTreeView({
       );
     };
 
-    // 更新当前选中项数量
-    setSelectedCount(
-      treeData.reduce((count, node) => count + countSelectedItems(node), 0)
-    );
-
     // 调用父组件的回调
     if (onCheckChange) {
       onCheckChange(item, checked);
@@ -276,9 +271,6 @@ export function CascaderTreeView({
           variant='outline'
           className='w-full justify-between text-left font-normal'
         >
-          <span className='truncate'>
-            {selectedCount > 0 ? `已选择 ${selectedCount} 项` : '请选择'}
-          </span>
           {selectedCount > 0 && (
             <Badge
               variant='secondary'

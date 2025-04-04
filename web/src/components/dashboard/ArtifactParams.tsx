@@ -90,7 +90,7 @@ export function ArtifactParams({
     // 根据节点类型和选择状态更新参数值
     setParamValues((prev) => {
       // 获取当前的值列表
-      const currentValues: string[] = [];
+      const currentValues: string[] = [...(prev[paramKey] || [])];
 
       // 递归处理节点及其子节点
       const processNode = (node: TreeViewItem, isChecked: boolean) => {

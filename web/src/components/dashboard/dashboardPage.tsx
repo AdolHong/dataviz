@@ -298,7 +298,7 @@ export function DashboardPage() {
 
                     {/* 展示区域 */}
                     {report?.layout && report.layout.items.length > 0 && (
-                      <LayoutGrid layout={report.layout} />
+                      <LayoutGrid report={report} />
                     )}
                   </div>
                 </div>

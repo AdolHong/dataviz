@@ -3,15 +3,17 @@ import { Badge } from '@/components/ui/badge';
 import { useState } from 'react';
 import { Combobox } from '@/components/combobox';
 import type { QueryStatus } from '@/lib/store/useTabQueryStatusStore';
-
+import type { DataSource } from '@/types/models/dataSource';
 interface ArtifactParamsProps {
   artifact: Artifact;
   dependentQueryStatus: Record<string, QueryStatus>;
+  dataSources: DataSource[];
 }
 
 export function ArtifactParams({
   artifact,
   dependentQueryStatus,
+  dataSources,
 }: ArtifactParamsProps) {
   if (!artifact) return null;
 
@@ -32,6 +34,11 @@ export function ArtifactParams({
         [paramName]: value,
       };
     });
+  };
+
+  // 根据dfAlias找到dataSources
+  const findDataSourceByDfAlias = (dfAlias: string) => {
+    return dataSources.find((ds) => ds.alias === dfAlias);
   };
 
   return (

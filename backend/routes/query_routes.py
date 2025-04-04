@@ -177,7 +177,7 @@ def construct_response_cascader_context(df: Optional[pd.DataFrame], cascader_req
             inferred_cascader[required] = convert_df_to_csv_string(df_unique)
     return {
         "required": cascader_required,
-        "infered": inferred_cascader
+        "inferred": inferred_cascader
     }
 
     

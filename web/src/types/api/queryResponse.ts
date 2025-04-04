@@ -1,3 +1,5 @@
+import type { CascaderContext } from './queryRequest';
+
 interface Alert {
   type: 'info' | 'warning' | 'error';
   message: string;
@@ -26,6 +28,6 @@ export interface QueryResponse {
   alerts: Alert[];
   data: QueryResponseDataContext;
   codeContext: QueryResponseCodeContext;
-  cascaderContext: Record<string, string>;
+  cascaderContext: CascaderContext;
   queryTime: string;
 }

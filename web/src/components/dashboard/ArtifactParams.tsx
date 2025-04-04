@@ -15,11 +15,18 @@ export function ArtifactParams({ artifact }: ArtifactParamsProps) {
     Record<string, string | string[]>
   >({});
 
+  // 修改后的代码
   const handleValueChange = (paramName: string, value: string | string[]) => {
-    setParamValues((prev) => ({
-      ...prev,
-      [paramName]: value,
-    }));
+    setParamValues((prev) => {
+      // 如果值没有变化，不更新状态
+      if (JSON.stringify(prev[paramName]) === JSON.stringify(value)) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [paramName]: value,
+      };
+    });
   };
 
   return (

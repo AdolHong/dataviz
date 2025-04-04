@@ -260,12 +260,14 @@ export const ParameterQueryArea = memo(
       if (response.data.status === 'success') {
         const newStatus = {
           status: DataSourceStatus.SUCCESS,
+          dataSourceId: dataSource.id,
         } as QueryStatus;
         setQueryStatus(dataSource.id, newStatus);
         toast.info(`[查询] ${dataSource.id}(${dataSource.name}): 成功`);
       } else {
         const newStatus = {
           status: DataSourceStatus.ERROR,
+          dataSourceId: dataSource.id,
         } as QueryStatus;
 
         setQueryStatus(dataSource.id, newStatus);

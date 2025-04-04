@@ -206,8 +206,11 @@ export const ParameterQueryArea = memo(
     };
 
     const initialFiles = () => {
+      // 若有缓存文件，则加载
       csvDataSources.forEach((ds) => {
-        files[ds.id] = cachedFiles[ds.id] || {};
+        if (cachedFiles[ds.id]) {
+          files[ds.id] = cachedFiles[ds.id];
+        }
       });
     };
 

@@ -162,6 +162,9 @@ export function ArtifactParams({
                       dependentQueryStatus={dependentQueryStatus}
                       selectedItems={selectedItems}
                       onCheckChange={(item, checked) => {
+                        console.info('hi, item', item);
+                        console.info('hi, checked', checked);
+
                         // 如果有levels，使用第一个level作为默认
                         if (param.levels && param.levels.length > 0) {
                           handleTreeViewCheckChange(

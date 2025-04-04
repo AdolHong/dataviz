@@ -45,6 +45,19 @@ export function CascaderTreeView({
     return dataSources.find((ds) => ds.alias === dfAlias);
   }, [dataSources, dfAlias]);
 
+  const levels = useMemo(() => {
+    if (!dataSource) return [];
+
+    const queryStatus = dependentQueryStatus[dataSource.id];
+    if (!queryStatus?.queryResponse?.cascaderContext?.inferred) return [];
+
+    let cascaderTuple: string[] = [];
+    cascaderParam.levels.forEach((level) => {
+      cascaderTuple.push(level.dfColumn);
+    });
+    return cascaderTuple;
+  }, [dataSource, dependentQueryStatus, cascaderParam]);
+
   // 2. 从dependentQueryStatus找到对应的cascaderContext数据
   const csvData = useMemo(() => {
     if (!dataSource) return null;

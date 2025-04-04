@@ -82,7 +82,7 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
         layoutItem,
         artifact,
         strDependentQueryStatus: JSON.stringify(dependentQueryStatus),
-        title: activeTab.title,
+        title: activeTab?.title || '',
         description: 'todo: description',
         report,
       };
@@ -92,7 +92,7 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
     report.artifacts,
     report.dataSources,
     queryStatus,
-    activeTab.title,
+    activeTab?.title || '',
     report,
   ]);
 
@@ -115,7 +115,7 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
 
   return (
     <>
-      <h1 className='text-2xl font-bold'>{activeTab.title}</h1>
+      <h1 className='text-2xl font-bold'>{activeTab?.title || ''}</h1>
       <div
         className='grid gap-4 w-full'
         style={{

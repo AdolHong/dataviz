@@ -2,7 +2,7 @@ import json
 import os
 from fastapi import APIRouter, HTTPException
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List
 from models.query_models import QueryRequest, QueryResponse, QueryResponseDataContext, QueryResponseCodeContext, Alert
 from models.report_models import Report
 from utils.report_utils import get_report_content
@@ -107,16 +107,24 @@ async def query_by_source_id(request: QueryRequest):
         if result is not None:
             save_query_result(request.uniqueId, result.to_json(orient='records'))
 
-        # 创建响应
+
+
+        
+        
+        # 创建data context
         data_context = QueryResponseDataContext(
             uniqueId=request.uniqueId,
             demoData="",
             rowNumber=len(result) if result is not None else 0,
-            cascaderContext={}
         )
         
         # 构造codeContext
         code_context = construct_response_code_context(request)
+
+        # 构造cascaderContext
+        cascader_context = construct_response_cascader_context(result, request.cascaderContext.required)
+        
+        print("cascader_context:",cascader_context)
 
         return QueryResponse(
             status="success",
@@ -125,6 +133,7 @@ async def query_by_source_id(request: QueryRequest):
             alerts=alerts,
             data=data_context,
             codeContext=code_context,
+            cascaderContext=cascader_context,
             queryTime=datetime.now().isoformat()
         )
 
@@ -136,6 +145,15 @@ async def query_by_source_id(request: QueryRequest):
             error=str(e),
             alerts=[Alert(type="error", message=str(e))]
         )
+        
+def construct_response_cascader_context(result: Optional[pd.DataFrame], cascader_required: List[str]):
+    print("cascader_required:",cascader_required)
+    return {
+        "required": cascader_required,
+        "infered": {i:"" for i in cascader_required}
+    }
+
+    
         
 def construct_response_code_context(request: QueryRequest):
     # 根据不同的请求类型构建 QueryResponseCodeContext

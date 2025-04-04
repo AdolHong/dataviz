@@ -28,7 +28,6 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
   if (!report || activeTabId === '') {
     return <></>;
   }
-  console.info('hi, layoutGrid');
 
   const [layout, setLayout] = useState<Layout>(report.layout);
   const [dataSources, setDataSources] = useState<DataSource[]>(
@@ -36,10 +35,7 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
   );
   const [artifacts, setArtifacts] = useState<Artifact[]>(report.artifacts);
 
-  // zustand: activateTab
   const activeTab = useTabsSessionStore((state) => state.tabs[activeTabId]);
-
-  // zusatand: queryStatus
   const queryStatus = useTabQueryStatusStore((state) =>
     state.getQueryStatusByTabId(activeTabId)
   );
@@ -50,29 +46,17 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
     setArtifacts(report.artifacts);
   }, [report]);
 
-  // 使用 useMemo 缓存 artifacts
-  const memoizedArtifacts = useMemo(() => {
-    return report.artifacts;
-  }, [report.artifacts]);
-
-  // 使用 useMemo 缓存 dataSources
-  const memoizedDataSources = useMemo(() => {
-    return report.dataSources;
-  }, [report.dataSources]);
-
-  // 使用 useCallback 缓存 LayoutGridItem 渲染函数
-  const renderLayoutGridItem = useCallback(
-    (layoutItem: LayoutItem) => {
-      const artifact = memoizedArtifacts.find(
+  // 预处理 artifacts 和 dataSources
+  const processedItems = useMemo(() => {
+    return layout.items.map((layoutItem) => {
+      const artifact = report.artifacts.find(
         (artifact) => artifact.id === layoutItem.id
       );
 
-      // todo: dependencies的结构需要改改
-      // 遍历dependencies, 并从dataSources中找到对应的dataSource (当时只存了df_alias， 需要根据df_alias找到对应的dataSource)
       const dependentDataSources: string[] = artifact
         ? artifact.dependencies
             .map((dependency) => {
-              const dataSource = memoizedDataSources.find(
+              const dataSource = report.dataSources.find(
                 (dataSource) => dataSource.alias === dependency
               );
               return dataSource ? dataSource.id : '';
@@ -80,7 +64,6 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
             .filter(Boolean)
         : [];
 
-      // 从queryStatus中找到对应的queryStatus
       const dependentQueryStatus: Record<string, QueryStatus> = Object.keys(
         queryStatus
       )
@@ -93,23 +76,34 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
           {} as Record<string, QueryStatus>
         );
 
-      // 使用 useMemo 缓存 LayoutGridItem 的 props
-      const memoizedLayoutGridItemProps = useMemo(
-        () => ({
-          layoutItem,
-          artifact,
-          strDependentQueryStatus: JSON.stringify(dependentQueryStatus),
-          title: activeTab.title,
-          description: 'todo: description',
-        }),
-        [layoutItem, artifact, dependentQueryStatus, activeTab.title]
-      );
+      return {
+        layoutItem,
+        artifact,
+        strDependentQueryStatus: JSON.stringify(dependentQueryStatus),
+        title: activeTab.title,
+        description: 'todo: description',
+      };
+    });
+  }, [
+    layout.items,
+    report.artifacts,
+    report.dataSources,
+    queryStatus,
+    activeTab.title,
+  ]);
 
-      return (
-        <LayoutGridItem key={layoutItem.id} {...memoizedLayoutGridItemProps} />
-      );
+  // 渲染函数使用 useCallback
+  const renderLayoutGridItem = useCallback(
+    (props: {
+      layoutItem: LayoutItem;
+      artifact: Artifact | undefined;
+      strDependentQueryStatus: string;
+      title: string;
+      description: string;
+    }) => {
+      return <LayoutGridItem key={props.layoutItem.id} {...props} />;
     },
-    [memoizedArtifacts, memoizedDataSources, queryStatus, activeTab.title]
+    [] // 空依赖，因为所有逻辑已经在 processedItems 中处理
   );
 
   return (
@@ -118,16 +112,12 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
       <div
         className='grid gap-4 w-full'
         style={{
-          gridTemplateColumns: `repeat(${stableLayout.columns}, minmax(0, 1fr))`,
-          gridTemplateRows: `repeat(${stableLayout.rows}, minmax(200px, auto))`,
+          gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))`,
+          gridTemplateRows: `repeat(${layout.rows}, minmax(200px, auto))`,
           gridAutoFlow: 'dense',
         }}
       >
-        {layout.items.map((item, index) => (
-          <React.Fragment key={item.id || `item-${index}`}>
-            {renderLayoutGridItem(item)}
-          </React.Fragment>
-        ))}
+        {processedItems.map((item) => renderLayoutGridItem(item))}
       </div>
     </>
   );

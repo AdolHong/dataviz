@@ -7,7 +7,6 @@ export interface QueryResponseDataContext {
   rowNumber: number;
   demoData: string;
   uniqueId: string;
-  cascaderContext: Record<string, string>;
 }
 
 export interface QueryResponseCodeContext {
@@ -27,5 +26,6 @@ export interface QueryResponse {
   alerts: Alert[];
   data: QueryResponseDataContext;
   codeContext: QueryResponseCodeContext;
+  cascaderContext: Record<string, string>;
   queryTime: string;
 }

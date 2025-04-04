@@ -241,10 +241,9 @@ export const ParameterQueryArea = memo(
     ): QueryRequest | null => {
       // sessionId + tabId + dataSourceId (标识此处请求是唯一的)
       const uniqueId = getSessionId() + '_' + activeTabId + '_' + dataSource.id;
-      let queryRequest: QueryRequest | null = null;
 
-      // cascader context
-      let cascaderContext: string[] = [];
+      // cascader context: 级联参数
+      let cascaderRequired: string[] = [];
       artifacts?.forEach((artifact) => {
         artifact?.cascaderParams?.forEach((cascaderParam) => {
           if (cascaderParam.dfAlias === dataSource.alias) {
@@ -252,66 +251,55 @@ export const ParameterQueryArea = memo(
             cascaderParam.levels.forEach((level) => {
               cascaderTuple.push(level.dfColumn);
             });
-            cascaderContext.push(JSON.stringify(cascaderTuple));
+            cascaderRequired.push(JSON.stringify(cascaderTuple));
           }
         });
       });
 
-      console.info('cascaderContext', cascaderContext);
-
       // request context
+      let requestContext = null;
       if (dataSource.executor.type === 'sql') {
         const code = replaceParametersInCode(dataSource.executor.code, values);
-        queryRequest = {
-          uniqueId: uniqueId,
-          requestContext: {
-            type: 'sql',
-            fileId: reportId,
-            sourceId: dataSource.id,
-            reportUpdateTime: reportUpdatedAt,
-            engine: dataSource.executor.engine,
-            code: dataSource.executor.code,
-            parsedCode: code,
-            paramValues: values,
-          },
+        requestContext = {
+          type: 'sql',
+          engine: dataSource.executor.engine,
+          code: dataSource.executor.code,
+          parsedCode: code,
+          paramValues: values,
         };
       } else if (dataSource.executor.type === 'python') {
         const code = replaceParametersInCode(dataSource.executor.code, values);
-        queryRequest = {
-          uniqueId: uniqueId,
-          requestContext: {
-            type: 'python',
-            fileId: reportId,
-            sourceId: dataSource.id,
-            reportUpdateTime: reportUpdatedAt,
-            engine: dataSource.executor.engine,
-            code: dataSource.executor.code,
-            parsedCode: code,
-            paramValues: values,
-          },
+        requestContext = {
+          type: 'python',
+          engine: dataSource.executor.engine,
+          code: dataSource.executor.code,
+          parsedCode: code,
+          paramValues: values,
         };
       } else if (dataSource.executor.type === 'csv_uploader') {
-        queryRequest = {
-          uniqueId: uniqueId,
-          requestContext: {
-            type: 'csv_uploader',
-            fileId: reportId,
-            sourceId: dataSource.id,
-            reportUpdateTime: reportUpdatedAt,
-            dataContent: '', // 需要根据实际情况填充
-          },
+        requestContext = {
+          type: 'csv_uploader',
+          dataContent: '', // 需要根据实际情况填充
         };
       } else if (dataSource.executor.type === 'csv_data') {
-        queryRequest = {
-          uniqueId: uniqueId,
-          requestContext: {
-            type: 'csv_data',
-            fileId: reportId,
-            sourceId: dataSource.id,
-            reportUpdateTime: reportUpdatedAt,
-          },
+        requestContext = {
+          type: 'csv_data',
         };
       }
+
+      const queryRequest = {
+        uniqueId: uniqueId,
+
+        requestContext: {
+          fileId: reportId,
+          sourceId: dataSource.id,
+          reportUpdateTime: reportUpdatedAt,
+          ...requestContext,
+        },
+        cascaderContext: {
+          required: cascaderRequired,
+        },
+      } as QueryRequest;
 
       return queryRequest;
     };

@@ -1,5 +1,9 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Dict, Any, Optional, List, Union, Literal
+
+class CascaderContext(BaseModel):
+    required: List[str]
+    inferred: Optional[Dict[str, str]] = None
 
 class Alert(BaseModel):
     type: Literal['info', 'warning', 'error']
@@ -8,7 +12,7 @@ class QueryResponseDataContext(BaseModel):
     rowNumber: int = 0
     demoData: str = ""
     uniqueId: str
-    cascaderContext: Dict[str, str] = {}
+    
 
 class QueryResponseCodeContext(BaseModel):
     fileId: str
@@ -27,6 +31,7 @@ class QueryResponse(BaseModel):
     alerts: List[Alert] = []
     data: QueryResponseDataContext
     codeContext: QueryResponseCodeContext
+    cascaderContext: CascaderContext
     queryTime: str
 
 class QueryBySQLRequestContext(BaseModel):
@@ -62,6 +67,8 @@ class QueryByCsvUploadRequestContext(BaseModel):
     reportUpdateTime: str
     dataContent: str
 
+
+
 class QueryRequest(BaseModel):
     uniqueId: str
     requestContext: Union[
@@ -70,4 +77,4 @@ class QueryRequest(BaseModel):
         QueryByCsvDataRequestContext, 
         QueryByCsvUploadRequestContext
     ]
-    cascaderContext: Optional[List[str]] = None
+    cascaderContext: CascaderContext

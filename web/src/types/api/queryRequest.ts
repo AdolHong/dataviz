@@ -34,6 +34,10 @@ export interface QueryByCsvUploadRequestContext {
   reportUpdateTime: string;
   dataContent: string;
 }
+export interface CascaderContext {
+  required: string[];
+  inferred?: { [key: string]: string };
+}
 
 export interface QueryRequest {
   uniqueId: string;
@@ -43,5 +47,5 @@ export interface QueryRequest {
     | QueryByPythonRequestContext
     | QueryByCsvDataRequestContext
     | QueryByCsvUploadRequestContext;
-  cascaderContext?: string[];
+  cascaderContext?: CascaderContext;
 }

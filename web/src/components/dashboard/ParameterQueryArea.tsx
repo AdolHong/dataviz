@@ -401,25 +401,6 @@ export const ParameterQueryArea = memo(
       handleValueChange(param.name, newValues);
     };
 
-    const queryStatusColor = (status: DataSourceStatus) => {
-      // 暂时的想法是： 成功或未初始化，都为白色
-
-      switch (status) {
-        case DataSourceStatus.SUCCESS:
-          return 'bg-green-500 hover:bg-green-600';
-        // return '';
-        case DataSourceStatus.ERROR:
-          return 'bg-red-500 hover:bg-red-600';
-        case DataSourceStatus.SCHEDULED:
-          return 'bg-yellow-500 hover:bg-yellow-600';
-        case DataSourceStatus.RUNNING:
-          return 'bg-blue-500 hover:bg-blue-600';
-        default:
-          return 'bg-gray-300 hover:bg-gray-400';
-        // return '';
-      }
-    };
-
     const renderParameterInput = (param: Parameter) => {
       const inputComponent = (() => {
         switch (param.config.type) {
@@ -694,3 +675,22 @@ export const ParameterQueryArea = memo(
     );
   }
 );
+
+export const queryStatusColor = (status: DataSourceStatus) => {
+  // 暂时的想法是： 成功或未初始化，都为白色
+
+  switch (status) {
+    case DataSourceStatus.SUCCESS:
+      return 'bg-green-500 hover:bg-green-600';
+    // return '';
+    case DataSourceStatus.ERROR:
+      return 'bg-red-500 hover:bg-red-600';
+    case DataSourceStatus.SCHEDULED:
+      return 'bg-yellow-500 hover:bg-yellow-600';
+    case DataSourceStatus.RUNNING:
+      return 'bg-blue-500 hover:bg-blue-600';
+    default:
+      return 'bg-gray-300 hover:bg-gray-400';
+    // return '';
+  }
+};

@@ -17,6 +17,7 @@ import {
 import { DataSourceStatus } from '@/lib/store/useTabQueryStatusStore';
 import React from 'react';
 import { constructNow } from 'date-fns';
+import { queryStatusColor } from './ParameterQueryArea';
 
 interface LayoutGridProps {
   report: Report;
@@ -192,8 +193,10 @@ const LayoutGridItem = React.memo(
               {/* 展示dataSources的queryStatus */}
               {Object.values(dependentQueryStatus).map((queryStatus) => (
                 <span
-                  key={`${queryStatus.dataSourceId}-${queryStatus.status}`}
-                  className='w-3 h-3 rounded-full bg-green-500 shadow-sm'
+                  key={`${queryStatus.queryResponse?.codeContext?.sourceId}-${queryStatus.status}`}
+                  className={`w-3 h-3 rounded-full ${queryStatusColor(
+                    queryStatus.status
+                  )}`}
                 />
               ))}
 

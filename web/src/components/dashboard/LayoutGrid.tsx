@@ -323,15 +323,25 @@ const LayoutGridItem = React.memo(
                   margin: { l: 50, r: 50, b: 50, t: 50, pad: 4 },
                   font: { family: 'Arial, sans-serif' },
                   sliders: layout.sliders, // 确保滑块配置被传递
+                  modebar: {
+                    orientation: 'v',
+                  },
                 }}
                 frames={frames} // 明确传递动画帧
                 config={{
                   ...(config || {}),
                   responsive: true,
-                  displayModeBar: 'hover',
-                  modeBarPosition: 'bottom',
+                  // displayModeBar: 'hover',
                   displaylogo: false,
-                  modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+                  // displayModeBar: false,
+                  modeBarButtonsToRemove: [
+                    'lasso2d',
+                    'select2d',
+                    'zoom2d',
+                    'toImage',
+                    'pan2d',
+                    'resetScale2d',
+                  ],
                 }}
                 style={{ width: '100%', height: '100%' }}
               />

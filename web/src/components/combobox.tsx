@@ -26,6 +26,7 @@ interface ComboboxProps {
   placeholder?: string;
   mode?: 'single' | 'multiple';
   disabled?: boolean;
+  terminateCancelSelect?: (value: string) => boolean;
 }
 
 export function Combobox({
@@ -35,6 +36,7 @@ export function Combobox({
   placeholder = '默认值为空',
   mode = 'single',
   disabled = false,
+  terminateCancelSelect,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
 
@@ -52,6 +54,18 @@ export function Combobox({
   }, [options]);
 
   const handleSelect = (currentValue: string) => {
+    // 判断当前的值是否可以被取消选中
+    if (terminateCancelSelect && terminateCancelSelect(currentValue)) {
+      if (
+        (mode === 'single' && currentValue === value) ||
+        (mode === 'multiple' &&
+          Array.isArray(value) &&
+          value.includes(currentValue))
+      ) {
+        return;
+      }
+    }
+
     if (mode === 'single') {
       // 单选模式
       onValueChange(currentValue === value ? '' : currentValue);
@@ -81,25 +95,15 @@ export function Combobox({
     }
   };
 
-  // 新增：反选功能
-  const handleInvertSelection = () => {
-    if (mode === 'multiple') {
-      const currentValues = Array.isArray(value) ? value : [];
-      const invertedValues = options
-        .map((option) => option.value)
-        .filter((optionValue) => !currentValues.includes(optionValue));
-
-      onValueChange(invertedValues);
-    }
-  };
-
   const displayValue =
     mode === 'single'
       ? (value as string) || placeholder
       : (value as string[]).length > 0
-        ? (value as string[]).length === options.length
-          ? '全部'
-          : `已选 ${(value as string[]).length} 项`
+        ? (value as string[]).length <= 5
+          ? (value as string[]).join(', ')
+          : (value as string[]).length === options.length
+            ? '全部'
+            : `已选 ${(value as string[]).length} 项`
         : placeholder;
 
   return (

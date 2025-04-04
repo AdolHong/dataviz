@@ -286,6 +286,16 @@ const EditArtifactModal = ({
                 }}
                 mode='multiple' // 允许多选
                 placeholder='选择数据源依赖'
+                terminateCancelSelect={(value) => {
+                  const depParams = cascaderParams.filter(
+                    (param) => param.dfAlias === value
+                  );
+                  if (depParams.length > 0) {
+                    toast.error('不能取消选中');
+                    return true;
+                  }
+                  return false;
+                }}
               />
             </div>
           </div>

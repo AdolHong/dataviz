@@ -71,7 +71,9 @@ const EditArtifactParamModal = ({
   const [plainDefaultMultiple, setPlainDefaultMultiple] = useState<string[]>(
     []
   );
-  const [plainChoices, setPlainChoices] = useState<string[]>([]);
+  const [plainChoices, setPlainChoices] = useState<Record<string, string>[]>(
+    []
+  );
   const [plainChoicesString, setPlainChoicesString] = useState('');
 
   // Cascader 参数的状态
@@ -93,7 +95,9 @@ const EditArtifactParamModal = ({
         setPlainValueType(param.valueType);
         setPlainParamType(param.type);
         setPlainChoices(param.choices);
-        setPlainChoicesString(param.choices.join(','));
+        setPlainChoicesString(
+          param.choices.map((choice) => `${choice.value}`).join(',')
+        );
 
         if (param.type === 'single') {
           setPlainDefault(param.default);
@@ -138,7 +142,12 @@ const EditArtifactParamModal = ({
       .map((choice) => choice.trim())
       .filter((choice) => choice.length > 0);
 
-    setPlainChoices(newChoices);
+    setPlainChoices(
+      newChoices.map((choice) => ({
+        key: choice,
+        value: choice,
+      }))
+    );
 
     // 如果默认值不在选项列表中，则清空默认值
     if (plainDefault && !newChoices.includes(plainDefault)) {
@@ -217,7 +226,7 @@ const EditArtifactParamModal = ({
             alias: plainAlias || undefined,
             description: plainDescription || undefined,
             valueType: plainValueType,
-            default: plainDefault || plainChoices[0],
+            default: plainDefault || plainChoices[0].value,
             choices: plainChoices,
           };
           onSave(singleParam);
@@ -233,7 +242,7 @@ const EditArtifactParamModal = ({
             default:
               plainDefaultMultiple.length > 0
                 ? plainDefaultMultiple
-                : [plainChoices[0]],
+                : [plainChoices[0].value],
             choices: plainChoices,
           };
           onSave(multipleParam);
@@ -413,8 +422,8 @@ const EditArtifactParamModal = ({
                   <div className='col-span-3'>
                     <Combobox
                       options={plainChoices.map((choice) => ({
-                        key: choice,
-                        value: choice,
+                        key: choice.key,
+                        value: choice.value,
                       }))}
                       value={plainDefault}
                       onValueChange={(value: string | string[]) => {
@@ -442,8 +451,8 @@ const EditArtifactParamModal = ({
                   <div className='col-span-3'>
                     <Combobox
                       options={plainChoices.map((choice) => ({
-                        key: choice,
-                        value: choice,
+                        key: choice.key,
+                        value: choice.value,
                       }))}
                       value={plainDefaultMultiple}
                       onValueChange={(value: string | string[]) => {

@@ -18,7 +18,7 @@ export interface SinglePlainParam {
   description?: string;
   valueType: 'string' | 'double' | 'boolean' | 'int';
   default: string;
-  choices: string[];
+  choices: Record<string, string>[];
 }
 
 export interface MultiplePlainParam {
@@ -29,7 +29,7 @@ export interface MultiplePlainParam {
   description?: string;
   valueType: 'string' | 'double' | 'boolean' | 'int';
   default: string[];
-  choices: string[];
+  choices: Record<string, string>[];
 }
 
 export interface CascaderParam {

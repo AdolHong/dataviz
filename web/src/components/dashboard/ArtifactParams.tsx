@@ -37,8 +37,8 @@ export function ArtifactParams({
     artifact.plainParams?.forEach((param) => {
       // 先处理choices的动态日期
       const choices = param.choices.map((choice) => ({
-        key: parseDynamicDate(choice),
-        value: parseDynamicDate(choice),
+        key: parseDynamicDate(choice.key),
+        value: parseDynamicDate(choice.value),
       }));
 
       setPlainParamChoices((prev) => ({

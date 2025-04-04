@@ -98,7 +98,7 @@ class SinglePlainParam(BaseModel):
     description: Optional[str] = None
     valueType: Literal["string", "double", "boolean", "int"]
     default: str
-    choices: List[str]
+    choices: List[Dict[str, str]]
 
 class MultiplePlainParam(BaseModel):
     type: Literal["multiple"]
@@ -108,7 +108,7 @@ class MultiplePlainParam(BaseModel):
     description: Optional[str] = None
     valueType: Literal["string", "double", "boolean", "int"]
     default: List[str]
-    choices: List[str]
+    choices: List[Dict[str, str]]
 
 ArtifactParam = Union[SinglePlainParam, MultiplePlainParam, CascaderParam]
 

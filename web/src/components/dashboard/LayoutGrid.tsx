@@ -409,27 +409,26 @@ const LayoutGridItem = React.memo(
                 )
               )}
 
-              {(artifact &&
-                artifact.plainParams &&
-                artifact.plainParams.length > 0) ||
-                (artifact.cascaderParams &&
-                  artifact.cascaderParams.length > 0 && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant='ghost'
-                          size='icon'
-                          className='h-6 w-6'
-                          onClick={() => setShowParams(!showParams)}
-                        >
-                          <SettingsIcon className='h-4 w-4' />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>{showParams ? '隐藏参数' : '显示参数'}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  ))}
+              {artifact &&
+                ((artifact.plainParams && artifact.plainParams.length > 0) ||
+                  (artifact.cascaderParams &&
+                    artifact.cascaderParams.length > 0)) && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant='ghost'
+                        size='icon'
+                        className='h-6 w-6'
+                        onClick={() => setShowParams(!showParams)}
+                      >
+                        <SettingsIcon className='h-4 w-4' />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>{showParams ? '隐藏参数' : '显示参数'}</p>
+                    </TooltipContent>
+                  </Tooltip>
+                )}
             </div>
           </CardHeader>
           <CardContent className='p-0 h-[calc(100%-3.5rem)]'>

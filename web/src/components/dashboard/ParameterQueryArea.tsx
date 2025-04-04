@@ -20,7 +20,7 @@ import { type Parameter } from '@/types/models/parameter';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import { FileUploadArea } from '@/components/dashboard/FileUploadArea';
-import type { DataSource } from '@/types';
+import type { Artifact, DataSource } from '@/types';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -57,6 +57,7 @@ interface ParameterQueryAreaProps {
   reportUpdatedAt: string;
   parameters?: Parameter[];
   dataSources?: DataSource[];
+  artifacts?: Artifact[];
   onEditReport: () => void;
 }
 
@@ -67,6 +68,7 @@ export const ParameterQueryArea = memo(
     reportUpdatedAt,
     parameters,
     dataSources,
+    artifacts,
     onEditReport,
   }: ParameterQueryAreaProps) => {
     console.info('hi, parameterQueryArea');
@@ -137,6 +139,8 @@ export const ParameterQueryArea = memo(
 
     useEffect(() => {
       queryStatusRef.current = queryStatus; // 更新 ref 的值
+
+      console.info('queryStatus', queryStatus);
     }, [queryStatus]);
 
     // 使用 useEffect 在初始渲染时设置默认值
@@ -239,6 +243,23 @@ export const ParameterQueryArea = memo(
       const uniqueId = getSessionId() + '_' + activeTabId + '_' + dataSource.id;
       let queryRequest: QueryRequest | null = null;
 
+      // cascader context
+      let cascaderContext: string[] = [];
+      artifacts?.forEach((artifact) => {
+        artifact?.cascaderParams?.forEach((cascaderParam) => {
+          if (cascaderParam.dfAlias === dataSource.alias) {
+            let cascaderTuple: string[] = [];
+            cascaderParam.levels.forEach((level) => {
+              cascaderTuple.push(level.dfColumn);
+            });
+            cascaderContext.push(JSON.stringify(cascaderTuple));
+          }
+        });
+      });
+
+      console.info('cascaderContext', cascaderContext);
+
+      // request context
       if (dataSource.executor.type === 'sql') {
         const code = replaceParametersInCode(dataSource.executor.code, values);
         queryRequest = {

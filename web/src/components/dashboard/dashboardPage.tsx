@@ -214,6 +214,7 @@ export function DashboardPage() {
   // query area: 使用 useMemo 优化参数
   const memoizedParameters = useMemo(() => report?.parameters, [report]);
   const memoizedDataSources = useMemo(() => report?.dataSources, [report]);
+  const memoizedArtifacts = useMemo(() => report?.artifacts, [report]);
   const memoizedOnEditReport = useCallback(() => {
     if (report) {
       setIsEditModalOpen(true);
@@ -291,6 +292,7 @@ export function DashboardPage() {
                           reportUpdatedAt={memoizedReportUpdatedAt}
                           parameters={memoizedParameters}
                           dataSources={memoizedDataSources}
+                          artifacts={memoizedArtifacts}
                           onEditReport={memoizedOnEditReport}
                         />
                       )}

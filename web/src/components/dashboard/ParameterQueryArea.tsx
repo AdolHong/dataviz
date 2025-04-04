@@ -259,14 +259,14 @@ export const ParameterQueryArea = memo(
           status: DataSourceStatus.SUCCESS,
         } as QueryStatus;
         setQueryStatus(dataSource.id, newStatus);
-        toast.info(`[查询] ${dataSource.id}: ${dataSource.name} 成功`);
+        toast.info(`[查询] ${dataSource.id}(${dataSource.name}): 成功`);
       } else {
         const newStatus = {
           status: DataSourceStatus.ERROR,
         } as QueryStatus;
 
         setQueryStatus(dataSource.id, newStatus);
-        toast.error(`[查询] ${dataSource.id}: ${dataSource.name} 失败`);
+        toast.error(`[查询] ${dataSource.id}(${dataSource.name}): 失败`);
       }
     };
 

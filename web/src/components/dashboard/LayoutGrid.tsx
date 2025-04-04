@@ -16,10 +16,12 @@ import {
 } from '@/lib/store/useTabQueryStatusStore';
 import { DataSourceStatus } from '@/lib/store/useTabQueryStatusStore';
 import React from 'react';
+import { constructNow } from 'date-fns';
 
 interface LayoutGridProps {
   report: Report;
   activeTabId: string;
+  isEditModalOpen: boolean;
 }
 
 export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
@@ -27,8 +29,17 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
     return <></>;
   }
 
+  const stableLayout = useMemo(
+    () => report.layout,
+    [
+      // 添加必要的依赖
+      report.layout.items.length,
+      report.layout.columns,
+      report.layout.rows,
+    ]
+  );
+
   console.info('hi, layout');
-  const [layout, setLayout] = useState<Layout>(report.layout);
 
   const [dataSources, setDataSources] = useState<DataSource[]>(
     report.dataSources
@@ -44,7 +55,6 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
   );
 
   useEffect(() => {
-    setLayout(report.layout);
     setDataSources(report.dataSources);
     setArtifacts(report.artifacts);
   }, [report]);
@@ -117,12 +127,16 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
       <div
         className='grid gap-4 w-full'
         style={{
-          gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))`,
-          gridTemplateRows: `repeat(${layout.rows}, minmax(200px, auto))`,
+          gridTemplateColumns: `repeat(${stableLayout.columns}, minmax(0, 1fr))`,
+          gridTemplateRows: `repeat(${stableLayout.rows}, minmax(200px, auto))`,
           gridAutoFlow: 'dense',
         }}
       >
-        {layout.items.map(renderLayoutGridItem)}
+        {stableLayout.items.map((item, index) => (
+          <React.Fragment key={item.id || `item-${index}`}>
+            {renderLayoutGridItem(item)}
+          </React.Fragment>
+        ))}
       </div>
     </>
   );
@@ -147,7 +161,8 @@ const LayoutGridItem = React.memo(
   }: LayoutGridItemProps) => {
     const [showParams, setShowParams] = useState(false);
 
-    console.info('hi, strDependentQueryStatus', strDependentQueryStatus);
+    console.info('hi, layoutItem');
+    // console.info('hi, strDependentQueryStatus', strDependentQueryStatus);
 
     const dependentQueryStatus = JSON.parse(
       strDependentQueryStatus || '[]'

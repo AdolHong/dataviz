@@ -213,6 +213,7 @@ const LayoutGridItem = React.memo(
       if (artifactResponse?.dataContext?.type !== 'echart') {
         return;
       }
+      console.info('hi, artifactResponse', artifactResponse);
 
       // 确保 DOM 元素已经渲染且有数据
       if (chartRef.current && artifactResponse.dataContext.data) {
@@ -235,7 +236,7 @@ const LayoutGridItem = React.memo(
           chartInstance.current = null;
         }
       };
-    }, [artifactResponse]); // 当 visualizationData 变化时重新渲染
+    }, [artifactResponse?.dataContext?.data]); // 当 visualizationData 变化时重新渲染
 
     useEffect(() => {
       if (
@@ -379,6 +380,7 @@ const LayoutGridItem = React.memo(
           console.info('chartRef', chartRef);
           return (
             <div className='w-[95%] h-[95%] flex justify-center items-center'>
+              <div>12222</div>
               <div
                 ref={chartRef}
                 style={{

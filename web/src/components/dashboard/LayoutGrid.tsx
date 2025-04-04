@@ -18,6 +18,7 @@ import { DataSourceStatus } from '@/lib/store/useTabQueryStatusStore';
 import React from 'react';
 import { constructNow } from 'date-fns';
 import { queryStatusColor } from './ParameterQueryArea';
+import { DataSourceDialog } from './DataSourceDialog';
 
 interface LayoutGridProps {
   report: Report;
@@ -83,6 +84,7 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
         strDependentQueryStatus: JSON.stringify(dependentQueryStatus),
         title: activeTab.title,
         description: 'todo: description',
+        report,
       };
     });
   }, [
@@ -91,6 +93,7 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
     report.dataSources,
     queryStatus,
     activeTab.title,
+    report,
   ]);
 
   // 渲染函数使用 useCallback
@@ -101,10 +104,13 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
       strDependentQueryStatus: string;
       title: string;
       description: string;
+      report: Report;
     }) => {
-      return <LayoutGridItem key={props.layoutItem.id} {...props} />;
+      return (
+        <LayoutGridItem key={props.layoutItem.id} {...props} report={report} />
+      );
     },
-    [] // 空依赖，因为所有逻辑已经在 processedItems 中处理
+    [report]
   );
 
   return (
@@ -130,6 +136,7 @@ interface LayoutGridItemProps {
   strDependentQueryStatus: string | undefined;
   title: string;
   description: string;
+  report: Report;
 }
 
 // 渲染具体的网格项内容
@@ -140,17 +147,22 @@ const LayoutGridItem = React.memo(
     strDependentQueryStatus,
     title,
     description,
+    report,
   }: LayoutGridItemProps) => {
     const [showParams, setShowParams] = useState(false);
+    const [selectedDataSourceId, setSelectedDataSourceId] = useState<
+      string | null
+    >(null);
+    const [showDataSourceDialog, setShowDataSourceDialog] = useState(false);
 
     console.info('hi, layoutItem');
     // console.info('hi, strDependentQueryStatus', strDependentQueryStatus);
 
     const dependentQueryStatus = JSON.parse(
-      strDependentQueryStatus || '[]'
-    ) as QueryStatus[];
+      strDependentQueryStatus || '{}'
+    ) as Record<string, QueryStatus>;
 
-    console.info('hi, layoutitem');
+    // console.info('hi, layoutitem');
 
     useEffect(() => {
       // 判断artifact有没有参数
@@ -158,6 +170,18 @@ const LayoutGridItem = React.memo(
         setShowParams(true);
       }
     }, [layoutItem]);
+
+    // 处理点击数据源按钮事件
+    const handleDataSourceClick = (sourceId: string) => {
+      setSelectedDataSourceId(sourceId);
+      setShowDataSourceDialog(true);
+    };
+
+    // 添加查找数据源的函数
+    const findDataSource = (sourceId: string): DataSource | null => {
+      const dataSource = report.dataSources.find((ds) => ds.id === sourceId);
+      return dataSource || null;
+    };
 
     if (!artifact) {
       return <div>没有找到对应的artifact</div>;
@@ -190,15 +214,18 @@ const LayoutGridItem = React.memo(
             </div>
 
             <div className='flex space-x-2 items-center'>
-              {/* 展示dataSources的queryStatus */}
-              {Object.values(dependentQueryStatus).map((queryStatus) => (
-                <span
-                  key={`${queryStatus.queryResponse?.codeContext?.sourceId}-${queryStatus.status}`}
-                  className={`w-3 h-3 rounded-full ${queryStatusColor(
-                    queryStatus.status
-                  )}`}
-                />
-              ))}
+              {/* 修改为按钮，点击可查看数据源详情 */}
+              {Object.entries(dependentQueryStatus).map(
+                ([sourceId, status]) => (
+                  <button
+                    key={`${sourceId}-${status.status}`}
+                    onClick={() => handleDataSourceClick(sourceId)}
+                    className={`w-3 h-3 rounded-full cursor-pointer ${queryStatusColor(
+                      status.status
+                    )}`}
+                  />
+                )
+              )}
 
               {(artifact &&
                 artifact.plainParams &&
@@ -261,6 +288,16 @@ const LayoutGridItem = React.memo(
                 ) && <ArtifactParams artifact={artifact} />}
             </div>
           </CardContent>
+
+          {/* 添加DataSourceDialog组件 */}
+          {showDataSourceDialog && selectedDataSourceId && (
+            <DataSourceDialog
+              open={showDataSourceDialog}
+              onOpenChange={setShowDataSourceDialog}
+              dataSource={findDataSource(selectedDataSourceId)}
+              queryStatus={dependentQueryStatus[selectedDataSourceId] || null}
+            />
+          )}
         </Card>
       </div>
     );

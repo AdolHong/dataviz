@@ -7,6 +7,9 @@ import { useTabsSessionStore } from '@/lib/store/useTabsSessionStore';
 import { useEffect, useState } from 'react';
 import { type DataSource } from '@/types/models/dataSource';
 import { type Artifact } from '@/types/models/artifact';
+import { ArtifactParams } from './ArtifactParams';
+import { Button } from '@/components/ui/button';
+import { SettingsIcon } from 'lucide-react';
 
 interface LayoutGridProps {
   report: Report;
@@ -64,6 +67,8 @@ const renderGridItem = (
   title: string,
   description: string
 ) => {
+  const [showParams, setShowParams] = useState(false);
+
   if (!artifact) {
     return <div>没有找到对应的artifact</div>;
   }
@@ -90,18 +95,40 @@ const renderGridItem = (
               )}
             </Tooltip>
           </div>
-          <div className='flex space-x-2'>
+          <div className='flex space-x-2 items-center'>
             {[1, 2, 3].map((dot) => (
               <span
                 key={dot}
                 className='w-3 h-3 rounded-full bg-green-500 shadow-sm'
               />
             ))}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant='ghost'
+                  size='icon'
+                  className='h-6 w-6'
+                  onClick={() => setShowParams(!showParams)}
+                >
+                  <SettingsIcon className='h-4 w-4' />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{showParams ? '隐藏参数' : '显示参数'}</p>
+              </TooltipContent>
+            </Tooltip>
           </div>
         </CardHeader>
         <CardContent className='p-0 h-[calc(100%-3.5rem)]'>
-          <div className='flex items-center justify-center h-full border-t p-4'>
-            <div className='text-muted-foreground text-sm'>{title} 内容</div>
+          <div className='flex h-full border-t'>
+            <div className='flex-1 flex items-center justify-center p-4'>
+              <div className='text-muted-foreground text-sm'>{title} 内容</div>
+            </div>
+            {showParams && artifact && (
+              <div className='flex-shrink-0 h-full overflow-hidden'>
+                <ArtifactParams artifact={artifact} />
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

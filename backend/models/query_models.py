@@ -29,9 +29,9 @@ class QueryResponse(BaseModel):
     message: str
     error: str = ""
     alerts: List[Alert] = []
-    data: QueryResponseDataContext
-    codeContext: QueryResponseCodeContext
-    cascaderContext: CascaderContext
+    data: Optional[QueryResponseDataContext] = None
+    codeContext: Optional[QueryResponseCodeContext] = None
+    cascaderContext: Optional[CascaderContext] = None
     queryTime: str
 
 class QueryBySQLRequestContext(BaseModel):

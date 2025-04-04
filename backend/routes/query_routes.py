@@ -9,6 +9,10 @@ from utils.report_utils import get_report_content
 from pathlib import Path
 import pandas as pd
 
+import pandas as pd
+from io import StringIO
+
+
 execute_sql_query = lambda code, param_values, engine: print("hi sql")
 execute_python_query = lambda code, param_values, engine: print("hi python")
 
@@ -143,14 +147,41 @@ async def query_by_source_id(request: QueryRequest):
             status="error",
             message=str(e),
             error=str(e),
+            queryTime=datetime.now().isoformat(),
             alerts=[Alert(type="error", message=str(e))]
         )
-        
-def construct_response_cascader_context(result: Optional[pd.DataFrame], cascader_required: List[str]):
-    print("cascader_required:",cascader_required)
+
+def convert_df_to_csv_string(df: pd.DataFrame):
+    csv_buffer = StringIO()
+    df.to_csv(csv_buffer, index=False, encoding='utf-8')
+    return csv_buffer.getvalue()
+
+def construct_response_cascader_context(df: Optional[pd.DataFrame], cascader_required: List[str]):
+    # 空数据
+    if df is None or not isinstance(df, pd.DataFrame):
+        raise ValueError("[CascaderContext] DataFrame is None")
+    
+    # 检查列是否存在
+    cascader_tuples = []
+    for cascader_tuple in cascader_required:
+        columns = json.loads(cascader_tuple)
+        for column in columns:
+            if column not in df.columns:
+                raise ValueError(f"[CascaderContext] Column {column} not found in DataFrame")
+        cascader_tuples.append(columns)
+    
+    # 推断出cascader的值
+    inferred_cascader = {}
+    if df.empty:
+        for required, columns in zip(cascader_required, cascader_tuples):
+            inferred_cascader[required] = ",".join(columns) + "\n"
+    else:
+        for required, columns in zip(cascader_required, cascader_tuples):
+            df_unique = df[columns].drop_duplicates()
+            inferred_cascader[required] = convert_df_to_csv_string(df_unique)
     return {
         "required": cascader_required,
-        "infered": {i:"" for i in cascader_required}
+        "infered": inferred_cascader
     }
 
     

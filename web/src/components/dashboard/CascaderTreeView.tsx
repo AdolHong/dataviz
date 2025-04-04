@@ -16,6 +16,77 @@ import {
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 
+interface CsvRow {
+  [key: string]: string;
+}
+
+interface TreeNode {
+  id: string;
+  name: string;
+  type: string;
+  children?: TreeNode[];
+}
+
+function csvToHierarchicalData(
+  csvRows: CsvRow[],
+  levels: string[]
+): TreeNode[] {
+  // Create the root node
+  const root: TreeNode = {
+    id: '1',
+    name: 'Root',
+    type: 'root',
+    children: [],
+  };
+
+  // Create maps to track existing nodes at each level
+  const provinceMap: Record<string, TreeNode> = {};
+  const cityMap: Record<string, Record<string, TreeNode>> = {};
+
+  // Process each CSV row
+  csvRows.forEach((row) => {
+    const province = row[levels[0]]; // 'province'
+    const city = row[levels[1]]; // 'city'
+
+    if (!province) return; // Skip if no province value
+
+    // Handle province level
+    if (!provinceMap[province]) {
+      const provinceId = `1.${Object.keys(provinceMap).length + 1}`;
+      const provinceNode: TreeNode = {
+        id: provinceId,
+        name: province,
+        type: levels[0], // 'province'
+        children: [],
+      };
+      root.children!.push(provinceNode);
+      provinceMap[province] = provinceNode;
+    }
+
+    // Handle city level
+    if (city && provinceMap[province]) {
+      if (!cityMap[province]) {
+        cityMap[province] = {};
+      }
+
+      if (!cityMap[province][city]) {
+        const provinceNode = provinceMap[province];
+        const cityId = `${provinceNode.id}.${(provinceNode.children?.length || 0) + 1}`;
+        const cityNode: TreeNode = {
+          id: cityId,
+          name: city,
+          type: levels[1], // 'city'
+          children: [],
+        };
+        provinceNode.children!.push(cityNode);
+        cityMap[province][city] = cityNode;
+      }
+    }
+  });
+
+  return [root];
+}
+
 interface CascaderTreeViewProps {
   dfAlias: string;
   dataSources: DataSource[];
@@ -23,10 +94,6 @@ interface CascaderTreeViewProps {
   dependentQueryStatus: Record<string, QueryStatus>;
   onCheckChange?: (item: TreeViewItem, checked: boolean) => void;
   selectedItems?: string[]; // 已选中的项目名称列表
-}
-
-interface CsvRow {
-  [key: string]: string;
 }
 
 export function CascaderTreeView({
@@ -88,157 +155,11 @@ export function CascaderTreeView({
       skipEmptyLines: true,
     });
 
-    if (!data || data.length === 0) return [];
-
-    // 获取所有列名
-    const columns = Object.keys(data[0]);
-    if (columns.length === 0) return [];
-
-    // 构建树形结构
-    const root: TreeViewItem = {
-      id: 'root',
-      name: '全部',
-      type: 'root',
-      children: [],
-      // 默认为未选中状态
-      checked: false,
-    };
-
-    // 用于跟踪节点，避免重复创建
-    const nodeMap = new Map<string, TreeViewItem>();
-    nodeMap.set('root', root);
-
-    // 处理每一行数据
-    data.forEach((row, rowIndex) => {
-      let currentParent = root;
-
-      // 处理每一列，作为层级
-      columns.forEach((column, colIndex) => {
-        const value = row[column];
-        if (!value) return;
-
-        // console.info(
-        //   'column, colIndex, levels.length',
-        //   column,
-        //   colIndex,
-        //   levels.length
-        // );
-        // 构建层级路径作为唯一标识
-        const path = columns
-          .slice(0, colIndex + 1)
-          .map((col) => row[col])
-          .join('|');
-
-        // 如果节点已存在，使用现有节点
-        if (nodeMap.has(path)) {
-          currentParent = nodeMap.get(path)!;
-          return;
-        }
-        // console.info('nodemap:', nodeMap);
-
-        // 设置正确的节点类型：根据层级深度设置
-        let nodeType = 'null';
-        if (colIndex < levels.length - 1) {
-          nodeType = levels[colIndex];
-        } else {
-          nodeType = 'item';
-        }
-
-        // 创建新节点
-        const newNode: TreeViewItem = {
-          id: `${path}_${rowIndex}_${colIndex}`,
-          name: value,
-          type: nodeType,
-          children: [],
-          // 只有当该项明确在selectedItems中时才标记为选中
-          checked: selectedItems.includes(value),
-        };
-
-        // 将新节点添加到父节点
-        if (!currentParent.children) {
-          currentParent.children = [];
-        }
-
-        // 检查是否已存在同名节点
-        const existingNode = currentParent.children.find(
-          (child) => child.name === value
-        );
-        if (existingNode) {
-          currentParent = existingNode;
-        } else {
-          currentParent.children.push(newNode);
-          nodeMap.set(path, newNode);
-          currentParent = newNode;
-        }
-      });
-    });
-
-    // 更新root节点的选中状态
-    const updateParentCheckedState = (node: TreeViewItem): boolean => {
-      if (!node.children || node.children.length === 0) {
-        return !!node.checked;
-      }
-
-      // 递归更新子节点状态
-      const childrenCheckedStates = node.children.map((child) =>
-        updateParentCheckedState(child)
-      );
-
-      // 如果所有子节点都被选中，则父节点也被选中
-      const allChildrenChecked = childrenCheckedStates.every((state) => state);
-      const anyChildChecked = childrenCheckedStates.some((state) => state);
-
-      // 只有当所有子节点都被选中，父节点才被标记为选中
-      node.checked = allChildrenChecked;
-
-      return allChildrenChecked;
-    };
-
-    // 更新节点选中状态
-    updateParentCheckedState(root);
-
-    // 简化树
-    const simplifyTree = (node: TreeViewItem): TreeViewItem => {
-      if (node.children) {
-        node.children = node.children.map(simplifyTree);
-
-        // 如果节点只有一个子节点且类型相同，合并它们
-        if (node.children.length === 1 && node.type === node.children[0].type) {
-          const child = node.children[0];
-          return {
-            ...child,
-            name: `${node.name} / ${child.name}`,
-            checked: child.checked,
-          };
-        }
-      }
-      return node;
-    };
-
-    return [simplifyTree(root)];
-  }, [csvData, selectedItems]);
-
-  // 处理选中项变化，并跟踪选中数量
-  const handleCheckChange = (item: TreeViewItem, checked: boolean) => {
-    // 递归计算选中项数量
-    const countSelectedItems = (node: TreeViewItem): number => {
-      // 如果是叶子节点，根据checked状态计数
-      if (!node.children || node.children.length === 0) {
-        return node.checked ? 1 : 0;
-      }
-
-      // 如果有子节点，累计子节点的选中数量
-      return node.children.reduce(
-        (count, child) => count + countSelectedItems(child),
-        0
-      );
-    };
-
-    // 调用父组件的回调
-    if (onCheckChange) {
-      onCheckChange(item, checked);
-    }
-  };
+    // Example usage with your data
+    const hierarchicalData = csvToHierarchicalData(data, levels);
+    console.log(JSON.stringify(hierarchicalData, null, 2));
+    return hierarchicalData;
+  }, [csvData]);
 
   if (!dataSource) {
     return (
@@ -298,7 +219,6 @@ export function CascaderTreeView({
               check: '全选',
               uncheck: '取消全选',
             }}
-            onCheckChange={handleCheckChange}
           />
         </div>
       </DialogContent>

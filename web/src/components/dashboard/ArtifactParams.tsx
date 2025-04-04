@@ -13,12 +13,16 @@ interface ArtifactParamsProps {
   artifact: Artifact;
   dependentQueryStatus: Record<string, QueryStatus>;
   dataSources: DataSource[];
+  // plainParamValues: Record<string, string | string[]>;
+  // cascaderParamValues: Record<string, string | string[]>;
 }
 
 export function ArtifactParams({
   artifact,
   dependentQueryStatus,
   dataSources,
+  // plainParamValues,
+  // cascaderParamValues,
 }: ArtifactParamsProps) {
   if (!artifact) return null;
 

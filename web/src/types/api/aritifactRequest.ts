@@ -9,21 +9,15 @@ export interface ArtifactRequest {
   engine: string;
 }
 
-export interface ArtifactResponse {
-  status: string;
-  message: string;
-  error: string;
-  alerts: Alert[];
-  codeContext: {
-    uniqueId: string;
-    dfAliasUniqueIds: Record<string, string>;
-    plainParamValues: Record<string, string | string[]>;
-    cascaderParamValues: Record<string, string | string[]>;
-    pyCode: string;
-    engine: string;
-  };
-  dataContext: null;
+export interface ArtifactCodeContext {
+  uniqueId: string;
+  dfAliasUniqueIds: Record<string, string>;
+  plainParamValues: Record<string, string | string[]>;
+  cascaderParamValues: Record<string, string | string[]>;
+  pyCode: string;
+  engine: string;
 }
+
 export interface ArtifactTextDataContext {
   type: 'text';
   data: string;
@@ -39,17 +33,32 @@ export interface ArtifactTableDataContext {
   data: string;
 }
 
-export interface ArtifactTablePlotlyContext {
+export interface ArtifactPlotlyDataContext {
   type: 'plotly';
   data: string;
 }
 
-export interface ArtifactTableEChartContext {
+export interface ArtifactEChartDataContext {
   type: 'echart';
   data: string;
 }
 
-export interface ArtifactTableAltairContext {
+export interface ArtifactAltairDataContext {
   type: 'altair';
   data: string;
+}
+
+export interface ArtifactResponse {
+  status: string;
+  message: string;
+  error: string;
+  alerts: Alert[];
+  codeContext: ArtifactCodeContext;
+  dataContext:
+    | ArtifactTextDataContext
+    | ArtifactImageDataContext
+    | ArtifactTableDataContext
+    | ArtifactPlotlyDataContext
+    | ArtifactEChartDataContext
+    | ArtifactAltairDataContext;
 }

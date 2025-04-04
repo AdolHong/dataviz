@@ -119,7 +119,7 @@ async def query_by_source_id(request: QueryRequest):
         )
         
         # 构造codeContext
-        code_context = construct_response_code_context(request)
+        code_context = construct_response_code_context(request, request.uniqueId)
 
         # 构造cascaderContext
         cascader_context = construct_response_cascader_context(result, request.cascaderContext.required)
@@ -182,10 +182,11 @@ def construct_response_cascader_context(df: Optional[pd.DataFrame], cascader_req
 
     
         
-def construct_response_code_context(request: QueryRequest):
+def construct_response_code_context(request: QueryRequest, uniqueId:str):
     # 根据不同的请求类型构建 QueryResponseCodeContext
     if request.requestContext.type == 'sql':
         return QueryResponseCodeContext(
+            uniqueId=uniqueId,
             fileId=request.requestContext.fileId,
             sourceId=request.requestContext.sourceId,
             reportUpdateTime=request.requestContext.reportUpdateTime,
@@ -197,6 +198,7 @@ def construct_response_code_context(request: QueryRequest):
         )
     elif request.requestContext.type == 'python':
         return QueryResponseCodeContext(
+            uniqueId=uniqueId,
             fileId=request.requestContext.fileId,
             sourceId=request.requestContext.sourceId,
             reportUpdateTime=request.requestContext.reportUpdateTime,
@@ -208,6 +210,7 @@ def construct_response_code_context(request: QueryRequest):
         )
     elif request.requestContext.type == 'csv_data':
         return QueryResponseCodeContext(
+            uniqueId=uniqueId,
             fileId=request.requestContext.fileId,
             sourceId=request.requestContext.sourceId,
             reportUpdateTime=request.requestContext.reportUpdateTime,
@@ -215,6 +218,7 @@ def construct_response_code_context(request: QueryRequest):
         )
     elif request.requestContext.type == 'csv_uploader':
         return QueryResponseCodeContext(
+            uniqueId=uniqueId,
             fileId=request.requestContext.fileId,
             sourceId=request.requestContext.sourceId,
             reportUpdateTime=request.requestContext.reportUpdateTime,

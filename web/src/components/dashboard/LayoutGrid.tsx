@@ -19,6 +19,12 @@ import React from 'react';
 import { constructNow } from 'date-fns';
 import { queryStatusColor } from './ParameterQueryArea';
 import { DataSourceDialog } from './DataSourceDialog';
+import { artifactApi } from '@/api/artifact';
+import type {
+  ArtifactRequest,
+  ArtifactResponse,
+} from '@/types/api/aritifactRequest';
+import { toast } from 'sonner';
 
 interface LayoutGridProps {
   report: Report;
@@ -153,6 +159,14 @@ const LayoutGridItem = React.memo(
     >(null);
     const [showDataSourceDialog, setShowDataSourceDialog] = useState(false);
 
+    // 为每个参数创建状态
+    const [plainParamValues, setPlainParamValues] = useState<
+      Record<string, string | string[]>
+    >({});
+    const [cascaderParamValues, setCascaderParamValues] = useState<
+      Record<string, string | string[]>
+    >({});
+
     console.info('hi, layoutItem');
     // console.info('hi, strDependentQueryStatus', strDependentQueryStatus);
 
@@ -189,6 +203,141 @@ const LayoutGridItem = React.memo(
     const itemStyle = {
       gridColumn: `${layoutItem.x + 1} / span ${layoutItem.width}`,
       gridRow: `${layoutItem.y + 1} / span ${layoutItem.height}`,
+    };
+
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [artifactResponse, setArtifactResponse] =
+      useState<ArtifactResponse | null>(null);
+
+    useEffect(() => {
+      if (
+        Object.values(dependentQueryStatus).every(
+          (queryStatus) => queryStatus.status === DataSourceStatus.SUCCESS
+        )
+      ) {
+        const queryIds = Object.keys(dependentQueryStatus).reduce(
+          (acc, key) => {
+            const source = findDataSource(key);
+            acc[source?.alias || ''] =
+              dependentQueryStatus[key].queryResponse?.data.uniqueId || '';
+            return acc;
+          },
+          {} as Record<string, string>
+        );
+        executeArtifact(artifact, queryIds);
+      }
+    }, [strDependentQueryStatus, plainParamValues, cascaderParamValues]);
+
+    // 执行artifact的函数
+    const executeArtifact = async (
+      artifact: Artifact,
+      queryIds: Record<string, string>
+    ) => {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        // 构建请求参数
+        const request: ArtifactRequest = {
+          uniqueId: `artifact_${artifact.id}_${Date.now()}`,
+          dfAliasUniqueIds: queryIds,
+          plainParamValues: {}, // 可以从UI收集参数
+          cascaderParamValues: {}, // 可以从UI收集参数
+          pyCode: artifact.code,
+          engine: artifact.executor_engine,
+        };
+
+        // 调用API
+        const response = await artifactApi.executeArtifact(request);
+        setArtifactResponse(response);
+
+        // 处理返回结果
+        if (response.status === 'success') {
+        } else {
+          toast.error(response.error || '执行失败');
+          setError(response.error || '执行失败');
+        }
+      } catch (err) {
+        // 错误处理
+        const errorMessage =
+          err instanceof Error ? err.message : '请求过程中发生错误';
+        setError(errorMessage);
+        console.error('执行artifact失败:', err);
+        return null;
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    const renderArtifactData = (artifactData: ArtifactResponse) => {
+      if (!artifactData.dataContext) {
+        return <div>无数据</div>;
+      }
+
+      switch (artifactData.dataContext.type) {
+        case 'text':
+          return (
+            <pre className='whitespace-pre-wrap'>
+              {artifactData.dataContext.data}
+            </pre>
+          );
+
+        case 'table':
+          return (
+            <div
+              className='w-full overflow-x-auto'
+              dangerouslySetInnerHTML={{
+                __html: artifactData.dataContext.data,
+              }}
+            />
+          );
+
+        case 'image':
+          return (
+            <img
+              src={`data:image/png;base64,${artifactData.dataContext.data}`}
+              alt='Artifact Image'
+              className='max-w-full max-h-full object-contain'
+            />
+          );
+
+        case 'plotly':
+          return (
+            <div
+              id='plotly-container'
+              data-plotly={artifactData.dataContext.data}
+              className='w-full h-full'
+            >
+              Plotly图表渲染位置
+            </div>
+          );
+
+        case 'echart':
+          return (
+            <div
+              id='echart-container'
+              data-echart={artifactData.dataContext.data}
+              className='w-full h-full'
+            >
+              EChart图表渲染位置
+            </div>
+          );
+
+        case 'altair':
+          return (
+            <div
+              id='altair-container'
+              data-altair={artifactData.dataContext.data}
+              className='w-full h-full'
+            >
+              Altair图表渲染位置
+            </div>
+          );
+
+        default:
+          return <div>不支持的数据类型</div>;
+      }
     };
 
     return (
@@ -265,7 +414,18 @@ const LayoutGridItem = React.memo(
                         queryStatus.status === DataSourceStatus.SUCCESS
                     ) && (
                       // 如果所有依赖都成功，展示内容
-                      <>{title} 内容成功了</>
+                      <div>
+                        {isLoading && <div>加载中...</div>}
+                        {error && <div className='text-red-500'>{error}</div>}
+                        {!isLoading &&
+                          !error &&
+                          artifactResponse &&
+                          artifactResponse.dataContext && (
+                            <div className='w-full h-full'>
+                              {renderArtifactData(artifactResponse)}
+                            </div>
+                          )}
+                      </div>
                     )}
 
                   {/* 如果存在依赖，并且有一个依赖失败，展示失败信息 */}
@@ -288,6 +448,10 @@ const LayoutGridItem = React.memo(
                     artifact={artifact}
                     dataSources={report.dataSources}
                     dependentQueryStatus={dependentQueryStatus}
+                    // plainParamValues={plainParamValues}
+                    // setPlainParamValues={setPlainParamValues}
+                    // cascaderParamValues={cascaderParamValues}
+                    // setCascaderParamValues={setCascaderParamValues}
                   />
                 )}
             </div>

@@ -15,6 +15,7 @@ class QueryResponseDataContext(BaseModel):
     
 
 class QueryResponseCodeContext(BaseModel):
+    uniqueId:str
     fileId: str
     sourceId: str
     reportUpdateTime: str

@@ -12,6 +12,7 @@ export interface QueryResponseDataContext {
 }
 
 export interface QueryResponseCodeContext {
+  uniqueId: string;
   fileId: string;
   sourceId: string;
   type: 'sql' | 'python' | 'csv_data' | 'csv_uploader';

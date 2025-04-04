@@ -1,6 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { type Layout, type LayoutItem } from '@/types/models/layout';
-import { cn } from '@/lib/utils';
 import { TooltipContent } from '@/components/ui/tooltip';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 import { useTabsSessionStore } from '@/lib/store/useTabsSessionStore';
@@ -38,7 +37,7 @@ export function LayoutGrid({ layout }: LayoutGridProps) {
     };
 
     return (
-      <div key={item.id} className={cn('min-h-80 max-h-120')} style={itemStyle}>
+      <div key={item.id} className='min-h-80 max-h-120' style={itemStyle}>
         <Card className='h-full overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300'>
           <CardHeader className='h-5 flex items-center justify-between'>
             <div>

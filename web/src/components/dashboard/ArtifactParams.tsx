@@ -23,11 +23,15 @@ export function ArtifactParams({
   if (!artifact) return null;
 
   // 为每个参数创建状态
-  const [paramValues, setParamValues] = useState<
+  const [plainParamValues, setPlainParamValues] = useState<
+    Record<string, string | string[]>
+  >({});
+  const [cascaderParamValues, setCascaderParamValues] = useState<
     Record<string, string | string[]>
   >({});
 
-  console.info('hi, artifactParmas.   paramValues', paramValues);
+  console.info('hi, artifactParmas. plainParamValues', plainParamValues);
+  console.info('hi, artifactParmas. cascaderParamValues', cascaderParamValues);
   const [plainParamChoices, setPlainParamChoices] = useState<
     Record<string, Record<string, string>[]>
   >({});
@@ -48,13 +52,13 @@ export function ArtifactParams({
       // 再处理default
       if (param.type === 'single') {
         const defaulVal = parseDynamicDate(param.default);
-        setParamValues((prev) => ({
+        setPlainParamValues((prev) => ({
           ...prev,
           [param.name]: defaulVal,
         }));
       } else if (param.type === 'multiple') {
         const defaulVal = param.default.map((val) => parseDynamicDate(val));
-        setParamValues((prev) => ({
+        setPlainParamValues((prev) => ({
           ...prev,
           [param.name]: defaulVal,
         }));
@@ -64,7 +68,7 @@ export function ArtifactParams({
 
   // 修改后的代码
   const handleValueChange = (paramName: string, value: string | string[]) => {
-    setParamValues((prev) => {
+    setPlainParamValues((prev) => {
       // 如果值没有变化，不更新状态
       if (JSON.stringify(prev[paramName]) === JSON.stringify(value)) {
         return prev;
@@ -83,16 +87,13 @@ export function ArtifactParams({
     selectedValues: string[],
     treeData: TreeNodeData[]
   ) => {
-    const paramKey = `cascader,${dfAlias},${itemLevel}`;
+    const paramKey = `${dfAlias},${itemLevel}`;
     // 根据节点类型和选择状态更新参数值
-    setParamValues((prev) => {
+    setCascaderParamValues((prev) => {
       const currentValues = getChildrenValuesByTargetValues(
         treeData,
         selectedValues
       );
-
-      console.info('hi, currentValues', currentValues);
-
       // 返回更新后的状态
       return {
         ...prev,
@@ -120,15 +121,15 @@ export function ArtifactParams({
                     >
                       级联
                     </Badge>
-                    <span className='text-xs font-medium truncate mr-4'>
+                    <span className='text-xs font-medium truncate mr-5'>
                       {param.dfAlias}
                     </span>
                     <div className='flex flex-row gap-1'>
                       {param.levels &&
                         param.levels.map((level, i) => (
                           <span key={i} className='text-[10px]'>
-                            {level.name || level.dfColumn}
-                            {i < param.levels.length - 1 ? ',' : ''}
+                            ({level.name || level.dfColumn})
+                            {i < param.levels.length - 1 ? ', ' : ''}
                           </span>
                         ))}
                     </div>
@@ -190,7 +191,7 @@ export function ArtifactParams({
                         value: choice.value,
                       })) || []
                     }
-                    value={paramValues[param.name] || []}
+                    value={plainParamValues[param.name] || []}
                     placeholder='请选择'
                     onValueChange={(value) =>
                       handleValueChange(param.name, value)

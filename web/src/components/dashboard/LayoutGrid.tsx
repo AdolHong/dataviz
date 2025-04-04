@@ -108,7 +108,12 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
 
   return (
     <>
-      <h1 className='text-2xl font-bold'>{activeTab?.title || ''}</h1>
+      <div className='flex items-center'>
+        <hr className='flex-1 border-t border-gray-200' />
+        <span className='mx-4 text-lg font-bold'>展示区域</span>
+        <hr className='flex-1 border-t border-gray-200' />
+        <hr className='flex-1 border-t border-gray-200' />
+      </div>
       <div
         className='grid gap-4 w-full'
         style={{

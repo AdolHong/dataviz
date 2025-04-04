@@ -27,6 +27,7 @@ class QueryResponse(BaseModel):
     alerts: List[Alert] = []
     data: QueryResponseDataContext
     codeContext: QueryResponseCodeContext
+    queryTime: str
 
 class QueryBySQLRequestContext(BaseModel):
     type: Literal['sql']

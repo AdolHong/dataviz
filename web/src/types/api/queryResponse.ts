@@ -27,4 +27,5 @@ export interface QueryResponse {
   alerts: Alert[];
   data: QueryResponseDataContext;
   codeContext: QueryResponseCodeContext;
+  queryTime: string;
 }

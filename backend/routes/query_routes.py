@@ -56,7 +56,8 @@ async def query_by_source_id(request: QueryRequest):
             (ds for ds in report.dataSources if ds.id == request.requestContext.sourceId),
             None
         )
-        
+    
+        # 若找不到datasource，则返回错误
         if not data_source:
             return QueryResponse(
                 status="error",
@@ -114,7 +115,8 @@ async def query_by_source_id(request: QueryRequest):
             cascaderContext={}
         )
         
-        code_context = construct_code_context(request)
+        # 构造codeContext
+        code_context = construct_response_code_context(request)
 
         return QueryResponse(
             status="success",
@@ -122,7 +124,8 @@ async def query_by_source_id(request: QueryRequest):
             error="",
             alerts=alerts,
             data=data_context,
-            codeContext=code_context
+            codeContext=code_context,
+            queryTime=datetime.now().isoformat()
         )
 
     except Exception as e:
@@ -134,12 +137,43 @@ async def query_by_source_id(request: QueryRequest):
             alerts=[Alert(type="error", message=str(e))]
         )
         
-def construct_code_context(request: QueryRequest):
-    
-
-    return QueryResponseCodeContext(
-        fileId=request.requestContext.fileId,
-        sourceId=request.requestContext.sourceId,
-        reportUpdateTime=request.requestContext.reportUpdateTime,
-        type=request.requestContext.type,
-    )
+def construct_response_code_context(request: QueryRequest):
+    # 根据不同的请求类型构建 QueryResponseCodeContext
+    if request.requestContext.type == 'sql':
+        return QueryResponseCodeContext(
+            fileId=request.requestContext.fileId,
+            sourceId=request.requestContext.sourceId,
+            reportUpdateTime=request.requestContext.reportUpdateTime,
+            type='sql',
+            engine=request.requestContext.engine,
+            code=request.requestContext.code,
+            parsedCode=request.requestContext.parsedCode,
+            paramValues=request.requestContext.paramValues
+        )
+    elif request.requestContext.type == 'python':
+        return QueryResponseCodeContext(
+            fileId=request.requestContext.fileId,
+            sourceId=request.requestContext.sourceId,
+            reportUpdateTime=request.requestContext.reportUpdateTime,
+            type='python',
+            engine=request.requestContext.engine,
+            code=request.requestContext.code,
+            parsedCode=request.requestContext.parsedCode,
+            paramValues=request.requestContext.paramValues
+        )
+    elif request.requestContext.type == 'csv_data':
+        return QueryResponseCodeContext(
+            fileId=request.requestContext.fileId,
+            sourceId=request.requestContext.sourceId,
+            reportUpdateTime=request.requestContext.reportUpdateTime,
+            type='csv_data'
+        )
+    elif request.requestContext.type == 'csv_uploader':
+        return QueryResponseCodeContext(
+            fileId=request.requestContext.fileId,
+            sourceId=request.requestContext.sourceId,
+            reportUpdateTime=request.requestContext.reportUpdateTime,
+            type='csv_uploader'
+        )
+    else:
+        raise ValueError(f"Unsupported request type: {request.requestContext.type}")

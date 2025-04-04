@@ -65,6 +65,49 @@ function csvToTreeData(csvData: string, levels: string[]): TreeNodeData[] {
   return result;
 }
 
+export function getChildrenValuesByTargetValues(
+  treeData: TreeNodeData[],
+  targetValues: string[]
+): string[] {
+  const result: string[] = [];
+
+  // 递归函数，用于遍历树结构
+  function traverse(nodes: TreeNodeData[]) {
+    for (const node of nodes) {
+      // 如果当前节点的value在目标值列表中
+      if (targetValues.includes(node.value)) {
+        // 如果是叶子节点，则添加自身
+        if (!node.children || node.children.length === 0) {
+          result.push(node.value);
+        }
+        // 如果有子节点，则添加所有子节点的值
+        else {
+          collectAllChildrenValues(node, result);
+        }
+      }
+      // 继续遍历子节点
+      else if (node.children && node.children.length > 0) {
+        traverse(node.children);
+      }
+    }
+  }
+
+  // 收集所有子节点的值
+  function collectAllChildrenValues(node: TreeNodeData, values: string[]) {
+    if (!node.children || node.children.length === 0) {
+      values.push(node.value);
+      return;
+    }
+
+    for (const child of node.children) {
+      collectAllChildrenValues(child, values);
+    }
+  }
+
+  traverse(treeData);
+  return result;
+}
+
 interface CascaderTreeViewProps {
   dfAlias: string;
   dataSources: DataSource[];
@@ -153,48 +196,41 @@ export function CascaderTreeView({
   const [value, setValue] = useState<string[]>([]);
   console.info('value', value);
 
-  interface TreeNodeData {
-    name: string;
-    value: string;
-    children?: TreeNodeData[];
-  }
+  // // 示例数据
+  // const treeData2 = [
+  //   {
+  //     name: '广东',
+  //     value: '广东',
+  //     children: [
+  //       {
+  //         name: '深圳',
+  //         value: '深圳',
+  //       },
+  //       {
+  //         name: '广州',
+  //         value: '广州',
+  //       },
+  //       {
+  //         name: '汕头',
+  //         value: '汕头',
+  //       },
+  //     ],
+  //   },
+  //   {
+  //     name: '湖南',
+  //     value: '湖南',
+  //     children: [
+  //       {
+  //         name: '佛山',
+  //         value: '佛山',
+  //       },
+  //     ],
+  //   },
+  // ];
 
-  // 示例数据
-  const treeData2 = [
-    {
-      name: '广东',
-      value: '广东',
-      children: [
-        {
-          name: '深圳',
-          value: '深圳',
-        },
-        {
-          name: '广州',
-          value: '广州',
-        },
-        {
-          name: '汕头',
-          value: '汕头',
-        },
-      ],
-    },
-    {
-      name: '湖南',
-      value: '湖南',
-      children: [
-        {
-          name: '佛山',
-          value: '佛山',
-        },
-      ],
-    },
-  ];
-
-  const values = ['深圳', '汕头', '湖南'];
-  const result = getChildrenValuesByTargetValues(treeData2, values);
-  console.log('result', result);
-  // 输出: ["佛山", "深圳", '汕头']
+  // const values = ['深圳', '汕头', '湖南'];
+  // const result = getChildrenValuesByTargetValues(treeData2, values);
+  // console.log('result', result);
 
   return (
     <TreeSelect

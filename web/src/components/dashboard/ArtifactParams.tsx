@@ -8,7 +8,7 @@ import { CascaderTreeView } from './CascaderTreeView';
 import { Combobox } from '@/components/combobox';
 import { parseDynamicDate } from '@/utils/parser';
 import type { TreeNodeData } from '../tree-select/types';
-
+import { getChildrenValuesByTargetValues } from './CascaderTreeView';
 interface ArtifactParamsProps {
   artifact: Artifact;
   dependentQueryStatus: Record<string, QueryStatus>;
@@ -27,13 +27,12 @@ export function ArtifactParams({
     Record<string, string | string[]>
   >({});
 
+  console.info('hi, artifactParmas.   paramValues', paramValues);
   const [plainParamChoices, setPlainParamChoices] = useState<
     Record<string, Record<string, string>[]>
   >({});
 
   useEffect(() => {
-    console.info('hi, paramValues', paramValues);
-
     artifact.plainParams?.forEach((param) => {
       // 先处理choices的动态日期
       const choices = param.choices.map((choice) => ({
@@ -85,11 +84,14 @@ export function ArtifactParams({
     treeData: TreeNodeData[]
   ) => {
     const paramKey = `cascader,${dfAlias},${itemLevel}`;
-
     // 根据节点类型和选择状态更新参数值
     setParamValues((prev) => {
-      // 获取当前的值列表
-      const currentValues: string[] = [...(prev[paramKey] || [])];
+      const currentValues = getChildrenValuesByTargetValues(
+        treeData,
+        selectedValues
+      );
+
+      console.info('hi, currentValues', currentValues);
 
       // 返回更新后的状态
       return {
@@ -97,10 +99,6 @@ export function ArtifactParams({
         [paramKey]: currentValues,
       };
     });
-
-    setTimeout(() => {
-      console.info('hi, paramValues', paramValues);
-    }, 1000);
   };
 
   return (

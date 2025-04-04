@@ -80,18 +80,17 @@ export function ArtifactParams({
   // 级联参数树形视图中选择变化的处理
   const handleTreeViewCheckChange = (
     dfAlias: string,
-    level: string,
+    itemLevel: string,
     item: TreeViewItem,
     checked: boolean
   ) => {
-    const paramKey = `${dfAlias}_${level}`;
+    const paramKey = `cascader,${dfAlias},${itemLevel}`;
 
+    console.info('hi, paramKey', paramKey);
     // 根据节点类型和选择状态更新参数值
     setParamValues((prev) => {
       // 获取当前的值列表
-      const currentValues = Array.isArray(prev[paramKey])
-        ? [...(prev[paramKey] as string[])]
-        : [];
+      const currentValues: string[] = [];
 
       // 递归处理节点及其子节点
       const processNode = (node: TreeViewItem, isChecked: boolean) => {
@@ -128,6 +127,10 @@ export function ArtifactParams({
         [paramKey]: currentValues,
       };
     });
+
+    setTimeout(() => {
+      console.info('hi, paramValues', paramValues);
+    }, 1000);
   };
 
   return (
@@ -185,7 +188,7 @@ export function ArtifactParams({
                         if (param.levels && param.levels.length > 0) {
                           handleTreeViewCheckChange(
                             param.dfAlias,
-                            param.levels[0].dfColumn,
+                            param.levels[param.levels.length - 1].dfColumn,
                             item,
                             checked
                           );

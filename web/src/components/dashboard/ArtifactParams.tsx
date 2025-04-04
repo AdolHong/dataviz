@@ -1,9 +1,4 @@
-import {
-  type Artifact,
-  type SinglePlainParam,
-  type MultiplePlainParam,
-  type CascaderParam,
-} from '@/types/models/artifact';
+import { type Artifact } from '@/types/models/artifact';
 import { Badge } from '@/components/ui/badge';
 import { useState } from 'react';
 import { Combobox } from '@/components/combobox';

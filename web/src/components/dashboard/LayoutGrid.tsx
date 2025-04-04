@@ -312,27 +312,29 @@ const LayoutGridItem = React.memo(
           );
 
           return (
-            <Plot
-              data={data}
-              layout={{
-                ...layout,
-                autosize: true,
-                width: undefined,
-                height: 300,
-                margin: { l: 50, r: 50, b: 50, t: 50, pad: 4 },
-                font: { family: 'Arial, sans-serif' },
-                responsive: true,
-              }}
-              frames={frames}
-              config={{
-                ...(config || {}),
-                responsive: true,
-                displayModeBar: true,
-                displaylogo: false,
-                modeBarButtonsToRemove: ['lasso2d', 'select2d'],
-              }}
-              style={{ width: '100%', height: '100%' }}
-            />
+            <div className='w-full h-full flex'>
+              <Plot
+                data={data}
+                layout={{
+                  ...layout,
+                  autosize: true,
+                  width: undefined,
+                  height: 300,
+                  margin: { l: 50, r: 50, b: 50, t: 50, pad: 4 },
+                  font: { family: 'Arial, sans-serif' },
+                  responsive: true,
+                }}
+                frames={frames}
+                config={{
+                  ...(config || {}),
+                  responsive: true,
+                  displayModeBar: true,
+                  displaylogo: false,
+                  modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+                }}
+                style={{ width: '100%', height: '100%' }}
+              />
+            </div>
           );
 
         case 'echart':
@@ -443,7 +445,7 @@ const LayoutGridItem = React.memo(
                           !error &&
                           artifactResponse &&
                           artifactResponse.dataContext && (
-                            <div className='w-full h-full'>
+                            <div className='w-full h-full flex'>
                               {renderArtifactData(artifactResponse)}
                             </div>
                           )}

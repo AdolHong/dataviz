@@ -9,7 +9,7 @@ import io
 import plotly
 import pyecharts
 
-from models.artifact_models import ArtifactRequest, ArtifactResponse, ArtifactCodeContext, ArtifactTextDataContext, ArtifactPlotlyDataContext, ArtifactEchartsDataContext
+from models.artifact_models import ArtifactRequest, ArtifactResponse, ArtifactCodeContext, ArtifactTextDataContext, ArtifactPlotlyDataContext, ArtifactEChartDataContext
 from models.query_models import Alert
 
 router = APIRouter(tags=["artifact"])
@@ -98,13 +98,15 @@ async def execute_artifact(request: ArtifactRequest):
         if "result" in local_vars:
             result = local_vars["result"]
             
+        
             # 根据结果类型返回不同的数据上下文
             if isinstance(result, str):
                 data_context = ArtifactTextDataContext(type="text", data=result)
-            elif isinstance(result, plotly.graph_objs._figure.Figure):
-                data_context = ArtifactPlotlyDataContext(type="plotly", data=json.loads(result.to_json()))
-            elif isinstance(result, pyecharts.charts.Chart):
-                data_context = ArtifactEchartsDataContext(type="echarts", data=json.loads(result.dump_options()))
+            # elif isinstance(result, plotly.graph_objs._figure.Figure):
+            elif 'plotly.graph_objs._figure.Figure' in str(type(result)):
+                data_context = ArtifactPlotlyDataContext(type="plotly", data=result.to_json())
+            elif 'pyecharts.charts.Chart' in str(type(result)):
+                data_context = ArtifactEChartDataContext(type="echart", data=result.dump_options())
             else:
                 # 默认转换为文本
                 data_context = ArtifactTextDataContext(type="text", data=str(result))
@@ -118,6 +120,7 @@ async def execute_artifact(request: ArtifactRequest):
                 alerts.append(Alert(type="warning", message="No result or output from code execution"))
         
     except Exception as e:
+        print("hi, error", e)
         return ArtifactResponse(
             status="error",
             message=f"Failed to execute Python code",

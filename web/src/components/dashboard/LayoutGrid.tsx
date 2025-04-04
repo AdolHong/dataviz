@@ -25,6 +25,7 @@ import type {
   ArtifactResponse,
 } from '@/types/api/aritifactRequest';
 import { toast } from 'sonner';
+import Plot from 'react-plotly.js';
 
 interface LayoutGridProps {
   report: Report;
@@ -251,6 +252,7 @@ const LayoutGridItem = React.memo(
         // 调用API
         const response = await artifactApi.executeArtifact(request);
         setArtifactResponse(response);
+        console.info('hi, response', response);
 
         // 处理返回结果
         if (response.status === 'success') {
@@ -274,6 +276,8 @@ const LayoutGridItem = React.memo(
       if (!artifactData.dataContext) {
         return <div>无数据</div>;
       }
+
+      console.info('hi, artifactData', artifactData);
 
       switch (artifactData.dataContext.type) {
         case 'text':
@@ -303,14 +307,32 @@ const LayoutGridItem = React.memo(
           );
 
         case 'plotly':
+          const { data, layout, config, frames } = JSON.parse(
+            artifactData.dataContext.data
+          );
+
           return (
-            <div
-              id='plotly-container'
-              data-plotly={artifactData.dataContext.data}
-              className='w-full h-full'
-            >
-              Plotly图表渲染位置
-            </div>
+            <Plot
+              data={data}
+              layout={{
+                ...layout,
+                autosize: true,
+                width: undefined,
+                height: 300,
+                margin: { l: 50, r: 50, b: 50, t: 50, pad: 4 },
+                font: { family: 'Arial, sans-serif' },
+                responsive: true,
+              }}
+              frames={frames}
+              config={{
+                ...(config || {}),
+                responsive: true,
+                displayModeBar: true,
+                displaylogo: false,
+                modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+              }}
+              style={{ width: '100%', height: '100%' }}
+            />
           );
 
         case 'echart':

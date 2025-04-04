@@ -309,28 +309,22 @@ export const ParameterQueryArea = memo(
 
       const response = await queryApi.executeQueryBySourceId(queryRequest);
 
+      // 查询结果
       let newStatus: QueryStatus = {
-        status: DataSourceStatus.INIT,
-        dataSourceId: dataSource.id,
-        updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+        status:
+          response.status === 'success'
+            ? DataSourceStatus.SUCCESS
+            : DataSourceStatus.ERROR,
+        queryResponse: response,
       };
+      setQueryStatus(dataSource.id, newStatus);
 
-      // 更新查询状态
-      if (response && response.status === 'success') {
-        newStatus = {
-          ...newStatus,
-          status: DataSourceStatus.SUCCESS,
-        } as QueryStatus;
-        setQueryStatus(dataSource.id, newStatus);
-        toast.info(`[查询] ${dataSource.id}(${dataSource.name}): 成功`);
+      if (response.alerts.length > 0 && response.status !== 'success') {
+        response.alerts.forEach((alert) => {
+          toast.info(`[${alert.type}] ${alert.message}`);
+        });
       } else {
-        newStatus = {
-          ...newStatus,
-          status: DataSourceStatus.ERROR,
-        } as QueryStatus;
-
-        setQueryStatus(dataSource.id, newStatus);
-        toast.error(`[查询] ${dataSource.id}(${dataSource.name}): 失败`);
+        toast.info(`[查询] ${dataSource.name}(${dataSource.id}): 成功`);
       }
     };
 

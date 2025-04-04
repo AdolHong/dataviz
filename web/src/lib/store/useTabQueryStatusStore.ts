@@ -1,13 +1,19 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
+import type { QueryResponse } from '@/types/api/queryResponse';
+
+// 定义文件系统中的项目类型：文件夹或文件
+export enum DataSourceStatus {
+  RUNNING = 'running',
+  SCHEDULED = 'scheduled',
+  SUCCESS = 'success',
+  ERROR = 'error',
+  INIT = 'init',
+}
 
 export interface QueryStatus {
-  dataSourceId: string;
-  updatedAt: string;
   status: DataSourceStatus;
-  error?: string;
-  rowCount?: number;
-  demoData?: string;
+  queryResponse?: QueryResponse;
 }
 
 // 定义 store 的状态类型
@@ -31,15 +37,6 @@ interface TabQueryStatusState {
 
   clearQueryByTabId: (tabId: string) => void;
   clear: () => void;
-}
-
-// 定义文件系统中的项目类型：文件夹或文件
-export enum DataSourceStatus {
-  RUNNING = 'running',
-  SCHEDULED = 'scheduled',
-  SUCCESS = 'success',
-  ERROR = 'error',
-  INIT = 'init',
 }
 
 // 创建 Zustand Store

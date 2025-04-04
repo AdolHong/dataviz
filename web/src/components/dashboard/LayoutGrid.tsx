@@ -28,19 +28,9 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
   if (!report || activeTabId === '') {
     return <></>;
   }
+  console.info('hi, layoutGrid');
 
-  const stableLayout = useMemo(
-    () => report.layout,
-    [
-      // 添加必要的依赖
-      report.layout.items.length,
-      report.layout.columns,
-      report.layout.rows,
-    ]
-  );
-
-  console.info('hi, layout');
-
+  const [layout, setLayout] = useState<Layout>(report.layout);
   const [dataSources, setDataSources] = useState<DataSource[]>(
     report.dataSources
   );
@@ -55,6 +45,7 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
   );
 
   useEffect(() => {
+    setLayout(report.layout);
     setDataSources(report.dataSources);
     setArtifacts(report.artifacts);
   }, [report]);
@@ -132,7 +123,7 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
           gridAutoFlow: 'dense',
         }}
       >
-        {stableLayout.items.map((item, index) => (
+        {layout.items.map((item, index) => (
           <React.Fragment key={item.id || `item-${index}`}>
             {renderLayoutGridItem(item)}
           </React.Fragment>

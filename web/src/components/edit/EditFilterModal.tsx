@@ -445,7 +445,7 @@ const EditFilterModal = ({
               </Label>
               <Input
                 id='multi-input-default'
-                value={multiInputDefault.join(',')}
+                defaultValue={multiInputDefault.join(',')}
                 onChange={(e) =>
                   setMultiInputDefault(
                     e.target.value

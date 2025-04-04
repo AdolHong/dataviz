@@ -3,7 +3,7 @@ import os
 from fastapi import APIRouter, HTTPException
 from datetime import datetime
 from typing import Dict, Any
-from models.query_models import QueryBySourceRequest, QueryResponse
+from models.query_models import QueryRequest, QueryResponse, QueryResponseDataContext, QueryResponseCodeContext, Alert
 from models.report_models import Report
 from utils.report_utils import get_report_content
 from pathlib import Path
@@ -25,28 +25,30 @@ def load_query_result(uniqueId:str)->pd.DataFrame:
 
 
 @router.post("/query_by_source_id", response_model=QueryResponse)
-async def query_by_source_id(request: QueryBySourceRequest):
+async def query_by_source_id(request: QueryRequest):
     """
     根据数据源ID执行查询
     """
+    alerts = []
     try:
-
         print("uniqueId", request.uniqueId)
         # 根据report id 获取报表信息
-        report = get_report_content(request.fileId)
+        report = get_report_content(request.requestContext.fileId)
         if not report:
             return QueryResponse(
                 status="error",
                 message="Report not found",
-                error="Report not found"
+                error="Report not found",
+                alerts=[Alert(type="error", message="Report not found")]
             )
 
         # 检查更新时间是否匹配
-        if report.updatedAt != request.updateTime:
+        if report.updatedAt != request.reportUpdateTime:
             return QueryResponse(
                 status="error",
                 message="Report has been updated, please refresh the page",
-                error="Report version mismatch"
+                error="Report version mismatch",
+                alerts=[Alert(type="error", message="Report version mismatch")]
             )
 
         # 查找对应的数据源
@@ -59,46 +61,67 @@ async def query_by_source_id(request: QueryBySourceRequest):
             return QueryResponse(
                 status="error",
                 message="Data source not found",
-                error="Data source not found"
+                error="Data source not found",
+                alerts=[Alert(type="error", message="Data source not found")]
             )
 
         # 根据数据源类型执行不同的查询
         result = None
-        if data_source.executor.type == "sql":
-
-            print("sql code: ", request.code)
-            # execute_sql_query(
-            #     request.code,
-            #     request.paramValues,
-            #     data_source.executor.engine
-            # )
+        request_type = request.requestContext.type
+        
+        if request_type == "sql":
+            code = request.requestContext.parsedCode
+            engine = request.requestContext.engine
+            
+            print("sql code: ", code)
+            # 执行SQL查询
             from engine_config import sql_engine
-            result = sql_engine[data_source.executor.engine](request.code)
-        elif data_source.executor.type == "python":
+            result = sql_engine[engine](code)
+            
+        elif request_type == "python":
+            code = request.requestContext.parsedCode
+            engine = request.requestContext.engine
+            
             execute_python_query(
-                request.code,
-                request.paramValues,
-                data_source.executor.engine
+                code,
+                {},
+                engine
             )
-        elif data_source.executor.type == "csv_uploader":
+            
+        elif request_type == "csv_uploader":
+            dataContent = request.requestContext.dataContent
             print("todo: uploader")
-        elif data_source.executor.type == "csv_data":
+            
+        elif request_type == "csv_data":
             print("todo: csv_data")
+            
         else:
             return QueryResponse(
                 status="error",
                 message="Unsupported executor type",
-                error=f"Unsupported executor type: {data_source.executor.type}"
+                error=f"Unsupported executor type: {request_type}",
+                alerts=[Alert(type="error", message=f"Unsupported executor type: {request_type}")]
             )
         
         if result is not None:
             save_query_result(request.uniqueId, result.to_json(orient='records'))
 
+        # 创建响应
+        data_context = QueryResponseDataContext(
+            uniqueId=request.uniqueId,
+            demoData="",
+            rowNumber=len(result) if result is not None else 0,
+            cascaderContext={}
+        )
+        code_context = request.requestContext
 
         return QueryResponse(
             status="success",
             message="Query executed successfully",
-            data=None
+            error="",
+            alerts=alerts,
+            data=data_context,
+            codeContext=code_context
         )
 
     except Exception as e:
@@ -106,5 +129,6 @@ async def query_by_source_id(request: QueryBySourceRequest):
         return QueryResponse(
             status="error",
             message=str(e),
-            error=str(e)
+            error=str(e),
+            alerts=[Alert(type="error", message=str(e))]
         )

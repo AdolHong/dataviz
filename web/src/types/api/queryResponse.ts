@@ -1,10 +1,6 @@
-export interface QueryResponse {
-  status: string;
+interface Alert {
+  type: 'info' | 'warning' | 'error';
   message: string;
-  error: string;
-  alerts: Alert[];
-  data: QueryResponseDataContext;
-  codeContext: QueryResponseCodeContext;
 }
 
 export interface QueryResponseDataContext {
@@ -13,6 +9,7 @@ export interface QueryResponseDataContext {
   uniqueId: string;
   cascaderContext: Record<string, string>;
 }
+
 export interface QueryResponseCodeContext {
   fileId: string;
   sourceId: string;
@@ -23,7 +20,11 @@ export interface QueryResponseCodeContext {
   paramValues?: { [key: string]: any };
 }
 
-interface Alert {
-  type: 'info' | 'warning' | 'error';
+export interface QueryResponse {
+  status: string;
   message: string;
+  error: string;
+  alerts: Alert[];
+  data: QueryResponseDataContext;
+  codeContext: QueryResponseCodeContext;
 }

@@ -1,18 +1,8 @@
-export interface QueryRequest {
-  uniqueId: string;
+export interface QueryBySQLRequestContext {
+  type: 'sql';
   fileId: string;
   sourceId: string;
   reportUpdateTime: string;
-  requestContext:
-    | QueryBySQLRequestContext
-    | QueryByPythonRequestContext
-    | QueryByCsvDataRequestContext
-    | QueryByCsvUploadRequestContext;
-  cascaderContext?: string[];
-}
-
-export interface QueryBySQLRequestContext {
-  type: 'sql';
   engine: string;
   code: string;
   parsedCode: string;
@@ -21,6 +11,9 @@ export interface QueryBySQLRequestContext {
 
 export interface QueryByPythonRequestContext {
   type: 'python';
+  fileId: string;
+  sourceId: string;
+  reportUpdateTime: string;
   engine: string;
   code: string;
   parsedCode: string;
@@ -29,9 +22,26 @@ export interface QueryByPythonRequestContext {
 
 export interface QueryByCsvDataRequestContext {
   type: 'csv_data';
+  fileId: string;
+  sourceId: string;
+  reportUpdateTime: string;
 }
 
 export interface QueryByCsvUploadRequestContext {
   type: 'csv_uploader';
+  fileId: string;
+  sourceId: string;
+  reportUpdateTime: string;
   dataContent: string;
+}
+
+export interface QueryRequest {
+  uniqueId: string;
+
+  requestContext:
+    | QueryBySQLRequestContext
+    | QueryByPythonRequestContext
+    | QueryByCsvDataRequestContext
+    | QueryByCsvUploadRequestContext;
+  cascaderContext?: string[];
 }

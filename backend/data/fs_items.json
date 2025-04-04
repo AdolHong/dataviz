@@ -38,5 +38,15 @@
     "updatedAt": "2025-04-02T16:13:17.012053",
     "reportId": "report-1743558993736",
     "referenceTo": "file-1743558993736"
+  },
+  {
+    "id": "file-1743740214697",
+    "name": "新的",
+    "type": "file",
+    "parentId": null,
+    "createdAt": "2025-04-04T12:16:54.718337",
+    "updatedAt": "2025-04-04T12:16:54.718337",
+    "reportId": "report-1743740214697",
+    "referenceTo": null
   }
 ]

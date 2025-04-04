@@ -256,18 +256,23 @@ export const ParameterQueryArea = memo(
         return;
       }
 
+      let newStatus: QueryStatus = {
+        status: DataSourceStatus.INIT,
+        dataSourceId: dataSource.id,
+        updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      };
       // 更新查询状态
       if (response.data.status === 'success') {
-        const newStatus = {
+        newStatus = {
+          ...newStatus,
           status: DataSourceStatus.SUCCESS,
-          dataSourceId: dataSource.id,
         } as QueryStatus;
         setQueryStatus(dataSource.id, newStatus);
         toast.info(`[查询] ${dataSource.id}(${dataSource.name}): 成功`);
       } else {
-        const newStatus = {
+        newStatus = {
+          ...newStatus,
           status: DataSourceStatus.ERROR,
-          dataSourceId: dataSource.id,
         } as QueryStatus;
 
         setQueryStatus(dataSource.id, newStatus);

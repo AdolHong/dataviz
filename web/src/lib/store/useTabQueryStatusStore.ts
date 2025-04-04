@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 
 export interface QueryStatus {
   dataSourceId: string;
+  updatedAt: string;
   status: DataSourceStatus;
   error?: string;
   rowCount?: number;

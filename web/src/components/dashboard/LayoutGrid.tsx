@@ -4,7 +4,7 @@ import { type Report } from '@/types/models/report';
 import { TooltipContent } from '@/components/ui/tooltip';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 import { useTabsSessionStore } from '@/lib/store/useTabsSessionStore';
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { type DataSource } from '@/types/models/dataSource';
 import { type Artifact } from '@/types/models/artifact';
 import { ArtifactParams } from './ArtifactParams';
@@ -15,6 +15,7 @@ import {
   type QueryStatus,
 } from '@/lib/store/useTabQueryStatusStore';
 import { DataSourceStatus } from '@/lib/store/useTabQueryStatusStore';
+import React from 'react';
 
 interface LayoutGridProps {
   report: Report;
@@ -48,6 +49,68 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
     setArtifacts(report.artifacts);
   }, [report]);
 
+  // 使用 useMemo 缓存 artifacts
+  const memoizedArtifacts = useMemo(() => {
+    return report.artifacts;
+  }, [report.artifacts]);
+
+  // 使用 useMemo 缓存 dataSources
+  const memoizedDataSources = useMemo(() => {
+    return report.dataSources;
+  }, [report.dataSources]);
+
+  // 使用 useCallback 缓存 LayoutGridItem 渲染函数
+  const renderLayoutGridItem = useCallback(
+    (layoutItem: LayoutItem) => {
+      const artifact = memoizedArtifacts.find(
+        (artifact) => artifact.id === layoutItem.id
+      );
+
+      // todo: dependencies的结构需要改改
+      // 遍历dependencies, 并从dataSources中找到对应的dataSource (当时只存了df_alias， 需要根据df_alias找到对应的dataSource)
+      const dependentDataSources: string[] = artifact
+        ? artifact.dependencies
+            .map((dependency) => {
+              const dataSource = memoizedDataSources.find(
+                (dataSource) => dataSource.alias === dependency
+              );
+              return dataSource ? dataSource.id : '';
+            })
+            .filter(Boolean)
+        : [];
+
+      // 从queryStatus中找到对应的queryStatus
+      const dependentQueryStatus: Record<string, QueryStatus> = Object.keys(
+        queryStatus
+      )
+        .filter((key) => dependentDataSources.includes(key))
+        .reduce(
+          (acc, key) => {
+            acc[key] = queryStatus[key];
+            return acc;
+          },
+          {} as Record<string, QueryStatus>
+        );
+
+      // 使用 useMemo 缓存 LayoutGridItem 的 props
+      const memoizedLayoutGridItemProps = useMemo(
+        () => ({
+          layoutItem,
+          artifact,
+          strDependentQueryStatus: JSON.stringify(dependentQueryStatus),
+          title: activeTab.title,
+          description: 'todo: description',
+        }),
+        [layoutItem, artifact, dependentQueryStatus, activeTab.title]
+      );
+
+      return (
+        <LayoutGridItem key={layoutItem.id} {...memoizedLayoutGridItemProps} />
+      );
+    },
+    [memoizedArtifacts, memoizedDataSources, queryStatus, activeTab.title]
+  );
+
   return (
     <>
       <h1 className='text-2xl font-bold'>{activeTab.title}</h1>
@@ -59,46 +122,7 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
           gridAutoFlow: 'dense',
         }}
       >
-        {layout.items.map((layoutItem) => {
-          const artifact = artifacts.find(
-            (artifact) => artifact.id === layoutItem.id
-          );
-
-          // 遍历dependencies, 并从dataSources中找到对应的dataSource
-          const dependentDataSources: string[] = artifact
-            ? artifact.dependencies
-                .map((dependency) => {
-                  const dataSource = dataSources.find(
-                    (dataSource) => dataSource.alias === dependency
-                  );
-                  return dataSource ? dataSource.id : '';
-                })
-                .filter(Boolean)
-            : [];
-
-          const dependentQueryStatus: Record<string, QueryStatus> = Object.keys(
-            queryStatus
-          )
-            .filter((key) => dependentDataSources.includes(key))
-            .reduce(
-              (acc, key) => {
-                acc[key] = queryStatus[key];
-                return acc;
-              },
-              {} as Record<string, QueryStatus>
-            );
-
-          return (
-            <LayoutGridItem
-              key={layoutItem.id}
-              layoutItem={layoutItem}
-              artifact={artifact}
-              dependentQueryStatus={dependentQueryStatus}
-              title={activeTab.title}
-              description='todo: description'
-            />
-          );
-        })}
+        {layout.items.map(renderLayoutGridItem)}
       </div>
     </>
   );
@@ -107,21 +131,27 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
 interface LayoutGridItemProps {
   layoutItem: LayoutItem;
   artifact: Artifact | undefined;
-  dependentQueryStatus: Record<string, QueryStatus>;
+  strDependentQueryStatus: string | undefined;
   title: string;
   description: string;
 }
 
 // 渲染具体的网格项内容
-export const LayoutGridItem = memo(
+const LayoutGridItem = React.memo(
   ({
     layoutItem,
     artifact,
-    dependentQueryStatus,
+    strDependentQueryStatus,
     title,
     description,
   }: LayoutGridItemProps) => {
     const [showParams, setShowParams] = useState(false);
+
+    console.info('hi, strDependentQueryStatus', strDependentQueryStatus);
+
+    const dependentQueryStatus = JSON.parse(
+      strDependentQueryStatus || '[]'
+    ) as QueryStatus[];
 
     console.info('hi, layoutitem');
 

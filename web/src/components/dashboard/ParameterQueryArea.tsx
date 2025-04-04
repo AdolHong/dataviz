@@ -49,6 +49,7 @@ import { useTabParamValuesStore } from '@/lib/store/useParamValuesStore';
 import { useSessionIdStore } from '@/lib/store/useSessionIdStore';
 import { queryApi } from '@/api/query';
 import { Combobox } from '../combobox';
+import type { QueryRequest, QueryResponse } from '@/types/api/queryRequest';
 
 interface ParameterQueryAreaProps {
   activeTabId: string;
@@ -231,38 +232,91 @@ export const ParameterQueryArea = memo(
       }
     };
 
-    const handleQueryRequest = async (dataSource: DataSource) => {
+    const constructQueryRequest = (
+      dataSource: DataSource
+    ): QueryRequest | null => {
       // sessionId + tabId + dataSourceId (标识此处请求是唯一的)
       const uniqueId = getSessionId() + '_' + activeTabId + '_' + dataSource.id;
+      let queryRequest: QueryRequest | null = null;
 
-      let response = null;
       if (dataSource.executor.type === 'sql') {
         const code = replaceParametersInCode(dataSource.executor.code, values);
-        const request = {
-          fileId: reportId,
-          sourceId: dataSource.id,
-          updateTime: reportUpdatedAt,
+        queryRequest = {
           uniqueId: uniqueId,
-          paramValues: values,
-          code: code,
-          dataContent: null,
+          requestContext: {
+            type: 'sql',
+            fileId: reportId,
+            sourceId: dataSource.id,
+            reportUpdateTime: reportUpdatedAt,
+            engine: dataSource.executor.engine,
+            code: dataSource.executor.code,
+            parsedCode: code,
+            paramValues: values,
+          },
         };
-        response = await queryApi.executeQueryBySourceId(request);
       } else if (dataSource.executor.type === 'python') {
-        return;
+        const code = replaceParametersInCode(dataSource.executor.code, values);
+        queryRequest = {
+          uniqueId: uniqueId,
+          requestContext: {
+            type: 'python',
+            fileId: reportId,
+            sourceId: dataSource.id,
+            reportUpdateTime: reportUpdatedAt,
+            engine: dataSource.executor.engine,
+            code: dataSource.executor.code,
+            parsedCode: code,
+            paramValues: values,
+          },
+        };
       } else if (dataSource.executor.type === 'csv_uploader') {
-        return;
+        queryRequest = {
+          uniqueId: uniqueId,
+          requestContext: {
+            type: 'csv_uploader',
+            fileId: reportId,
+            sourceId: dataSource.id,
+            reportUpdateTime: reportUpdatedAt,
+            dataContent: '', // 需要根据实际情况填充
+          },
+        };
       } else if (dataSource.executor.type === 'csv_data') {
+        queryRequest = {
+          uniqueId: uniqueId,
+          requestContext: {
+            type: 'csv_data',
+            fileId: reportId,
+            sourceId: dataSource.id,
+            reportUpdateTime: reportUpdatedAt,
+          },
+        };
+      }
+
+      return queryRequest;
+    };
+
+    const handleQueryRequest = async (dataSource: DataSource) => {
+      const queryRequest = constructQueryRequest(dataSource);
+
+      if (!queryRequest) {
+        toast.error(
+          `[查询失败] ${dataSource.id}(${dataSource.name}), 不支持的查询类型`
+        );
         return;
       }
+
+      console.info('queryRequest', queryRequest);
+
+      const response = await queryApi.executeQueryBySourceId(queryRequest);
 
       let newStatus: QueryStatus = {
         status: DataSourceStatus.INIT,
         dataSourceId: dataSource.id,
         updatedAt: dayjs().format('YYYY-MM-DD HH:mm:ss'),
       };
+
       // 更新查询状态
-      if (response.data.status === 'success') {
+      if (response && response.status === 'success') {
         newStatus = {
           ...newStatus,
           status: DataSourceStatus.SUCCESS,

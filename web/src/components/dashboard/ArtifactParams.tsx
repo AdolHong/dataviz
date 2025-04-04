@@ -36,7 +36,6 @@ export function ArtifactParams({ artifact }: ArtifactParamsProps) {
         {/* 级联参数 */}
         {artifact.cascaderParams && artifact.cascaderParams.length > 0 && (
           <div>
-            <h4 className='text-xs font-medium text-gray-500 mb-2'>级联参数</h4>
             <div className='space-y-2'>
               {artifact.cascaderParams.map((param, index) => (
                 <div key={index} className='bg-gray-50 p-2 rounded-md'>
@@ -52,15 +51,28 @@ export function ArtifactParams({ artifact }: ArtifactParamsProps) {
                     </span>
                   </div>
                   {param.levels && param.levels.length > 0 && (
-                    <div className='mt-1 pl-2 border-l border-green-200'>
-                      {param.levels.map((level, i) => (
-                        <div key={i} className='text-[10px] mb-1 truncate'>
-                          <span className='text-gray-600'>
-                            {level.name || level.dfColumn}:{' '}
-                          </span>
-                          <span>{level.description || level.dfColumn}</span>
-                        </div>
-                      ))}
+                    <div className='space-y-2'>
+                      {param.levels.map((level, i) => {
+                        const paramKey = `${param.dfAlias}_${level.dfColumn}`;
+                        return (
+                          <div key={i} className='mt-1'>
+                            <div className='text-[10px] mb-1 truncate'>
+                              <span className='text-gray-600'>
+                                {level.name || level.dfColumn}
+                              </span>
+                            </div>
+                            <Combobox
+                              options={[]}
+                              value={paramValues[paramKey] || []}
+                              placeholder='请选择'
+                              onValueChange={(value) =>
+                                handleValueChange(paramKey, value)
+                              }
+                              mode='multiple'
+                            />
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -72,7 +84,7 @@ export function ArtifactParams({ artifact }: ArtifactParamsProps) {
         {/* 普通参数 */}
         {artifact.plainParams && artifact.plainParams.length > 0 && (
           <div className='mb-3'>
-            <h4 className='text-xs font-medium text-gray-500 mb-2'>基础参数</h4>
+            {/* <h4 className='text-xs font-medium text-gray-500 mb-2'>基础参数</h4> */}
             <div className='space-y-2'>
               {artifact.plainParams.map((param) => (
                 <div key={param.id} className='bg-gray-50 p-2 rounded-md'>

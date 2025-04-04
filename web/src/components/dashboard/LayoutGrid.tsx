@@ -426,7 +426,7 @@ const LayoutGridItem = React.memo(
             <div className='flex h-full border-t overflow-hidden'>
               {/* 展示内容 */}
               <div className='flex-1 flex items-center justify-center p-4 min-w-0'>
-                <div className='text-muted-foreground text-sm'>
+                <div className='text-muted-foreground text-sm w-full h-full'>
                   {/* 如果没有任何依赖，展示暂无内容 */}
                   {Object.values(dependentQueryStatus).length === 0 && (
                     <> 暂无内容</>
@@ -446,7 +446,7 @@ const LayoutGridItem = React.memo(
                           !error &&
                           artifactResponse &&
                           artifactResponse.dataContext && (
-                            <div className='w-full h-full flex'>
+                            <div className='w-full h-full'>
                               {renderArtifactData(artifactResponse)}
                             </div>
                           )}

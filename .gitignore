@@ -25,3 +25,7 @@ ENV/
 *.swp
 *.swo
 *.data
+
+
+# 数据
+data/

@@ -7,6 +7,7 @@ from models.query_models import QueryRequest, QueryResponse, QueryResponseDataCo
 from models.report_models import Report
 from utils.report_utils import get_report_content
 from pathlib import Path
+from utils.fs_utils import FILE_CACHE_PATH
 import pandas as pd
 
 import pandas as pd
@@ -19,12 +20,11 @@ execute_python_query = lambda code, param_values, engine: print("hi python")
 router = APIRouter(tags=["query"])
 
 def save_query_result(uniqueId:str, result:str):
-    os.makedirs(Path(__file__).parent.parent / "cachedData", exist_ok=True)
-    with open(Path(__file__).parent.parent / "cachedData"  / f"{uniqueId}.data", "w") as f:
+    with open(Path(FILE_CACHE_PATH) / f"{uniqueId}.data", "w") as f:
         json.dump(json.loads(result), f)
 
 def load_query_result(uniqueId:str)->pd.DataFrame:
-    with open(Path(__file__).parent.parent / "cachedData"  / f"{uniqueId}.data", "r") as f:
+    with open(Path(FILE_CACHE_PATH)/ "cachedData"  / f"{uniqueId}.data", "r") as f:
         return pd.read_json(f)
 
 

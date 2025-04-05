@@ -9,6 +9,7 @@ import pyecharts
 import io
 import base64
 import matplotlib.pyplot as plt
+from utils.fs_utils import FILE_CACHE_PATH
 
 
 from models.artifact_models import ArtifactRequest, ArtifactResponse, ArtifactCodeContext, ArtifactTextDataContext, ArtifactPlotlyDataContext, ArtifactEChartDataContext, ArtifactImageDataContext,ArtifactAltairDataContext
@@ -19,7 +20,7 @@ router = APIRouter(tags=["artifact"])
 def load_query_result(uniqueId: str) -> pd.DataFrame:
     """加载查询结果"""
     try:
-        with open(Path(__file__).parent.parent / "cachedData" / f"{uniqueId}.data", "r") as f:
+        with open(Path(FILE_CACHE_PATH) / f"{uniqueId}.data", "r") as f:
             return pd.read_json(f)
     except Exception as e:
         raise ValueError(f"Failed to load query result: {str(e)}")

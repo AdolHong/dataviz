@@ -11,6 +11,7 @@
 // Import Routes
 
 import { Route as rootRoute } from './routes/__root'
+import { Route as LoginImport } from './routes/login'
 import { Route as IndexImport } from './routes/index'
 import { Route as DevFileExplorerImport } from './routes/dev/fileExplorer'
 import { Route as DevEditImport } from './routes/dev/edit'
@@ -18,6 +19,12 @@ import { Route as DevEchartImport } from './routes/dev/echart'
 import { Route as DevDashboardImport } from './routes/dev/dashboard'
 
 // Create/Update Routes
+
+const LoginRoute = LoginImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRoute,
+} as any)
 
 const IndexRoute = IndexImport.update({
   id: '/',
@@ -60,6 +67,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexImport
       parentRoute: typeof rootRoute
     }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginImport
+      parentRoute: typeof rootRoute
+    }
     '/dev/dashboard': {
       id: '/dev/dashboard'
       path: '/dev/dashboard'
@@ -95,6 +109,7 @@ declare module '@tanstack/react-router' {
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
   '/dev/dashboard': typeof DevDashboardRoute
   '/dev/echart': typeof DevEchartRoute
   '/dev/edit': typeof DevEditRoute
@@ -103,6 +118,7 @@ export interface FileRoutesByFullPath {
 
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
   '/dev/dashboard': typeof DevDashboardRoute
   '/dev/echart': typeof DevEchartRoute
   '/dev/edit': typeof DevEditRoute
@@ -112,6 +128,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRoute
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
   '/dev/dashboard': typeof DevDashboardRoute
   '/dev/echart': typeof DevEchartRoute
   '/dev/edit': typeof DevEditRoute
@@ -122,15 +139,23 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/login'
     | '/dev/dashboard'
     | '/dev/echart'
     | '/dev/edit'
     | '/dev/fileExplorer'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/dev/dashboard' | '/dev/echart' | '/dev/edit' | '/dev/fileExplorer'
+  to:
+    | '/'
+    | '/login'
+    | '/dev/dashboard'
+    | '/dev/echart'
+    | '/dev/edit'
+    | '/dev/fileExplorer'
   id:
     | '__root__'
     | '/'
+    | '/login'
     | '/dev/dashboard'
     | '/dev/echart'
     | '/dev/edit'
@@ -140,6 +165,7 @@ export interface FileRouteTypes {
 
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  LoginRoute: typeof LoginRoute
   DevDashboardRoute: typeof DevDashboardRoute
   DevEchartRoute: typeof DevEchartRoute
   DevEditRoute: typeof DevEditRoute
@@ -148,6 +174,7 @@ export interface RootRouteChildren {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  LoginRoute: LoginRoute,
   DevDashboardRoute: DevDashboardRoute,
   DevEchartRoute: DevEchartRoute,
   DevEditRoute: DevEditRoute,
@@ -165,6 +192,7 @@ export const routeTree = rootRoute
       "filePath": "__root.tsx",
       "children": [
         "/",
+        "/login",
         "/dev/dashboard",
         "/dev/echart",
         "/dev/edit",
@@ -173,6 +201,9 @@ export const routeTree = rootRoute
     },
     "/": {
       "filePath": "index.tsx"
+    },
+    "/login": {
+      "filePath": "login.tsx"
     },
     "/dev/dashboard": {
       "filePath": "dev/dashboard.tsx"

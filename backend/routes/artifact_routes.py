@@ -9,6 +9,7 @@ import pyecharts
 import io
 import base64
 import matplotlib.pyplot as plt
+from datetime import datetime
 from utils.fs_utils import FILE_CACHE_PATH
 
 
@@ -40,6 +41,7 @@ async def execute_artifact(request: ArtifactRequest):
                 dfs[alias] = df
             except Exception as e:
                 return ArtifactResponse(
+                    queryTime=datetime.now().isoformat(),
                     status="error",
                     message=f"Failed to load data source {alias}: {str(e)}",
                     error=str(e),
@@ -57,6 +59,7 @@ async def execute_artifact(request: ArtifactRequest):
             # 执行Python代码
     except Exception as e:
         return ArtifactResponse(
+            queryTime=datetime.now().isoformat(),
             status="error",
             message=str(e),
             error=str(e),
@@ -135,12 +138,22 @@ async def execute_artifact(request: ArtifactRequest):
         
     except Exception as e:
         return ArtifactResponse(
+            queryTime=datetime.now().isoformat(),
             status="error",
             message=f"Failed to execute Python code",
             error=str(e),
             alerts=[Alert(type="error", message=f"Code execution error: {str(e)}")],
             codeContext=ArtifactCodeContext(**request.dict())
         )
+         
+    print(ArtifactResponse(
+        status="success",
+        message="Artifact executed successfully",
+        alerts=alerts,
+        codeContext=ArtifactCodeContext(**request.dict()),
+        dataContext=data_context,
+        queryTime=datetime.now().isoformat()
+    ))
                 
     # 返回执行结果
     return ArtifactResponse(
@@ -148,6 +161,7 @@ async def execute_artifact(request: ArtifactRequest):
         message="Artifact executed successfully",
         alerts=alerts,
         codeContext=ArtifactCodeContext(**request.dict()),
-        dataContext=data_context
+        dataContext=data_context,
+        queryTime=datetime.now().isoformat()
     )
         

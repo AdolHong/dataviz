@@ -58,3 +58,4 @@ class ArtifactResponse(BaseModel):
     alerts: List[Alert] = []
     codeContext: ArtifactCodeContext
     dataContext: Optional[ArtifactDataContext] = None
+    queryTime: str

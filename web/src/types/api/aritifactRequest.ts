@@ -54,6 +54,7 @@ export interface ArtifactResponse {
   error: string;
   alerts: Alert[];
   codeContext: ArtifactCodeContext;
+  queryTime: string;
   dataContext:
     | ArtifactTextDataContext
     | ArtifactImageDataContext

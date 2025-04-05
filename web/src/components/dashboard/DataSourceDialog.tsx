@@ -124,28 +124,6 @@ export function DataSourceDialog({
                 </div>
               </div>
             )}
-
-            {response?.alerts && response.alerts.length > 0 && (
-              <div className='mt-4'>
-                <h3 className='text-sm font-medium'>提示信息</h3>
-                <div className='mt-1 space-y-2'>
-                  {response.alerts.map((alert, idx) => (
-                    <div
-                      key={idx}
-                      className={`rounded-md p-3 text-sm ${
-                        alert.type === 'error'
-                          ? 'bg-destructive/10 text-destructive'
-                          : alert.type === 'warning'
-                            ? 'bg-warning/10 text-warning'
-                            : 'bg-info/10 text-info'
-                      }`}
-                    >
-                      {`[${alert.type}] ${alert.message}`}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </TabsContent>
 
           <TabsContent value='data' className='pt-4'>

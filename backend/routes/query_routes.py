@@ -34,8 +34,8 @@ async def query_by_source_id(request: QueryRequest):
     根据数据源ID执行查询
     """
     alerts = []
+    code_context = construct_response_code_context(request, request.uniqueId)
     try:
-        print("uniqueId", request.uniqueId)
         # 根据report id 获取报表信息
         report = get_report_content(request.requestContext.fileId)
         if not report:
@@ -120,12 +120,8 @@ async def query_by_source_id(request: QueryRequest):
         
         # 构造codeContext
         code_context = construct_response_code_context(request, request.uniqueId)
-
         # 构造cascaderContext
         cascader_context = construct_response_cascader_context(result, request.cascaderContext.required)
-        
-        print("cascader_context:",cascader_context)
-
         return QueryResponse(
             status="success",
             message="Query executed successfully",
@@ -138,19 +134,46 @@ async def query_by_source_id(request: QueryRequest):
         )
 
     except Exception as e:
-        print("error", e)
         return QueryResponse(
             status="error",
             message=str(e),
+            codeContext=code_context,   
             error=str(e),
             queryTime=datetime.now().isoformat(),
-            alerts=[Alert(type="error", message=str(e))]
+            alerts=[Alert(type="error", message=str(e))],
         )
 
 def convert_df_to_csv_string(df: pd.DataFrame):
     csv_buffer = StringIO()
     df.to_csv(csv_buffer, index=False, encoding='utf-8')
     return csv_buffer.getvalue()
+
+
+
+def check_unique_parents(df, columns):
+    """
+    Function to check if all child nodes correspond to unique parent nodes.
+
+    Parameters:
+        df (pd.DataFrame): The pandas DataFrame containing the data.
+        parent_columns (list): List of column names representing parent nodes.
+        child_column (str): Column name representing child nodes.
+
+    Returns:
+        bool: True if all child nodes have unique parent nodes, False otherwise.
+    """
+    parent_columns = columns[:len(columns) - 1]
+    child_column = columns[- 1]
+
+
+    # Group by child column and count unique combinations of parent columns
+    grouped = df.groupby(child_column)[parent_columns].nunique()
+
+    # Check if any child has more than one unique parent combination
+    for col in parent_columns:
+        if (grouped[col] > 1).any():
+            return False, grouped[grouped[col] > 1].head(5)
+    return True, None
 
 def construct_response_cascader_context(df: Optional[pd.DataFrame], cascader_required: List[str]):
     # 空数据
@@ -174,14 +197,15 @@ def construct_response_cascader_context(df: Optional[pd.DataFrame], cascader_req
     else:
         for required, columns in zip(cascader_required, cascader_tuples):
             df_unique = df[columns].drop_duplicates()
+            flag_unique, df_bad_case = check_unique_parents(df_unique, columns)
+            if not flag_unique:
+                raise ValueError(f"[CascaderContext] {columns} 存在一个子结点对应多个父结点: {str(df_bad_case)}")
             inferred_cascader[required] = convert_df_to_csv_string(df_unique)
     return {
         "required": cascader_required,
         "inferred": inferred_cascader
     }
 
-    
-        
 def construct_response_code_context(request: QueryRequest, uniqueId:str):
     # 根据不同的请求类型构建 QueryResponseCodeContext
     if request.requestContext.type == 'sql':

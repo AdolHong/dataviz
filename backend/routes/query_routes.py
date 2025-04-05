@@ -78,8 +78,6 @@ async def query_by_source_id(request: QueryRequest, username: str = Depends(veri
         if request_type == "sql":
             code = request.requestContext.parsedCode
             engine = request.requestContext.engine
-            
-            print("sql code: ", code)
             # 执行SQL查询
             from engine_config import sql_engine
             result = sql_engine[engine](code)

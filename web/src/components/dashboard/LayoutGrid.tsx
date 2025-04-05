@@ -31,7 +31,6 @@ import * as echarts from 'echarts';
 interface LayoutGridProps {
   report: Report;
   activeTabId: string;
-  isEditModalOpen: boolean;
 }
 
 export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
@@ -45,7 +44,6 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
   );
   const [artifacts, setArtifacts] = useState<Artifact[]>(report.artifacts);
 
-  const activeTab = useTabsSessionStore((state) => state.tabs[activeTabId]);
   const queryStatus = useTabQueryStatusStore((state) =>
     state.getQueryStatusByTabId(activeTabId)
   );
@@ -117,7 +115,7 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
   return (
     <>
       <div
-        className='grid gap-4 w-full'
+        className='grid gap-6 w-full'
         style={{
           gridTemplateColumns: `repeat(${layout.columns}, minmax(0, 1fr))`,
           gridTemplateRows: `repeat(${layout.rows}, minmax(200px, auto))`,
@@ -294,11 +292,13 @@ const LayoutGridItem = React.memo(
 
         case 'image':
           return (
-            <img
-              src={`data:image/png;base64,${artifactData.dataContext.data}`}
-              alt='Artifact Image'
-              className='max-w-full max-h-full object-contain'
-            />
+            <div className='w-[95%] h-[95%] flex justify-center items-center'>
+              <img
+                src={`data:image/png;base64,${artifactData.dataContext.data}`}
+                alt='Artifact Image'
+                className='max-w-full max-h-[300px] object-contain'
+              />
+            </div>
           );
 
         case 'plotly':
@@ -316,7 +316,6 @@ const LayoutGridItem = React.memo(
                   autosize: true,
                   height: 300,
                   margin: { l: 20, r: 20, b: 50, t: 50, pad: 4 },
-                  // margin: { l: 0, r: 0, b: 0, t: 0, pad: 4 },
                   font: { family: 'Arial, sans-serif' },
                   sliders: layout.sliders, // 确保滑块配置被传递
                   modebar: {
@@ -345,21 +344,26 @@ const LayoutGridItem = React.memo(
           );
 
         case 'echart':
-          return <EChartComponent optionData={artifactData.dataContext.data} />;
+          return (
+            <EChartComponent
+              optionData={artifactData.dataContext.data}
+              showParams={showParams}
+            />
+          );
 
         case 'altair':
           return (
-            <div
-              id='altair-container'
-              data-altair={artifactData.dataContext.data}
-              className='w-full h-full'
-            >
-              Altair图表渲染位置
+            <div className='w-[95%] h-[95%] flex justify-center items-center'>
+              <VegaChart data={artifactData.dataContext.data} />
             </div>
           );
 
         default:
-          return <div>不支持的数据类型</div>;
+          return (
+            <div className='w-[95%] h-[95%] flex justify-center items-center'>
+              <div>不支持的数据类型</div>
+            </div>
+          );
       }
     };
 
@@ -368,7 +372,7 @@ const LayoutGridItem = React.memo(
         <Card className='h-full overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300  mt-0 mb-0 py-1 gap-0'>
           <CardHeader
             key={`layoutItem.id-${layoutItem.id}-card-header`}
-            className='h-10 flex items-center justify-between'
+            className='h-10 flex items-center justify-between border-b-1 shadow-sm'
           >
             <div>
               <Tooltip>
@@ -470,10 +474,6 @@ const LayoutGridItem = React.memo(
                     artifact={artifact}
                     dataSources={report.dataSources}
                     dependentQueryStatus={dependentQueryStatus}
-                    // plainParamValues={plainParamValues}
-                    // setPlainParamValues={setPlainParamValues}
-                    // cascaderParamValues={cascaderParamValues}
-                    // setCascaderParamValues={setCascaderParamValues}
                   />
                 )}
             </div>
@@ -497,9 +497,13 @@ const LayoutGridItem = React.memo(
 // ECharts 图表渲染组件
 interface EChartComponentProps {
   optionData: string; // JSON 字符串格式的 ECharts 配置
+  showParams: boolean;
 }
 
-const EChartComponent: React.FC<EChartComponentProps> = ({ optionData }) => {
+const EChartComponent: React.FC<EChartComponentProps> = ({
+  optionData,
+  showParams,
+}) => {
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<echarts.ECharts | null>(null);
 
@@ -541,8 +545,36 @@ const EChartComponent: React.FC<EChartComponentProps> = ({ optionData }) => {
         chartInstance.current = null; // 清空引用
       }
     };
-  }, [optionData]); // 当配置数据变化时，重新执行 effect
+  }, [optionData, showParams]); // 当配置数据变化时，重新执行 effect
+
+  console.info('charRef', chartRef);
 
   // 返回用于挂载 ECharts 的 div
-  return <div ref={chartRef} style={{ width: '100%', height: '100%' }} />;
+  return (
+    <div
+      ref={chartRef}
+      style={{
+        width: '100%',
+        height: '300px',
+      }}
+    />
+  );
+};
+
+import { VegaLite } from 'react-vega';
+
+const VegaChart: React.FC<{ data: string }> = ({ data }) => {
+  const [chartData, setChartData] = useState(JSON.parse(data));
+  if (!chartData) return <div>Loading...</div>;
+
+  console.info('chartData', chartData);
+
+  // const { view } = chartData['config'];
+
+  const newChartData = {
+    ...chartData,
+    // autosize: { type: 'fit', contains: 'padding' },
+  };
+
+  return <VegaLite spec={newChartData} />;
 };

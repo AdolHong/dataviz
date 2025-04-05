@@ -1,15 +1,17 @@
 import json
 import os
-from fastapi import APIRouter, HTTPException
-from datetime import datetime
-from typing import Dict, Any, Optional, List, Union
+from fastapi import APIRouter
 from pathlib import Path
 import pandas as pd
 import io
 import plotly
 import pyecharts
+import io
+import base64
+import matplotlib.pyplot as plt
 
-from models.artifact_models import ArtifactRequest, ArtifactResponse, ArtifactCodeContext, ArtifactTextDataContext, ArtifactPlotlyDataContext, ArtifactEChartDataContext
+
+from models.artifact_models import ArtifactRequest, ArtifactResponse, ArtifactCodeContext, ArtifactTextDataContext, ArtifactPlotlyDataContext, ArtifactEChartDataContext, ArtifactImageDataContext,ArtifactAltairDataContext
 from models.query_models import Alert
 
 router = APIRouter(tags=["artifact"])
@@ -107,6 +109,16 @@ async def execute_artifact(request: ArtifactRequest):
                 data_context = ArtifactPlotlyDataContext(type="plotly", data=result.to_json())
             elif 'pyecharts' in str(type(result)):
                 data_context = ArtifactEChartDataContext(type="echart", data=result.dump_options())
+            elif 'matplotlib' in str(type(result)):
+                # 将图表保存为BytesIO对象
+                buf = io.BytesIO()
+                result.savefig(buf, format='png')
+                buf.seek(0)
+                base64_image = base64.b64encode(buf.read()).decode('utf-8')
+                buf.close()
+                data_context = ArtifactImageDataContext(type="image", data=base64_image)
+            elif 'altair' in str(type(result)):
+                data_context = ArtifactAltairDataContext(type="altair", data=json.dumps(result.to_dict()))
             else:
                 # 默认转换为文本
                 data_context = ArtifactTextDataContext(type="text", data=str(result))
@@ -120,7 +132,6 @@ async def execute_artifact(request: ArtifactRequest):
                 alerts.append(Alert(type="warning", message="No result or output from code execution"))
         
     except Exception as e:
-        print("hi, error", e)
         return ArtifactResponse(
             status="error",
             message=f"Failed to execute Python code",

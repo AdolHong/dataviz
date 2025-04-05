@@ -19,11 +19,11 @@ interface ParamValuesState {
     paramValues: Record<string, any>
   ) => void;
 
-  removeTabIdParamValues: (tabId: string) => void;
+  clearParamValuesByTabId: (tabId: string) => void;
 }
 
 // 创建 Zustand Store
-export const useTabParamValuesStore = create<ParamValuesState>()(
+export const useParamValuesStore = create<ParamValuesState>()(
   persist(
     (set, get) => ({
       tabIdParamValues: {},
@@ -46,7 +46,7 @@ export const useTabParamValuesStore = create<ParamValuesState>()(
         }));
       },
 
-      removeTabIdParamValues: (tabId: string) => {
+      clearParamValuesByTabId: (tabId: string) => {
         const oldTabIdParamValues = { ...get().tabIdParamValues };
         delete oldTabIdParamValues[tabId];
         set({ tabIdParamValues: oldTabIdParamValues });

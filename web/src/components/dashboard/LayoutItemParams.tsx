@@ -1,6 +1,6 @@
 import { type Artifact } from '@/types/models/artifact';
 import { Badge } from '@/components/ui/badge';
-import type { QueryStatus } from '@/lib/store/useTabQueryStatusStore';
+import type { QueryStatus } from '@/lib/store/useQueryStatusStore';
 import type { DataSource } from '@/types/models/dataSource';
 import { CascaderTreeView } from './CascaderTreeView';
 

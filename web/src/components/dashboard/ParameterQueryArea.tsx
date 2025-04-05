@@ -1,11 +1,4 @@
-import React, {
-  useState,
-  useEffect,
-  memo,
-  use,
-  useCallback,
-  useRef,
-} from 'react';
+import React, { useState, useEffect, memo, useCallback, useRef } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -22,12 +15,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FileUploadArea } from '@/components/dashboard/FileUploadArea';
 import type { Artifact, DataSource } from '@/types';
 import { toast } from 'sonner';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { DatePicker } from '@/components/ui/datepicker';
 import { Card } from '../ui/card';
 import { CardContent } from '../ui/card';
@@ -38,14 +25,14 @@ import {
   type FileCache,
 } from '@/lib/store/useFileSessionStore';
 
-import { DataSourceStatus } from '@/lib/store/useTabQueryStatusStore';
+import { DataSourceStatus } from '@/lib/store/useQueryStatusStore';
 
 import { parseDynamicDate, replaceParametersInCode } from '@/utils/parser';
 import {
-  useTabQueryStatusStore,
+  useQueryStatusStore,
   type QueryStatus,
-} from '@/lib/store/useTabQueryStatusStore';
-import { useTabParamValuesStore } from '@/lib/store/useParamValuesStore';
+} from '@/lib/store/useQueryStatusStore';
+import { useParamValuesStore } from '@/lib/store/useParamValuesStore';
 import { useSessionIdStore } from '@/lib/store/useSessionIdStore';
 import { queryApi } from '@/api/query';
 import { Combobox } from '../combobox';
@@ -94,10 +81,10 @@ export const ParameterQueryArea = memo(
     >({});
 
     // zustand: values, setValues
-    const setTabIdParamValues = useTabParamValuesStore(
+    const setTabIdParamValues = useParamValuesStore(
       (state) => state.setTabIdParamValues
     );
-    const cachedValues: Record<string, any> = useTabParamValuesStore((state) =>
+    const cachedValues: Record<string, any> = useParamValuesStore((state) =>
       state.getTabIdParamValues(activeTabId)
     );
     const setCachedValues = useCallback(
@@ -116,7 +103,7 @@ export const ParameterQueryArea = memo(
     );
 
     // zustand: queryStatus, setQueryStatus
-    const setQueryStatusByTabIdAndSourceId = useTabQueryStatusStore(
+    const setQueryStatusByTabIdAndSourceId = useQueryStatusStore(
       (state) => state.setQueryStatusByTabIdAndSourceId
     );
     const setQueryStatus = useCallback(
@@ -125,7 +112,7 @@ export const ParameterQueryArea = memo(
       [activeTabId, setQueryStatusByTabIdAndSourceId]
     );
 
-    const queryStatus = useTabQueryStatusStore((state) =>
+    const queryStatus = useQueryStatusStore((state) =>
       state.getQueryStatusByTabId(activeTabId)
     );
 

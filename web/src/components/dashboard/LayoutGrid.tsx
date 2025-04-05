@@ -1,15 +1,9 @@
-import { type Layout, type LayoutItem } from '@/types/models/layout';
 import { type Report } from '@/types/models/report';
-
-import { useEffect, useState, useMemo, useCallback } from 'react';
-import { type DataSource } from '@/types/models/dataSource';
-import { type Artifact } from '@/types/models/artifact';
 import { LayoutGridItem } from './LayoutGridItem';
-
 import {
-  useTabQueryStatusStore,
+  useQueryStatusStore,
   type QueryStatus,
-} from '@/lib/store/useTabQueryStatusStore';
+} from '@/lib/store/useQueryStatusStore';
 
 interface LayoutGridProps {
   report: Report;
@@ -21,7 +15,7 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
     return <></>;
   }
 
-  const queryStatus = useTabQueryStatusStore((state) =>
+  const queryStatus = useQueryStatusStore((state) =>
     state.getQueryStatusByTabId(activeTabId)
   );
 

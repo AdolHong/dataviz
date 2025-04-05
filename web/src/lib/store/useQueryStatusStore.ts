@@ -17,7 +17,7 @@ export interface QueryStatus {
 }
 
 // 定义 store 的状态类型
-interface TabQueryStatusState {
+interface QueryStatusState {
   tabQueryStatus: Record<string, Record<string, QueryStatus>>;
   getQueryStatusByTabId: (tabId: string) => Record<string, QueryStatus>;
   setQueryStatusByTabId: (
@@ -35,12 +35,12 @@ interface TabQueryStatusState {
     sourceId: string
   ) => QueryStatus;
 
-  clearQueryByTabId: (tabId: string) => void;
+  clearQueryStatusByTabId: (tabId: string) => void;
   clear: () => void;
 }
 
 // 创建 Zustand Store
-export const useTabQueryStatusStore = create<TabQueryStatusState>()(
+export const useQueryStatusStore = create<QueryStatusState>()(
   persist(
     (set, get) => ({
       tabQueryStatus: {},
@@ -69,7 +69,7 @@ export const useTabQueryStatusStore = create<TabQueryStatusState>()(
       },
 
       // 根据tabId清除所有查询状态
-      clearQueryByTabId: (tabId: string) =>
+      clearQueryStatusByTabId: (tabId: string) =>
         set((state) => ({
           tabQueryStatus: Object.fromEntries(
             Object.entries(state.tabQueryStatus).filter(

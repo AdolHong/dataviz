@@ -12,7 +12,7 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion';
 import { Badge } from '@/components/ui/badge';
-import { type QueryStatus } from '@/lib/store/useTabQueryStatusStore';
+import { type QueryStatus } from '@/lib/store/useQueryStatusStore';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { DataSource } from '@/types/models/dataSource';
 

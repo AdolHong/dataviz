@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { DataSource } from '@/types/models/dataSource';
-import type { QueryStatus } from '@/lib/store/useTabQueryStatusStore';
+import type { QueryStatus } from '@/lib/store/useQueryStatusStore';
 import Papa from 'papaparse';
 import type { CascaderParam } from '@/types/models/artifact';
 import { Button } from '@/components/ui/button';

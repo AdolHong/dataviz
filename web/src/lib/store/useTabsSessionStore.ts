@@ -17,6 +17,7 @@ interface TabsState {
   getCachedTab: (tabId: string) => TabDetail | undefined;
   setCachedTab: (tabId: string, tab: TabDetail) => void;
   findTabsByFileId: (fileId: string) => TabDetail[];
+  findTabsByReportId: (reportId: string) => TabDetail[];
   removeCachedTab: (tabId: string) => void;
 
   // 设置激活标签
@@ -43,6 +44,9 @@ export const useTabsSessionStore = create<TabsState>()(
 
       findTabsByFileId: (fileId: string) =>
         Object.values(get().tabs).filter((tab) => tab.fileId === fileId),
+
+      findTabsByReportId: (reportId: string) =>
+        Object.values(get().tabs).filter((tab) => tab.reportId === reportId),
 
       removeCachedTab: (tabId: string) =>
         set((state) => {

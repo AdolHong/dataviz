@@ -1,13 +1,5 @@
 import { Button } from '@/components/ui/button';
-import {
-  useState,
-  useEffect,
-  memo,
-  useCallback,
-  useMemo,
-  useLayoutEffect,
-  useRef,
-} from 'react';
+import { useState, useEffect, memo, useCallback, useMemo, useRef } from 'react';
 import { FileExplorer } from '@/components/dashboard/FileExplorer';
 import type {
   FileItem,
@@ -25,7 +17,9 @@ import { useTabsSessionStore } from '@/lib/store/useTabsSessionStore';
 import { ParameterQueryArea } from '@/components/dashboard/ParameterQueryArea';
 import { LayoutGrid } from '@/components/dashboard/LayoutGrid';
 import { type TabDetail } from '@/lib/store/useTabsSessionStore';
-
+import { useQueryStatusStore } from '@/lib/store/useQueryStatusStore';
+import { useParamValuesStore } from '@/lib/store/useParamValuesStore';
+import { useTabFilesStore } from '@/lib/store/useFileSessionStore';
 // 为标签加载报表数据的函数
 const loadReportForTab = async (tab: TabDetail) => {
   const report = await reportApi.getReportByReportId(tab.reportId);
@@ -46,6 +40,9 @@ export function DashboardPage() {
   const setActiveTabId = useTabsSessionStore((state) => state.setActiveTabId);
   const findTabsByFileId = useTabsSessionStore(
     (state) => state.findTabsByFileId
+  );
+  const findTabsByReportId = useTabsSessionStore(
+    (state) => state.findTabsByReportId
   );
   const setCachedTab = useTabsSessionStore((state) => state.setCachedTab);
   const removeCachedTab = useTabsSessionStore((state) => state.removeCachedTab);
@@ -169,10 +166,12 @@ export function DashboardPage() {
 
   // fileexplorer: 删除文件
   const handleDeleteItem = useCallback((item: FileSystemItem) => {
-    const tabs = findTabsByFileId(item.id);
-    tabs.forEach((tab) => {
-      removeCachedTab(tab.tabId);
-    });
+    if (item.type === 'file' || item.type === 'reference') {
+      const tabs = findTabsByReportId(item.reportId);
+      tabs.forEach((tab) => {
+        removeCachedTab(tab.tabId);
+      });
+    }
   }, []);
 
   // fileexplorer: 文件系统保存变更
@@ -335,6 +334,16 @@ const TabsArea = memo(
       (state) => state.removeCachedTab
     );
 
+    const clearTabIdParamValues = useParamValuesStore(
+      (state) => state.clearParamValuesByTabId
+    );
+    const clearQueryStatusByTabId = useQueryStatusStore(
+      (state) => state.clearQueryStatusByTabId
+    );
+    const clearFilesByTabId = useTabFilesStore(
+      (state) => state.clearFilesByTabId
+    );
+
     // 加载tab对应的报表
     const loadTabReport = async (targetTab: TabDetail) => {
       // 设置激活tab
@@ -360,18 +369,12 @@ const TabsArea = memo(
         }
       }
 
-      // todo: 清除tabs相关的缓存和参数等等
-      // 删除tab对应的参数值
-      removeTabIdParamValues(activeTabId);
-
-      // 删除tab对应的查询状态
-      removeTabIdQueryStatus(activeTabId);
+      // // QueryArea: 清除tab对应的参数值
+      clearTabIdParamValues(activeTabId);
+      clearFilesByTabId(activeTabId);
 
       // // 删除tab对应的查询状态
-      // clearQueryByTabId(tabId);
-      // console.log('删除tab之后, tabIdFiles', tabIdFiles);
-      // console.log('删除tab之后, tabIdParamValues', tabIdParamValues);
-      // console.log('删除tab之后, tabQueryStatus', tabQueryStatus);
+      clearQueryStatusByTabId(activeTabId);
     }, [openTabs]);
 
     return (

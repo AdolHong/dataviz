@@ -15,7 +15,7 @@ interface TabFilesState {
   getTabIdFiles: (tabId: string) => Record<string, FileCache>;
   setTabIdFiles: (tabId: string, files: Record<string, FileCache>) => void;
 
-  removeTabIdFiles: (tabId: string) => void;
+  clearFilesByTabId: (tabId: string) => void;
 }
 
 // 创建 Zustand Store
@@ -39,7 +39,7 @@ export const useTabFilesStore = create<TabFilesState>()(
         }));
       },
 
-      removeTabIdFiles: (tabId: string) => {
+      clearFilesByTabId: (tabId: string) => {
         const oldTabIdFiles = { ...get().tabIdFiles };
         delete oldTabIdFiles[tabId];
         set({ tabIdFiles: oldTabIdFiles });

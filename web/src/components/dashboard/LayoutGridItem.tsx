@@ -30,11 +30,11 @@ import { VegaLite } from 'react-vega';
 export const artifactStatusColor = (status: string): string => {
   switch (status) {
     case 'success':
-      return 'bg-green-500 hover:bg-green-600';
+      return 'bg-green-300 hover:bg-green-500 opacity-60 hover:opacity-100';
     case 'error':
       return 'bg-red-500 hover:bg-red-600';
     default:
-      return 'bg-gray-300 hover:bg-gray-400';
+      return 'bg-gray-300 hover:bg-gray-400  opacity-60 hover:opacity-100';
   }
 };
 
@@ -155,7 +155,8 @@ export const LayoutGridItem = memo(
         Object.values(dependentQueryStatus).length > 0 &&
         Object.values(dependentQueryStatus).every(
           (queryStatus) => queryStatus.status === DataSourceStatus.SUCCESS
-        )
+        ) &&
+        Object.keys(plainParamValues).length == artifact.plainParams?.length
       ) {
         console.info('hi, executeArtifact');
         const queryIds = Object.keys(dependentQueryStatus).reduce(

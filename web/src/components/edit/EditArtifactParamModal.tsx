@@ -203,6 +203,12 @@ const EditArtifactParamModal = ({
           );
           return;
         }
+
+        if (plainName.startsWith('df_')) {
+          toast.error('参数名称不能以df_开头');
+          return;
+        }
+
         // 检查是否存在同名参数
         if (
           plainParamNames.includes(plainName) &&

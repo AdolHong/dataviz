@@ -228,16 +228,9 @@ export function ArtifactResponseDialog({
           </TabsContent>
 
           <TabsContent value='code' className='pt-4'>
-            <Accordion type='single' collapsible className='w-full'>
-              <AccordionItem value='code'>
-                <AccordionTrigger>Python代码</AccordionTrigger>
-                <AccordionContent>
-                  <pre className='text-xs rounded-md bg-muted p-4 font-mono overflow-auto max-h-60'>
-                    {artifactResponse.codeContext.pyCode || '无代码'}
-                  </pre>
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
+            <pre className='text-xs rounded-md bg-muted p-4 font-mono overflow-auto max-h-60'>
+              {artifactResponse.codeContext.pyCode || '无代码'}
+            </pre>
           </TabsContent>
         </Tabs>
       </DialogContent>

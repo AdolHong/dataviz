@@ -98,6 +98,8 @@ export const LayoutGridItem = memo(
     const [artifactResponse, setArtifactResponse] =
       useState<ArtifactResponse | null>(null);
 
+    console.info('artifactResponse', artifactResponse);
+
     useEffect(() => {
       artifact.plainParams?.forEach((param) => {
         // 先处理choices的动态日期
@@ -130,6 +132,7 @@ export const LayoutGridItem = memo(
 
     useEffect(() => {
       if (
+        Object.values(dependentQueryStatus).length > 0 &&
         Object.values(dependentQueryStatus).every(
           (queryStatus) => queryStatus.status === DataSourceStatus.SUCCESS
         )
@@ -310,7 +313,6 @@ export const LayoutGridItem = memo(
             </div>
 
             <div className='flex space-x-2 items-center'>
-              {/* 修改为按钮，点击可查看数据源详情 */}
               {Object.entries(dependentQueryStatus).map(
                 ([sourceId, status]) => (
                   <button
@@ -323,6 +325,13 @@ export const LayoutGridItem = memo(
                 )
               )}
 
+              {
+                <button
+                  className={`w-3 h-3 aspect-square cursor-pointer ${artifactStatusColor(
+                    artifactResponse?.status || ''
+                  )}`}
+                />
+              }
               {artifact &&
                 ((artifact.plainParams && artifact.plainParams.length > 0) ||
                   (artifact.cascaderParams &&
@@ -504,4 +513,17 @@ const VegaChart: React.FC<{ data: string }> = ({ data }) => {
   };
 
   return <VegaLite spec={newChartData} />;
+};
+
+export const artifactStatusColor = (status: string) => {
+  console.info('status', status);
+  // 暂时的想法是： 成功或未初始化，都为白色
+  switch (status) {
+    case 'success':
+      return 'bg-green-500 hover:bg-green-600';
+    case 'error':
+      return 'bg-red-500 hover:bg-red-600';
+    default:
+      return 'bg-gray-300 hover:bg-gray-400';
+  }
 };

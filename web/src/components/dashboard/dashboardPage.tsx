@@ -8,7 +8,7 @@ import type {
 } from '@/types/models/fileSystem';
 import type { Artifact, DataSource, Parameter, Report } from '@/types';
 import type { Layout } from '@/types/models/layout';
-import { ChevronLeft, ChevronRight, X, Edit } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { fsApi } from '@/api/fs';
 import EditModal from '@/components/edit/EditModal';
 import { reportApi } from '@/api/report';

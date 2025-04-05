@@ -10,6 +10,7 @@ from models.fs_models import (
     FileSystemOperation,
     BatchOperationRequest
 )
+import json
 from utils.fs_utils import (
     load_fs_data, 
     save_fs_data, 
@@ -18,8 +19,10 @@ from utils.fs_utils import (
     is_folder_empty, 
     get_folder_and_children_ids, 
     get_references_to_file,
-    get_item_path
+    get_item_path,
+    FILE_DELETED_PATH
 )
+
 from routes.report_routes import update_report_title
 
 router = APIRouter(tags=["file-system"])
@@ -49,8 +52,20 @@ def create_file(item: FileSystemItem):
     
     # 创建实际文件
     file_path = get_item_path(item)
+    default_report = {
+        "id": item.id,  
+        "title": item.name,
+        "description": "",
+        "dataSources": [],
+        "parameters": [],
+        "artifacts": [],
+        "layout": {"items": []},
+        "createdAt": datetime.now().isoformat(),
+        "updatedAt": datetime.now().isoformat(),
+    }
+    
     with open(file_path, "w", encoding="utf-8") as f:
-        f.write("{}")  # 创建空json文件
+        f.write(json.dumps(default_report))  # 创建空json文件
     
     # 添加到列表并保存
     items.append(item)
@@ -124,7 +139,8 @@ def delete_file(file_id: str):
     # 删除实际文件
     file_path = get_item_path(file_item)
     if os.path.exists(file_path):
-        os.remove(file_path)
+        deleted_file_path = os.path.join(FILE_DELETED_PATH, datetime.now().strftime("%Y%m%dT%H:%M:%S") + "__" + file_item.id)
+        os.rename(file_path, deleted_file_path)
     
     # 删除文件记录
     items = [item for item in items if item.id != file_id]

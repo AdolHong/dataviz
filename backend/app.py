@@ -4,7 +4,7 @@ import os
 import uvicorn
 
 from routes import fs_routes, report_routes, query_routes, artifact_routes
-from utils.fs_utils import DATA_DIR, FS_DATA_FILE, FILE_STORAGE_PATH, save_fs_data
+from utils.fs_utils import DATA_DIR, FS_DATA_FILE, FILE_STORAGE_PATH, save_fs_data, FILE_DELETED_PATH
 
 app = FastAPI()
 
@@ -31,6 +31,9 @@ def startup_event():
     
     if not os.path.exists(FILE_STORAGE_PATH):
         os.makedirs(FILE_STORAGE_PATH, exist_ok=True)
+    
+    if not os.path.exists(FILE_DELETED_PATH):
+        os.makedirs(FILE_DELETED_PATH, exist_ok=True)
     
     if not os.path.exists(FS_DATA_FILE):
         save_fs_data([])

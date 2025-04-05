@@ -23,23 +23,10 @@ def get_report(file_id: str):
     # 获取报表文件ID(文件或引用)
     report_file_id = file_item.id if file_item.type == FileSystemItemType.FILE else file_item.referenceTo
 
+    print("report_file_id", report_file_id)
+
     # 获取报表内容
     report_content = get_report_content(report_file_id)
-    if not report_content:
-        # 如果文件为空，初始化一个默认的报表结构
-        default_report = Report(**{
-            "id": file_id,
-            "title": file_item.name,
-            "description": "",
-            "dataSources": [],
-            "parameters": [],
-            "artifacts": [],
-            "layout": {"items": []},
-            "createdAt": datetime.now().isoformat(),
-            "updatedAt": datetime.now().isoformat(),
-        })
-        save_report_content(file_id, default_report)
-        return default_report
     return report_content
 
 # API端点：获取报表数据
@@ -59,9 +46,11 @@ def get_report_by_report_id(report_id: str):
 
     if file_item.reportId != report_id:
         raise HTTPException(status_code=404, detail="报表文件不存在")
-
+    
+        # 获取报表内容
+    report_content = get_report_content(file_item.id)
     # 获取报表内容
-    return get_report_content(file_item.id)
+    return report_content
 
 
 

@@ -11,7 +11,7 @@ def get_report_content(file_id: str) -> Optional[Report]:
         return None
     
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, "r", encoding="utf-8") as f:            
             return Report(**json.load(f))
     except json.JSONDecodeError:
         # 如果文件为空或格式不正确，返回空对象

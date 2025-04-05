@@ -86,7 +86,7 @@ async def execute_artifact(request: ArtifactRequest):
         # 创建本地变量空间，包含DataFrame对象和参数
         local_vars = {
             **dfs,  # 数据源
-            # **request.plainParamValues
+            **request.plainParamValues
         }
         
         # 创建输出捕获
@@ -100,6 +100,8 @@ async def execute_artifact(request: ArtifactRequest):
         
         exec(code, exec_globals, local_vars)
         
+        # 获取捕获的输出
+        captured_output = text_output.getvalue()
         
         # 检查是否有输出结果变量
         if "result" in local_vars:
@@ -129,7 +131,6 @@ async def execute_artifact(request: ArtifactRequest):
                 data_context = ArtifactTextDataContext(type="text", data=str(result))
         else:
             # 如果没有result变量，返回标准输出内容
-            captured_output = text_output.getvalue()
             if captured_output:
                 data_context = ArtifactTextDataContext(type="text", data=captured_output)
             else:
@@ -146,19 +147,12 @@ async def execute_artifact(request: ArtifactRequest):
             codeContext=ArtifactCodeContext(**request.dict())
         )
          
-    print(ArtifactResponse(
-        status="success",
-        message="Artifact executed successfully",
-        alerts=alerts,
-        codeContext=ArtifactCodeContext(**request.dict()),
-        dataContext=data_context,
-        queryTime=datetime.now().isoformat()
-    ))
+
                 
     # 返回执行结果
     return ArtifactResponse(
         status="success",
-        message="Artifact executed successfully",
+        message=captured_output if captured_output else "Artifact executed successfully",
         alerts=alerts,
         codeContext=ArtifactCodeContext(**request.dict()),
         dataContext=data_context,

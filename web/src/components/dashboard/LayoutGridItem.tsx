@@ -14,6 +14,7 @@ import { DataSourceStatus } from '@/lib/store/useQueryStatusStore';
 import React from 'react';
 import { queryStatusColor } from './ParameterQueryArea';
 import { DataSourceDialog } from './DataSourceDialog';
+import { ArtifactResponseDialog } from './ArtifactResponseDialog';
 import { artifactApi } from '@/api/artifact';
 import { parseDynamicDate } from '@/utils/parser';
 import type {
@@ -23,6 +24,19 @@ import type {
 import { toast } from 'sonner';
 import Plot from 'react-plotly.js';
 import * as echarts from 'echarts';
+import { VegaLite } from 'react-vega';
+
+// Artifact状态颜色
+export const artifactStatusColor = (status: string): string => {
+  switch (status) {
+    case 'success':
+      return 'bg-green-500 hover:bg-green-600';
+    case 'error':
+      return 'bg-red-500 hover:bg-red-600';
+    default:
+      return 'bg-gray-300 hover:bg-gray-400';
+  }
+};
 
 interface LayoutGridItemProps {
   layoutItem: LayoutItem;
@@ -50,6 +64,7 @@ export const LayoutGridItem = memo(
     const [selectedDataSourceId, setSelectedDataSourceId] = useState<
       string | null
     >(null);
+    const [showArtifactDialog, setShowArtifactDialog] = useState(false);
 
     // 为每个参数创建状态
     const [plainParamValues, setPlainParamValues] = useState<
@@ -75,6 +90,11 @@ export const LayoutGridItem = memo(
     const handleDataSourceClick = (sourceId: string) => {
       setSelectedDataSourceId(sourceId);
       setShowDataSourceDialog(true);
+    };
+
+    // 处理点击Artifact按钮事件
+    const handleArtifactClick = () => {
+      setShowArtifactDialog(true);
     };
 
     // 添加查找数据源的函数
@@ -330,6 +350,7 @@ export const LayoutGridItem = memo(
                   className={`w-3 h-3 aspect-square cursor-pointer ${artifactStatusColor(
                     artifactResponse?.status || ''
                   )}`}
+                  onClick={handleArtifactClick}
                 />
               }
               {artifact &&
@@ -424,6 +445,16 @@ export const LayoutGridItem = memo(
               queryStatus={dependentQueryStatus[selectedDataSourceId] || null}
             />
           )}
+
+          {/* 添加ArtifactResponseDialog组件 */}
+          {showArtifactDialog && artifactResponse && (
+            <ArtifactResponseDialog
+              open={showArtifactDialog}
+              onOpenChange={setShowArtifactDialog}
+              artifact={artifact}
+              artifactResponse={artifactResponse}
+            />
+          )}
         </Card>
       </div>
     );
@@ -497,8 +528,6 @@ const EChartComponent: React.FC<EChartComponentProps> = ({
   );
 };
 
-import { VegaLite } from 'react-vega';
-
 const VegaChart: React.FC<{ data: string }> = ({ data }) => {
   const [chartData, _] = useState(JSON.parse(data));
   if (!chartData) return <div>Loading...</div>;
@@ -513,17 +542,4 @@ const VegaChart: React.FC<{ data: string }> = ({ data }) => {
   };
 
   return <VegaLite spec={newChartData} />;
-};
-
-export const artifactStatusColor = (status: string) => {
-  console.info('status', status);
-  // 暂时的想法是： 成功或未初始化，都为白色
-  switch (status) {
-    case 'success':
-      return 'bg-green-500 hover:bg-green-600';
-    case 'error':
-      return 'bg-red-500 hover:bg-red-600';
-    default:
-      return 'bg-gray-300 hover:bg-gray-400';
-  }
 };

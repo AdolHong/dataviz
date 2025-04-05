@@ -25,7 +25,6 @@ import { useTabsSessionStore } from '@/lib/store/useTabsSessionStore';
 import { ParameterQueryArea } from '@/components/dashboard/ParameterQueryArea';
 import { LayoutGrid } from '@/components/dashboard/LayoutGrid';
 import { type TabDetail } from '@/lib/store/useTabsSessionStore';
-import { toast } from 'sonner';
 
 // 为标签加载报表数据的函数
 const loadReportForTab = async (tab: TabDetail) => {
@@ -36,9 +35,7 @@ const loadReportForTab = async (tab: TabDetail) => {
 export function DashboardPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-
   const [navbarVisible, setNavbarVisible] = useState(true);
-  const [navbarWidth, setNavbarWidth] = useState(256); // 默认宽度为256px
 
   console.info('hi, dashboardPage');
 
@@ -189,27 +186,15 @@ export function DashboardPage() {
   // tabsArea: 使用 useCallback 优化 onToggleNavbarVisible
   const handleToggleNavbarVisible = useCallback(() => {
     setNavbarVisible((prev) => !prev);
-  }, []);
-
-  // tabsArea: 使用 useCallback 优化 onCloseTab
-  const handleCloseTab = useCallback((tabId: string) => {
-    // 删除tab
-    // removeCachedTab(tabId);
-    // 删除tab对应的报表
-    // removeCachedReport(tabId);
-    // 删除tab对应的参数值
-    // removeTabIdParamValues(tabId);
-    // // 删除tab对应的查询状态
-    // clearQueryByTabId(tabId);
-    // console.log('删除tab之后, tabIdFiles', tabIdFiles);
-    // console.log('删除tab之后, tabIdParamValues', tabIdParamValues);
-    // console.log('删除tab之后, tabQueryStatus', tabQueryStatus);
-  }, []);
+  }, [report]);
 
   // textArea: 使用 useCallback 优化 setReport
-  const handleSetReport = useCallback((report: Report) => {
-    setReport(report);
-  }, []);
+  const handleSetReport = useCallback(
+    (report: Report) => {
+      setReport(report);
+    },
+    [report]
+  );
 
   // query area: 使用 useMemo 优化参数
   const memoizedParameters = useMemo(() => report?.parameters, [report]);
@@ -252,7 +237,7 @@ export function DashboardPage() {
         <div
           className='border-r bg-background overflow-auto transition-all duration-300 ease-in-out flex-shrink-0'
           style={{
-            width: navbarVisible ? `${navbarWidth}px` : '0px',
+            width: navbarVisible ? '256px' : '0px',
             opacity: navbarVisible ? 1 : 0,
             visibility: navbarVisible ? 'visible' : 'hidden',
           }}
@@ -272,7 +257,6 @@ export function DashboardPage() {
             setReport={handleSetReport}
             navbarVisible={navbarVisible}
             onToggleNavbarVisible={handleToggleNavbarVisible}
-            onCloseTab={handleCloseTab}
           />
 
           {/* 标签内容区 */}
@@ -335,25 +319,60 @@ interface TabsAreaProps {
   setReport: (report: Report) => void;
   navbarVisible: boolean;
   onToggleNavbarVisible: () => void;
-  onCloseTab: (tabId: string) => void;
 }
 
 // 标签栏组件
 const TabsArea = memo(
-  ({
-    setReport,
-    navbarVisible,
-    onToggleNavbarVisible,
-    onCloseTab,
-  }: TabsAreaProps) => {
+  ({ setReport, navbarVisible, onToggleNavbarVisible }: TabsAreaProps) => {
+    if (!setReport) {
+      return <div>setReport is not defined</div>;
+    }
+
     const openTabs = useTabsSessionStore((state) => state.tabs);
+    const activeTabId = useTabsSessionStore((state) => state.activeTabId);
+    const setActiveTabId = useTabsSessionStore((state) => state.setActiveTabId);
     const removeCachedTab = useTabsSessionStore(
       (state) => state.removeCachedTab
     );
-    const activeTabId = useTabsSessionStore((state) => state.activeTabId);
-    const setActiveTabId = useTabsSessionStore((state) => state.setActiveTabId);
 
-    // console.info('hi, tabsArea');
+    // 加载tab对应的报表
+    const loadTabReport = async (targetTab: TabDetail) => {
+      // 设置激活tab
+      const report = await loadReportForTab(targetTab);
+      setReport(report);
+
+      // 更新激活id
+      setActiveTabId(targetTab.tabId);
+    };
+
+    useEffect(() => {
+      // 若openTabs中不存在activeTabId，则选择第一个tab激活
+      if (Object.values(openTabs).every((tab) => tab.tabId !== activeTabId)) {
+        const leftTabs = Object.values(openTabs).filter(
+          (t: TabDetail) => t.tabId !== activeTabId
+        );
+        if (leftTabs.length > 0) {
+          // 获取该标签对应的报表数据
+          const targetTab = leftTabs[0];
+          loadTabReport(targetTab);
+        } else {
+          setActiveTabId('');
+        }
+      }
+
+      // todo: 清除tabs相关的缓存和参数等等
+      // 删除tab对应的参数值
+      removeTabIdParamValues(activeTabId);
+
+      // 删除tab对应的查询状态
+      removeTabIdQueryStatus(activeTabId);
+
+      // // 删除tab对应的查询状态
+      // clearQueryByTabId(tabId);
+      // console.log('删除tab之后, tabIdFiles', tabIdFiles);
+      // console.log('删除tab之后, tabIdParamValues', tabIdParamValues);
+      // console.log('删除tab之后, tabQueryStatus', tabQueryStatus);
+    }, [openTabs]);
 
     return (
       <div className='border-b bg-muted/30'>
@@ -387,14 +406,7 @@ const TabsArea = memo(
                   }`}
                   onClick={async () => {
                     if (tab.tabId !== activeTabId) {
-                      // setActiveTabId(tab.tabId); // PS: 两次渲染，导致report数据重复加载(AI不要删我注释)
-                      if (setReport) {
-                        const report = await loadReportForTab(tab);
-                        if (report) {
-                          setReport(report);
-                        }
-                      }
-                      setActiveTabId(tab.tabId); // PS: 1次渲染，导致report数据重复加载(AI不要删我注释)
+                      loadTabReport(tab);
                     }
                   }}
                 >
@@ -403,14 +415,10 @@ const TabsArea = memo(
                     variant='ghost'
                     size='icon'
                     className='h-6 w-6 ml-2 opacity-60 hover:opacity-100'
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.stopPropagation();
-
+                      //删除tab:  remove操作的同时也会更新activeTabId
                       removeCachedTab(tab.tabId);
-                      // 使用setTimeout查看更新后的状态
-                      if (onCloseTab) {
-                        onCloseTab(tab.tabId);
-                      }
                     }}
                   >
                     <X size={14} />

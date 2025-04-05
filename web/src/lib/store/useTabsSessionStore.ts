@@ -13,6 +13,7 @@ interface TabDetail {
 interface TabsState {
   // 操作方法
   tabs: Record<string, TabDetail>;
+  getTabs: () => TabDetail[];
   getCachedTab: (tabId: string) => TabDetail | undefined;
   setCachedTab: (tabId: string, tab: TabDetail) => void;
   findTabsByFileId: (fileId: string) => TabDetail[];
@@ -31,6 +32,7 @@ export const useTabsSessionStore = create<TabsState>()(
   persist(
     (set, get) => ({
       tabs: {},
+      getTabs: () => Object.values(get().tabs),
       activeTabId: '',
       getCachedTab: (tabId: string) => get().tabs[tabId],
       setCachedTab: (tabId: string, tab: TabDetail) =>
@@ -49,22 +51,10 @@ export const useTabsSessionStore = create<TabsState>()(
             return { tabs: state.tabs };
           }
 
+          // 删除tab
           const oldTabs = { ...state.tabs };
           delete oldTabs[tabId];
-
-          // 若删除的是正在激活的tab
-          if (tabId === state.activeTabId) {
-            const keysList = Object.keys(oldTabs);
-            const minTabId =
-              keysList.length === 0
-                ? ''
-                : keysList.reduce((a, b) => (a < b ? a : b));
-            console.info('pardon, 删除激活', oldTabs);
-            return { tabs: oldTabs, activeTabId: minTabId };
-          } else {
-            console.info('pardon, 删除未激活', oldTabs);
-            return { tabs: oldTabs };
-          }
+          return { tabs: oldTabs };
         }),
       setActiveTabId: (tabId: string) => set({ activeTabId: tabId }),
 

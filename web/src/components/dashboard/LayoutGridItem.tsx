@@ -151,11 +151,19 @@ export const LayoutGridItem = memo(
     }, [report]);
 
     useEffect(() => {
+      console.info('artifactResponse', artifactResponse);
       if (
+        // 条件1: 所有状态均成功,  且queryStatus查询时间大于report的更新时间
         Object.values(dependentQueryStatus).length > 0 &&
         Object.values(dependentQueryStatus).every(
           (queryStatus) => queryStatus.status === DataSourceStatus.SUCCESS
         ) &&
+        // 条件2: 所有queryStatus的queryTime大于report的updatedAt
+        Object.values(dependentQueryStatus).every(
+          (queryStatus) =>
+            (queryStatus.queryResponse?.queryTime || '') > report.updatedAt
+        ) &&
+        // 条件3: 所有参数(plainParamValues)均已初始化
         Object.keys(plainParamValues).length == artifact.plainParams?.length
       ) {
         console.info('hi, executeArtifact');

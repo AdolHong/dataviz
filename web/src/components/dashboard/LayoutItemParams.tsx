@@ -1,74 +1,38 @@
 import { type Artifact } from '@/types/models/artifact';
 import { Badge } from '@/components/ui/badge';
-import { useState, useEffect } from 'react';
 import type { QueryStatus } from '@/lib/store/useTabQueryStatusStore';
 import type { DataSource } from '@/types/models/dataSource';
 import { CascaderTreeView } from './CascaderTreeView';
 
 import { Combobox } from '@/components/combobox';
-import { parseDynamicDate } from '@/utils/parser';
+
 import type { TreeNodeData } from '../tree-select/types';
 import { getChildrenValuesByTargetValues } from './CascaderTreeView';
-interface ArtifactParamsProps {
+interface LayoutItemParamsProps {
   artifact: Artifact;
   dependentQueryStatus: Record<string, QueryStatus>;
   dataSources: DataSource[];
-  // plainParamValues: Record<string, string | string[]>;
-  // cascaderParamValues: Record<string, string | string[]>;
+  plainParamValues: Record<string, string | string[]>;
+  setPlainParamValues: (values: Record<string, string | string[]>) => void;
+  cascaderParamValues: Record<string, string | string[]>;
+  setCascaderParamValues: (values: Record<string, string | string[]>) => void;
+  plainParamChoices: Record<string, Record<string, string>[]>;
+  setPlainParamChoices: (
+    values: Record<string, Record<string, string>[]>
+  ) => void;
 }
 
-export function ArtifactParams({
+export function LayoutItemParams({
   artifact,
   dependentQueryStatus,
   dataSources,
-  // plainParamValues,
-  // cascaderParamValues,
-}: ArtifactParamsProps) {
+  plainParamValues,
+  cascaderParamValues,
+  setPlainParamValues,
+  setCascaderParamValues,
+  plainParamChoices,
+}: LayoutItemParamsProps) {
   if (!artifact) return null;
-
-  // 为每个参数创建状态
-  const [plainParamValues, setPlainParamValues] = useState<
-    Record<string, string | string[]>
-  >({});
-  const [cascaderParamValues, setCascaderParamValues] = useState<
-    Record<string, string | string[]>
-  >({});
-
-  console.info('hi, artifactParmas. plainParamValues', plainParamValues);
-  console.info('hi, artifactParmas. cascaderParamValues', cascaderParamValues);
-  const [plainParamChoices, setPlainParamChoices] = useState<
-    Record<string, Record<string, string>[]>
-  >({});
-
-  useEffect(() => {
-    artifact.plainParams?.forEach((param) => {
-      // 先处理choices的动态日期
-      const choices = param.choices.map((choice) => ({
-        key: parseDynamicDate(choice.key),
-        value: parseDynamicDate(choice.value),
-      }));
-
-      setPlainParamChoices((prev) => ({
-        ...prev,
-        [param.name]: choices,
-      }));
-
-      // 再处理default
-      if (param.type === 'single') {
-        const defaulVal = parseDynamicDate(param.default);
-        setPlainParamValues((prev) => ({
-          ...prev,
-          [param.name]: defaulVal,
-        }));
-      } else if (param.type === 'multiple') {
-        const defaulVal = param.default.map((val) => parseDynamicDate(val));
-        setPlainParamValues((prev) => ({
-          ...prev,
-          [param.name]: defaulVal,
-        }));
-      }
-    });
-  }, [dependentQueryStatus]);
 
   // 修改后的代码
   const handleValueChange = (paramName: string, value: string | string[]) => {
@@ -195,7 +159,7 @@ export function ArtifactParams({
                         value: choice.value,
                       })) || []
                     }
-                    value={plainParamValues[param.name] || []}
+                    value={plainParamValues?.[param.name] || []}
                     placeholder='请选择'
                     onValueChange={(value) =>
                       handleValueChange(param.name, value)

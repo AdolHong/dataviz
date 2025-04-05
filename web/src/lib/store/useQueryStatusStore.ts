@@ -36,6 +36,7 @@ interface QueryStatusState {
   ) => QueryStatus;
 
   clearQueryStatusByTabId: (tabId: string) => void;
+  clearNonWhitelistedTabs: (whitelistedTabIds: string[]) => void;
   clear: () => void;
 }
 
@@ -77,6 +78,22 @@ export const useQueryStatusStore = create<QueryStatusState>()(
             )
           ),
         })),
+
+      clearNonWhitelistedTabs: (whitelistedTabIds: string[]) => {
+        set((state) => {
+          const newTabQueryStatus = { ...state.tabQueryStatus };
+
+          // 遍历当前所有的tabId
+          Object.keys(newTabQueryStatus).forEach((tabId) => {
+            // 如果当前tabId不在白名单中，则删除
+            if (!whitelistedTabIds.includes(tabId)) {
+              delete newTabQueryStatus[tabId];
+            }
+          });
+
+          return { tabQueryStatus: newTabQueryStatus };
+        });
+      },
 
       getQueryStatusByTabIdAndSourceId: (tabId: string, sourceId: string) => {
         if (!get().tabQueryStatus[tabId]) {

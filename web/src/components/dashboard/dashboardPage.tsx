@@ -341,13 +341,13 @@ const TabsArea = memo(
     );
 
     const clearTabIdParamValues = useParamValuesStore(
-      (state) => state.clearParamValuesByTabId
+      (state) => state.clearNonWhitelistedTabs
     );
     const clearQueryStatusByTabId = useQueryStatusStore(
-      (state) => state.clearQueryStatusByTabId
+      (state) => state.clearNonWhitelistedTabs
     );
     const clearFilesByTabId = useTabFilesStore(
-      (state) => state.clearFilesByTabId
+      (state) => state.clearNonWhitelistedTabs
     );
 
     // 用于拖拽功能的状态
@@ -391,12 +391,12 @@ const TabsArea = memo(
         }
       }
 
-      // // QueryArea: 清除tab对应的参数值
-      clearTabIdParamValues(activeTabId);
-      clearFilesByTabId(activeTabId);
+      // // QueryArea: 仅保留openTabs
+      clearTabIdParamValues(Object.keys(openTabs));
+      clearFilesByTabId(Object.keys(openTabs));
 
-      // // 删除tab对应的查询状态
-      clearQueryStatusByTabId(activeTabId);
+      // // QueryStatus: 仅保留openTabs
+      clearQueryStatusByTabId(Object.keys(openTabs));
     }, [openTabs]);
 
     // 拖拽事件处理函数

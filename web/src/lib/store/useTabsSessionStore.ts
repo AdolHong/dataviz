@@ -80,7 +80,9 @@ export const useTabsSessionStore = create<TabsState>()(
 
       setActiveTabId: (tabId: string) => set({ activeTabId: tabId }),
 
-      clear: () => set({ tabs: {}, tabsOrder: [], activeTabId: '' }),
+      clear: () => {
+        set({ tabs: {}, tabsOrder: [], activeTabId: '' });
+      },
     }),
     {
       name: 'tabs-session-storage', // localStorage 中的 key 名称

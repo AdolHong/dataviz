@@ -161,8 +161,8 @@ export const LayoutGridItem = memo(
         const request: ArtifactRequest = {
           uniqueId: `artifact_${artifact.id}_${Date.now()}`,
           dfAliasUniqueIds: queryIds,
-          plainParamValues: {}, // 可以从UI收集参数
-          cascaderParamValues: {}, // 可以从UI收集参数
+          plainParamValues: plainParamValues, // 可以从UI收集参数
+          cascaderParamValues: cascaderParamValues, // 可以从UI收集参数
           pyCode: artifact.code,
           engine: artifact.executor_engine,
         };

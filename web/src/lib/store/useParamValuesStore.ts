@@ -20,6 +20,7 @@ interface ParamValuesState {
   ) => void;
 
   clearParamValuesByTabId: (tabId: string) => void;
+  clearNonWhitelistedTabs: (whitelistedTabIds: string[]) => void;
 }
 
 // 创建 Zustand Store
@@ -50,6 +51,22 @@ export const useParamValuesStore = create<ParamValuesState>()(
         const oldTabIdParamValues = { ...get().tabIdParamValues };
         delete oldTabIdParamValues[tabId];
         set({ tabIdParamValues: oldTabIdParamValues });
+      },
+
+      clearNonWhitelistedTabs: (whitelistedTabIds: string[]) => {
+        set((state) => {
+          const newTabIdParamValues = { ...state.tabIdParamValues };
+
+          // 遍历当前所有的tabId
+          Object.keys(newTabIdParamValues).forEach((tabId) => {
+            // 如果当前tabId不在白名单中，则删除
+            if (!whitelistedTabIds.includes(tabId)) {
+              delete newTabIdParamValues[tabId];
+            }
+          });
+
+          return { tabIdParamValues: newTabIdParamValues };
+        });
       },
     }),
     {

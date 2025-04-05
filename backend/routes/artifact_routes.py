@@ -65,6 +65,7 @@ async def execute_artifact(request: ArtifactRequest):
         )
         
     
+    print("啥情况呀:", request.cascaderParamValues, request.plainParamValues)
         
 
     try:
@@ -82,7 +83,7 @@ async def execute_artifact(request: ArtifactRequest):
         # 创建本地变量空间，包含DataFrame对象和参数
         local_vars = {
             **dfs,  # 数据源
-            "plain_params": request.plainParamValues
+            # **request.plainParamValues
         }
         
         # 创建输出捕获

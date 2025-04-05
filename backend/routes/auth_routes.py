@@ -7,6 +7,30 @@ from secrets import token_hex
 from typing import Dict, Optional
 from pydantic import BaseModel
 
+
+
+def generate_sha256_hash(password):
+    """
+    # 示例用法
+    password = "your_password"
+    hashed_password = generate_sha256_hash(password)
+    print(f"SHA256哈希后的密码：{hashed_password}")
+    
+    
+    """
+    # 创建SHA256哈希对象
+    sha256_hash = hashlib.sha256()
+    
+    # 将密码转换为字节并更新哈希对象
+    sha256_hash.update(password.encode('utf-8'))
+    
+    # 获取十六进制的哈希值
+    hashed_password = sha256_hash.hexdigest()
+    
+    return hashed_password
+
+
+
 # 定义请求和响应模型
 class LoginRequest(BaseModel):
     username: str
@@ -24,8 +48,8 @@ router = APIRouter(tags=["auth"], prefix="/api/auth")
 # 用于存储用户凭证的字典，实际应用中应使用数据库
 # 这里密码已经预先用SHA256哈希过（实际情况下应该加盐）
 USERS = {
-    "admin": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",  # admin
-    "user": "04f8996da763b7a969b1028ee3007569eaf3a635486ddab211d512c85b9df8fb",   # user
+    "adol": "f09a31c2bb20aeee1e1ce6639c32226098bdaaf949b247b775f845aafadda2bd",  # adol
+    # "user": "04f8996da763b7a969b1028ee3007569eaf3a635486ddab211d512c85b9df8fb",   # user
 }
 
 # 用于JWT签名的密钥

@@ -43,7 +43,7 @@ async def execute_artifact(request: ArtifactRequest):
                 return ArtifactResponse(
                     queryTime=datetime.now().isoformat(),
                     status="error",
-                    message=f"Failed to load data source {alias}: {str(e)}",
+                    message=f"[PYTHON]Failed to load data source {alias}: {str(e)}",
                     error=str(e),
                     alerts=[Alert(type="error", message=f"Failed to load data source {alias}: {str(e)}")],
                     codeContext=ArtifactCodeContext(**request.dict())
@@ -67,20 +67,14 @@ async def execute_artifact(request: ArtifactRequest):
             codeContext=ArtifactCodeContext(**request.dict())
         )
         
-    
-    print("啥情况呀:", request.cascaderParamValues, request.plainParamValues)
-        
-
     try:
         # cascader_params 处理
         for param_name, param_value in request.cascaderParamValues.items():
             if not isinstance(param_value, list):
                 raise ValueError(f"Invalid cascader param value: {param_value}, should be a list.")
             df_alias, df_column = param_name.split(",")[:2]
-            print("之前", dfs[df_alias].shape)
             df_index = dfs[df_alias][df_column].astype(str).isin(param_value)
             dfs[df_alias] = dfs[df_alias].loc[df_index]
-            print("之后", dfs[df_alias].shape)
             
             
         # 创建本地变量空间，包含DataFrame对象和参数
@@ -89,20 +83,27 @@ async def execute_artifact(request: ArtifactRequest):
             **request.plainParamValues
         }
         
+        
         # 创建输出捕获
         text_output = io.StringIO()
-        
-        # 执行代码，捕获标准输出
-        exec_globals = {
-            "pd": pd,
-            "print": lambda *args, **kwargs: print(*args, **kwargs, file=text_output)
-        }
-        
-        exec(code, exec_globals, local_vars)
-        
+        try:
+            # 执行代码，捕获标准输出
+            exec_globals = {
+                "pd": pd,
+                "print": lambda *args, **kwargs: print(*args, **kwargs, file=text_output)
+            }
+            exec(code, exec_globals, local_vars)
+        except Exception as e:
+            return ArtifactResponse(
+                queryTime=datetime.now().isoformat(),
+                status="error",
+                message=text_output.getvalue(),
+                error=f"[PYTHON CODE] {type(e)}: " + str(e),
+                alerts=[Alert(type="error", message=str(e))],
+                codeContext=ArtifactCodeContext(**request.dict())
+            )
         # 获取捕获的输出
         captured_output = text_output.getvalue()
-        
         # 检查是否有输出结果变量
         if "result" in local_vars:
             result = local_vars["result"]

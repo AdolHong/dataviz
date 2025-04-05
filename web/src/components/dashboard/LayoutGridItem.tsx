@@ -25,6 +25,7 @@ import { toast } from 'sonner';
 import Plot from 'react-plotly.js';
 import * as echarts from 'echarts';
 import { VegaLite } from 'react-vega';
+import dayjs from 'dayjs';
 
 // Artifact状态颜色
 export const artifactStatusColor = (status: string): string => {
@@ -65,6 +66,7 @@ export const LayoutGridItem = memo(
       string | null
     >(null);
     const [showArtifactDialog, setShowArtifactDialog] = useState(false);
+    const [isInitialized, setIsInitialized] = useState(false);
 
     // 为每个参数创建状态
     const [plainParamValues, setPlainParamValues] = useState<
@@ -148,10 +150,17 @@ export const LayoutGridItem = memo(
           }));
         }
       });
+
+      // ps: 有了isInitialized, 可以避免在无参数的artifact请求多次画图;
+      setIsInitialized(true);
     }, [report]);
 
     useEffect(() => {
-      console.info('artifactResponse', artifactResponse);
+      // 条件1: 组件已经初始化完了, 即useEffect[report];
+      if (!isInitialized || !dependentQueryStatus || !report) {
+        return;
+      }
+
       if (
         // 条件1: 所有状态均成功,  且queryStatus查询时间大于report的更新时间
         Object.values(dependentQueryStatus).length > 0 &&
@@ -159,14 +168,16 @@ export const LayoutGridItem = memo(
           (queryStatus) => queryStatus.status === DataSourceStatus.SUCCESS
         ) &&
         // 条件2: 所有queryStatus的queryTime大于report的updatedAt
+        report.updatedAt &&
         Object.values(dependentQueryStatus).every(
           (queryStatus) =>
-            (queryStatus.queryResponse?.queryTime || '') > report.updatedAt
-        ) &&
-        // 条件3: 所有参数(plainParamValues)均已初始化
-        Object.keys(plainParamValues).length == artifact.plainParams?.length
+            queryStatus.queryResponse &&
+            // 日期比较，用了dayjs
+            dayjs(queryStatus.queryResponse.queryTime).isAfter(
+              dayjs(report.updatedAt)
+            )
+        )
       ) {
-        console.info('hi, executeArtifact');
         const queryIds = Object.keys(dependentQueryStatus).reduce(
           (acc, key) => {
             const source = findDataSource(key);
@@ -178,7 +189,12 @@ export const LayoutGridItem = memo(
         );
         executeArtifact(artifact, queryIds);
       }
-    }, [dependentQueryStatus, plainParamValues, cascaderParamValues]);
+    }, [
+      dependentQueryStatus,
+      plainParamValues,
+      cascaderParamValues,
+      isInitialized,
+    ]);
 
     // 执行artifact的函数
     const executeArtifact = async (

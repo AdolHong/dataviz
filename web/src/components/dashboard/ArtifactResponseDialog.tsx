@@ -113,7 +113,7 @@ export function ArtifactResponseDialog({
             {/* 输出信息 */}
             <div className='mt-4'>
               <h3 className='text-sm font-medium text-muted-foreground'>
-                输出信息
+                python输出信息(即print)
               </h3>
               <div className='mt-1 rounded-md bg-muted p-3 text-sm overflow-auto max-h-40'>
                 <pre className='whitespace-pre-wrap'>
@@ -132,29 +132,6 @@ export function ArtifactResponseDialog({
                   <pre className='whitespace-pre-wrap'>
                     {artifactResponse.error || '未知错误'}
                   </pre>
-                </div>
-              </div>
-            )}
-
-            {/* 警告信息 */}
-            {artifactResponse.alerts && artifactResponse.alerts.length > 0 && (
-              <div className='mt-4'>
-                <h3 className='text-sm font-medium'>提示信息</h3>
-                <div className='mt-1 space-y-2'>
-                  {artifactResponse.alerts.map((alert, idx) => (
-                    <div
-                      key={idx}
-                      className={`rounded-md p-3 text-sm ${
-                        alert.type === 'error'
-                          ? 'bg-destructive/10 text-destructive'
-                          : alert.type === 'warning'
-                            ? 'bg-warning/10 text-warning'
-                            : 'bg-info/10 text-info'
-                      }`}
-                    >
-                      {`[${alert.type}] ${alert.message}`}
-                    </div>
-                  ))}
                 </div>
               </div>
             )}

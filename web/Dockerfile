@@ -14,7 +14,7 @@ RUN npm install --force
 COPY . .
 
 # 暴露开发服务器端口
-EXPOSE 3000
+EXPOSE 8080
 
 # 启动开发服务器
 CMD ["npm", "start"] 

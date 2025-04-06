@@ -68,7 +68,7 @@ class ArtifactResponse(BaseModel):
     dataContext: Optional[ArtifactDataContext] = None
     queryTime: str
     
-class ArtifactCodeReponse(BaseModel):
+class ArtifactCodeResponse(BaseModel):
     status: str
     message: str
     error: str = ""

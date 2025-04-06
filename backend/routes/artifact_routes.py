@@ -14,7 +14,7 @@ from datetime import datetime
 from utils.fs_utils import FILE_CACHE_PATH
 
 
-from models.artifact_models import ArtifactRequest, ArtifactResponse, ArtifactCodeContext, ArtifactTextDataContext, ArtifactPlotlyDataContext, ArtifactEChartDataContext, ArtifactImageDataContext,ArtifactAltairDataContext, ArtifactCodeReponse
+from models.artifact_models import ArtifactRequest, ArtifactResponse, ArtifactCodeContext, ArtifactTextDataContext, ArtifactPlotlyDataContext, ArtifactEChartDataContext, ArtifactImageDataContext,ArtifactAltairDataContext, ArtifactCodeResponse
 from models.query_models import Alert
 from models.artifact_models import PlainParamValue
 
@@ -193,7 +193,7 @@ async def execute_artifact(request: ArtifactRequest):
     )
         
 
-@router.post("/artifact_code", response_model=ArtifactCodeReponse)
+@router.post("/artifact_code", response_model=ArtifactCodeResponse)
 async def artifact_code(request: ArtifactRequest):
     """
     处理代码并返回格式化后的Python代码，用于复制到剪贴板
@@ -254,7 +254,7 @@ async def artifact_code(request: ArtifactRequest):
         params_context = "# params\n" + f"globals().update(json.loads(\"\"\"{json.dumps(plain_param_values)}\"\"\"))"
         pyCode =  import_context + "\n\n" + params_context + "\n\n" + data_context + "\n\n" + "# code\n" + request.pyCode
     except Exception as e:
-        return ArtifactCodeReponse(
+        return ArtifactCodeResponse(
             queryTime=datetime.now().isoformat(),
             status="error",
             message=f"Failed to process Python code",
@@ -264,7 +264,7 @@ async def artifact_code(request: ArtifactRequest):
         )
     
     # 返回处理结果
-    return ArtifactCodeReponse(
+    return ArtifactCodeResponse(
         status="success",
         message="Code processed successfully",
         alerts=alerts,

@@ -8,7 +8,7 @@ import { type DataSource } from '@/types/models/dataSource';
 import { type Artifact } from '@/types/models/artifact';
 import { LayoutItemParams } from './LayoutItemParams';
 import { Button } from '@/components/ui/button';
-import { SettingsIcon } from 'lucide-react';
+import { SettingsIcon, Copy } from 'lucide-react';
 import { type QueryStatus } from '@/lib/store/useQueryStatusStore';
 import { DataSourceStatus } from '@/lib/store/useQueryStatusStore';
 import React from 'react';
@@ -344,6 +344,28 @@ export const LayoutGridItem = memo(
       }
     };
 
+    // 在组件中添加复制到剪切板的函数
+    const handleCopyToClipboard = (content: string) => {
+      try {
+        // 使用 Clipboard API 复制内容
+        navigator.clipboard
+          .writeText(content)
+          .then(() => {
+            // 复制成功后显示通知
+            toast.success('已复制到剪切板');
+          })
+          .catch((err) => {
+            // 处理复制失败的情况
+            toast.error('复制失败', {
+              description: err.message,
+            });
+          });
+      } catch (err) {
+        // 兼容性处理
+        toast.error('浏览器不支持剪切板操作');
+      }
+    };
+
     return (
       <div key={layoutItem.id} className='min-h-80 max-h-120' style={itemStyle}>
         <Card className='h-full overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300  mt-0 mb-0 py-1 gap-0'>
@@ -378,7 +400,7 @@ export const LayoutGridItem = memo(
                   />
                 )
               )}
-
+              {/* 执行按钮 */}
               {
                 <button
                   className={`w-3 h-3 aspect-square cursor-pointer ${artifactStatusColor(
@@ -386,6 +408,15 @@ export const LayoutGridItem = memo(
                   )}`}
                   onClick={handleArtifactClick}
                 />
+              }
+              {/* 复制剪切板按钮 */}
+              {
+                <button
+                  className='w-3 h-3 aspect-square cursor-pointer'
+                  onClick={() => handleCopyToClipboard('随便什么内容')}
+                >
+                  <Copy className='w-full h-full text-gray-500 hover:text-gray-700' />
+                </button>
               }
               {artifact &&
                 ((artifact.plainParams && artifact.plainParams.length > 0) ||

@@ -1,9 +1,9 @@
-11. dataViz区域,   提供python代码；+数据
+
 12.  对于timer,  可能查询有延迟； 保证新的查询不会被旧的查询替代；
-19. python的import与engine的依赖项
 20. viz提供playground，可以复制当前queryStaus和代码，进行画图
 21. share就很有意思…再想想
-22. cascader是否生效了; 多对多怎么处理
+
+
 
 完成：
 8. aritifact:  支持图片、plotly、 pyecharts； 支持dataframe, 感觉 shadcn/ui的足够用了;
@@ -13,18 +13,24 @@
 6.  param values的读取和存储； 动态日期参数的解析， 都在前端； multiple_select， 不需要拼接了，为了页面能还原；
 7. 多个datasource的存储， 是分多个文件还是单个文件；
 9. 文件上传， 字段不匹配，要提示； 
+11. dataViz区域,   提供python代码；+数据
 13. query处， 提供每个 datasource的解析后的代码；
 14.  report需要维护 createTime, updateTime; 用于知道是否发生变更;
 15. mul_input不能输入,
 16. 级联参数中已经依赖了的dataSource；  不允许删除；
 17.  viz区域的参数，会造成无限次渲染；
 18. 删除文件时，不要真的删除；给表加上一个is_deleted就可以了
+22. cascader是否生效了; 多对多怎么处理
 23. close tab时，要清理一些数据
 24. 换一下默认的文件路径， 让发布代码更方便。
 25. 删除文件时， 文件的引用一起close
 26. 关闭tab, dashboard没有正常响应
-27. 代码输入框太小气，修整宽度
-
+27. df_alias和option的key名，不能一样
+28. cascader，应该是一颗树，不能多对多
+29. 用户登录
+30. 限制了数据查询的行数， 目前是5万
+31. cascader取消即反选：
+32.  plainParam， 单选不能为空；  且做好类型转换；
 
 
 

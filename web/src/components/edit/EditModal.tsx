@@ -299,20 +299,20 @@ const EditModal = ({
             onValueChange={setActiveTab}
             className='flex-1 flex flex-col overflow-hidden'
           >
-            <TabsList className='w-full grid grid-cols-4 sticky top-0 z-10'>
-              <TabsTrigger value='info' className='flex items-center gap-2'>
+            <TabsList className='w-full grid grid-cols-3 sticky top-0 z-10'>
+              {/* <TabsTrigger value='info' className='flex items-center gap-2'>
                 <Info size={24} />
                 <span>基本信息</span>
+              </TabsTrigger> */}
+
+              <TabsTrigger value='data' className='flex items-center gap-2'>
+                <Database size={24} />
+                <span>数据源</span>
               </TabsTrigger>
 
               <TabsTrigger value='filters' className='flex items-center gap-2'>
                 <Filter size={24} />
                 <span>筛选条件</span>
-              </TabsTrigger>
-
-              <TabsTrigger value='data' className='flex items-center gap-2'>
-                <Database size={24} />
-                <span>数据源</span>
               </TabsTrigger>
 
               <TabsTrigger

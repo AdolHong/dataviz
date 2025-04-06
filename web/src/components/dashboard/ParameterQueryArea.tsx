@@ -214,14 +214,11 @@ export const ParameterQueryArea = memo(
         setCachedValues(values);
         setCachedFiles(files);
 
-        setIsQuerying(true);
-        const promises = dataSources.map((dataSource) =>
-          handleQueryRequest(dataSource)
-        );
-        await Promise.all(promises);
-        setIsQuerying(false);
-
-        console.info('queryStatusRef', queryStatusRef.current);
+        // setIsQuerying(true);
+        for (const dataSource of dataSources) {
+          await handleQueryRequest(dataSource);
+        }
+        // setIsQuerying(false);
       }
     };
 
@@ -302,9 +299,6 @@ export const ParameterQueryArea = memo(
         );
         return;
       }
-
-      console.info('queryRequest', queryRequest);
-
       const response = await queryApi.executeQueryBySourceId(queryRequest);
 
       // 查询结果

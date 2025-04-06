@@ -6,7 +6,7 @@ const BASE_URL = 'http://localhost:8000/api';
 
 export const axiosInstance = axios.create({
   baseURL: BASE_URL,
-  timeout: 10000,
+  timeout: 120000, // 两分钟超时
   headers: {
     'Content-Type': 'application/json',
   },

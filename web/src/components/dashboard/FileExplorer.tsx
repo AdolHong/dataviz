@@ -317,7 +317,7 @@ export const FileExplorer = React.memo(
         updatedItems = createFile(
           fsItems,
           duplicateItemName,
-          (itemToDuplicate as any).reportId || `report-${Date.now()}`,
+          `report-${Date.now()}`,
           itemToDuplicate.parentId
         );
       }

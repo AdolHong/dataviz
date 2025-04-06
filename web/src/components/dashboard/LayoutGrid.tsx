@@ -61,7 +61,6 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
               {} as Record<string, QueryStatus>
             );
 
-          console.info('hi, layoutgrid');
           return (
             <LayoutGridItem
               key={item.id}

@@ -86,12 +86,9 @@ async def query_by_source_id(request: QueryRequest, username: str = Depends(veri
             code = request.requestContext.parsedCode
             engine = request.requestContext.engine
             
-            execute_python_query(
-                code,
-                {},
-                engine
-            )
-            
+            global_vars = {}
+            exec(code, global_vars)
+            result = global_vars.get('result')
         elif request_type == "csv_uploader":
             dataContent = request.requestContext.dataContent
             print("todo: uploader")

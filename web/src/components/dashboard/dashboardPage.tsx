@@ -327,9 +327,7 @@ export function DashboardPage() {
                 </div>
               </div>
             ) : (
-              <div className='flex items-center justify-center h-full text-muted-foreground'>
-                双击文件或引用打开报表
-              </div>
+              <div className='flex items-center justify-center h-full text-muted-foreground'></div>
             )}
           </div>
         </div>

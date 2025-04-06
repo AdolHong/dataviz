@@ -138,24 +138,11 @@ async def execute_artifact(request: ArtifactRequest):
                 codeContext=ArtifactCodeContext(**request.dict())
             )
         
-        # import
-        import_context = "# import\n" + "import io\n" + "import json\n" + "import pandas as pd\n"
-        
-        # data
-        data_context = "# data\n" + "\n".join([f"""{df_alias} = pd.read_json(io.StringIO(\"\"\"{df_value.to_json(orient='records', date_format='iso',force_ascii=False).strip()}\"\"\"))""" for df_alias, df_value in dfs.items()])
-        
-        # param
-        params_context = "# params\n" + f"globals().update(json.loads(\"\"\"{json.dumps(plain_param_values)}\"\"\"))"
-        pyCode =  import_context + "\n\n" + data_context + "\n\n" + params_context + "\n\n" + "# code\n" + request.pyCode
-        request.pyCode = pyCode
-        
         # 获取捕获的输出
         captured_output = text_output.getvalue()
         # 检查是否有输出结果变量
         if "result" in local_vars:
             result = local_vars["result"]
-            
-        
             # 根据结果类型返回不同的数据上下文
             if isinstance(result, str):
                 data_context = ArtifactTextDataContext(type="text", data=result)
@@ -221,13 +208,13 @@ async def artifact_code(request: ArtifactRequest):
             df = load_query_result(uniqueId)
             dfs[alias] = df
         except Exception as e:
-            return ArtifactResponse(
+            return ArtifactCodeResponse(
                 queryTime=datetime.now().isoformat(),
                 status="error",
                 message=f"[PYTHON]Failed to load data source {alias}: {str(e)}",
                 error=str(e),
                 alerts=[Alert(type="error", message=f"Failed to load data source {alias}: {str(e)}")],
-                codeContext=ArtifactCodeContext(**request.dict())
+                pyCode=""
             )
     try:
         # cascader_params 处理

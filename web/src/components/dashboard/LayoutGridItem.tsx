@@ -68,6 +68,10 @@ export const LayoutGridItem = memo(
     >(null);
     const [showArtifactDialog, setShowArtifactDialog] = useState(false);
     const [isInitialized, setIsInitialized] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [artifactResponse, setArtifactResponse] =
+      useState<ArtifactResponse | null>(null);
 
     // 为每个参数创建状态
     const [plainParamValues, setPlainParamValues] = useState<
@@ -115,11 +119,6 @@ export const LayoutGridItem = memo(
       gridColumn: `${layoutItem.x + 1} / span ${layoutItem.width}`,
       gridRow: `${layoutItem.y + 1} / span ${layoutItem.height}`,
     };
-
-    const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [artifactResponse, setArtifactResponse] =
-      useState<ArtifactResponse | null>(null);
 
     useEffect(() => {
       artifact.plainParams?.forEach((param) => {

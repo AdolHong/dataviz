@@ -214,11 +214,12 @@ export const ParameterQueryArea = memo(
         setCachedValues(values);
         setCachedFiles(files);
 
-        // setIsQuerying(true);
-        for (const dataSource of dataSources) {
-          await handleQueryRequest(dataSource);
-        }
-        // setIsQuerying(false);
+        setIsQuerying(true);
+        const promises = dataSources.map((dataSource) =>
+          handleQueryRequest(dataSource)
+        );
+        await Promise.all(promises);
+        setIsQuerying(false);
       }
     };
 

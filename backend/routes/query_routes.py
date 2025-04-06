@@ -29,6 +29,13 @@ def load_query_result(uniqueId:str)->pd.DataFrame:
         return pd.read_json(f)
 
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+
+
+
+
 @router.post("/query_by_source_id", response_model=QueryResponse)
 async def query_by_source_id(request: QueryRequest, username: str = Depends(verify_token_dependency)):
     """
@@ -80,7 +87,16 @@ async def query_by_source_id(request: QueryRequest, username: str = Depends(veri
             engine = request.requestContext.engine
             # 执行SQL查询
             from engine_config import sql_engine
-            result = sql_engine[engine](code)
+            # result = sql_engine[engine](code)
+            def sql_execute_async():
+                result = sql_engine[engine](code)
+                return result
+            
+            
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(pool, sql_execute_async)
+            
             
         elif request_type == "python":
             code = request.requestContext.parsedCode

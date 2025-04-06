@@ -1,4 +1,15 @@
 
+
+# python 启动
+uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+
+# react 启动
+npm start
+
+
+
+
+
 12.  对于timer,  可能查询有延迟； 保证新的查询不会被旧的查询替代；
 20. viz提供playground，可以复制当前queryStaus和代码，进行画图
 21. share就很有意思…再想想

@@ -1,33 +1,20 @@
-# 第一阶段：构建应用
-FROM node:20-alpine AS build
+# 使用Node.js官方镜像
+FROM node:20-alpine
 
 # 设置工作目录
 WORKDIR /app
 
-# 复制 package.json 和 package-lock.json
+# 复制package.json和yarn.lock
 COPY package*.json ./
-COPY yarn.lock ./
 
 # 安装依赖
-RUN yarn install
+RUN npm install --force
 
-# 复制源代码
+# 复制所有源代码
 COPY . .
 
-# 构建应用
-RUN yarn build
+# 暴露开发服务器端口
+EXPOSE 3000
 
-# 第二阶段：生产环境
-FROM nginx:alpine
-
-# 拷贝构建产物到nginx
-COPY --from=build /app/dist /usr/share/nginx/html
-
-# 拷贝nginx配置文件
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-
-# 暴露80端口
-EXPOSE 80
-
-# 启动nginx
-CMD ["nginx", "-g", "daemon off;"] 
+# 启动开发服务器
+CMD ["npm", "start"] 

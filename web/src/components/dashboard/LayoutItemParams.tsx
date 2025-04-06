@@ -103,7 +103,7 @@ export function LayoutItemParams({
                     </div>
                   </div>
 
-                  <div className='mt-1'>
+                  <div className='mt-1' key={`cascader-${index}`}>
                     <CascaderTreeView
                       dfAlias={param.dfAlias}
                       cascaderParam={param}

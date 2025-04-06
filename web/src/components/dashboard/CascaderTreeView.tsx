@@ -123,6 +123,9 @@ export function CascaderTreeView({
   dependentQueryStatus,
   onCheckChange,
 }: CascaderTreeViewProps) {
+  // 先声明所有的状态，避免条件渲染导致hooks顺序不一致
+  const [value, setValue] = useState<string[]>([]);
+
   // 1. 根据dfAlias找到对应的dataSource和sourceId
   const dataSource = useMemo(() => {
     return dataSources.find((ds) => ds.alias === dfAlias);
@@ -167,8 +170,9 @@ export function CascaderTreeView({
 
     const treeData = csvToTreeData(csvData, levels);
     return treeData;
-  }, [csvData]);
+  }, [csvData, levels]);
 
+  // 提前渲染UI，避免条件分支导致hooks顺序改变
   if (!dataSource) {
     return (
       <Button
@@ -192,9 +196,6 @@ export function CascaderTreeView({
       </Button>
     );
   }
-
-  const [value, setValue] = useState<string[]>([]);
-  console.info('value', value);
 
   return (
     <TreeSelect

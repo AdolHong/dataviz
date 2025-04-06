@@ -7,11 +7,14 @@ from models.fs_models import FileSystemItem, FileSystemItemType
 # 数据文件路径
 DATA_DIR = Path(__file__).parent.parent.parent / "data"
 FS_DATA_FILE = os.path.join(DATA_DIR, "fs_items.json")
+TOKEN_FILE = os.path.join(DATA_DIR, "token.duckdb")
 
 # 设置实际文件存储的基础路径
 FILE_STORAGE_PATH = os.path.join(DATA_DIR, "files")
 FILE_DELETED_PATH = os.path.join(DATA_DIR, "files_deleted")
 FILE_CACHE_PATH = os.path.join(DATA_DIR, "files_cache")
+
+
 
 # 辅助函数：加载文件系统数据
 def load_fs_data() -> List[FileSystemItem]:

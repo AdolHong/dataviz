@@ -15,9 +15,6 @@ import pandas as pd
 from io import StringIO
 
 
-execute_sql_query = lambda code, param_values, engine: print("hi sql")
-execute_python_query = lambda code, param_values, engine: print("hi python")
-
 router = APIRouter(tags=["query"])
 
 def save_query_result(uniqueId:str, result:str):
@@ -31,9 +28,6 @@ def load_query_result(uniqueId:str)->pd.DataFrame:
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-
-
-
 
 
 @router.post("/query_by_source_id", response_model=QueryResponse)
@@ -102,9 +96,16 @@ async def query_by_source_id(request: QueryRequest, username: str = Depends(veri
             code = request.requestContext.parsedCode
             engine = request.requestContext.engine
             
-            global_vars = {}
-            exec(code, global_vars)
-            result = global_vars.get('result')
+            def python_execute_async():
+                global_vars = {}
+                exec(code, global_vars)
+                result = global_vars.get('result')
+                return result
+            
+            loop = asyncio.get_event_loop()
+            with ThreadPoolExecutor() as pool:
+                result = await loop.run_in_executor(pool, python_execute_async)
+            
         elif request_type == "csv_uploader":
             dataContent = request.requestContext.dataContent
             print("todo: uploader")

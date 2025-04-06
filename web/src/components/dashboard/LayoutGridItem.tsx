@@ -20,6 +20,7 @@ import { parseDynamicDate } from '@/utils/parser';
 import type {
   ArtifactRequest,
   ArtifactResponse,
+  PlainParamValue,
 } from '@/types/api/aritifactRequest';
 import { toast } from 'sonner';
 import Plot from 'react-plotly.js';
@@ -70,7 +71,7 @@ export const LayoutGridItem = memo(
 
     // 为每个参数创建状态
     const [plainParamValues, setPlainParamValues] = useState<
-      Record<string, string | string[]>
+      Record<string, PlainParamValue>
     >({});
     const [cascaderParamValues, setCascaderParamValues] = useState<
       Record<string, string | string[]>
@@ -120,8 +121,6 @@ export const LayoutGridItem = memo(
     const [artifactResponse, setArtifactResponse] =
       useState<ArtifactResponse | null>(null);
 
-    console.info('artifactResponse', artifactResponse);
-
     useEffect(() => {
       artifact.plainParams?.forEach((param) => {
         // 先处理choices的动态日期
@@ -140,13 +139,21 @@ export const LayoutGridItem = memo(
           const defaulVal = parseDynamicDate(param.default);
           setPlainParamValues((prev) => ({
             ...prev,
-            [param.name]: defaulVal,
+            [param.name]: {
+              name: param.name,
+              isMultiple: false,
+              value: defaulVal,
+            },
           }));
         } else if (param.type === 'multiple') {
           const defaulVal = param.default.map((val) => parseDynamicDate(val));
           setPlainParamValues((prev) => ({
             ...prev,
-            [param.name]: defaulVal,
+            [param.name]: {
+              name: param.name,
+              isMultiple: true,
+              value: defaulVal,
+            },
           }));
         }
       });

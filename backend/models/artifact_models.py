@@ -1,11 +1,18 @@
 from pydantic import BaseModel
-from typing import Dict, Any, Optional, List, Union, Literal
+from typing import Dict, Optional, List, Union, Literal
 from models.query_models import Alert
+
+
+class PlainParamValue(BaseModel):
+    name: str
+    isMultiple: bool
+    value: Union[str, List[str]]
+
 
 class ArtifactRequest(BaseModel):
     uniqueId: str
     dfAliasUniqueIds: Dict[str, str]
-    plainParamValues: Dict[str, Union[str, List[str]]]
+    plainParamValues: Dict[str, PlainParamValue]
     cascaderParamValues: Dict[str, Union[str, List[str]]]
     pyCode: str
     engine: str
@@ -46,7 +53,7 @@ ArtifactDataContext = Union[
 class ArtifactCodeContext(BaseModel):
     uniqueId: str
     dfAliasUniqueIds: Dict[str, str]
-    plainParamValues: Dict[str, Union[str, List[str]]]
+    plainParamValues: Dict[str, PlainParamValue]
     cascaderParamValues: Dict[str, Union[str, List[str]]]
     pyCode: str
     engine: str

@@ -8,13 +8,13 @@ import { Combobox } from '@/components/combobox';
 
 import type { TreeNodeData } from '../tree-select/types';
 import { getChildrenValuesByTargetValues } from './CascaderTreeView';
+import type { PlainParamValue } from '@/types/api/aritifactRequest';
 interface LayoutItemParamsProps {
   artifact: Artifact;
   dependentQueryStatus: Record<string, QueryStatus>;
   dataSources: DataSource[];
-  plainParamValues: Record<string, string | string[]>;
-  setPlainParamValues: (values: Record<string, string | string[]>) => void;
-  cascaderParamValues: Record<string, string | string[]>;
+  plainParamValues: Record<string, PlainParamValue>;
+  setPlainParamValues: (values: Record<string, PlainParamValue>) => void;
   setCascaderParamValues: (values: Record<string, string | string[]>) => void;
   plainParamChoices: Record<string, Record<string, string>[]>;
   setPlainParamChoices: (
@@ -27,7 +27,6 @@ export function LayoutItemParams({
   dependentQueryStatus,
   dataSources,
   plainParamValues,
-  cascaderParamValues,
   setPlainParamValues,
   setCascaderParamValues,
   plainParamChoices,
@@ -35,7 +34,11 @@ export function LayoutItemParams({
   if (!artifact) return null;
 
   // 修改后的代码
-  const handleValueChange = (paramName: string, value: string | string[]) => {
+  const handleValueChange = (
+    paramName: string,
+    value: string | string[],
+    isMultiple: boolean
+  ) => {
     setPlainParamValues((prev) => {
       // 如果值没有变化，不更新状态
       if (JSON.stringify(prev[paramName]) === JSON.stringify(value)) {
@@ -43,7 +46,11 @@ export function LayoutItemParams({
       }
       return {
         ...prev,
-        [paramName]: value,
+        [paramName]: {
+          name: paramName,
+          isMultiple: isMultiple,
+          value: value,
+        },
       };
     });
   };
@@ -159,10 +166,14 @@ export function LayoutItemParams({
                         value: choice.value,
                       })) || []
                     }
-                    value={plainParamValues?.[param.name] || []}
+                    value={plainParamValues?.[param.name]?.value || []}
                     placeholder='请选择'
                     onValueChange={(value) =>
-                      handleValueChange(param.name, value)
+                      handleValueChange(
+                        param.name,
+                        value,
+                        param.type === 'single' ? false : true
+                      )
                     }
                     mode={param.type === 'single' ? 'single' : 'multiple'}
                   />

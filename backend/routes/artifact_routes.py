@@ -15,6 +15,7 @@ from utils.fs_utils import FILE_CACHE_PATH
 
 from models.artifact_models import ArtifactRequest, ArtifactResponse, ArtifactCodeContext, ArtifactTextDataContext, ArtifactPlotlyDataContext, ArtifactEChartDataContext, ArtifactImageDataContext,ArtifactAltairDataContext
 from models.query_models import Alert
+from models.artifact_models import PlainParamValue
 
 router = APIRouter(tags=["artifact"])
 
@@ -71,7 +72,7 @@ async def execute_artifact(request: ArtifactRequest):
         # cascader_params 处理
         for param_name, param_value in request.cascaderParamValues.items():
             if not isinstance(param_value, list):
-                raise ValueError(f"Invalid cascader param value: {param_value}, should be a list.")
+                raise ValueError(f"[PARAMS] Invalid cascader param value: {param_value}, should be a list.")
             
             # 对于cascader_params, 如果参数值为空, 则默认为全选
             if len(param_value) == 0:
@@ -80,6 +81,16 @@ async def execute_artifact(request: ArtifactRequest):
             df_index = dfs[df_alias][df_column].astype(str).isin(param_value)
             dfs[df_alias] = dfs[df_alias].loc[df_index]
             
+        # 对于plain_params, 进行类型转换
+        
+        print("request.plainParamValues, ", request.plainParamValues)
+        for param_name, param_value in request.plainParamValues.items():
+            if isinstance(param_value, PlainParamValue) and isinstance(param_value.value, str) and not param_value.isMultiple:
+                pass
+            elif isinstance(param_value, PlainParamValue) and isinstance(param_value.value, list) and param_value.isMultiple:
+                pass
+            else:
+                raise ValueError(f"[PARAMS] Invalid plain param value: {param_value}, should be a list or a string.")
             
         # 创建本地变量空间，包含DataFrame对象和参数
         local_vars = {

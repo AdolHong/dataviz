@@ -101,8 +101,6 @@ async def execute_artifact(request: ArtifactRequest):
             dfs[df_alias] = dfs[df_alias].loc[df_index]
             
         # 对于plain_params, 进行类型转换
-        
-        print("request.plainParamValues, ", request.plainParamValues)
         plain_param_values = {}
         for param_name, param_value in request.plainParamValues.items():
             if isinstance(param_value, PlainParamValue) and  param_value.type == 'single' and isinstance(param_value.value, str):
@@ -217,7 +215,9 @@ async def artifact_code(request: ArtifactRequest):
                 pyCode=""
             )
     try:
+        print("dfs", dfs)
         # cascader_params 处理
+        print("request.cascaderParamValues", request.cascaderParamValues)
         for param_name, param_value in request.cascaderParamValues.items():
             if not isinstance(param_value, list):
                 raise ValueError(f"[PARAMS] Invalid cascader param value: {param_value}, should be a list.")
@@ -227,7 +227,10 @@ async def artifact_code(request: ArtifactRequest):
                 continue
             df_alias, df_column = param_name.split(",")[:2]
             df_index = dfs[df_alias][df_column].astype(str).isin(param_value)
+            
+            print("df之前 ", dfs[df_alias].shape)
             dfs[df_alias] = dfs[df_alias].loc[df_index]
+            print("df之后 ", dfs[df_alias].shape)
             
         # 对于plain_params, 进行类型转换
         plain_param_values = {}
@@ -239,12 +242,14 @@ async def artifact_code(request: ArtifactRequest):
             else:
                 raise ValueError(f"[PARAMS] Invalid plain param value: {param_value}, should be a list or a string.")
             
+        
+        print(1)
         # import
         import_context = "# import\n" + "import io\n" + "import json\n" + "import pandas as pd\n"
-        
+        print(2)
         # data
         data_context = "# data\n" + "\n".join([f"""{df_alias} = pd.read_json(io.StringIO(\"\"\"{df_value.to_json(orient='records', date_format='iso',force_ascii=False).strip()}\"\"\"))""" for df_alias, df_value in dfs.items()])
-        
+        print(3)
         # param
         params_context = "# params\n" + f"globals().update(json.loads(\"\"\"{json.dumps(plain_param_values)}\"\"\"))"
         pyCode =  import_context + "\n\n" + params_context + "\n\n" + data_context + "\n\n" + "# code\n" + request.pyCode

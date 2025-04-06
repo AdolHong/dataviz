@@ -346,20 +346,27 @@ export const LayoutGridItem = memo(
 
     // 在组件中添加复制到剪切板的函数
     const handleCopyToClipboard = async () => {
+      console.info('artifactResponse', artifactResponse);
+      console.info('artifact', artifact);
+
       if (!artifact || !artifactResponse) {
         return;
       }
 
+      const queryIds = Object.keys(dependentQueryStatus).reduce(
+        (acc, key) => {
+          const source = findDataSource(key);
+          acc[source?.alias || ''] =
+            dependentQueryStatus[key].queryResponse?.data.uniqueId || '';
+          return acc;
+        },
+        {} as Record<string, string>
+      );
+
       // 准备请求参数，根据executeArtifact函数中的构建方式
       const request: ArtifactRequest = {
         uniqueId: `artifact_${artifact.id}_${Date.now()}`,
-        dfAliasUniqueIds: Object.entries(dependentQueryStatus).reduce(
-          (acc, [key, value]) => {
-            acc[key] = value.queryResponse?.data.uniqueId || '';
-            return acc;
-          },
-          {} as Record<string, string>
-        ),
+        dfAliasUniqueIds: queryIds,
         plainParamValues: plainParamValues || {},
         cascaderParamValues: cascaderParamValues || {},
         pyCode: artifact.code,
@@ -368,6 +375,7 @@ export const LayoutGridItem = memo(
 
       // 调用新API
       const response = await artifactApi.getArtifactCode(request);
+      console.info('response', response);
 
       // 复制到剪贴板
       if (!response || !response.pyCode) {

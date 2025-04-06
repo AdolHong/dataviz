@@ -67,3 +67,11 @@ class ArtifactResponse(BaseModel):
     codeContext: ArtifactCodeContext
     dataContext: Optional[ArtifactDataContext] = None
     queryTime: str
+    
+class ArtifactCodeReponse(BaseModel):
+    status: str
+    message: str
+    error: str = ""
+    alerts: List[Alert] = []
+    pyCode: str
+    queryTime: str

@@ -346,6 +346,11 @@ export const LayoutGridItem = memo(
 
     // 在组件中添加复制到剪切板的函数
     const handleCopyToClipboard = (content: string) => {
+      if (!content) {
+        toast.error('没有内容可以复制');
+        return;
+      }
+
       try {
         // 使用 Clipboard API 复制内容
         navigator.clipboard
@@ -413,7 +418,11 @@ export const LayoutGridItem = memo(
               {
                 <button
                   className='w-3 h-3 aspect-square cursor-pointer'
-                  onClick={() => handleCopyToClipboard('随便什么内容')}
+                  onClick={() =>
+                    handleCopyToClipboard(
+                      artifactResponse?.codeContext.pyCode || ''
+                    )
+                  }
                 >
                   <Copy className='w-full h-full text-gray-500 hover:text-gray-700' />
                 </button>

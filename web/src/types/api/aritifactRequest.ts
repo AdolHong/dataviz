@@ -1,3 +1,4 @@
+import { List } from 'lucide-react';
 import type { Alert } from './queryResponse';
 
 export interface ArtifactRequest {
@@ -69,4 +70,13 @@ export interface ArtifactResponse {
     | ArtifactPlotlyDataContext
     | ArtifactEChartDataContext
     | ArtifactAltairDataContext;
+}
+
+export interface ArtifactCodeReponse {
+  status: string;
+  message: string;
+  error: string;
+  alerts: Alert[];
+  pyCode: string;
+  queryTime: string;
 }

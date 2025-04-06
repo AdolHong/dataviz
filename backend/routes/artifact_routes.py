@@ -14,7 +14,7 @@ from datetime import datetime
 from utils.fs_utils import FILE_CACHE_PATH
 
 
-from models.artifact_models import ArtifactRequest, ArtifactResponse, ArtifactCodeContext, ArtifactTextDataContext, ArtifactPlotlyDataContext, ArtifactEChartDataContext, ArtifactImageDataContext,ArtifactAltairDataContext
+from models.artifact_models import ArtifactRequest, ArtifactResponse, ArtifactCodeContext, ArtifactTextDataContext, ArtifactPlotlyDataContext, ArtifactEChartDataContext, ArtifactImageDataContext,ArtifactAltairDataContext, ArtifactCodeReponse
 from models.query_models import Alert
 from models.artifact_models import PlainParamValue
 
@@ -204,6 +204,79 @@ async def execute_artifact(request: ArtifactRequest):
         alerts=alerts,
         codeContext=ArtifactCodeContext(**request.dict()),
         dataContext=data_context,
+        queryTime=datetime.now().isoformat()
+    )
+        
+
+@router.post("/artifact_code", response_model=ArtifactCodeReponse)
+async def artifact_code(request: ArtifactRequest):
+    """
+    处理代码并返回格式化后的Python代码，用于复制到剪贴板
+    """
+    alerts = []
+    # 加载所有依赖的数据源查询结果
+    dfs = {}
+    for alias, uniqueId in request.dfAliasUniqueIds.items():
+        try:
+            df = load_query_result(uniqueId)
+            dfs[alias] = df
+        except Exception as e:
+            return ArtifactResponse(
+                queryTime=datetime.now().isoformat(),
+                status="error",
+                message=f"[PYTHON]Failed to load data source {alias}: {str(e)}",
+                error=str(e),
+                alerts=[Alert(type="error", message=f"Failed to load data source {alias}: {str(e)}")],
+                codeContext=ArtifactCodeContext(**request.dict())
+            )
+    try:
+        # cascader_params 处理
+        for param_name, param_value in request.cascaderParamValues.items():
+            if not isinstance(param_value, list):
+                raise ValueError(f"[PARAMS] Invalid cascader param value: {param_value}, should be a list.")
+            
+            # 对于cascader_params, 如果参数值为空, 则默认为全选
+            if len(param_value) == 0:
+                continue
+            df_alias, df_column = param_name.split(",")[:2]
+            df_index = dfs[df_alias][df_column].astype(str).isin(param_value)
+            dfs[df_alias] = dfs[df_alias].loc[df_index]
+            
+        # 对于plain_params, 进行类型转换
+        plain_param_values = {}
+        for param_name, param_value in request.plainParamValues.items():
+            if isinstance(param_value, PlainParamValue) and  param_value.type == 'single' and isinstance(param_value.value, str):
+                plain_param_values[param_name] = convert_plain_param_value(param_value.value, param_value.valueType)
+            elif isinstance(param_value, PlainParamValue) and param_value.type == 'multiple' and isinstance(param_value.value, list):
+                plain_param_values[param_name] = [convert_plain_param_value(value, param_value.valueType) for value in param_value.value] 
+            else:
+                raise ValueError(f"[PARAMS] Invalid plain param value: {param_value}, should be a list or a string.")
+            
+        # import
+        import_context = "# import\n" + "import io\n" + "import json\n" + "import pandas as pd\n"
+        
+        # data
+        data_context = "# data\n" + "\n".join([f"""{df_alias} = pd.read_json(io.StringIO(\"\"\"{df_value.to_json(orient='records', date_format='iso',force_ascii=False).strip()}\"\"\"))""" for df_alias, df_value in dfs.items()])
+        
+        # param
+        params_context = "# params\n" + f"globals().update(json.loads(\"\"\"{json.dumps(plain_param_values)}\"\"\"))"
+        pyCode =  import_context + "\n\n" + params_context + "\n\n" + data_context + "\n\n" + "# code\n" + request.pyCode
+    except Exception as e:
+        return ArtifactCodeReponse(
+            queryTime=datetime.now().isoformat(),
+            status="error",
+            message=f"Failed to process Python code",
+            error=str(e),
+            alerts=[Alert(type="error", message=f"Code processing error: {str(e)}")],
+            pyCode=""
+        )
+    
+    # 返回处理结果
+    return ArtifactCodeReponse(
+        status="success",
+        message="Code processed successfully",
+        alerts=alerts,
+        pyCode=pyCode,
         queryTime=datetime.now().isoformat()
     )
         

@@ -72,6 +72,10 @@ async def execute_artifact(request: ArtifactRequest):
         for param_name, param_value in request.cascaderParamValues.items():
             if not isinstance(param_value, list):
                 raise ValueError(f"Invalid cascader param value: {param_value}, should be a list.")
+            
+            # 对于cascader_params, 如果参数值为空, 则默认为全选
+            if len(param_value) == 0:
+                continue
             df_alias, df_column = param_name.split(",")[:2]
             df_index = dfs[df_alias][df_column].astype(str).isin(param_value)
             dfs[df_alias] = dfs[df_alias].loc[df_index]

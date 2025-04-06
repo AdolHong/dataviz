@@ -8,7 +8,7 @@ import type {
 } from '@/types/models/fileSystem';
 import type { Artifact, DataSource, Parameter, Report } from '@/types';
 import type { Layout } from '@/types/models/layout';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, User, X, LogOut } from 'lucide-react';
 import { fsApi } from '@/api/fs';
 import EditModal from '@/components/edit/EditModal';
 import { reportApi } from '@/api/report';
@@ -22,6 +22,8 @@ import { LayoutGrid } from '@/components/dashboard/LayoutGrid';
 import { useQueryStatusStore } from '@/lib/store/useQueryStatusStore';
 import { useParamValuesStore } from '@/lib/store/useParamValuesStore';
 import { useTabFilesStore } from '@/lib/store/useFileSessionStore';
+import { useNavigate } from '@tanstack/react-router';
+
 // 为标签加载报表数据的函数
 const loadReportForTab = async (tab: TabDetail) => {
   const report = await reportApi.getReportByReportId(tab.reportId);
@@ -213,10 +215,23 @@ export function DashboardPage() {
   );
   const memoizedActiveTabId = useMemo(() => activeTabId || '', [report]);
 
+  const navigate = useNavigate();
+  const username = sessionStorage.getItem('auth-username') || 'UnknownUser';
+
+  const handleLogout = () => {
+    // 清除sessionStorage中的token和username
+    sessionStorage.removeItem('auth-token');
+    sessionStorage.removeItem('auth-username');
+
+    // 重定向到登录页面
+    navigate({ to: '/login' });
+  };
+
   return (
     <div className='flex flex-col h-screen relative'>
       {/* 顶部Header */}
-      <div className='border-b bg-background flex items-center h-14 px-4'>
+      <div className='border-b bg-background flex items-center justify-between h-14 px-4'>
+        {/* 左侧Logo */}
         <div className='flex items-center space-x-2'>
           <svg
             className='h-6 w-6 text-blue-500'
@@ -230,6 +245,24 @@ export function DashboardPage() {
             <polyline points='22 12 18 12 15 21 9 3 6 12 2 12'></polyline>
           </svg>
           <span className='text-xl font-semibold'>DataViz</span>
+        </div>
+
+        {/* 右侧用户信息 */}
+        <div className='flex items-center space-x-4'>
+          <div className='flex items-center space-x-2'>
+            <User size={16} className='text-gray-600' />
+            <span className='text-sm font-medium'>{username}</span>
+          </div>
+
+          <Button
+            variant='ghost'
+            size='icon'
+            onClick={handleLogout}
+            className='hover:bg-red-50'
+            title='注销'
+          >
+            <LogOut size={16} className='text-red-500' />
+          </Button>
         </div>
       </div>
 

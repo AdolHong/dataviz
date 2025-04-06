@@ -11,7 +11,8 @@ export interface ArtifactRequest {
 
 export interface PlainParamValue {
   name: string;
-  isMultiple: boolean;
+  type: 'single' | 'multiple';
+  valueType: 'string' | 'double' | 'boolean' | 'int';
   value: string | string[];
 }
 

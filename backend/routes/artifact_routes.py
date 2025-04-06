@@ -9,6 +9,7 @@ import pyecharts
 import io
 import base64
 import matplotlib.pyplot as plt
+from typing import Literal, Any
 from datetime import datetime
 from utils.fs_utils import FILE_CACHE_PATH
 
@@ -26,6 +27,24 @@ def load_query_result(uniqueId: str) -> pd.DataFrame:
             return pd.read_json(f)
     except Exception as e:
         raise ValueError(f"Failed to load query result: {str(e)}")
+
+
+def convert_plain_param_value(value: str, valueType: Literal['string', 'double', 'boolean', 'int']) -> Any:
+    try:
+        """转换普通参数值"""
+        if valueType == 'string':
+            return str(value)
+        elif valueType == 'double':
+            return float(value)
+        elif valueType == 'boolean':
+            return bool(value)
+        elif valueType == 'int':
+            return int(value)
+    except Exception as e:
+        raise ValueError(f"[PARAMS] Invalid plain param value: {value}, should be a {valueType}, with error: {str(e)}")  
+
+
+
 
 @router.post("/execute_artifact", response_model=ArtifactResponse)
 async def execute_artifact(request: ArtifactRequest):
@@ -84,18 +103,19 @@ async def execute_artifact(request: ArtifactRequest):
         # 对于plain_params, 进行类型转换
         
         print("request.plainParamValues, ", request.plainParamValues)
+        plain_param_values = {}
         for param_name, param_value in request.plainParamValues.items():
-            if isinstance(param_value, PlainParamValue) and isinstance(param_value.value, str) and not param_value.isMultiple:
-                pass
-            elif isinstance(param_value, PlainParamValue) and isinstance(param_value.value, list) and param_value.isMultiple:
-                pass
+            if isinstance(param_value, PlainParamValue) and  param_value.type == 'single' and isinstance(param_value.value, str):
+                plain_param_values[param_name] = convert_plain_param_value(param_value.value, param_value.valueType)
+            elif isinstance(param_value, PlainParamValue) and param_value.type == 'multiple' and isinstance(param_value.value, list):
+                plain_param_values[param_name] = [convert_plain_param_value(value, param_value.valueType) for value in param_value.value] 
             else:
                 raise ValueError(f"[PARAMS] Invalid plain param value: {param_value}, should be a list or a string.")
             
         # 创建本地变量空间，包含DataFrame对象和参数
         local_vars = {
             **dfs,  # 数据源
-            **request.plainParamValues
+            **plain_param_values
         }
         
         

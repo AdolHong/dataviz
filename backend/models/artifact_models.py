@@ -5,9 +5,10 @@ from models.query_models import Alert
 
 class PlainParamValue(BaseModel):
     name: str
-    isMultiple: bool
+    type: Literal['single', 'multiple']
     value: Union[str, List[str]]
-
+    valueType: Literal['string', 'double', 'boolean', 'int']
+    
 
 class ArtifactRequest(BaseModel):
     uniqueId: str

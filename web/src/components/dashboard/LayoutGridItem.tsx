@@ -141,7 +141,8 @@ export const LayoutGridItem = memo(
             ...prev,
             [param.name]: {
               name: param.name,
-              isMultiple: false,
+              type: 'single',
+              valueType: param.valueType,
               value: defaulVal,
             },
           }));
@@ -151,7 +152,8 @@ export const LayoutGridItem = memo(
             ...prev,
             [param.name]: {
               name: param.name,
-              isMultiple: true,
+              type: 'multiple',
+              valueType: param.valueType,
               value: defaulVal,
             },
           }));
@@ -459,7 +461,6 @@ export const LayoutGridItem = memo(
                     dependentQueryStatus={dependentQueryStatus}
                     plainParamValues={plainParamValues}
                     setPlainParamValues={setPlainParamValues}
-                    cascaderParamValues={cascaderParamValues}
                     setCascaderParamValues={setCascaderParamValues}
                     plainParamChoices={plainParamChoices}
                     setPlainParamChoices={setPlainParamChoices}

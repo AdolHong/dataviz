@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Check, ChevronsUpDown } from 'lucide-react';
+import { Check, ChevronsUpDown, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import {
@@ -28,6 +28,7 @@ interface ComboboxProps {
   disabled?: boolean;
   terminateCancelSelect?: (value: string) => boolean;
   displayNum?: number;
+  clearAble?: boolean;
 }
 
 export function Combobox({
@@ -39,8 +40,20 @@ export function Combobox({
   disabled = false,
   terminateCancelSelect,
   displayNum = 5,
+  clearAble = false,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (
+      !clearAble &&
+      (!value || (Array.isArray(value) && value.length === 0)) &&
+      options.length > 0
+    ) {
+      const firstOptionValue = options[0].value;
+      onValueChange(mode === 'single' ? firstOptionValue : [firstOptionValue]);
+    }
+  }, [options, clearAble, value, mode]);
 
   useEffect(() => {
     options.forEach((option) => {
@@ -69,12 +82,23 @@ export function Combobox({
     }
 
     if (mode === 'single') {
-      // 单选模式
+      if (!clearAble && currentValue === value) {
+        return;
+      }
       onValueChange(currentValue === value ? '' : currentValue);
       setOpen(false);
     } else {
       // 多选模式
       const currentValues = Array.isArray(value) ? value : [];
+
+      if (
+        !clearAble &&
+        currentValues.length === 1 &&
+        currentValues.includes(currentValue)
+      ) {
+        return;
+      }
+
       const newValues = currentValues.includes(currentValue)
         ? currentValues.filter((v) => v !== currentValue)
         : [...currentValues, currentValue];

@@ -37,7 +37,8 @@ export function LayoutItemParams({
   const handleValueChange = (
     paramName: string,
     value: string | string[],
-    isMultiple: boolean
+    valueType: 'string' | 'double' | 'boolean' | 'int',
+    type: 'single' | 'multiple'
   ) => {
     setPlainParamValues((prev) => {
       // 如果值没有变化，不更新状态
@@ -48,7 +49,8 @@ export function LayoutItemParams({
         ...prev,
         [paramName]: {
           name: paramName,
-          isMultiple: isMultiple,
+          type: type,
+          valueType: valueType,
           value: value,
         },
       };
@@ -172,9 +174,11 @@ export function LayoutItemParams({
                       handleValueChange(
                         param.name,
                         value,
-                        param.type === 'single' ? false : true
+                        param.valueType,
+                        param.type
                       )
                     }
+                    clearAble={param.type === 'single' ? false : true}
                     mode={param.type === 'single' ? 'single' : 'multiple'}
                   />
                 </div>

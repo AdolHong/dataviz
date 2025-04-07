@@ -390,16 +390,44 @@ export const LayoutGridItem = memo(
           .then(() => {
             // 复制成功后显示通知
             toast.success('已复制到剪切板');
+            throw new Error('刻意抛出错误以测试下载功能');
           })
-          .catch((err) => {
-            // 处理复制失败的情况
-            toast.error('复制失败', {
-              description: err.message,
-            });
+          .catch((err: Error) => {
+            // 复制失败，尝试下载文件
+            try {
+              // 创建一个 Blob 对象
+              const blob = new Blob([content], { type: 'text/plain' });
+
+              // 创建一个下载链接
+              const downloadLink = document.createElement('a');
+              downloadLink.href = URL.createObjectURL(blob);
+              downloadLink.download = 'artifact_code.py'; // 默认文件名
+
+              // 触发下载
+              document.body.appendChild(downloadLink);
+              downloadLink.click();
+              document.body.removeChild(downloadLink);
+
+              // 释放 URL 对象
+              URL.revokeObjectURL(downloadLink.href);
+
+              toast.success('由于复制失败，已为您下载文件');
+            } catch (downloadErr: unknown) {
+              // 下载也失败了
+              toast.error('复制和下载均失败', {
+                description:
+                  downloadErr instanceof Error
+                    ? downloadErr.message
+                    : '未知错误',
+              });
+            }
           });
-      } catch (err) {
+      } catch (err: unknown) {
         // 兼容性处理
-        toast.error('浏览器不支持剪切板操作');
+        toast.error('浏览器不支持剪切板操作', {
+          description:
+            err instanceof Error ? err.message : '已为您尝试下载文件',
+        });
       }
     };
 

@@ -1,6 +1,11 @@
 import type { Artifact, DataSource } from '..';
 
 // 可视化参数接口
+type AliasRelianceMapValue = {
+  artifactTitle: string;
+  artifactId: string;
+};
+
 export interface AliasRelianceMap {
   aliasToArtifacts: {
     [alias: string]: { artifactTitle: string; artifactId: string }[];
@@ -84,34 +89,42 @@ export const createAliasRelianceMap = (
   dataSources: DataSource[],
   artifacts: Artifact[]
 ): AliasRelianceMap => {
-  const aliasToArtifacts = artifacts.reduce<{
-    aliasToArtifacts: {
-      [alias: string]: { artifactTitle: string; artifactId: string }[];
-    };
-  }>((acc, artifact) => {
+  // 修改这里，直接使用正确的类型结构初始化
+  const aliasToArtifacts: Record<string, AliasRelianceMapValue[]> = {};
+
+  // 遍历所有图表，收集依赖关系
+  artifacts.forEach((artifact) => {
     artifact.dependencies.forEach((alias) => {
-      if (!acc[alias]) {
-        acc[alias] = []; // 如果 alias 不存在，初始化为一个空数组
+      if (!aliasToArtifacts[alias]) {
+        aliasToArtifacts[alias] = [];
       }
-      acc[alias].push({
+      aliasToArtifacts[alias].push({
         artifactTitle: artifact.title,
         artifactId: artifact.id,
-      }); // 将 artifact.title 添加到对应的 alias 列表中
+      });
     });
-    return acc;
-  }, {});
+  });
 
-  const aliasToDataSourceId = dataSources.reduce<{
-    [alias: string]: string;
-  }>((acc, dataSource) => {
-    acc[dataSource.alias] = dataSource.id; // 将数据源的别名映射到其ID
-    return acc;
-  }, {});
+  // 构建数据源映射
+  const aliasToDataSourceId: Record<string, string> = {};
+  dataSources.forEach((dataSource) => {
+    aliasToDataSourceId[dataSource.alias] = dataSource.id;
+  });
 
-  const aliasRelianceMap: AliasRelianceMap = {
+  return {
     aliasToArtifacts,
     aliasToDataSourceId,
   };
-
-  return aliasRelianceMap;
 };
+
+// // 确保创建 AliasRelianceMap 实例时完全匹配接口
+// const exampleMap: AliasRelianceMap = {
+//   aliasToArtifacts: {
+//     // 必须是 { artifactTitle: string; artifactId: string }[] 类型
+//     someAlias: [{ artifactTitle: 'Example Title', artifactId: 'example-id' }],
+//   },
+//   aliasToDataSourceId: {
+//     // 必须是 { [alias: string]: string } 类型
+//     someAlias: 'dataSourceId',
+//   },
+// };

@@ -9,14 +9,24 @@ src/components/dashboard/LayoutItemParams.tsx(69,29): error TS7006: Parameter 'p
 src/components/edit/EditDataSourceModal.tsx(429,43): error TS2339: Property 'interval' does not exist on type 'ManualUpdateMode | AutoUpdateMode'.
   Property 'interval' does not exist on type 'ManualUpdateMode'.
 src/components/edit/EditLayoutModal.tsx(343,42): error TS6133: 'upEvent' is declared but its value is never read.
-src/components/edit/EditModal.tsx(55,50): error TS2306: File '/Users/adolhong/Desktop/dashboard2/web/src/data/demoReport.ts' is not a module.
-src/components/edit/EditModal.tsx(66,3): error TS6133: 'titleEdiable' is declared but its value is never read.
-src/components/edit/EditModal.tsx(75,10): error TS6133: 'updatedAt' is declared but its value is never read.
 src/components/edit/TabDataSource.tsx(43,43): error TS6133: 'idx' is declared but its value is never read.
 src/components/tree-select/tree-select.tsx(7,39): error TS2307: Cannot find module '@/models/aria-invalid-props' or its corresponding type declarations.
 src/components/tree-select/tree-select.tsx(54,26): error TS7006: Parameter 'v' implicitly has an 'any' type.
 src/components/tree-select/tree-select.tsx(64,51): error TS7006: Parameter 'value' implicitly has an 'any' type.
 src/components/tree-select/tree-select.tsx(68,53): error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/data/demoReport.ts(64,19): error TS2322: Type 'string' is not assignable to type 'Record<string, string>'.
+src/data/demoReport.ts(64,33): error TS2322: Type 'string' is not assignable to type 'Record<string, string>'.
+src/data/demoReport.ts(64,47): error TS2322: Type 'string' is not assignable to type 'Record<string, string>'.
+src/data/demoReport.ts(86,19): error TS2322: Type 'string' is not assignable to type 'Record<string, string>'.
+src/data/demoReport.ts(86,24): error TS2322: Type 'string' is not assignable to type 'Record<string, string>'.
+src/data/demoReport.ts(86,29): error TS2322: Type 'string' is not assignable to type 'Record<string, string>'.
+src/data/demoReport.ts(86,34): error TS2322: Type 'string' is not assignable to type 'Record<string, string>'.
+src/data/demoReport.ts(86,39): error TS2322: Type 'string' is not assignable to type 'Record<string, string>'.
+src/data/demoReport.ts(97,19): error TS2322: Type 'string' is not assignable to type 'Record<string, string>'.
+src/data/demoReport.ts(97,26): error TS2322: Type 'string' is not assignable to type 'Record<string, string>'.
+src/data/demoReport.ts(97,33): error TS2322: Type 'string' is not assignable to type 'Record<string, string>'.
+src/data/demoReport.ts(97,40): error TS2322: Type 'string' is not assignable to type 'Record<string, string>'.
+src/data/demoReport.ts(97,49): error TS2322: Type 'string' is not assignable to type 'Record<string, string>'.
 src/routes/dev/fileExplorer.tsx(39,7): error TS2322: Type '{ fsItems: FileSystemItem[]; setFsItems: (items: any) => void; }' is not assignable to type 'IntrinsicAttributes & FileExplorerProps'.
   Property 'fsItems' does not exist on type 'IntrinsicAttributes & FileExplorerProps'.
 src/routes/dev/fileExplorer.tsx(40,20): error TS7006: Parameter 'items' implicitly has an 'any' type.

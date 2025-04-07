@@ -114,6 +114,3 @@ def delete_report_content(file_id: str) -> bool:
     except Exception as e:
         print(f"软删除报告文件时发生错误: {e}")
         return False
-
-
-=

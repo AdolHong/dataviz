@@ -25,6 +25,7 @@ ENV/
 *.swp
 *.swo
 *.data
+*.tar.gz
 
 
 # 数据

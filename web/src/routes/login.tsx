@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import CryptoJS from 'crypto-js';
 import { axiosInstance } from '@/lib/axios';
+import { BASE_URL } from '@/lib/axios';
 
 export const Route = createFileRoute('/login')({
   component: Login,
@@ -18,6 +19,7 @@ function Login() {
     e.preventDefault();
     setError('');
 
+    console.log('BASE_URL', BASE_URL);
     try {
       // 使用CryptoJS加密密码
       const hashedPassword = CryptoJS.SHA256(password).toString();

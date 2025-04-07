@@ -108,7 +108,7 @@ export function DataSourceDialog({
               </div>
               <div>
                 <h3 className='text-sm font-medium text-muted-foreground'>
-                  查询时间
+                  查询完成时间
                 </h3>
                 <p className='text-sm'>{response?.queryTime || '未知'}</p>
               </div>

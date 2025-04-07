@@ -78,5 +78,5 @@ async def execute_query(query: str, url: Optional[str] = None):
 
 # 异步查询引擎
 sql_engine = {
-    "default": lambda query, url: execute_query(query, url),
+    "default": execute_query,
 }

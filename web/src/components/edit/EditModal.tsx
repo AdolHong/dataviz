@@ -51,7 +51,6 @@ interface EditModalProps {
   ) => void;
 }
 
-import { demoReportResponse as demoReport } from '@/data/demoReport';
 import {
   demoDataSourceEngineChoices,
   demoArtifactEngineChoices,
@@ -85,7 +84,7 @@ const EditModal = ({ open, onClose, report, handleSave }: EditModalProps) => {
 
   // 创建一个对象来存储 alias 和对应的 artifact.id 列表
   const [aliasRelianceMap, setAliasRelianceMap] = useState<AliasRelianceMap>(
-    createAliasRelianceMap(demoReport.dataSources, demoReport.artifacts)
+    createAliasRelianceMap(report?.dataSources || [], report?.artifacts || [])
   );
 
   // 确认删除dialog

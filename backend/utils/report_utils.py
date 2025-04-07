@@ -6,9 +6,14 @@ from datetime import datetime
 from typing import Optional, Dict
 from utils.fs_utils import FILE_STORAGE_PATH, FILE_DELETED_PATH
 from models.report_models import Report
+import asyncio
 
 # 使用字典管理文件锁
 file_locks: Dict[str, multiprocessing.Lock] = {}
+
+# 使用 asyncio 的锁
+_file_locks = {}
+_file_lock_create_lock = asyncio.Lock()
 
 
 def get_file_lock(file_id: str) -> multiprocessing.Lock:
@@ -36,21 +41,18 @@ async def get_report_content(file_id: str) -> Optional[Report]:
     Returns:
         Optional[Report]: 报表内容，如果文件不存在或解析失败则返回 None
     """
-    # 获取文件路径
     file_path = os.path.join(FILE_STORAGE_PATH, file_id + ".data")
 
     if not os.path.exists(file_path):
         return None
 
     try:
-        file_lock = get_file_lock(file_id)
-        with file_lock:
-            async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
-                content = await f.read()
-                return Report(**json.loads(content))
+        async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+            content = await f.read()
+            return Report(**json.loads(content))
     except (json.JSONDecodeError, IOError) as e:
         print(f"读取报告文件时发生错误: {e}")
-        raise Exception(f"读取报告文件时发生错误: {e}")
+        raise
 
 
 async def save_report_content(file_id: str, content: Report):

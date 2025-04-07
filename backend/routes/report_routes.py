@@ -62,7 +62,7 @@ async def get_report_by_report_id(report_id: str):
 async def update_report(file_id: str, report: Report):
     print("Received report data:", report.dict())
 
-    items = load_fs_data()
+    items = await load_fs_data()
 
     # 查找文件
     file_item = find_item_by_id(items, file_id)

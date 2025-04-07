@@ -1,8 +1,10 @@
 import axios from 'axios';
 
-const BASE_URL = 'http://localhost:8000/api';
-// mac个人
-// const BASE_URL = 'http://host.docker.internal:8000/api';
+// 个人mac
+// const BASE_URL = 'http://localhost:8000/api';
+
+// 公司服务器
+const BASE_URL = 'http://10.128.252.212:8000/api';
 
 export const axiosInstance = axios.create({
   baseURL: BASE_URL,

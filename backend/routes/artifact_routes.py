@@ -120,12 +120,7 @@ async def execute_artifact(request: ArtifactRequest):
         # 创建输出捕获
         text_output = io.StringIO()
         try:
-            # 执行代码，捕获标准输出
-            exec_globals = {
-                "pd": pd,
-                "print": lambda *args, **kwargs: print(*args, **kwargs, file=text_output)
-            }
-            exec(code, exec_globals, local_vars)
+            exec(code, local_vars)
         except Exception as e:
             return ArtifactResponse(
                 queryTime=datetime.now().isoformat(),

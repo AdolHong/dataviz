@@ -4,7 +4,6 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
-import type { AriaInvalidProps } from '@/models/aria-invalid-props';
 import { ChevronDown, Search, X } from 'lucide-react';
 import * as React from 'react';
 import { Badge } from '../ui/badge';
@@ -12,6 +11,13 @@ import { Button, buttonVariants } from '../ui/button';
 import { getTreeValueLabelMap } from './tree-utils';
 import { TreeView } from './tree-view';
 import type { TreeSelectProps } from './types';
+
+export interface AriaInvalidProps {
+  /**
+   * 指示输入字段是否包含验证错误
+   */
+  'aria-invalid'?: boolean;
+}
 
 export type TreeSelectComponentProps = TreeSelectProps &
   AriaInvalidProps & {
@@ -51,7 +57,7 @@ export const TreeSelect = ({
         >
           <div className='relative flex grow flex-wrap items-center gap-[6px] overflow-hidden'>
             {value.length > 0 ? (
-              value.map((v) => (
+              value.map((v: string) => (
                 <Badge
                   key={v}
                   variant='secondary'
@@ -61,11 +67,15 @@ export const TreeSelect = ({
                   <div
                     onClick={(e) => {
                       e.preventDefault();
-                      onValueChange(value.filter((value) => value !== v));
+                      onValueChange(
+                        value.filter((value: string) => value !== v)
+                      );
                     }}
                     onKeyDown={(e) => {
                       if (e.key === ' ' || e.key === 'Enter') {
-                        onValueChange(value.filter((value) => value !== v));
+                        onValueChange(
+                          value.filter((value: string) => value !== v)
+                        );
                         ref.current?.focus();
                       }
                     }}

@@ -14,8 +14,20 @@ interface LayoutItemParamsProps {
   dependentQueryStatus: Record<string, QueryStatus>;
   dataSources: DataSource[];
   plainParamValues: Record<string, PlainParamValue>;
-  setPlainParamValues: (values: Record<string, PlainParamValue>) => void;
-  setCascaderParamValues: (values: Record<string, string | string[]>) => void;
+  setPlainParamValues: (
+    values:
+      | Record<string, PlainParamValue>
+      | ((
+          prev: Record<string, PlainParamValue>
+        ) => Record<string, PlainParamValue>)
+  ) => void;
+  setCascaderParamValues: (
+    values:
+      | Record<string, string | string[]>
+      | ((
+          prev: Record<string, string | string[]>
+        ) => Record<string, string | string[]>)
+  ) => void;
   plainParamChoices: Record<string, Record<string, string>[]>;
   setPlainParamChoices: (
     values: Record<string, Record<string, string>[]>
@@ -66,7 +78,7 @@ export function LayoutItemParams({
   ) => {
     const paramKey = `${dfAlias},${itemLevel}`;
     // 根据节点类型和选择状态更新参数值
-    setCascaderParamValues((prev) => {
+    setCascaderParamValues((prev: Record<string, string | string[]>) => {
       const currentValues = getChildrenValuesByTargetValues(
         treeData,
         selectedValues

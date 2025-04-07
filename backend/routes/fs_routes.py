@@ -25,6 +25,7 @@ from utils.fs_utils import (
 
 from routes.report_routes import update_report_title
 from routes.auth_routes import verify_token_dependency
+from utils.report_utils import delete_report_content
 
 router = APIRouter(tags=["file-system"])
 
@@ -146,12 +147,8 @@ def delete_file(file_id: str, username: str = Depends(verify_token_dependency)):
     if not file_item or file_item.type != FileSystemItemType.FILE:
         raise HTTPException(status_code=404, detail="文件不存在")
 
-    # 删除实际文件
-    file_path = get_item_path(file_item)
-    if os.path.exists(file_path):
-        deleted_file_path = os.path.join(FILE_DELETED_PATH, datetime.now().strftime(
-            "%Y%m%dT%H:%M:%S") + "__" + file_item.id)
-        os.rename(file_path, deleted_file_path)
+    # 软删除报告内容
+    delete_report_content(file_id)
 
     # 删除文件记录
     items = [item for item in items if item.id != file_id]
@@ -182,26 +179,18 @@ def delete_folder(folder_id: str, recursive: bool = False, username: str = Depen
     # 递归删除
     if recursive:
         ids_to_remove = get_folder_and_children_ids(items, folder_id)
+
+        # 软删除文件
+        for item_id in [item_id for item_id in ids_to_remove if 'file' in item_id]:
+            # 只调用delete_report_content，不需要在这里调用delete_file
+            delete_report_content(item_id)
+
+        # 删除文件夹和文件记录
         items = [item for item in items if item.id not in ids_to_remove]
 
         # 删除指向已删除文件的所有引用
         items = [item for item in items if item.type !=
                  FileSystemItemType.REFERENCE or item.referenceTo not in ids_to_remove]
-
-        # 实际删除文件
-        for item_id in [item_id for item_id in ids_to_remove if 'file' in item_id]:
-            # 获取文件路径，直接删除文件而不调用delete_file以避免重复更新items
-            file_item = FileSystemItem(
-                id=item_id,
-                name="",
-                type=FileSystemItemType.FILE,
-                createdAt="",
-                updatedAt=""
-            )
-            file_path = get_item_path(file_item)
-            if os.path.exists(file_path):
-                os.remove(file_path)
-
     else:
         # 只删除文件夹本身
         items = [item for item in items if item.id != folder_id]

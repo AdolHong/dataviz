@@ -7,12 +7,8 @@ type AliasRelianceMapValue = {
 };
 
 export interface AliasRelianceMap {
-  aliasToArtifacts: {
-    [alias: string]: { artifactTitle: string; artifactId: string }[];
-  };
-  aliasToDataSourceId: {
-    [alias: string]: string;
-  };
+  aliasToArtifacts: Record<string, AliasRelianceMapValue[]>;
+  aliasToDataSourceId: Record<string, string>;
 }
 
 export const updateAliasRelianceMapByArtifact = (
@@ -116,15 +112,3 @@ export const createAliasRelianceMap = (
     aliasToDataSourceId,
   };
 };
-
-// // 确保创建 AliasRelianceMap 实例时完全匹配接口
-// const exampleMap: AliasRelianceMap = {
-//   aliasToArtifacts: {
-//     // 必须是 { artifactTitle: string; artifactId: string }[] 类型
-//     someAlias: [{ artifactTitle: 'Example Title', artifactId: 'example-id' }],
-//   },
-//   aliasToDataSourceId: {
-//     // 必须是 { [alias: string]: string } 类型
-//     someAlias: 'dataSourceId',
-//   },
-// };

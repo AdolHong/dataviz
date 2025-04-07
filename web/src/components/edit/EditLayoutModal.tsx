@@ -340,7 +340,7 @@ export function EditLayoutModal({
                     });
                   };
 
-                  const handleMouseUp = (upEvent: MouseEvent) => {
+                  const handleMouseUp = () => {
                     document.removeEventListener('mousemove', handleMouseMove);
                     document.removeEventListener('mouseup', handleMouseUp);
 

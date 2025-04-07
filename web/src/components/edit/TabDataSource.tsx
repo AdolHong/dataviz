@@ -40,7 +40,7 @@ const TabDataSource = ({
       <TabsContent value='data' className='p-4'>
         <div className='space-y-4'>
           <div className='space-y-3'>
-            {dataSources.map((dataSource, idx) => (
+            {dataSources.map((dataSource) => (
               <div
                 key={dataSource.id}
                 className='border rounded-lg p-4 bg-white shadow-sm'

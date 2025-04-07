@@ -15,12 +15,9 @@ from utils.fs_utils import (
     load_fs_data,
     save_fs_data,
     find_item_by_id,
-    get_children,
     is_folder_empty,
     get_folder_and_children_ids,
-    get_references_to_file,
     get_item_path,
-    FILE_DELETED_PATH
 )
 
 from routes.report_routes import update_report_title

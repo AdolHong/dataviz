@@ -87,38 +87,33 @@ def delete_report_content(file_id: str) -> bool:
     """
     file_path = os.path.join(FILE_STORAGE_PATH, file_id + ".data")
 
+    if os.path.exists(file_path):
+        return
+
     # 获取文件锁
     file_lock = get_file_lock(file_id)
 
-    is_locked = False
     try:
-        file_lock.acquire()
-        is_locked = True
-
-        try:
-            if os.path.exists(file_path):
+        with file_lock:
+            if os.path.exists(FILE_DELETED_PATH):
                 # 创建删除目录（如果不存在）
                 os.makedirs(FILE_DELETED_PATH, exist_ok=True)
 
-                # 构建删除文件的新路径，包含时间戳确保唯一性
-                deleted_file_path = os.path.join(
-                    FILE_DELETED_PATH,
-                    datetime.now().strftime("%Y%m%dT%H%M%S") + "__" + file_id + ".data"
-                )
+            # 构建删除文件的新路径，包含时间戳确保唯一性
+            deleted_file_path = os.path.join(
+                FILE_DELETED_PATH,
+                datetime.now().strftime("%Y%m%dT%H%M%S") + "__" + file_id + ".data"
+            )
 
-                # 移动文件而不是删除
-                os.rename(file_path, deleted_file_path)
+            # 移动文件而不是删除
+            os.rename(file_path, deleted_file_path)
 
-                # 删除对应的文件锁
-                if file_id in file_locks:
-                    del file_locks[file_id]
+            # 删除对应的文件锁
+            if file_id in file_locks:
+                del file_locks[file_id]
+    except Exception as e:
+        print(f"软删除报告文件时发生错误: {e}")
+        return False
 
-                return True
-            return False
-        except Exception as e:
-            print(f"软删除报告文件时发生错误: {e}")
-            return False
-    finally:
-        # 确保锁被释放
-        if is_locked:
-            file_lock.release()
+
+=

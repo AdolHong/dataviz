@@ -1,6 +1,7 @@
 import os
 import json
 import multiprocessing
+import aiofiles
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from models.fs_models import FileSystemItem, FileSystemItemType
@@ -19,50 +20,50 @@ FILE_TOKEN_PATH = os.path.join(DATA_DIR, "tokens")
 # 创建一个全局的文件系统数据锁
 fs_data_lock = multiprocessing.Lock()
 
-# 辅助函数：加载文件系统数据
 
-
-def load_fs_data() -> List[FileSystemItem]:
+async def load_fs_data() -> List[FileSystemItem]:
     """
-    线程安全地加载文件系统数据
+    异步线程安全地加载文件系统数据，确保即使发生异常也能释放锁
 
     Returns:
         List[FileSystemItem]: 文件系统项目列表
     """
-    with fs_data_lock:
-        if not os.path.exists(FS_DATA_FILE):
-            return []
+    if not os.path.exists(FS_DATA_FILE):
+        return []
 
-        try:
-            with open(FS_DATA_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
+    try:
+        with fs_data_lock:
+            async with aiofiles.open(FS_DATA_FILE, "r", encoding="utf-8") as f:
+                content = await f.read()
+                data = json.loads(content)
 
-            # 将字典列表转换为FileSystemItem对象列表
-            return [FileSystemItem(**item) for item in data]
-        except (json.JSONDecodeError, IOError) as e:
-            print(f"加载文件系统数据时发生错误: {e}")
-            return []
-
-# 辅助函数：保存文件系统数据
+        # 将字典列表转换为FileSystemItem对象列表
+        return [FileSystemItem(**item) for item in data]
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"加载文件系统数据时发生错误: {e}")
+        return []
 
 
-def save_fs_data(items: List[FileSystemItem]):
+async def save_fs_data(items: List[FileSystemItem]):
     """
-    线程安全地保存文件系统数据
+    异步线程安全地保存文件系统数据，确保即使发生异常也能释放锁
 
     Args:
         items (List[FileSystemItem]): 要保存的文件系统项目列表
     """
-    with fs_data_lock:
-        try:
+    try:
+        os.makedirs(os.path.dirname(FS_DATA_FILE), exist_ok=True)
+        with fs_data_lock:
             # 确保数据目录存在
-            os.makedirs(os.path.dirname(FS_DATA_FILE), exist_ok=True)
+            async with aiofiles.open(FS_DATA_FILE, "w", encoding="utf-8") as f:
+                await f.write(json.dumps(
+                    [item.dict() for item in items],
+                    ensure_ascii=False,
+                    indent=2
+                ))
+    except IOError as e:
+        print(f"保存文件系统数据时发生错误: {e}")
 
-            with open(FS_DATA_FILE, "w", encoding="utf-8") as f:
-                json.dump([item.dict() for item in items],
-                          f, ensure_ascii=False, indent=2)
-        except IOError as e:
-            print(f"保存文件系统数据时发生错误: {e}")
 
 # 辅助函数：根据ID查找项目
 

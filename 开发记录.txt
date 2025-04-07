@@ -1,3 +1,7 @@
+# 打包代码
+tar -czvf ../dataviz_$(date +%Y%m%d_%H%M%S).tar.gz  --exclude backend/engine_config.py backend web
+
+
 
 
 # python 启动

@@ -40,7 +40,7 @@ export function LayoutItemParams({
     valueType: 'string' | 'double' | 'boolean' | 'int',
     type: 'single' | 'multiple'
   ) => {
-    setPlainParamValues((prev) => {
+    setPlainParamValues((prev: Record<string, PlainParamValue>) => {
       // 如果值没有变化，不更新状态
       if (JSON.stringify(prev[paramName]) === JSON.stringify(value)) {
         return prev;

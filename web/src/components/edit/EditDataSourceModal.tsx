@@ -139,6 +139,13 @@ export const EditDataSourceModal = ({
         .updateMode?.type || 'manual'
     : 'manual';
 
+  // 方法2：更安全的类型保护
+  const updateModeSafe = (
+    dataSource.executor as PythonSourceExecutor | SQLSourceExecutor
+  ).updateMode;
+  const intervalSafe =
+    updateModeSafe?.type === 'auto' ? updateModeSafe.interval : 300;
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className='max-w-3xl h-[80vh] max-h-[90vh] flex flex-col overflow-hidden'>
@@ -416,19 +423,7 @@ export const EditDataSourceModal = ({
                     <Input
                       type='number'
                       className='w-40 h-10'
-                      value={
-                        (
-                          dataSource.executor as
-                            | PythonSourceExecutor
-                            | SQLSourceExecutor
-                        ).updateMode?.type === 'auto'
-                          ? (
-                              dataSource.executor as
-                                | PythonSourceExecutor
-                                | SQLSourceExecutor
-                            ).updateMode?.interval || 300
-                          : 300
-                      }
+                      value={intervalSafe}
                       onChange={(e) => {
                         const value = parseInt(e.target.value) || 60;
                         setDataSource((prev) => ({

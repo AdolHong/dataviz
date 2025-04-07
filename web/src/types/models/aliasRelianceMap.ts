@@ -102,7 +102,7 @@ export const createAliasRelianceMap = (
   }, {});
 
   const aliasToDataSourceId = dataSources.reduce<{
-    aliasToDataSourceId: { [alias: string]: string };
+    [alias: string]: string;
   }>((acc, dataSource) => {
     acc[dataSource.alias] = dataSource.id; // 将数据源的别名映射到其ID
     return acc;

@@ -36,7 +36,7 @@ import { useParamValuesStore } from '@/lib/store/useParamValuesStore';
 import { useSessionIdStore } from '@/lib/store/useSessionIdStore';
 import { queryApi } from '@/api/query';
 import { Combobox } from '../combobox';
-import type { QueryRequest, QueryResponse } from '@/types/api/queryRequest';
+import type { QueryRequest } from '@/types/api/queryRequest';
 import { DataSourceDialog } from './DataSourceDialog';
 
 interface ParameterQueryAreaProps {

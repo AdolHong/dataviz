@@ -4,7 +4,8 @@ import { type DataSource } from '@/types/models/dataSource';
 import { TabsContent } from '@radix-ui/react-tabs';
 import { useState } from 'react';
 import { EditDataSourceModal } from './EditDataSourceModal';
-import { type AliasRelianceMap, type EngineChoices } from '@/types';
+import { type AliasRelianceMap } from '@/types/models/aliasRelianceMap';
+import { type EngineChoices } from '@/types/models/engineChoices';
 
 interface TabDataSourceProps {
   dataSources: DataSource[];

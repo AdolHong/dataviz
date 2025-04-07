@@ -147,11 +147,8 @@ const checkItemsDiff = (
 export const fsApi = {
   // 获取所有文件系统项目
   async getAllItems(): Promise<FileSystemItem[]> {
-    const response = await axiosInstance.get<{ data: FileSystemItem[] }>(
-      '/fs/items'
-    );
-
-    return response.data;
+    const { data } = await axiosInstance.get('/fs/items');
+    return data;
   },
 
   // 创建文件

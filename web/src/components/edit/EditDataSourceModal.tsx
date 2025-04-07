@@ -28,7 +28,8 @@ import {
   handleEngineChange,
 } from '@/types/models/dataSource';
 import { CSVTable } from '@/components/CSVTable';
-import type { EngineChoices, AliasRelianceMap } from '@/types';
+import type { EngineChoices } from '@/types/models/engineChoices';
+import type { AliasRelianceMap } from '@/types/models/aliasRelianceMap';
 import { Download } from 'lucide-react';
 
 import AceEditor from 'react-ace';

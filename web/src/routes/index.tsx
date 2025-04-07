@@ -1,6 +1,5 @@
 import { createFileRoute, redirect } from '@tanstack/react-router';
 import { DashboardPage } from '@/components/dashboard/DashboardPage';
-import { useSessionIdStore } from '@/lib/store/useSessionIdStore';
 
 export const Route = createFileRoute('/')({
   component: DashboardRoute,

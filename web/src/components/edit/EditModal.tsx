@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
-import { Filter, Database, BarChart2, Info } from 'lucide-react';
+import { Filter, Database, BarChart2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import type { DataSource, Layout, Parameter, Artifact, Report } from '@/types';

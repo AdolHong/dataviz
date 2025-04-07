@@ -1,13 +1,7 @@
-import React, {
-  useRef,
-  useState,
-  useCallback,
-  useMemo,
-  useEffect,
-} from 'react';
+import React, { useRef, useState, useCallback, useMemo } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { FileText, FileUp, Eye, Download, RefreshCw, X } from 'lucide-react';
+import { FileText, FileUp, Eye, Download, X } from 'lucide-react';
 import {
   Dialog,
   DialogContent,

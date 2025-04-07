@@ -26,7 +26,6 @@ function csvToTreeData(csvData: string, levels: string[]): TreeNodeData[] {
   data.forEach((row: any) => {
     // 从根节点开始处理
     let currentLevel = result;
-    let parentNode: TreeNodeData | null = null;
 
     // 遍历每一层级
     for (let i = 0; i < levels.length; i++) {

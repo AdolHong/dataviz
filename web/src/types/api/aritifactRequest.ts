@@ -1,4 +1,3 @@
-import { List } from 'lucide-react';
 import type { Alert } from './queryResponse';
 
 export interface ArtifactRequest {

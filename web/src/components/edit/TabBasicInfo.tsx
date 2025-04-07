@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
-import { InfoIcon, EditIcon, CheckCircleIcon } from 'lucide-react';
+import { EditIcon } from 'lucide-react';
 
 interface TabBasicInfoProps {
   title: string;

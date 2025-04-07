@@ -39,7 +39,7 @@ async def query_by_source_id(request: QueryRequest, username: str = Depends(veri
     code_context = construct_response_code_context(request, request.uniqueId)
     try:
         # 根据report id 获取报表信息
-        report = get_report_content(request.requestContext.fileId)
+        report = await get_report_content(request.requestContext.fileId)
         if not report:
             return QueryResponse(
                 status="error",

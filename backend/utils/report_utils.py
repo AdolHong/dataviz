@@ -1,6 +1,7 @@
 import os
 import json
 import multiprocessing
+import aiofiles
 from datetime import datetime
 from typing import Optional, Dict
 from utils.fs_utils import FILE_STORAGE_PATH, FILE_DELETED_PATH
@@ -25,9 +26,9 @@ def get_file_lock(file_id: str) -> multiprocessing.Lock:
     return file_locks[file_id]
 
 
-def get_report_content(file_id: str) -> Optional[Report]:
+async def get_report_content(file_id: str) -> Optional[Report]:
     """
-    获取报表文件内容，使用文件锁确保线程安全
+    异步获取报表文件内容
 
     Args:
         file_id (str): 文件标识符
@@ -38,24 +39,23 @@ def get_report_content(file_id: str) -> Optional[Report]:
     # 获取文件路径
     file_path = os.path.join(FILE_STORAGE_PATH, file_id + ".data")
 
-    # 获取文件锁
-    file_lock = get_file_lock(file_id)
+    if not os.path.exists(file_path):
+        return None
 
-    with file_lock:
-        if not os.path.exists(file_path):
-            return None
+    try:
+        file_lock = get_file_lock(file_id)
+        with file_lock:
+            async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+                content = await f.read()
+                return Report(**json.loads(content))
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"读取报告文件时发生错误: {e}")
+        raise Exception(f"读取报告文件时发生错误: {e}")
 
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                return Report(**json.load(f))
-        except json.JSONDecodeError:
-            # 如果文件为空或格式不正确，返回空对象
-            return None
 
-
-def save_report_content(file_id: str, content: Report):
+async def save_report_content(file_id: str, content: Report):
     """
-    保存报表文件内容，使用文件锁确保线程安全
+    异步保存报表文件内容，确保锁能正常释放
 
     Args:
         file_id (str): 文件标识符
@@ -66,14 +66,18 @@ def save_report_content(file_id: str, content: Report):
     # 获取文件锁
     file_lock = get_file_lock(file_id)
 
-    with file_lock:
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(content.dict(), f, ensure_ascii=False, indent=2)
+    try:
+        with file_lock:
+            async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
+                await f.write(json.dumps(content.dict(), ensure_ascii=False, indent=2))
+    except Exception as e:
+        print(f"保存报告文件时发生错误: {e}")
+        raise Exception(f"保存报告文件时发生错误: {e}")
 
 
 def delete_report_content(file_id: str) -> bool:
     """
-    软删除报表文件 - 将文件移动到删除目录而不是直接删除
+    软删除报表文件，确保锁能正常释放
 
     Args:
         file_id (str): 文件标识符
@@ -86,7 +90,11 @@ def delete_report_content(file_id: str) -> bool:
     # 获取文件锁
     file_lock = get_file_lock(file_id)
 
-    with file_lock:
+    is_locked = False
+    try:
+        file_lock.acquire()
+        is_locked = True
+
         try:
             if os.path.exists(file_path):
                 # 创建删除目录（如果不存在）
@@ -110,3 +118,7 @@ def delete_report_content(file_id: str) -> bool:
         except Exception as e:
             print(f"软删除报告文件时发生错误: {e}")
             return False
+    finally:
+        # 确保锁被释放
+        if is_locked:
+            file_lock.release()

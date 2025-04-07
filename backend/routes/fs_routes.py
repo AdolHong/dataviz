@@ -29,15 +29,15 @@ router = APIRouter(tags=["file-system"])
 
 # API端点：获取所有文件系统项目
 @router.get("/fs/items", response_model=List[FileSystemItem])
-def get_fs_items(username: str = Depends(verify_token_dependency)):
-    return load_fs_data()
+async def get_fs_items(username: str = Depends(verify_token_dependency)):
+    return await load_fs_data()
 
 # API端点：创建文件
 
 
 @router.post("/fs/operations/create-file", response_model=FileSystemItem)
-def create_file(item: FileSystemItem, username: str = Depends(verify_token_dependency)):
-    items = load_fs_data()
+async def create_file(item: FileSystemItem, username: str = Depends(verify_token_dependency)):
+    items = await load_fs_data()
 
     # 检查父文件夹是否存在
     if item.parentId:
@@ -71,15 +71,15 @@ def create_file(item: FileSystemItem, username: str = Depends(verify_token_depen
 
     # 添加到列表并保存
     items.append(item)
-    save_fs_data(items)
+    await save_fs_data(items)
     return item
 
 # API端点：创建文件夹
 
 
 @router.post("/fs/operations/create-folder", response_model=FileSystemItem)
-def create_folder(item: FileSystemItem, username: str = Depends(verify_token_dependency)):
-    items = load_fs_data()
+async def create_folder(item: FileSystemItem, username: str = Depends(verify_token_dependency)):
+    items = await load_fs_data()
 
     # 检查父文件夹是否存在
     if item.parentId:
@@ -96,15 +96,15 @@ def create_folder(item: FileSystemItem, username: str = Depends(verify_token_dep
 
     # 添加到列表并保存
     items.append(item)
-    save_fs_data(items)
+    await save_fs_data(items)
     return item
 
 # API端点：创建引用
 
 
 @router.post("/fs/operations/create-reference", response_model=FileSystemItem)
-def create_reference(item: FileSystemItem, username: str = Depends(verify_token_dependency)):
-    items = load_fs_data()
+async def create_reference(item: FileSystemItem, username: str = Depends(verify_token_dependency)):
+    items = await load_fs_data()
 
     # 检查引用的原始文件是否存在
     if not item.referenceTo:
@@ -129,14 +129,14 @@ def create_reference(item: FileSystemItem, username: str = Depends(verify_token_
 
     # 添加到列表并保存
     items.append(item)
-    save_fs_data(items)
+    await save_fs_data(items)
     return item
 
 # API端点：删除文件
 
 
 @router.delete("/fs/operations/delete-file/{file_id}", response_model=Dict[str, bool])
-def delete_file(file_id: str, username: str = Depends(verify_token_dependency)):
+async def delete_file(file_id: str, username: str = Depends(verify_token_dependency)):
     items = load_fs_data()
 
     # 查找文件
@@ -154,14 +154,14 @@ def delete_file(file_id: str, username: str = Depends(verify_token_dependency)):
     items = [item for item in items if item.type !=
              FileSystemItemType.REFERENCE or item.referenceTo != file_id]
 
-    save_fs_data(items)
+    await save_fs_data(items)
     return {"success": True}
 
 # API端点：删除文件夹
 
 
 @router.delete("/fs/operations/delete-folder/{folder_id}", response_model=Dict[str, bool])
-def delete_folder(folder_id: str, recursive: bool = False, username: str = Depends(verify_token_dependency)):
+async def delete_folder(folder_id: str, recursive: bool = False, username: str = Depends(verify_token_dependency)):
     items = load_fs_data()
 
     # 查找文件夹
@@ -192,14 +192,14 @@ def delete_folder(folder_id: str, recursive: bool = False, username: str = Depen
         # 只删除文件夹本身
         items = [item for item in items if item.id != folder_id]
 
-    save_fs_data(items)
+    await save_fs_data(items)
     return {"success": True}
 
 # API端点：删除引用
 
 
 @router.delete("/fs/operations/delete-reference/{reference_id}", response_model=Dict[str, bool])
-def delete_reference(reference_id: str, username: str = Depends(verify_token_dependency)):
+async def delete_reference(reference_id: str, username: str = Depends(verify_token_dependency)):
     items = load_fs_data()
 
     # 查找引用
@@ -210,14 +210,14 @@ def delete_reference(reference_id: str, username: str = Depends(verify_token_dep
     # 删除引用
     items = [item for item in items if item.id != reference_id]
 
-    save_fs_data(items)
+    await save_fs_data(items)
     return {"success": True}
 
 # API端点：重命名文件夹
 
 
 @router.put("/fs/operations/rename-folder/{folder_id}", response_model=FileSystemItem)
-def rename_folder(folder_id: str, new_name: str, username: str = Depends(verify_token_dependency)):
+async def rename_folder(folder_id: str, new_name: str, username: str = Depends(verify_token_dependency)):
     items = load_fs_data()
 
     # 查找文件夹
@@ -230,14 +230,14 @@ def rename_folder(folder_id: str, new_name: str, username: str = Depends(verify_
     items[folder_idx].name = new_name
     items[folder_idx].updatedAt = datetime.now().isoformat()
 
-    save_fs_data(items)
+    await save_fs_data(items)
     return items[folder_idx]
 
 # API端点：重命名文件
 
 
 @router.put("/fs/operations/rename-file/{file_id}", response_model=FileSystemItem)
-def rename_file(file_id: str, new_name: str, username: str = Depends(verify_token_dependency)):
+async def rename_file(file_id: str, new_name: str, username: str = Depends(verify_token_dependency)):
     items = load_fs_data()
 
     # 查找文件
@@ -254,15 +254,15 @@ def rename_file(file_id: str, new_name: str, username: str = Depends(verify_toke
     update_report_title(file_id, new_name)
 
     # 更新目录结构
-    save_fs_data(items)
+    await save_fs_data(items)
     return items[file_idx]
 
 # API端点：重命名引用
 
 
 @router.put("/fs/operations/rename-reference/{reference_id}", response_model=FileSystemItem)
-def rename_reference(reference_id: str, new_name: str, username: str = Depends(verify_token_dependency)):
-    items = load_fs_data()
+async def rename_reference(reference_id: str, new_name: str, username: str = Depends(verify_token_dependency)):
+    items = await load_fs_data()
 
     # 查找引用
     ref_idx = next((i for i, item in enumerate(items) if item.id ==
@@ -274,15 +274,15 @@ def rename_reference(reference_id: str, new_name: str, username: str = Depends(v
     items[ref_idx].name = new_name
     items[ref_idx].updatedAt = datetime.now().isoformat()
 
-    save_fs_data(items)
+    await save_fs_data(items)
     return items[ref_idx]
 
 # API端点：移动项目
 
 
 @router.put("/fs/operations/move-item/{item_id}", response_model=FileSystemItem)
-def move_item(item_id: str, new_parent_id: Optional[str] = None, username: str = Depends(verify_token_dependency)):
-    items = load_fs_data()
+async def move_item(item_id: str, new_parent_id: Optional[str] = None, username: str = Depends(verify_token_dependency)):
+    items = await load_fs_data()
 
     # 查找项目
     item_idx = next((i for i, item in enumerate(
@@ -307,43 +307,43 @@ def move_item(item_id: str, new_parent_id: Optional[str] = None, username: str =
     items[item_idx].parentId = new_parent_id
     items[item_idx].updatedAt = datetime.now().isoformat()
 
-    save_fs_data(items)
+    await save_fs_data(items)
     return items[item_idx]
 
 # API端点：批量处理操作
 
 
 @router.post("/fs/batch", response_model=Dict[str, Any])
-def batch_operations(request: BatchOperationRequest, username: str = Depends(verify_token_dependency)):
+async def batch_operations(request: BatchOperationRequest, username: str = Depends(verify_token_dependency)):
     results = []
 
     for operation in request.operations:
         try:
             if operation.type == FileSystemOperation.CREATE_FILE:
-                result = create_file(operation.item, username)
+                result = await create_file(operation.item, username)
             elif operation.type == FileSystemOperation.CREATE_FOLDER:
-                result = create_folder(operation.item, username)
+                result = await create_folder(operation.item, username)
             elif operation.type == FileSystemOperation.CREATE_REFERENCE:
-                result = create_reference(operation.item, username)
+                result = await create_reference(operation.item, username)
             elif operation.type == FileSystemOperation.DELETE_FILE:
-                result = delete_file(operation.item.id, username)
+                result = await delete_file(operation.item.id, username)
             elif operation.type == FileSystemOperation.DELETE_FOLDER:
-                result = delete_folder(
+                result = await delete_folder(
                     operation.item.id, recursive=True, username=username)
             elif operation.type == FileSystemOperation.DELETE_REFERENCE:
-                result = delete_reference(operation.item.id, username)
+                result = await delete_reference(operation.item.id, username)
             elif operation.type == FileSystemOperation.RENAME_FOLDER:
-                result = rename_folder(
+                result = await rename_folder(
                     operation.item.id, operation.item.name, username)
             elif operation.type == FileSystemOperation.RENAME_FILE:
-                result = rename_file(
+                result = await rename_file(
                     operation.item.id, operation.item.name, username)
             elif operation.type == FileSystemOperation.RENAME_REFERENCE:
-                result = rename_reference(
+                result = await rename_reference(
                     operation.item.id, operation.item.name, username)
             elif operation.type == FileSystemOperation.MOVE_ITEM:
-                result = move_item(operation.item.id,
-                                   operation.item.parentId, username)
+                result = await move_item(
+                    operation.item.id, operation.item.parentId, username)
             else:
                 raise HTTPException(
                     status_code=400, detail=f"不支持的操作类型: {operation.type}")

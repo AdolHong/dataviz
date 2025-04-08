@@ -17,6 +17,8 @@ USERS = {
     "adol": "f09a31c2bb20aeee1e1ce6639c32226098bdaaf949b247b775f845aafadda2bd",  # adol
     # "user": "04f8996da763b7a969b1028ee3007569eaf3a635486ddab211d512c85b9df8fb",   # user
 }
+# 活跃token列表（用于验证和注销）
+ACTIVE_TOKENS = {}
 
 # 用于JWT签名的密钥
 # SECRET_KEY = token_hex(32)
@@ -56,10 +58,6 @@ class TokenResponse(BaseModel):
     message: str
     token: Optional[str] = None
     username: Optional[str] = None
-
-
-# 活跃token列表（用于验证和注销）
-ACTIVE_TOKENS = {}
 
 
 @router.post("/login", response_model=TokenResponse)

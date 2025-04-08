@@ -1,24 +1,22 @@
 import json
-import os
 from fastapi import APIRouter
 from pathlib import Path
 import pandas as pd
 import io
-import plotly
-import pyecharts
 import io
 import base64
-import matplotlib.pyplot as plt
 from typing import Literal, Any
 from datetime import datetime
 from utils.fs_utils import FILE_CACHE_PATH
+from contextlib import redirect_stdout
 
 
-from models.artifact_models import ArtifactRequest, ArtifactResponse, ArtifactCodeContext, ArtifactTextDataContext, ArtifactPlotlyDataContext, ArtifactEChartDataContext, ArtifactImageDataContext,ArtifactAltairDataContext, ArtifactCodeResponse
+from models.artifact_models import ArtifactRequest, ArtifactResponse, ArtifactCodeContext, ArtifactTextDataContext, ArtifactPlotlyDataContext, ArtifactEChartDataContext, ArtifactImageDataContext, ArtifactAltairDataContext, ArtifactCodeResponse
 from models.query_models import Alert
 from models.artifact_models import PlainParamValue
 
 router = APIRouter(tags=["artifact"])
+
 
 def load_query_result(uniqueId: str) -> pd.DataFrame:
     """加载查询结果"""
@@ -41,9 +39,8 @@ def convert_plain_param_value(value: str, valueType: Literal['string', 'double',
         elif valueType == 'int':
             return int(value)
     except Exception as e:
-        raise ValueError(f"[PARAMS] Invalid plain param value: {value}, should be a {valueType}, with error: {str(e)}")  
-
-
+        raise ValueError(
+            f"[PARAMS] Invalid plain param value: {value}, should be a {valueType}, with error: {str(e)}")
 
 
 @router.post("/execute_artifact", response_model=ArtifactResponse)
@@ -65,13 +62,14 @@ async def execute_artifact(request: ArtifactRequest):
                     status="error",
                     message=f"[PYTHON]Failed to load data source {alias}: {str(e)}",
                     error=str(e),
-                    alerts=[Alert(type="error", message=f"Failed to load data source {alias}: {str(e)}")],
+                    alerts=[
+                        Alert(type="error", message=f"Failed to load data source {alias}: {str(e)}")],
                     codeContext=ArtifactCodeContext(**request.dict())
                 )
         # 构建代码执行环境
         code = request.pyCode
         engine = request.engine
-        
+
         # 判断引擎
         result = None
         if engine != "default":
@@ -86,41 +84,45 @@ async def execute_artifact(request: ArtifactRequest):
             alerts=[Alert(type="error", message=str(e))],
             codeContext=ArtifactCodeContext(**request.dict())
         )
-        
+
     try:
         # cascader_params 处理
         for param_name, param_value in request.cascaderParamValues.items():
             if not isinstance(param_value, list):
-                raise ValueError(f"[PARAMS] Invalid cascader param value: {param_value}, should be a list.")
-            
+                raise ValueError(
+                    f"[PARAMS] Invalid cascader param value: {param_value}, should be a list.")
+
             # 对于cascader_params, 如果参数值为空, 则默认为全选
             if len(param_value) == 0:
                 continue
             df_alias, df_column = param_name.split(",")[:2]
             df_index = dfs[df_alias][df_column].astype(str).isin(param_value)
             dfs[df_alias] = dfs[df_alias].loc[df_index]
-            
+
         # 对于plain_params, 进行类型转换
         plain_param_values = {}
         for param_name, param_value in request.plainParamValues.items():
-            if isinstance(param_value, PlainParamValue) and  param_value.type == 'single' and isinstance(param_value.value, str):
-                plain_param_values[param_name] = convert_plain_param_value(param_value.value, param_value.valueType)
+            if isinstance(param_value, PlainParamValue) and param_value.type == 'single' and isinstance(param_value.value, str):
+                plain_param_values[param_name] = convert_plain_param_value(
+                    param_value.value, param_value.valueType)
             elif isinstance(param_value, PlainParamValue) and param_value.type == 'multiple' and isinstance(param_value.value, list):
-                plain_param_values[param_name] = [convert_plain_param_value(value, param_value.valueType) for value in param_value.value] 
+                plain_param_values[param_name] = [convert_plain_param_value(
+                    value, param_value.valueType) for value in param_value.value]
             else:
-                raise ValueError(f"[PARAMS] Invalid plain param value: {param_value}, should be a list or a string.")
-            
+                raise ValueError(
+                    f"[PARAMS] Invalid plain param value: {param_value}, should be a list or a string.")
+
         # 创建本地变量空间，包含DataFrame对象和参数
         local_vars = {
             **dfs,  # 数据源
             **plain_param_values
         }
-        
-        
+
         # 创建输出捕获
         text_output = io.StringIO()
         try:
-            exec(code, local_vars)
+            with redirect_stdout(text_output):
+                exec(code, local_vars)
         except Exception as e:
             return ArtifactResponse(
                 queryTime=datetime.now().isoformat(),
@@ -130,7 +132,7 @@ async def execute_artifact(request: ArtifactRequest):
                 alerts=[Alert(type="error", message=str(e))],
                 codeContext=ArtifactCodeContext(**request.dict())
             )
-        
+
         # 获取捕获的输出
         captured_output = text_output.getvalue()
         # 检查是否有输出结果变量
@@ -138,12 +140,15 @@ async def execute_artifact(request: ArtifactRequest):
             result = local_vars["result"]
             # 根据结果类型返回不同的数据上下文
             if isinstance(result, str):
-                data_context = ArtifactTextDataContext(type="text", data=result)
+                data_context = ArtifactTextDataContext(
+                    type="text", data=result)
             # elif isinstance(result, plotly.graph_objs._figure.Figure):
             elif 'plotly' in str(type(result)):
-                data_context = ArtifactPlotlyDataContext(type="plotly", data=result.to_json())
+                data_context = ArtifactPlotlyDataContext(
+                    type="plotly", data=result.to_json())
             elif 'pyecharts' in str(type(result)):
-                data_context = ArtifactEChartDataContext(type="echart", data=result.dump_options())
+                data_context = ArtifactEChartDataContext(
+                    type="echart", data=result.dump_options())
             elif 'matplotlib' in str(type(result)):
                 # 将图表保存为BytesIO对象
                 buf = io.BytesIO()
@@ -151,32 +156,36 @@ async def execute_artifact(request: ArtifactRequest):
                 buf.seek(0)
                 base64_image = base64.b64encode(buf.read()).decode('utf-8')
                 buf.close()
-                data_context = ArtifactImageDataContext(type="image", data=base64_image)
+                data_context = ArtifactImageDataContext(
+                    type="image", data=base64_image)
             elif 'altair' in str(type(result)):
-                data_context = ArtifactAltairDataContext(type="altair", data=json.dumps(result.to_dict()))
+                data_context = ArtifactAltairDataContext(
+                    type="altair", data=json.dumps(result.to_dict()))
             else:
                 # 默认转换为文本
-                data_context = ArtifactTextDataContext(type="text", data=str(result))
+                data_context = ArtifactTextDataContext(
+                    type="text", data=str(result))
         else:
             # 如果没有result变量，返回标准输出内容
             if captured_output:
-                data_context = ArtifactTextDataContext(type="text", data=captured_output)
+                data_context = ArtifactTextDataContext(
+                    type="text", data=captured_output)
             else:
                 data_context = None
-                alerts.append(Alert(type="warning", message="No result or output from code execution"))
-        
+                alerts.append(
+                    Alert(type="warning", message="No result or output from code execution"))
+
     except Exception as e:
         return ArtifactResponse(
             queryTime=datetime.now().isoformat(),
             status="error",
             message=f"Failed to execute Python code",
             error=str(e),
-            alerts=[Alert(type="error", message=f"Code execution error: {str(e)}")],
+            alerts=[
+                Alert(type="error", message=f"Code execution error: {str(e)}")],
             codeContext=ArtifactCodeContext(**request.dict())
         )
-         
 
-                
     # 返回执行结果
     return ArtifactResponse(
         status="success",
@@ -186,7 +195,7 @@ async def execute_artifact(request: ArtifactRequest):
         dataContext=data_context,
         queryTime=datetime.now().isoformat()
     )
-        
+
 
 @router.post("/artifact_code", response_model=ArtifactCodeResponse)
 async def artifact_code(request: ArtifactRequest):
@@ -206,7 +215,8 @@ async def artifact_code(request: ArtifactRequest):
                 status="error",
                 message=f"[PYTHON]Failed to load data source {alias}: {str(e)}",
                 error=str(e),
-                alerts=[Alert(type="error", message=f"Failed to load data source {alias}: {str(e)}")],
+                alerts=[
+                    Alert(type="error", message=f"Failed to load data source {alias}: {str(e)}")],
                 pyCode=""
             )
     try:
@@ -215,49 +225,57 @@ async def artifact_code(request: ArtifactRequest):
         print("request.cascaderParamValues", request.cascaderParamValues)
         for param_name, param_value in request.cascaderParamValues.items():
             if not isinstance(param_value, list):
-                raise ValueError(f"[PARAMS] Invalid cascader param value: {param_value}, should be a list.")
-            
+                raise ValueError(
+                    f"[PARAMS] Invalid cascader param value: {param_value}, should be a list.")
+
             # 对于cascader_params, 如果参数值为空, 则默认为全选
             if len(param_value) == 0:
                 continue
             df_alias, df_column = param_name.split(",")[:2]
             df_index = dfs[df_alias][df_column].astype(str).isin(param_value)
-            
+
             print("df之前 ", dfs[df_alias].shape)
             dfs[df_alias] = dfs[df_alias].loc[df_index]
             print("df之后 ", dfs[df_alias].shape)
-            
+
         # 对于plain_params, 进行类型转换
         plain_param_values = {}
         for param_name, param_value in request.plainParamValues.items():
-            if isinstance(param_value, PlainParamValue) and  param_value.type == 'single' and isinstance(param_value.value, str):
-                plain_param_values[param_name] = convert_plain_param_value(param_value.value, param_value.valueType)
+            if isinstance(param_value, PlainParamValue) and param_value.type == 'single' and isinstance(param_value.value, str):
+                plain_param_values[param_name] = convert_plain_param_value(
+                    param_value.value, param_value.valueType)
             elif isinstance(param_value, PlainParamValue) and param_value.type == 'multiple' and isinstance(param_value.value, list):
-                plain_param_values[param_name] = [convert_plain_param_value(value, param_value.valueType) for value in param_value.value] 
+                plain_param_values[param_name] = [convert_plain_param_value(
+                    value, param_value.valueType) for value in param_value.value]
             else:
-                raise ValueError(f"[PARAMS] Invalid plain param value: {param_value}, should be a list or a string.")
-            
-        
+                raise ValueError(
+                    f"[PARAMS] Invalid plain param value: {param_value}, should be a list or a string.")
+
         print(1)
         # import
-        import_context = "# import\n" + "import io\n" + "import json\n" + "import pandas as pd\n"
+        import_context = "# import\n" + "import io\n" + \
+            "import json\n" + "import pandas as pd\n"
         print(2)
         # data
-        data_context = "# data\n" + "\n".join([f"""{df_alias} = pd.read_json(io.StringIO(\"\"\"{df_value.to_json(orient='records', date_format='iso',force_ascii=False).strip()}\"\"\"))""" for df_alias, df_value in dfs.items()])
+        data_context = "# data\n" + \
+            "\n".join([f"""{df_alias} = pd.read_json(io.StringIO(\"\"\"{df_value.to_json(orient='records', date_format='iso',force_ascii=False).strip()}\"\"\"))""" for df_alias, df_value in dfs.items()])
         print(3)
         # param
-        params_context = "# params\n" + f"globals().update(json.loads(\"\"\"{json.dumps(plain_param_values)}\"\"\"))"
-        pyCode =  import_context + "\n\n" + params_context + "\n\n" + data_context + "\n\n" + "# code\n" + request.pyCode
+        params_context = "# params\n" + \
+            f"globals().update(json.loads(\"\"\"{json.dumps(plain_param_values)}\"\"\"))"
+        pyCode = import_context + "\n\n" + params_context + "\n\n" + \
+            data_context + "\n\n" + "# code\n" + request.pyCode
     except Exception as e:
         return ArtifactCodeResponse(
             queryTime=datetime.now().isoformat(),
             status="error",
             message=f"Failed to process Python code",
             error=str(e),
-            alerts=[Alert(type="error", message=f"Code processing error: {str(e)}")],
+            alerts=[
+                Alert(type="error", message=f"Code processing error: {str(e)}")],
             pyCode=""
         )
-    
+
     # 返回处理结果
     return ArtifactCodeResponse(
         status="success",
@@ -266,4 +284,3 @@ async def artifact_code(request: ArtifactRequest):
         pyCode=pyCode,
         queryTime=datetime.now().isoformat()
     )
-        

@@ -137,7 +137,7 @@ async def create_reference(item: FileSystemItem, username: str = Depends(verify_
 
 @router.delete("/fs/operations/delete-file/{file_id}", response_model=Dict[str, bool])
 async def delete_file(file_id: str, username: str = Depends(verify_token_dependency)):
-    items = load_fs_data()
+    items = await load_fs_data()
 
     # 查找文件
     file_item = find_item_by_id(items, file_id)
@@ -162,7 +162,7 @@ async def delete_file(file_id: str, username: str = Depends(verify_token_depende
 
 @router.delete("/fs/operations/delete-folder/{folder_id}", response_model=Dict[str, bool])
 async def delete_folder(folder_id: str, recursive: bool = False, username: str = Depends(verify_token_dependency)):
-    items = load_fs_data()
+    items = await load_fs_data()
 
     # 查找文件夹
     folder_item = find_item_by_id(items, folder_id)
@@ -200,7 +200,7 @@ async def delete_folder(folder_id: str, recursive: bool = False, username: str =
 
 @router.delete("/fs/operations/delete-reference/{reference_id}", response_model=Dict[str, bool])
 async def delete_reference(reference_id: str, username: str = Depends(verify_token_dependency)):
-    items = load_fs_data()
+    items = await load_fs_data()
 
     # 查找引用
     ref_item = find_item_by_id(items, reference_id)
@@ -218,7 +218,7 @@ async def delete_reference(reference_id: str, username: str = Depends(verify_tok
 
 @router.put("/fs/operations/rename-folder/{folder_id}", response_model=FileSystemItem)
 async def rename_folder(folder_id: str, new_name: str, username: str = Depends(verify_token_dependency)):
-    items = load_fs_data()
+    items = await load_fs_data()
 
     # 查找文件夹
     folder_idx = next((i for i, item in enumerate(
@@ -238,7 +238,7 @@ async def rename_folder(folder_id: str, new_name: str, username: str = Depends(v
 
 @router.put("/fs/operations/rename-file/{file_id}", response_model=FileSystemItem)
 async def rename_file(file_id: str, new_name: str, username: str = Depends(verify_token_dependency)):
-    items = load_fs_data()
+    items = await load_fs_data()
 
     # 查找文件
     file_idx = next((i for i, item in enumerate(items) if item.id ==

@@ -32,10 +32,10 @@ async def load_fs_data() -> List[FileSystemItem]:
         return []
 
     try:
-        with fs_data_lock:
-            async with aiofiles.open(FS_DATA_FILE, "r", encoding="utf-8") as f:
-                content = await f.read()
-                data = json.loads(content)
+        # with fs_data_lock:
+        async with aiofiles.open(FS_DATA_FILE, "r", encoding="utf-8") as f:
+            content = await f.read()
+            data = json.loads(content)
 
         # 将字典列表转换为FileSystemItem对象列表
         return [FileSystemItem(**item) for item in data]

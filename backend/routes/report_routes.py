@@ -97,7 +97,7 @@ async def update_report_title(file_id: str, title: str):
 # API端点：创建一个新的报表文件
 @router.post("/reports", response_model=Report)
 async def create_report(report: Report, parent_id: Optional[str] = None):
-    items = load_fs_data()
+    items = await load_fs_data()
 
     # 检查父文件夹是否存在
     if parent_id:

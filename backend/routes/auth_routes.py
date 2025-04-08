@@ -3,6 +3,10 @@ from fastapi.responses import JSONResponse
 import hashlib
 import jwt
 import datetime
+import os
+import json
+import asyncio
+import aiofiles
 from secrets import token_hex
 from typing import Dict, Optional
 from pydantic import BaseModel
@@ -11,43 +15,32 @@ from utils.fs_utils import FILE_TOKEN_PATH
 # 创建Router
 router = APIRouter(tags=["auth"], prefix="/api/auth")
 
-# 用于存储用户凭证的字典，实际应用中应使用数据库
-# 这里密码已经预先用SHA256哈希过（实际情况下应该加盐）
-USERS = {
-    "adol": "f09a31c2bb20aeee1e1ce6639c32226098bdaaf949b247b775f845aafadda2bd",  # adol
-    # "user": "04f8996da763b7a969b1028ee3007569eaf3a635486ddab211d512c85b9df8fb",   # user
-}
-# 活跃token列表（用于验证和注销）
-ACTIVE_TOKENS = {}
 
 # 用于JWT签名的密钥
 # SECRET_KEY = token_hex(32)
 # 固定下来, 多个进程共用一个SECRET_KEY
 SECRET_KEY = 'cd3fd8928370f07e726ed4a519ffdc3b3da24b66819c55595ad7e4c7c2bb36b3'
 
+# 用于存储用户凭证的字典，实际应用中应使用数据库
+USERS = {
+    "adol": "f09a31c2bb20aeee1e1ce6639c32226098bdaaf949b247b775f845aafadda2bd",  # adol
+}
+# 活跃token列表（用于验证和注销）
+ACTIVE_TOKENS = {}
+
 
 def generate_sha256_hash(password):
     """
-    # 示例用法
-    password = "your_password"
-    hashed_password = generate_sha256_hash(password)
-    print(f"SHA256哈希后的密码：{hashed_password}")
-
-
+    生成密码的SHA256哈希值
     """
     # 创建SHA256哈希对象
     sha256_hash = hashlib.sha256()
-
-    # 将密码转换为字节并更新哈希对象
     sha256_hash.update(password.encode('utf-8'))
-
-    # 获取十六进制的哈希值
-    hashed_password = sha256_hash.hexdigest()
-
-    return hashed_password
-
+    return sha256_hash.hexdigest()
 
 # 定义请求和响应模型
+
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -60,11 +53,68 @@ class TokenResponse(BaseModel):
     username: Optional[str] = None
 
 
+async def get_active_tokens() -> Dict[str, str]:
+    """
+    异步获取活跃的 token
+
+    Returns:
+        Dict[str, str]: token 到用户名的映射
+    """
+    tokens_file = os.path.join(FILE_TOKEN_PATH, "active_tokens.json")
+
+    # 确保目录存在
+    os.makedirs(FILE_TOKEN_PATH, exist_ok=True)
+
+    if not os.path.exists(tokens_file):
+        return {}
+
+    try:
+        async with aiofiles.open(tokens_file, "r", encoding="utf-8") as f:
+            content = await f.read()
+            return json.loads(content)
+    except (json.JSONDecodeError, IOError):
+        return {}
+
+
+async def save_active_tokens(tokens: Dict[str, str]):
+    """
+    异步保存活跃的 token
+
+    Args:
+        tokens (Dict[str, str]): token 到用户名的映射
+    """
+    tokens_file = os.path.join(FILE_TOKEN_PATH, "active_tokens.json")
+
+    try:
+        async with aiofiles.open(tokens_file, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(tokens, ensure_ascii=False, indent=2))
+    except IOError as e:
+        print(f"保存 token 时发生错误: {e}")
+
+
+async def is_user_already_logged_in(username: str) -> bool:
+    """
+    检查用户是否已经登录
+
+    Args:
+        username (str): 用户名
+
+    Returns:
+        bool: 用户是否已登录
+    """
+    active_tokens = await get_active_tokens()
+    return username in active_tokens.values()
+
+
 @router.post("/login", response_model=TokenResponse)
 async def login(request: LoginRequest):
     """处理用户登录请求"""
     username = request.username
     password = request.password  # 客户端已哈希的密码
+
+    # 检查用户是否已登录， 允许多次登陆
+    if await is_user_already_logged_in(username):
+        print(f"用户 {username} 已在其他地方登录")
 
     # 验证用户名和密码
     if username not in USERS or USERS[username] != password:
@@ -79,8 +129,10 @@ async def login(request: LoginRequest):
 
     token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
-    # 保存token到活跃列表
-    ACTIVE_TOKENS[token] = username
+    # 获取并更新活跃 token
+    active_tokens = await get_active_tokens()
+    active_tokens[token] = username
+    await save_active_tokens(active_tokens)
 
     return TokenResponse(
         success=True,
@@ -98,8 +150,11 @@ async def verify_token(authorization: Optional[str] = Header(None)):
 
     token = authorization.split(' ')[1]
 
+    # 获取活跃 token
+    active_tokens = await get_active_tokens()
+
     # 验证token是否在活跃列表中
-    if token not in ACTIVE_TOKENS:
+    if token not in active_tokens:
         return TokenResponse(success=False, message="令牌已失效")
 
     try:
@@ -113,8 +168,9 @@ async def verify_token(authorization: Optional[str] = Header(None)):
         )
     except jwt.ExpiredSignatureError:
         # 移除过期token
-        if token in ACTIVE_TOKENS:
-            del ACTIVE_TOKENS[token]
+        if token in active_tokens:
+            del active_tokens[token]
+            await save_active_tokens(active_tokens)
         return TokenResponse(success=False, message="令牌已过期")
     except jwt.InvalidTokenError:
         return TokenResponse(success=False, message="无效的令牌")
@@ -128,14 +184,16 @@ async def logout(authorization: Optional[str] = Header(None)):
 
     token = authorization.split(' ')[1]
 
+    # 获取并更新活跃 token
+    active_tokens = await get_active_tokens()
+
     # 从活跃token列表中移除
-    if token in ACTIVE_TOKENS:
-        del ACTIVE_TOKENS[token]
+    if token in active_tokens:
+        del active_tokens[token]
+        await save_active_tokens(active_tokens)
         return TokenResponse(success=True, message="已成功注销")
 
     return TokenResponse(success=False, message="令牌不存在或已失效")
-
-# 验证token的依赖函数
 
 
 async def verify_token_dependency(authorization: Optional[str] = Header(None)):
@@ -145,8 +203,11 @@ async def verify_token_dependency(authorization: Optional[str] = Header(None)):
 
     token = authorization.split(' ')[1]
 
+    # 获取活跃 token
+    active_tokens = await get_active_tokens()
+
     # 验证token是否在活跃列表中
-    if token not in ACTIVE_TOKENS:
+    if token not in active_tokens:
         raise HTTPException(status_code=401, detail="令牌已失效")
 
     try:
@@ -154,13 +215,12 @@ async def verify_token_dependency(authorization: Optional[str] = Header(None)):
         return payload.get('username')
     except jwt.ExpiredSignatureError:
         # 移除过期token
-        if token in ACTIVE_TOKENS:
-            del ACTIVE_TOKENS[token]
+        if token in active_tokens:
+            del active_tokens[token]
+            await save_active_tokens(active_tokens)
         raise HTTPException(status_code=401, detail="令牌已过期")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="无效的令牌")
-
-# 用于兼容之前代码的函数
 
 
 def token_required(f):

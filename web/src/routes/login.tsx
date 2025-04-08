@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState } from 'react';
+import type { React } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import CryptoJS from 'crypto-js';
 import { axiosInstance } from '@/lib/axios';
@@ -31,8 +32,8 @@ function Login() {
       });
 
       // 保存token到sessionStorage
-      sessionStorage.setItem('auth-token', response.data.token);
-      sessionStorage.setItem('auth-username', username);
+      localStorage.setItem('auth-token', response.data.token);
+      localStorage.setItem('auth-username', username);
 
       // 登录成功，跳转到主页
       navigate({ to: '/' });

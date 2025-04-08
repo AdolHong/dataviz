@@ -220,8 +220,8 @@ export function DashboardPage() {
 
   const handleLogout = () => {
     // 清除sessionStorage中的token和username
-    sessionStorage.removeItem('auth-token');
-    sessionStorage.removeItem('auth-username');
+    localStorage.removeItem('auth-token');
+    localStorage.removeItem('auth-username');
 
     // 重定向到登录页面
     navigate({ to: '/login' });

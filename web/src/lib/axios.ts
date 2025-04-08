@@ -18,8 +18,8 @@ export const axiosInstance = axios.create({
 axiosInstance.interceptors.request.use(
   (config) => {
     // 从sessionStorage获取auth-token
-    const token = sessionStorage.getItem('auth-token');
-    const username = sessionStorage.getItem('auth-username');
+    const token = localStorage.getItem('auth-token');
+    const username = localStorage.getItem('auth-username');
 
     if (token) {
       config.headers['Authorization'] = `Bearer ${token}`;
@@ -49,8 +49,8 @@ axiosInstance.interceptors.response.use(
     // 如果响应状态码是401（未授权），可能是token过期或无效
     if (error.response && error.response.status === 401) {
       // 清除sessionStorage中的token和username
-      sessionStorage.removeItem('auth-token');
-      sessionStorage.removeItem('auth-username');
+      localStorage.removeItem('auth-token');
+      localStorage.removeItem('auth-username');
 
       // 重定向到登录页面
       window.location.href = '/login';

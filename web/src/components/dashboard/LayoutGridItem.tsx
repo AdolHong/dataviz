@@ -288,7 +288,6 @@ export const LayoutGridItem = memo(
                 data={data}
                 layout={{
                   ...layout,
-                  showlegend: false,
                   autosize: true,
                   height: 300,
                   margin: { l: 20, r: 20, b: 50, t: 50, pad: 4 },
@@ -347,8 +346,9 @@ export const LayoutGridItem = memo(
     const safeCopyToClipboard = async (content: string) => {
       // 检查 Clipboard API 是否可用
       if (
-        navigator.clipboard &&
-        typeof navigator.clipboard.writeText === 'function'
+        navigator?.clipboard &&
+        navigator?.clipboard?.writeText &&
+        typeof navigator?.clipboard?.writeText === 'function'
       ) {
         try {
           await navigator.clipboard.writeText(content);

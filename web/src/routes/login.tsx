@@ -1,6 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState } from 'react';
-import type { React } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import CryptoJS from 'crypto-js';
 import { axiosInstance } from '@/lib/axios';

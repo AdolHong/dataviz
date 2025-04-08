@@ -343,11 +343,40 @@ export const LayoutGridItem = memo(
       }
     };
 
-    // 在组件中添加复制到剪切板的函数
-    const handleCopyToClipboard = async () => {
-      console.info('artifactResponse', artifactResponse);
-      console.info('artifact', artifact);
+    // 添加一个安全的复制函数
+    const safeCopyToClipboard = async (content: string) => {
+      // 检查 Clipboard API 是否可用
+      if (
+        navigator.clipboard &&
+        typeof navigator.clipboard.writeText === 'function'
+      ) {
+        try {
+          await navigator.clipboard.writeText(content);
+          return true;
+        } catch {
+          return false;
+        }
+      }
 
+      // 备选方案：使用 document.execCommand
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = content;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.select();
+
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        return successful;
+      } catch {
+        return false;
+      }
+    };
+
+    // 修改现有的复制逻辑
+    const handleCopyContent = async () => {
       if (!artifact || !artifactResponse) {
         return;
       }
@@ -376,57 +405,36 @@ export const LayoutGridItem = memo(
       const response = await artifactApi.getArtifactCode(request);
       console.info('response', response);
 
-      // 复制到剪贴板
+      // 如果不能获取到代码，则提示
       if (!response || !response.pyCode) {
         toast.error('没有获取到代码');
         return;
       }
       const content = response.pyCode;
 
+      // 复制到剪贴板或尝试下载
       try {
-        // 使用 Clipboard API 复制内容
-        navigator.clipboard
-          .writeText(content)
-          .then(() => {
-            // 复制成功后显示通知
-            toast.success('已复制到剪切板');
-            throw new Error('刻意抛出错误以测试下载功能');
-          })
-          .catch((err: Error) => {
-            // 复制失败，尝试下载文件
-            try {
-              // 创建一个 Blob 对象
-              const blob = new Blob([content], { type: 'text/plain' });
+        const copySuccess = await safeCopyToClipboard(content);
 
-              // 创建一个下载链接
-              const downloadLink = document.createElement('a');
-              downloadLink.href = URL.createObjectURL(blob);
-              downloadLink.download = 'artifact_code.py'; // 默认文件名
+        if (copySuccess) {
+          toast.success('已复制到剪切板');
+        } else {
+          // 复制失败，尝试下载文件
+          const blob = new Blob([content], { type: 'text/plain' });
+          const downloadLink = document.createElement('a');
+          downloadLink.href = URL.createObjectURL(blob);
+          downloadLink.download = 'artifact_code.py';
 
-              // 触发下载
-              document.body.appendChild(downloadLink);
-              downloadLink.click();
-              document.body.removeChild(downloadLink);
+          document.body.appendChild(downloadLink);
+          downloadLink.click();
+          document.body.removeChild(downloadLink);
 
-              // 释放 URL 对象
-              URL.revokeObjectURL(downloadLink.href);
-
-              toast.success('由于复制失败，已为您下载文件');
-            } catch (downloadErr: unknown) {
-              // 下载也失败了
-              toast.error('复制和下载均失败', {
-                description:
-                  downloadErr instanceof Error
-                    ? downloadErr.message
-                    : '未知错误',
-              });
-            }
-          });
-      } catch (err: unknown) {
-        // 兼容性处理
-        toast.error('浏览器不支持剪切板操作', {
-          description:
-            err instanceof Error ? err.message : '已为您尝试下载文件',
+          URL.revokeObjectURL(downloadLink.href);
+          toast.info('复制失败，已为您下载文件');
+        }
+      } catch (err) {
+        toast.error('复制和下载均失败', {
+          description: err instanceof Error ? err.message : '未知错误',
         });
       }
     };
@@ -480,7 +488,7 @@ export const LayoutGridItem = memo(
                   className='w-3 h-3 aspect-square cursor-pointer'
                   onClick={async () => {
                     if (artifact && artifactResponse) {
-                      await handleCopyToClipboard();
+                      await handleCopyContent();
                     }
                   }}
                 >

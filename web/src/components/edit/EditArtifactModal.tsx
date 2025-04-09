@@ -18,6 +18,8 @@ import type {
   SinglePlainParam,
   MultiplePlainParam,
   CascaderParam,
+  SingleInferredParam,
+  MultipleInferredParam,
 } from '@/types';
 import EditArtifactParamModal from './EditArtifactParamModal';
 import { Combobox } from '@/components/combobox';
@@ -61,12 +63,20 @@ const EditArtifactModal = ({
   const [cascaderParams, setCascaderParams] = useState<CascaderParam[]>([]);
 
   const [plainParamNames, setPlainParamNames] = useState<string[]>([]);
+  const [inferredParams, setInferredParams] = useState<
+    (SingleInferredParam | MultipleInferredParam)[]
+  >([]);
 
   // UI 状态控制
   const [isParamModalOpen, setIsParamModalOpen] = useState(false);
   const [editingParam, setEditingParam] = useState<{
-    param: SinglePlainParam | MultiplePlainParam | CascaderParam;
-    type: 'plain' | 'cascader';
+    param:
+      | SinglePlainParam
+      | MultiplePlainParam
+      | CascaderParam
+      | SingleInferredParam
+      | MultipleInferredParam;
+    type: 'plain' | 'cascader' | 'inferred';
     id: string;
   } | null>(null);
 
@@ -86,6 +96,7 @@ const EditArtifactModal = ({
       setPlainParams(artifact.plainParams || []);
       setCascaderParams(artifact.cascaderParams || []);
       setPlainParamNames(artifact.plainParams?.map((p) => p.name) || []);
+      setInferredParams(artifact.inferredParams || []);
     } else {
       // 新增模式：重置所有状态
       setId(generateId());
@@ -97,18 +108,31 @@ const EditArtifactModal = ({
       setPlainParams([]);
       setCascaderParams([]);
       setPlainParamNames([]);
+      setInferredParams([]);
     }
   }, [artifact, isOpen]);
 
   // --- 参数相关操作 ---
   const handleAddParam = (
-    param: SinglePlainParam | MultiplePlainParam | CascaderParam
+    param:
+      | SinglePlainParam
+      | MultiplePlainParam
+      | CascaderParam
+      | SingleInferredParam
+      | MultipleInferredParam,
+    type: 'plain' | 'cascader' | 'inferred'
   ) => {
-    if ('type' in param) {
+    if (type === 'plain') {
       // 处理 Plain 参数
       setPlainParams((prev) => [
         ...prev,
         param as SinglePlainParam | MultiplePlainParam,
+      ]);
+    } else if (type === 'inferred') {
+      // 处理 Inferred 参数
+      setInferredParams((prev) => [
+        ...prev,
+        param as SingleInferredParam | MultipleInferredParam,
       ]);
     } else {
       // 处理 Cascader 参数
@@ -117,29 +141,42 @@ const EditArtifactModal = ({
     setIsParamModalOpen(false);
   };
 
-  const handleEditParam = (
-    param: SinglePlainParam | MultiplePlainParam | CascaderParam,
-    paramType: 'plain' | 'cascader',
-    originalId: string
-  ) => {
-    if (paramType === 'plain') {
-      setPlainParams((prev) =>
-        prev.map((p) =>
-          p.id === originalId
-            ? (param as SinglePlainParam | MultiplePlainParam)
-            : p
-        )
-      );
-    } else {
-      setCascaderParams((prev) =>
-        prev.map((p, index) =>
-          index === parseInt(originalId) ? (param as CascaderParam) : p
-        )
-      );
-    }
-    setEditingParam(null);
-    setIsParamModalOpen(false);
-  };
+  // const handleEditParam = (
+  //   param:
+  //     | SinglePlainParam
+  //     | MultiplePlainParam
+  //     | CascaderParam
+  //     | SingleInferredParam
+  //     | MultipleInferredParam,
+  //   paramType: 'plain' | 'cascader' | 'inferred',
+  //   originalId: string
+  // ) => {
+  //   if (paramType === 'plain') {
+  //     setPlainParams((prev) =>
+  //       prev.map((p) =>
+  //         p.id === originalId
+  //           ? (param as SinglePlainParam | MultiplePlainParam)
+  //           : p
+  //       )
+  //     );
+  //   } else if (paramType === 'cascader') {
+  //     setCascaderParams((prev) =>
+  //       prev.map((p, index) =>
+  //         index === parseInt(originalId) ? (param as CascaderParam) : p
+  //       )
+  //     );
+  //   } else if (paramType === 'inferred') {
+  //     setInferredParams((prev) =>
+  //       prev.map((p) =>
+  //         p.id === originalId
+  //           ? (param as SingleInferredParam | MultipleInferredParam)
+  //           : p
+  //       )
+  //     );
+  //   }
+  //   setEditingParam(null);
+  //   setIsParamModalOpen(false);
+  // };
 
   const handleDeleteParam = (
     paramId: string,
@@ -147,8 +184,12 @@ const EditArtifactModal = ({
   ) => {
     if (paramType === 'plain') {
       setPlainParams((prev) => prev.filter((p) => p.id !== paramId));
-    } else {
+    } else if (paramType === 'cascader') {
       setCascaderParams((prev) =>
+        prev.filter((_, index) => index.toString() !== paramId)
+      );
+    } else if (paramType === 'inferred') {
+      setInferredParams((prev) =>
         prev.filter((_, index) => index.toString() !== paramId)
       );
     }
@@ -468,12 +509,7 @@ const EditArtifactModal = ({
           setIsParamModalOpen(false);
           setEditingParam(null);
         }}
-        onSave={
-          editingParam
-            ? (param: SinglePlainParam | MultiplePlainParam | CascaderParam) =>
-                handleEditParam(param, editingParam.type, editingParam.id)
-            : handleAddParam
-        }
+        onSave={handleAddParam}
         paramData={editingParam}
         plainParamNames={plainParamNames}
         setPlainParamNames={setPlainParamNames}

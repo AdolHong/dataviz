@@ -40,7 +40,8 @@ interface EditArtifactParamModalProps {
       | MultiplePlainParam
       | CascaderParam
       | SingleInferredParam
-      | MultipleInferredParam
+      | MultipleInferredParam,
+    type: 'plain' | 'cascader' | 'inferred'
   ) => void;
   paramData: {
     param: any;
@@ -280,7 +281,7 @@ const EditArtifactParamModal = ({
             default: plainDefault || plainChoices[0].value,
             choices: plainChoices,
           };
-          onSave(singleParam);
+          onSave(singleParam, 'plain');
         } else {
           // 构建多选参数
           const multipleParam: MultiplePlainParam = {
@@ -296,7 +297,7 @@ const EditArtifactParamModal = ({
                 : [plainChoices[0].value],
             choices: plainChoices,
           };
-          onSave(multipleParam);
+          onSave(multipleParam, 'plain');
         }
 
         // todo: 删除旧名, 更换新名
@@ -330,7 +331,7 @@ const EditArtifactParamModal = ({
           levels: cascaderLevels,
         };
 
-        onSave(cascaderParam);
+        onSave(cascaderParam, 'cascader');
       } else if (paramType === 'inferred') {
         // 基本验证
         if (!inferredDfAlias) {
@@ -352,7 +353,7 @@ const EditArtifactParamModal = ({
           dfColumn: inferredDfColumn,
           clearable: inferredClearable,
         };
-        onSave(inferredParam);
+        onSave(inferredParam, 'inferred');
       }
     } catch (error) {
       console.error('Error saving parameter:', error);

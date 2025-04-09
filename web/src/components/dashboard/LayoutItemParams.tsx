@@ -9,6 +9,8 @@ import { Combobox } from '@/components/combobox';
 import type { TreeNodeData } from '../tree-select/types';
 import { getChildrenValuesByTargetValues } from './CascaderTreeView';
 import type { PlainParamValue } from '@/types/api/aritifactRequest';
+import type { SingleInferredParam, MultipleInferredParam } from '@/types';
+
 interface LayoutItemParamsProps {
   artifact: Artifact;
   dependentQueryStatus: Record<string, QueryStatus>;
@@ -32,6 +34,16 @@ interface LayoutItemParamsProps {
   setPlainParamChoices: (
     values: Record<string, Record<string, string>[]>
   ) => void;
+  // 新增参数，用于获取推断参数的选项
+  inferredParamChoices?: Record<string, Record<string, string>[]>;
+  inferredParamValues?: Record<string, string | string[]>;
+  setInferredParamValues?: (
+    values:
+      | Record<string, string | string[]>
+      | ((
+          prev: Record<string, string | string[]>
+        ) => Record<string, string | string[]>)
+  ) => void;
 }
 
 export function LayoutItemParams({
@@ -42,6 +54,9 @@ export function LayoutItemParams({
   setPlainParamValues,
   setCascaderParamValues,
   plainParamChoices,
+  inferredParamChoices = {},
+  inferredParamValues = {},
+  setInferredParamValues = () => {},
 }: LayoutItemParamsProps) {
   if (!artifact) return null;
 
@@ -69,6 +84,23 @@ export function LayoutItemParams({
     });
   };
 
+  // 处理推断参数值变化
+  const handleInferredValueChange = (
+    paramId: string,
+    value: string | string[]
+  ) => {
+    setInferredParamValues((prev) => {
+      // 如果值没有变化，不更新状态
+      if (JSON.stringify(prev[paramId]) === JSON.stringify(value)) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [paramId]: value,
+      };
+    });
+  };
+
   // 级联参数树形视图中选择变化的处理
   const handleTreeViewCheckChange = (
     dfAlias: string,
@@ -89,6 +121,13 @@ export function LayoutItemParams({
         [paramKey]: currentValues,
       };
     });
+  };
+
+  // 获取推断参数的标识，用于在UI中显示和获取值
+  const getInferredParamKey = (
+    param: SingleInferredParam | MultipleInferredParam
+  ) => {
+    return `${param.dfAlias}_${param.dfColumn}_${param.id}`;
   };
 
   return (
@@ -145,6 +184,56 @@ export function LayoutItemParams({
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* 单列推断参数 */}
+        {artifact?.inferredParams && artifact.inferredParams.length > 0 && (
+          <div className='mb-3'>
+            <div className='space-y-2'>
+              {artifact.inferredParams.map((param) => {
+                const paramKey = getInferredParamKey(param);
+                return (
+                  <div key={param.id} className='bg-gray-50 p-2 rounded-md'>
+                    <div className='flex items-center mb-1'>
+                      <Badge
+                        variant='outline'
+                        className='mr-1.5 bg-purple-50 text-purple-700 border-purple-200 text-[10px] px-1.5 py-0'
+                      >
+                        {param.type === 'single' ? '单列单选' : '单列多选'}
+                      </Badge>
+                      <span className='text-xs font-medium truncate'>
+                        {param.alias || `${param.dfAlias}.${param.dfColumn}`}
+                      </span>
+                    </div>
+                    {param.description && (
+                      <div className='text-[10px] text-gray-500 mb-1.5 line-clamp-1'>
+                        {param.description}
+                      </div>
+                    )}
+
+                    <Combobox
+                      options={
+                        inferredParamChoices[paramKey]?.map((choice) => ({
+                          key: choice.key,
+                          value: choice.value,
+                        })) || []
+                      }
+                      value={
+                        inferredParamValues[paramKey] ||
+                        (param.type === 'single' ? '' : [])
+                      }
+                      placeholder='请选择'
+                      onValueChange={(value) =>
+                        handleInferredValueChange(paramKey, value)
+                      }
+                      clearAble={param.clearable}
+                      mode={param.type === 'single' ? 'single' : 'multiple'}
+                    />
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 

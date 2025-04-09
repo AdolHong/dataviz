@@ -2,21 +2,28 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any, Union, Literal
 
 # UpdateMode 相关模型
+
+
 class ManualUpdateMode(BaseModel):
     type: Literal["manual"]
+
 
 class AutoUpdateMode(BaseModel):
     type: Literal["auto"]
     interval: Optional[int] = 600
 
+
 UpdateMode = Union[ManualUpdateMode, AutoUpdateMode]
 
 # Executor 相关模型
+
+
 class PythonSourceExecutor(BaseModel):
     type: Literal["python"]
     engine: str
     code: str
     updateMode: UpdateMode
+
 
 class SQLSourceExecutor(BaseModel):
     type: Literal["sql"]
@@ -24,17 +31,23 @@ class SQLSourceExecutor(BaseModel):
     code: str
     updateMode: UpdateMode
 
+
 class CSVSourceExecutor(BaseModel):
-    type: Literal["csv_data"] 
+    type: Literal["csv_data"]
     data: str
+
 
 class CSVUploaderSourceExecutor(BaseModel):
     type: Literal["csv_uploader"]
     demoData: str
 
-Executor = Union[PythonSourceExecutor, SQLSourceExecutor, CSVSourceExecutor, CSVUploaderSourceExecutor]
+
+Executor = Union[PythonSourceExecutor, SQLSourceExecutor,
+                 CSVSourceExecutor, CSVUploaderSourceExecutor]
 
 # DataSource 模型
+
+
 class DataSource(BaseModel):
     id: str
     name: str
@@ -44,10 +57,13 @@ class DataSource(BaseModel):
     config: Optional[Dict[str, Any]] = None
 
 # Parameter 相关模型
+
+
 class SingleSelectParamConfig(BaseModel):
     type: Literal["single_select"]
     choices: List[Dict[str, str]]
     default: str
+
 
 class MultiSelectParamConfig(BaseModel):
     type: Literal["multi_select"]
@@ -56,10 +72,18 @@ class MultiSelectParamConfig(BaseModel):
     sep: str
     wrapper: str
 
+
 class DatePickerParamConfig(BaseModel):
     type: Literal["date_picker"]
     dateFormat: str
     default: str
+
+
+class DateRangePickerParamConfig(BaseModel):
+    type: Literal["date_range_picker"]
+    dateFormat: str
+    default: List[str]
+
 
 class MultiInputParamConfig(BaseModel):
     type: Literal["multi_input"]
@@ -67,11 +91,15 @@ class MultiInputParamConfig(BaseModel):
     sep: str
     wrapper: str
 
+
 class SingleInputParamConfig(BaseModel):
     type: Literal["single_input"]
     default: str
 
-ParamConfig = Union[SingleSelectParamConfig, MultiSelectParamConfig, DatePickerParamConfig, MultiInputParamConfig, SingleInputParamConfig]
+
+ParamConfig = Union[SingleSelectParamConfig, MultiSelectParamConfig,
+                    DatePickerParamConfig, DateRangePickerParamConfig, MultiInputParamConfig, SingleInputParamConfig]
+
 
 class Parameter(BaseModel):
     id: str
@@ -81,14 +109,18 @@ class Parameter(BaseModel):
     config: ParamConfig
 
 # Artifact 相关模型
+
+
 class CascaderLevel(BaseModel):
     dfColumn: str
     name: Optional[str] = None
     description: Optional[str] = None
 
+
 class CascaderParam(BaseModel):
     dfAlias: str
     levels: List[CascaderLevel]
+
 
 class SinglePlainParam(BaseModel):
     type: Literal["single"]
@@ -100,6 +132,7 @@ class SinglePlainParam(BaseModel):
     default: str
     choices: List[Dict[str, str]]
 
+
 class MultiplePlainParam(BaseModel):
     type: Literal["multiple"]
     id: str
@@ -110,7 +143,9 @@ class MultiplePlainParam(BaseModel):
     default: List[str]
     choices: List[Dict[str, str]]
 
+
 ArtifactParam = Union[SinglePlainParam, MultiplePlainParam, CascaderParam]
+
 
 class Artifact(BaseModel):
     id: str
@@ -119,10 +154,13 @@ class Artifact(BaseModel):
     code: str
     dependencies: List[str]
     executor_engine: str
-    plainParams: Optional[List[Union[SinglePlainParam, MultiplePlainParam]]] = None
+    plainParams: Optional[List[Union[SinglePlainParam,
+                                     MultiplePlainParam]]] = None
     cascaderParams: Optional[List[CascaderParam]] = None
 
 # Layout 相关模型
+
+
 class LayoutItem(BaseModel):
     id: str
     title: Optional[str] = None
@@ -131,12 +169,15 @@ class LayoutItem(BaseModel):
     width: Optional[int] = None
     height: Optional[int] = None
 
+
 class Layout(BaseModel):
     items: List[LayoutItem] = []
     columns: int = 1
     rows: int = 1
 
 # Report 主模型
+
+
 class Report(BaseModel):
     id: str
     title: str

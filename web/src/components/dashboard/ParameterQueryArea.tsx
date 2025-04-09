@@ -18,7 +18,10 @@ import { toast } from 'sonner';
 import { DatePicker } from '@/components/ui/datepicker';
 import { Card } from '../ui/card';
 import { CardContent } from '../ui/card';
-import { type DatePickerParamConfig } from '@/types/models/parameter';
+import {
+  type DatePickerParamConfig,
+  type DateRangePickerParamConfig,
+} from '@/types/models/parameter';
 import dayjs from 'dayjs';
 import {
   useTabFilesStore,
@@ -38,6 +41,8 @@ import { queryApi } from '@/api/query';
 import { Combobox } from '../combobox';
 import type { QueryRequest } from '@/types/api/queryRequest';
 import { DataSourceDialog } from './DataSourceDialog';
+import { DateRangePicker } from '@/components/ui/daterangepicker';
+import type { DateRange } from 'react-day-picker';
 
 interface ParameterQueryAreaProps {
   activeTabId: string;
@@ -158,6 +163,14 @@ export const ParameterQueryArea = memo(
           param.config.type === 'multi_input'
         ) {
           const defaultVal = param.config.default || [];
+          const parsedVal = defaultVal.map((val: string) =>
+            parseDynamicDate(val)
+          );
+          initValues[param.name] = parsedVal;
+        }
+        // 对于日期范围选择器，处理两个日期值
+        else if (param.config.type === 'date_range_picker') {
+          const defaultVal = param.config.default || ['', ''];
           const parsedVal = defaultVal.map((val: string) =>
             parseDynamicDate(val)
           );
@@ -333,10 +346,9 @@ export const ParameterQueryArea = memo(
       setParametersExpanded(!parametersExpanded);
     };
 
-    const handleValueChange = (id: string, value: any) => {
-      const newValues = { ...values, [id]: value };
+    const handleValueChange = (name: string, value: any) => {
+      const newValues = { ...values, [name]: value };
       setValues(newValues);
-      console.info('你改啥了', newValues);
     };
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -356,6 +368,31 @@ export const ParameterQueryArea = memo(
 
       if (dataSources?.length === 0) {
         toast.error('请先添加数据源');
+        return;
+      }
+
+      if (artifacts?.length === 0) {
+        toast.error('请先添加图表');
+        return;
+      }
+
+      // 检查日期范围是否合理
+      const isDateRangeValid = parameters?.every((param) => {
+        if (
+          param.config.type === 'date_range_picker' &&
+          !(
+            Array.isArray(values[param.name]) &&
+            values[param.name].length === 2 &&
+            values[param.name][0] !== '' &&
+            values[param.name][1] !== ''
+          )
+        ) {
+          toast.error(`[${param.name}] 请选择日期范围`);
+          return false;
+        }
+        return true;
+      });
+      if (!isDateRangeValid) {
         return;
       }
 
@@ -450,6 +487,41 @@ export const ParameterQueryArea = memo(
                     handleValueChange(param.name, '');
                   }
                 }}
+              />
+            );
+
+          case 'date_range_picker':
+            return (
+              <DateRangePicker
+                dateRange={
+                  values[param.name] && Array.isArray(values[param.name])
+                    ? [
+                        values[param.name][0]
+                          ? new Date(values[param.name][0])
+                          : undefined,
+                        values[param.name][1]
+                          ? new Date(values[param.name][1])
+                          : undefined,
+                      ]
+                    : [undefined, undefined]
+                }
+                setDateRange={(dateRange) => {
+                  let dateFormat = (param.config as DateRangePickerParamConfig)
+                    .dateFormat;
+                  dateFormat =
+                    dateFormat === 'YYYYMMDD' ? 'YYYYMMDD' : 'YYYY-MM-DD';
+
+                  console.info('dateRange', dateRange);
+                  const dateStrings = dateRange.map((date) =>
+                    date ? dayjs(date).format(dateFormat) : ''
+                  );
+                  console.info('dateStrings', dateStrings);
+
+                  handleValueChange(param.name, dateStrings);
+                }}
+                dateFormat={
+                  (param.config as DateRangePickerParamConfig).dateFormat
+                }
               />
             );
 

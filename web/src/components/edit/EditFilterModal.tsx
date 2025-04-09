@@ -75,6 +75,12 @@ const EditFilterModal = ({
   const [multiInputDefault, setMultiInputDefault] = useState<string[]>([]);
   const [multiInputSep, setMultiInputSep] = useState(',');
   const [multiInputWrapper, setMultiInputWrapper] = useState("'");
+  // date_range_picker
+  const [dateRangePickerFormat, setDateRangePickerFormat] =
+    useState('YYYY-MM-DD');
+  const [dateRangePickerDefault, setDateRangePickerDefault] = useState<
+    string[]
+  >(['', '']);
 
   // --- 效果钩子 ---
   useEffect(() => {
@@ -91,6 +97,8 @@ const EditFilterModal = ({
       setMultiSelectWrapper("'");
       setDatePickerFormat('YYYY-MM-DD');
       setDatePickerDefault('');
+      setDateRangePickerFormat('YYYY-MM-DD');
+      setDateRangePickerDefault(['', '']);
       setMultiInputDefault([]);
       setMultiInputSep(',');
       setMultiInputWrapper("'");
@@ -132,6 +140,10 @@ const EditFilterModal = ({
         case 'date_picker':
           setDatePickerFormat(parameter.config.dateFormat);
           setDatePickerDefault(parameter.config.default);
+          break;
+        case 'date_range_picker':
+          setDateRangePickerFormat(parameter.config.dateFormat);
+          setDateRangePickerDefault(parameter.config.default);
           break;
         default:
           toast.error('[DEBUG] parameter edit: 未知参数类型');
@@ -221,6 +233,54 @@ const EditFilterModal = ({
             return;
           }
 
+          break;
+        case 'date_range_picker':
+          config = {
+            type: 'date_range_picker',
+            dateFormat: dateRangePickerFormat,
+            default: dateRangePickerDefault,
+          };
+          if (
+            dateRangePickerFormat != 'YYYY-MM-DD' &&
+            dateRangePickerFormat != 'YYYYMMDD'
+          ) {
+            toast.error('[PARAM] 异常, 默认日期格式错误');
+            config.dateFormat = 'YYYY-MM-DD';
+          }
+
+          // 验证日期范围
+          if (dateRangePickerDefault.length !== 2) {
+            toast.error('[PARAM] 异常, 日期范围必须包含开始和结束日期');
+            config.default = ['', ''];
+          } else {
+            // 验证每个日期是有效的或为空
+            for (let i = 0; i < 2; i++) {
+              const dateStr = dateRangePickerDefault[i];
+              if (
+                dateStr !== '' &&
+                !isValidDate(dateStr, dateRangePickerFormat) &&
+                !isValidDynamicDate(dateStr)
+              ) {
+                if (isValidDynamicDate(dateStr)) {
+                  const parsedDate = parseDynamicDate(dateStr);
+                  if (
+                    parsedDate &&
+                    !isValidDate(parsedDate, dateRangePickerFormat)
+                  ) {
+                    toast.error(
+                      `[PARAM] 异常, 日期范围的第${i + 1}个日期格式错误`
+                    );
+                    return;
+                  }
+                } else {
+                  toast.error(
+                    `[PARAM] 异常, 日期范围的第${i + 1}个日期不是有效日期`
+                  );
+                  return;
+                }
+              }
+            }
+          }
           break;
         case 'multi_input':
           config = {
@@ -419,6 +479,73 @@ const EditFilterModal = ({
             </div>
           </>
         );
+      // 日期范围选择
+      case 'date_range_picker':
+        return (
+          <>
+            <div className='grid grid-cols-4 items-center gap-4'>
+              <Label htmlFor='date-range-picker-format' className='text-right'>
+                日期格式
+              </Label>
+              <div className='col-span-3'>
+                <Select
+                  value={dateRangePickerFormat}
+                  onValueChange={setDateRangePickerFormat}
+                >
+                  <SelectTrigger id='date-range-picker-format'>
+                    <SelectValue placeholder='选择日期格式' />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value='YYYY-MM-DD'>YYYY-MM-DD</SelectItem>
+                    <SelectItem value='YYYYMMDD'>YYYYMMDD</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className='grid grid-cols-4 items-center gap-4'>
+              <Label
+                htmlFor='date-range-picker-default-start'
+                className='text-right'
+              >
+                默认开始日期
+              </Label>
+              <Input
+                id='date-range-picker-default-start'
+                type='text'
+                value={dateRangePickerDefault[0]}
+                onChange={(e) =>
+                  setDateRangePickerDefault([
+                    e.target.value,
+                    dateRangePickerDefault[1],
+                  ])
+                }
+                className='col-span-3'
+                placeholder='开始日期字符串'
+              />
+            </div>
+            <div className='grid grid-cols-4 items-center gap-4'>
+              <Label
+                htmlFor='date-range-picker-default-end'
+                className='text-right'
+              >
+                默认结束日期
+              </Label>
+              <Input
+                id='date-range-picker-default-end'
+                type='text'
+                value={dateRangePickerDefault[1]}
+                onChange={(e) =>
+                  setDateRangePickerDefault([
+                    dateRangePickerDefault[0],
+                    e.target.value,
+                  ])
+                }
+                className='col-span-3'
+                placeholder='结束日期字符串'
+              />
+            </div>
+          </>
+        );
       // 单值输入
       case 'single_input':
         return (
@@ -558,6 +685,7 @@ const EditFilterModal = ({
                 <SelectItem value='single_select'>单选列表</SelectItem>
                 <SelectItem value='multi_select'>多选列表</SelectItem>
                 <SelectItem value='date_picker'>日期选择</SelectItem>
+                <SelectItem value='date_range_picker'>日期范围选择</SelectItem>
               </SelectContent>
             </Select>
           </div>

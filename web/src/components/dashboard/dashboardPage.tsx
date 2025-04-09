@@ -271,7 +271,9 @@ export function DashboardPage() {
         <div
           className='border-r bg-background overflow-auto transition-all duration-300 ease-in-out flex-shrink-0'
           style={{
-            width: navbarVisible ? '256px' : '0px',
+            width: navbarVisible ? 'auto' : '0px',
+            minWidth: navbarVisible ? '180px' : '0px',
+            maxWidth: navbarVisible ? '320px' : '0px',
             opacity: navbarVisible ? 1 : 0,
             visibility: navbarVisible ? 'visible' : 'hidden',
           }}

@@ -40,7 +40,7 @@ docker run -p 3000:3000 dataviz-frontend
 39. 重新query的时候， queryStatus或许可以更新一下颜色; (INIT, RUNNING, SUCCESS, ERROR, ON_SCHEDULE)
 45. 还没query时，  我也想看parsed_code
 46. 隐藏参数按钮， 点击两次，没有加载当前的value；
-47. navbar, item的文字溢出截断；
+
 
 
 完成：
@@ -74,6 +74,7 @@ docker run -p 3000:3000 dataviz-frontend
 42. 后端多进程的lock问题
 43. 后端的io读写，改为异步
 44. 若不能复制剪切板，则改为下载
+47. navbar, item的文字溢出截断；
 
 
 

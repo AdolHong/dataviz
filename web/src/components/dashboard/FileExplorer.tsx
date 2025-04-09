@@ -470,7 +470,7 @@ export const FileExplorer = React.memo(
             <ContextMenuTrigger>
               <div
                 className={cn(
-                  'flex items-center px-2 py-1.5 rounded-md cursor-pointer transition-colors group',
+                  'flex items-center px-1 py-0.5 rounded cursor-pointer transition-colors group',
                   isDragging ? 'opacity-50' : '',
                   isDropTarget
                     ? 'bg-blue-100 dark:bg-blue-900/40'
@@ -488,7 +488,7 @@ export const FileExplorer = React.memo(
                 onDrop={(e) => handleDrop(e, item)}
               >
                 {/* 展开/折叠图标 */}
-                <div className='w-5 h-5 flex items-center justify-center mr-1 flex-shrink-0'>
+                <div className='w-4 h-4 flex items-center justify-center mr-0.5 flex-shrink-0'>
                   {isFolder && (
                     <button
                       onClick={(e) => {
@@ -499,12 +499,12 @@ export const FileExplorer = React.memo(
                     >
                       {isExpanded ? (
                         <ChevronDown
-                          size={16}
+                          size={12}
                           className='text-muted-foreground'
                         />
                       ) : (
                         <ChevronRight
-                          size={16}
+                          size={12}
                           className='text-muted-foreground'
                         />
                       )}
@@ -513,18 +513,18 @@ export const FileExplorer = React.memo(
                 </div>
 
                 {/* 图标 */}
-                <div className='mr-2 flex-shrink-0'>
+                <div className='mr-1 flex-shrink-0'>
                   {isFolder ? (
-                    <Folder size={18} className='text-blackAlpha.900' />
+                    <Folder size={14} className='text-blackAlpha.900' />
                   ) : isReference ? (
-                    <Link size={18} className='text-blue-500' />
+                    <Link size={14} className='text-blue-500' />
                   ) : (
-                    <File size={18} className='text-muted-foreground' />
+                    <File size={14} className='text-muted-foreground' />
                   )}
                 </div>
 
                 {/* 名称 - 改为自动省略太长的名称 */}
-                <div className='flex-1 truncate text-sm' title={item.name}>
+                <div className='flex-1 truncate text-xs' title={item.name}>
                   {item.name}
                 </div>
               </div>
@@ -535,19 +535,19 @@ export const FileExplorer = React.memo(
                 <>
                   <ContextMenuItem
                     onClick={() =>
-                      openNewItemDialog(item.id, FileSystemItemType.FOLDER)
-                    }
-                  >
-                    <Plus className='mr-2 h-4 w-4' />
-                    <span>新建文件夹</span>
-                  </ContextMenuItem>
-                  <ContextMenuItem
-                    onClick={() =>
                       openNewItemDialog(item.id, FileSystemItemType.FILE)
                     }
                   >
                     <File className='mr-2 h-4 w-4' />
                     <span>新建文件</span>
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    onClick={() =>
+                      openNewItemDialog(item.id, FileSystemItemType.FOLDER)
+                    }
+                  >
+                    <Plus className='mr-2 h-4 w-4' />
+                    <span>新建文件夹</span>
                   </ContextMenuItem>
                   <ContextMenuSeparator />
                 </>
@@ -590,7 +590,7 @@ export const FileExplorer = React.memo(
 
           {/* 子项目 */}
           {isFolder && isExpanded && (
-            <div className='pl-5 mt-0.5 border-l ml-2.5 border-border/50'>
+            <div className='pl-3 mt-0.5 border-l ml-2 border-border/30'>
               {renderItems(item.id)}
             </div>
           )}
@@ -622,12 +622,12 @@ export const FileExplorer = React.memo(
       <div className='h-full flex flex-col'>
         {/* 添加根目录右键菜单 */}
         <ContextMenu>
-          <ContextMenuTrigger className='flex-1 overflow-auto pr-1 min-w-0'>
-            <div className='space-y-0.5'>
+          <ContextMenuTrigger className='flex-1 overflow-auto pr-1 min-w-0 max-w-full'>
+            <div className='space-y-0.5 w-full max-w-full'>
               {renderItems(null)}
               {/* 如果没有任何项目，添加一个提示 */}
               {fsItems.length === 0 && (
-                <div className='text-center text-muted-foreground py-4'>
+                <div className='text-center text-muted-foreground py-2 text-xs'>
                   右键添加文件或文件夹
                 </div>
               )}
@@ -635,16 +635,16 @@ export const FileExplorer = React.memo(
           </ContextMenuTrigger>
           <ContextMenuContent className='w-56'>
             <ContextMenuItem
-              onClick={() => openNewItemDialog(null, FileSystemItemType.FOLDER)}
-            >
-              <Folder className='mr-2 h-4 w-4 text-gray-500' />
-              <span>新建文件夹</span>
-            </ContextMenuItem>
-            <ContextMenuItem
               onClick={() => openNewItemDialog(null, FileSystemItemType.FILE)}
             >
               <File className='mr-2 h-4 w-4' />
               <span>新建文件</span>
+            </ContextMenuItem>
+            <ContextMenuItem
+              onClick={() => openNewItemDialog(null, FileSystemItemType.FOLDER)}
+            >
+              <Folder className='mr-2 h-4 w-4 text-gray-500' />
+              <span>新建文件夹</span>
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>

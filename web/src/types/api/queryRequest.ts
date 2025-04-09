@@ -41,7 +41,7 @@ export interface CascaderContext {
 
 export interface InferredContext {
   required: string[];
-  inferred?: { [key: string]: string };
+  inferred?: { [key: string]: string[] };
 }
 
 export interface QueryRequest {
@@ -53,4 +53,5 @@ export interface QueryRequest {
     | QueryByCsvDataRequestContext
     | QueryByCsvUploadRequestContext;
   cascaderContext?: CascaderContext;
+  inferredContext?: InferredContext;
 }

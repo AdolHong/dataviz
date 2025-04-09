@@ -134,6 +134,10 @@ async def query_by_source_id(request: QueryRequest, username: str = Depends(veri
         # 构造cascaderContext
         cascader_context = construct_response_cascader_context(
             result, request.cascaderContext.required)
+        # 构造inferredContext
+        inferred_context = construct_response_inferred_context(
+            result, request.inferredContext.required)
+        print("inferred_context", inferred_context)
         return QueryResponse(
             status="success",
             message="Query executed successfully",
@@ -142,6 +146,7 @@ async def query_by_source_id(request: QueryRequest, username: str = Depends(veri
             data=data_context,
             codeContext=code_context,
             cascaderContext=cascader_context,
+            inferredContext=inferred_context,
             queryTime=datetime.now().isoformat()
         )
 
@@ -215,8 +220,8 @@ def construct_response_inferred_context(df: Optional[pd.DataFrame], inferred_req
         if df.empty:
             inferred_context[required_column] = []
         else:
-            inferred_context[required_column] = df[required_column].unique(
-            ).tolist()
+            inferred_context[required_column] = df[required_column].astype(
+                str).unique().tolist()
     return {
         "required": inferred_required,
         "inferred": inferred_context

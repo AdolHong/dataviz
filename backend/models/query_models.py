@@ -9,7 +9,7 @@ class CascaderContext(BaseModel):
 
 class InferredContext(BaseModel):
     required: List[str]
-    inferred: Optional[Dict[str, str]] = None
+    inferred: Optional[Dict[str, List[str]]] = None
 
 
 class Alert(BaseModel):
@@ -93,3 +93,4 @@ class QueryRequest(BaseModel):
         QueryByCsvUploadRequestContext
     ]
     cascaderContext: CascaderContext
+    inferredContext: InferredContext

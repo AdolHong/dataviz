@@ -255,6 +255,16 @@ export const ParameterQueryArea = memo(
         });
       });
 
+      // inferred context: 推断参数
+      let inferredRequired: string[] = [];
+      artifacts?.forEach((artifact) => {
+        artifact.inferredParams?.forEach((inferredParam) => {
+          if (inferredParam.dfAlias === dataSource.alias) {
+            inferredRequired.push(inferredParam.dfColumn);
+          }
+        });
+      });
+
       // request context
       let requestContext = null;
       if (dataSource.executor.type === 'sql') {
@@ -294,6 +304,7 @@ export const ParameterQueryArea = memo(
         };
       }
 
+      console.info('sourceID, required:', dataSource.id, inferredRequired);
       const queryRequest = {
         uniqueId: uniqueId,
 
@@ -305,6 +316,9 @@ export const ParameterQueryArea = memo(
         },
         cascaderContext: {
           required: cascaderRequired,
+        },
+        inferredContext: {
+          required: inferredRequired,
         },
       } as QueryRequest;
 

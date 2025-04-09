@@ -84,6 +84,14 @@ export const LayoutGridItem = memo(
       Record<string, Record<string, string>[]>
     >({});
 
+    // 在useState区域添加inferredParams相关状态
+    const [inferredParamValues, setInferredParamValues] = useState<
+      Record<string, string | string[]>
+    >({});
+    const [inferredParamChoices, setInferredParamChoices] = useState<
+      Record<string, Record<string, string>[]>
+    >({});
+
     const dependentQueryStatus = useMemo(
       () =>
         JSON.parse(strDependentQueryStatus || '{}') as Record<
@@ -186,6 +194,51 @@ export const LayoutGridItem = memo(
             )
         )
       ) {
+        // 处理inferredContext
+        const inferredChoices: Record<string, Record<string, string>[]> = {};
+
+        // 从每个查询响应中获取inferredContext并更新inferredParamChoices
+        Object.values(dependentQueryStatus).forEach((queryStatus) => {
+          if (queryStatus.queryResponse?.inferredContext) {
+            const { inferred } = queryStatus.queryResponse.inferredContext;
+            if (inferred) {
+              // 遍历每个推断参数
+              artifact?.inferredParams?.forEach((param) => {
+                const paramKey = `${param.dfAlias}_${param.dfColumn}_${param.id}`;
+                // 查找对应数据源和列的值
+                const choicesKey = `${param.dfAlias}.${param.dfColumn}`;
+                if (
+                  inferred[choicesKey] &&
+                  typeof inferred[choicesKey] === 'string'
+                ) {
+                  try {
+                    // 解析JSON字符串为选项数组
+                    const choices = JSON.parse(inferred[choicesKey]);
+                    if (Array.isArray(choices)) {
+                      inferredChoices[paramKey] = choices.map((value) => ({
+                        key: String(value),
+                        value: String(value),
+                      }));
+                    }
+                  } catch (e) {
+                    console.error(
+                      `Failed to parse inferred values for ${choicesKey}`,
+                      e
+                    );
+                  }
+                }
+              });
+            }
+          }
+        });
+
+        console.info('inferredChoices', inferredChoices);
+
+        // 更新推断参数选项
+        if (Object.keys(inferredChoices).length > 0) {
+          setInferredParamChoices(inferredChoices);
+        }
+
         const queryIds = Object.keys(dependentQueryStatus).reduce(
           (acc, key) => {
             const source = findDataSource(key);
@@ -201,6 +254,7 @@ export const LayoutGridItem = memo(
       dependentQueryStatus,
       plainParamValues,
       cascaderParamValues,
+      inferredParamValues,
       isInitialized,
     ]);
 
@@ -219,9 +273,11 @@ export const LayoutGridItem = memo(
           dfAliasUniqueIds: queryIds,
           plainParamValues: plainParamValues, // 可以从UI收集参数
           cascaderParamValues: cascaderParamValues, // 可以从UI收集参数
+          inferredParamValues: inferredParamValues, // 添加推断参数值
           pyCode: artifact.code,
           engine: artifact.executor_engine,
         };
+        console.info('request', request);
 
         // 调用API
         const response = await artifactApi.executeArtifact(request);
@@ -397,6 +453,7 @@ export const LayoutGridItem = memo(
         dfAliasUniqueIds: queryIds,
         plainParamValues: plainParamValues || {},
         cascaderParamValues: cascaderParamValues || {},
+        inferredParamValues: inferredParamValues || {}, // 添加推断参数值
         pyCode: artifact.code,
         engine: artifact.executor_engine,
       };
@@ -572,6 +629,9 @@ export const LayoutGridItem = memo(
                     setCascaderParamValues={setCascaderParamValues}
                     plainParamChoices={plainParamChoices}
                     setPlainParamChoices={setPlainParamChoices}
+                    inferredParamChoices={inferredParamChoices}
+                    inferredParamValues={inferredParamValues}
+                    setInferredParamValues={setInferredParamValues}
                   />
                 )}
             </div>

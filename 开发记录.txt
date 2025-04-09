@@ -1,6 +1,9 @@
 # 打包代码
 tar -czvf ../dataviz_$(date +%Y%m%d_%H%M%S).tar.gz  --exclude backend/engine_config.py backend web
 
+# 启动前端, 并将处理不了的请求导向index.html
+npm install http-server -g
+http-server -P "http://localhost:8080/?"    
 
 
 
@@ -35,6 +38,7 @@ docker run -p 3000:3000 dataviz-frontend
 37. date那个包
 38. 复制文件功能是 假复制....(😂哭死)
 39. 重新query的时候， queryStatus或许可以更新一下颜色;
+40. 还没query时，  我也想看parsed_code
 
 
 完成：

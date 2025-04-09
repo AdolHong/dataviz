@@ -15,6 +15,7 @@ import { Route as LoginImport } from './routes/login'
 import { Route as IndexImport } from './routes/index'
 import { Route as DevFileExplorerImport } from './routes/dev/fileExplorer'
 import { Route as DevEditImport } from './routes/dev/edit'
+import { Route as DevDaterangerdemoImport } from './routes/dev/daterangerdemo'
 import { Route as DevDashboardImport } from './routes/dev/dashboard'
 
 // Create/Update Routes
@@ -40,6 +41,12 @@ const DevFileExplorerRoute = DevFileExplorerImport.update({
 const DevEditRoute = DevEditImport.update({
   id: '/dev/edit',
   path: '/dev/edit',
+  getParentRoute: () => rootRoute,
+} as any)
+
+const DevDaterangerdemoRoute = DevDaterangerdemoImport.update({
+  id: '/dev/daterangerdemo',
+  path: '/dev/daterangerdemo',
   getParentRoute: () => rootRoute,
 } as any)
 
@@ -74,6 +81,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DevDashboardImport
       parentRoute: typeof rootRoute
     }
+    '/dev/daterangerdemo': {
+      id: '/dev/daterangerdemo'
+      path: '/dev/daterangerdemo'
+      fullPath: '/dev/daterangerdemo'
+      preLoaderRoute: typeof DevDaterangerdemoImport
+      parentRoute: typeof rootRoute
+    }
     '/dev/edit': {
       id: '/dev/edit'
       path: '/dev/edit'
@@ -97,6 +111,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/dev/dashboard': typeof DevDashboardRoute
+  '/dev/daterangerdemo': typeof DevDaterangerdemoRoute
   '/dev/edit': typeof DevEditRoute
   '/dev/fileExplorer': typeof DevFileExplorerRoute
 }
@@ -105,6 +120,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/dev/dashboard': typeof DevDashboardRoute
+  '/dev/daterangerdemo': typeof DevDaterangerdemoRoute
   '/dev/edit': typeof DevEditRoute
   '/dev/fileExplorer': typeof DevFileExplorerRoute
 }
@@ -114,6 +130,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/dev/dashboard': typeof DevDashboardRoute
+  '/dev/daterangerdemo': typeof DevDaterangerdemoRoute
   '/dev/edit': typeof DevEditRoute
   '/dev/fileExplorer': typeof DevFileExplorerRoute
 }
@@ -124,15 +141,23 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/dev/dashboard'
+    | '/dev/daterangerdemo'
     | '/dev/edit'
     | '/dev/fileExplorer'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/dev/dashboard' | '/dev/edit' | '/dev/fileExplorer'
+  to:
+    | '/'
+    | '/login'
+    | '/dev/dashboard'
+    | '/dev/daterangerdemo'
+    | '/dev/edit'
+    | '/dev/fileExplorer'
   id:
     | '__root__'
     | '/'
     | '/login'
     | '/dev/dashboard'
+    | '/dev/daterangerdemo'
     | '/dev/edit'
     | '/dev/fileExplorer'
   fileRoutesById: FileRoutesById
@@ -142,6 +167,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
   DevDashboardRoute: typeof DevDashboardRoute
+  DevDaterangerdemoRoute: typeof DevDaterangerdemoRoute
   DevEditRoute: typeof DevEditRoute
   DevFileExplorerRoute: typeof DevFileExplorerRoute
 }
@@ -150,6 +176,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   DevDashboardRoute: DevDashboardRoute,
+  DevDaterangerdemoRoute: DevDaterangerdemoRoute,
   DevEditRoute: DevEditRoute,
   DevFileExplorerRoute: DevFileExplorerRoute,
 }
@@ -167,6 +194,7 @@ export const routeTree = rootRoute
         "/",
         "/login",
         "/dev/dashboard",
+        "/dev/daterangerdemo",
         "/dev/edit",
         "/dev/fileExplorer"
       ]
@@ -179,6 +207,9 @@ export const routeTree = rootRoute
     },
     "/dev/dashboard": {
       "filePath": "dev/dashboard.tsx"
+    },
+    "/dev/daterangerdemo": {
+      "filePath": "dev/daterangerdemo.tsx"
     },
     "/dev/edit": {
       "filePath": "dev/edit.tsx"

@@ -144,6 +144,26 @@ class MultiplePlainParam(BaseModel):
     choices: List[Dict[str, str]]
 
 
+class SingleInferredParam(BaseModel):
+    type: Literal["single"]
+    id: str
+    alias: Optional[str] = None
+    description: Optional[str] = None
+    dfAlias: str
+    dfColumn: str
+    clearable: bool
+
+
+class MultipleInferredParam(BaseModel):
+    type: Literal["multiple"]
+    id: str
+    alias: Optional[str] = None
+    description: Optional[str] = None
+    dfAlias: str
+    dfColumn: str
+    clearable: bool
+
+
 ArtifactParam = Union[SinglePlainParam, MultiplePlainParam, CascaderParam]
 
 
@@ -157,6 +177,8 @@ class Artifact(BaseModel):
     plainParams: Optional[List[Union[SinglePlainParam,
                                      MultiplePlainParam]]] = None
     cascaderParams: Optional[List[CascaderParam]] = None
+    inferredParams: Optional[List[Union[SingleInferredParam,
+                                        MultipleInferredParam]]] = None
 
 # Layout 相关模型
 

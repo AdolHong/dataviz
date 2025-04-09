@@ -8,6 +8,7 @@ export interface Artifact {
   executor_engine: string;
   plainParams?: (SinglePlainParam | MultiplePlainParam)[];
   cascaderParams?: CascaderParam[];
+  inferredParams?: (SingleInferredParam | MultipleInferredParam)[];
 }
 
 export interface SinglePlainParam {
@@ -41,4 +42,24 @@ export interface CascaderLevel {
   dfColumn: string;
   name?: string;
   description?: string;
+}
+
+export interface SingleInferredParam {
+  type: 'single';
+  id: string;
+  alias?: string;
+  description?: string;
+  dfAlias: string;
+  dfColumn: string;
+  clearable: boolean;
+}
+
+export interface MultipleInferredParam {
+  type: 'multiple';
+  id: string;
+  alias?: string;
+  description?: string;
+  dfAlias: string;
+  dfColumn: string;
+  clearable: boolean;
 }

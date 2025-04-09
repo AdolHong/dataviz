@@ -82,37 +82,60 @@ export function replaceParametersInCode(
 
   // 处理每个参数值并替换SQL中的占位符
   for (const paramName in params) {
-    if (Object.prototype.hasOwnProperty.call(params, paramName)) {
-      let paramValue = params[paramName];
-      const paramSetting = parameters.find(
-        (p) => p.name === paramName
-      ) as Parameter;
+    let paramValue = params[paramName];
+    const paramSetting = parameters.find(
+      (p) => p.name === paramName
+    ) as Parameter;
 
-      if (paramSetting.config.type !== 'date_range_picker') {
-        // 多选参数 需要预处理
-        if (
-          Array.isArray(paramValue) &&
-          (paramSetting.config.type === 'multi_select' ||
-            paramSetting.config.type === 'multi_input')
-        ) {
-          const sep = paramSetting.config.sep;
-          const wrapper = paramSetting.config.wrapper;
-          paramValue = paramValue
-            .map((value) => wrapper + value + wrapper)
-            .join(sep);
+    if (Object.prototype.hasOwnProperty.call(params, paramName)) {
+      if (
+        paramSetting.config.type === 'single_select' ||
+        paramSetting.config.type === 'single_input' ||
+        paramSetting.config.type === 'date_picker'
+      ) {
+        // 空值，不进行替换
+        if (paramValue == null || paramValue === '') {
+          continue;
         }
 
         result = regReplace(result, `\${${paramName}}`, paramValue);
-      } else {
-        // 日期范围参数 需要预处理
-        if (!Array.isArray(paramValue) || paramValue.length !== 2) {
-          toast.error(`[${paramName}] 请选择日期范围`);
-          throw new Error(`[${paramName}] 请选择日期范围`);
+      } else if (
+        paramSetting.config.type === 'multi_select' ||
+        paramSetting.config.type === 'multi_input'
+      ) {
+        // 空值，不进行替换
+        if (
+          paramValue == null ||
+          !Array.isArray(paramValue) ||
+          paramValue.length === 0
+        ) {
+          continue;
         }
-        const [startDate, endDate] = paramValue;
 
-        result = regReplace(result, `\${${paramName}:start}`, startDate);
-        result = regReplace(result, `\${${paramName}:end}`, endDate);
+        const sep = paramSetting.config.sep;
+        const wrapper = paramSetting.config.wrapper;
+        paramValue = paramValue
+          .map((value: string) => wrapper + value + wrapper)
+          .join(sep);
+
+        result = regReplace(result, `\${${paramName}}`, paramValue);
+      } else if (paramSetting.config.type === 'date_range_picker') {
+        // // 日期范围参数 需要预处理
+        // if (!Array.isArray(paramValue) || paramValue.length !== 2) {
+        //   toast.error(`[${paramName}] 请选择日期范围`);
+        //   throw new Error(`[${paramName}] 请选择日期范围`);
+        // }
+        const [startDate, endDate] = paramValue;
+        // 替换开始日期
+        if (startDate != null && startDate !== '') {
+          result = regReplace(result, `\${${paramName}:start}`, startDate);
+        }
+        // 替换结束日期
+        if (endDate != null && endDate !== '') {
+          result = regReplace(result, `\${${paramName}:end}`, endDate);
+        }
+      } else {
+        throw new Error(`[${paramName}] 不支持的参数类型`);
       }
     }
   }

@@ -42,7 +42,6 @@ import { Combobox } from '../combobox';
 import type { QueryRequest } from '@/types/api/queryRequest';
 import { DataSourceDialog } from './DataSourceDialog';
 import { DateRangePicker } from '@/components/ui/daterangepicker';
-import type { DateRange } from 'react-day-picker';
 
 interface ParameterQueryAreaProps {
   activeTabId: string;
@@ -376,28 +375,29 @@ export const ParameterQueryArea = memo(
         return;
       }
 
-      // 检查日期范围是否合理
-      const isDateRangeValid = parameters?.every((param) => {
-        console.info('param', param);
-        console.info('values[param.name]', values[param.name]);
+      // 暂时保留这份代码，不确定要不要拦截
+      // // 检查日期范围是否合理
+      // const isDateRangeValid = parameters?.every((param) => {
+      //   console.info('param', param);
+      //   console.info('values[param.name]', values[param.name]);
 
-        if (
-          param.config.type === 'date_range_picker' &&
-          !(
-            Array.isArray(values[param.name]) &&
-            values[param.name].length === 2 &&
-            values[param.name][0] !== '' &&
-            values[param.name][1] !== ''
-          )
-        ) {
-          toast.error(`[${param.name}] 请选择日期范围`);
-          return false;
-        }
-        return true;
-      });
-      if (!isDateRangeValid) {
-        return;
-      }
+      //   if (
+      //     param.config.type === 'date_range_picker' &&
+      //     !(
+      //       Array.isArray(values[param.name]) &&
+      //       values[param.name].length === 2 &&
+      //       values[param.name][0] !== '' &&
+      //       values[param.name][1] !== ''
+      //     )
+      //   ) {
+      //     toast.error(`[${param.name}] 请选择日期范围`);
+      //     return false;
+      //   }
+      //   return true;
+      // });
+      // if (!isDateRangeValid) {
+      //   return;
+      // }
 
       handleQuerySubmit();
     };

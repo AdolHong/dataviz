@@ -19,12 +19,15 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import type {
   SinglePlainParam,
   MultiplePlainParam,
   CascaderParam,
   CascaderLevel,
+  SingleInferredParam,
+  MultipleInferredParam,
 } from '@/types';
 
 // 定义参数编辑模态框属性
@@ -32,9 +35,18 @@ interface EditArtifactParamModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (
-    param: SinglePlainParam | MultiplePlainParam | CascaderParam
+    param:
+      | SinglePlainParam
+      | MultiplePlainParam
+      | CascaderParam
+      | SingleInferredParam
+      | MultipleInferredParam
   ) => void;
-  paramData: { param: any; type: 'plain' | 'cascader'; id: string } | null; // null表示新增
+  paramData: {
+    param: any;
+    type: 'plain' | 'cascader' | 'inferred';
+    id: string;
+  } | null; // 新增inferred类型
   dependencies: string[];
   plainParamNames: string[];
   setPlainParamNames: (names: string[]) => void;
@@ -54,7 +66,9 @@ const EditArtifactParamModal = ({
   setPlainParamNames,
 }: EditArtifactParamModalProps) => {
   // 参数类型选择
-  const [paramType, setParamType] = useState<'plain' | 'cascader'>('plain');
+  const [paramType, setParamType] = useState<'plain' | 'cascader' | 'inferred'>(
+    'plain'
+  );
 
   // Plain 参数的状态
   const [plainId, setPlainId] = useState('');
@@ -80,6 +94,17 @@ const EditArtifactParamModal = ({
   const [cascaderDfAlias, setCascaderDfAlias] = useState('');
   const [cascaderLevels, setCascaderLevels] = useState<CascaderLevel[]>([]);
 
+  // Inferred 参数的状态
+  const [inferredId, setInferredId] = useState('');
+  const [inferredAlias, setInferredAlias] = useState('');
+  const [inferredDescription, setInferredDescription] = useState('');
+  const [inferredDfAlias, setInferredDfAlias] = useState('');
+  const [inferredDfColumn, setInferredDfColumn] = useState('');
+  const [inferredParamType, setInferredParamType] = useState<
+    'single' | 'multiple'
+  >('single');
+  const [inferredClearable, setInferredClearable] = useState(true);
+
   // 初始化表单
   useEffect(() => {
     if (paramData) {
@@ -104,10 +129,22 @@ const EditArtifactParamModal = ({
         } else {
           setPlainDefaultMultiple(param.default);
         }
-      } else {
+      } else if (paramData.type === 'cascader') {
         const param = paramData.param as CascaderParam;
         setCascaderDfAlias(param.dfAlias);
         setCascaderLevels([...param.levels]);
+      } else if (paramData.type === 'inferred') {
+        // 处理推断参数编辑
+        const param = paramData.param as
+          | SingleInferredParam
+          | MultipleInferredParam;
+        setInferredId(param.id);
+        setInferredAlias(param.alias || '');
+        setInferredDescription(param.description || '');
+        setInferredDfAlias(param.dfAlias);
+        setInferredDfColumn(param.dfColumn);
+        setInferredParamType(param.type);
+        setInferredClearable(param.clearable);
       }
     } else {
       // 新增模式：重置所有
@@ -132,6 +169,14 @@ const EditArtifactParamModal = ({
     // Cascader 参数重置
     setCascaderDfAlias('');
     setCascaderLevels([]);
+    // Inferred 参数重置
+    setInferredId(generateId());
+    setInferredAlias('');
+    setInferredDescription('');
+    setInferredDfAlias('');
+    setInferredDfColumn('');
+    setInferredParamType('single');
+    setInferredClearable(true);
   };
 
   // 处理选项字符串变化
@@ -260,7 +305,7 @@ const EditArtifactParamModal = ({
         );
         newPlainParamNames.push(plainName);
         setPlainParamNames(newPlainParamNames);
-      } else {
+      } else if (paramType === 'cascader') {
         // Cascader 参数验证
         if (!cascaderDfAlias) {
           toast.error('数据源别名不能为空');
@@ -286,6 +331,28 @@ const EditArtifactParamModal = ({
         };
 
         onSave(cascaderParam);
+      } else if (paramType === 'inferred') {
+        // 基本验证
+        if (!inferredDfAlias) {
+          toast.error('数据源别名不能为空');
+          return;
+        }
+
+        if (!inferredDfColumn) {
+          toast.error('数据列名不能为空');
+          return;
+        }
+
+        const inferredParam: SingleInferredParam | MultipleInferredParam = {
+          type: inferredParamType,
+          id: inferredId,
+          alias: inferredAlias || '',
+          description: inferredDescription || '',
+          dfAlias: inferredDfAlias,
+          dfColumn: inferredDfColumn,
+          clearable: inferredClearable,
+        };
+        onSave(inferredParam);
       }
     } catch (error) {
       console.error('Error saving parameter:', error);
@@ -307,17 +374,21 @@ const EditArtifactParamModal = ({
             <RadioGroup
               value={paramType}
               onValueChange={(value) =>
-                setParamType(value as 'plain' | 'cascader')
+                setParamType(value as 'plain' | 'cascader' | 'inferred')
               }
-              className='col-span-3 flex'
+              className='col-span-3 flex flex-wrap'
             >
               <div className='flex items-center space-x-2 mr-4'>
                 <RadioGroupItem value='plain' id='param-type-plain' />
                 <Label htmlFor='param-type-plain'>普通参数</Label>
               </div>
-              <div className='flex items-center space-x-2'>
+              <div className='flex items-center space-x-2 mr-4'>
                 <RadioGroupItem value='cascader' id='param-type-cascader' />
                 <Label htmlFor='param-type-cascader'>级联参数</Label>
+              </div>
+              <div className='flex items-center space-x-2'>
+                <RadioGroupItem value='inferred' id='param-type-inferred' />
+                <Label htmlFor='param-type-inferred'>单列推断</Label>
               </div>
             </RadioGroup>
           </div>
@@ -614,6 +685,114 @@ const EditArtifactParamModal = ({
               </div>
             </>
           )}
+
+          {/* Inferred 参数表单 */}
+          {paramType === 'inferred' && (
+            <>
+              <div className='grid grid-cols-4 items-center gap-4'>
+                <Label htmlFor='inferredAlias' className='text-right'>
+                  参数别名
+                </Label>
+                <Input
+                  id='inferredAlias'
+                  value={inferredAlias}
+                  onChange={(e) => setInferredAlias(e.target.value)}
+                  className='col-span-3'
+                  placeholder='参数的显示名称（可选）'
+                />
+              </div>
+
+              <div className='grid grid-cols-4 items-center gap-4'>
+                <Label htmlFor='inferredDescription' className='text-right'>
+                  描述
+                </Label>
+                <Input
+                  id='inferredDescription'
+                  value={inferredDescription}
+                  onChange={(e) => setInferredDescription(e.target.value)}
+                  className='col-span-3'
+                  placeholder='参数描述（可选）'
+                />
+              </div>
+
+              <div className='grid grid-cols-4 items-center gap-4'>
+                <Label htmlFor='inferredDfAlias' className='text-right'>
+                  数据源别名*
+                </Label>
+                <div className='col-span-3'>
+                  <Combobox
+                    options={dependencies.map((dependency) => ({
+                      key: dependency,
+                      value: dependency,
+                    }))}
+                    value={inferredDfAlias}
+                    onValueChange={(value: string | string[]) => {
+                      if (Array.isArray(value)) {
+                        setInferredDfAlias(value[0]);
+                      } else {
+                        setInferredDfAlias(value);
+                      }
+                    }}
+                    mode='single'
+                    placeholder='选择数据源别名'
+                  />
+                </div>
+              </div>
+
+              <div className='grid grid-cols-4 items-center gap-4'>
+                <Label htmlFor='inferredDfColumn' className='text-right'>
+                  数据列名*
+                </Label>
+                <Input
+                  id='inferredDfColumn'
+                  value={inferredDfColumn}
+                  onChange={(e) => setInferredDfColumn(e.target.value)}
+                  className='col-span-3'
+                  placeholder='指定数据表中的列名'
+                  required
+                />
+              </div>
+
+              <div className='grid grid-cols-4 items-center gap-4'>
+                <Label className='text-right'>参数值类型*</Label>
+                <RadioGroup
+                  value={inferredParamType}
+                  onValueChange={(value) =>
+                    setInferredParamType(value as 'single' | 'multiple')
+                  }
+                  className='col-span-3 flex'
+                >
+                  <div className='flex items-center space-x-2 mr-4'>
+                    <RadioGroupItem value='single' id='inferred-param-single' />
+                    <Label htmlFor='inferred-param-single'>单选</Label>
+                  </div>
+                  <div className='flex items-center space-x-2'>
+                    <RadioGroupItem
+                      value='multiple'
+                      id='inferred-param-multiple'
+                    />
+                    <Label htmlFor='inferred-param-multiple'>多选</Label>
+                  </div>
+                </RadioGroup>
+              </div>
+
+              <div className='grid grid-cols-4 items-center gap-4'>
+                <Label htmlFor='inferredClearable' className='text-right'>
+                  可以不选
+                </Label>
+                <div className='flex items-center col-span-3'>
+                  <Switch
+                    id='inferredClearable'
+                    checked={inferredClearable}
+                    onCheckedChange={setInferredClearable}
+                  />
+                  <Label htmlFor='inferredClearable' className='ml-2'>
+                    {inferredClearable ? '是' : '否'}
+                  </Label>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         <DialogFooter>
@@ -629,7 +808,9 @@ const EditArtifactParamModal = ({
                   !cascaderLevels.length ||
                   cascaderLevels.some(
                     (level) => !level.dfColumn || !level.name
-                  )))
+                  ))) ||
+              (paramType === 'inferred' &&
+                (!inferredDfAlias || !inferredDfColumn))
             }
           >
             保存

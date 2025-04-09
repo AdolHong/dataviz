@@ -1,3 +1,4 @@
+import type { Parameter } from '@/types/models/parameter';
 import dayjs from 'dayjs';
 
 // 动态日期解析函数
@@ -62,7 +63,8 @@ export const parseDynamicDate = (value: string) => {
  */
 export function replaceParametersInCode(
   code: string,
-  params: Record<string, any>
+  params: Record<string, any>,
+  parameters: Parameter[]
 ): string {
   if (!code || !params) {
     return code;
@@ -73,7 +75,22 @@ export function replaceParametersInCode(
   // 处理每个参数值并替换SQL中的占位符
   for (const paramName in params) {
     if (Object.prototype.hasOwnProperty.call(params, paramName)) {
-      const paramValue = params[paramName];
+      let paramValue = params[paramName];
+      const paramSetting = parameters.find(
+        (p) => p.name === paramName
+      ) as Parameter;
+
+      if (
+        Array.isArray(paramValue) &&
+        (paramSetting.config.type === 'multi_select' ||
+          paramSetting.config.type === 'multi_input')
+      ) {
+        const sep = paramSetting.config.sep;
+        const wrapper = paramSetting.config.wrapper;
+        paramValue = paramValue
+          .map((value) => wrapper + value + wrapper)
+          .join(sep);
+      }
 
       // 替换SQL中的参数占位符 ${param_name}
       const placeholder = `\${${paramName}}`;
@@ -95,6 +112,7 @@ export function replaceParametersInCode(
     result = result.replace(new RegExp(escapeRegExp(match), 'g'), parsedDate);
   }
 
+  console.info('result', result);
   return result;
 }
 

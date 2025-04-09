@@ -246,7 +246,11 @@ export const ParameterQueryArea = memo(
       // request context
       let requestContext = null;
       if (dataSource.executor.type === 'sql') {
-        const code = replaceParametersInCode(dataSource.executor.code, values);
+        const code = replaceParametersInCode(
+          dataSource.executor.code,
+          values,
+          parameters || []
+        );
         requestContext = {
           type: 'sql',
           engine: dataSource.executor.engine,
@@ -255,7 +259,11 @@ export const ParameterQueryArea = memo(
           paramValues: values,
         };
       } else if (dataSource.executor.type === 'python') {
-        const code = replaceParametersInCode(dataSource.executor.code, values);
+        const code = replaceParametersInCode(
+          dataSource.executor.code,
+          values,
+          parameters || []
+        );
         requestContext = {
           type: 'python',
           engine: dataSource.executor.engine,

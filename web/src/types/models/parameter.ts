@@ -9,7 +9,8 @@ export interface Parameter {
     | MultiSelectParamConfig
     | DatePickerParamConfig
     | MultiInputParamConfig
-    | SingleInputParamConfig;
+    | SingleInputParamConfig
+    | DateRangePickerParamConfig;
 }
 
 export interface SingleSelectParamConfig {
@@ -30,6 +31,12 @@ export interface DatePickerParamConfig {
   type: 'date_picker';
   dateFormat: string;
   default: string;
+}
+
+export interface DateRangePickerParamConfig {
+  type: 'date_range_picker';
+  dateFormat: string;
+  default: string[];
 }
 
 export interface MultiInputParamConfig {

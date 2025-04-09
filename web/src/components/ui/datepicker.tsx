@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { format, startOfYear, endOfYear, eachMonthOfInterval } from 'date-fns';
+import dayjs from 'dayjs';
 import { Calendar as CalendarIcon } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -25,14 +25,14 @@ interface DatePickerProps {
 
 export function DatePicker({ date, setDate }: DatePickerProps) {
   const [month, setMonth] = React.useState<number>(
-    date ? date.getMonth() : new Date().getMonth()
+    date ? dayjs(date).month() : dayjs().month()
   );
   const [year, setYear] = React.useState<number>(
-    date ? date.getFullYear() : new Date().getFullYear()
+    date ? dayjs(date).year() : dayjs().year()
   );
 
   const years = React.useMemo(() => {
-    const currentYear = new Date().getFullYear();
+    const currentYear = dayjs().year();
     // 年份的开始结束
     return Array.from(
       { length: currentYear - 2000 + 1 },
@@ -42,18 +42,15 @@ export function DatePicker({ date, setDate }: DatePickerProps) {
 
   const months = React.useMemo(() => {
     if (year) {
-      return eachMonthOfInterval({
-        start: startOfYear(new Date(year, 0, 1)),
-        end: endOfYear(new Date(year, 0, 1)),
-      });
+      return Array.from({ length: 12 }, (_, i) => dayjs().year(year).month(i));
     }
     return [];
   }, [year]);
 
   React.useEffect(() => {
     if (date) {
-      setMonth(date.getMonth());
-      setYear(date.getFullYear());
+      setMonth(dayjs(date).month());
+      setYear(dayjs(date).year());
     }
   }, [date]);
 
@@ -61,8 +58,7 @@ export function DatePicker({ date, setDate }: DatePickerProps) {
     const newYear = parseInt(selectedYear, 10);
     setYear(newYear);
     if (date) {
-      const newDate = new Date(date);
-      newDate.setFullYear(newYear);
+      const newDate = dayjs(date).year(newYear).toDate();
       setDate(newDate);
     }
   };
@@ -71,11 +67,10 @@ export function DatePicker({ date, setDate }: DatePickerProps) {
     const newMonth = parseInt(selectedMonth, 10);
     setMonth(newMonth);
     if (date) {
-      const newDate = new Date(date);
-      newDate.setMonth(newMonth);
+      const newDate = dayjs(date).month(newMonth).toDate();
       setDate(newDate);
     } else {
-      setDate(new Date(year, newMonth, 1));
+      setDate(dayjs().year(year).month(newMonth).toDate());
     }
   };
 
@@ -90,7 +85,7 @@ export function DatePicker({ date, setDate }: DatePickerProps) {
           )}
         >
           <CalendarIcon className='mr-2 h-4 w-4' />
-          {date ? format(date, 'yyyy-MM-dd') : <span>Pick a date</span>}
+          {date ? dayjs(date).format('YYYY-MM-DD') : <span>Pick a date</span>}
         </Button>
       </PopoverTrigger>
       <PopoverContent className='w-auto p-0' align='start'>
@@ -114,7 +109,7 @@ export function DatePicker({ date, setDate }: DatePickerProps) {
             <SelectContent>
               {months.map((m, index) => (
                 <SelectItem key={index} value={index.toString()}>
-                  {format(m, 'MMMM')}
+                  {m.format('MMMM')}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -124,10 +119,10 @@ export function DatePicker({ date, setDate }: DatePickerProps) {
           mode='single'
           selected={date}
           onSelect={setDate}
-          month={new Date(year, month)}
+          month={dayjs().year(year).month(month).toDate()}
           onMonthChange={(newMonth) => {
-            setMonth(newMonth.getMonth());
-            setYear(newMonth.getFullYear());
+            setMonth(dayjs(newMonth).month());
+            setYear(dayjs(newMonth).year());
           }}
           initialFocus
         />

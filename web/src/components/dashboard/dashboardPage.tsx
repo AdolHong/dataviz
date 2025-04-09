@@ -522,7 +522,7 @@ const TabsArea = memo(
                 return (
                   <div
                     key={tab.tabId}
-                    className={`flex items-center px-4 py-2 cursor-pointer border-r border-border relative min-w-[150px] max-w-[200px] ${
+                    className={`flex items-center px-2 py-1 cursor-pointer border-r border-border relative min-w-[120px] ${
                       tab.tabId === activeTabId
                         ? 'bg-background'
                         : 'bg-muted/50 hover:bg-muted'
@@ -545,11 +545,13 @@ const TabsArea = memo(
                         draggedItem === tab.tabId ? 'scale(0.95)' : 'scale(1)',
                     }}
                   >
-                    <div className='truncate flex-1'>{tab.title}</div>
+                    <div className='whitespace-nowrap text-xs flex-grow'>
+                      {tab.title}
+                    </div>
                     <Button
                       variant='ghost'
                       size='icon'
-                      className='h-6 w-6 ml-2 opacity-60 hover:opacity-100'
+                      className='h-5 w-5 ml-1 opacity-60 hover:opacity-100 flex-shrink-0'
                       onClick={async (e) => {
                         e.stopPropagation();
                         //删除tab:  remove操作的同时也会更新activeTabId
@@ -560,7 +562,7 @@ const TabsArea = memo(
                         );
                       }}
                     >
-                      <X size={14} />
+                      <X size={12} />
                     </Button>
                   </div>
                 );

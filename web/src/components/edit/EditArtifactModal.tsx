@@ -139,48 +139,12 @@ const EditArtifactModal = ({
       setCascaderParams((prev) => [...prev, param as CascaderParam]);
     }
     setIsParamModalOpen(false);
+    setEditingParam(null);
   };
-
-  // const handleEditParam = (
-  //   param:
-  //     | SinglePlainParam
-  //     | MultiplePlainParam
-  //     | CascaderParam
-  //     | SingleInferredParam
-  //     | MultipleInferredParam,
-  //   paramType: 'plain' | 'cascader' | 'inferred',
-  //   originalId: string
-  // ) => {
-  //   if (paramType === 'plain') {
-  //     setPlainParams((prev) =>
-  //       prev.map((p) =>
-  //         p.id === originalId
-  //           ? (param as SinglePlainParam | MultiplePlainParam)
-  //           : p
-  //       )
-  //     );
-  //   } else if (paramType === 'cascader') {
-  //     setCascaderParams((prev) =>
-  //       prev.map((p, index) =>
-  //         index === parseInt(originalId) ? (param as CascaderParam) : p
-  //       )
-  //     );
-  //   } else if (paramType === 'inferred') {
-  //     setInferredParams((prev) =>
-  //       prev.map((p) =>
-  //         p.id === originalId
-  //           ? (param as SingleInferredParam | MultipleInferredParam)
-  //           : p
-  //       )
-  //     );
-  //   }
-  //   setEditingParam(null);
-  //   setIsParamModalOpen(false);
-  // };
 
   const handleDeleteParam = (
     paramId: string,
-    paramType: 'plain' | 'cascader'
+    paramType: 'plain' | 'cascader' | 'inferred'
   ) => {
     if (paramType === 'plain') {
       setPlainParams((prev) => prev.filter((p) => p.id !== paramId));
@@ -189,9 +153,7 @@ const EditArtifactModal = ({
         prev.filter((_, index) => index.toString() !== paramId)
       );
     } else if (paramType === 'inferred') {
-      setInferredParams((prev) =>
-        prev.filter((_, index) => index.toString() !== paramId)
-      );
+      setInferredParams((prev) => prev.filter((p) => p.id !== paramId));
     }
   };
 
@@ -224,6 +186,7 @@ const EditArtifactModal = ({
           executor_engine: executor_engine || 'default',
           plainParams: plainParams.length > 0 ? plainParams : [],
           cascaderParams: cascaderParams.length > 0 ? cascaderParams : [],
+          inferredParams: inferredParams.length > 0 ? inferredParams : [],
         };
       } else {
         savedArtifact = {
@@ -235,6 +198,7 @@ const EditArtifactModal = ({
           executor_engine: executor_engine || 'default',
           plainParams: plainParams.length > 0 ? plainParams : [],
           cascaderParams: cascaderParams.length > 0 ? cascaderParams : [],
+          inferredParams: inferredParams.length > 0 ? inferredParams : [],
         };
       }
       console.info('savedArtifact', savedArtifact);
@@ -328,11 +292,19 @@ const EditArtifactModal = ({
                 mode='multiple' // 允许多选
                 placeholder='选择数据源依赖'
                 terminateCancelSelect={(value) => {
-                  const depParams = cascaderParams.filter(
+                  const depCascaderParams = cascaderParams.filter(
                     (param) => param.dfAlias === value
                   );
-                  if (depParams.length > 0) {
-                    toast.error('不能取消选中');
+                  if (depCascaderParams.length > 0) {
+                    toast.error('不能取消选中, cascader 参数依赖于数据源');
+                    return true;
+                  }
+
+                  const depInferredParams = inferredParams.filter(
+                    (param) => param.dfAlias === value
+                  );
+                  if (depInferredParams.length > 0) {
+                    toast.error('不能取消选中, inferred 参数依赖于数据源');
                     return true;
                   }
                   return false;
@@ -442,11 +414,64 @@ const EditArtifactModal = ({
                 </div>
               )}
 
-              {plainParams.length === 0 && cascaderParams.length === 0 && (
-                <div className='text-center text-gray-500 p-4 border-2 border-dashed rounded-lg'>
-                  暂无参数(可选)
+              {/* 单列推断参数列表 */}
+              {inferredParams.length > 0 && (
+                <div className='space-y-2'>
+                  <h4 className='text-sm font-medium'>单列推断参数</h4>
+                  {inferredParams.map((param) => (
+                    <div
+                      key={param.id}
+                      className='border-2 rounded-lg p-3 text-sm relative group shadow-sm'
+                    >
+                      <div className='font-medium'>
+                        {param.alias || `${param.dfAlias}.${param.dfColumn}`}
+                      </div>
+                      <div className='text-xs text-gray-500'>
+                        {param.description || '无描述'} · 数据源:{' '}
+                        {param.dfAlias} · 列名: {param.dfColumn} ·
+                        {param.type === 'single' ? '单选' : '多选'} ·
+                        {param.clearable ? '可不选' : '必选'}
+                      </div>
+
+                      <div className='absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-80 transition-opacity'>
+                        <Button
+                          variant='ghost'
+                          size='icon'
+                          className='h-6 w-6'
+                          onClick={() => {
+                            setEditingParam({
+                              param,
+                              type: 'inferred',
+                              id: param.id,
+                            });
+                            setIsParamModalOpen(true);
+                          }}
+                        >
+                          <Pencil className='h-4 w-4' />
+                        </Button>
+                        <Button
+                          variant='ghost'
+                          size='icon'
+                          className='h-6 w-6 text-destructive'
+                          onClick={() =>
+                            handleDeleteParam(param.id, 'inferred')
+                          }
+                        >
+                          <Trash2 className='h-4 w-4' />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
+
+              {plainParams.length === 0 &&
+                cascaderParams.length === 0 &&
+                inferredParams.length === 0 && (
+                  <div className='text-center text-gray-500 p-4 border-2 border-dashed rounded-lg'>
+                    暂无参数(可选)
+                  </div>
+                )}
 
               <Button
                 variant='outline'
@@ -509,7 +534,9 @@ const EditArtifactModal = ({
           setIsParamModalOpen(false);
           setEditingParam(null);
         }}
-        onSave={handleAddParam}
+        onSave={(param, type) => {
+          handleAddParam(param, type);
+        }}
         paramData={editingParam}
         plainParamNames={plainParamNames}
         setPlainParamNames={setPlainParamNames}

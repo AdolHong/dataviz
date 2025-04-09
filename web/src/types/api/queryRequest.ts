@@ -39,6 +39,11 @@ export interface CascaderContext {
   inferred?: { [key: string]: string };
 }
 
+export interface InferredContext {
+  required: string[];
+  inferred?: { [key: string]: string };
+}
+
 export interface QueryRequest {
   uniqueId: string;
 

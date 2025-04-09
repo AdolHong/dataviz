@@ -1,21 +1,30 @@
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List, Union, Literal
 
+
 class CascaderContext(BaseModel):
     required: List[str]
     inferred: Optional[Dict[str, str]] = None
 
+
+class InferredContext(BaseModel):
+    required: List[str]
+    inferred: Optional[Dict[str, str]] = None
+
+
 class Alert(BaseModel):
     type: Literal['info', 'warning', 'error']
     message: str
+
+
 class QueryResponseDataContext(BaseModel):
     rowNumber: int = 0
     demoData: str = ""
     uniqueId: str
-    
+
 
 class QueryResponseCodeContext(BaseModel):
-    uniqueId:str
+    uniqueId: str
     fileId: str
     sourceId: str
     reportUpdateTime: str
@@ -25,6 +34,7 @@ class QueryResponseCodeContext(BaseModel):
     parsedCode: Optional[str] = None
     paramValues: Optional[Dict[str, Any]] = None
 
+
 class QueryResponse(BaseModel):
     status: str
     message: str
@@ -33,7 +43,9 @@ class QueryResponse(BaseModel):
     data: Optional[QueryResponseDataContext] = None
     codeContext: Optional[QueryResponseCodeContext] = None
     cascaderContext: Optional[CascaderContext] = None
+    inferredContext: Optional[InferredContext] = None
     queryTime: str
+
 
 class QueryBySQLRequestContext(BaseModel):
     type: Literal['sql']
@@ -45,6 +57,7 @@ class QueryBySQLRequestContext(BaseModel):
     parsedCode: str
     paramValues: Optional[Dict[str, Any]] = None
 
+
 class QueryByPythonRequestContext(BaseModel):
     type: Literal['python']
     fileId: str
@@ -55,11 +68,13 @@ class QueryByPythonRequestContext(BaseModel):
     parsedCode: str
     paramValues: Optional[Dict[str, Any]] = None
 
+
 class QueryByCsvDataRequestContext(BaseModel):
     type: Literal['csv_data']
     fileId: str
     sourceId: str
     reportUpdateTime: str
+
 
 class QueryByCsvUploadRequestContext(BaseModel):
     type: Literal['csv_uploader']
@@ -69,13 +84,12 @@ class QueryByCsvUploadRequestContext(BaseModel):
     dataContent: str
 
 
-
 class QueryRequest(BaseModel):
     uniqueId: str
     requestContext: Union[
-        QueryBySQLRequestContext, 
-        QueryByPythonRequestContext, 
-        QueryByCsvDataRequestContext, 
+        QueryBySQLRequestContext,
+        QueryByPythonRequestContext,
+        QueryByCsvDataRequestContext,
         QueryByCsvUploadRequestContext
     ]
     cascaderContext: CascaderContext

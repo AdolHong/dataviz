@@ -202,6 +202,27 @@ def check_unique_parents(df, columns):
     return True, None
 
 
+def construct_response_inferred_context(df: Optional[pd.DataFrame], inferred_required: List[str]):
+    if df is None or not isinstance(df, pd.DataFrame):
+        raise ValueError("[InferredContext] DataFrame is None")
+
+    inferred_context = {}
+    for required_column in inferred_required:
+        if required_column not in df.columns:
+            raise ValueError(
+                f"[InferredContext] Column {required_column} not found in DataFrame")
+
+        if df.empty:
+            inferred_context[required_column] = []
+        else:
+            inferred_context[required_column] = df[required_column].unique(
+            ).tolist()
+    return {
+        "required": inferred_required,
+        "inferred": inferred_context
+    }
+
+
 def construct_response_cascader_context(df: Optional[pd.DataFrame], cascader_required: List[str]):
     # 空数据
     if df is None or not isinstance(df, pd.DataFrame):
@@ -229,6 +250,7 @@ def construct_response_cascader_context(df: Optional[pd.DataFrame], cascader_req
             if not flag_unique:
                 raise ValueError(
                     f"[CascaderContext] {columns} 存在一个子结点对应多个父结点: {str(df_bad_case)}")
+            # 返回csv，是因为前端要基于此，构造cascader树
             inferred_cascader[required] = convert_df_to_csv_string(df_unique)
     return {
         "required": cascader_required,

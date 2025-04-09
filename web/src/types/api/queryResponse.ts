@@ -1,4 +1,4 @@
-import type { CascaderContext } from './queryRequest';
+import type { CascaderContext, InferredContext } from './queryRequest';
 
 export interface Alert {
   type: 'info' | 'warning' | 'error';
@@ -30,5 +30,6 @@ export interface QueryResponse {
   data: QueryResponseDataContext;
   codeContext: QueryResponseCodeContext;
   cascaderContext: CascaderContext;
+  inferredContext: InferredContext;
   queryTime: string;
 }

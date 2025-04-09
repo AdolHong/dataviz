@@ -487,6 +487,7 @@ export const ParameterQueryArea = memo(
                     handleValueChange(param.name, '');
                   }
                 }}
+                dateFormat={(param.config as DatePickerParamConfig).dateFormat}
               />
             );
 
@@ -495,29 +496,11 @@ export const ParameterQueryArea = memo(
               <DateRangePicker
                 dateRange={
                   values[param.name] && Array.isArray(values[param.name])
-                    ? [
-                        values[param.name][0]
-                          ? new Date(values[param.name][0])
-                          : undefined,
-                        values[param.name][1]
-                          ? new Date(values[param.name][1])
-                          : undefined,
-                      ]
+                    ? values[param.name]
                     : [undefined, undefined]
                 }
                 setDateRange={(dateRange) => {
-                  let dateFormat = (param.config as DateRangePickerParamConfig)
-                    .dateFormat;
-                  dateFormat =
-                    dateFormat === 'YYYYMMDD' ? 'YYYYMMDD' : 'YYYY-MM-DD';
-
-                  console.info('dateRange', dateRange);
-                  const dateStrings = dateRange.map((date) =>
-                    date ? dayjs(date).format(dateFormat) : ''
-                  );
-                  console.info('dateStrings', dateStrings);
-
-                  handleValueChange(param.name, dateStrings);
+                  handleValueChange(param.name, dateRange);
                 }}
                 dateFormat={
                   (param.config as DateRangePickerParamConfig).dateFormat

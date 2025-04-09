@@ -21,9 +21,14 @@ import {
 interface DatePickerProps {
   date: Date | undefined;
   setDate: (date: Date | undefined) => void;
+  dateFormat?: string;
 }
 
-export function DatePicker({ date, setDate }: DatePickerProps) {
+export function DatePicker({
+  date,
+  setDate,
+  dateFormat = 'YYYY-MM-DD',
+}: DatePickerProps) {
   const [month, setMonth] = React.useState<number>(
     date ? dayjs(date).month() : dayjs().month()
   );
@@ -74,6 +79,13 @@ export function DatePicker({ date, setDate }: DatePickerProps) {
     }
   };
 
+  const formatDisplayDate = (date: Date | undefined) => {
+    if (!date) return '';
+    return dayjs(date).format(
+      dateFormat === 'YYYYMMDD' ? 'YYYYMMDD' : 'YYYY-MM-DD'
+    );
+  };
+
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -85,14 +97,14 @@ export function DatePicker({ date, setDate }: DatePickerProps) {
           )}
         >
           <CalendarIcon className='mr-2 h-4 w-4' />
-          {date ? dayjs(date).format('YYYY-MM-DD') : <span>Pick a date</span>}
+          {date ? formatDisplayDate(date) : <span>选择日期</span>}
         </Button>
       </PopoverTrigger>
       <PopoverContent className='w-auto p-0' align='start'>
         <div className='flex justify-between p-2 space-x-1'>
           <Select onValueChange={handleYearChange} value={year.toString()}>
             <SelectTrigger className='w-[120px]'>
-              <SelectValue placeholder='Year' />
+              <SelectValue placeholder='年份' />
             </SelectTrigger>
             <SelectContent>
               {years.map((y) => (
@@ -104,7 +116,7 @@ export function DatePicker({ date, setDate }: DatePickerProps) {
           </Select>
           <Select onValueChange={handleMonthChange} value={month.toString()}>
             <SelectTrigger className='w-[120px]'>
-              <SelectValue placeholder='Month' />
+              <SelectValue placeholder='月份' />
             </SelectTrigger>
             <SelectContent>
               {months.map((m, index) => (

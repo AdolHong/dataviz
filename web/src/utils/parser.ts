@@ -1,5 +1,6 @@
 import type { Parameter } from '@/types/models/parameter';
 import dayjs from 'dayjs';
+import { toast } from 'sonner';
 
 // 动态日期解析函数
 export const parseDynamicDate = (value: string) => {
@@ -55,6 +56,13 @@ export const parseDynamicDate = (value: string) => {
   return value;
 };
 
+const regReplace = (result: string, placeholder: string, value: string) => {
+  return result.replace(
+    new RegExp(escapeRegExp(placeholder), 'g'),
+    String(value)
+  );
+};
+
 /**
  * 替换SQL中的参数占位符
  * @param sql SQL查询语句
@@ -80,24 +88,32 @@ export function replaceParametersInCode(
         (p) => p.name === paramName
       ) as Parameter;
 
-      if (
-        Array.isArray(paramValue) &&
-        (paramSetting.config.type === 'multi_select' ||
-          paramSetting.config.type === 'multi_input')
-      ) {
-        const sep = paramSetting.config.sep;
-        const wrapper = paramSetting.config.wrapper;
-        paramValue = paramValue
-          .map((value) => wrapper + value + wrapper)
-          .join(sep);
-      }
+      if (paramSetting.config.type !== 'date_range_picker') {
+        // 多选参数 需要预处理
+        if (
+          Array.isArray(paramValue) &&
+          (paramSetting.config.type === 'multi_select' ||
+            paramSetting.config.type === 'multi_input')
+        ) {
+          const sep = paramSetting.config.sep;
+          const wrapper = paramSetting.config.wrapper;
+          paramValue = paramValue
+            .map((value) => wrapper + value + wrapper)
+            .join(sep);
+        }
 
-      // 替换SQL中的参数占位符 ${param_name}
-      const placeholder = `\${${paramName}}`;
-      result = result.replace(
-        new RegExp(escapeRegExp(placeholder), 'g'),
-        String(paramValue)
-      );
+        result = regReplace(result, `\${${paramName}}`, paramValue);
+      } else {
+        // 日期范围参数 需要预处理
+        if (!Array.isArray(paramValue) || paramValue.length !== 2) {
+          toast.error(`[${paramName}] 请选择日期范围`);
+          throw new Error(`[${paramName}] 请选择日期范围`);
+        }
+        const [startDate, endDate] = paramValue;
+
+        result = regReplace(result, `\${${paramName}:start}`, startDate);
+        result = regReplace(result, `\${${paramName}:end}`, endDate);
+      }
     }
   }
 

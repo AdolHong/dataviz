@@ -378,6 +378,9 @@ export const ParameterQueryArea = memo(
 
       // 检查日期范围是否合理
       const isDateRangeValid = parameters?.every((param) => {
+        console.info('param', param);
+        console.info('values[param.name]', values[param.name]);
+
         if (
           param.config.type === 'date_range_picker' &&
           !(
@@ -428,6 +431,35 @@ export const ParameterQueryArea = memo(
       handleValueChange(param.name, newValues);
     };
 
+    const parseDateString = (
+      dateStr: string,
+      format: string
+    ): Date | undefined => {
+      if (!dateStr) return undefined;
+
+      try {
+        let parsedDate: dayjs.Dayjs;
+
+        if (format === 'YYYYMMDD') {
+          // 处理 YYYYMMDD 格式
+          if (!/^\d{8}$/.test(dateStr)) {
+            return undefined;
+          }
+          parsedDate = dayjs(dateStr, 'YYYYMMDD');
+        } else {
+          // 默认处理 YYYY-MM-DD 格式
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+            return undefined;
+          }
+          parsedDate = dayjs(dateStr, 'YYYY-MM-DD');
+        }
+
+        return parsedDate.isValid() ? parsedDate.toDate() : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+
     const renderParameterInput = (param: Parameter) => {
       const inputComponent = (() => {
         switch (param.config.type) {
@@ -471,7 +503,12 @@ export const ParameterQueryArea = memo(
             return (
               <DatePicker
                 date={
-                  values[param.name] ? new Date(values[param.name]) : undefined
+                  values[param.name]
+                    ? parseDateString(
+                        values[param.name],
+                        (param.config as DatePickerParamConfig).dateFormat
+                      )
+                    : undefined
                 }
                 setDate={(date) => {
                   if (date) {
@@ -496,11 +533,26 @@ export const ParameterQueryArea = memo(
               <DateRangePicker
                 dateRange={
                   values[param.name] && Array.isArray(values[param.name])
-                    ? values[param.name]
+                    ? values[param.name].map((date: string) =>
+                        parseDateString(
+                          date,
+                          (param.config as DateRangePickerParamConfig)
+                            .dateFormat
+                        )
+                      )
                     : [undefined, undefined]
                 }
                 setDateRange={(dateRange) => {
-                  handleValueChange(param.name, dateRange);
+                  let dateFormat = (param.config as DateRangePickerParamConfig)
+                    .dateFormat;
+                  dateFormat =
+                    dateFormat === 'YYYYMMDD' ? 'YYYYMMDD' : 'YYYY-MM-DD';
+
+                  // 使用 dayjs 替换 toLocaleDateString
+                  const dateString = dateRange.map((date) =>
+                    date ? dayjs(date).format(dateFormat) : ''
+                  );
+                  handleValueChange(param.name, dateString);
                 }}
                 dateFormat={
                   (param.config as DateRangePickerParamConfig).dateFormat

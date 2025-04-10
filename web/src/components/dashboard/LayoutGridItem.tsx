@@ -184,11 +184,12 @@ export const LayoutGridItem = memo(
               // const paramKey = `${param.dfAlias}_${param.dfColumn}_${param.id}`;
               // 查找对应数据源和列的值
               const paramKey = `${param.dfAlias}.${param.dfColumn}`;
-
-              inferredChoices[paramKey] = inferred[paramKey].map((value) => ({
-                key: String(value),
-                value: String(value),
-              }));
+              if (inferred[paramKey] && inferred[paramKey].length > 0) {
+                inferredChoices[paramKey] = inferred[paramKey].map((value) => ({
+                  key: String(value),
+                  value: String(value),
+                }));
+              }
             });
           }
         }

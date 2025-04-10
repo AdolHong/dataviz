@@ -87,6 +87,11 @@ export function replaceParametersInCode(
       (p) => p.name === paramName
     ) as Parameter;
 
+    // 如果参数不存在，则跳过
+    if (!paramSetting) {
+      continue;
+    }
+
     if (Object.prototype.hasOwnProperty.call(params, paramName)) {
       if (
         paramSetting.config.type === 'single_select' ||

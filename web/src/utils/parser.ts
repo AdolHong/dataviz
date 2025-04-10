@@ -71,7 +71,8 @@ const regReplace = (result: string, placeholder: string, value: string) => {
 export function replaceParametersInCode(
   code: string,
   params: Record<string, any>,
-  parameters: Parameter[]
+  parameters: Parameter[],
+  codeLang: string = 'sql'
 ): string {
   if (!code || !params) {
     return code;
@@ -92,30 +93,34 @@ export function replaceParametersInCode(
         paramSetting.config.type === 'single_input' ||
         paramSetting.config.type === 'date_picker'
       ) {
-        // 空值，不进行替换
-        if (paramValue == null || paramValue === '') {
-          continue;
-        }
+        // // 空值，不进行替换
+        // if (paramValue == null || paramValue === '') {
+        //   continue;
+        // }
 
         result = regReplace(result, `\${${paramName}}`, paramValue);
       } else if (
         paramSetting.config.type === 'multi_select' ||
         paramSetting.config.type === 'multi_input'
       ) {
-        // 空值，不进行替换
-        if (
-          paramValue == null ||
-          !Array.isArray(paramValue) ||
-          paramValue.length === 0
-        ) {
-          continue;
-        }
+        // // 空值，不进行替换
+        // if (
+        //   paramValue == null ||
+        //   !Array.isArray(paramValue) ||
+        //   paramValue.length === 0
+        // ) {
+        //   continue;
+        // }
 
         const sep = paramSetting.config.sep;
         const wrapper = paramSetting.config.wrapper;
         paramValue = paramValue
           .map((value: string) => wrapper + value + wrapper)
           .join(sep);
+
+        if (paramValue === '') {
+          paramValue = codeLang === 'sql' ? 'null' : 'None';
+        }
 
         result = regReplace(result, `\${${paramName}}`, paramValue);
       } else if (paramSetting.config.type === 'date_range_picker') {
@@ -125,14 +130,18 @@ export function replaceParametersInCode(
         //   throw new Error(`[${paramName}] 请选择日期范围`);
         // }
         const [startDate, endDate] = paramValue;
-        // 替换开始日期
-        if (startDate != null && startDate !== '') {
-          result = regReplace(result, `\${${paramName}:start}`, startDate);
-        }
-        // 替换结束日期
-        if (endDate != null && endDate !== '') {
-          result = regReplace(result, `\${${paramName}:end}`, endDate);
-        }
+        // // 替换开始日期
+        // if (startDate != null && startDate !== '') {
+        //   result = regReplace(result, `\${${paramName}:start}`, startDate);
+        // }
+        // // 替换结束日期
+        // if (endDate != null && endDate !== '') {
+        //   result = regReplace(result, `\${${paramName}:end}`, endDate);
+        // }
+
+        // 空值也要进行替换
+        result = regReplace(result, `\${${paramName}:start}`, startDate || '');
+        result = regReplace(result, `\${${paramName}:end}`, endDate || '');
       } else {
         throw new Error(`[${paramName}] 不支持的参数类型`);
       }

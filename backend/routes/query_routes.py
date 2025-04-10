@@ -213,14 +213,15 @@ def construct_response_inferred_context(df: Optional[pd.DataFrame], inferred_req
 
     inferred_context = {}
     for required_column in inferred_required:
-        if required_column not in df.columns:
+        _, df_column = required_column.split(".")
+        if df_column not in df.columns:
             raise ValueError(
-                f"[InferredContext] Column {required_column} not found in DataFrame")
+                f"[InferredContext] Column {df_column} not found in DataFrame")
 
         if df.empty:
             inferred_context[required_column] = []
         else:
-            inferred_context[required_column] = df[required_column].astype(
+            inferred_context[required_column] = df[df_column].astype(
                 str).unique().tolist()
     return {
         "required": inferred_required,

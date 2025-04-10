@@ -260,7 +260,9 @@ export const ParameterQueryArea = memo(
       artifacts?.forEach((artifact) => {
         artifact.inferredParams?.forEach((inferredParam) => {
           if (inferredParam.dfAlias === dataSource.alias) {
-            inferredRequired.push(inferredParam.dfColumn);
+            inferredRequired.push(
+              `${inferredParam.dfAlias}.${inferredParam.dfColumn}`
+            );
           }
         });
       });

@@ -9,7 +9,6 @@ import { Combobox } from '@/components/combobox';
 import type { TreeNodeData } from '../tree-select/types';
 import { getChildrenValuesByTargetValues } from './CascaderTreeView';
 import type { PlainParamValue } from '@/types/api/aritifactRequest';
-import type { SingleInferredParam, MultipleInferredParam } from '@/types';
 
 interface LayoutItemParamsProps {
   artifact: Artifact;
@@ -36,13 +35,11 @@ interface LayoutItemParamsProps {
   ) => void;
   // 新增参数，用于获取推断参数的选项
   inferredParamChoices?: Record<string, Record<string, string>[]>;
-  inferredParamValues?: Record<string, string | string[]>;
+  inferredParamValues?: Record<string, string[]>;
   setInferredParamValues?: (
     values:
-      | Record<string, string | string[]>
-      | ((
-          prev: Record<string, string | string[]>
-        ) => Record<string, string | string[]>)
+      | Record<string, string[]>
+      | ((prev: Record<string, string[]>) => Record<string, string[]>)
   ) => void;
 }
 
@@ -59,7 +56,6 @@ export function LayoutItemParams({
   setInferredParamValues = () => {},
 }: LayoutItemParamsProps) {
   if (!artifact) return null;
-
   // 修改后的代码
   const handleValueChange = (
     paramName: string,
@@ -85,15 +81,8 @@ export function LayoutItemParams({
   };
 
   // 处理推断参数值变化
-  const handleInferredValueChange = (
-    paramId: string,
-    value: string | string[]
-  ) => {
+  const handleInferredValueChange = (paramId: string, value: string[]) => {
     setInferredParamValues((prev) => {
-      // 如果值没有变化，不更新状态
-      if (JSON.stringify(prev[paramId]) === JSON.stringify(value)) {
-        return prev;
-      }
       return {
         ...prev,
         [paramId]: value,
@@ -121,13 +110,6 @@ export function LayoutItemParams({
         [paramKey]: currentValues,
       };
     });
-  };
-
-  // 获取推断参数的标识，用于在UI中显示和获取值
-  const getInferredParamKey = (
-    param: SingleInferredParam | MultipleInferredParam
-  ) => {
-    return `${param.dfAlias}_${param.dfColumn}_${param.id}`;
   };
 
   return (
@@ -192,7 +174,7 @@ export function LayoutItemParams({
           <div className='mb-3'>
             <div className='space-y-2'>
               {artifact.inferredParams.map((param) => {
-                const paramKey = getInferredParamKey(param);
+                const paramKey = `${param.dfAlias}.${param.dfColumn}`;
                 return (
                   <div key={param.id} className='bg-gray-50 p-2 rounded-md'>
                     <div className='flex items-center mb-1'>
@@ -224,9 +206,20 @@ export function LayoutItemParams({
                         (param.type === 'single' ? '' : [])
                       }
                       placeholder='请选择'
-                      onValueChange={(value) =>
-                        handleInferredValueChange(paramKey, value)
-                      }
+                      onValueChange={(value) => {
+                        let values = Array.isArray(value) ? value : [value];
+
+                        if (
+                          values.length == 1 &&
+                          JSON.stringify(values) ===
+                            JSON.stringify(inferredParamValues[paramKey]) &&
+                          param.clearable
+                        ) {
+                          values = [];
+                        }
+
+                        handleInferredValueChange(paramKey, values);
+                      }}
                       clearAble={param.clearable}
                       mode={param.type === 'single' ? 'single' : 'multiple'}
                     />

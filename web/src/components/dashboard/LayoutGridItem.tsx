@@ -59,7 +59,10 @@ export const LayoutGridItem = memo(
     }
     // todo: 默认是否展示参数
     const [showParams, setShowParams] = useState(
-      (artifact && artifact.plainParams && artifact.plainParams.length > 0) ||
+      (artifact &&
+        ((artifact.plainParams && artifact.plainParams.length > 0) ||
+          (artifact.inferredParams && artifact.inferredParams.length > 0) ||
+          (artifact.cascaderParams && artifact.cascaderParams.length > 0))) ||
         false
     );
     const [showDataSourceDialog, setShowDataSourceDialog] = useState(false);
@@ -86,7 +89,7 @@ export const LayoutGridItem = memo(
 
     // 在useState区域添加inferredParams相关状态
     const [inferredParamValues, setInferredParamValues] = useState<
-      Record<string, string | string[]>
+      Record<string, string[]>
     >({});
     const [inferredParamChoices, setInferredParamChoices] = useState<
       Record<string, Record<string, string>[]>
@@ -129,6 +132,7 @@ export const LayoutGridItem = memo(
     };
 
     useEffect(() => {
+      // 处理plainParams的初始化
       artifact.plainParams?.forEach((param) => {
         // 先处理choices的动态日期
         const choices = param.choices.map((choice) => ({
@@ -167,6 +171,34 @@ export const LayoutGridItem = memo(
         }
       });
 
+      // 处理inferredParams的初始化
+      const inferredChoices: Record<string, Record<string, string>[]> = {};
+
+      // 从每个查询响应中获取inferredContext并更新inferredParamChoices
+      Object.values(dependentQueryStatus).forEach((queryStatus) => {
+        if (queryStatus.queryResponse?.inferredContext) {
+          const { inferred } = queryStatus.queryResponse.inferredContext;
+          if (inferred) {
+            // 遍历每个推断参数
+            artifact?.inferredParams?.forEach((param) => {
+              // const paramKey = `${param.dfAlias}_${param.dfColumn}_${param.id}`;
+              // 查找对应数据源和列的值
+              const paramKey = `${param.dfAlias}.${param.dfColumn}`;
+
+              inferredChoices[paramKey] = inferred[paramKey].map((value) => ({
+                key: String(value),
+                value: String(value),
+              }));
+            });
+          }
+        }
+      });
+
+      // 更新推断参数选项
+      if (Object.keys(inferredChoices).length > 0) {
+        setInferredParamChoices(inferredChoices);
+      }
+
       // ps: 有了isInitialized, 可以避免在无参数的artifact请求多次画图;
       setIsInitialized(true);
     }, [report]);
@@ -194,51 +226,6 @@ export const LayoutGridItem = memo(
             )
         )
       ) {
-        // 处理inferredContext
-        const inferredChoices: Record<string, Record<string, string>[]> = {};
-
-        // 从每个查询响应中获取inferredContext并更新inferredParamChoices
-        Object.values(dependentQueryStatus).forEach((queryStatus) => {
-          if (queryStatus.queryResponse?.inferredContext) {
-            const { inferred } = queryStatus.queryResponse.inferredContext;
-            if (inferred) {
-              // 遍历每个推断参数
-              artifact?.inferredParams?.forEach((param) => {
-                const paramKey = `${param.dfAlias}_${param.dfColumn}_${param.id}`;
-                // 查找对应数据源和列的值
-                const choicesKey = `${param.dfAlias}.${param.dfColumn}`;
-                if (
-                  inferred[choicesKey] &&
-                  typeof inferred[choicesKey] === 'string'
-                ) {
-                  try {
-                    // 解析JSON字符串为选项数组
-                    const choices = JSON.parse(inferred[choicesKey]);
-                    if (Array.isArray(choices)) {
-                      inferredChoices[paramKey] = choices.map((value) => ({
-                        key: String(value),
-                        value: String(value),
-                      }));
-                    }
-                  } catch (e) {
-                    console.error(
-                      `Failed to parse inferred values for ${choicesKey}`,
-                      e
-                    );
-                  }
-                }
-              });
-            }
-          }
-        });
-
-        console.info('inferredChoices', inferredChoices);
-
-        // 更新推断参数选项
-        if (Object.keys(inferredChoices).length > 0) {
-          setInferredParamChoices(inferredChoices);
-        }
-
         const queryIds = Object.keys(dependentQueryStatus).reduce(
           (acc, key) => {
             const source = findDataSource(key);
@@ -552,10 +539,14 @@ export const LayoutGridItem = memo(
                   <Copy className='w-full h-full text-gray-500 hover:text-gray-700' />
                 </button>
               }
+
+              {/* 展示参数按钮 */}
               {artifact &&
                 ((artifact.plainParams && artifact.plainParams.length > 0) ||
                   (artifact.cascaderParams &&
-                    artifact.cascaderParams.length > 0)) && (
+                    artifact.cascaderParams.length > 0) ||
+                  (artifact.inferredParams &&
+                    artifact.inferredParams.length > 0)) && (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -614,26 +605,21 @@ export const LayoutGridItem = memo(
                 </div>
               </div>
               {/* 展示参数 */}
-              {showParams &&
-                Object.values(dependentQueryStatus).length > 0 &&
-                Object.values(dependentQueryStatus).every(
-                  (queryStatus) =>
-                    queryStatus.status === DataSourceStatus.SUCCESS
-                ) && (
-                  <LayoutItemParams
-                    artifact={artifact}
-                    dataSources={report.dataSources}
-                    dependentQueryStatus={dependentQueryStatus}
-                    plainParamValues={plainParamValues}
-                    setPlainParamValues={setPlainParamValues}
-                    setCascaderParamValues={setCascaderParamValues}
-                    plainParamChoices={plainParamChoices}
-                    setPlainParamChoices={setPlainParamChoices}
-                    inferredParamChoices={inferredParamChoices}
-                    inferredParamValues={inferredParamValues}
-                    setInferredParamValues={setInferredParamValues}
-                  />
-                )}
+              <div className={`${showParams ? 'block' : 'hidden'}`}>
+                <LayoutItemParams
+                  artifact={artifact}
+                  dataSources={report.dataSources}
+                  dependentQueryStatus={dependentQueryStatus}
+                  plainParamValues={plainParamValues}
+                  setPlainParamValues={setPlainParamValues}
+                  setCascaderParamValues={setCascaderParamValues}
+                  plainParamChoices={plainParamChoices}
+                  setPlainParamChoices={setPlainParamChoices}
+                  inferredParamChoices={inferredParamChoices}
+                  inferredParamValues={inferredParamValues}
+                  setInferredParamValues={setInferredParamValues}
+                />
+              </div>
             </div>
           </CardContent>
 

@@ -24,7 +24,7 @@ import { useParamValuesStore } from '@/lib/store/useParamValuesStore';
 import { useTabFilesStore } from '@/lib/store/useFileSessionStore';
 import { useNavigate } from '@tanstack/react-router';
 
-// 为标签加载报表数据的函数
+// 为标签加载报表数据的函数1
 const loadReportForTab = async (tab: TabDetail) => {
   const report = await reportApi.getReportByReportId(tab.reportId);
   return report;

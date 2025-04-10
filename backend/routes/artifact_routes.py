@@ -99,6 +99,12 @@ async def execute_artifact(request: ArtifactRequest):
             df_index = dfs[df_alias][df_column].astype(str).isin(param_value)
             dfs[df_alias] = dfs[df_alias].loc[df_index]
 
+        # 对于inferred_params, 进行类型转换
+        for param_name, param_value in request.inferredParamValues.items():
+            df_alias, df_column = param_name.split('.')[:2]
+            df_index = dfs[df_alias][df_column].astype(str).isin(param_value)
+            dfs[df_alias] = dfs[df_alias].loc[df_index]
+
         # 对于plain_params, 进行类型转换
         plain_param_values = {}
         for param_name, param_value in request.plainParamValues.items():
@@ -220,9 +226,7 @@ async def artifact_code(request: ArtifactRequest):
                 pyCode=""
             )
     try:
-        print("dfs", dfs)
         # cascader_params 处理
-        print("request.cascaderParamValues", request.cascaderParamValues)
         for param_name, param_value in request.cascaderParamValues.items():
             if not isinstance(param_value, list):
                 raise ValueError(
@@ -234,9 +238,13 @@ async def artifact_code(request: ArtifactRequest):
             df_alias, df_column = param_name.split(",")[:2]
             df_index = dfs[df_alias][df_column].astype(str).isin(param_value)
 
-            print("df之前 ", dfs[df_alias].shape)
             dfs[df_alias] = dfs[df_alias].loc[df_index]
-            print("df之后 ", dfs[df_alias].shape)
+
+        # 对于inferred_params, 进行类型转换
+        for param_name, param_value in request.inferredParamValues.items():
+            df_alias, df_column = param_name.split('.')[:2]
+            df_index = dfs[df_alias][df_column].astype(str).isin(param_value)
+            dfs[df_alias] = dfs[df_alias].loc[df_index]
 
         # 对于plain_params, 进行类型转换
         plain_param_values = {}

@@ -141,6 +141,42 @@ const EditArtifactModal = ({
     setIsParamModalOpen(false);
     setEditingParam(null);
   };
+  const handleEditParam = (
+    param:
+      | SinglePlainParam
+      | MultiplePlainParam
+      | CascaderParam
+      | SingleInferredParam
+      | MultipleInferredParam,
+    paramType: 'plain' | 'cascader' | 'inferred',
+    originalId: string
+  ) => {
+    if (paramType === 'plain') {
+      setPlainParams((prev) =>
+        prev.map((p) =>
+          p.id === originalId
+            ? (param as SinglePlainParam | MultiplePlainParam)
+            : p
+        )
+      );
+    } else if (paramType === 'cascader') {
+      setCascaderParams((prev) =>
+        prev.map((p, index) =>
+          index === parseInt(originalId) ? (param as CascaderParam) : p
+        )
+      );
+    } else if (paramType === 'inferred') {
+      setInferredParams((prev) =>
+        prev.map((p) =>
+          p.id === originalId
+            ? (param as SingleInferredParam | MultipleInferredParam)
+            : p
+        )
+      );
+    }
+    setEditingParam(null);
+    setIsParamModalOpen(false);
+  };
 
   const handleDeleteParam = (
     paramId: string,
@@ -535,7 +571,11 @@ const EditArtifactModal = ({
           setEditingParam(null);
         }}
         onSave={(param, type) => {
-          handleAddParam(param, type);
+          if (editingParam) {
+            handleEditParam(param, type, editingParam.id);
+          } else {
+            handleAddParam(param, type);
+          }
         }}
         paramData={editingParam}
         plainParamNames={plainParamNames}

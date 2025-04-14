@@ -266,7 +266,7 @@ async def artifact_code(request: ArtifactRequest):
         print(2)
         # data
         data_context = "# data\n" + \
-            "\n".join([f"""{df_alias} = pd.read_json(io.StringIO(\"\"\"{df_value.to_json(orient='records', date_format='iso',force_ascii=False).strip()}\"\"\"))""" for df_alias, df_value in dfs.items()])
+            "\n".join([f"{df_alias} = pd.read_json(io.StringIO({repr(df_value.to_json(orient='records', date_format='iso', force_ascii=False).strip())}))" for df_alias, df_value in dfs.items()])
         print(3)
         # param
         params_context = "# params\n" + \

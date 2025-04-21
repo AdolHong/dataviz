@@ -522,31 +522,23 @@ const EditArtifactModal = ({
               </Button>
             </div>
           </div>
-
-          <div className='grid grid-cols-4 items-start gap-4'>
-            <Label htmlFor='code' className='text-right pt-2'>
-              Python代码*
-            </Label>
-            <div className='col-span-3'>
-              <AceEditor
-                mode='python'
-                theme='xcode'
-                name='artifactCodeEditor'
-                height='200px'
-                width='100%'
-                onChange={(value) => setCode(value)}
-                value={code}
-                setOptions={{
-                  enableBasicAutocompletion: true,
-                  enableLiveAutocompletion: true,
-                  enableSnippets: true,
-                  showLineNumbers: true,
-                  tabSize: 2,
-                }}
-              />
-            </div>
-          </div>
         </div>
+        <AceEditor
+          mode='python'
+          theme='xcode'
+          name='artifactCodeEditor'
+          height='200px'
+          width='100%'
+          onChange={(value) => setCode(value)}
+          value={code}
+          setOptions={{
+            enableBasicAutocompletion: true,
+            enableLiveAutocompletion: true,
+            enableSnippets: true,
+            showLineNumbers: true,
+            tabSize: 2,
+          }}
+        />
 
         <DialogFooter>
           <Button variant='outline' onClick={onClose}>

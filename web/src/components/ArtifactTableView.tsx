@@ -179,6 +179,7 @@ export const ArtifactTableView: React.FC<ArtifactTableViewProps> = ({
           </DropdownMenu>
         )}
       </div>
+
       <div className='w-full h-[280px] overflow-y-auto rounded-md border'>
         <Table>
           <TableHeader className='sticky top-0 bg-white z-10'>
@@ -197,6 +198,7 @@ export const ArtifactTableView: React.FC<ArtifactTableViewProps> = ({
               </TableRow>
             ))}
           </TableHeader>
+
           <TableBody>
             {table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => (

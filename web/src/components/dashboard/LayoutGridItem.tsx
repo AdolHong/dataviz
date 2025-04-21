@@ -302,12 +302,7 @@ export const LayoutGridItem = memo(
           );
 
         case 'table':
-          return (
-            <ArtifactTableView
-              data={artifactData.dataContext.data}
-              title='数据表格'
-            />
-          );
+          return <ArtifactTableView data={artifactData.dataContext.data} />;
 
         case 'image':
           return (

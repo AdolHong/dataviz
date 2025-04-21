@@ -11,7 +11,7 @@ from utils.fs_utils import FILE_CACHE_PATH
 from contextlib import redirect_stdout
 
 
-from models.artifact_models import ArtifactRequest, ArtifactResponse, ArtifactCodeContext, ArtifactTextDataContext, ArtifactPlotlyDataContext, ArtifactEChartDataContext, ArtifactImageDataContext, ArtifactAltairDataContext, ArtifactCodeResponse
+from models.artifact_models import ArtifactRequest, ArtifactResponse, ArtifactCodeContext, ArtifactTextDataContext, ArtifactPlotlyDataContext, ArtifactEChartDataContext, ArtifactImageDataContext, ArtifactAltairDataContext, ArtifactCodeResponse, ArtifactTableDataContext
 from models.query_models import Alert
 from models.artifact_models import PlainParamValue
 
@@ -169,6 +169,9 @@ async def execute_artifact(request: ArtifactRequest):
             elif 'altair' in str(type(result)):
                 data_context = ArtifactAltairDataContext(
                     type="altair", data=json.dumps(result.to_dict()))
+            elif "pandas.core.frame.DataFrame" in str(type(result)):
+                data_context = ArtifactTableDataContext(
+                    type="table", data=result.to_json(orient='records', date_format='iso', force_ascii=False))
             else:
                 # 默认转换为文本
                 data_context = ArtifactTextDataContext(

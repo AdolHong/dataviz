@@ -155,7 +155,7 @@ export const EditDataSourceModal = ({
           </DialogTitle>
         </DialogHeader>
 
-        <div className='space-y-4'>
+        <div className='space-y-4 flex-1 overflow-y-auto pr-2'>
           <div className='flex items-center space-x-6'>
             <div className='flex items-center space-x-2'>
               <label className='whitespace-nowrap min-w-8 mr-4 flex items-center'>
@@ -529,7 +529,7 @@ export const EditDataSourceModal = ({
           )}
         </div>
 
-        <DialogFooter className='mt-auto'>
+        <DialogFooter className='mt-4 pt-4 sticky bottom-0 bg-white'>
           <Button variant='outline' onClick={onClose}>
             取消
           </Button>

@@ -17,9 +17,13 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
-import { ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Download, MoreHorizontal } from 'lucide-react';
+import {
+  ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  MoreHorizontal,
+} from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -31,16 +35,16 @@ import Papa from 'papaparse';
 
 interface ArtifactTableViewProps {
   data: string; // JSON string from ArtifactTableDataContext
-  title?: string;
   fileName?: string;
   showExport?: boolean;
+  maxHeight?: string;
 }
 
 export const ArtifactTableView: React.FC<ArtifactTableViewProps> = ({
   data,
-  title,
   fileName = 'table-data',
   showExport = true,
+  maxHeight = '100%',
 }) => {
   // 解析JSON数据
   const parsedData = useMemo(() => {
@@ -117,6 +121,11 @@ export const ArtifactTableView: React.FC<ArtifactTableViewProps> = ({
     state: {
       sorting,
     },
+    initialState: {
+      pagination: {
+        pageSize: 15, // 设置默认每页显示15条
+      },
+    },
   });
 
   // 导出CSV
@@ -149,107 +158,109 @@ export const ArtifactTableView: React.FC<ArtifactTableViewProps> = ({
     );
   }
 
+  // 计算高度变量以确保内容适合容器
+  const tableHeight = `calc(${maxHeight} - 60px)`; // 为工具栏和分页减去空间
+
   return (
-    <Card className='w-full h-full overflow-hidden'>
-      {title && (
-        <CardHeader className='px-6 py-4 flex flex-row items-center justify-between space-y-0'>
-          <CardTitle className='text-base font-medium'>{title}</CardTitle>
-          {showExport && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant='ghost' size='sm' className='h-8 w-8 p-0'>
-                  <MoreHorizontal className='h-4 w-4' />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align='end'>
-                <DropdownMenuItem onClick={handleExportCSV}>
-                  <Download className='mr-2 h-4 w-4' />
-                  <span>导出 CSV</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleExportJSON}>
-                  <Download className='mr-2 h-4 w-4' />
-                  <span>导出 JSON</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </CardHeader>
-      )}
-      <CardContent className={`p-0 ${title ? '' : 'pt-4'}`}>
-        <div className='overflow-auto max-h-[500px]'>
-          <div className='rounded-md border'>
-            <Table>
-              <TableHeader>
-                {table.getHeaderGroups().map((headerGroup) => (
-                  <TableRow key={headerGroup.id}>
-                    {headerGroup.headers.map((header) => (
-                      <TableHead key={header.id}>
-                        {header.isPlaceholder
-                          ? null
-                          : flexRender(
-                              header.column.columnDef.header,
-                              header.getContext()
-                            )}
-                      </TableHead>
+    <div className='w-full h-full flex flex-col'>
+      <div className='flex justify-end items-center flex-shrink-0 mb-2'>
+        {showExport && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant='ghost' size='sm' className='h-8 w-8 p-0'>
+                <MoreHorizontal className='h-4 w-4' />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align='end'>
+              <DropdownMenuItem onClick={handleExportCSV}>
+                <Download className='mr-2 h-4 w-4' />
+                <span>导出 CSV</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleExportJSON}>
+                <Download className='mr-2 h-4 w-4' />
+                <span>导出 JSON</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </div>
+
+      <div className='flex-grow overflow-hidden'>
+        <div
+          className='overflow-auto rounded-md border'
+          style={{ maxHeight: tableHeight }}
+        >
+          <Table>
+            <TableHeader className='sticky top-0 bg-white z-10'>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <TableRow key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => (
+                    <TableHead key={header.id}>
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(
+                            header.column.columnDef.header,
+                            header.getContext()
+                          )}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              ))}
+            </TableHeader>
+            <TableBody>
+              {table.getRowModel().rows?.length ? (
+                table.getRowModel().rows.map((row) => (
+                  <TableRow
+                    key={row.id}
+                    data-state={row.getIsSelected() && 'selected'}
+                  >
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell key={cell.id}>
+                        {flexRender(
+                          cell.column.columnDef.cell,
+                          cell.getContext()
+                        )}
+                      </TableCell>
                     ))}
                   </TableRow>
-                ))}
-              </TableHeader>
-              <TableBody>
-                {table.getRowModel().rows?.length ? (
-                  table.getRowModel().rows.map((row) => (
-                    <TableRow
-                      key={row.id}
-                      data-state={row.getIsSelected() && 'selected'}
-                    >
-                      {row.getVisibleCells().map((cell) => (
-                        <TableCell key={cell.id}>
-                          {flexRender(
-                            cell.column.columnDef.cell,
-                            cell.getContext()
-                          )}
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell
-                      colSpan={columns.length}
-                      className='h-24 text-center'
-                    >
-                      暂无数据
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell
+                    colSpan={columns.length}
+                    className='h-24 text-center'
+                  >
+                    暂无数据
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
         </div>
+      </div>
 
-        <div className='flex items-center justify-end space-x-2 py-4 px-4'>
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => table.previousPage()}
-            disabled={!table.getCanPreviousPage()}
-          >
-            <ChevronLeft className='h-4 w-4' />
-          </Button>
-          <span className='text-sm text-muted-foreground'>
-            第 {table.getState().pagination.pageIndex + 1} 页， 共{' '}
-            {table.getPageCount()} 页
-          </span>
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={() => table.nextPage()}
-            disabled={!table.getCanNextPage()}
-          >
-            <ChevronRight className='h-4 w-4' />
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+      <div className='flex items-center justify-end space-x-2 py-3 flex-shrink-0'>
+        <Button
+          variant='outline'
+          size='sm'
+          onClick={() => table.previousPage()}
+          disabled={!table.getCanPreviousPage()}
+        >
+          <ChevronLeft className='h-4 w-4' />
+        </Button>
+        <span className='text-sm text-muted-foreground'>
+          第 {table.getState().pagination.pageIndex + 1} 页， 共{' '}
+          {table.getPageCount()} 页
+        </span>
+        <Button
+          variant='outline'
+          size='sm'
+          onClick={() => table.nextPage()}
+          disabled={!table.getCanNextPage()}
+        >
+          <ChevronRight className='h-4 w-4' />
+        </Button>
+      </div>
+    </div>
   );
 };

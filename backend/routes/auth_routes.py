@@ -24,6 +24,7 @@ SECRET_KEY = 'cd3fd8928370f07e726ed4a519ffdc3b3da24b66819c55595ad7e4c7c2bb36b3'
 # 用于存储用户凭证的字典，实际应用中应使用数据库
 USERS = {
     "adol": "f09a31c2bb20aeee1e1ce6639c32226098bdaaf949b247b775f845aafadda2bd",  # adol
+    "evans": 'b0a85ea55612378ea58b08566dc8f36828af614f56edccf76ac4f0026381d3a2'
 }
 # 活跃token列表（用于验证和注销）
 ACTIVE_TOKENS = {}

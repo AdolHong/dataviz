@@ -96,13 +96,15 @@ async def execute_artifact(request: ArtifactRequest):
             if len(param_value) == 0:
                 continue
             df_alias, df_column = param_name.split(",")[:2]
-            df_index = dfs[df_alias][df_column].astype(str).isin(param_value)
+            df_index = dfs[df_alias][df_column].fillna(
+                '').astype(str).str.lower().isin(param_value)
             dfs[df_alias] = dfs[df_alias].loc[df_index]
 
         # 对于inferred_params, 进行类型转换
         for param_name, param_value in request.inferredParamValues.items():
             df_alias, df_column = param_name.split('.')[:2]
-            df_index = dfs[df_alias][df_column].astype(str).isin(param_value)
+            df_index = dfs[df_alias][df_column].fillna(
+                '').astype(str).str.lower().isin(param_value)
             dfs[df_alias] = dfs[df_alias].loc[df_index]
 
         # 对于plain_params, 进行类型转换
@@ -236,14 +238,16 @@ async def artifact_code(request: ArtifactRequest):
             if len(param_value) == 0:
                 continue
             df_alias, df_column = param_name.split(",")[:2]
-            df_index = dfs[df_alias][df_column].astype(str).isin(param_value)
+            df_index = dfs[df_alias][df_column].fillna(
+                '').astype(str).str.lower().isin(param_value)
 
             dfs[df_alias] = dfs[df_alias].loc[df_index]
 
         # 对于inferred_params, 进行类型转换
         for param_name, param_value in request.inferredParamValues.items():
             df_alias, df_column = param_name.split('.')[:2]
-            df_index = dfs[df_alias][df_column].astype(str).isin(param_value)
+            df_index = dfs[df_alias][df_column].fillna(
+                '').astype(str).str.lower().isin(param_value)
             dfs[df_alias] = dfs[df_alias].loc[df_index]
 
         # 对于plain_params, 进行类型转换

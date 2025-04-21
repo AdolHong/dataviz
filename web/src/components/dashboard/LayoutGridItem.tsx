@@ -27,6 +27,7 @@ import Plot from 'react-plotly.js';
 import * as echarts from 'echarts';
 import { VegaLite } from 'react-vega';
 import dayjs from 'dayjs';
+import { ArtifactTableView } from '@/components/ArtifactTableView';
 
 // Artifact状态颜色
 export const artifactStatusColor = (status: string): string => {
@@ -302,11 +303,9 @@ export const LayoutGridItem = memo(
 
         case 'table':
           return (
-            <div
-              className='w-full overflow-x-auto'
-              dangerouslySetInnerHTML={{
-                __html: artifactData.dataContext.data,
-              }}
+            <ArtifactTableView
+              data={artifactData.dataContext.data}
+              title='数据表格'
             />
           );
 

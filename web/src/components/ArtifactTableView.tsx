@@ -37,14 +37,12 @@ interface ArtifactTableViewProps {
   data: string; // JSON string from ArtifactTableDataContext
   fileName?: string;
   showExport?: boolean;
-  maxHeight?: string;
 }
 
 export const ArtifactTableView: React.FC<ArtifactTableViewProps> = ({
   data,
   fileName = 'table-data',
   showExport = true,
-  maxHeight = '100%',
 }) => {
   // 解析JSON数据
   const parsedData = useMemo(() => {
@@ -158,9 +156,6 @@ export const ArtifactTableView: React.FC<ArtifactTableViewProps> = ({
     );
   }
 
-  // 计算高度变量以确保内容适合容器
-  const tableHeight = `calc(${maxHeight} - 60px)`; // 为工具栏和分页减去空间
-
   return (
     <div className='w-full h-full flex flex-col'>
       <div className='flex justify-end items-center flex-shrink-0 mb-2'>
@@ -185,58 +180,53 @@ export const ArtifactTableView: React.FC<ArtifactTableViewProps> = ({
         )}
       </div>
 
-      <div className='flex-grow overflow-hidden'>
-        <div
-          className='overflow-auto rounded-md border'
-          style={{ maxHeight: tableHeight }}
-        >
-          <Table>
-            <TableHeader className='sticky top-0 bg-white z-10'>
-              {table.getHeaderGroups().map((headerGroup) => (
-                <TableRow key={headerGroup.id}>
-                  {headerGroup.headers.map((header) => (
-                    <TableHead key={header.id}>
-                      {header.isPlaceholder
-                        ? null
-                        : flexRender(
-                            header.column.columnDef.header,
-                            header.getContext()
-                          )}
-                    </TableHead>
+      <div className='flex-grow overflow-y-auto rounded-md border'>
+        <Table>
+          <TableHeader className='sticky top-0 bg-white z-10'>
+            {table.getHeaderGroups().map((headerGroup) => (
+              <TableRow key={headerGroup.id}>
+                {headerGroup.headers.map((header) => (
+                  <TableHead key={header.id}>
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(
+                          header.column.columnDef.header,
+                          header.getContext()
+                        )}
+                  </TableHead>
+                ))}
+              </TableRow>
+            ))}
+          </TableHeader>
+          <TableBody>
+            {table.getRowModel().rows?.length ? (
+              table.getRowModel().rows.map((row) => (
+                <TableRow
+                  key={row.id}
+                  data-state={row.getIsSelected() && 'selected'}
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id}>
+                      {flexRender(
+                        cell.column.columnDef.cell,
+                        cell.getContext()
+                      )}
+                    </TableCell>
                   ))}
                 </TableRow>
-              ))}
-            </TableHeader>
-            <TableBody>
-              {table.getRowModel().rows?.length ? (
-                table.getRowModel().rows.map((row) => (
-                  <TableRow
-                    key={row.id}
-                    data-state={row.getIsSelected() && 'selected'}
-                  >
-                    {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id}>
-                        {flexRender(
-                          cell.column.columnDef.cell,
-                          cell.getContext()
-                        )}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell
-                    colSpan={columns.length}
-                    className='h-24 text-center'
-                  >
-                    暂无数据
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell
+                  colSpan={columns.length}
+                  className='h-24 text-center'
+                >
+                  暂无数据
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
       </div>
 
       <div className='flex items-center justify-end space-x-2 py-3 flex-shrink-0'>

@@ -303,7 +303,6 @@ export const LayoutGridItem = memo(
 
         case 'table':
           return <ArtifactTableView data={artifactData.dataContext.data} />;
-
         case 'image':
           return (
             <div className='w-[95%] h-[95%] flex justify-center items-center'>

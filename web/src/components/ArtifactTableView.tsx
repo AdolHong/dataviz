@@ -157,7 +157,7 @@ export const ArtifactTableView: React.FC<ArtifactTableViewProps> = ({
   }
 
   return (
-    <div className='w-full h-full flex flex-col'>
+    <>
       <div className='flex justify-end items-center flex-shrink-0 mb-2'>
         {showExport && (
           <DropdownMenu>
@@ -179,8 +179,7 @@ export const ArtifactTableView: React.FC<ArtifactTableViewProps> = ({
           </DropdownMenu>
         )}
       </div>
-
-      <div className='flex-grow overflow-y-auto rounded-md border'>
+      <div className='w-full h-[280px] overflow-y-auto rounded-md border'>
         <Table>
           <TableHeader className='sticky top-0 bg-white z-10'>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -251,6 +250,6 @@ export const ArtifactTableView: React.FC<ArtifactTableViewProps> = ({
           <ChevronRight className='h-4 w-4' />
         </Button>
       </div>
-    </div>
+    </>
   );
 };

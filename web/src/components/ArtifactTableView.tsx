@@ -121,7 +121,7 @@ export const ArtifactTableView: React.FC<ArtifactTableViewProps> = ({
     },
     initialState: {
       pagination: {
-        pageSize: 15, // 设置默认每页显示15条
+        pageSize: 5, // 设置默认每页显示15条
       },
     },
   });
@@ -180,7 +180,7 @@ export const ArtifactTableView: React.FC<ArtifactTableViewProps> = ({
         )}
       </div>
 
-      <div className='w-full h-[280px] overflow-y-auto rounded-md border'>
+      <div className='w-full max-h-[320px] overflow-y-auto rounded-md border'>
         <Table>
           <TableHeader className='sticky top-0 bg-white z-10'>
             {table.getHeaderGroups().map((headerGroup) => (

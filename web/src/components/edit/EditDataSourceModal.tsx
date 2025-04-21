@@ -361,36 +361,6 @@ export const EditDataSourceModal = ({
 
           {showCodeEditor && (
             <>
-              <div>
-                <label className='block mb-2'>代码</label>
-                <AceEditor
-                  mode={executorType === 'python' ? 'python' : 'sql'}
-                  theme='xcode'
-                  name='codeEditor'
-                  height='200px'
-                  width='100%'
-                  onChange={(value) => {
-                    setDataSource((prev) => ({
-                      ...prev,
-                      executor: {
-                        ...(prev.executor as
-                          | PythonSourceExecutor
-                          | SQLSourceExecutor),
-                        code: value,
-                      },
-                    }));
-                  }}
-                  value={
-                    executorType === 'python' || executorType === 'sql'
-                      ? (
-                          dataSource.executor as
-                            | PythonSourceExecutor
-                            | SQLSourceExecutor
-                        ).code || ''
-                      : ''
-                  }
-                />
-              </div>
               <div className='flex space-x-10'>
                 <div>
                   <label className='block mb-2'>更新模式</label>
@@ -444,6 +414,36 @@ export const EditDataSourceModal = ({
                     />
                   </div>
                 )}
+              </div>
+              <div>
+                <label className='block mb-2'>代码</label>
+                <AceEditor
+                  mode={executorType === 'python' ? 'python' : 'sql'}
+                  theme='xcode'
+                  name='codeEditor'
+                  height='200px'
+                  width='100%'
+                  onChange={(value) => {
+                    setDataSource((prev) => ({
+                      ...prev,
+                      executor: {
+                        ...(prev.executor as
+                          | PythonSourceExecutor
+                          | SQLSourceExecutor),
+                        code: value,
+                      },
+                    }));
+                  }}
+                  value={
+                    executorType === 'python' || executorType === 'sql'
+                      ? (
+                          dataSource.executor as
+                            | PythonSourceExecutor
+                            | SQLSourceExecutor
+                        ).code || ''
+                      : ''
+                  }
+                />
               </div>
             </>
           )}

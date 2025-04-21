@@ -216,7 +216,7 @@ export function DashboardPage() {
   const memoizedActiveTabId = useMemo(() => activeTabId || '', [report]);
 
   const navigate = useNavigate();
-  const username = sessionStorage.getItem('auth-username') || 'UnknownUser';
+  const username = localStorage.getItem('auth-username') || 'UnknownUser';
 
   const handleLogout = () => {
     // 清除sessionStorage中的token和username

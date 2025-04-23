@@ -559,61 +559,48 @@ export const LayoutGridItem = memo(
                 )}
             </div>
           </CardHeader>
-          <CardContent className='flex-1 border-t overflow-hidden p-4'>
+          <CardContent className='flex flex-1 border-t overflow-hidden p-4  items-center justify-center text-muted-foreground text-sm'>
             {/* 展示内容 */}
-            <div className='flex-1 flex items-center justify-center'>
-              <div className='text-muted-foreground text-sm w-full h-full'>
-                {/* 如果没有任何依赖，展示暂无内容 */}
-                {Object.values(dependentQueryStatus).length === 0 && (
-                  <> 暂无内容</>
-                )}
+            {Object.values(dependentQueryStatus).length === 0 && <> 暂无内容</>}
 
-                {/* 如果存在依赖，并且所有依赖都成功，展示内容 */}
-                {Object.values(dependentQueryStatus).length > 0 &&
-                  Object.values(dependentQueryStatus).every(
-                    (queryStatus) =>
-                      queryStatus.status === DataSourceStatus.SUCCESS
-                  ) && (
-                    // 如果所有依赖都成功，展示内容
-                    <div>
-                      {isLoading && <div>加载中...</div>}
-                      {error && <div className='text-red-500'>{error}</div>}
-                      {!isLoading &&
-                        !error &&
-                        artifactResponse &&
-                        artifactResponse.dataContext && (
-                          <div className='w-full h-full'>
-                            {renderArtifactData(artifactResponse)}
-                          </div>
-                        )}
-                    </div>
-                  )}
+            {Object.values(dependentQueryStatus).length > 0 &&
+              Object.values(dependentQueryStatus).every(
+                (queryStatus) => queryStatus.status === DataSourceStatus.SUCCESS
+              ) && (
+                <div className='w-full h-full'>
+                  {isLoading && <div>加载中...</div>}
+                  {error && <div className='text-red-500'>{error}</div>}
+                  {!isLoading &&
+                    !error &&
+                    artifactResponse &&
+                    artifactResponse.dataContext && (
+                      <>{renderArtifactData(artifactResponse)}</>
+                    )}
+                </div>
+              )}
 
-                {/* 如果存在依赖，并且有一个依赖失败，展示失败信息 */}
-                {Object.values(dependentQueryStatus).length > 0 &&
-                  Object.values(dependentQueryStatus).some(
-                    (queryStatus) =>
-                      queryStatus.status === DataSourceStatus.ERROR
-                  ) && <> 查询失败</>}
-              </div>
-            </div>
-            {/* 展示参数 */}
-            <div className={`${showParams ? 'block' : 'hidden'}`}>
-              <LayoutItemParams
-                artifact={artifact}
-                dataSources={report.dataSources}
-                dependentQueryStatus={dependentQueryStatus}
-                plainParamValues={plainParamValues}
-                setPlainParamValues={setPlainParamValues}
-                setCascaderParamValues={setCascaderParamValues}
-                plainParamChoices={plainParamChoices}
-                setPlainParamChoices={setPlainParamChoices}
-                inferredParamChoices={inferredParamChoices}
-                inferredParamValues={inferredParamValues}
-                setInferredParamValues={setInferredParamValues}
-              />
-            </div>
+            {Object.values(dependentQueryStatus).length > 0 &&
+              Object.values(dependentQueryStatus).some(
+                (queryStatus) => queryStatus.status === DataSourceStatus.ERROR
+              ) && <> 查询失败</>}
           </CardContent>
+
+          {/* 展示参数 */}
+          <div className={`${showParams ? 'block' : 'hidden'}`}>
+            <LayoutItemParams
+              artifact={artifact}
+              dataSources={report.dataSources}
+              dependentQueryStatus={dependentQueryStatus}
+              plainParamValues={plainParamValues}
+              setPlainParamValues={setPlainParamValues}
+              setCascaderParamValues={setCascaderParamValues}
+              plainParamChoices={plainParamChoices}
+              setPlainParamChoices={setPlainParamChoices}
+              inferredParamChoices={inferredParamChoices}
+              inferredParamValues={inferredParamValues}
+              setInferredParamValues={setInferredParamValues}
+            />
+          </div>
 
           {/* 添加DataSourceDialog组件 */}
           {showDataSourceDialog && selectedDataSourceId && (

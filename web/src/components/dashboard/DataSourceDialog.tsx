@@ -129,7 +129,7 @@ export function DataSourceDialog({
           <TabsContent value='data' className='pt-4'>
             {response?.data?.demoData ? (
               <div className='max-h-96 overflow-auto'>
-                <pre className='text-xs rounded-md bg-muted p-4 font-mono'>
+                <pre className='text-xs rounded-md bg-muted p-4 font-mono whitespace-pre-wrap'>
                   {demoData}
                 </pre>
               </div>
@@ -146,7 +146,7 @@ export function DataSourceDialog({
                 <AccordionItem value='code'>
                   <AccordionTrigger>查询代码</AccordionTrigger>
                   <AccordionContent>
-                    <pre className='text-xs rounded-md bg-muted p-4 font-mono overflow-auto max-h-60'>
+                    <pre className='text-xs rounded-md bg-muted p-4 font-mono overflow-auto max-h-60 whitespace-pre-wrap'>
                       {response?.codeContext?.code || '无代码'}
                     </pre>
                   </AccordionContent>
@@ -155,7 +155,7 @@ export function DataSourceDialog({
                 <AccordionItem value='parsedCode'>
                   <AccordionTrigger>解析后代码</AccordionTrigger>
                   <AccordionContent>
-                    <pre className='text-xs rounded-md bg-muted p-4 font-mono overflow-auto max-h-60'>
+                    <pre className='text-xs rounded-md bg-muted p-4 font-mono overflow-auto max-h-60 whitespace-pre-wrap'>
                       {response?.codeContext?.parsedCode || '无解析代码'}
                     </pre>
                   </AccordionContent>
@@ -165,7 +165,7 @@ export function DataSourceDialog({
                   <AccordionItem value='params'>
                     <AccordionTrigger>参数值</AccordionTrigger>
                     <AccordionContent>
-                      <pre className='text-xs rounded-md bg-muted p-4 font-mono overflow-auto max-h-60'>
+                      <pre className='text-xs rounded-md bg-muted p-4 font-mono overflow-auto max-h-60 whitespace-pre-wrap'>
                         {JSON.stringify(
                           response.codeContext.paramValues,
                           null,

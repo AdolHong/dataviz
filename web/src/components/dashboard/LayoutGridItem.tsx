@@ -479,7 +479,7 @@ export const LayoutGridItem = memo(
 
     return (
       <div key={layoutItem.id} style={itemStyle}>
-        <Card className='h-full overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300  mt-0 mb-0 py-1 gap-0'>
+        <Card className='h-full flex overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300  mt-0 mb-0 py-1 gap-0'>
           <CardHeader
             key={`layoutItem.id-${layoutItem.id}-card-header`}
             className='h-10 flex items-center justify-between border-b-1 shadow-sm'
@@ -559,40 +559,43 @@ export const LayoutGridItem = memo(
                 )}
             </div>
           </CardHeader>
-          <CardContent className='h-full py-0 px-0 border-t overflow-hidden flex'>
+          <CardContent className='flex-1 border-t overflow-hidden p-4'>
             {/* 展示内容 */}
-            <div className='flex-1 flex items-center justify-center p-4 min-w-0 text-muted-foreground text-sm'>
-              {/* 如果没有任何依赖，展示暂无内容 */}
-              {Object.values(dependentQueryStatus).length === 0 && (
-                <> 暂无内容</>
-              )}
-
-              {/* 如果存在依赖，并且所有依赖都成功，展示内容 */}
-              {Object.values(dependentQueryStatus).length > 0 &&
-                Object.values(dependentQueryStatus).every(
-                  (queryStatus) =>
-                    queryStatus.status === DataSourceStatus.SUCCESS
-                ) && (
-                  // 如果所有依赖都成功，展示内容
-                  <div>
-                    {isLoading && <div>加载中...</div>}
-                    {error && <div className='text-red-500'>{error}</div>}
-                    {!isLoading &&
-                      !error &&
-                      artifactResponse &&
-                      artifactResponse.dataContext && (
-                        <div className='w-full h-full'>
-                          {renderArtifactData(artifactResponse)}
-                        </div>
-                      )}
-                  </div>
+            <div className='flex-1 flex items-center justify-center'>
+              <div className='text-muted-foreground text-sm w-full h-full'>
+                {/* 如果没有任何依赖，展示暂无内容 */}
+                {Object.values(dependentQueryStatus).length === 0 && (
+                  <> 暂无内容</>
                 )}
 
-              {/* 如果存在依赖，并且有一个依赖失败，展示失败信息 */}
-              {Object.values(dependentQueryStatus).length > 0 &&
-                Object.values(dependentQueryStatus).some(
-                  (queryStatus) => queryStatus.status === DataSourceStatus.ERROR
-                ) && <> 查询失败</>}
+                {/* 如果存在依赖，并且所有依赖都成功，展示内容 */}
+                {Object.values(dependentQueryStatus).length > 0 &&
+                  Object.values(dependentQueryStatus).every(
+                    (queryStatus) =>
+                      queryStatus.status === DataSourceStatus.SUCCESS
+                  ) && (
+                    // 如果所有依赖都成功，展示内容
+                    <div>
+                      {isLoading && <div>加载中...</div>}
+                      {error && <div className='text-red-500'>{error}</div>}
+                      {!isLoading &&
+                        !error &&
+                        artifactResponse &&
+                        artifactResponse.dataContext && (
+                          <div className='w-full h-full'>
+                            {renderArtifactData(artifactResponse)}
+                          </div>
+                        )}
+                    </div>
+                  )}
+
+                {/* 如果存在依赖，并且有一个依赖失败，展示失败信息 */}
+                {Object.values(dependentQueryStatus).length > 0 &&
+                  Object.values(dependentQueryStatus).some(
+                    (queryStatus) =>
+                      queryStatus.status === DataSourceStatus.ERROR
+                  ) && <> 查询失败</>}
+              </div>
             </div>
             {/* 展示参数 */}
             <div className={`${showParams ? 'block' : 'hidden'}`}>

@@ -29,7 +29,7 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
         className='grid gap-6 w-full'
         style={{
           gridTemplateColumns: `repeat(${report.layout.columns}, minmax(0, 1fr))`,
-          gridTemplateRows: `repeat(${report.layout.rows}, minmax(200px, auto))`,
+          gridTemplateRows: `repeat(${report.layout.rows}, minmax(100px, auto))`,
           gridAutoFlow: 'dense',
         }}
       >

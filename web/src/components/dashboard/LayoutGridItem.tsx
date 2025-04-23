@@ -478,7 +478,7 @@ export const LayoutGridItem = memo(
     };
 
     return (
-      <div key={layoutItem.id} className='min-h-80 max-h-120' style={itemStyle}>
+      <div key={layoutItem.id} style={itemStyle}>
         <Card className='h-full overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300  mt-0 mb-0 py-1 gap-0'>
           <CardHeader
             key={`layoutItem.id-${layoutItem.id}-card-header`}
@@ -559,61 +559,56 @@ export const LayoutGridItem = memo(
                 )}
             </div>
           </CardHeader>
-          <CardContent className='h-full py-0 px-0'>
-            <div className='flex h-full border-t overflow-hidden'>
-              {/* 展示内容 */}
-              <div className='flex-1 flex items-center justify-center p-4 min-w-0'>
-                <div className='text-muted-foreground text-sm w-full h-full'>
-                  {/* 如果没有任何依赖，展示暂无内容 */}
-                  {Object.values(dependentQueryStatus).length === 0 && (
-                    <> 暂无内容</>
-                  )}
+          <CardContent className='h-full py-0 px-0 border-t overflow-hidden flex'>
+            {/* 展示内容 */}
+            <div className='flex-1 flex items-center justify-center p-4 min-w-0 text-muted-foreground text-sm'>
+              {/* 如果没有任何依赖，展示暂无内容 */}
+              {Object.values(dependentQueryStatus).length === 0 && (
+                <> 暂无内容</>
+              )}
 
-                  {/* 如果存在依赖，并且所有依赖都成功，展示内容 */}
-                  {Object.values(dependentQueryStatus).length > 0 &&
-                    Object.values(dependentQueryStatus).every(
-                      (queryStatus) =>
-                        queryStatus.status === DataSourceStatus.SUCCESS
-                    ) && (
-                      // 如果所有依赖都成功，展示内容
-                      <div>
-                        {isLoading && <div>加载中...</div>}
-                        {error && <div className='text-red-500'>{error}</div>}
-                        {!isLoading &&
-                          !error &&
-                          artifactResponse &&
-                          artifactResponse.dataContext && (
-                            <div className='w-full h-full'>
-                              {renderArtifactData(artifactResponse)}
-                            </div>
-                          )}
-                      </div>
-                    )}
+              {/* 如果存在依赖，并且所有依赖都成功，展示内容 */}
+              {Object.values(dependentQueryStatus).length > 0 &&
+                Object.values(dependentQueryStatus).every(
+                  (queryStatus) =>
+                    queryStatus.status === DataSourceStatus.SUCCESS
+                ) && (
+                  // 如果所有依赖都成功，展示内容
+                  <div>
+                    {isLoading && <div>加载中...</div>}
+                    {error && <div className='text-red-500'>{error}</div>}
+                    {!isLoading &&
+                      !error &&
+                      artifactResponse &&
+                      artifactResponse.dataContext && (
+                        <div className='w-full h-full'>
+                          {renderArtifactData(artifactResponse)}
+                        </div>
+                      )}
+                  </div>
+                )}
 
-                  {/* 如果存在依赖，并且有一个依赖失败，展示失败信息 */}
-                  {Object.values(dependentQueryStatus).length > 0 &&
-                    Object.values(dependentQueryStatus).some(
-                      (queryStatus) =>
-                        queryStatus.status === DataSourceStatus.ERROR
-                    ) && <> 查询失败</>}
-                </div>
-              </div>
-              {/* 展示参数 */}
-              <div className={`${showParams ? 'block' : 'hidden'}`}>
-                <LayoutItemParams
-                  artifact={artifact}
-                  dataSources={report.dataSources}
-                  dependentQueryStatus={dependentQueryStatus}
-                  plainParamValues={plainParamValues}
-                  setPlainParamValues={setPlainParamValues}
-                  setCascaderParamValues={setCascaderParamValues}
-                  plainParamChoices={plainParamChoices}
-                  setPlainParamChoices={setPlainParamChoices}
-                  inferredParamChoices={inferredParamChoices}
-                  inferredParamValues={inferredParamValues}
-                  setInferredParamValues={setInferredParamValues}
-                />
-              </div>
+              {/* 如果存在依赖，并且有一个依赖失败，展示失败信息 */}
+              {Object.values(dependentQueryStatus).length > 0 &&
+                Object.values(dependentQueryStatus).some(
+                  (queryStatus) => queryStatus.status === DataSourceStatus.ERROR
+                ) && <> 查询失败</>}
+            </div>
+            {/* 展示参数 */}
+            <div className={`${showParams ? 'block' : 'hidden'}`}>
+              <LayoutItemParams
+                artifact={artifact}
+                dataSources={report.dataSources}
+                dependentQueryStatus={dependentQueryStatus}
+                plainParamValues={plainParamValues}
+                setPlainParamValues={setPlainParamValues}
+                setCascaderParamValues={setCascaderParamValues}
+                plainParamChoices={plainParamChoices}
+                setPlainParamChoices={setPlainParamChoices}
+                inferredParamChoices={inferredParamChoices}
+                inferredParamValues={inferredParamValues}
+                setInferredParamValues={setInferredParamValues}
+              />
             </div>
           </CardContent>
 

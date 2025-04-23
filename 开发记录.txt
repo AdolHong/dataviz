@@ -1,5 +1,5 @@
 # 打包代码
-tar -czvf ../dataviz_$(date +%Y%m%d_%H%M%S).tar.gz  --exclude backend/engine_config.py backend web
+tar -czvf ../dataviz_$(date +%Y%m%d_%H%M%S).tar.gz  --exclude backend/engine_config.py backend
 
 # 启动前端, 并将处理不了的请求导向index.html
 npm install http-server -g

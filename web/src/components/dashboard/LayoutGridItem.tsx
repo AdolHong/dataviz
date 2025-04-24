@@ -690,27 +690,21 @@ const EChartComponent: React.FC<EChartComponentProps> = ({
     };
   }, [optionData, showParams]); // 当配置数据变化时，重新执行 effect
 
-  console.info('charRef', chartRef);
-
   // 返回用于挂载 ECharts 的 div
   return (
-    <div
-      ref={chartRef}
-      style={{
-        width: '100%',
-        height: '300px',
-      }}
-    />
+    <div className='w-full h-full'>
+      {/* 外层容器设置为全高 */}
+      <div
+        ref={chartRef}
+        className='w-full min-h-[300px] max-h-[480px] h-[100%]'
+      />
+    </div>
   );
 };
 
 const VegaChart: React.FC<{ data: string }> = ({ data }) => {
   const [chartData, _] = useState(JSON.parse(data));
   if (!chartData) return <div>Loading...</div>;
-
-  console.info('chartData', chartData);
-
-  // const { view } = chartData['config'];
 
   const newChartData = {
     ...chartData,

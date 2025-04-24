@@ -319,13 +319,20 @@ export const LayoutGridItem = memo(
             artifactData.dataContext.data
           );
 
+          // 高度范围: 300 ~ 480
+          const height =
+            layout.height === undefined
+              ? 300
+              : Math.min(Math.max(layout.height, 300), 480);
+
           return (
             <Plot
               data={data}
               layout={{
                 ...layout,
                 width: undefined, // 移除固定宽度 :  这样才能自适应父组件的宽度
-                // height: undefined, // 移除固定高度
+                height: height,
+                autosize: true,
                 font: { family: 'Arial, sans-serif' },
                 sliders: layout.sliders, // 确保滑块配置被传递
                 modebar: {
@@ -336,6 +343,7 @@ export const LayoutGridItem = memo(
               config={{
                 ...(config || {}),
                 responsive: true,
+                autosizable: true,
                 displaylogo: false,
                 modeBarButtonsToRemove: [
                   'lasso2d',
@@ -346,7 +354,9 @@ export const LayoutGridItem = memo(
                   'resetScale2d',
                 ],
               }}
-              style={{ width: '100%' }}
+              style={{
+                width: '100%',
+              }}
             />
           );
 
@@ -555,47 +565,52 @@ export const LayoutGridItem = memo(
             </div>
           </CardHeader>
           <CardContent className='flex flex-1 border-t overflow-hidden p-4  items-center justify-center text-muted-foreground text-sm'>
-            {/* 展示内容 */}
-            {Object.values(dependentQueryStatus).length === 0 && <> 暂无内容</>}
-
-            {Object.values(dependentQueryStatus).length > 0 &&
-              Object.values(dependentQueryStatus).every(
-                (queryStatus) => queryStatus.status === DataSourceStatus.SUCCESS
-              ) && (
-                <div className='w-full h-full'>
-                  {isLoading && <div>加载中...</div>}
-                  {error && <div className='text-red-500'>{error}</div>}
-                  {!isLoading &&
-                    !error &&
-                    artifactResponse &&
-                    artifactResponse.dataContext && (
-                      <>{renderArtifactData(artifactResponse)}</>
-                    )}
-                </div>
+            <div className='w-full h-full flex-1'>
+              {/* 展示内容 */}
+              {Object.values(dependentQueryStatus).length === 0 && (
+                <> 暂无内容</>
               )}
 
-            {Object.values(dependentQueryStatus).length > 0 &&
-              Object.values(dependentQueryStatus).some(
-                (queryStatus) => queryStatus.status === DataSourceStatus.ERROR
-              ) && <> 查询失败</>}
-          </CardContent>
+              {Object.values(dependentQueryStatus).length > 0 &&
+                Object.values(dependentQueryStatus).every(
+                  (queryStatus) =>
+                    queryStatus.status === DataSourceStatus.SUCCESS
+                ) && (
+                  <>
+                    {isLoading && <div>加载中...</div>}
+                    {error && <div className='text-red-500'>{error}</div>}
+                    {!isLoading &&
+                      !error &&
+                      artifactResponse &&
+                      artifactResponse.dataContext && (
+                        <>{renderArtifactData(artifactResponse)}</>
+                      )}
+                  </>
+                )}
 
-          {/* 展示参数 */}
-          <div className={`${showParams ? 'block' : 'hidden'}`}>
-            <LayoutItemParams
-              artifact={artifact}
-              dataSources={report.dataSources}
-              dependentQueryStatus={dependentQueryStatus}
-              plainParamValues={plainParamValues}
-              setPlainParamValues={setPlainParamValues}
-              setCascaderParamValues={setCascaderParamValues}
-              plainParamChoices={plainParamChoices}
-              setPlainParamChoices={setPlainParamChoices}
-              inferredParamChoices={inferredParamChoices}
-              inferredParamValues={inferredParamValues}
-              setInferredParamValues={setInferredParamValues}
-            />
-          </div>
+              {Object.values(dependentQueryStatus).length > 0 &&
+                Object.values(dependentQueryStatus).some(
+                  (queryStatus) => queryStatus.status === DataSourceStatus.ERROR
+                ) && <> 查询失败</>}
+            </div>
+
+            {/* 展示参数 */}
+            <div className={`${showParams ? 'block' : 'hidden'}`}>
+              <LayoutItemParams
+                artifact={artifact}
+                dataSources={report.dataSources}
+                dependentQueryStatus={dependentQueryStatus}
+                plainParamValues={plainParamValues}
+                setPlainParamValues={setPlainParamValues}
+                setCascaderParamValues={setCascaderParamValues}
+                plainParamChoices={plainParamChoices}
+                setPlainParamChoices={setPlainParamChoices}
+                inferredParamChoices={inferredParamChoices}
+                inferredParamValues={inferredParamValues}
+                setInferredParamValues={setInferredParamValues}
+              />
+            </div>
+          </CardContent>
 
           {/* 添加DataSourceDialog组件 */}
           {showDataSourceDialog && selectedDataSourceId && (

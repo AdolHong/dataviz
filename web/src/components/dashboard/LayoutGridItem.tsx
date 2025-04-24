@@ -322,7 +322,7 @@ export const LayoutGridItem = memo(
           // 高度范围: 300 ~ 480
           const height =
             layout.height === undefined
-              ? 300
+              ? '100%'
               : Math.min(Math.max(layout.height, 300), 480);
 
           return (

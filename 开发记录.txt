@@ -30,7 +30,7 @@ docker run -p 3000:3000 dataviz-frontend
 
 12. 对于timer,  可能查询有延迟； 保证新的查询不会被旧的查询替代；
 20. viz提供playground，可以复制当前queryStaus和代码，进行画图
-21. share就很有意思…再想想
+21. share就很有意思…再想想; share如果有个share管理就好了； 离职也能带走一些东西
 33. report的json导出， json导入;
 34. 文件拖拽方式的json导入
 35. csv文件的处理
@@ -39,12 +39,9 @@ docker run -p 3000:3000 dataviz-frontend
 
 45. 还没query时，  我也想看parsed_code
 
-48. version管理
-49. share如果有个share管理就好了； 离职也能带走一些东西
 51. 重复列名的inferredColumn
 52. cascader推断， 需要支持 多对多；
-53. cascader推断： 展示效果不好， 需要好好优化；      多选，还是单选；  单选的话， 中间结点不能选择； cascader和单列推断，特别冗余；
-54. cascader推断，弄成全局的；  并且可以设置局部不受影响；
+53. cascader和inferredColumn，弄成全局的；  并且可以设置局部不受影响；
 
 
 
@@ -82,7 +79,9 @@ docker run -p 3000:3000 dataviz-frontend
 44. 若不能复制剪切板，则改为下载
 46. 隐藏参数按钮， 点击两次，没有加载当前的value；
 47. navbar, item的文字溢出截断；
+48. version管理: -> 没开发， 仅用了git来保存历史版本
 50. date_range参数的支持。  比如  ${job_date:start}, ${job_date:end}
+
 
 
 

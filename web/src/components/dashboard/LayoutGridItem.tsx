@@ -320,39 +320,34 @@ export const LayoutGridItem = memo(
           );
 
           return (
-            <div className='w-[95%] h-[95%] flex justify-center items-center'>
-              <Plot
-                data={data}
-                layout={{
-                  ...layout,
-                  autosize: true,
-                  height: 300,
-                  margin: { l: 20, r: 20, b: 50, t: 50, pad: 4 },
-                  font: { family: 'Arial, sans-serif' },
-                  sliders: layout.sliders, // 确保滑块配置被传递
-                  modebar: {
-                    orientation: 'v',
-                  },
-                }}
-                frames={frames} // 明确传递动画帧
-                config={{
-                  ...(config || {}),
-                  responsive: true,
-                  // displayModeBar: 'hover',
-                  displaylogo: false,
-                  // displayModeBar: false,
-                  modeBarButtonsToRemove: [
-                    'lasso2d',
-                    'select2d',
-                    'zoom2d',
-                    'toImage',
-                    'pan2d',
-                    'resetScale2d',
-                  ],
-                }}
-                style={{ width: '100%', height: '100%' }}
-              />
-            </div>
+            <Plot
+              data={data}
+              layout={{
+                ...layout,
+                width: undefined, // 移除固定宽度 :  这样才能自适应父组件的宽度
+                // height: undefined, // 移除固定高度
+                font: { family: 'Arial, sans-serif' },
+                sliders: layout.sliders, // 确保滑块配置被传递
+                modebar: {
+                  orientation: 'v',
+                },
+              }}
+              frames={frames} // 明确传递动画帧
+              config={{
+                ...(config || {}),
+                responsive: true,
+                displaylogo: false,
+                modeBarButtonsToRemove: [
+                  'lasso2d',
+                  'select2d',
+                  'zoom2d',
+                  'toImage',
+                  'pan2d',
+                  'resetScale2d',
+                ],
+              }}
+              style={{ width: '100%' }}
+            />
           );
 
         case 'echart':

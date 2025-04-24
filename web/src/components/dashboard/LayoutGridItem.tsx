@@ -669,6 +669,13 @@ const EChartComponent: React.FC<EChartComponentProps> = ({
 
       // 设置配置项
       chartInstance.current.setOption(parsedOption, true); // true 表示不合并，完全替换
+
+      // 在下一个事件循环中调用 resize
+      setTimeout(() => {
+        if (chartInstance.current && !chartInstance.current.isDisposed()) {
+          chartInstance.current.resize();
+        }
+      }, 500);
     }
 
     // 添加窗口大小调整监听器

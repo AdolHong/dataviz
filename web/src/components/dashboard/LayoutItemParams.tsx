@@ -11,7 +11,7 @@ import { getChildrenValuesByTargetValues } from './CascaderTreeView';
 import type { PlainParamValue } from '@/types/api/aritifactRequest';
 
 import type { CascaderProps } from 'antd';
-import { Cascader } from 'antd';
+import { AntdCascaderView } from './AntdCascaderView';
 
 interface Option {
   value: string;
@@ -168,6 +168,14 @@ export function LayoutItemParams({
     });
   };
 
+  const handleCascaderValueChange = (
+    dfAlias: string,
+    itemLevel: string,
+    selectedValues: string[]
+  ) => {
+    const paramKey = `${dfAlias},${itemLevel}`;
+  };
+
   return (
     <div className='border-l border-gray-200 pl-3 w-[250px] my-5 flex flex-col h-full'>
       <h3 className='text-sm font-medium mb-3 flex-shrink-0'>参数列表</h3>
@@ -202,13 +210,14 @@ export function LayoutItemParams({
                   </div>
 
                   <div className='mt-1' key={`cascader-${index}`}>
-                    <CascaderTreeView
+                    {/* <CascaderTreeView
                       dfAlias={param.dfAlias}
                       cascaderParam={param}
                       dataSources={dataSources}
                       dependentQueryStatus={dependentQueryStatus}
                       onCheckChange={(selectedValues, treeData) => {
                         if (param.levels && param.levels.length > 0) {
+                          console.info('old cascader:', selectedValues);
                           handleTreeViewCheckChange(
                             param.dfAlias,
                             param.levels[param.levels.length - 1].dfColumn,
@@ -216,6 +225,17 @@ export function LayoutItemParams({
                             treeData
                           );
                         }
+                      }}
+                    /> */}
+                    <AntdCascaderView
+                      dfAlias={param.dfAlias}
+                      cascaderParam={param}
+                      dataSources={dataSources}
+                      dependentQueryStatus={dependentQueryStatus}
+                      multiple={true}
+                      onCheckChange={(selectedValues, treeData) => {
+                        console.info('selectedValues:', selectedValues);
+                        console.info('treeData:', treeData);
                       }}
                     />
                   </div>

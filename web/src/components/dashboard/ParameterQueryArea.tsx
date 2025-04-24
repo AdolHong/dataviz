@@ -227,9 +227,17 @@ export const ParameterQueryArea = memo(
         setCachedFiles(files);
 
         setIsQuerying(true);
-        const promises = dataSources.map((dataSource) =>
-          handleQueryRequest(dataSource)
-        );
+
+        const promises = dataSources.map((dataSource) => {
+          // 初始化QueryStatus的状态
+          const newStatus: QueryStatus = {
+            status: DataSourceStatus.INIT,
+          };
+          setQueryStatus(dataSource.id, newStatus);
+
+          // 发起query请求
+          handleQueryRequest(dataSource);
+        });
         await Promise.all(promises);
         setIsQuerying(false);
       }

@@ -238,6 +238,13 @@ export const LayoutGridItem = memo(
           {} as Record<string, string>
         );
         executeArtifact(artifact, queryIds);
+      } else if (
+        Object.values(dependentQueryStatus).some(
+          (queryStatus) => queryStatus.status !== DataSourceStatus.SUCCESS
+        ) &&
+        artifactResponse !== null
+      ) {
+        setArtifactResponse(null);
       }
     }, [
       dependentQueryStatus,

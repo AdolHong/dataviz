@@ -36,7 +36,7 @@ docker run -p 3000:3000 dataviz-frontend
 35. csv文件的处理
 36. timer
 38. 复制文件功能是 假复制....(😂哭死)
-39. 重新query的时候， queryStatus或许可以更新一下颜色; (INIT, RUNNING, SUCCESS, ERROR, ON_SCHEDULE)
+
 45. 还没query时，  我也想看parsed_code
 
 48. version管理
@@ -74,6 +74,7 @@ docker run -p 3000:3000 dataviz-frontend
 30. 限制了数据查询的行数， 目前是5万
 31. cascader取消即反选：
 32.  plainParam， 单选不能为空；  且做好类型转换；
+39. 重新query的时候， queryStatus, artifactResponse可以更新一下颜色; (INIT)
 40. 网页刷新，进入到 /login, 为什么是白色页面
 41. 后端多进程登陆
 42. 后端多进程的lock问题

@@ -10,6 +10,62 @@ import type { TreeNodeData } from '../tree-select/types';
 import { getChildrenValuesByTargetValues } from './CascaderTreeView';
 import type { PlainParamValue } from '@/types/api/aritifactRequest';
 
+import type { CascaderProps } from 'antd';
+import { Cascader } from 'antd';
+
+interface Option {
+  value: string;
+  label: string;
+  children?: Option[];
+}
+
+const options: Option[] = [
+  {
+    value: 'zhejiang',
+    label: 'Zhejiang',
+    children: [
+      {
+        value: 'hangzhou',
+        label: 'Hangzhou',
+        children: [
+          {
+            value: 'xihu',
+            label: 'West Lake',
+          },
+        ],
+      },
+    ],
+  },
+  {
+    value: 'jiangsu',
+    label: 'Jiangsu',
+    children: [
+      {
+        value: 'nanjing',
+        label: 'Nanjing',
+        children: [
+          {
+            value: 'zhonghuamen',
+            label: 'Zhong Hua Men',
+          },
+          {
+            value: 'xihu',
+            label: 'West Lake',
+          },
+        ],
+      },
+    ],
+  },
+];
+
+const onChange: CascaderProps<Option>['onChange'] = (value) => {
+  console.log(value);
+};
+
+const onChange2: CascaderProps<Option, 'value', true>['onChange'] = (value) => {
+  console.log(value);
+};
+
 interface LayoutItemParamsProps {
   artifact: Artifact;
   dependentQueryStatus: Record<string, QueryStatus>;
@@ -280,6 +336,26 @@ export function LayoutItemParams({
             </div>
           </div>
         )}
+
+        {/*
+          单选:  设置默认选项
+          多选:  后端的开发
+         */}
+        {/* <Cascader
+          style={{ width: '100%' }}
+          options={options}
+          onChange={onChange}
+          placeholder='Please select'
+          allowClear={false}
+        /> */}
+        {/* <Cascader
+          style={{ width: '100%' }}
+          options={options}
+          onChange={onChange2}
+          multiple
+          maxTagCount='responsive'
+          defaultValue={[['jiangsu']]}
+        /> */}
       </div>
     </div>
   );

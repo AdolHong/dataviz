@@ -10,61 +10,61 @@ import type { TreeNodeData } from '../tree-select/types';
 import { getChildrenValuesByTargetValues } from './CascaderTreeView';
 import type { PlainParamValue } from '@/types/api/aritifactRequest';
 
-import type { CascaderProps } from 'antd';
-import { AntdCascaderView } from './AntdCascaderView';
+// import type { CascaderProps } from 'antd';
+// import { AntdCascaderView } from './AntdCascaderView';
 
-interface Option {
-  value: string;
-  label: string;
-  children?: Option[];
-}
+// interface Option {
+//   value: string;
+//   label: string;
+//   children?: Option[];
+// }
 
-const options: Option[] = [
-  {
-    value: 'zhejiang',
-    label: 'Zhejiang',
-    children: [
-      {
-        value: 'hangzhou',
-        label: 'Hangzhou',
-        children: [
-          {
-            value: 'xihu',
-            label: 'West Lake',
-          },
-        ],
-      },
-    ],
-  },
-  {
-    value: 'jiangsu',
-    label: 'Jiangsu',
-    children: [
-      {
-        value: 'nanjing',
-        label: 'Nanjing',
-        children: [
-          {
-            value: 'zhonghuamen',
-            label: 'Zhong Hua Men',
-          },
-          {
-            value: 'xihu',
-            label: 'West Lake',
-          },
-        ],
-      },
-    ],
-  },
-];
+// const options: Option[] = [
+//   {
+//     value: 'zhejiang',
+//     label: 'Zhejiang',
+//     children: [
+//       {
+//         value: 'hangzhou',
+//         label: 'Hangzhou',
+//         children: [
+//           {
+//             value: 'xihu',
+//             label: 'West Lake',
+//           },
+//         ],
+//       },
+//     ],
+//   },
+//   {
+//     value: 'jiangsu',
+//     label: 'Jiangsu',
+//     children: [
+//       {
+//         value: 'nanjing',
+//         label: 'Nanjing',
+//         children: [
+//           {
+//             value: 'zhonghuamen',
+//             label: 'Zhong Hua Men',
+//           },
+//           {
+//             value: 'xihu',
+//             label: 'West Lake',
+//           },
+//         ],
+//       },
+//     ],
+//   },
+// ];
 
-const onChange: CascaderProps<Option>['onChange'] = (value) => {
-  console.log(value);
-};
+// const onChange: CascaderProps<Option>['onChange'] = (value) => {
+//   console.log(value);
+// };
 
-const onChange2: CascaderProps<Option, 'value', true>['onChange'] = (value) => {
-  console.log(value);
-};
+// const onChange2: CascaderProps<Option, 'value', true>['onChange'] = (value) => {
+//   console.log(value);
+// };
 
 interface LayoutItemParamsProps {
   artifact: Artifact;
@@ -168,13 +168,23 @@ export function LayoutItemParams({
     });
   };
 
-  const handleCascaderValueChange = (
-    dfAlias: string,
-    itemLevel: string,
-    selectedValues: string[]
-  ) => {
-    const paramKey = `${dfAlias},${itemLevel}`;
-  };
+  // const handleCascaderValueChange = (
+  //   dfAlias: string,
+  //   columns: string[],
+  //   selectedValues: string[]
+  // ) => {
+  //   const paramKey = `${dfAlias},{${columns}.join(',')}`;
+  //   console.info(
+  //     `cascader param ${paramKey} selected values: ${selectedValues}`
+  //   );
+  //   console.info('selectedValues:', selectedValues);
+  //   setCascaderParamValues((prev: Record<string, string | string[]>) => {
+  //     return {
+  //       ...prev,
+  //       [paramKey]: selectedValues,
+  //     };
+  //   });
+  // };
 
   return (
     <div className='border-l border-gray-200 pl-3 w-[250px] my-5 flex flex-col h-full'>
@@ -210,7 +220,7 @@ export function LayoutItemParams({
                   </div>
 
                   <div className='mt-1' key={`cascader-${index}`}>
-                    {/* <CascaderTreeView
+                    <CascaderTreeView
                       dfAlias={param.dfAlias}
                       cascaderParam={param}
                       dataSources={dataSources}
@@ -226,18 +236,27 @@ export function LayoutItemParams({
                           );
                         }
                       }}
-                    /> */}
-                    <AntdCascaderView
+                    />
+                    {/* <AntdCascaderView
                       dfAlias={param.dfAlias}
                       cascaderParam={param}
                       dataSources={dataSources}
                       dependentQueryStatus={dependentQueryStatus}
                       multiple={true}
-                      onCheckChange={(selectedValues, treeData) => {
-                        console.info('selectedValues:', selectedValues);
-                        console.info('treeData:', treeData);
+                      onCheckChange={(selectedValues) => {
+                        
+                        if (param.levels && param.levels.length > 0) {
+                          const columns = param.levels.map((level) => {
+                            return level.dfColumn;
+                          });
+                          handleCascaderValueChange(
+                            param.dfAlias,
+                            columns,
+                            selectedValues
+                          );
+                        }
                       }}
-                    />
+                    /> */}
                   </div>
                 </div>
               );

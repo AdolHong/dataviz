@@ -1,10 +1,10 @@
 import axios from 'axios';
 
 // 个人mac
-export const BASE_URL = 'http://localhost:8000/api';
+// export const BASE_URL = 'http://localhost:8000/api';
 
 // 公司服务器
-// export const BASE_URL = 'http://10.128.252.212:8080/api';
+export const BASE_URL = 'http://10.128.252.212:8080/api';
 
 export const axiosInstance = axios.create({
   baseURL: BASE_URL,

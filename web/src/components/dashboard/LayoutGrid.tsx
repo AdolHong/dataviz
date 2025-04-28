@@ -35,6 +35,7 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
           gridAutoFlow: 'dense',
         }}
       >
+        {/* 展示layout grid*/}
         {report.layout.items.map((item) => {
           const artifact = report.artifacts.find(
             (artifact) => artifact.id === item.id
@@ -72,12 +73,12 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
                 strDependentQueryStatus={JSON.stringify(dependentQueryStatus)}
                 report={report}
               />
-
-              {/* artiface 详情*/}
-              <ArtifactResponseDialog />
             </>
           );
         })}
+
+        {/* artiface 详情*/}
+        <ArtifactResponseDialog />
       </div>
     </>
   );

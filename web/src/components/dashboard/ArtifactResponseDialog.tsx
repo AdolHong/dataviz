@@ -195,7 +195,7 @@ export function ArtifactResponseDialog() {
           </TabsContent>
 
           <TabsContent value='code' className='pt-4'>
-            <pre className='text-xs rounded-md bg-muted p-4 font-mono max-h-96 overflow-auto w-full whitespace-pre-wrap break-all'>
+            <pre className='text-xs rounded-md bg-muted p-4 font-mono max-h-96 overflow-auto  whitespace-pre-wrap break-all'>
               {artifactResponse.codeContext.pyCode || '无代码'}
             </pre>
           </TabsContent>

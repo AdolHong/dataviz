@@ -5,6 +5,7 @@ import { useTabFilesStore } from '@/lib/store/useFileSessionStore';
 import { useState, useEffect, memo } from 'react';
 import { loadReportForTab } from './DashboardPage';
 import { Button } from '@/components/ui/button';
+import type { Report } from '@/types';
 
 import {
   useTabsSessionStore,

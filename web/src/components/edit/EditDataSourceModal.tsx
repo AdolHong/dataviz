@@ -362,7 +362,7 @@ export const EditDataSourceModal = ({
           {showCodeEditor && (
             <>
               <div className='flex space-x-10'>
-                <div>
+                <div className='hidden'>
                   <label className='block mb-2'>更新模式</label>
                   <RadioGroup
                     value={updateMode}

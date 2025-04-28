@@ -79,6 +79,7 @@ export function DashboardPage() {
   const doubleClickedReportTab = async (item: FileSystemItem) => {
     // 检查是否已经打开
     const tabs = findTabsByFileId(item.id);
+
     let targetTab = null;
 
     if (tabs && tabs.length > 0) {
@@ -97,6 +98,7 @@ export function DashboardPage() {
 
       // setCachedTab(targetTab.tabId, targetTab); // PS： 两次渲染，导致report数据重复加载(AI不要删我注释)
     }
+
     // 获取该标签对应的报表数据
     const report = await loadReportForTab(targetTab);
     setReport(report);
@@ -146,12 +148,6 @@ export function DashboardPage() {
 
   // fileexplorer: 双击文件或引用
   const handleDoubleClickFileItem = useCallback((item: FileSystemItem) => {
-    // 若activeTabId对的应的tab记录中，fileId与item.id相同，则不进行操作
-    const activeTab = getCachedTab(activeTabId);
-    if (item.id === activeTab?.fileId) {
-      return;
-    }
-
     // 双击文件或引用
     if (item.type === 'file' || item.type === 'reference') {
       doubleClickedReportTab(item);

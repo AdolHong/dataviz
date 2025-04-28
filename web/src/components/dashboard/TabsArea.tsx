@@ -75,10 +75,6 @@ function BaseTabsArea({
     }
   };
 
-  const handleDragEnd = () => {
-    setDraggedItem(null);
-  };
-
   return (
     <>
       {tabs.map((tab) => (
@@ -93,7 +89,7 @@ function BaseTabsArea({
           draggable
           onDragStart={(e) => handleDragStart(tab.tabId, e)}
           onDragOver={(e) => handleDragOver(e, tab.tabId)}
-          onDragEnd={handleDragEnd}
+          onDragEnd={() => setDraggedItem(null)}
           style={{
             cursor: 'grab',
             transition: 'all 0.2s ease-in-out',

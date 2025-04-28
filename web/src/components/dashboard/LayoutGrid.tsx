@@ -25,57 +25,54 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
   }
 
   return (
-    <>
-      <div
-        className='grid gap-6 w-full'
-        style={{
-          gridTemplateColumns: `repeat(${report.layout.columns}, minmax(0, 1fr))`,
-          gridTemplateRows: `repeat(${report.layout.rows}, minmax(100px, auto))`,
-          gridAutoFlow: 'dense',
-        }}
-      >
-        {/* 展示layout grid*/}
-        {report.layout.items.map((item) => {
-          const artifact = report.artifacts.find(
-            (artifact) => artifact.id === item.id
+    <div
+      key={`grid-${report.id}`}
+      className='grid gap-6 w-full'
+      style={{
+        gridTemplateColumns: `repeat(${report.layout.columns}, minmax(0, 1fr))`,
+        gridTemplateRows: `repeat(${report.layout.rows}, minmax(100px, auto))`,
+        gridAutoFlow: 'dense',
+      }}
+    >
+      {/* 展示layout grid*/}
+      {report.layout.items.map((item) => {
+        const artifact = report.artifacts.find(
+          (artifact) => artifact.id === item.id
+        );
+
+        const dependentDataSources: string[] = artifact
+          ? artifact.dependencies
+              .map((dependency) => {
+                const dataSource = report.dataSources.find(
+                  (dataSource) => dataSource.alias === dependency
+                );
+                return dataSource ? dataSource.id : '';
+              })
+              .filter(Boolean)
+          : [];
+
+        const dependentQueryStatus: Record<string, QueryStatus> = Object.keys(
+          queryStatus
+        )
+          .filter((key) => dependentDataSources.includes(key))
+          .reduce(
+            (acc, key) => {
+              acc[key] = queryStatus[key];
+              return acc;
+            },
+            {} as Record<string, QueryStatus>
           );
 
-          const dependentDataSources: string[] = artifact
-            ? artifact.dependencies
-                .map((dependency) => {
-                  const dataSource = report.dataSources.find(
-                    (dataSource) => dataSource.alias === dependency
-                  );
-                  return dataSource ? dataSource.id : '';
-                })
-                .filter(Boolean)
-            : [];
-
-          const dependentQueryStatus: Record<string, QueryStatus> = Object.keys(
-            queryStatus
-          )
-            .filter((key) => dependentDataSources.includes(key))
-            .reduce(
-              (acc, key) => {
-                acc[key] = queryStatus[key];
-                return acc;
-              },
-              {} as Record<string, QueryStatus>
-            );
-
-          return (
-            <>
-              <LayoutGridItem
-                key={item.id}
-                layoutItem={item}
-                artifact={artifact}
-                strDependentQueryStatus={JSON.stringify(dependentQueryStatus)}
-                report={report}
-              />
-            </>
-          );
-        })}
-      </div>
-    </>
+        return (
+          <LayoutGridItem
+            key={item.id}
+            layoutItem={item}
+            artifact={artifact}
+            strDependentQueryStatus={JSON.stringify(dependentQueryStatus)}
+            report={report}
+          />
+        );
+      })}
+    </div>
   );
 }

@@ -788,8 +788,6 @@ export const queryStatusColor = (status: DataSourceStatus) => {
     // return '';
     case DataSourceStatus.ERROR:
       return 'bg-red-500 hover:bg-red-600';
-    case DataSourceStatus.SCHEDULED:
-      return 'bg-yellow-500 hover:bg-yellow-600  opacity-60 hover:opacity-100';
     case DataSourceStatus.RUNNING:
       return 'bg-blue-500 hover:bg-blue-600  opacity-60 hover:opacity-100';
     default:

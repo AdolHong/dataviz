@@ -29,6 +29,7 @@ import dayjs from 'dayjs';
 import { ArtifactTableView } from '@/components/ArtifactTableView';
 
 import { useArtifactDialogStore } from '@/lib/store/useArtifactDialogStore';
+import { useDataSourceDialogStore } from '@/lib/store/useDataSourceDialogStore';
 
 // Artifact状态颜色
 export const artifactStatusColor = (status: string): string => {
@@ -67,12 +68,12 @@ export const LayoutGridItem = memo(
           (artifact.cascaderParams && artifact.cascaderParams.length > 0))) ||
         false
     );
-    const [showDataSourceDialog, setShowDataSourceDialog] = useState(false);
-    const [selectedDataSourceId, setSelectedDataSourceId] = useState<
-      string | null
-    >(null);
 
     const openArtifactDialog = useArtifactDialogStore(
+      (state) => state.openDialog
+    );
+
+    const openDataSourceDialog = useDataSourceDialogStore(
       (state) => state.openDialog
     );
 
@@ -112,8 +113,11 @@ export const LayoutGridItem = memo(
 
     // 处理点击数据源按钮事件
     const handleDataSourceClick = (sourceId: string) => {
-      setSelectedDataSourceId(sourceId);
-      setShowDataSourceDialog(true);
+      const dataSource = findDataSource(sourceId);
+      const queryStatus = dependentQueryStatus[sourceId];
+      if (dataSource && queryStatus) {
+        openDataSourceDialog(dataSource, queryStatus);
+      }
     };
 
     // 处理点击Artifact按钮事件
@@ -122,7 +126,7 @@ export const LayoutGridItem = memo(
         openArtifactDialog(artifact, artifactResponse);
       }
     };
-
+    console.info('渲染我干嘛?');
     // 添加查找数据源的函数
     const findDataSource = (sourceId: string): DataSource | null => {
       const dataSource = report.dataSources.find((ds) => ds.id === sourceId);
@@ -625,16 +629,6 @@ export const LayoutGridItem = memo(
               />
             </div>
           </CardContent>
-
-          {/* 添加DataSourceDialog组件 */}
-          {showDataSourceDialog && selectedDataSourceId && (
-            <DataSourceDialog
-              open={showDataSourceDialog}
-              onOpenChange={setShowDataSourceDialog}
-              dataSource={findDataSource(selectedDataSourceId)}
-              queryStatus={dependentQueryStatus[selectedDataSourceId] || null}
-            />
-          )}
 
           {/* 添加ArtifactResponseDialog组件
           {showArtifactDialog && artifactResponse && (

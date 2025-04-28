@@ -12,29 +12,19 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion';
 import { Badge } from '@/components/ui/badge';
-import { type QueryStatus } from '@/lib/store/useQueryStatusStore';
+
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import type { DataSource } from '@/types/models/dataSource';
+import { useDataSourceDialogStore } from '@/lib/store/useDataSourceDialogStore';
 
-interface DataSourceDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  dataSource: DataSource | null;
-  queryStatus: QueryStatus | null;
-}
-
-export function DataSourceDialog({
-  open,
-  onOpenChange,
-  dataSource,
-  queryStatus,
-}: DataSourceDialogProps) {
+export function DataSourceDialog() {
   const [activeTab, setActiveTab] = useState<string>('details');
+
+  const { isOpen, dataSource, queryStatus, closeDialog } =
+    useDataSourceDialogStore();
 
   if (!dataSource || !queryStatus) {
     return null;
   }
-  console.log('queryStatus', queryStatus);
 
   const { queryResponse: response } = queryStatus;
   const hasError = response?.status === 'error';
@@ -45,7 +35,7 @@ export function DataSourceDialog({
     response?.codeContext?.type === 'python';
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={isOpen} onOpenChange={closeDialog}>
       <DialogContent className='sm:max-w-3xl'>
         <DialogHeader>
           <DialogTitle className='flex items-center gap-2'>

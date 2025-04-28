@@ -1,6 +1,7 @@
 import { type Report } from '@/types/models/report';
 import { LayoutGridItem } from './LayoutGridItem';
 import { ArtifactResponseDialog } from './ArtifactResponseDialog';
+import { DataSourceDialog } from './DataSourceDialog';
 
 import {
   useQueryStatusStore,
@@ -76,6 +77,9 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
             </>
           );
         })}
+
+        {/* data source 详情*/}
+        <DataSourceDialog />
 
         {/* artiface 详情*/}
         <ArtifactResponseDialog />

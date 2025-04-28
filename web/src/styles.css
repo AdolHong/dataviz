@@ -7,6 +7,13 @@
   box-sizing: border-box;
 }
 
+/* vega lite 的自适应*/
+ .vega-embed canvas {
+  width: auto !important;
+  height: auto !important;
+  min-height: 300px;
+  max-height: 480px;
+} 
 
 body {
   @apply m-0;

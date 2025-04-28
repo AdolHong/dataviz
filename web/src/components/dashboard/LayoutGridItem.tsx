@@ -326,7 +326,7 @@ export const LayoutGridItem = memo(
               <img
                 src={`data:image/png;base64,${artifactData.dataContext.data}`}
                 alt='Artifact Image'
-                className='max-w-full max-h-[300px] object-contain'
+                className='max-w-full object-contain'
               />
             </div>
           );
@@ -387,7 +387,7 @@ export const LayoutGridItem = memo(
 
         case 'altair':
           return (
-            <div className='w-[95%] h-[95%] flex justify-center items-center'>
+            <div className='w-full flex justify-center items-center'>
               <VegaChart data={artifactData.dataContext.data} />
             </div>
           );
@@ -720,9 +720,14 @@ const VegaChart: React.FC<{ data: string }> = ({ data }) => {
   const [chartData, _] = useState(JSON.parse(data));
   if (!chartData) return <div>Loading...</div>;
 
+  console.info('height:', chartData?.height);
+
+  // 默认是 480 * 320
   const newChartData = {
     ...chartData,
-    // autosize: { type: 'fit', contains: 'padding' },
+    autosize: 'fit',
+    height: chartData?.height | 320,
+    width: chartData?.width | 480,
   };
 
   return <VegaLite spec={newChartData} />;

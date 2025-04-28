@@ -121,8 +121,6 @@ export const ParameterQueryArea = memo(
       state.getQueryStatusByTabId(activeTabId)
     );
 
-    const queryStatusRef = useRef(queryStatus);
-
     // 检查需要文件上传的数据源
     const csvDataSources =
       dataSources?.filter(
@@ -130,10 +128,6 @@ export const ParameterQueryArea = memo(
           ds.executor.type === 'csv_uploader' || ds.executor.type === 'csv_data'
       ) || [];
     const requireFileUpload = csvDataSources.length > 0;
-
-    useEffect(() => {
-      queryStatusRef.current = queryStatus; // 更新 ref 的值
-    }, [queryStatus]);
 
     // 使用 useEffect 在初始渲染时设置默认值
     useEffect(() => {
@@ -225,16 +219,18 @@ export const ParameterQueryArea = memo(
         setCachedValues(values);
         setCachedFiles(files);
 
+        // 重新初始化状态
         setIsQuerying(true);
-
-        const promises = dataSources.map((dataSource) => {
+        dataSources.map((dataSource) => {
           // 初始化QueryStatus的状态
           const newStatus: QueryStatus = {
             status: DataSourceStatus.INIT,
           };
           setQueryStatus(dataSource.id, newStatus);
+        });
 
-          // 发起query请求
+        // 发起query请求
+        const promises = dataSources.map((dataSource) => {
           handleQueryRequest(dataSource);
         });
         await Promise.all(promises);
@@ -655,6 +651,7 @@ export const ParameterQueryArea = memo(
       );
     };
 
+    console.info('渲染了的啊', queryStatus);
     return (
       <Card className='w-full'>
         <CardContent>
@@ -691,16 +688,14 @@ export const ParameterQueryArea = memo(
                         key={source.id}
                         type='button'
                         onClick={() => {
-                          const queryStatus = queryStatusRef.current[source.id];
-                          if (source && queryStatus) {
-                            openDataSourceDialog(source, queryStatus);
+                          const currentQueryStatus = queryStatus[source.id];
+                          if (source && currentQueryStatus) {
+                            openDataSourceDialog(source, currentQueryStatus);
                           }
                         }}
                         className={`w-3 h-3 rounded-full  shadow-sm   cursor-pointer ${
-                          queryStatusRef.current[source.id]?.status
-                            ? queryStatusColor(
-                                queryStatusRef.current[source.id]?.status
-                              )
+                          queryStatus?.[source.id]
+                            ? queryStatusColor(queryStatus[source.id].status)
                             : 'bg-gray-300 hover:bg-gray-400'
                         }`}
                       />
@@ -781,7 +776,6 @@ export const ParameterQueryArea = memo(
 
 export const queryStatusColor = (status: DataSourceStatus) => {
   // 暂时的想法是： 成功或未初始化，都为白色
-
   switch (status) {
     case DataSourceStatus.SUCCESS:
       return 'bg-green-300 hover:bg-green-500 opacity-60 hover:opacity-100';

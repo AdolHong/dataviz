@@ -19,7 +19,7 @@ interface TabsAreaProps {
 }
 
 // 标签栏组件
-const TabsArea = memo(
+export const TabsArea = memo(
   ({ setReport, navbarVisible, onToggleNavbarVisible }: TabsAreaProps) => {
     if (!setReport) {
       return <div>setReport is not defined</div>;
@@ -237,5 +237,3 @@ const TabsArea = memo(
     );
   }
 );
-
-export default TabsArea;

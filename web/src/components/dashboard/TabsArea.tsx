@@ -17,6 +17,149 @@ interface TabsAreaProps {
   setReport: (report: Report) => void;
 }
 
+type BaseTab = {
+  tabId: string;
+  tabName: string;
+};
+
+interface BaseTabsAreaProps {
+  handleOpenTab: (tabId: string, tabName: string) => void;
+  handleClickTab: (tabId: string) => void;
+  handleCloseTab: (tabId: string) => void;
+  updateTabsOrder: (tabs: BaseTab[]) => void;
+}
+
+function BaseTabsArea({
+  handleOpenTab,
+  handleClickTab,
+  handleCloseTab,
+  updateTabsOrder,
+}: BaseTabsAreaProps) {
+  // 用于拖拽功能的状态
+  const [draggedItem, setDraggedItem] = useState<string | null>(null);
+  const [openTabs, setOpenTabs] = useState<BaseTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string>('');
+
+  // 拖拽事件处理函数
+  const handleDragStart = (
+    tabId: string,
+    e: React.DragEvent<HTMLDivElement>
+  ) => {
+    setDraggedItem(tabId);
+    // 设置拖拽图像（可选）
+    if (e.dataTransfer && e.target instanceof HTMLElement) {
+      // 创建半透明拖拽效果
+      e.dataTransfer.effectAllowed = 'move';
+      // 设置光标位置
+      e.dataTransfer.setDragImage(e.target, 20, 20);
+    }
+  };
+
+  const handleDragOver = (
+    e: React.DragEvent<HTMLDivElement>,
+    targetTabId: string
+  ) => {
+    e.preventDefault();
+    if (draggedItem && draggedItem !== targetTabId) {
+      const currentOpenTabs = [...openTabs];
+      const draggedIndex = currentOpenTabs.findIndex(
+        (tab) => tab.tabId === draggedItem
+      );
+      const targetIndex = currentOpenTabs.findIndex(
+        (tab) => tab.tabId === targetTabId
+      );
+
+      if (draggedIndex !== -1 && targetIndex !== -1) {
+        const updatedTabs = [...currentOpenTabs];
+        const [removedTab] = updatedTabs.splice(draggedIndex, 1);
+        updatedTabs.splice(targetIndex, 0, removedTab);
+
+        setOpenTabs(updatedTabs);
+      }
+    }
+  };
+
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (e.currentTarget) {
+      e.currentTarget.classList.add('bg-blue-100', 'dark:bg-blue-900/20');
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (e.currentTarget) {
+      e.currentTarget.classList.remove('bg-blue-100', 'dark:bg-blue-900/20');
+    }
+  };
+
+  const handleDragEnd = (e: React.DragEvent<HTMLDivElement>) => {
+    if (e.currentTarget) {
+      e.currentTarget.classList.remove('bg-blue-100', 'dark:bg-blue-900/20');
+    }
+    // 持久化到store
+    if (draggedItem) {
+      updateTabsOrder(openTabs);
+    }
+    setDraggedItem(null);
+  };
+
+  return (
+    <>
+      {/* 标签页 - 使用 store 中的 tabsOrder */}
+
+      {openTabs.length > 0 &&
+        openTabs.map((tab) => {
+          if (!tab) return null;
+
+          return (
+            <div
+              key={tab.tabId}
+              className={`flex items-center px-2 py-1 cursor-pointer border-r border-border relative min-w-[120px] ${
+                tab.tabId === activeTabId
+                  ? 'bg-background'
+                  : 'bg-muted/50 hover:bg-muted'
+              } ${draggedItem === tab.tabId ? 'opacity-50' : ''}`}
+              onClick={async () => {
+                if (tab.tabId !== activeTabId) {
+                  handleClickTab(tab.tabId);
+                }
+              }}
+              draggable
+              onDragStart={(e) => handleDragStart(tab.tabId, e)}
+              onDragOver={(e) => handleDragOver(e, tab.tabId)}
+              onDragEnd={handleDragEnd}
+              onDragEnter={handleDragEnter}
+              onDragLeave={handleDragLeave}
+              style={{
+                cursor: 'grab',
+                transition: 'all 0.2s ease-in-out',
+                transform:
+                  draggedItem === tab.tabId ? 'scale(0.95)' : 'scale(1)',
+              }}
+            >
+              <div className='whitespace-nowrap text-xs flex-grow'>
+                {tab.tabName}
+              </div>
+              <Button
+                variant='ghost'
+                size='icon'
+                className='h-5 w-5 ml-1 opacity-60 hover:opacity-100 flex-shrink-0'
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  //删除tab:  remove操作的同时也会更新activeTabId
+                  handleCloseTab(tab.tabId);
+                }}
+              >
+                <X size={12} />
+              </Button>
+            </div>
+          );
+        })}
+    </>
+  );
+}
+
 // 标签栏组件
 export const TabsArea = memo(({ setReport }: TabsAreaProps) => {
   if (!setReport) {

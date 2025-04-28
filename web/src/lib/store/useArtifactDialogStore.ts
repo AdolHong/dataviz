@@ -21,5 +21,6 @@ export const useArtifactDialogStore = create<ArtifactDialogState>((set) => ({
       artifact,
       artifactResponse,
     }),
-  closeDialog: () => set({ isOpen: false }),
+  closeDialog: () =>
+    set({ isOpen: false, artifact: null, artifactResponse: null }),
 }));

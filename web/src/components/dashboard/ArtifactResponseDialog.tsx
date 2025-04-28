@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -13,7 +13,13 @@ import { useArtifactDialogStore } from '@/lib/store/useArtifactDialogStore';
 export function ArtifactResponseDialog() {
   const { isOpen, artifact, artifactResponse, closeDialog } =
     useArtifactDialogStore();
+
   const [activeTab, setActiveTab] = useState<string>('details');
+
+  // 关键修改：当open变化时重置tab
+  useEffect(() => {
+    setActiveTab('details');
+  }, [isOpen]);
 
   if (!artifact || !artifactResponse) {
     return null;
@@ -189,7 +195,7 @@ export function ArtifactResponseDialog() {
           </TabsContent>
 
           <TabsContent value='code' className='pt-4'>
-            <pre className='text-xs rounded-md bg-muted p-4 font-mono overflow-auto max-h-60'>
+            <pre className='text-xs rounded-md bg-muted p-4 font-mono max-h-96 overflow-auto w-full whitespace-pre-wrap break-all'>
               {artifactResponse.codeContext.pyCode || '无代码'}
             </pre>
           </TabsContent>

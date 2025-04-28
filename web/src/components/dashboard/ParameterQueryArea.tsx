@@ -40,8 +40,9 @@ import { useSessionIdStore } from '@/lib/store/useSessionIdStore';
 import { queryApi } from '@/api/query';
 import { Combobox } from '../combobox';
 import type { QueryRequest } from '@/types/api/queryRequest';
-import { DataSourceDialog } from './DataSourceDialog';
 import { DateRangePicker } from '@/components/ui/daterangepicker';
+
+import { useDataSourceDialogStore } from '@/lib/store/useDataSourceDialogStore';
 
 interface ParameterQueryAreaProps {
   activeTabId: string;
@@ -67,10 +68,10 @@ export const ParameterQueryArea = memo(
 
     const { getSessionId } = useSessionIdStore();
     const [parametersExpanded, setParametersExpanded] = useState(true);
-    const [selectedDataSourceIndex, setSelectedDataSourceIndex] = useState<
-      number | null
-    >(null);
-    const [showDataSourceDialog, setShowDataSourceDialog] = useState(false);
+
+    const openDataSourceDialog = useDataSourceDialogStore(
+      (state) => state.openDialog
+    );
 
     // 当前标签: parameters or upload
     const [activeParameterTab, setActiveParameterTab] = useState('parameters');
@@ -132,8 +133,6 @@ export const ParameterQueryArea = memo(
 
     useEffect(() => {
       queryStatusRef.current = queryStatus; // 更新 ref 的值
-
-      console.info('queryStatus', queryStatus);
     }, [queryStatus]);
 
     // 使用 useEffect 在初始渲染时设置默认值
@@ -687,13 +686,15 @@ export const ParameterQueryArea = memo(
                     )}
                   </TabsList>
                   <div className='flex space-x-2 ml-4'>
-                    {dataSources?.map((source, index) => (
+                    {dataSources?.map((source) => (
                       <button
                         key={source.id}
                         type='button'
                         onClick={() => {
-                          setSelectedDataSourceIndex(index);
-                          setShowDataSourceDialog(true);
+                          const queryStatus = queryStatusRef.current[source.id];
+                          if (source && queryStatus) {
+                            openDataSourceDialog(source, queryStatus);
+                          }
                         }}
                         className={`w-3 h-3 rounded-full  shadow-sm   cursor-pointer ${
                           queryStatusRef.current[source.id]?.status
@@ -772,25 +773,6 @@ export const ParameterQueryArea = memo(
               ) : null}
             </Tabs>
           </form>
-
-          {/* 数据源详情对话框 */}
-          <DataSourceDialog
-            open={showDataSourceDialog}
-            onOpenChange={setShowDataSourceDialog}
-            dataSource={
-              selectedDataSourceIndex !== null
-                ? dataSources?.[selectedDataSourceIndex] || null
-                : null
-            }
-            queryStatus={
-              selectedDataSourceIndex !== null &&
-              dataSources?.[selectedDataSourceIndex]
-                ? queryStatusRef.current[
-                    dataSources[selectedDataSourceIndex].id
-                  ]
-                : null
-            }
-          />
         </CardContent>
       </Card>
     );

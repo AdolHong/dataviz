@@ -36,7 +36,12 @@ export function DataSourceDialog() {
 
   return (
     <Dialog open={isOpen} onOpenChange={closeDialog}>
-      <DialogContent className='sm:max-w-3xl'>
+      <DialogContent
+        className='sm:max-w-3xl'
+        aria-description=''
+        aria-label=''
+        aria-describedby=''
+      >
         <DialogHeader>
           <DialogTitle className='flex items-center gap-2'>
             <span>数据源: {dataSource.name}</span>

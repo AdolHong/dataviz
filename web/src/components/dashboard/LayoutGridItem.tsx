@@ -13,7 +13,6 @@ import { type QueryStatus } from '@/lib/store/useQueryStatusStore';
 import { DataSourceStatus } from '@/lib/store/useQueryStatusStore';
 import React from 'react';
 import { queryStatusColor } from './ParameterQueryArea';
-import { DataSourceDialog } from './DataSourceDialog';
 import { artifactApi } from '@/api/artifact';
 import { parseDynamicDate } from '@/utils/parser';
 import type {

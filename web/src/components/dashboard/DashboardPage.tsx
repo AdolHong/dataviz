@@ -23,6 +23,8 @@ import { useQueryStatusStore } from '@/lib/store/useQueryStatusStore';
 import { useParamValuesStore } from '@/lib/store/useParamValuesStore';
 import { useTabFilesStore } from '@/lib/store/useFileSessionStore';
 import { useNavigate } from '@tanstack/react-router';
+import { DataSourceDialog } from './DataSourceDialog';
+import { ArtifactResponseDialog } from './ArtifactResponseDialog';
 
 // 为标签加载报表数据的函数1
 const loadReportForTab = async (tab: TabDetail) => {
@@ -494,82 +496,92 @@ const TabsArea = memo(
     };
 
     return (
-      <div className='border-b bg-muted/30'>
-        <div className='flex overflow-x-auto items-center'>
-          {/* 导航栏切换按钮 */}
-          <div className='flex items-center border-r border-border px-2'>
-            <Button
-              variant='ghost'
-              size='icon'
-              className='h-8 w-8 rounded-full'
-              onClick={onToggleNavbarVisible}
-            >
-              {navbarVisible ? (
-                <ChevronLeft size={16} />
-              ) : (
-                <ChevronRight size={16} />
-              )}
-            </Button>
-          </div>
+      <>
+        <div className='border-b bg-muted/30'>
+          <div className='flex overflow-x-auto items-center'>
+            {/* 导航栏切换按钮 */}
+            <div className='flex items-center border-r border-border px-2'>
+              <Button
+                variant='ghost'
+                size='icon'
+                className='h-8 w-8 rounded-full'
+                onClick={onToggleNavbarVisible}
+              >
+                {navbarVisible ? (
+                  <ChevronLeft size={16} />
+                ) : (
+                  <ChevronRight size={16} />
+                )}
+              </Button>
+            </div>
 
-          {/* 标签页 - 使用 store 中的 tabsOrder */}
-          <>
-            {localTabsOrder.length > 0 &&
-              localTabsOrder.map((tabId) => {
-                const tab = openTabs[tabId];
-                if (!tab) return null;
+            {/* 标签页 - 使用 store 中的 tabsOrder */}
+            <>
+              {localTabsOrder.length > 0 &&
+                localTabsOrder.map((tabId) => {
+                  const tab = openTabs[tabId];
+                  if (!tab) return null;
 
-                return (
-                  <div
-                    key={tab.tabId}
-                    className={`flex items-center px-2 py-1 cursor-pointer border-r border-border relative min-w-[120px] ${
-                      tab.tabId === activeTabId
-                        ? 'bg-background'
-                        : 'bg-muted/50 hover:bg-muted'
-                    } ${draggedItem === tab.tabId ? 'opacity-50' : ''}`}
-                    onClick={async () => {
-                      if (tab.tabId !== activeTabId) {
-                        loadTabReport(tab);
-                      }
-                    }}
-                    draggable
-                    onDragStart={(e) => handleDragStart(tab.tabId, e)}
-                    onDragOver={(e) => handleDragOver(e, tab.tabId)}
-                    onDragEnd={handleDragEnd}
-                    onDragEnter={handleDragEnter}
-                    onDragLeave={handleDragLeave}
-                    style={{
-                      cursor: 'grab',
-                      transition: 'all 0.2s ease-in-out',
-                      transform:
-                        draggedItem === tab.tabId ? 'scale(0.95)' : 'scale(1)',
-                    }}
-                  >
-                    <div className='whitespace-nowrap text-xs flex-grow'>
-                      {tab.title}
-                    </div>
-                    <Button
-                      variant='ghost'
-                      size='icon'
-                      className='h-5 w-5 ml-1 opacity-60 hover:opacity-100 flex-shrink-0'
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        //删除tab:  remove操作的同时也会更新activeTabId
-                        removeCachedTab(tab.tabId);
-                        // 从本地标签顺序中移除（store中已通过removeCachedTab移除）
-                        setLocalTabsOrder((prev) =>
-                          prev.filter((id) => id !== tab.tabId)
-                        );
+                  return (
+                    <div
+                      key={tab.tabId}
+                      className={`flex items-center px-2 py-1 cursor-pointer border-r border-border relative min-w-[120px] ${
+                        tab.tabId === activeTabId
+                          ? 'bg-background'
+                          : 'bg-muted/50 hover:bg-muted'
+                      } ${draggedItem === tab.tabId ? 'opacity-50' : ''}`}
+                      onClick={async () => {
+                        if (tab.tabId !== activeTabId) {
+                          loadTabReport(tab);
+                        }
+                      }}
+                      draggable
+                      onDragStart={(e) => handleDragStart(tab.tabId, e)}
+                      onDragOver={(e) => handleDragOver(e, tab.tabId)}
+                      onDragEnd={handleDragEnd}
+                      onDragEnter={handleDragEnter}
+                      onDragLeave={handleDragLeave}
+                      style={{
+                        cursor: 'grab',
+                        transition: 'all 0.2s ease-in-out',
+                        transform:
+                          draggedItem === tab.tabId
+                            ? 'scale(0.95)'
+                            : 'scale(1)',
                       }}
                     >
-                      <X size={12} />
-                    </Button>
-                  </div>
-                );
-              })}
-          </>
+                      <div className='whitespace-nowrap text-xs flex-grow'>
+                        {tab.title}
+                      </div>
+                      <Button
+                        variant='ghost'
+                        size='icon'
+                        className='h-5 w-5 ml-1 opacity-60 hover:opacity-100 flex-shrink-0'
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          //删除tab:  remove操作的同时也会更新activeTabId
+                          removeCachedTab(tab.tabId);
+                          // 从本地标签顺序中移除（store中已通过removeCachedTab移除）
+                          setLocalTabsOrder((prev) =>
+                            prev.filter((id) => id !== tab.tabId)
+                          );
+                        }}
+                      >
+                        <X size={12} />
+                      </Button>
+                    </div>
+                  );
+                })}
+            </>
+          </div>
         </div>
-      </div>
+
+        {/* data source 详情*/}
+        <DataSourceDialog />
+
+        {/* artiface 详情*/}
+        <ArtifactResponseDialog />
+      </>
     );
   }
 );

@@ -230,112 +230,121 @@ export function DashboardPage() {
   };
 
   return (
-    <div className='flex flex-col h-screen relative'>
-      {/* 顶部Header */}
-      <div className='border-b bg-background flex items-center justify-between h-14 px-4'>
-        {/* 左侧Logo */}
-        <div className='flex items-center space-x-2'>
-          <svg
-            className='h-6 w-6 text-blue-500'
-            viewBox='0 0 24 24'
-            fill='none'
-            stroke='currentColor'
-            strokeWidth='2'
-            strokeLinecap='round'
-            strokeLinejoin='round'
-          >
-            <polyline points='22 12 18 12 15 21 9 3 6 12 2 12'></polyline>
-          </svg>
-          <span className='text-xl font-semibold'>DataViz</span>
-        </div>
-
-        {/* 右侧用户信息 */}
-        <div className='flex items-center space-x-4'>
+    <>
+      <div className='flex flex-col h-screen relative'>
+        {/* 顶部Header */}
+        <div className='border-b bg-background flex items-center justify-between h-14 px-4'>
+          {/* 左侧Logo */}
           <div className='flex items-center space-x-2'>
-            <User size={16} className='text-gray-600' />
-            <span className='text-sm font-medium'>{username}</span>
+            <svg
+              className='h-6 w-6 text-blue-500'
+              viewBox='0 0 24 24'
+              fill='none'
+              stroke='currentColor'
+              strokeWidth='2'
+              strokeLinecap='round'
+              strokeLinejoin='round'
+            >
+              <polyline points='22 12 18 12 15 21 9 3 6 12 2 12'></polyline>
+            </svg>
+            <span className='text-xl font-semibold'>DataViz</span>
           </div>
 
-          <Button
-            variant='ghost'
-            size='icon'
-            onClick={handleLogout}
-            className='hover:bg-red-50'
-            title='注销'
+          {/* 右侧用户信息 */}
+          <div className='flex items-center space-x-4'>
+            <div className='flex items-center space-x-2'>
+              <User size={16} className='text-gray-600' />
+              <span className='text-sm font-medium'>{username}</span>
+            </div>
+
+            <Button
+              variant='ghost'
+              size='icon'
+              onClick={handleLogout}
+              className='hover:bg-red-50'
+              title='注销'
+            >
+              <LogOut size={16} className='text-red-500' />
+            </Button>
+          </div>
+        </div>
+
+        {/* main */}
+        <div className='flex flex-1 overflow-hidden'>
+          {/* 左侧导航栏 */}
+          <div
+            className='border-r bg-background overflow-auto transition-all duration-300 ease-in-out flex-shrink-0'
+            style={{
+              width: navbarVisible ? 'auto' : '0px',
+              minWidth: navbarVisible ? '180px' : '0px',
+              maxWidth: navbarVisible ? '320px' : '0px',
+              opacity: navbarVisible ? 1 : 0,
+              visibility: navbarVisible ? 'visible' : 'hidden',
+            }}
           >
-            <LogOut size={16} className='text-red-500' />
-          </Button>
-        </div>
-      </div>
+            <FileExplorer
+              onDoubleClick={handleDoubleClickFileItem}
+              useFileSystemChangeEffect={handleFileSystemChange}
+              useRenameItemEffect={handleRenameItem}
+              useDeleteItemEffect={handleDeleteItem}
+            />
+          </div>
 
-      <div className='flex flex-1 overflow-hidden'>
-        {/* 左侧导航栏 */}
-        <div
-          className='border-r bg-background overflow-auto transition-all duration-300 ease-in-out flex-shrink-0'
-          style={{
-            width: navbarVisible ? 'auto' : '0px',
-            minWidth: navbarVisible ? '180px' : '0px',
-            maxWidth: navbarVisible ? '320px' : '0px',
-            opacity: navbarVisible ? 1 : 0,
-            visibility: navbarVisible ? 'visible' : 'hidden',
-          }}
-        >
-          <FileExplorer
-            onDoubleClick={handleDoubleClickFileItem}
-            useFileSystemChangeEffect={handleFileSystemChange}
-            useRenameItemEffect={handleRenameItem}
-            useDeleteItemEffect={handleDeleteItem}
-          />
-        </div>
+          {/* 右侧内容区 */}
+          <div className='flex-1 w-0 min-w-0 overflow-hidden flex flex-col'>
+            {/* 标签页栏 */}
+            <TabsArea
+              setReport={handleSetReport}
+              navbarVisible={navbarVisible}
+              onToggleNavbarVisible={handleToggleNavbarVisible}
+            />
 
-        {/* 右侧内容区 */}
-        <div className='flex-1 w-0 min-w-0 overflow-hidden flex flex-col'>
-          {/* 标签页栏 */}
-          <TabsArea
-            setReport={handleSetReport}
-            navbarVisible={navbarVisible}
-            onToggleNavbarVisible={handleToggleNavbarVisible}
-          />
+            {/* 标签内容区 */}
+            <div className='flex-1 overflow-auto'>
+              {activeTabId ? (
+                <div className='h-full'>
+                  {/* 为每个报表渲染内容组件 */}
+                  {/* 展示区域 */}
+                  <div key={activeTabId} className='flex-1 overflow-auto'>
+                    <div className='container max-w-full py-6 px-4 md:px-8 space-y-6'>
+                      {/* 参数区域 */}
+                      <div className='space-y-2'>
+                        {report && (
+                          <ParameterQueryArea
+                            activeTabId={memoizedActiveTabId}
+                            reportId={memoizedReportId}
+                            reportUpdatedAt={memoizedReportUpdatedAt}
+                            parameters={memoizedParameters}
+                            dataSources={memoizedDataSources}
+                            artifacts={memoizedArtifacts}
+                            onEditReport={memoizedOnEditReport}
+                          />
+                        )}
+                      </div>
 
-          {/* 标签内容区 */}
-          <div className='flex-1 overflow-auto'>
-            {activeTabId ? (
-              <div className='h-full'>
-                {/* 为每个报表渲染内容组件 */}
-                {/* 展示区域 */}
-                <div key={activeTabId} className='flex-1 overflow-auto'>
-                  <div className='container max-w-full py-6 px-4 md:px-8 space-y-6'>
-                    {/* 参数区域 */}
-                    <div className='space-y-2'>
-                      {report && (
-                        <ParameterQueryArea
+                      {/* 展示区域 */}
+                      {report?.layout && report.layout.items.length > 0 && (
+                        <LayoutGrid
+                          report={report}
                           activeTabId={memoizedActiveTabId}
-                          reportId={memoizedReportId}
-                          reportUpdatedAt={memoizedReportUpdatedAt}
-                          parameters={memoizedParameters}
-                          dataSources={memoizedDataSources}
-                          artifacts={memoizedArtifacts}
-                          onEditReport={memoizedOnEditReport}
                         />
                       )}
                     </div>
-
-                    {/* 展示区域 */}
-                    {report?.layout && report.layout.items.length > 0 && (
-                      <LayoutGrid
-                        report={report}
-                        activeTabId={memoizedActiveTabId}
-                      />
-                    )}
                   </div>
                 </div>
-              </div>
-            ) : (
-              <div className='flex items-center justify-center h-full text-muted-foreground'></div>
-            )}
+              ) : (
+                <div className='flex items-center justify-center h-full text-muted-foreground'></div>
+              )}
+            </div>
           </div>
         </div>
       </div>
+
+      {/* data source 详情*/}
+      <DataSourceDialog />
+
+      {/* artiface 详情*/}
+      <ArtifactResponseDialog />
 
       {/* 添加 EditModal 组件 */}
       {report && (
@@ -346,7 +355,7 @@ export function DashboardPage() {
           handleSave={handleSaveReport}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -572,12 +581,6 @@ const TabsArea = memo(
               })}
           </div>
         </div>
-
-        {/* data source 详情*/}
-        <DataSourceDialog />
-
-        {/* artiface 详情*/}
-        <ArtifactResponseDialog />
       </>
     );
   }

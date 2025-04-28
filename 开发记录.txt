@@ -28,17 +28,14 @@ docker run -p 3000:3000 dataviz-frontend
 
 
 
-12. 对于timer,  可能查询有延迟； 保证新的查询不会被旧的查询替代；
 20. viz提供playground，可以复制当前queryStaus和代码，进行画图
 21. share就很有意思…再想想; share如果有个share管理就好了； 离职也能带走一些东西
 33. report的json导出， json导入;
 34. 文件拖拽方式的json导入
 35. csv文件的处理
-36. timer
 38. 复制文件功能是 假复制....(😂哭死)
 
 45. 还没query时，  我也想看parsed_code
-
 51. 重复列名的inferredColumn
 52. cascader推断， 需要支持 多对多；
 53. cascader和inferredColumn，弄成全局的；  并且可以设置局部不受影响；

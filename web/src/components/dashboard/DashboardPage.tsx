@@ -8,7 +8,7 @@ import type {
 } from '@/types/models/fileSystem';
 import type { Artifact, DataSource, Parameter, Report } from '@/types';
 import type { Layout } from '@/types/models/layout';
-import { User, LogOut } from 'lucide-react';
+import { User, LogOut, ChevronRight, ChevronLeft } from 'lucide-react';
 import { fsApi } from '@/api/fs';
 import EditModal from '@/components/edit/EditModal';
 import { reportApi } from '@/api/report';
@@ -292,11 +292,28 @@ export function DashboardPage() {
           {/* 右侧内容区 */}
           <div className='flex-1 w-0 min-w-0 overflow-hidden flex flex-col'>
             {/* 标签页栏 */}
-            <TabsArea
-              setReport={handleSetReport}
-              navbarVisible={navbarVisible}
-              onToggleNavbarVisible={handleToggleNavbarVisible}
-            />
+
+            <div className='border-b bg-muted/30'>
+              <div className='flex overflow-x-auto items-center'>
+                {/* 导航栏切换按钮 */}
+                <div className='flex items-center border-r border-border px-2'>
+                  <Button
+                    variant='ghost'
+                    size='icon'
+                    className='h-8 w-8 rounded-full'
+                    onClick={handleToggleNavbarVisible}
+                  >
+                    {navbarVisible ? (
+                      <ChevronLeft size={16} />
+                    ) : (
+                      <ChevronRight size={16} />
+                    )}
+                  </Button>
+                </div>
+
+                <TabsArea setReport={handleSetReport} />
+              </div>
+            </div>
 
             {/* 标签内容区 */}
             <div className='flex-1 overflow-auto'>

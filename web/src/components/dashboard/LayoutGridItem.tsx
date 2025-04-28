@@ -14,7 +14,6 @@ import { DataSourceStatus } from '@/lib/store/useQueryStatusStore';
 import React from 'react';
 import { queryStatusColor } from './ParameterQueryArea';
 import { DataSourceDialog } from './DataSourceDialog';
-import { ArtifactResponseDialog } from './ArtifactResponseDialog';
 import { artifactApi } from '@/api/artifact';
 import { parseDynamicDate } from '@/utils/parser';
 import type {
@@ -28,6 +27,8 @@ import * as echarts from 'echarts';
 import { VegaLite } from 'react-vega';
 import dayjs from 'dayjs';
 import { ArtifactTableView } from '@/components/ArtifactTableView';
+
+import { useArtifactDialogStore } from '@/lib/store/useArtifactDialogStore';
 
 // Artifact状态颜色
 export const artifactStatusColor = (status: string): string => {
@@ -70,7 +71,11 @@ export const LayoutGridItem = memo(
     const [selectedDataSourceId, setSelectedDataSourceId] = useState<
       string | null
     >(null);
-    const [showArtifactDialog, setShowArtifactDialog] = useState(false);
+
+    const openArtifactDialog = useArtifactDialogStore(
+      (state) => state.openDialog
+    );
+
     const [isInitialized, setIsInitialized] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -113,7 +118,9 @@ export const LayoutGridItem = memo(
 
     // 处理点击Artifact按钮事件
     const handleArtifactClick = () => {
-      setShowArtifactDialog(true);
+      if (artifact && artifactResponse) {
+        openArtifactDialog(artifact, artifactResponse);
+      }
     };
 
     // 添加查找数据源的函数
@@ -629,7 +636,7 @@ export const LayoutGridItem = memo(
             />
           )}
 
-          {/* 添加ArtifactResponseDialog组件 */}
+          {/* 添加ArtifactResponseDialog组件
           {showArtifactDialog && artifactResponse && (
             <ArtifactResponseDialog
               open={showArtifactDialog}
@@ -637,7 +644,7 @@ export const LayoutGridItem = memo(
               artifact={artifact}
               artifactResponse={artifactResponse}
             />
-          )}
+          )} */}
         </Card>
       </div>
     );

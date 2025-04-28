@@ -7,22 +7,12 @@ import {
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import type { Artifact } from '@/types/models/artifact';
-import type { ArtifactResponse } from '@/types/api/aritifactRequest';
 
-interface ArtifactResponseDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  artifact: Artifact | null;
-  artifactResponse: ArtifactResponse | null;
-}
+import { useArtifactDialogStore } from '@/lib/store/useArtifactDialogStore';
 
-export function ArtifactResponseDialog({
-  open,
-  onOpenChange,
-  artifact,
-  artifactResponse,
-}: ArtifactResponseDialogProps) {
+export function ArtifactResponseDialog() {
+  const { isOpen, artifact, artifactResponse, closeDialog } =
+    useArtifactDialogStore();
   const [activeTab, setActiveTab] = useState<string>('details');
 
   if (!artifact || !artifactResponse) {
@@ -35,7 +25,7 @@ export function ArtifactResponseDialog({
   );
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={isOpen} onOpenChange={closeDialog}>
       <DialogContent className='sm:max-w-3xl'>
         <DialogHeader>
           <DialogTitle className='flex items-center gap-2'>

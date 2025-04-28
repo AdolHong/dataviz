@@ -1,5 +1,7 @@
 import { type Report } from '@/types/models/report';
 import { LayoutGridItem } from './LayoutGridItem';
+import { ArtifactResponseDialog } from './ArtifactResponseDialog';
+
 import {
   useQueryStatusStore,
   type QueryStatus,
@@ -62,13 +64,18 @@ export function LayoutGrid({ report, activeTabId }: LayoutGridProps) {
             );
 
           return (
-            <LayoutGridItem
-              key={item.id}
-              layoutItem={item}
-              artifact={artifact}
-              strDependentQueryStatus={JSON.stringify(dependentQueryStatus)}
-              report={report}
-            />
+            <>
+              <LayoutGridItem
+                key={item.id}
+                layoutItem={item}
+                artifact={artifact}
+                strDependentQueryStatus={JSON.stringify(dependentQueryStatus)}
+                report={report}
+              />
+
+              {/* artiface 详情*/}
+              <ArtifactResponseDialog />
+            </>
           );
         })}
       </div>

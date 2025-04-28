@@ -17,12 +17,6 @@ interface TabsAreaProps {
   setReport: (report: Report) => void;
 }
 
-type BaseTab = {
-  tabId: string;
-  tabName: string;
-  tabDescrition: string;
-};
-
 // 定义 Tab 接口
 interface Tab {
   tabId: string;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, memo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, memo, useCallback } from 'react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -231,9 +231,10 @@ export const ParameterQueryArea = memo(
 
         // 发起query请求
         const promises = dataSources.map((dataSource) => {
-          handleQueryRequest(dataSource);
+          return handleQueryRequest(dataSource);
         });
-        await Promise.all(promises);
+        // 过滤掉 null，并等待请求结果
+        await Promise.all(promises.filter((promise) => promise !== null));
         setIsQuerying(false);
       }
     };
@@ -337,7 +338,7 @@ export const ParameterQueryArea = memo(
         toast.error(
           `[查询失败] ${dataSource.id}(${dataSource.name}), 不支持的查询类型`
         );
-        return;
+        return null;
       }
       const response = await queryApi.executeQueryBySourceId(queryRequest);
 
@@ -357,6 +358,7 @@ export const ParameterQueryArea = memo(
         });
       } else {
         toast.info(`[查询] ${dataSource.name}(${dataSource.id}): 成功`);
+        return response;
       }
     };
 

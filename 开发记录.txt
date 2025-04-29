@@ -40,6 +40,8 @@ docker run -p 3000:3000 dataviz-frontend
 52. cascader推断， 需要支持 多对多；
 53. cascader和inferredColumn，弄成全局的；  并且可以设置局部不受影响；
 
+54. toggle 文件夹时， artifact没有autosize。。😂
+55. artifact，可以考虑用tanstack query,  cached query结果； 避免反复请求;
 
 
 完成：

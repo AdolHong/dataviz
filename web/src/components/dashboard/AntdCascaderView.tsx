@@ -1,6 +1,6 @@
 // web/src/components/dashboard/AntdCascaderView.tsx
 import { useMemo, useState } from 'react';
-import { Cascader, type CascaderProps } from 'antd';
+import { Cascader } from 'antd';
 import Papa from 'papaparse';
 import type { DataSource } from '@/types/models/dataSource';
 import type { QueryStatus } from '@/lib/store/useQueryStatusStore';
@@ -64,9 +64,8 @@ interface AntdCascaderViewProps {
   dataSources: DataSource[];
   cascaderParam: CascaderParam;
   dependentQueryStatus: Record<string, QueryStatus>;
-  onCheckChange?: (selectedValues: string[], options: CascaderOption[]) => void;
+  onCheckChange?: (selectedValues: string[] | string[][]) => void;
   multiple?: boolean;
-  allowClear?: boolean;
 }
 
 export function AntdCascaderView({
@@ -76,9 +75,8 @@ export function AntdCascaderView({
   dependentQueryStatus,
   onCheckChange,
   multiple = false,
-  allowClear = true,
 }: AntdCascaderViewProps) {
-  const [_, setValue] = useState<string[]>([]);
+  const [_, setValue] = useState<string[][]>([]);
 
   // 找到对应的数据源
   const dataSource = useMemo(() => {
@@ -140,21 +138,78 @@ export function AntdCascaderView({
   }
 
   // Cascader 配置
-  const cascaderProps: CascaderProps = {
-    options,
-    style: { width: '100%' },
-    multiple,
-    onChange: (value, selectedOptions) => {
-      setValue(value as string[]);
-      if (onCheckChange) {
-        // 将选中的值和选项传递出去
-        onCheckChange(value as string[], selectedOptions as CascaderOption[]);
-      }
-    },
-    placeholder: '请选择',
-    maxTagCount: 'responsive',
-    allowClear,
-  };
+  // const cascaderProps: CascaderProps = {
+  //   options,
+  //   style: { width: '100%' },
+  //   onChange: (value, selectedOptions) => {
+  //     setValue(value as string[]);
+  //     if (onCheckChange) {
+  //       // 将选中的值和选项传递出去
+  //       onCheckChange(value as string[], selectedOptions as CascaderOption[]);
+  //     }
+  //   },
+  //   placeholder: '请选择',
+  //   maxTagCount: 'responsive',
+  //   allowClear,
+  // };
 
-  return <Cascader {...cascaderProps} />;
+  {
+    /*
+          单选:  设置默认选项
+          多选:  后端的开发
+         */
+  }
+  {
+    /* <Cascader
+          style={{ width: '100%' }}
+          options={options}
+          onChange={onChange}
+          placeholder='Please select'
+          allowClear={false}
+        /> */
+  }
+  {
+    /* <Cascader
+          style={{ width: '100%' }}
+          options={options}
+          onChange={onChange2}
+          multiple
+          maxTagCount='responsive'
+          defaultValue={[['jiangsu']]}
+        /> */
+  }
+
+  if (multiple) {
+    return (
+      <Cascader
+        options={options}
+        multiple={true}
+        maxTagCount='responsive'
+        placeholder='请选择'
+        onChange={(value) => {
+          setValue(value as string[][]);
+          if (onCheckChange) {
+            onCheckChange(value as string[][]);
+          }
+        }}
+        allowClear={true}
+        style={{ width: '100%' }}
+      />
+    );
+  }
+
+  return (
+    <Cascader
+      style={{ width: '100%' }}
+      options={options}
+      onChange={(value) => {
+        setValue([value as string[]]);
+        if (onCheckChange) {
+          onCheckChange([value as string[]]);
+        }
+      }}
+      placeholder='请选择'
+      allowClear={false}
+    />
+  );
 }

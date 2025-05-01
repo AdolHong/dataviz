@@ -149,7 +149,7 @@ async def query_by_source_id(request: QueryRequest, username: str = Depends(veri
         # 构造inferredContext
         inferred_context = construct_response_inferred_context(
             result, request.inferredContext.required)
-        print("inferred_context", inferred_context)
+
         return QueryResponse(
             status="success",
             message="Query executed successfully",

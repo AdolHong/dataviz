@@ -40,6 +40,7 @@ docker run -p 3000:3000 dataviz-frontend
 
 54. toggle 文件夹时， artifact没有autosize。。😂
 55. artifact，可以考虑用tanstack query,  cached query结果； 避免反复请求;
+56. 重新查询， 应该得消除 artifact params的values.
 
 
 完成：

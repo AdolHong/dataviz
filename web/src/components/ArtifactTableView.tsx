@@ -180,8 +180,8 @@ export const ArtifactTableView: React.FC<ArtifactTableViewProps> = ({
         )}
       </div>
 
-      <div className='w-full overflow-y-auto rounded-md border'>
-        <Table>
+      <div className='flex overflow-auto rounded-md border'>
+        <Table style={{ tableLayout: 'fixed', width: '100%' }}>
           <TableHeader className='sticky top-0 bg-white z-10'>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>

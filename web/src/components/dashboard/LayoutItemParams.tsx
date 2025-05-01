@@ -110,7 +110,7 @@ export function LayoutItemParams({
   };
 
   return (
-    <div className='border-l border-gray-200 pl-3 w-[250px] my-5 flex flex-col h-full'>
+    <div className='pl-3 w-[250px] my-5 flex flex-col h-full'>
       <h3 className='text-sm font-medium mb-3 flex-shrink-0'>参数列表</h3>
 
       {/* 参数列表 */}
@@ -281,26 +281,6 @@ export function LayoutItemParams({
             </div>
           </div>
         )}
-
-        {/*
-          单选:  设置默认选项
-          多选:  后端的开发
-         */}
-        {/* <Cascader
-          style={{ width: '100%' }}
-          options={options}
-          onChange={onChange}
-          placeholder='Please select'
-          allowClear={false}
-        /> */}
-        {/* <Cascader
-          style={{ width: '100%' }}
-          options={options}
-          onChange={onChange2}
-          multiple
-          maxTagCount='responsive'
-          defaultValue={[['jiangsu']]}
-        /> */}
       </div>
     </div>
   );

@@ -391,10 +391,10 @@ const EditArtifactParamModal = ({
                 <RadioGroupItem value='cascader' id='param-type-cascader' />
                 <Label htmlFor='param-type-cascader'>级联参数</Label>
               </div>
-              <div className='flex items-center space-x-2'>
+              {/* <div className='flex items-center space-x-2'>
                 <RadioGroupItem value='inferred' id='param-type-inferred' />
                 <Label htmlFor='param-type-inferred'>单列推断</Label>
-              </div>
+              </div> */}
             </RadioGroup>
           </div>
 

@@ -87,7 +87,7 @@ export const LayoutGridItem = memo(
       Record<string, PlainParamValue>
     >({});
     const [cascaderParamValues, setCascaderParamValues] = useState<
-      Record<string, string | string[] | string[][]>
+      Record<string, string[] | string[][]>
     >({});
     const [plainParamChoices, setPlainParamChoices] = useState<
       Record<string, Record<string, string>[]>
@@ -581,7 +581,7 @@ export const LayoutGridItem = memo(
                 )}
             </div>
           </CardHeader>
-          <CardContent className='flex flex-1 border-t overflow-hidden p-4  items-center justify-center text-muted-foreground text-sm'>
+          <CardContent className='flex flex-1 border-t overflow-hidden p-4  items-start justify-center text-muted-foreground text-sm'>
             <div className='w-full h-full flex-1'>
               {/* 展示内容 */}
               {Object.values(dependentQueryStatus).length === 0 && (
@@ -612,7 +612,9 @@ export const LayoutGridItem = memo(
             </div>
 
             {/* 展示参数 */}
-            <div className={`${showParams ? 'block' : 'hidden'}`}>
+            <div
+              className={`${showParams ? 'block' : 'hidden'} flex-col items-start`}
+            >
               <LayoutItemParams
                 artifact={artifact}
                 dataSources={report.dataSources}
@@ -628,16 +630,6 @@ export const LayoutGridItem = memo(
               />
             </div>
           </CardContent>
-
-          {/* 添加ArtifactResponseDialog组件
-          {showArtifactDialog && artifactResponse && (
-            <ArtifactResponseDialog
-              open={showArtifactDialog}
-              onOpenChange={setShowArtifactDialog}
-              artifact={artifact}
-              artifactResponse={artifactResponse}
-            />
-          )} */}
         </Card>
       </div>
     );

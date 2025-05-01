@@ -408,7 +408,10 @@ const EditArtifactModal = ({
                       key={index}
                       className='border-2 rounded-lg p-3 text-sm relative group shadow-sm'
                     >
-                      <div className='font-medium'>数据源: {param.dfAlias}</div>
+                      <div className='font-medium'>
+                        数据源: {param.dfAlias} (
+                        {param.multiple ? '多选' : '单选'})
+                      </div>
                       <ul className='text-xs mt-1'>
                         {param.levels.map((level, levelIndex) => (
                           <li key={levelIndex}>

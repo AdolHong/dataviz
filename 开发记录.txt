@@ -36,8 +36,6 @@ docker run -p 3000:3000 dataviz-frontend
 38. 复制文件功能是 假复制....(😂哭死)
 
 45. 还没query时，  我也想看parsed_code
-51. 重复列名的inferredColumn
-52. cascader推断， 需要支持 多对多；
 53. cascader和inferredColumn，弄成全局的；  并且可以设置局部不受影响；
 
 54. toggle 文件夹时， artifact没有autosize。。😂
@@ -80,6 +78,7 @@ docker run -p 3000:3000 dataviz-frontend
 47. navbar, item的文字溢出截断；
 48. version管理: -> 没开发， 仅用了git来保存历史版本
 50. date_range参数的支持。  比如  ${job_date:start}, ${job_date:end}
+52. cascader推断， 需要支持 多对多；
 
 
 

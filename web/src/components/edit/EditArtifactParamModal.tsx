@@ -93,6 +93,7 @@ const EditArtifactParamModal = ({
 
   // Cascader 参数的状态
   const [cascaderDfAlias, setCascaderDfAlias] = useState('');
+  const [cascaderMultiple, setCascaderMultiple] = useState(false);
   const [cascaderLevels, setCascaderLevels] = useState<CascaderLevel[]>([]);
 
   // Inferred 参数的状态
@@ -134,6 +135,7 @@ const EditArtifactParamModal = ({
         const param = paramData.param as CascaderParam;
         setCascaderDfAlias(param.dfAlias);
         setCascaderLevels([...param.levels]);
+        setCascaderMultiple(param.multiple);
       } else if (paramData.type === 'inferred') {
         // 处理推断参数编辑
         const param = paramData.param as
@@ -169,6 +171,7 @@ const EditArtifactParamModal = ({
     setPlainChoicesString('');
     // Cascader 参数重置
     setCascaderDfAlias('');
+    setCascaderMultiple(false);
     setCascaderLevels([]);
     // Inferred 参数重置
     setInferredId(generateId());
@@ -329,6 +332,7 @@ const EditArtifactParamModal = ({
         const cascaderParam: CascaderParam = {
           dfAlias: cascaderDfAlias,
           levels: cascaderLevels,
+          multiple: cascaderMultiple,
         };
 
         onSave(cascaderParam, 'cascader');
@@ -576,6 +580,28 @@ const EditArtifactParamModal = ({
                     placeholder='选择数据源别名'
                   />
                 </div>
+              </div>
+              <div className='grid grid-cols-4 items-center gap-4'>
+                <Label className='text-right'>参数值类型*</Label>
+                <RadioGroup
+                  value={cascaderMultiple ? 'multiple' : 'single'}
+                  onValueChange={(value) =>
+                    setCascaderMultiple(value === 'multiple')
+                  }
+                  className='col-span-3 flex'
+                >
+                  <div className='flex items-center space-x-2 mr-4'>
+                    <RadioGroupItem value='single' id='cascader-param-single' />
+                    <Label htmlFor='cascader-param-single'>单选</Label>
+                  </div>
+                  <div className='flex items-center space-x-2'>
+                    <RadioGroupItem
+                      value='multiple'
+                      id='cascader-param-multiple'
+                    />
+                    <Label htmlFor='cascader-param-multiple'>多选</Label>
+                  </div>
+                </RadioGroup>
               </div>
 
               <div className='grid grid-cols-4 items-start gap-4 mt-2'>

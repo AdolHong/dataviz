@@ -2,69 +2,9 @@ import { type Artifact } from '@/types/models/artifact';
 import { Badge } from '@/components/ui/badge';
 import type { QueryStatus } from '@/lib/store/useQueryStatusStore';
 import type { DataSource } from '@/types/models/dataSource';
-import { CascaderTreeView } from './CascaderTreeView';
-
 import { Combobox } from '@/components/combobox';
-
-import type { TreeNodeData } from '../tree-select/types';
-import { getChildrenValuesByTargetValues } from './CascaderTreeView';
 import type { PlainParamValue } from '@/types/api/aritifactRequest';
-
-import type { CascaderProps } from 'antd';
 import { AntdCascaderView } from './AntdCascaderView';
-
-interface Option {
-  value: string;
-  label: string;
-  children?: Option[];
-}
-
-const options: Option[] = [
-  {
-    value: 'zhejiang',
-    label: 'Zhejiang',
-    children: [
-      {
-        value: 'hangzhou',
-        label: 'Hangzhou',
-        children: [
-          {
-            value: 'xihu',
-            label: 'West Lake',
-          },
-        ],
-      },
-    ],
-  },
-  {
-    value: 'jiangsu',
-    label: 'Jiangsu',
-    children: [
-      {
-        value: 'nanjing',
-        label: 'Nanjing',
-        children: [
-          {
-            value: 'zhonghuamen',
-            label: 'Zhong Hua Men',
-          },
-          {
-            value: 'xihu',
-            label: 'West Lake',
-          },
-        ],
-      },
-    ],
-  },
-];
-
-const onChange: CascaderProps<Option>['onChange'] = (value) => {
-  console.log(value);
-};
-
-const onChange2: CascaderProps<Option, 'value', true>['onChange'] = (value) => {
-  console.log(value);
-};
 
 interface LayoutItemParamsProps {
   artifact: Artifact;
@@ -192,6 +132,15 @@ export function LayoutItemParams({
                       {param.dfAlias}
                     </span>
                   </div>
+                  <div className='flex flex-row gap-1'>
+                    {param.levels &&
+                      param.levels.map((level, i) => (
+                        <span key={i} className='text-[10px]'>
+                          {level.name || level.dfColumn}
+                          {i < param.levels.length - 1 ? ', ' : ''}
+                        </span>
+                      ))}
+                  </div>
 
                   <div className='mt-1' key={`cascader-${index}`}>
                     <AntdCascaderView
@@ -199,7 +148,8 @@ export function LayoutItemParams({
                       cascaderParam={param}
                       dataSources={dataSources}
                       dependentQueryStatus={dependentQueryStatus}
-                      multiple={false}
+                      multiple={param.multiple}
+                      // allowClear={false}
                       onCheckChange={(selectedValues) => {
                         if (param.levels && param.levels.length > 0) {
                           const columns = param.levels.map((level) => {

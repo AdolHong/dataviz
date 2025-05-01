@@ -66,6 +66,7 @@ interface AntdCascaderViewProps {
   dependentQueryStatus: Record<string, QueryStatus>;
   onCheckChange?: (selectedValues: string[], options: CascaderOption[]) => void;
   multiple?: boolean;
+  allowClear?: boolean;
 }
 
 export function AntdCascaderView({
@@ -75,6 +76,7 @@ export function AntdCascaderView({
   dependentQueryStatus,
   onCheckChange,
   multiple = false,
+  allowClear = true,
 }: AntdCascaderViewProps) {
   const [_, setValue] = useState<string[]>([]);
 
@@ -151,6 +153,7 @@ export function AntdCascaderView({
     },
     placeholder: '请选择',
     maxTagCount: 'responsive',
+    allowClear,
   };
 
   return <Cascader {...cascaderProps} />;

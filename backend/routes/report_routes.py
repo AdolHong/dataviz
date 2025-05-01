@@ -53,6 +53,8 @@ async def get_report_by_report_id(report_id: str):
 
     # 获取报表内容
     report_content = await get_report_content(file_item.id)
+
+    print(report_content)
     # 获取报表内容
     return report_content
 

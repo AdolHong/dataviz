@@ -36,6 +36,7 @@ export interface MultiplePlainParam {
 export interface CascaderParam {
   dfAlias: string;
   levels: CascaderLevel[];
+  multiple: boolean;
 }
 
 export interface CascaderLevel {

@@ -120,6 +120,7 @@ class CascaderLevel(BaseModel):
 class CascaderParam(BaseModel):
     dfAlias: str
     levels: List[CascaderLevel]
+    multiple: bool
 
 
 class SinglePlainParam(BaseModel):

@@ -137,48 +137,6 @@ export function AntdCascaderView({
     );
   }
 
-  // Cascader 配置
-  // const cascaderProps: CascaderProps = {
-  //   options,
-  //   style: { width: '100%' },
-  //   onChange: (value, selectedOptions) => {
-  //     setValue(value as string[]);
-  //     if (onCheckChange) {
-  //       // 将选中的值和选项传递出去
-  //       onCheckChange(value as string[], selectedOptions as CascaderOption[]);
-  //     }
-  //   },
-  //   placeholder: '请选择',
-  //   maxTagCount: 'responsive',
-  //   allowClear,
-  // };
-
-  {
-    /*
-          单选:  设置默认选项
-          多选:  后端的开发
-         */
-  }
-  {
-    /* <Cascader
-          style={{ width: '100%' }}
-          options={options}
-          onChange={onChange}
-          placeholder='Please select'
-          allowClear={false}
-        /> */
-  }
-  {
-    /* <Cascader
-          style={{ width: '100%' }}
-          options={options}
-          onChange={onChange2}
-          multiple
-          maxTagCount='responsive'
-          defaultValue={[['jiangsu']]}
-        /> */
-  }
-
   if (multiple) {
     return (
       <Cascader

@@ -92,19 +92,10 @@ export function LayoutItemParams({
     selectedValues: string[] | string[][]
   ) => {
     const paramKey = `${dfAlias},${columns.join(',')}`;
-
-    // 判断是否为 string 数组
-    const isStringArray = selectedValues.every(
-      (item) => typeof item === 'string'
-    );
-
-    // 转换为 string[][] 类型
-    const convertedValues = isStringArray ? [selectedValues] : selectedValues;
-
     setCascaderParamValues((prev: Record<string, string[] | string[][]>) => {
       return {
         ...prev,
-        [paramKey]: convertedValues,
+        [paramKey]: selectedValues,
       };
     });
   };

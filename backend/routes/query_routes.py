@@ -127,8 +127,8 @@ async def query_by_source_id(request: QueryRequest, username: str = Depends(veri
             )
 
         if result is not None and isinstance(result, pd.DataFrame):
-            if result.shape[0] > 50000:
-                raise ValueError("[Query] 数据行数超过5万，请减少查询范围")
+            if result.shape[0] > 500000:
+                raise ValueError("[Query] 数据行数超过50万，请减少查询范围")
             save_query_result(request.uniqueId,
                               result.to_json(orient='records'))
 

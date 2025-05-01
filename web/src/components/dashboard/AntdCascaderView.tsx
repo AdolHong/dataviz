@@ -76,7 +76,7 @@ export function AntdCascaderView({
   onCheckChange,
   multiple = false,
 }: AntdCascaderViewProps) {
-  const [_, setValue] = useState<string[][]>([]);
+  const [value, setValue] = useState<string[][] | string[]>([]);
 
   // 找到对应的数据源
   const dataSource = useMemo(() => {
@@ -102,6 +102,9 @@ export function AntdCascaderView({
 
     const cascaderTuple = cascaderParam.levels.map((level) => level.dfColumn);
     const cascaderKey = JSON.stringify(cascaderTuple);
+
+    // 设置value初始化
+    setValue([]);
 
     return queryStatus.queryResponse.cascaderContext.inferred[
       cascaderKey
@@ -141,6 +144,7 @@ export function AntdCascaderView({
     return (
       <Cascader
         options={options}
+        value={value as string[][]}
         multiple={true}
         maxTagCount='responsive'
         placeholder='请选择'
@@ -159,6 +163,7 @@ export function AntdCascaderView({
   return (
     <Cascader
       style={{ width: '100%' }}
+      value={value as string[]}
       options={options}
       onChange={(value) => {
         setValue([value as string[]]);

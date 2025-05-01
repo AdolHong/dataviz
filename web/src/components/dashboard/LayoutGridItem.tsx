@@ -110,6 +110,14 @@ export const LayoutGridItem = memo(
       [strDependentQueryStatus]
     );
 
+    // 每次查询， 清除paramValues, 避免参数值被保留
+    useEffect(() => {
+      setPlainParamValues({});
+      setCascaderParamValues({});
+      setInferredParamValues({});
+      setArtifactResponse(null);
+    }, [strDependentQueryStatus]);
+
     // 处理点击数据源按钮事件
     const handleDataSourceClick = (sourceId: string) => {
       const dataSource = findDataSource(sourceId);
@@ -282,7 +290,6 @@ export const LayoutGridItem = memo(
           pyCode: artifact.code,
           engine: artifact.executor_engine,
         };
-        console.info('request', request);
 
         // 调用API
         const response = await artifactApi.executeArtifact(request);

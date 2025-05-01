@@ -125,7 +125,6 @@ export const LayoutGridItem = memo(
         openArtifactDialog(artifact, artifactResponse);
       }
     };
-    console.info('渲染我干嘛?');
     // 添加查找数据源的函数
     const findDataSource = (sourceId: string): DataSource | null => {
       const dataSource = report.dataSources.find((ds) => ds.id === sourceId);

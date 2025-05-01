@@ -140,7 +140,6 @@ export function LayoutItemParams({
                       dataSources={dataSources}
                       dependentQueryStatus={dependentQueryStatus}
                       multiple={param.multiple}
-                      // allowClear={false}
                       onCheckChange={(selectedValues) => {
                         if (param.levels && param.levels.length > 0) {
                           const columns = param.levels.map((level) => {

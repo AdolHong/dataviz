@@ -122,7 +122,7 @@ async def login(request: LoginRequest):
         return TokenResponse(success=False, message="用户名或密码错误")
 
     # 生成JWT令牌
-    exp_time = datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+    exp_time = datetime.datetime.utcnow() + datetime.timedelta(hours=24 * 30)  # token 30天过期
     payload = {
         "username": username,
         "exp": exp_time

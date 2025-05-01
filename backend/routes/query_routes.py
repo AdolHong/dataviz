@@ -100,11 +100,23 @@ async def query_by_source_id(request: QueryRequest, username: str = Depends(veri
 
         elif request_type == "csv_uploader":
             dataContent = request.requestContext.dataContent
-            print("todo: uploader")
-
+            # 使用 StringIO 读取 CSV 文本
+            result = pd.read_csv(StringIO(dataContent))
         elif request_type == "csv_data":
-            print("todo: csv_data")
-
+            data_source = next(
+                (ds for ds in report.dataSources if ds.id ==
+                 request.requestContext.sourceId),
+                None
+            )
+            if not data_source:
+                return QueryResponse(
+                    status="error",
+                    message="Data source not found",
+                    error="Data source not found",
+                    alerts=[
+                        Alert(type="error", message="Data source not found")]
+                )
+            result = pd.read_csv(StringIO(data_source.executor.data))
         else:
             return QueryResponse(
                 status="error",

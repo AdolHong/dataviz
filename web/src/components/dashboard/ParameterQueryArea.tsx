@@ -302,7 +302,7 @@ export const ParameterQueryArea = memo(
       } else if (dataSource.executor.type === 'csv_uploader') {
         requestContext = {
           type: 'csv_uploader',
-          dataContent: '', // 需要根据实际情况填充
+          dataContent: files[dataSource.id]?.fileContent || '',
         };
       } else if (dataSource.executor.type === 'csv_data') {
         requestContext = {
@@ -380,7 +380,9 @@ export const ParameterQueryArea = memo(
       }
       if (
         requireFileUpload &&
-        Object.keys(files).length !== csvDataSources.length
+        Object.keys(files).length !==
+          csvDataSources.filter((ds) => ds.executor.type === 'csv_uploader')
+            .length
       ) {
         toast.error('请上传文件');
         return;
@@ -744,9 +746,8 @@ export const ParameterQueryArea = memo(
 
               {/* 参数 */}
               {parametersExpanded &&
-              values &&
-              Object.keys(values).length > 0 ? (
-                <div>
+                values &&
+                Object.keys(values).length > 0 && (
                   <TabsContent value='parameters' className='mt-2 space-y-4'>
                     <div className='grid grid-cols-2 md:grid-cols-4 gap-x-10 gap-y-3'>
                       {parameters?.map((param) => (
@@ -756,18 +757,17 @@ export const ParameterQueryArea = memo(
                       ))}
                     </div>
                   </TabsContent>
+                )}
 
-                  {requireFileUpload && (
-                    <TabsContent value='upload' className='mt-2'>
-                      <FileUploadArea
-                        dataSources={csvDataSources}
-                        files={files}
-                        setFiles={setFiles}
-                      />
-                    </TabsContent>
-                  )}
-                </div>
-              ) : null}
+              {parametersExpanded && requireFileUpload && (
+                <TabsContent value='upload' className='mt-2'>
+                  <FileUploadArea
+                    dataSources={csvDataSources}
+                    files={files}
+                    setFiles={setFiles}
+                  />
+                </TabsContent>
+              )}
             </Tabs>
           </form>
         </CardContent>

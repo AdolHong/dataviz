@@ -4,7 +4,7 @@ export interface ArtifactRequest {
   uniqueId: string;
   dfAliasUniqueIds: Record<string, string>;
   plainParamValues: Record<string, PlainParamValue>;
-  cascaderParamValues: Record<string, string | string[]>;
+  cascaderParamValues: Record<string, string[] | string[][]>;
   inferredParamValues?: Record<string, string | string[]>;
   pyCode: string;
   engine: string;
@@ -21,7 +21,7 @@ export interface ArtifactCodeContext {
   uniqueId: string;
   dfAliasUniqueIds: Record<string, string>;
   plainParamValues: Record<string, PlainParamValue>;
-  cascaderParamValues: Record<string, string | string[]>;
+  cascaderParamValues: Record<string, string[] | string[][]>;
   inferredParamValues?: Record<string, string | string[]>;
   pyCode: string;
   engine: string;

@@ -80,10 +80,10 @@ interface LayoutItemParamsProps {
   ) => void;
   setCascaderParamValues: (
     values:
-      | Record<string, string | string[]>
+      | Record<string, string[] | string[][]>
       | ((
-          prev: Record<string, string | string[]>
-        ) => Record<string, string | string[]>)
+          prev: Record<string, string[] | string[][]>
+        ) => Record<string, string[] | string[][]>)
   ) => void;
   plainParamChoices: Record<string, Record<string, string>[]>;
   setPlainParamChoices: (
@@ -149,17 +149,22 @@ export function LayoutItemParams({
   const handleCascaderValueChange = (
     dfAlias: string,
     columns: string[],
-    selectedValues: string[]
+    selectedValues: string[] | string[][]
   ) => {
     const paramKey = `${dfAlias},${columns.join(',')}`;
-    // console.info(
-    //   `cascader param ${paramKey} selected values: ${selectedValues}`
-    // );
-    // console.info('selectedValues:', selectedValues);
-    setCascaderParamValues((prev: Record<string, string | string[]>) => {
+
+    // 判断是否为 string 数组
+    const isStringArray = selectedValues.every(
+      (item) => typeof item === 'string'
+    );
+
+    // 转换为 string[][] 类型
+    const convertedValues = isStringArray ? [selectedValues] : selectedValues;
+
+    setCascaderParamValues((prev: Record<string, string[] | string[][]>) => {
       return {
         ...prev,
-        [paramKey]: selectedValues,
+        [paramKey]: convertedValues,
       };
     });
   };
@@ -186,15 +191,6 @@ export function LayoutItemParams({
                     <span className='text-xs font-medium truncate mr-5'>
                       {param.dfAlias}
                     </span>
-                    <div className='flex flex-row gap-1'>
-                      {param.levels &&
-                        param.levels.map((level, i) => (
-                          <span key={i} className='text-[10px]'>
-                            ({level.name || level.dfColumn})
-                            {i < param.levels.length - 1 ? ', ' : ''}
-                          </span>
-                        ))}
-                    </div>
                   </div>
 
                   <div className='mt-1' key={`cascader-${index}`}>
@@ -203,7 +199,7 @@ export function LayoutItemParams({
                       cascaderParam={param}
                       dataSources={dataSources}
                       dependentQueryStatus={dependentQueryStatus}
-                      multiple={true}
+                      multiple={false}
                       onCheckChange={(selectedValues) => {
                         if (param.levels && param.levels.length > 0) {
                           const columns = param.levels.map((level) => {

@@ -87,7 +87,7 @@ export const LayoutGridItem = memo(
       Record<string, PlainParamValue>
     >({});
     const [cascaderParamValues, setCascaderParamValues] = useState<
-      Record<string, string | string[]>
+      Record<string, string | string[] | string[][]>
     >({});
     const [plainParamChoices, setPlainParamChoices] = useState<
       Record<string, Record<string, string>[]>

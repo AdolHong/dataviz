@@ -14,7 +14,8 @@ class ArtifactRequest(BaseModel):
     uniqueId: str
     dfAliasUniqueIds: Dict[str, str]
     plainParamValues: Dict[str, PlainParamValue]
-    cascaderParamValues: Dict[str, Union[str, List[str]]]
+    # cascaderParamValues: Dict[str, Union[str, List[str], List[List[str]]]]
+    cascaderParamValues: Dict[str, List[List[str]]]
     inferredParamValues: Dict[str, Union[str, List[str]]]
     pyCode: str
     engine: str
@@ -64,7 +65,8 @@ class ArtifactCodeContext(BaseModel):
     uniqueId: str
     dfAliasUniqueIds: Dict[str, str]
     plainParamValues: Dict[str, PlainParamValue]
-    cascaderParamValues: Dict[str, Union[str, List[str]]]
+    # cascaderParamValues: Dict[str, Union[str, List[str], List[List[str]]]]
+    cascaderParamValues: Dict[str, List[List[str]]]
     inferredParamValues: Dict[str, Union[str, List[str]]]
     pyCode: str
     engine: str

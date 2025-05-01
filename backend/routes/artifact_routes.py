@@ -9,6 +9,7 @@ from typing import Literal, Any
 from datetime import datetime
 from utils.fs_utils import FILE_CACHE_PATH
 from contextlib import redirect_stdout
+from functools import reduce
 
 
 from models.artifact_models import ArtifactRequest, ArtifactResponse, ArtifactCodeContext, ArtifactTextDataContext, ArtifactPlotlyDataContext, ArtifactEChartDataContext, ArtifactImageDataContext, ArtifactAltairDataContext, ArtifactCodeResponse, ArtifactTableDataContext
@@ -87,18 +88,22 @@ async def execute_artifact(request: ArtifactRequest):
 
     try:
         # cascader_params 处理
-        for param_name, param_value in request.cascaderParamValues.items():
-            if not isinstance(param_value, list):
-                raise ValueError(
-                    f"[PARAMS] Invalid cascader param value: {param_value}, should be a list.")
+        for param_name, param_values in request.cascaderParamValues.items():
+            df_alias, df_columns = param_name.split(
+                ",")[0], param_name.split(",")[1:]
 
             # 对于cascader_params, 如果参数值为空, 则默认为全选
-            if len(param_value) == 0:
+            if len(param_values) == 0:
                 continue
-            df_alias, df_column = param_name.split(",")[:2]
-            df_index = dfs[df_alias][df_column].fillna(
-                '').astype(str).str.lower().isin(param_value)
-            dfs[df_alias] = dfs[df_alias].loc[df_index]
+
+            df_selected_list = []
+            for param_value in param_values:
+
+                conds = [dfs[df_alias][column].astype(str) == param_value[idx] for idx, column in enumerate(
+                    df_columns) if idx < len(param_value)]
+                df_index = reduce(lambda x, y: x & y, conds)
+                df_selected_list.append(dfs[df_alias].loc[df_index])
+            dfs[df_alias] = pd.concat(df_selected_list)
 
         # 对于inferred_params, 进行类型转换
         for param_name, param_value in request.inferredParamValues.items():
@@ -233,18 +238,25 @@ async def artifact_code(request: ArtifactRequest):
     try:
         # cascader_params 处理
         for param_name, param_value in request.cascaderParamValues.items():
-            if not isinstance(param_value, list):
-                raise ValueError(
-                    f"[PARAMS] Invalid cascader param value: {param_value}, should be a list.")
 
-            # 对于cascader_params, 如果参数值为空, 则默认为全选
-            if len(param_value) == 0:
-                continue
-            df_alias, df_column = param_name.split(",")[:2]
-            df_index = dfs[df_alias][df_column].fillna(
-                '').astype(str).str.lower().isin(param_value)
+            print(param_name, param_value)
+            # if not isinstance(param_value, list):
+            #     raise ValueError(
+            #         f"[PARAMS] Invalid cascader param value: {param_value}, should be a list.")
 
-            dfs[df_alias] = dfs[df_alias].loc[df_index]
+            # # 对于cascader_params, 如果参数值为空, 则默认为全选
+            # if len(param_value) == 0:
+            #     continue
+            # df_alias, df_columns = param_name.split(
+            #     ",")[0], param_name.split(",")[1:]
+
+            # print(f"df_alias: {df_alias}, df_columns: {df_columns}")
+            # print(f"param_value: {param_value}")
+
+            # df_index = dfs[df_alias][df_columns].fillna(
+            #     '').astype(str).str.lower().isin(param_value)
+
+            # dfs[df_alias] = dfs[df_alias].loc[df_index]
 
         # 对于inferred_params, 进行类型转换
         for param_name, param_value in request.inferredParamValues.items():

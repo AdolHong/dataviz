@@ -252,10 +252,10 @@ def construct_response_cascader_context(df: Optional[pd.DataFrame], cascader_req
     else:
         for required, columns in zip(cascader_required, cascader_tuples):
             df_unique = df[columns].drop_duplicates()
-            flag_unique, df_bad_case = check_unique_parents(df_unique, columns)
-            if not flag_unique:
-                raise ValueError(
-                    f"[CascaderContext] {columns} 存在一个子结点对应多个父结点: {str(df_bad_case)}")
+            # flag_unique, df_bad_case = check_unique_parents(df_unique, columns)
+            # if not flag_unique:
+            #     raise ValueError(
+            #         f"[CascaderContext] {columns} 存在一个子结点对应多个父结点: {str(df_bad_case)}")
             # 返回csv，是因为前端要基于此，构造cascader树
             inferred_cascader[required] = convert_df_to_csv_string(df_unique)
     return {

@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "vite --host 0.0.0.0 --port 3000",
-    "build": "vite build --outDir ../backend/dist && tsc",
+    "build": "vite build  && tsc && rm -rf ../backend/dist && mv ./dist ../backend/dist",
     "serve": "vite preview",
     "test": "vitest run"
   },

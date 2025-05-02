@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import os
 import uvicorn
 
@@ -24,23 +25,29 @@ app.include_router(query_routes.router, prefix="/api")
 app.include_router(artifact_routes.router, prefix="/api")
 app.include_router(auth_routes.router)  # auth_routes已设置prefix="/api/auth"
 
+# 注册静态文件服务（假设前端构建文件在./dist目录）
+app.mount("/", StaticFiles(directory="./dist", html=True), name="static")
+
 # 启动初始化：如果数据文件不存在，创建一个空的文件系统
+
+
 @app.on_event("startup")
 def startup_event():
     if not os.path.exists(DATA_DIR):
         os.makedirs(DATA_DIR, exist_ok=True)
-    
+
     if not os.path.exists(FILE_STORAGE_PATH):
         os.makedirs(FILE_STORAGE_PATH, exist_ok=True)
-    
+
     if not os.path.exists(FILE_DELETED_PATH):
         os.makedirs(FILE_DELETED_PATH, exist_ok=True)
-    
+
     if not os.path.exists(FILE_CACHE_PATH):
         os.makedirs(FILE_CACHE_PATH, exist_ok=True)
-    
+
     if not os.path.exists(FS_DATA_FILE):
         save_fs_data([])
 
+
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8080)

@@ -5,25 +5,15 @@ tar -czvf ../dataviz_$(date +%Y%m%d_%H%M%S).tar.gz  --exclude backend/engine_con
 npm install http-server -g
 http-server -P "http://localhost:8080/?"    
 
-
-
 # python 启动
 uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 
 # react 启动
 npm start
 
-
-# docker 启动前端
-```
-# 进入前端目录
-cd web
-
-# 构建Docker镜像
-docker build -t dataviz-frontend .
-
-# 运行容器
-docker run -p 3000:3000 dataviz-frontend
+# react 编译
+npm run build
+npx tsc
 ```
 
 
@@ -40,6 +30,7 @@ docker run -p 3000:3000 dataviz-frontend
 
 54. toggle 文件夹时， artifact没有autosize。。😂
 55. artifact，可以考虑用tanstack query,  cached query结果； 避免反复请求;
+56. 级联单选，可以考虑，默认选第一个。 
 
 
 

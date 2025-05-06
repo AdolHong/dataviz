@@ -37,7 +37,7 @@ function csvToCascaderOptions(
 
       if (!levelMap.has(mapKey)) {
         const newOption: CascaderOption = {
-          value: value.toLowerCase().replace(/\s+/g, '-'),
+          value: value.replace(/\s+/g, '-'),
           label: value,
           children: index < levels.length - 1 ? [] : undefined,
         };

@@ -60,14 +60,14 @@ function csvToCascaderOptions(
 }
 
 // 针对单选列表，递归获取第一个选项的值
-function extractCascaderValues(options: CascaderOption[]): string[] {
+function extractCascaderFirstLevelValues(options: CascaderOption[]): string[] {
   const values: string[] = [];
 
   function traverse(option: CascaderOption) {
     values.push(option.value);
 
     if (option.children && option.children.length > 0) {
-      option.children.forEach(traverse);
+      traverse(option.children[0]);
     }
   }
 
@@ -137,10 +137,9 @@ export function AntdCascaderView({
 
     // 如果非多选，且有数据，则设置value为第一个选项
     if (!cascaderParam.multiple && options.length > 0) {
-      // 在现有代码中可以这样使用
-      const firstLevelValues = extractCascaderValues(options);
+      const firstLevelValues = extractCascaderFirstLevelValues(options);
       setValue(firstLevelValues);
-      console.info('options', options);
+      onCheckChange?.([firstLevelValues as string[]]); // 触发onCheckChange, 更新cascaderParamValues
     }
 
     return options;

@@ -263,7 +263,7 @@ def construct_response_cascader_context(df: Optional[pd.DataFrame], cascader_req
             inferred_cascader[required] = ",".join(columns) + "\n"
     else:
         for required, columns in zip(cascader_required, cascader_tuples):
-            df_unique = df[columns].drop_duplicates()
+            df_unique = df[columns].drop_duplicates().sort_values(by=columns)
             # flag_unique, df_bad_case = check_unique_parents(df_unique, columns)
             # if not flag_unique:
             #     raise ValueError(

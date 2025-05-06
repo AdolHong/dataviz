@@ -59,6 +59,25 @@ function csvToCascaderOptions(
   return result;
 }
 
+// 针对单选列表，递归获取第一个选项的值
+function extractCascaderValues(options: CascaderOption[]): string[] {
+  const values: string[] = [];
+
+  function traverse(option: CascaderOption) {
+    values.push(option.value);
+
+    if (option.children && option.children.length > 0) {
+      option.children.forEach(traverse);
+    }
+  }
+
+  if (options.length > 0) {
+    traverse(options[0]);
+  }
+
+  return values;
+}
+
 interface AntdCascaderViewProps {
   dfAlias: string;
   dataSources: DataSource[];
@@ -114,7 +133,17 @@ export function AntdCascaderView({
   // 将CSV数据转换为Cascader选项
   const options = useMemo(() => {
     if (!csvData) return [];
-    return csvToCascaderOptions(csvData, levels);
+    const options = csvToCascaderOptions(csvData, levels);
+
+    // 如果非多选，且有数据，则设置value为第一个选项
+    if (!cascaderParam.multiple && options.length > 0) {
+      // 在现有代码中可以这样使用
+      const firstLevelValues = extractCascaderValues(options);
+      setValue(firstLevelValues);
+      console.info('options', options);
+    }
+
+    return options;
   }, [csvData, levels]);
 
   // 渲染处理

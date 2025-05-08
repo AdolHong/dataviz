@@ -209,7 +209,26 @@ export const LayoutGridItem = memo(
             dayjs(queryStatus.queryResponse.queryTime).isAfter(
               dayjs(report.updatedAt)
             )
-        )
+        ) &&
+        // 条件3: 所有cascaderParamValues均不为空
+        Object.values(artifact?.cascaderParams || []).every((param) => {
+          // 多选: 直接返回true
+          if (param.multiple) {
+            return true;
+          }
+
+          // 单选: 检查paramValues是否为空
+          const paramKey = `${param.dfAlias},${param.levels.map(
+            (level) => level.dfColumn
+          )}`;
+          const paramValues = cascaderParamValues?.[paramKey];
+          if (!paramValues) {
+            return false;
+          }
+
+          // 单选: 检查paramValues的长度为1
+          return paramValues.length === 1;
+        })
       ) {
         const queryIds = Object.keys(dependentQueryStatus).reduce(
           (acc, key) => {

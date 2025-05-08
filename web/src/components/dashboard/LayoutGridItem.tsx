@@ -97,7 +97,7 @@ export const LayoutGridItem = memo(
     const [inferredParamValues, setInferredParamValues] = useState<
       Record<string, string[]>
     >({});
-    const [inferredParamChoices, setInferredParamChoices] = useState<
+    const [inferredParamChoices, _] = useState<
       Record<string, Record<string, string>[]>
     >({});
 

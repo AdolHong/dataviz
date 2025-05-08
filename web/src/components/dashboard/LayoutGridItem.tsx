@@ -181,38 +181,12 @@ export const LayoutGridItem = memo(
         }
       });
 
-      // 处理inferredParams的初始化
-      const inferredChoices: Record<string, Record<string, string>[]> = {};
-
-      // 从每个查询响应中获取inferredContext并更新inferredParamChoices
-      Object.values(dependentQueryStatus).forEach((queryStatus) => {
-        if (queryStatus.queryResponse?.inferredContext) {
-          const { inferred } = queryStatus.queryResponse.inferredContext;
-          if (inferred) {
-            // 遍历每个推断参数
-            artifact?.inferredParams?.forEach((param) => {
-              // const paramKey = `${param.dfAlias}_${param.dfColumn}_${param.id}`;
-              // 查找对应数据源和列的值
-              const paramKey = `${param.dfAlias}.${param.dfColumn}`;
-              if (inferred[paramKey] && inferred[paramKey].length > 0) {
-                inferredChoices[paramKey] = inferred[paramKey].map((value) => ({
-                  key: String(value),
-                  value: String(value),
-                }));
-              }
-            });
-          }
-        }
-      });
-
-      // 更新推断参数选项
-      if (Object.keys(inferredChoices).length > 0) {
-        setInferredParamChoices(inferredChoices);
-      }
+      // 处理cascaderParams的初始化
+      setCascaderParamValues({});
 
       // ps: 有了isInitialized, 可以避免在无参数的artifact请求多次画图;
       setIsInitialized(true);
-    }, [report]);
+    }, [report, dependentQueryStatus]);
 
     useEffect(() => {
       // 条件1: 组件已经初始化完了, 即useEffect[report];

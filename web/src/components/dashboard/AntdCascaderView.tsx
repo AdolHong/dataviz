@@ -137,9 +137,12 @@ export function AntdCascaderView({
 
     // 如果非多选，且有数据，则设置value为第一个选项
     if (!cascaderParam.multiple && options.length > 0) {
-      const firstLevelValues = extractCascaderFirstLevelValues(options);
-      setValue(firstLevelValues);
-      onCheckChange?.([firstLevelValues as string[]]); // 触发onCheckChange, 更新cascaderParamValues
+      // 延迟0.1秒后渲染，以确保数据正确加载
+      setTimeout(() => {
+        const firstLevelValues = extractCascaderFirstLevelValues(options);
+        setValue(firstLevelValues);
+        onCheckChange?.([firstLevelValues as string[]]); // 触发onCheckChange, 更新cascaderParamValues
+      }, 100);
     }
 
     return options;

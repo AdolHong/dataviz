@@ -137,12 +137,9 @@ export function AntdCascaderView({
 
     // 如果非多选，且有数据，则设置value为第一个选项
     if (!cascaderParam.multiple && options.length > 0) {
-      // 延迟0.1秒后渲染，以确保数据正确加载
-      setTimeout(() => {
-        const firstLevelValues = extractCascaderFirstLevelValues(options);
-        setValue(firstLevelValues);
-        onCheckChange?.([firstLevelValues as string[]]); // 触发onCheckChange, 更新cascaderParamValues
-      }, 100);
+      const firstLevelValues = extractCascaderFirstLevelValues(options);
+      setValue(firstLevelValues);
+      onCheckChange?.([firstLevelValues as string[]]); // 触发onCheckChange, 更新cascaderParamValues
     }
 
     return options;
@@ -155,6 +152,7 @@ export function AntdCascaderView({
         style={{ width: '100%' }}
         options={[]}
         disabled
+        showSearch={true}
         placeholder='找不到数据源'
       />
     );
@@ -166,6 +164,7 @@ export function AntdCascaderView({
         style={{ width: '100%' }}
         options={[]}
         disabled
+        showSearch={true}
         placeholder='无级联数据可用'
       />
     );
@@ -185,6 +184,7 @@ export function AntdCascaderView({
             onCheckChange(value as string[][]);
           }
         }}
+        showSearch={true}
         allowClear={true}
         style={{ width: '100%' }}
       />
@@ -204,6 +204,7 @@ export function AntdCascaderView({
       }}
       placeholder='请选择'
       allowClear={false}
+      showSearch={true}
     />
   );
 }

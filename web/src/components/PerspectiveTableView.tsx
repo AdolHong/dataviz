@@ -122,6 +122,9 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
 
   // 解析JSON数据并初始化Perspective
   useEffect(() => {
+    let timer: number | undefined;
+    let viewInstance: any = null;
+
     const initPerspective = async () => {
       try {
         // 等待确保WASM和模块已加载
@@ -145,9 +148,26 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
           parsedData = [];
         }
 
+        // 如果存在旧视图，先关闭
+        if (viewInstance) {
+          try {
+            // 首先尝试卸载视图
+            await viewInstance.delete();
+          } catch (error) {
+            console.log('清理视图失败，可以忽略:', error);
+          }
+        }
+
         // 如果存在旧表，先关闭
         if (tableRef.current) {
-          tableRef.current.delete();
+          try {
+            // 安全地尝试删除表
+            if (typeof tableRef.current.delete === 'function') {
+              await tableRef.current.delete();
+            }
+          } catch (error) {
+            console.log('清理表格失败，可以忽略:', error);
+          }
         }
 
         // 创建新表
@@ -156,6 +176,7 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
         // 加载数据到视图
         if (viewerRef.current) {
           await viewerRef.current.load(tableRef.current);
+          viewInstance = tableRef.current.view();
 
           // 设置默认配置
           await viewerRef.current.restore({
@@ -170,7 +191,7 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
     };
 
     // 确保DOM已加载
-    const timer = setTimeout(() => {
+    timer = window.setTimeout(() => {
       if (viewerRef.current) {
         initPerspective();
       }
@@ -178,10 +199,50 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
 
     // 组件卸载时清理资源
     return () => {
-      clearTimeout(timer);
-      if (tableRef.current) {
-        tableRef.current.delete();
-      }
+      // 清除定时器
+      if (timer) window.clearTimeout(timer);
+
+      // 安全地清理资源
+      const cleanup = async () => {
+        try {
+          // 清理视图实例
+          if (viewInstance) {
+            try {
+              await viewInstance.delete();
+            } catch (e) {
+              console.log('清理视图实例失败，可以忽略:', e);
+            }
+          }
+
+          // 清理表格
+          if (tableRef.current) {
+            try {
+              // 安全地检查delete方法是否存在
+              if (typeof tableRef.current.delete === 'function') {
+                await tableRef.current.delete();
+              }
+            } catch (e) {
+              console.log('清理表格失败，可以忽略:', e);
+            }
+          }
+
+          // 清理worker
+          if (workerRef.current) {
+            try {
+              if (typeof workerRef.current.terminate === 'function') {
+                workerRef.current.terminate();
+              }
+            } catch (e) {
+              console.log('清理worker失败，可以忽略:', e);
+            }
+          }
+        } catch (error) {
+          console.log('清理资源时发生错误，可以忽略:', error);
+        }
+      };
+
+      // 执行清理
+      cleanup();
     };
   }, [data]);
 
@@ -189,7 +250,9 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
   const handleExportCSV = async () => {
     try {
       if (tableRef.current) {
-        const csv = await tableRef.current.view().to_csv();
+        const view = tableRef.current.view();
+        const csv = await view.to_csv();
+        view.delete(); // 用完即删
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
         saveAs(blob, `${fileName}.csv`);
       }
@@ -202,7 +265,9 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
   const handleExportJSON = async () => {
     try {
       if (tableRef.current) {
-        const json = await tableRef.current.view().to_json();
+        const view = tableRef.current.view();
+        const json = await view.to_json();
+        view.delete(); // 用完即删
         const blob = new Blob([JSON.stringify(json, null, 2)], {
           type: 'application/json;charset=utf-8;',
         });

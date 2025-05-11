@@ -25,7 +25,6 @@ import Plot from 'react-plotly.js';
 import * as echarts from 'echarts';
 import { VegaLite } from 'react-vega';
 import dayjs from 'dayjs';
-import { ArtifactTableView } from '@/components/ArtifactTableView';
 import { PerspectiveTableView } from '@/components/PerspectiveTableView';
 
 import { useArtifactDialogStore } from '@/lib/store/useArtifactDialogStore';

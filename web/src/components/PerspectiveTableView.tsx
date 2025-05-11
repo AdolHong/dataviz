@@ -279,25 +279,7 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
   };
 
   return (
-    <div className='flex flex-col h-full'>
-      {showExport && (
-        <div className='flex justify-end items-center flex-shrink-0 mb-2'>
-          <Button
-            variant='outline'
-            size='sm'
-            onClick={handleExportCSV}
-            className='mr-2'
-          >
-            <Download className='mr-2 h-4 w-4' />
-            <span>导出 CSV</span>
-          </Button>
-          <Button variant='outline' size='sm' onClick={handleExportJSON}>
-            <Download className='mr-2 h-4 w-4' />
-            <span>导出 JSON</span>
-          </Button>
-        </div>
-      )}
-
+    <div className='flex flex-col min-h-[600px]'>
       <div className='flex-grow relative border rounded-md overflow-hidden'>
         <perspective-viewer
           ref={viewerRef as React.RefObject<HTMLElement>}

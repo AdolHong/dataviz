@@ -69,18 +69,18 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
     const loadWasmFiles = async () => {
       try {
         // 预加载所有必要的WASM文件
-        const wasmResources = [
-          //   {
-          //     id: 'perspective-wasm',
-          //     href: 'https://cdn.jsdelivr.net/npm/@finos/perspective/dist/cdn/perspective.wasm',
-          //     type: 'application/wasm',
-          //   },
-          {
-            id: 'perspective-viewer-wasm',
-            href: 'https://cdn.jsdelivr.net/npm/@finos/perspective-viewer/dist/cdn/perspective-viewer.wasm',
-            type: 'application/wasm',
-          },
-        ];
+        // const wasmResources = [
+        //   {
+        //     id: 'perspective-wasm',
+        //     href: 'https://cdn.jsdelivr.net/npm/@finos/perspective/dist/cdn/perspective.wasm',
+        //     type: 'application/wasm',
+        //   },
+        //   {
+        //     id: 'perspective-viewer-wasm',
+        //     href: 'https://cdn.jsdelivr.net/npm/@finos/perspective-viewer/dist/cdn/perspective-viewer.wasm',
+        //     type: 'application/wasm',
+        //   },
+        // ];
 
         // 加载CSS
         if (!document.getElementById('perspective-css')) {
@@ -94,19 +94,19 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
           document.head.appendChild(link);
         }
 
-        // 为每个WASM文件创建预加载链接
-        wasmResources.forEach((resource) => {
-          if (!document.getElementById(resource.id)) {
-            const link = document.createElement('link');
-            link.id = resource.id;
-            link.rel = 'preload';
-            link.href = resource.href;
-            link.as = 'fetch';
-            link.type = resource.type;
-            link.crossOrigin = 'anonymous';
-            document.head.appendChild(link);
-          }
-        });
+        // // 为每个WASM文件创建预加载链接
+        // wasmResources.forEach((resource) => {
+        //   if (!document.getElementById(resource.id)) {
+        //     const link = document.createElement('link');
+        //     link.id = resource.id;
+        //     link.rel = 'preload';
+        //     link.href = resource.href;
+        //     link.as = 'fetch';
+        //     link.type = resource.type;
+        //     link.crossOrigin = 'anonymous';
+        //     document.head.appendChild(link);
+        //   }
+        // });
 
         wasmLoaded.current = true;
       } catch (error) {
@@ -165,6 +165,8 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
         let parsedData;
         try {
           parsedData = JSON.parse(data);
+          //   console.info('data', data);
+          //   console.info('parsedData', parsedData);
         } catch (error) {
           console.error('数据解析错误:', error);
           parsedData = [];
@@ -193,6 +195,7 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
         }
 
         // 创建新表
+
         tableRef.current = workerRef.current.table(parsedData);
 
         // 加载数据到视图
@@ -203,7 +206,7 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
           await viewerRef.current.restore({
             plugin: 'datagrid',
             settings: false,
-            theme: 'material-dark',
+            // theme: 'Solarized',
           });
         }
       } catch (error) {

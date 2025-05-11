@@ -26,6 +26,7 @@ import * as echarts from 'echarts';
 import { VegaLite } from 'react-vega';
 import dayjs from 'dayjs';
 import { ArtifactTableView } from '@/components/ArtifactTableView';
+import { PerspectiveTableView } from '@/components/PerspectiveTableView';
 
 import { useArtifactDialogStore } from '@/lib/store/useArtifactDialogStore';
 import { useDataSourceDialogStore } from '@/lib/store/useDataSourceDialogStore';
@@ -310,7 +311,8 @@ export const LayoutGridItem = memo(
           );
 
         case 'table':
-          return <ArtifactTableView data={artifactData.dataContext.data} />;
+          // return <ArtifactTableView data={artifactData.dataContext.data} />;
+          return <PerspectiveTableView data={artifactData.dataContext.data} />;
         case 'image':
           return (
             <div className='w-[95%] h-[95%] flex justify-center items-center'>

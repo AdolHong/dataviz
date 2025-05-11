@@ -198,12 +198,11 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
         // 加载数据到视图
         if (viewerRef.current) {
           await viewerRef.current.load(tableRef.current);
-          viewInstance = tableRef.current.view();
 
           // 设置默认配置
           await viewerRef.current.restore({
             plugin: 'datagrid',
-            settings: true,
+            settings: false,
             theme: 'material-dark',
           });
         }
@@ -227,15 +226,6 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
       // 安全地清理资源
       const cleanup = async () => {
         try {
-          // 清理视图实例
-          if (viewInstance) {
-            try {
-              await viewInstance.delete();
-            } catch (e) {
-              console.log('清理视图实例失败，可以忽略:', e);
-            }
-          }
-
           // 清理表格
           if (tableRef.current) {
             try {

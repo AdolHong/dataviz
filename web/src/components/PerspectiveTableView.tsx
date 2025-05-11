@@ -1,18 +1,19 @@
 import React, { useEffect, useRef } from 'react';
-import { Button } from '@/components/ui/button';
-import { Download } from 'lucide-react';
-import { saveAs } from 'file-saver';
+
+// 为自定义元素创建单独的接口，避免与已有的JSX.IntrinsicElements冲突
+interface JsxPerspectiveViewerElement {
+  ref?: React.RefObject<any>;
+  className?: string;
+  style?: React.CSSProperties;
+  // 其他可能需要的属性
+  [key: string]: any;
+}
 
 // 声明自定义元素和类型
 declare global {
   namespace JSX {
     interface IntrinsicElements {
-      'perspective-viewer': React.DetailedHTMLProps<
-        React.HTMLAttributes<HTMLElement> & {
-          ref?: React.RefObject<any>;
-        },
-        HTMLElement
-      >;
+      'perspective-viewer': JsxPerspectiveViewerElement;
     }
   }
 }
@@ -25,19 +26,40 @@ interface PerspectiveViewerElement extends HTMLElement {
 
 interface PerspectiveTableViewProps {
   data: string; // JSON string from ArtifactTableDataContext
-  fileName?: string;
-  showExport?: boolean;
 }
 
 export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
   data,
-  fileName = 'table-data',
-  showExport = true,
 }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<PerspectiveViewerElement | null>(null);
   const tableRef = useRef<any>(null);
   const workerRef = useRef<any>(null);
   const wasmLoaded = useRef<boolean>(false);
+
+  // 创建perspective-viewer元素
+  useEffect(() => {
+    if (containerRef.current && !viewerRef.current) {
+      // 清空容器
+      containerRef.current.innerHTML = '';
+
+      // 创建perspective-viewer元素
+      const viewer = document.createElement('perspective-viewer');
+      viewer.className = 'absolute inset-0';
+      containerRef.current.appendChild(viewer);
+
+      // 保存引用
+      viewerRef.current = viewer as PerspectiveViewerElement;
+    }
+
+    return () => {
+      // 组件卸载时清理
+      if (viewerRef.current && viewerRef.current.parentNode) {
+        viewerRef.current.parentNode.removeChild(viewerRef.current);
+        viewerRef.current = null;
+      }
+    };
+  }, []);
 
   // 预加载WASM文件
   useEffect(() => {
@@ -48,11 +70,11 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
       try {
         // 预加载所有必要的WASM文件
         const wasmResources = [
-          {
-            id: 'perspective-wasm',
-            href: 'https://cdn.jsdelivr.net/npm/@finos/perspective/dist/cdn/perspective.wasm',
-            type: 'application/wasm',
-          },
+          //   {
+          //     id: 'perspective-wasm',
+          //     href: 'https://cdn.jsdelivr.net/npm/@finos/perspective/dist/cdn/perspective.wasm',
+          //     type: 'application/wasm',
+          //   },
           {
             id: 'perspective-viewer-wasm',
             href: 'https://cdn.jsdelivr.net/npm/@finos/perspective-viewer/dist/cdn/perspective-viewer.wasm',
@@ -246,46 +268,12 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
     };
   }, [data]);
 
-  // 导出CSV
-  const handleExportCSV = async () => {
-    try {
-      if (tableRef.current) {
-        const view = tableRef.current.view();
-        const csv = await view.to_csv();
-        view.delete(); // 用完即删
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        saveAs(blob, `${fileName}.csv`);
-      }
-    } catch (error) {
-      console.error('导出CSV错误:', error);
-    }
-  };
-
-  // 导出JSON
-  const handleExportJSON = async () => {
-    try {
-      if (tableRef.current) {
-        const view = tableRef.current.view();
-        const json = await view.to_json();
-        view.delete(); // 用完即删
-        const blob = new Blob([JSON.stringify(json, null, 2)], {
-          type: 'application/json;charset=utf-8;',
-        });
-        saveAs(blob, `${fileName}.json`);
-      }
-    } catch (error) {
-      console.error('导出JSON错误:', error);
-    }
-  };
-
   return (
     <div className='flex flex-col min-h-[600px]'>
-      <div className='flex-grow relative border rounded-md overflow-hidden'>
-        <perspective-viewer
-          ref={viewerRef as React.RefObject<HTMLElement>}
-          className='absolute inset-0'
-        />
-      </div>
+      <div
+        ref={containerRef}
+        className='flex-grow relative border rounded-md overflow-hidden'
+      ></div>
     </div>
   );
 };

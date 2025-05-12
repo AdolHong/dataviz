@@ -26,10 +26,12 @@ interface PerspectiveViewerElement extends HTMLElement {
 
 interface PerspectiveTableViewProps {
   data: string; // JSON string from ArtifactTableDataContext
+  config: string; // JSON string from ArtifactTableDataContext
 }
 
 export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
   data,
+  config = '{}',
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<PerspectiveViewerElement | null>(null);
@@ -97,10 +99,10 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
         const perspectiveScript = document.createElement('script');
         perspectiveScript.type = 'module';
         perspectiveScript.innerHTML = `
-          import perspective from "https://cdn.jsdelivr.net/npm/@finos/perspective@3.6.0/dist/cdn/perspective.js";
-          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer@3.6.0/dist/cdn/perspective-viewer.js";
-          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-datagrid@3.6.0/dist/cdn/perspective-viewer-datagrid.js";
-          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-d3fc@3.6.0/dist/cdn/perspective-viewer-d3fc.js";
+          import perspective from "https://cdn.jsdelivr.net/npm/@finos/perspective@3.6.1/dist/cdn/perspective.js";
+          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer@3.6.1/dist/cdn/perspective-viewer.js";
+          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-datagrid@3.6.1/dist/cdn/perspective-viewer-datagrid.js";
+          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-d3fc@3.6.1/dist/cdn/perspective-viewer-d3fc.js";
           
           window.perspective = perspective;
         `;
@@ -177,7 +179,7 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
           await viewerRef.current.restore({
             plugin: 'datagrid',
             settings: false,
-            // theme: 'Solarized',
+            ...JSON.parse(config),
           });
         }
       } catch (error) {

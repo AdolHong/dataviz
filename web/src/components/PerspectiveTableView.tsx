@@ -68,20 +68,6 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
 
     const loadWasmFiles = async () => {
       try {
-        // 预加载所有必要的WASM文件
-        // const wasmResources = [
-        //   {
-        //     id: 'perspective-wasm',
-        //     href: 'https://cdn.jsdelivr.net/npm/@finos/perspective/dist/cdn/perspective.wasm',
-        //     type: 'application/wasm',
-        //   },
-        //   {
-        //     id: 'perspective-viewer-wasm',
-        //     href: 'https://cdn.jsdelivr.net/npm/@finos/perspective-viewer/dist/cdn/perspective-viewer.wasm',
-        //     type: 'application/wasm',
-        //   },
-        // ];
-
         // 加载CSS
         if (!document.getElementById('perspective-css')) {
           const link = document.createElement('link');
@@ -93,21 +79,6 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
           link.crossOrigin = 'anonymous';
           document.head.appendChild(link);
         }
-
-        // // 为每个WASM文件创建预加载链接
-        // wasmResources.forEach((resource) => {
-        //   if (!document.getElementById(resource.id)) {
-        //     const link = document.createElement('link');
-        //     link.id = resource.id;
-        //     link.rel = 'preload';
-        //     link.href = resource.href;
-        //     link.as = 'fetch';
-        //     link.type = resource.type;
-        //     link.crossOrigin = 'anonymous';
-        //     document.head.appendChild(link);
-        //   }
-        // });
-
         wasmLoaded.current = true;
       } catch (error) {
         console.error('加载WASM文件错误:', error);

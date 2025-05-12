@@ -26,18 +26,25 @@ interface PerspectiveViewerElement extends HTMLElement {
 
 interface PerspectiveTableViewProps {
   data: string; // JSON string from ArtifactTableDataContext
-  config: string; // JSON string from ArtifactTableDataContext
+  config: string; // JSON string from ConfigContext
+  type: 'table' | 'plot';
 }
 
 export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
   data,
   config = '{}',
+  type = 'table',
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<PerspectiveViewerElement | null>(null);
   const tableRef = useRef<any>(null);
   const workerRef = useRef<any>(null);
   const wasmLoaded = useRef<boolean>(false);
+
+  let minHeight = '600px';
+  if (type === 'plot') {
+    minHeight = '480px';
+  }
 
   // 创建perspective-viewer元素
   useEffect(() => {
@@ -235,7 +242,7 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
   }, [data]);
 
   return (
-    <div className='flex flex-col min-h-[600px]'>
+    <div className={`flex flex-col min-h-[${minHeight}]`}>
       <div
         ref={containerRef}
         className='flex-grow relative border rounded-md overflow-hidden'

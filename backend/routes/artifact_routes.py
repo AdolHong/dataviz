@@ -12,7 +12,7 @@ from contextlib import redirect_stdout
 from functools import reduce
 
 
-from models.artifact_models import ArtifactRequest, ArtifactResponse, ArtifactCodeContext, ArtifactTextDataContext, ArtifactPlotlyDataContext, ArtifactEChartDataContext, ArtifactImageDataContext, ArtifactAltairDataContext, ArtifactCodeResponse, ArtifactTableDataContext
+from models.artifact_models import ArtifactRequest, ArtifactResponse, ArtifactCodeContext, ArtifactTextDataContext, ArtifactPlotlyDataContext, ArtifactEChartDataContext, ArtifactImageDataContext, ArtifactAltairDataContext, ArtifactCodeResponse, ArtifactTableDataContext, ArtifactPerspectiveDataContext
 from models.query_models import Alert
 from models.artifact_models import PlainParamValue
 
@@ -176,6 +176,11 @@ async def execute_artifact(request: ArtifactRequest):
             elif "pandas.core.frame.DataFrame" in str(type(result)):
                 data_context = ArtifactTableDataContext(
                     type="table", data=result.to_json(orient='records', date_format='iso', force_ascii=False))
+            elif 'PerspectiveWidget' in str(type(result)):
+                widget_df = result.table.view().to_pandas()
+                widget_config = result.save()
+                data_context = ArtifactPerspectiveDataContext(
+                    type="perspective", data=widget_df.to_json(orient='records', date_format='iso', force_ascii=False), config=widget_config)
             else:
                 # 默认转换为文本
                 data_context = ArtifactTextDataContext(

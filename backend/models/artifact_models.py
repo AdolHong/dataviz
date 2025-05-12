@@ -36,6 +36,12 @@ class ArtifactTableDataContext(BaseModel):
     data: str
 
 
+class ArtifactPerspectiveDataContext(BaseModel):
+    type: Literal['perspective']
+    data: str
+    config: str
+
+
 class ArtifactPlotlyDataContext(BaseModel):
     type: Literal['plotly']
     data: str
@@ -55,6 +61,7 @@ ArtifactDataContext = Union[
     ArtifactTextDataContext,
     ArtifactImageDataContext,
     ArtifactTableDataContext,
+    ArtifactPerspectiveDataContext,
     ArtifactPlotlyDataContext,
     ArtifactEChartDataContext,
     ArtifactAltairDataContext

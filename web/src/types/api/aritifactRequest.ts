@@ -57,6 +57,12 @@ export interface ArtifactAltairDataContext {
   data: string;
 }
 
+export interface ArtifactPerspectiveDataContext {
+  type: 'perspective';
+  data: string;
+  config: string;
+}
+
 export interface ArtifactResponse {
   status: string;
   message: string;
@@ -70,7 +76,8 @@ export interface ArtifactResponse {
     | ArtifactTableDataContext
     | ArtifactPlotlyDataContext
     | ArtifactEChartDataContext
-    | ArtifactAltairDataContext;
+    | ArtifactAltairDataContext
+    | ArtifactPerspectiveDataContext;
 }
 
 export interface ArtifactCodeReponse {

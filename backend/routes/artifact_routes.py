@@ -178,9 +178,12 @@ async def execute_artifact(request: ArtifactRequest):
                     type="table", data=result.to_json(orient='records', date_format='iso', force_ascii=False))
             elif 'PerspectiveWidget' in str(type(result)):
                 widget_df = result.table.view().to_pandas()
-                widget_config = result.save()
+                widget_config = json.dumps(result.save())
                 data_context = ArtifactPerspectiveDataContext(
                     type="perspective", data=widget_df.to_json(orient='records', date_format='iso', force_ascii=False), config=widget_config)
+            # elif type(result) == tuple and len(result) == 2 and "pandas.core.frame.DataFrame" in str(type(result[0])) and type(result[1]) == dict:
+            #     data_context = ArtifactPerspectiveDataContext(
+            #         type="perspective", data=result[0].to_json(orient='records', date_format='iso', force_ascii=False), config=json.dumps(result[1]))
             else:
                 # 默认转换为文本
                 data_context = ArtifactTextDataContext(

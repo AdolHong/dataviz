@@ -24,27 +24,20 @@ interface PerspectiveViewerElement extends HTMLElement {
   restore: (config: any) => Promise<void>;
 }
 
-interface PerspectiveTableViewProps {
+interface PerspectiveViewProps {
   data: string; // JSON string from ArtifactTableDataContext
   config: string; // JSON string from ConfigContext
-  type: 'table' | 'plot';
 }
 
-export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
+export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
   data,
   config = '{}',
-  type = 'table',
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<PerspectiveViewerElement | null>(null);
   const tableRef = useRef<any>(null);
   const workerRef = useRef<any>(null);
   const wasmLoaded = useRef<boolean>(false);
-
-  let minHeight = '600px';
-  if (type === 'plot') {
-    minHeight = '480px';
-  }
 
   // 创建perspective-viewer元素
   useEffect(() => {
@@ -106,10 +99,10 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
         const perspectiveScript = document.createElement('script');
         perspectiveScript.type = 'module';
         perspectiveScript.innerHTML = `
-          import perspective from "https://cdn.jsdelivr.net/npm/@finos/perspective@3.6.1/dist/cdn/perspective.js";
-          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer@3.6.1/dist/cdn/perspective-viewer.js";
-          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-datagrid@3.6.1/dist/cdn/perspective-viewer-datagrid.js";
-          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-d3fc@3.6.1/dist/cdn/perspective-viewer-d3fc.js";
+          import perspective from "https://cdn.jsdelivr.net/npm/@finos/perspective@3.6.0/dist/cdn/perspective.js";
+          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer@3.6.0/dist/cdn/perspective-viewer.js";
+          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-datagrid@3.6.0/dist/cdn/perspective-viewer-datagrid.js";
+          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-d3fc@3.6.0/dist/cdn/perspective-viewer-d3fc.js";
           
           window.perspective = perspective;
         `;
@@ -145,8 +138,6 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
         let parsedData;
         try {
           parsedData = JSON.parse(data);
-          //   console.info('data', data);
-          //   console.info('parsedData', parsedData);
         } catch (error) {
           console.error('数据解析错误:', error);
           parsedData = [];
@@ -181,13 +172,15 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
         // 加载数据到视图
         if (viewerRef.current) {
           await viewerRef.current.load(tableRef.current);
-
           // 设置默认配置
           await viewerRef.current.restore({
-            plugin: 'datagrid',
-            settings: false,
+            theme: 'Solarized',
             ...JSON.parse(config),
           });
+
+          console.info('config', config);
+
+          // const jsonState = await viewerRef.current.save();
         }
       } catch (error) {
         console.error('初始化Perspective错误:', error);
@@ -242,10 +235,10 @@ export const PerspectiveTableView: React.FC<PerspectiveTableViewProps> = ({
   }, [data]);
 
   return (
-    <div className={`flex flex-col min-h-[${minHeight}]`}>
+    <div className='flex flex-col min-h-[480px]'>
       <div
         ref={containerRef}
-        className='flex-grow relative border rounded-md overflow-hidden'
+        className='flex-grow relative border rounded-md'
       ></div>
     </div>
   );

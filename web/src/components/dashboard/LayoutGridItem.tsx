@@ -25,7 +25,7 @@ import Plot from 'react-plotly.js';
 import * as echarts from 'echarts';
 import { VegaLite } from 'react-vega';
 import dayjs from 'dayjs';
-import { PerspectiveTableView } from '@/components/PerspectiveTableView';
+import { PerspectiveView } from '@/components/PerspectiveView';
 
 import { useArtifactDialogStore } from '@/lib/store/useArtifactDialogStore';
 import { useDataSourceDialogStore } from '@/lib/store/useDataSourceDialogStore';
@@ -310,8 +310,13 @@ export const LayoutGridItem = memo(
           );
 
         case 'table':
-          // return <ArtifactTableView data={artifactData.dataContext.data} />;
-          return <PerspectiveTableView data={artifactData.dataContext.data} />;
+          return (
+            <PerspectiveView
+              data={artifactData.dataContext.data}
+              config='{}'
+              type='table'
+            />
+          );
         case 'image':
           return (
             <div className='w-[95%] h-[95%] flex justify-center items-center'>
@@ -321,6 +326,14 @@ export const LayoutGridItem = memo(
                 className='max-w-full object-contain'
               />
             </div>
+          );
+        case 'perspective':
+          return (
+            <PerspectiveView
+              data={artifactData.dataContext.data}
+              config={artifactData.dataContext.config}
+              type='plot'
+            />
           );
 
         case 'plotly':

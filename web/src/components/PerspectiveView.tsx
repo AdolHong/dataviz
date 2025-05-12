@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 // 为自定义元素创建单独的接口，避免与已有的JSX.IntrinsicElements冲突
 interface JsxPerspectiveViewerElement {
@@ -22,12 +22,46 @@ declare global {
 interface PerspectiveViewerElement extends HTMLElement {
   load: (table: any) => Promise<void>;
   restore: (config: any) => Promise<void>;
+  save: () => Promise<any>;
 }
 
 interface PerspectiveViewProps {
   data: string; // JSON string from ArtifactTableDataContext
   config: string; // JSON string from ConfigContext
 }
+
+// 添加一个安全的复制函数
+const safeCopyToClipboard = async (content: string) => {
+  // 检查 Clipboard API 是否可用
+  if (
+    navigator?.clipboard &&
+    navigator?.clipboard?.writeText &&
+    typeof navigator?.clipboard?.writeText === 'function'
+  ) {
+    try {
+      await navigator.clipboard.writeText(content);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // 备选方案：使用 document.execCommand
+  try {
+    const textArea = document.createElement('textarea');
+    textArea.value = content;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.select();
+
+    const successful = document.execCommand('copy');
+    document.body.removeChild(textArea);
+    return successful;
+  } catch {
+    return false;
+  }
+};
 
 export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
   data,
@@ -38,6 +72,7 @@ export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
   const tableRef = useRef<any>(null);
   const workerRef = useRef<any>(null);
   const wasmLoaded = useRef<boolean>(false);
+  const [isCopied, setIsCopied] = useState(false);
 
   // 创建perspective-viewer元素
   useEffect(() => {
@@ -99,10 +134,10 @@ export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
         const perspectiveScript = document.createElement('script');
         perspectiveScript.type = 'module';
         perspectiveScript.innerHTML = `
-          import perspective from "https://cdn.jsdelivr.net/npm/@finos/perspective@3.6.0/dist/cdn/perspective.js";
-          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer@3.6.0/dist/cdn/perspective-viewer.js";
-          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-datagrid@3.6.0/dist/cdn/perspective-viewer-datagrid.js";
-          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-d3fc@3.6.0/dist/cdn/perspective-viewer-d3fc.js";
+          import perspective from "https://cdn.jsdelivr.net/npm/@finos/perspective@3.6.1/dist/cdn/perspective.js";
+          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer@3.6.1/dist/cdn/perspective-viewer.js";
+          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-datagrid@3.6.1/dist/cdn/perspective-viewer-datagrid.js";
+          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-d3fc@3.6.1/dist/cdn/perspective-viewer-d3fc.js";
           
           window.perspective = perspective;
         `;
@@ -234,8 +269,71 @@ export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
     };
   }, [data]);
 
+  // 复制配置到剪贴板
+  const copyConfigToClipboard = async () => {
+    if (!viewerRef.current) return;
+
+    try {
+      const currentConfig = await viewerRef.current.save();
+      console.info('currentConfig', currentConfig);
+
+      const configString = JSON.stringify(currentConfig, null);
+      const pastedText = `# 设置用于画图的df
+df = None
+assert df is not None, "需要设置df，用于画图"
+
+# import
+import json
+
+config = json.loads("""${configString}""")
+result = (df, config)
+`;
+
+      //       const pastedText = `# 设置用于画图的df
+      // df = None
+      // assert df is not None, "需要设置df，用于画图"
+
+      // # import
+      // import json
+      // import perspective
+      // from perspective.widget import PerspectiveWidget
+
+      // config = json.loads("""${configString}""")
+      // table = perspective.table(df)
+      // widget = PerspectiveWidget(table, **config)
+      // result = widget
+      // result
+      // `;
+
+      const copySuccess = await safeCopyToClipboard(pastedText);
+
+      if (copySuccess) {
+        setIsCopied(true);
+        console.log('配置已复制到剪贴板:', configString);
+
+        // 3秒后重置复制状态
+        setTimeout(() => {
+          setIsCopied(false);
+        }, 3000);
+      } else {
+        console.error('复制到剪贴板失败');
+        alert('复制到剪贴板失败，请手动复制');
+      }
+    } catch (error) {
+      console.error('复制配置到剪贴板错误:', error);
+    }
+  };
+
   return (
     <div className='flex flex-col min-h-[480px]'>
+      <div className='flex justify-end mb-2'>
+        <button
+          className={`px-3 py-1 rounded-md text-sm ${isCopied ? 'bg-green-500 text-white' : 'bg-blue-500 text-white hover:bg-blue-600'}`}
+          onClick={copyConfigToClipboard}
+        >
+          {isCopied ? '已复制！' : '导出画图代码'}
+        </button>
+      </div>
       <div
         ref={containerRef}
         className='flex-grow relative border rounded-md'

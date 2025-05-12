@@ -30,6 +30,39 @@ import { PerspectiveView } from '@/components/PerspectiveView';
 import { useArtifactDialogStore } from '@/lib/store/useArtifactDialogStore';
 import { useDataSourceDialogStore } from '@/lib/store/useDataSourceDialogStore';
 
+// 添加一个安全的复制函数
+const safeCopyToClipboard = async (content: string) => {
+  // 检查 Clipboard API 是否可用
+  if (
+    navigator?.clipboard &&
+    navigator?.clipboard?.writeText &&
+    typeof navigator?.clipboard?.writeText === 'function'
+  ) {
+    try {
+      await navigator.clipboard.writeText(content);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // 备选方案：使用 document.execCommand
+  try {
+    const textArea = document.createElement('textarea');
+    textArea.value = content;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.select();
+
+    const successful = document.execCommand('copy');
+    document.body.removeChild(textArea);
+    return successful;
+  } catch {
+    return false;
+  }
+};
+
 // Artifact状态颜色
 export const artifactStatusColor = (status: string): string => {
   switch (status) {
@@ -403,39 +436,6 @@ export const LayoutGridItem = memo(
               <div>不支持的数据类型</div>
             </div>
           );
-      }
-    };
-
-    // 添加一个安全的复制函数
-    const safeCopyToClipboard = async (content: string) => {
-      // 检查 Clipboard API 是否可用
-      if (
-        navigator?.clipboard &&
-        navigator?.clipboard?.writeText &&
-        typeof navigator?.clipboard?.writeText === 'function'
-      ) {
-        try {
-          await navigator.clipboard.writeText(content);
-          return true;
-        } catch {
-          return false;
-        }
-      }
-
-      // 备选方案：使用 document.execCommand
-      try {
-        const textArea = document.createElement('textarea');
-        textArea.value = content;
-        textArea.style.position = 'fixed';
-        textArea.style.left = '-9999px';
-        document.body.appendChild(textArea);
-        textArea.select();
-
-        const successful = document.execCommand('copy');
-        document.body.removeChild(textArea);
-        return successful;
-      } catch {
-        return false;
       }
     };
 

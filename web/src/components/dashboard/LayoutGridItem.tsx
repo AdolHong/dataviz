@@ -344,11 +344,7 @@ export const LayoutGridItem = memo(
 
         case 'table':
           return (
-            <PerspectiveView
-              data={artifactData.dataContext.data}
-              config='{}'
-              type='table'
-            />
+            <PerspectiveView data={artifactData.dataContext.data} config='{}' />
           );
         case 'image':
           return (
@@ -365,7 +361,6 @@ export const LayoutGridItem = memo(
             <PerspectiveView
               data={artifactData.dataContext.data}
               config={artifactData.dataContext.config}
-              type='plot'
             />
           );
 

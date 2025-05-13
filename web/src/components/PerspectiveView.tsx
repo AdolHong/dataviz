@@ -356,7 +356,7 @@ result = (df, config)
     <div className={`flex flex-col h-full`}>
       <div
         ref={containerRef}
-        className={`flex-1 h-full relative border rounded-md overflow-hidden  ${hasSettings ? 'min-h-[680px]' : 'min-h-[300px]'}`}
+        className={`flex-1 h-full relative   overflow-hidden  ${hasSettings ? 'min-h-[680px]' : 'min-h-[300px]'}`}
       ></div>
 
       {hasSettings && (

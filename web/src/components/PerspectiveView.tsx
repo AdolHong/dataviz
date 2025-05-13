@@ -212,7 +212,6 @@ export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
             ...JSON.parse(config),
             settings: false,
           });
-          // const jsonState = await viewerRef.current.save();
         }
       } catch (error) {
         console.error('初始化Perspective错误:', error);
@@ -322,18 +321,19 @@ result = (df, config)
   };
 
   return (
-    <div className='flex flex-col min-h-[480px]'>
+    <div className='flex flex-col '>
       <div className='flex justify-end mb-2'>
         <button
-          className={`px-3 py-1 rounded-md text-sm ${isCopied ? 'bg-green-500 text-white' : 'bg-blue-500 text-white hover:bg-blue-600'}`}
+          className={`px-3 py-1 rounded-md text-sm ${isCopied ? 'bg-blue-500 text-white' : 'bg-gray-400 text-white hover:bg-gray-600'}`}
           onClick={copyConfigToClipboard}
         >
-          {isCopied ? '已复制！' : '导出画图代码'}
+          {isCopied ? '已复制至剪切板！' : '导出画图'}
         </button>
       </div>
+
       <div
         ref={containerRef}
-        className='flex-grow relative border rounded-md'
+        className='flex-grow relative border rounded-md min-h-[480px]'
       ></div>
     </div>
   );

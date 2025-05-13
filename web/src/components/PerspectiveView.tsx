@@ -353,7 +353,9 @@ result = (df, config)
   };
 
   return (
-    <div className='flex flex-col '>
+    <div
+      className={`flex flex-col ${hasSettings ? 'min-h-[680px]' : 'min-h-[480px]'}`}
+    >
       <div className='flex justify-end mb-2'>
         <button
           className={`px-3 py-1 rounded-md text-sm ${isCopied ? 'bg-blue-500 text-white' : 'bg-gray-400 text-white hover:bg-gray-600'}`}
@@ -365,7 +367,7 @@ result = (df, config)
 
       <div
         ref={containerRef}
-        className={`flex-grow relative border rounded-md ${hasSettings ? 'min-h-[600px]' : 'min-h-[480px]'}`}
+        className='flex-grow relative border rounded-md '
       ></div>
     </div>
   );

@@ -190,7 +190,7 @@ export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
         // 等待确保WASM和模块已加载
         if (!window.perspective) {
           console.log('等待Perspective初始化...');
-          setTimeout(initPerspective, 500);
+          setTimeout(initPerspective, 100);
           return;
         }
 
@@ -255,7 +255,7 @@ export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
       if (viewerRef.current) {
         initPerspective();
       }
-    }, 1000); // 延迟1秒确保所有资源加载完成
+    }, 300); // 延迟1秒确保所有资源加载完成
 
     // 组件卸载时清理资源
     return () => {

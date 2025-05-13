@@ -354,19 +354,21 @@ result = (df, config)
 
   return (
     <div className={`flex flex-col h-full`}>
-      <div className='flex justify-end mb-2'>
-        <button
-          className={`px-3 py-1 rounded-md text-sm ${isCopied ? 'bg-blue-500 text-white' : 'bg-gray-400 text-white hover:bg-gray-600'}`}
-          onClick={copyConfigToClipboard}
-        >
-          {isCopied ? '已复制至剪切板！' : '导出画图'}
-        </button>
-      </div>
-
       <div
         ref={containerRef}
         className={`flex-1 h-full relative border rounded-md overflow-hidden  ${hasSettings ? 'min-h-[680px]' : 'min-h-[300px]'}`}
       ></div>
+
+      {hasSettings && (
+        <div className='flex justify-end mt-3'>
+          <button
+            className={`px-3 py-1 rounded-md text-sm ${isCopied ? 'bg-blue-500 text-white' : 'bg-gray-400 text-white hover:bg-gray-600'}`}
+            onClick={copyConfigToClipboard}
+          >
+            {isCopied ? '已复制至剪切板！' : '导出画图'}
+          </button>
+        </div>
+      )}
     </div>
   );
 };

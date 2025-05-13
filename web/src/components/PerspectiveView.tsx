@@ -23,7 +23,6 @@ interface PerspectiveViewerElement extends HTMLElement {
   load: (table: any) => Promise<void>;
   restore: (config: any) => Promise<void>;
   save: () => Promise<any>;
-  toggleConfig: () => Promise<void>;
 }
 
 interface PerspectiveViewProps {
@@ -74,6 +73,7 @@ export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
   const workerRef = useRef<any>(null);
   const wasmLoaded = useRef<boolean>(false);
   const [isCopied, setIsCopied] = useState(false);
+  const [hasSettings, setHasSettings] = useState(false);
 
   // 创建perspective-viewer元素
   useEffect(() => {
@@ -98,6 +98,35 @@ export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
       }
     };
   }, []);
+
+  // 监听 settings 属性变化
+  useEffect(() => {
+    if (!viewerRef.current) return;
+
+    // 检查初始状态
+    setHasSettings(viewerRef.current.hasAttribute('settings'));
+
+    // 创建 MutationObserver 监听属性变化
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        if (
+          mutation.type === 'attributes' &&
+          mutation.attributeName === 'settings'
+        ) {
+          const hasSettingsAttr = viewerRef.current?.hasAttribute('settings');
+          setHasSettings(!!hasSettingsAttr);
+        }
+      });
+    });
+
+    // 开始监听
+    observer.observe(viewerRef.current, { attributes: true });
+
+    // 清理函数
+    return () => {
+      observer.disconnect();
+    };
+  }, [viewerRef.current]);
 
   // 预加载WASM文件
   useEffect(() => {
@@ -214,7 +243,7 @@ export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
             settings: false,
           });
 
-          // await viewerRef.current.toggleConfig();
+          // viewerRef.current.
         }
       } catch (error) {
         console.error('初始化Perspective错误:', error);
@@ -336,7 +365,7 @@ result = (df, config)
 
       <div
         ref={containerRef}
-        className='flex-grow relative border rounded-md min-h-[480px]'
+        className={`flex-grow relative border rounded-md ${hasSettings ? 'min-h-[600px]' : 'min-h-[480px]'}`}
       ></div>
     </div>
   );

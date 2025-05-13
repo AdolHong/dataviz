@@ -209,12 +209,9 @@ export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
           await viewerRef.current.load(tableRef.current);
           // 设置默认配置
           await viewerRef.current.restore({
-            theme: 'Solarized',
             ...JSON.parse(config),
+            settings: false,
           });
-
-          console.info('config', config);
-
           // const jsonState = await viewerRef.current.save();
         }
       } catch (error) {

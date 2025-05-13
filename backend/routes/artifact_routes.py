@@ -10,8 +10,6 @@ from datetime import datetime
 from utils.fs_utils import FILE_CACHE_PATH
 from contextlib import redirect_stdout
 from functools import reduce
-import perspective
-
 
 from models.artifact_models import ArtifactRequest, ArtifactResponse, ArtifactCodeContext, ArtifactTextDataContext, ArtifactPlotlyDataContext, ArtifactEChartDataContext, ArtifactImageDataContext, ArtifactAltairDataContext, ArtifactCodeResponse, ArtifactTableDataContext, ArtifactPerspectiveDataContext
 from models.query_models import Alert
@@ -177,14 +175,15 @@ async def execute_artifact(request: ArtifactRequest):
             elif "pandas.core.frame.DataFrame" in str(type(result)):
                 data_context = ArtifactTableDataContext(
                     type="table", data=result.to_json(orient='records', date_format='iso', force_ascii=False))
-            elif 'PerspectiveWidget' in str(type(result)):
-                widget_df = result.table.view().to_pandas()
-                widget_config = json.dumps(result.save())
-                data_context = ArtifactPerspectiveDataContext(
-                    type="perspective", data=widget_df.to_json(orient='records', date_format='iso', force_ascii=False), config=widget_config)
+            # elif 'PerspectiveWidget' in str(type(result)):
+            #     widget_df = result.table.view().to_pandas()
+            #     widget_config = json.dumps(result.save())
+            #     data_context = ArtifactPerspectiveDataContext(
+            #         type="perspective", data=widget_df.to_json(orient='records', date_format='iso', force_ascii=False), config=widget_config)
             elif type(result) == tuple and len(result) == 2 and "pandas.core.frame.DataFrame" in str(type(result[0])) and type(result[1]) == dict:
-                table = perspective.table(result[0])
-                widget_df = table.view().to_pandas()
+                # table = perspective.table(result[0])
+                # widget_df = table.view().to_pandas()
+                widget_df = result[0].reset_index()
                 widget_config = json.dumps(result[1])
 
                 data_context = ArtifactPerspectiveDataContext(

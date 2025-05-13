@@ -23,6 +23,7 @@ interface PerspectiveViewerElement extends HTMLElement {
   load: (table: any) => Promise<void>;
   restore: (config: any) => Promise<void>;
   save: () => Promise<any>;
+  toggleConfig: () => Promise<void>;
 }
 
 interface PerspectiveViewProps {
@@ -212,6 +213,8 @@ export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
             ...JSON.parse(config),
             settings: false,
           });
+
+          // await viewerRef.current.toggleConfig();
         }
       } catch (error) {
         console.error('初始化Perspective错误:', error);

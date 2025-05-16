@@ -430,19 +430,73 @@ export const ParameterQueryArea = memo(
       e: React.KeyboardEvent<HTMLInputElement>,
       param: Parameter
     ) => {
-      if (e.key === 'Enter' && e.currentTarget.value.trim() !== '') {
+      // 处理回车键和逗号键
+      if (
+        (e.key === 'Enter' || e.key === ',') &&
+        e.currentTarget.value.trim() !== ''
+      ) {
         e.preventDefault();
         const newValue = e.currentTarget.value.trim();
-        const currentValues = values[param.name] || [];
 
-        // 检查是否已存在该值
-        if (!currentValues.includes(newValue)) {
-          handleValueChange(param.name, [...currentValues, newValue]);
-          e.currentTarget.value = '';
-        } else {
-          // 可选：添加重复值的提示
-          toast.warning('不允许添加重复值');
+        // 如果按下的是逗号键，且输入值包含逗号，我们需要删除末尾的逗号
+        const valueToAdd =
+          e.key === ',' ? newValue.replace(/,$/, '') : newValue;
+
+        if (valueToAdd) {
+          // 确保值不为空
+          const currentValues = values[param.name] || [];
+
+          // 检查是否已存在该值
+          if (!currentValues.includes(valueToAdd)) {
+            handleValueChange(param.name, [...currentValues, valueToAdd]);
+            e.currentTarget.value = '';
+          } else {
+            // 可选：添加重复值的提示
+            toast.warning('不允许添加重复值');
+          }
         }
+      }
+    };
+
+    // 处理多输入框粘贴事件
+    const handleMultiInputPaste = (
+      e: React.ClipboardEvent<HTMLInputElement>,
+      param: Parameter
+    ) => {
+      e.preventDefault();
+      const pastedText = e.clipboardData.getData('text');
+
+      if (!pastedText.trim()) return;
+
+      // 分割粘贴的文本 - 支持逗号或换行符分隔
+      const values = pastedText
+        .split(/[,\r\n]+/) // 按逗号或换行符分割
+        .map((value) => value.trim())
+        .filter((value) => value !== ''); // 移除空值
+
+      if (values.length > 0) {
+        addMultipleValues(param, values);
+        // 清空输入框
+        e.currentTarget.value = '';
+      }
+    };
+
+    // 添加多个值到多输入框
+    const addMultipleValues = (param: Parameter, newValues: string[]) => {
+      const currentValues = values[param.name] || [];
+      const uniqueNewValues = newValues.filter(
+        (value) => !currentValues.includes(value)
+      );
+
+      if (uniqueNewValues.length > 0) {
+        handleValueChange(param.name, [...currentValues, ...uniqueNewValues]);
+
+        // 如果有重复值且新值数量大于1，显示提示
+        if (newValues.length > uniqueNewValues.length) {
+          toast.warning('已过滤重复值');
+        }
+      } else if (newValues.length > 0) {
+        toast.warning('所有值已存在，未添加新值');
       }
     };
 
@@ -587,8 +641,9 @@ export const ParameterQueryArea = memo(
             return (
               <div className='space-y-2'>
                 <Input
-                  placeholder={`输入${param.name}（按回车添加）`}
+                  placeholder={`输入${param.name}（按回车或逗号添加，可粘贴多项）`}
                   onKeyDown={(e) => handleMultiInputKeyDown(e, param)}
+                  onPaste={(e) => handleMultiInputPaste(e, param)}
                 />
                 <div className='flex flex-wrap gap-2 mb-2'>
                   {(values[param.name] || []).map(

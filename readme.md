@@ -1,19 +1,29 @@
 # 打包代码
+
+```shell
+
 tar -czvf ../dataviz_$(date +%Y%m%d_%H%M%S).tar.gz  --exclude backend/engine_config.py backend
 
-# 启动前端, 并将处理不了的请求导向index.html
+```
+
+# 启动前端, 并将处理不了的请求导向 index.html
+
 npm install http-server -g
-http-server -P "http://localhost:8080/?"    
+http-server -P "http://localhost:8080/?"
 
 # python 启动
+
 uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 
 # react 启动
+
 npm start
 
 # react 编译
+
 npm run build
 npx tsc
+
 ```
 
 
@@ -41,7 +51,7 @@ npx tsc
 5.  session ID存储的是 param_values和file_contens， 和report的updatedTime；  刷新网页时， 还能重新还原；
 6.  param values的读取和存储； 动态日期参数的解析， 都在前端； multiple_select， 不需要拼接了，为了页面能还原；
 7. 多个datasource的存储， 是分多个文件还是单个文件；
-9. 文件上传， 字段不匹配，要提示； 
+9. 文件上传， 字段不匹配，要提示；
 11. dataViz区域,   提供python代码；+数据
 13. query处， 提供每个 datasource的解析后的代码；
 14.  report需要维护 createTime, updateTime; 用于知道是否发生变更;
@@ -73,8 +83,10 @@ npx tsc
 50. date_range参数的支持。  比如  ${job_date:start}, ${job_date:end}
 52. cascader推断， 需要支持 多对多；
 56. 重新查询， 应该得消除 artifact params的values.
-57. 级联单选，可以考虑，默认选第一个。 
+57. 级联单选，可以考虑，默认选第一个。
 58. 支持类似dtale的功能
+59. multiple_input：  支持复制粘贴,  逗号或回车分割
+
 
 
 
@@ -127,15 +139,15 @@ npx tsc
     - 哪里存储 report的updateAt
 2. param area和layout，需要memo, 根据activateTab更新;
 3. 各区域需要的hook
-    (1) navbar: 
+    (1) navbar:
         - setActivateTab
         - setTabList (eg: 删除, 修改文件的操作)
-        
+
         DONE:
             - memo
             - FileSystemItem的任何修改, 需要api同步; 已改为usecallback
 
-    (2) tabs: 
+    (2) tabs:
         - activateTab
         - tabsList
         - ps: 修改title， 不应该重新渲染  param area和layout
@@ -150,3 +162,4 @@ npx tsc
         - report
         - activateTab
         - queryStatus
+```

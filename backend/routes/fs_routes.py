@@ -22,7 +22,7 @@ from utils.fs_utils import (
 
 from routes.report_routes import update_report_title
 from routes.auth_routes import verify_token_dependency
-from utils.report_utils import delete_report_content
+from utils.report_utils import delete_report_content, get_report_content, save_report_content
 
 router = APIRouter(tags=["file-system"])
 
@@ -310,6 +310,87 @@ async def move_item(item_id: str, new_parent_id: Optional[str] = None, username:
     await save_fs_data(items)
     return items[item_idx]
 
+# API端点：复制文件
+
+
+@router.post("/fs/operations/duplicate-file", response_model=FileSystemItem)
+async def duplicate_file(source_file_id: str, new_name: str, parent_id: Optional[str] = None, username: str = Depends(verify_token_dependency)):
+    items = await load_fs_data()
+
+    # 查找源文件
+    source_file = find_item_by_id(items, source_file_id)
+    if not source_file or source_file.type != FileSystemItemType.FILE:
+        raise HTTPException(status_code=404, detail="源文件不存在")
+
+    # 检查父文件夹是否存在
+    if parent_id:
+        parent = find_item_by_id(items, parent_id)
+        if not parent or parent.type != FileSystemItemType.FOLDER:
+            raise HTTPException(status_code=400, detail="父文件夹不存在")
+
+    # 检查同目录下是否有重名文件
+    existing_item = next((item for item in items if item.name == new_name and item.parentId == parent_id), None)
+    if existing_item:
+        raise HTTPException(status_code=400, detail="同目录下已存在同名文件")
+
+    # 创建新文件项（使用时间戳格式，与前端保持一致）
+    import time
+    timestamp = int(time.time() * 1000)  # 生成毫秒级时间戳
+    new_file_id = f"file-{timestamp}"
+    new_report_id = f"report-{timestamp}"
+    now = datetime.now().isoformat()
+    
+    new_file = FileSystemItem(
+        id=new_file_id,
+        name=new_name,
+        type=FileSystemItemType.FILE,
+        parentId=parent_id,
+        createdAt=now,
+        updatedAt=now,
+        reportId=new_report_id
+    )
+
+    try:
+        # 读取源文件内容
+        source_content = await get_report_content(source_file_id)
+        if source_content:
+            # 更新复制文件的基本信息
+            source_content.id = new_report_id  # 使用新的报表ID
+            source_content.title = new_name
+            source_content.createdAt = now
+            source_content.updatedAt = now
+            
+            # 保存到新文件（使用文件系统ID作为文件名）
+            await save_report_content(new_file_id, source_content)
+        else:
+            # 如果源文件内容不存在，创建默认内容
+            from models.report_models import Report, Layout
+            
+            default_report = Report(
+                id=new_report_id,  # 使用新的报表ID
+                title=new_name,
+                description="",
+                dataSources=[],
+                parameters=[],
+                artifacts=[],
+                layout=Layout(items=[]),
+                createdAt=now,
+                updatedAt=now,
+            )
+            
+            # 保存到新文件
+            await save_report_content(new_file_id, default_report)
+
+    except Exception as e:
+        print(f"复制文件内容失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"复制文件内容失败: {str(e)}")
+
+    # 添加到文件系统列表并保存
+    items.append(new_file)
+    await save_fs_data(items)
+    
+    return new_file
+
 # API端点：批量处理操作
 
 
@@ -344,6 +425,11 @@ async def batch_operations(request: BatchOperationRequest, username: str = Depen
             elif operation.type == FileSystemOperation.MOVE_ITEM:
                 result = await move_item(
                     operation.item.id, operation.item.parentId, username)
+            elif operation.type == FileSystemOperation.DUPLICATE_FILE:
+                # 从oldItem获取源文件ID，从item获取新文件信息
+                source_file_id = operation.oldItem.id if operation.oldItem else operation.item.id
+                result = await duplicate_file(
+                    source_file_id, operation.item.name, operation.item.parentId, username)
             else:
                 raise HTTPException(
                     status_code=400, detail=f"不支持的操作类型: {operation.type}")

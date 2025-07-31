@@ -86,8 +86,8 @@ def delete_report_content(file_id: str) -> bool:
     """
     file_path = os.path.join(FILE_STORAGE_PATH, file_id + ".data")
 
-    if os.path.exists(file_path):
-        return
+    if not os.path.exists(file_path):
+        return True  # 文件不存在，视为删除成功
 
     try:
         # # 获取文件锁
@@ -106,9 +106,10 @@ def delete_report_content(file_id: str) -> bool:
         # 移动文件而不是删除
         os.rename(file_path, deleted_file_path)
 
-        # 删除对应的文件锁
-        if file_id in file_locks:
-            del file_locks[file_id]
+        # 删除对应的文件锁（如果有的话）
+        # if file_id in file_locks:
+        #     del file_locks[file_id]
+        return True
     except Exception as e:
         print(f"软删除报告文件时发生错误: {e}")
         return False

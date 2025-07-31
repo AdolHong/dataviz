@@ -285,45 +285,45 @@ export const FileExplorer = React.memo(
     };
 
     // 处理复制文件
-    const handleDuplicateItem = () => {
+    const handleDuplicateItem = async () => {
       if (!itemToDuplicate || duplicateItemName.trim() === '') return;
 
-      // 检查同目录下是否有重名项目
-      const existingItem = fsItems.find(
-        (item) =>
-          item.name === duplicateItemName &&
-          item.parentId === itemToDuplicate.parentId
-      );
-      if (existingItem) {
-        toast.error('同目录下已存在同名文件或文件夹');
-        return;
+      try {
+        // 如果是引用类型，则创建一个新的引用
+        if (itemToDuplicate.type === FileSystemItemType.REFERENCE) {
+          // 假设引用有一个指向原始文件的 referenceTo 属性
+          const referencedFileId = (itemToDuplicate as any).referenceTo;
+          const updatedItems = createReference(
+            fsItems,
+            duplicateItemName,
+            referencedFileId,
+            itemToDuplicate.parentId,
+            (itemToDuplicate as any).reportId
+          );
+          handleFileSystemChange(fsItems, updatedItems);
+        } else if (itemToDuplicate.type === FileSystemItemType.FILE) {
+          // 使用真正的文件复制API
+          await fsApi.duplicateFile(
+            itemToDuplicate.id,
+            duplicateItemName,
+            itemToDuplicate.parentId || undefined
+          );
+          
+          // 重新获取文件系统数据，但不触发额外的保存操作
+          const updatedItems = await fsApi.getAllItems();
+          setFsItems(updatedItems);
+          toast.success('文件复制成功');
+        } else {
+          // 文件夹复制暂不支持
+          toast.error('暂不支持文件夹复制');
+          return;
+        }
+
+        setIsDuplicateDialogOpen(false);
+      } catch (error) {
+        console.error('复制文件失败:', error);
+        toast.error('复制文件失败');
       }
-
-      let updatedItems: FileSystemItem[];
-
-      // 如果是引用类型，则创建一个新的引用
-      if (itemToDuplicate.type === FileSystemItemType.REFERENCE) {
-        // 假设引用有一个指向原始文件的 referenceTo 属性
-        const referencedFileId = (itemToDuplicate as any).referenceTo;
-        updatedItems = createReference(
-          fsItems,
-          duplicateItemName,
-          referencedFileId,
-          itemToDuplicate.parentId,
-          (itemToDuplicate as any).reportId
-        );
-      } else {
-        // 普通文件复制
-        updatedItems = createFile(
-          fsItems,
-          duplicateItemName,
-          `report-${Date.now()}`,
-          itemToDuplicate.parentId
-        );
-      }
-
-      handleFileSystemChange(fsItems, updatedItems);
-      setIsDuplicateDialogOpen(false);
     };
 
     // 处理创建引用

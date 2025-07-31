@@ -27,6 +27,9 @@ class FileSystemOperation(str, Enum):
     
     # 移动
     MOVE_ITEM = "MOVE_ITEM"
+    
+    # 复制
+    DUPLICATE_FILE = "DUPLICATE_FILE"
 
 # 文件系统项目模型
 class FileSystemItem(BaseModel):

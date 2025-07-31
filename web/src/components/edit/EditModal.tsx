@@ -270,6 +270,10 @@ const EditModal = ({ open, onClose, report, handleSave }: EditModalProps) => {
     setParameters(parameters.filter((p) => p.id !== parameter.id));
   };
 
+  const handleReorderParameters = (newOrder: Parameter[]) => {
+    setParameters(newOrder);
+  };
+
   // 处理更新基本信息
   const handleUpdateBasicInfo = (newTitle: string, newDescription: string) => {
     setTitle(newTitle);
@@ -339,6 +343,7 @@ const EditModal = ({ open, onClose, report, handleSave }: EditModalProps) => {
                 handleDeleteParameter={handleDeleteParameter}
                 handleAddParameter={handleAddParameter}
                 handleEditParameter={handleEditParameter}
+                handleReorderParameters={handleReorderParameters}
                 confirmDelete={confirmDelete}
               />
               <TabArtifact

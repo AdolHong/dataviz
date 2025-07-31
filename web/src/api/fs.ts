@@ -20,6 +20,9 @@ enum FileSystemOperation {
 
   // 移动
   MOVE_ITEM = 'MOVE_ITEM',
+
+  // 复制
+  DUPLICATE_FILE = 'DUPLICATE_FILE',
 }
 
 interface FileSystemDiff {
@@ -262,6 +265,22 @@ export const fsApi = {
         params: { new_parent_id: newParentId },
       }
     );
+    return response.data;
+  },
+
+  // 复制文件
+  async duplicateFile(
+    sourceFileId: string,
+    newName: string,
+    parentId?: string
+  ): Promise<FileSystemItem> {
+    const response = await axiosInstance.post('/fs/operations/duplicate-file', null, {
+      params: {
+        source_file_id: sourceFileId,
+        new_name: newName,
+        parent_id: parentId,
+      },
+    });
     return response.data;
   },
 

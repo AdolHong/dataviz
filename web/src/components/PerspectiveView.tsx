@@ -164,10 +164,10 @@ export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
         const perspectiveScript = document.createElement('script');
         perspectiveScript.type = 'module';
         perspectiveScript.innerHTML = `
-          import perspective from "https://cdn.jsdelivr.net/npm/@finos/perspective@3.6.1/dist/cdn/perspective.js";
-          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer@3.6.1/dist/cdn/perspective-viewer.js";
-          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-datagrid@3.6.1/dist/cdn/perspective-viewer-datagrid.js";
-          import "https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-d3fc@3.6.1/dist/cdn/perspective-viewer-d3fc.js";
+          import perspective from "https://unpkg.com/@finos/perspective@3.8.0/dist/cdn/perspective.js";
+          import "https://unpkg.com/@finos/perspective-viewer@3.8.0/dist/cdn/perspective-viewer.js";
+          import "https://unpkg.com/@finos/perspective-viewer-datagrid@3.8.0/dist/cdn/perspective-viewer-datagrid.js";
+          import "https://unpkg.com/@finos/perspective-viewer-d3fc@3.8.0/dist/cdn/perspective-viewer-d3fc.js";
           
           window.perspective = perspective;
         `;

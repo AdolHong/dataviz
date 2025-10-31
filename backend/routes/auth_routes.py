@@ -23,11 +23,16 @@ SECRET_KEY = 'cd3fd8928370f07e726ed4a519ffdc3b3da24b66819c55595ad7e4c7c2bb36b3'
 
 # 用于存储用户凭证的字典，实际应用中应使用数据库
 USERS = {
-    "adol": "f09a31c2bb20aeee1e1ce6639c32226098bdaaf949b247b775f845aafadda2bd",  # adol
+"adol": "f09a31c2bb20aeee1e1ce6639c32226098bdaaf949b247b775f845aafadda2bd",  # adol
     "evans": 'b0a85ea55612378ea58b08566dc8f36828af614f56edccf76ac4f0026381d3a2',  # evans
-    "barry": '4466d77ec4cef2cc72774eb1f294f0bb9a5e13efba81cfcf4007bdfe9ce2a244',  # barry
-    "anderson": '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92'  # anderson
+    "rec": '4ace134748b5936017a2125b99b6132e4aed25338532422bd39249a1500e281f',  # rec
+    "anderson": '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92',  # anderson
+    "wyatt": "0ef71ab20c179dfa34db6ac5fe1b80573bc037b5012f684a8977384e0681c41b",
+    'dylan': "30042a738a2635498551c5082a42f528b36c26e12dfbdbb567bf4d6bc4149345",
+    'nora': '00dcf151aac7bb5293d12cf0428f04c0dd62785959671e73ede7f56b5ac329bf',
+    'kayla': '0e342ba209abd30651fd789b9e8555342d10ff22cfeab2bca74c680c3238c8f1',  # kayla123
 }
+
 # 活跃token列表（用于验证和注销）
 ACTIVE_TOKENS = {}
 

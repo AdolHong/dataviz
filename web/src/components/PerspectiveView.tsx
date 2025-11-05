@@ -237,9 +237,63 @@ export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
         // 加载数据到视图
         if (viewerRef.current) {
           await viewerRef.current.load(tableRef.current);
+
+          // 获取表的 schema 来识别日期列
+          let dateColumns: string[] = [];
+          try {
+            const schema = await tableRef.current.schema();
+            // schema 是一个对象，key 是列名，value 是类型（如 'datetime', 'date'）
+            dateColumns = Object.keys(schema).filter(
+              (col) => schema[col] === 'datetime' || schema[col] === 'date'
+            );
+          } catch (error) {
+            console.log('获取表结构失败，尝试从数据推断日期列:', error);
+            // 如果获取 schema 失败，尝试从数据推断日期列
+            if (parsedData.length > 0) {
+              const firstRow = parsedData[0];
+              dateColumns = Object.keys(firstRow).filter((key) => {
+                const value = firstRow[key];
+                return value != null && (
+                  typeof value === 'string' && !isNaN(Date.parse(value)) ||
+                  value instanceof Date
+                );
+              });
+            }
+          }
+
+          // 构建列配置，为所有日期列设置默认时区
+          const parsedConfig = JSON.parse(config);
+          const existingColumnsConfig = parsedConfig.columns_config || {};
+          
+          // 使用展开运算符构建新的配置对象，避免直接修改原对象
+          let columnsConfig = { ...existingColumnsConfig };
+          
+          // 为每个日期列设置默认时区（如果还没有设置）
+          dateColumns.forEach((colName) => {
+            const existingColConfig = existingColumnsConfig[colName];
+            const existingDateFormat = existingColConfig?.date_format;
+            
+            // 只在列配置中没有时区时才设置默认时区
+            if (!existingDateFormat?.timeZone) {
+              console.log('设置默认时区为 Atlantic/Reykjavik', colName);
+              columnsConfig = {
+                ...columnsConfig,
+                [colName]: {
+                  ...existingColConfig,
+                  date_format: {
+                    ...existingDateFormat,
+                    timeZone: 'Atlantic/Reykjavik',
+                  },
+                },
+              };
+            }
+          });
+
+          
           // 设置默认配置
           await viewerRef.current.restore({
-            ...JSON.parse(config),
+            ...parsedConfig,
+            columns_config: columnsConfig,
             settings: false,
           });
 

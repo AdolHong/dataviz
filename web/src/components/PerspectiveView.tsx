@@ -1,22 +1,53 @@
 import React, { useEffect, useRef, useState } from 'react';
+import perspective from '@finos/perspective';
+import perspective_viewer from '@finos/perspective-viewer';
+import '@finos/perspective-viewer-datagrid';
+import '@finos/perspective-viewer-d3fc';
+import '@finos/perspective-viewer/dist/css/themes.css';
 
-// 为自定义元素创建单独的接口，避免与已有的JSX.IntrinsicElements冲突
-interface JsxPerspectiveViewerElement {
-  ref?: React.RefObject<any>;
-  className?: string;
-  style?: React.CSSProperties;
-  // 其他可能需要的属性
-  [key: string]: any;
-}
+// 导入 WASM 文件
+import SERVER_WASM from '@finos/perspective/dist/wasm/perspective-server.wasm?url';
+import CLIENT_WASM from '@finos/perspective-viewer/dist/wasm/perspective-viewer.wasm?url';
 
-// 声明自定义元素和类型
-declare global {
-  namespace JSX {
-    interface IntrinsicElements {
-      'perspective-viewer': JsxPerspectiveViewerElement;
-    }
+// @finos/perspective-viewer 包自带类型定义，无需重复声明
+
+// 全局初始化标志和 Promise，确保 WASM 只初始化一次
+let wasmInitialized = false;
+let wasmInitPromise: Promise<void> | null = null;
+let globalWorker: any = null;
+
+// 全局初始化函数，确保只调用一次
+const initPerspectiveWasm = async () => {
+  if (wasmInitialized) {
+    return globalWorker;
   }
-}
+
+  if (wasmInitPromise) {
+    await wasmInitPromise;
+    return globalWorker;
+  }
+
+  wasmInitPromise = (async () => {
+    try {
+      // 初始化 WASM 文件
+      await Promise.all([
+        perspective.init_server(fetch(SERVER_WASM)),
+        perspective_viewer.init_client(fetch(CLIENT_WASM)),
+      ]);
+      
+      // 初始化 worker
+      globalWorker = await perspective.worker();
+      wasmInitialized = true;
+    } catch (error) {
+      console.error('初始化 Perspective WASM 错误:', error);
+      wasmInitPromise = null; // 重置以便重试
+      throw error;
+    }
+  })();
+
+  await wasmInitPromise;
+  return globalWorker;
+};
 
 // 扩展HTMLElement以包含Perspective方法
 interface PerspectiveViewerElement extends HTMLElement {
@@ -71,7 +102,6 @@ export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
   const viewerRef = useRef<PerspectiveViewerElement | null>(null);
   const tableRef = useRef<any>(null);
   const workerRef = useRef<any>(null);
-  const wasmLoaded = useRef<boolean>(false);
   const [isCopied, setIsCopied] = useState(false);
   const [hasSettings, setHasSettings] = useState(false);
 
@@ -128,56 +158,18 @@ export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
     };
   }, [viewerRef.current]);
 
-  // 预加载WASM文件
+  // 初始化 Perspective WASM 和 worker（使用全局初始化，确保只初始化一次）
   useEffect(() => {
-    // 只加载一次WASM文件
-    if (wasmLoaded.current) return;
-
-    const loadWasmFiles = async () => {
-      try {
-        // 加载CSS
-        if (!document.getElementById('perspective-css')) {
-          const link = document.createElement('link');
-          link.id = 'perspective-css';
-          link.rel = 'stylesheet';
-          link.type = 'text/css';
-          link.href =
-            'https://cdn.jsdelivr.net/npm/@finos/perspective-viewer/dist/css/themes.css';
-          link.crossOrigin = 'anonymous';
-          document.head.appendChild(link);
+    const initWorker = async () => {
+      if (!workerRef.current) {
+        try {
+          workerRef.current = await initPerspectiveWasm();
+        } catch (error) {
+          console.error('获取 Perspective worker 错误:', error);
         }
-        wasmLoaded.current = true;
-      } catch (error) {
-        console.error('加载WASM文件错误:', error);
       }
     };
-
-    // 加载WASM文件
-    loadWasmFiles();
-  }, []);
-
-  // 加载Perspective插件和模块
-  useEffect(() => {
-    const loadPerspectiveModules = async () => {
-      try {
-        // 从CDN动态加载模块
-        const perspectiveScript = document.createElement('script');
-        perspectiveScript.type = 'module';
-        perspectiveScript.innerHTML = `
-          import perspective from "https://unpkg.com/@finos/perspective@3.8.0/dist/cdn/perspective.js";
-          import "https://unpkg.com/@finos/perspective-viewer@3.8.0/dist/cdn/perspective-viewer.js";
-          import "https://unpkg.com/@finos/perspective-viewer-datagrid@3.8.0/dist/cdn/perspective-viewer-datagrid.js";
-          import "https://unpkg.com/@finos/perspective-viewer-d3fc@3.8.0/dist/cdn/perspective-viewer-d3fc.js";
-          
-          window.perspective = perspective;
-        `;
-        document.head.appendChild(perspectiveScript);
-      } catch (error) {
-        console.error('加载Perspective模块错误:', error);
-      }
-    };
-
-    loadPerspectiveModules();
+    initWorker();
   }, []);
 
   // 解析JSON数据并初始化Perspective
@@ -187,16 +179,11 @@ export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
 
     const initPerspective = async () => {
       try {
-        // 等待确保WASM和模块已加载
-        if (!window.perspective) {
-          console.log('等待Perspective初始化...');
+        // 等待确保 worker 已初始化
+        if (!workerRef.current) {
+          console.log('等待 Perspective worker 初始化...');
           setTimeout(initPerspective, 100);
           return;
-        }
-
-        // 初始化worker
-        if (!workerRef.current) {
-          workerRef.current = await window.perspective.worker();
         }
 
         // 解析数据
@@ -309,7 +296,7 @@ export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
       if (viewerRef.current) {
         initPerspective();
       }
-    }, 300); // 延迟1秒确保所有资源加载完成
+    }, 100); // 使用 Bundler 方式，延迟时间可以缩短
 
     // 组件卸载时清理资源
     return () => {
@@ -331,16 +318,9 @@ export const PerspectiveView: React.FC<PerspectiveViewProps> = ({
             }
           }
 
-          // 清理worker
-          if (workerRef.current) {
-            try {
-              if (typeof workerRef.current.terminate === 'function') {
-                workerRef.current.terminate();
-              }
-            } catch (e) {
-              console.log('清理worker失败，可以忽略:', e);
-            }
-          }
+          // 注意：不清理全局 worker，因为它是共享的，其他组件可能还在使用
+          // 只清理本组件的引用
+          workerRef.current = null;
         } catch (error) {
           console.log('清理资源时发生错误，可以忽略:', error);
         }
@@ -427,9 +407,3 @@ result = (df, config)
   );
 };
 
-// 为window对象添加perspective属性
-declare global {
-  interface Window {
-    perspective: any;
-  }
-}

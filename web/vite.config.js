@@ -15,11 +15,29 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src')
+      '@': path.resolve(__dirname, './src'),
+      'plotly.js/dist/plotly': path.resolve(__dirname, './node_modules/plotly.js/dist/plotly.js')
     }
   },
   server: {
     host: '0.0.0.0',
     port: 8080
+  },
+  optimizeDeps: {
+    include: ['d3-array', '@d3fc/d3fc-technical-indicator', 'plotly.js', 'plotly.js/dist/plotly'],
+    exclude: ['@finos/perspective', '@finos/perspective-viewer', '@finos/perspective-viewer-d3fc']
+  },
+  build: {
+    target: 'esnext',
+    rollupOptions: {
+      output: {
+        manualChunks: undefined,
+        format: 'es'
+      }
+    },
+    commonjsOptions: {
+      include: [/node_modules/],
+      transformMixedEsModules: true
+    }
   }
 });

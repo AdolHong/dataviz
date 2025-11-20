@@ -70,7 +70,7 @@ async def pd_read_sql(query: str, url: str, prepare_stmt: Optional[str] = None) 
 
 async def execute_query(query: str, url: Optional[str] = None):
     """根据主机名选择执行查询的方法"""
-    if socket.gethostname() == "Jiahaos-MacBook-Pro.local":
+    if socket.gethostname() == 'Adols-MacBook-Air-2.local':
         # 如果是本地开发环境，使用异步 DuckDB 查询
         return await execute_duckdb_query(query)
     else:

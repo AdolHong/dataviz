@@ -355,7 +355,7 @@ async def duplicate_file(source_file_id: str, new_name: str, parent_id: Optional
         source_content = await get_report_content(source_file_id)
         if source_content:
             # 更新复制文件的基本信息
-            source_content.id = new_report_id  # 使用新的报表ID
+            source_content.id = new_file_id  # 使用新的报表ID
             source_content.title = new_name
             source_content.createdAt = now
             source_content.updatedAt = now
@@ -367,7 +367,7 @@ async def duplicate_file(source_file_id: str, new_name: str, parent_id: Optional
             from models.report_models import Report, Layout
             
             default_report = Report(
-                id=new_report_id,  # 使用新的报表ID
+                id=new_file_id,  # 使用新的报表ID
                 title=new_name,
                 description="",
                 dataSources=[],

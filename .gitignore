@@ -12,6 +12,7 @@ __pycache__/
 venv/
 env/
 ENV/
+thirdparty/
 
 # 日志
 *.log

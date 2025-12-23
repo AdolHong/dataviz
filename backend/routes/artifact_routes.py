@@ -169,6 +169,11 @@ async def execute_artifact(request: ArtifactRequest):
                 buf.close()
                 data_context = ArtifactImageDataContext(
                     type="image", data=base64_image)
+            elif isinstance(result, bytes):
+                # 处理直接返回图片 bytes 的情况（如 screenshot_bytes）
+                base64_image = base64.b64encode(result).decode('utf-8')
+                data_context = ArtifactImageDataContext(
+                    type="image", data=base64_image)
             elif 'altair' in str(type(result)):
                 data_context = ArtifactAltairDataContext(
                     type="altair", data=json.dumps(result.to_dict()))

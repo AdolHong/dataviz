@@ -2,7 +2,7 @@
 
 ```shell
 
-tar -czvf ../dataviz_$(date +%Y%m%d_%H%M%S).tar.gz  --exclude backend/engine_config.py backend
+tar -czvf ../dataviz_$(date +%Y%m%d_%H%M%S).tar.gz  --exclude backend/engine_config.py --exclude backend/thirdparty backend
 
 ```
 

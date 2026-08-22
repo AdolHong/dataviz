@@ -1,0 +1,43 @@
+schema: dataviz/presentation/v1
+kind: presentation
+dashboard: sales-overview
+
+theme:
+  preset: business
+  accent: "#d5532d"
+  density: compact
+
+layout:
+  template: overview
+  columns: 12
+  gap: 18
+
+sections:
+  pulse:
+    template: band
+    class: presentation-kpi-band
+  trend:
+    template: split
+  detail:
+    template: comparison
+
+views:
+  revenue-trend:
+    width: 8
+    height: 420
+    container: chart
+  region-comparison:
+    width: 4
+    height: 420
+    container: chart
+  sales-detail:
+    width: 6
+    container: table
+    class: presentation-detail-table
+  sales-perspective:
+    width: 6
+    container: table
+
+assets:
+  css:
+    - assets/presentation.css

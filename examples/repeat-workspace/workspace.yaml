@@ -1,0 +1,7 @@
+schema: dataviz/workspace/v1
+kind: workspace
+id: repeat-workspace
+title: Repeat View Templates
+runtime:
+  plotly_js: bundled
+  max_workers: 4

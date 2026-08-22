@@ -1,0 +1,9 @@
+schema: dataviz/widget/v1
+kind: widget
+id: detail
+title: 明细检查
+description: DataFrame 表格
+runtime: browser
+depends_on: [orders]
+output:
+  type: table

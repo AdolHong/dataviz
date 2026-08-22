@@ -1,0 +1,27 @@
+adapters:
+  demo-duckdb:
+    type: duckdb
+    database: ':memory:'
+  shared-files:
+    type: files
+    root: shared-data
+
+  # 复制为 adapters.local.yaml，再填入你自己的环境变量。
+  mysql-example:
+    type: mysql
+    host: 127.0.0.1
+    port: 3306
+    database: analytics
+    username_env: DATAVIZ_MYSQL_USER
+    password_env: DATAVIZ_MYSQL_PASSWORD
+    options:
+      charset: utf8mb4
+  starrocks-example:
+    type: starrocks
+    host: 127.0.0.1
+    port: 9030
+    database: analytics
+    username_env: DATAVIZ_STARROCKS_USER
+    password_env: DATAVIZ_STARROCKS_PASSWORD
+    options:
+      charset: utf8mb4

@@ -1,0 +1,7 @@
+schema: dataviz/widget/v1
+kind: widget
+id: composition
+title: 省份构成
+runtime: browser
+depends_on: [metrics]
+output: {type: echarts}

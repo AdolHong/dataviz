@@ -1,0 +1,8 @@
+schema: dataviz/source/v1
+kind: datasource
+id: sql-grid
+name: DuckDB 数据矩阵
+type: sql
+adapter: warehouse
+code: grid.sql
+cache: {mode: session}

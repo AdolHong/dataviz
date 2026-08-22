@@ -1,0 +1,40 @@
+schema: dataviz/dashboard/v1
+kind: dashboard
+id: source-lab
+title: 数据源实验室
+description: 同一张画布检查 SQL 与 Python 取数结果，并把旧看板的调试感改成可阅读的数据叙事。
+adapters:
+  warehouse: demo-duckdb
+dashboard_selections:
+  - id: day
+    type: multi_select
+    label: 日期
+    default: [2025-10-01, 2025-10-02, 2025-10-03, 2025-10-04, 2025-10-05]
+    choices:
+      - {label: 10月1日, value: 2025-10-01}
+      - {label: 10月2日, value: 2025-10-02}
+      - {label: 10月3日, value: 2025-10-03}
+      - {label: 10月4日, value: 2025-10-04}
+      - {label: 10月5日, value: 2025-10-05}
+sections:
+  - id: pulse
+    title: 预测脉冲
+    views: [forecast-line, accuracy]
+  - id: matrix
+    title: SQL 数据矩阵
+    views: [sql-matrix]
+sources:
+  - sources/sql-grid.yaml
+  - sources/forecast.yaml
+widgets:
+  - widgets/forecast-line/widget.yaml
+  - widgets/accuracy/widget.yaml
+  - widgets/sql-matrix/widget.yaml
+canvas:
+  template: canvas/template.html
+  style: canvas/style.css
+  script: canvas/script.js
+  use_default_style: true
+  client_selections: true
+  client_sources: [sql-grid, forecast]
+  client_libraries: [plotly, echarts]

@@ -1,0 +1,4 @@
+adapters:
+  demo-duckdb:
+    type: duckdb
+    database: ':memory:'

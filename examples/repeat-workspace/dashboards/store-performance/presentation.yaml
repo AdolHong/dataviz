@@ -1,0 +1,26 @@
+schema: dataviz/presentation/v1
+kind: presentation
+dashboard: store-performance
+
+theme:
+  preset: editorial
+  accent: "#b9472f"
+  density: compact
+
+layout:
+  template: exploration
+  gap: 18
+
+sections:
+  selected-stores:
+    columns: 2
+  all-stores:
+    columns: 2
+
+selectors:
+  section:selected-stores/stores:
+    template: cascader
+    level_labels: [区域, 城市, 门店]
+    placeholder: 搜索或选择门店
+    search_placeholder: 搜索区域 / 城市 / 门店…
+    empty_text: 没有匹配的门店

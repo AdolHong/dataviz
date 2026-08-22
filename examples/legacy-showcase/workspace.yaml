@@ -1,0 +1,16 @@
+schema: dataviz/workspace/v1
+kind: workspace
+id: legacy-showcase
+title: Legacy Showcase
+description: 从 dashboard2 迁移的四个可分享看板
+context:
+  language: zh-CN
+  timezone: Asia/Shanghai
+runtime:
+  max_workers: 4
+  plotly_js: bundled
+  echarts_js: https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js
+  perspective_version: 5.2.0
+folders:
+  - path: 迁移看板
+    order: 10

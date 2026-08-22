@@ -1,0 +1,15 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+
+# Runtime output belongs to the local workspace, not source control.
+**/.dataviz/
+**/dist/
+**/auth/connections.local.yaml
+**/auth/adapters.local.yaml
+**/adapters.local.yaml

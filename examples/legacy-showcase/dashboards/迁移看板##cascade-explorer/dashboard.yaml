@@ -1,0 +1,54 @@
+schema: dataviz/dashboard/v1
+kind: dashboard
+id: cascade-explorer
+title: 级联选择器
+description: 对照 SQL、Workspace 文件 Adapter 与看板内置 CSV，验证三级 Selection 只在浏览器选择样本。
+adapters:
+  warehouse: demo-duckdb
+  uploads: shared-files
+dashboard_selections:
+  - id: province
+    type: multi_select
+    label: 省份
+    default: [广东, 福建]
+    choices:
+      - {label: 广东, value: 广东}
+      - {label: 福建, value: 福建}
+sections:
+  - id: geography
+    title: 地理级联
+    selections:
+      - id: city
+        type: multi_select
+        label: 城市
+        default: [深圳, 佛山, 厦门]
+        choices:
+          - {label: 深圳, value: 深圳}
+          - {label: 佛山, value: 佛山}
+          - {label: 厦门, value: 厦门}
+    views:
+      - map-bars
+      - widget: city-detail
+        selections:
+          - id: min_value
+            type: number
+            label: 最低值
+            default: 0
+  - {id: files, title: 文件来源, views: [uploaded-file, bundled-file]}
+sources:
+  - sources/cities.yaml
+  - sources/uploaded.yaml
+  - sources/bundled.yaml
+widgets:
+  - widgets/map-bars/widget.yaml
+  - widgets/city-detail/widget.yaml
+  - widgets/uploaded-file/widget.yaml
+  - widgets/bundled-file/widget.yaml
+canvas:
+  template: canvas/template.html
+  style: canvas/style.css
+  script: canvas/script.js
+  use_default_style: true
+  client_selections: true
+  client_sources: [cities, uploaded-file, bundled-file]
+  client_libraries: [plotly, echarts]

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dataviz Workbench</title>
+  <link rel="stylesheet" href="/static/server.css">
+</head>
+<body>
+  <div class="shell">
+    <aside id="dashboard-sidebar" class="rail">
+      <div class="brand">
+        <span class="brand-mark">D/V</span>
+        <strong>DATAVIZ</strong>
+      </div>
+      <div class="workspace-meta">
+        <h1 id="workspace-title">Dashboards</h1>
+        <button id="add-root-folder" class="rail-action" type="button" title="新建目录" aria-label="新建目录">＋</button>
+      </div>
+      <div id="nav-root-drop" class="nav-root-drop" aria-hidden="true">↰ 放到根目录</div>
+      <nav id="dashboard-nav" class="dashboard-nav" aria-label="Dashboards"></nav>
+      <details id="nav-trash" class="nav-trash">
+        <summary><span class="nav-trash__icon">⌫</span><strong>回收站</strong><small id="nav-trash-count">0</small><i>›</i></summary>
+        <div id="nav-trash-list" class="nav-trash__list"></div>
+      </details>
+      <div id="sidebar-resizer" class="sidebar-resizer" role="separator" aria-label="调整导航栏宽度" aria-orientation="vertical" aria-valuemin="180" aria-valuemax="480" aria-valuenow="220" tabindex="0"><span></span></div>
+    </aside>
+
+    <main class="workbench">
+      <header class="topbar">
+        <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-controls="dashboard-sidebar" aria-expanded="true" title="收起导航栏">
+          <span aria-hidden="true">◫</span><small>Navigation</small>
+        </button>
+        <div class="topbar-actions">
+          <details id="query-parameters-control" class="header-control" data-header-popover>
+            <summary class="header-control__trigger">
+              <span class="header-control__index">01</span>
+              <span><strong>Parameters</strong><small id="query-control-meta">Not applied</small></span>
+              <i>⌄</i>
+            </summary>
+            <div class="header-control__popover header-control__popover--query">
+              <div class="section-heading"><span>01</span><div><h3>Query parameters</h3><p>Changes require a new dataset query.</p></div></div>
+              <form id="parameter-form" class="parameter-form"></form>
+              <div id="query-state" class="query-state">No dataset loaded.</div>
+            </div>
+          </details>
+          <details id="dashboard-selections-control" class="header-control" data-header-popover>
+            <summary class="header-control__trigger">
+              <span class="header-control__index header-control__index--selection">02</span>
+              <span><strong>Selections</strong><small id="dashboard-control-meta">None</small></span>
+              <i>⌄</i>
+            </summary>
+            <div class="header-control__popover header-control__popover--selections">
+              <div class="section-heading"><span>02</span><div><h3>Dashboard selections</h3><p>Choose included rows and redraw all views without querying.</p></div></div>
+              <form id="dashboard-selection-form" class="selection-form"></form>
+            </div>
+          </details>
+          <button id="download-button" class="button button--ghost" disabled>Export HTML</button>
+          <details id="query-diagnostics" class="query-diagnostics" data-status="idle" data-header-popover>
+            <summary class="button button--ghost"><span class="query-diagnostics__light"></span><span class="query-diagnostics__copy"><strong>Sources</strong><small id="query-diagnostics-label">Not run</small></span><span class="query-diagnostics__chevron">⌄</span></summary>
+            <div class="query-diagnostics__popover">
+              <div class="section-heading"><span>↳</span><div><h3>Data sources</h3><p>Execution details for File, SQL and Python sources.</p></div></div>
+              <div id="node-list" class="node-list"></div>
+              <div id="run-message" class="run-message">Sources have not run.</div>
+            </div>
+          </details>
+          <button id="run-button" class="button button--run" disabled><span class="button-light"></span>Run query</button>
+        </div>
+      </header>
+
+      <section class="canvas-panel">
+        <iframe id="canvas-frame" title="Dashboard canvas"></iframe>
+      </section>
+    </main>
+  </div>
+  <dialog id="error-dialog">
+    <button class="dialog-close" onclick="this.closest('dialog').close()">×</button>
+    <span class="micro-label">NODE DIAGNOSTIC</span>
+    <h3 id="error-title">Execution error</h3>
+    <pre id="error-content"></pre>
+  </dialog>
+  <div id="nav-context-menu" class="nav-context-menu" role="menu" hidden></div>
+  <dialog id="nav-dialog" class="nav-dialog"></dialog>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

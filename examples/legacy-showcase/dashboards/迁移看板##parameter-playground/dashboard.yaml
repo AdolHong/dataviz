@@ -1,0 +1,32 @@
+schema: dataviz/dashboard/v1
+kind: dashboard
+id: parameter-playground
+title: 参数试验场
+description: Query Parameter 决定重新取数；Dashboard Selection 只改变已经拿到的数据样本。
+adapters: {warehouse: demo-duckdb}
+query_parameters:
+  - {id: multiplier, type: number, label: 数值倍率, default: 2}
+  - {id: row_count, type: number, label: 行数, default: 12}
+dashboard_selections:
+  - id: segment
+    type: multi_select
+    label: 分组
+    default: [Alpha, Beta, Gamma]
+    choices:
+      - {label: Alpha, value: Alpha}
+      - {label: Beta, value: Beta}
+      - {label: Gamma, value: Gamma}
+sections:
+  - {id: experiment, title: 参数实验, views: [parameter-line, parameter-table]}
+sources: [sources/parameterized.yaml]
+widgets:
+  - widgets/parameter-line/widget.yaml
+  - widgets/parameter-table/widget.yaml
+canvas:
+  template: canvas/template.html
+  style: canvas/style.css
+  script: canvas/script.js
+  use_default_style: true
+  client_selections: true
+  client_sources: [parameterized]
+  client_libraries: [plotly]

@@ -1,0 +1,7 @@
+schema: dataviz/widget/v1
+kind: widget
+id: parameter-line
+title: 参数生成曲线
+runtime: browser
+depends_on: [parameterized]
+output: {type: plotly}

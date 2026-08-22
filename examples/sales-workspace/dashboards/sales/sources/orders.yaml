@@ -1,0 +1,11 @@
+schema: dataviz/source/v1
+kind: datasource
+id: orders
+name: 订单文件
+description: CSV 文件读取
+type: file
+path: ../data/orders.csv
+format: csv
+cache:
+  mode: persistent
+

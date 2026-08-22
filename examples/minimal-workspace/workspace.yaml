@@ -1,0 +1,7 @@
+schema: dataviz/workspace/v1
+kind: workspace
+id: minimal-workspace
+title: Declarative Dashboards
+folders: []
+runtime:
+  perspective_version: 5.2.0

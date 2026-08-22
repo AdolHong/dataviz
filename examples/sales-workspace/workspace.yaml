@@ -1,0 +1,14 @@
+schema: dataviz/workspace/v1
+kind: workspace
+id: field-notes
+title: Field Notes
+description: 一个同时展示三类数据源与多种可视化产物的示例 workspace
+context:
+  language: zh-CN
+  timezone: Asia/Shanghai
+  currency: CNY
+runtime:
+  max_workers: 4
+  plotly_js: bundled
+  echarts_js: https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js
+folders: []

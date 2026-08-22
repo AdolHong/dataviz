@@ -1,0 +1,9 @@
+schema: dataviz/widget/v1
+kind: widget
+id: revenue
+title: 收入与预测轨迹
+description: Plotly 动态折线
+runtime: browser
+depends_on: [orders, forecast]
+output:
+  type: plotly

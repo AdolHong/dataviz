@@ -1,0 +1,24 @@
+<header class="pulse-hero">
+  <div>
+    <p class="dv-eyebrow">FIELD NOTE / 026</p>
+    <h1>{{ dashboard.title }}</h1>
+    <p class="dv-deck">{{ dashboard.description }}</p>
+  </div>
+</header>
+
+{{ section_selections("pulse") }}
+<section class="pulse-lead">
+  <div class="pulse-number">01</div>
+  <div class="pulse-wide">{{ widget("revenue") }}</div>
+  <div class="pulse-narrow">{{ widget("target") }}</div>
+</section>
+
+<section class="pulse-lower">
+  <div>{{ widget("distribution") }}</div>
+  <div>{{ widget("detail") }}</div>
+</section>
+
+<footer class="pulse-footer">
+  <span>Regions · <b id="active-regions">{{ selections["dashboard:sales/region"] | join(" / ") }}</b></span>
+  <span>Target factor · {{ parameters.target_factor }}</span>
+</footer>

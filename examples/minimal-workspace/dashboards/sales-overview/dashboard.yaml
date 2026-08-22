@@ -1,0 +1,106 @@
+schema: dataviz/dashboard/v1
+kind: dashboard
+id: sales-overview
+title: 销售概览
+description: dashboard.yaml 只负责分析逻辑；删除 presentation.yaml 后仍可使用默认页面。
+
+adapters:
+  warehouse: demo-duckdb
+
+query_parameters:
+  - id: min_query_revenue
+    type: number
+    label: 取数最低收入
+    default: 0
+
+sources:
+  - id: sales
+    name: 销售数据
+    type: sql
+    adapter: warehouse
+    code: sources/sales.sql
+    params: [min_query_revenue]
+
+dashboard_selections:
+  - id: region
+    field: region
+    type: multi_select
+    label: 区域
+    default: [华东, 华南, 华北]
+    choices:
+      - {label: 华东, value: 华东}
+      - {label: 华南, value: 华南}
+      - {label: 华北, value: 华北}
+
+views:
+  - id: total-revenue
+    title: 总收入
+    source: sales
+    template: metric
+    value: revenue
+    label: 当前选择范围
+    aggregate: sum
+
+  - id: total-orders
+    title: 总订单
+    source: sales
+    template: metric
+    value: orders
+    label: 当前选择范围
+    aggregate: sum
+
+  - id: revenue-trend
+    title: 收入趋势
+    source: sales
+    template: line
+    x: day
+    y: revenue
+    series: region
+    aggregate: sum
+
+  - id: region-comparison
+    title: 区域收入
+    source: sales
+    template: bar
+    x: region
+    y: revenue
+    aggregate: sum
+
+  - id: sales-detail
+    title: 展示型销售明细
+    source: sales
+    template: table
+    columns: [day, region, revenue, orders]
+    limit: 50
+    options:
+      labels: {day: 日期, region: 区域, revenue: 收入, orders: 订单}
+      formats: {revenue: currency, orders: number}
+      align: {revenue: right, orders: right}
+      striped: true
+      compact: false
+
+  - id: sales-perspective
+    title: 可透视销售明细
+    source: sales
+    template: perspective
+    columns: [day, region, revenue, orders]
+    config:
+      plugin: Datagrid
+      columns: [revenue, orders]
+      group_by: [region]
+      aggregates: {revenue: sum, orders: sum}
+      settings: false
+
+sections:
+  - id: pulse
+    title: 核心指标
+    views: [total-revenue, total-orders]
+
+  - id: trend
+    title: 趋势与结构
+    views: [revenue-trend, region-comparison]
+
+  - id: detail
+    title: 两种表格模板
+    description: 普通 Table 负责可定制展示，Perspective 负责自助分析。
+    views: [sales-detail, sales-perspective]

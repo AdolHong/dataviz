@@ -1,0 +1,8 @@
+/* Optional presentation-only polish. Removing this file does not affect data logic. */
+.presentation-kpi-band .dv-widget {
+  border-top-color: var(--dv-accent);
+}
+
+.presentation-detail-table .dv-table thead th {
+  color: var(--dv-accent);
+}

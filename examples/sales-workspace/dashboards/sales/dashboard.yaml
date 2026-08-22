@@ -1,0 +1,74 @@
+schema: dataviz/dashboard/v1
+kind: dashboard
+id: sales
+title: 销售脉搏
+description: 从原始订单到区域目标，用一张带编辑感的画布追踪经营节奏。
+context:
+  grain: 一行代表一个区域在某天的一组订单
+  currency: CNY
+  owner: analytics-studio
+assumptions:
+  - 所有金额均为含税人民币元
+  - 预测值为历史收入乘以 1.08，仅用于演示 Python source
+query_parameters:
+  - id: target_factor
+    type: number
+    label: 目标系数
+    default: 1.0
+dashboard_selections:
+  - id: region
+    type: multi_select
+    label: 区域
+    default: [North, South, East, West]
+    choices:
+      - {label: 北区, value: North}
+      - {label: 南区, value: South}
+      - {label: 东区, value: East}
+      - {label: 西区, value: West}
+sections:
+  - id: pulse
+    title: 经营脉搏
+    selections:
+      - id: min_revenue
+        type: number
+        label: 最低单期收入
+        default: 0
+    views:
+      - revenue
+      - target
+      - distribution
+  - id: records
+    title: 明细记录
+    views:
+      - widget: detail
+        selections:
+          - id: min_orders
+            type: number
+            label: 最低订单数
+            default: 0
+sources:
+  - sources/orders.yaml
+  - sources/targets.yaml
+  - sources/forecast.yaml
+widgets:
+  - widgets/revenue/widget.yaml
+  - widgets/target/widget.yaml
+  - widgets/distribution/widget.yaml
+  - widgets/detail/widget.yaml
+layout:
+  columns: 12
+  row_height: 100
+  gap: 18
+  items:
+    - {widget: revenue, x: 0, y: 0, width: 8, height: 4}
+    - {widget: target, x: 8, y: 0, width: 4, height: 4}
+    - {widget: distribution, x: 0, y: 4, width: 5, height: 4}
+    - {widget: detail, x: 5, y: 4, width: 7, height: 4}
+canvas:
+  template: canvas/template.html
+  style: canvas/style.css
+  script: canvas/script.js
+  use_default_style: true
+  client_selections: true
+  client_sources: [orders, targets, forecast]
+  client_libraries: [plotly, echarts]

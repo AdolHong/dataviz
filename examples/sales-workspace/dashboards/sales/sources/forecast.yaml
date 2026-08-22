@@ -1,0 +1,12 @@
+schema: dataviz/source/v1
+kind: datasource
+id: forecast
+name: Python 预测
+description: 依赖订单文件的 Python 计算数据源
+type: python
+code: forecast.py
+entrypoint: load
+depends_on: [orders]
+params: []
+cache:
+  mode: session

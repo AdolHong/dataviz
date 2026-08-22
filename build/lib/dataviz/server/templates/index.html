@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dataviz Workbench</title>
+  <link rel="stylesheet" href="/static/server.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand">
+        <span class="brand-mark">D/V</span>
+        <div><strong>DATAVIZ</strong><small>Workspace runtime</small></div>
+      </div>
+      <div class="workspace-meta">
+        <span class="micro-label">WORKSPACE</span>
+        <h1 id="workspace-title">Loading…</h1>
+        <p id="workspace-description"></p>
+      </div>
+      <nav id="dashboard-nav" class="dashboard-nav" aria-label="Dashboards"></nav>
+      <footer>
+        <span class="connection-dot"></span>
+        <span>Local runtime</span>
+      </footer>
+    </aside>
+
+    <main class="workbench">
+      <header class="topbar">
+        <div>
+          <span class="micro-label">ACTIVE CANVAS</span>
+          <h2 id="dashboard-title">Select a dashboard</h2>
+        </div>
+        <div class="topbar-actions">
+          <button id="download-button" class="button button--ghost" disabled>Export HTML</button>
+          <button id="run-button" class="button button--run" disabled><span class="button-light"></span>Run canvas</button>
+        </div>
+      </header>
+
+      <section class="control-strip">
+        <div class="parameters-panel">
+          <div class="section-heading"><span>01</span><div><h3>Query parameters</h3><p>Changing these can reload source data.</p></div></div>
+          <form id="parameter-form" class="parameter-form"></form>
+        </div>
+        <div class="run-panel">
+          <div class="section-heading"><span>02</span><div><h3>Execution graph</h3><p>Every source and widget reports independently.</p></div></div>
+          <div id="node-list" class="node-list"></div>
+          <div id="run-message" class="run-message">No run started.</div>
+        </div>
+        <div class="filters-panel">
+          <div class="section-heading"><span>F</span><div><h3>View filters</h3><p>Applied after source data is loaded. Scope is explicit for every control.</p></div></div>
+          <form id="filter-form" class="filter-form"></form>
+        </div>
+      </section>
+
+      <section class="canvas-panel">
+        <div class="canvas-toolbar">
+          <div><span class="micro-label">03 · OUTPUT</span><strong id="canvas-status">Waiting for execution</strong></div>
+          <button id="refresh-frame" class="icon-button" title="Refresh canvas">↻</button>
+        </div>
+        <iframe id="canvas-frame" title="Dashboard canvas"></iframe>
+      </section>
+    </main>
+  </div>
+  <dialog id="error-dialog">
+    <button class="dialog-close" onclick="this.closest('dialog').close()">×</button>
+    <span class="micro-label">NODE DIAGNOSTIC</span>
+    <h3 id="error-title">Execution error</h3>
+    <pre id="error-content"></pre>
+  </dialog>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

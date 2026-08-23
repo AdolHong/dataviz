@@ -20,6 +20,7 @@ class NodeResult(BaseModel):
     finished_at: str | None = None
     duration_ms: int | None = None
     outputs: dict[str, ArtifactDescriptor] = Field(default_factory=dict)
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
     log: ArtifactDescriptor | None = None
     error: dict[str, Any] | None = None
 

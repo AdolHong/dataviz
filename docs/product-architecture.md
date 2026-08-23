@@ -41,6 +41,8 @@ File/SQL Source 由内置 Runner 使用 Adapter；特殊外部系统由可信 Py
 
 从外部世界读取数据。支持 File、SQL 和 Python 入口。Source 可以接收 Query Parameter，但不能消费另一个 Source；跨 Dataset 计算属于 Server Transform。Python Source 可绑定一个 Workspace Adapter，通过 `context.adapter` 获得已解析连接信息。
 
+Source 同时是人机协同的查询证据边界。Server 的 Sources 面板按当前 tab、Dashboard 和 Run 展示节点状态、执行/缓存来源、耗时与错误；SQL 节点额外保存可读的 Resolved SQL、实际参数化 Driver statement、bound parameters、Adapter 类型、SQL 文件、timeout/retry 和 query hash。Resolved SQL 只用于 review，Runtime 始终用参数化 statement 执行；证据不得包含 Adapter URL、密码或环境变量 secret。
+
 ### Server Transform
 
 消费显式上游 Named Output 的 Python 计算节点，适合多表逻辑、模型、复杂 pandas/NumPy 计算和不能暴露到浏览器的数据处理。
@@ -72,6 +74,7 @@ Source、Server Transform 和 Browser Transform 共用的结果协议。一个�
 5. Component Package 同时拥有 Schema、默认值、无 DOM 行为、框架 Adapter、功能样式、Gallery Story 和自动测试。
 6. Server 只发布 Manifest、Runtime Event 和 Output；前端框架只消费稳定协议。更换 Vanilla JS/React/Vue 不得要求重写 DAG、Output 或 Selection 语义。
 7. 产品质量只有两个长期维度：模板功能和交互足够可靠；AI 开发所需上下文、输出与试错轮次足够少。
+8. 每次文件修改后的第一道边界是静态 `dataviz validate`，不是等待用户打开页面。Preflight 不执行查询，必须提供稳定错误码、文件/字段、Schema 细节与修复提示；通过后才进入 Source/Output/Renderer 动态验证。
 
 ## 3. 简单路径与复杂路径
 
@@ -167,9 +170,11 @@ Dashboard 同时有三类名称：
 | --- | --- | --- |
 | Canvas Name | 文件夹末级名称 | 导航、移动、复制、打包和分享 |
 | `dashboard.id` | dashboard.yaml | CLI、API、DAG、缓存和状态 |
-| `title/subtitle/description` | dashboard.yaml | 页面内容 |
+| `title/subtitle/description` | dashboard.yaml | 页面内容，可引用已提交的 Query Parameter |
 
 Canvas Name 是文件系统事实且不存在额外显示别名；`dashboard.id` 是持久程序身份；内容标题可以自由变化。标题为空时回退到 Canvas Name。
+
+页面内容使用受限插值 `{{ parameters.<id> }}` 把当前分析对象放进 Dashboard、Section、View 和 Markdown 的阅读层级。插值只读取本次 Run 已提交的 Query Parameter：Server 修改参数但尚未重新查询时仍展示旧上下文，重新查询后更新；导出 HTML 固定保存该 Run 的上下文。Selection 是浏览器端样本交互，不参与这套查询标题插值。未知参数、运算和任意模板表达式由 `dataviz validate` 拒绝。
 
 跨层引用使用带类型的稳定形式：
 
@@ -233,6 +238,8 @@ Python Source 与 Server Transform 使用 fresh spawn 子进程：
 - Python Source 的 Adapter secret 只通过父子进程参数进入内存，不写入运行结果；可信入口代码仍必须避免主动打印或返回 secret。
 
 SQL Source 同样在独立查询进程中执行。每次尝试默认超时 120 秒，默认在明确超时后立即额外重试一次；Source 可用 `timeout_seconds` 和 `timeout_retries` 覆盖，后者表示首次尝试之外的重试次数。每次重试都创建新进程和新连接，不复用可能已经异常的 Session。重试只响应 `query_timeout`；连接、权限、语法和其他执行错误立即失败。`timeout_seconds` 到期后 Runtime 终止查询进程并由操作系统释放连接；MySQL 与 StarRocks 还会设置 Session 级查询超时。数据库主动返回的超时也归一为 `query_timeout`，并与 `query_connection_error`、`query_execution_error` 保持稳定区分，只失败对应 DAG 分支。Runtime 通过 `node_retrying` 事件公开当前尝试次数。
+
+SQL 的命名参数契约在查询前静态检查：SQL 中出现的 `:name` / `$name` 必须列入 Source `params`，`params` 中声明但 SQL 未引用则给出 warning。扫描忽略字符串、注释、类型转换和 dollar-quoted body，避免把示例文本误判为参数。运行开始时生成查询证据并写入 Snapshot，因此查询失败或命中缓存时仍能检查当时使用的 SQL 与参数。
 
 这是可信单机工具，不在当前 DSL 中设计多租户 CPU/内存配额。Workspace Python 不能用来运行不可信脚本。
 
@@ -381,6 +388,7 @@ Workspace Loader 的 fail-soft 只用于隔离损坏 Dashboard 和非关键 Pres
 - 多 Named Output 与 table/scalar/object/text/html/chart/image/file Artifact。
 - Python 进程隔离、timeout、traceback/log、缓存依赖指纹。
 - SQL 查询进程隔离、硬 timeout/cancel 与结构化错误分类。
+- SQL 查询证据贯穿 Snapshot/Result，Server Sources 节点可检查并复制 Resolved SQL、Driver statement 和 bound parameters。
 - Browser Transform Worker 拓扑、异步入口、取消、硬超时、可序列化错误、局部失效和分支失败隔离。
 - Renderer Registry 和内置 Renderer。
 - 可达 Output payload、嵌入上限，以及 JSON/Arrow IPC 自动传输、HTTP gzip、导出 gzip 分片与异步解码。
@@ -401,6 +409,7 @@ Workspace Loader 的 fail-soft 只用于隔离损坏 Dashboard 和非关键 Pres
 - 自定义 Renderer 的 JS/CSS/Contract 脚手架、异步生命周期错误边界和 Chromium 契约测试。
 - 真实 Chromium E2E 覆盖弹层收起、三级级联、Cascader 多分支、View 隔离、Selector 键盘/焦点/视口几何、大列表 DOM 上限、Table/Perspective 滚动、渐进失败、Worker 取消/超时、Arrow 和 1,000 分组 Repeat。
 - `dataviz schemas` 从当前 Pydantic 模型生成紧凑字段契约或完整 JSON Schema；Component 文档继续从 Registry/Package 生成。
+- `dataviz validate` 提供 `dataviz/validation/v1` 静态 preflight、Dashboard 聚焦、SQL 参数契约、修复 hint 与 strict 退出码，全程不执行查询。
 - append-only `dataviz-authoring.jsonl` 与 start/note/finish/show CLI，记录真实首次成功、修正、耗时、Token 和文档/设计 friction，不估算缺失 Token。
 - 严格 Schema URI、dry-run 优先的离线 migration、可读 Changelog 和独立版本说明。
 - 第二 Web Component Frontend Adapter、公共 Output 变更事件，以及不加载默认 Canvas Runtime 的真实浏览器契约测试。

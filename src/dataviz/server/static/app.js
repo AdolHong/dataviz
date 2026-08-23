@@ -318,9 +318,9 @@ function nodeRow(node) {
   item.className = 'node';
   item.dataset.nodeId = node.id;
   item.dataset.status = 'not_run';
-  item.title = node.description || node.title;
-  item.innerHTML = `<span class="node-light"></span><strong>${escapeHtml(node.title)}</strong><small>${escapeHtml(node.subtype)}</small>`;
-  item.addEventListener('click', () => showNodeError(node.id, node.title));
+  item.title = `Inspect ${node.title}${node.description ? ` — ${node.description}` : ''}`;
+  item.innerHTML = `<span class="node-light"></span><strong>${escapeHtml(node.title)}</strong><small>${escapeHtml(node.subtype)} <i aria-hidden="true">↗</i></small>`;
+  item.addEventListener('click', () => showNodeInspector(node));
   return item;
 }
 
@@ -382,7 +382,9 @@ function parameters() {
 }
 
 function selections() {
-  return Object.assign({}, state.canvasSelections, formValues($('#dashboard-selection-form')));
+  const values = Object.assign({}, state.canvasSelections, formValues($('#dashboard-selection-form')));
+  const validKeys = new Set((state.dashboard?.selections || []).map((selection) => selection.key));
+  return Object.fromEntries(Object.entries(values).filter(([key]) => validKeys.has(key)));
 }
 
 function formValues(form) {
@@ -567,12 +569,180 @@ function scheduleViewSelections() {
   state.selectionTimer = window.setTimeout(applyViewSelections, 80);
 }
 
-function showNodeError(nodeId, title) {
-  const error = state.nodeErrors[nodeId];
-  if (!error) return;
-  $('#error-title').textContent = title;
-  $('#error-content').textContent = JSON.stringify(error, null, 2);
-  $('#error-dialog').showModal();
+function inspectorElement(tag, className = '', text = '') {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== '') node.textContent = String(text);
+  return node;
+}
+
+function inspectorFact(label, value) {
+  const item = inspectorElement('div', 'node-inspector__fact');
+  item.append(inspectorElement('span', '', label), inspectorElement('strong', '', value ?? '—'));
+  return item;
+}
+
+async function copyEvidence(text, button) {
+  const original = button.textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (_) {
+    const fallback = document.createElement('textarea');
+    fallback.value = text;
+    fallback.style.position = 'fixed';
+    fallback.style.opacity = '0';
+    document.body.append(fallback);
+    fallback.select();
+    document.execCommand('copy');
+    fallback.remove();
+  }
+  button.textContent = 'Copied';
+  window.setTimeout(() => { button.textContent = original; }, 1400);
+}
+
+function inspectorCodeSection({eyebrow, title, note, code, copyLabel = 'Copy'}) {
+  const section = inspectorElement('section', 'node-inspector__section node-inspector__section--code');
+  const heading = inspectorElement('header', 'node-inspector__section-heading');
+  const copy = inspectorElement('button', 'node-inspector__copy', copyLabel);
+  copy.type = 'button';
+  copy.addEventListener('click', () => copyEvidence(code, copy));
+  const copyBlock = inspectorElement('div');
+  copyBlock.append(inspectorElement('span', 'micro-label', eyebrow), inspectorElement('h4', '', title));
+  heading.append(copyBlock, copy);
+  section.append(heading);
+  if (note) section.append(inspectorElement('p', 'node-inspector__note', note));
+  const pre = inspectorElement('pre', 'node-inspector__code');
+  pre.append(inspectorElement('code', '', code || '—'));
+  section.append(pre);
+  return section;
+}
+
+function renderNodeInspector(node, record, runNode, failure = null) {
+  const body = $('#node-inspector-body');
+  body.replaceChildren();
+  $('#node-inspector-title').textContent = node.title;
+  $('#node-inspector-subtitle').textContent = node.description || `${node.type.replace('_', ' ')} · ${node.subtype}`;
+
+  const summary = inspectorElement('section', 'node-inspector__summary');
+  const status = runNode?.status || (record ? record.status : 'not run');
+  const stamp = inspectorElement('div', 'node-inspector__status', status);
+  stamp.dataset.status = String(status).replace('_', '-');
+  const facts = inspectorElement('div', 'node-inspector__facts');
+  facts.append(
+    inspectorFact('Node', node.id),
+    inspectorFact('Run', record?.run_id || 'Not run'),
+    inspectorFact('Result', runNode?.result_origin || '—'),
+    inspectorFact('Duration', runNode?.duration_ms == null ? '—' : `${runNode.duration_ms} ms`),
+  );
+  summary.append(stamp, facts);
+  body.append(summary);
+
+  if (failure) {
+    const message = inspectorElement('section', 'node-inspector__section node-inspector__section--failure');
+    message.append(inspectorElement('span', 'micro-label', 'INSPECTION FAILED'), inspectorElement('h4', '', failure));
+    body.append(message);
+    return;
+  }
+
+  if (!record) {
+    const empty = inspectorElement('section', 'node-inspector__section node-inspector__section--empty');
+    empty.append(
+      inspectorElement('span', 'micro-label', 'NO RUN EVIDENCE'),
+      inspectorElement('h4', '', 'Run this dashboard to inspect committed query evidence.'),
+      inspectorElement('p', 'node-inspector__note', 'Evidence is isolated by browser tab and Dashboard run; another user or tab cannot replace it.'),
+    );
+    body.append(empty);
+    return;
+  }
+
+  const query = runNode?.diagnostics?.query;
+  if (query) {
+    body.append(inspectorCodeSection({
+      eyebrow: 'READABLE PREVIEW',
+      title: 'Resolved SQL',
+      note: 'For review only. Dataviz still sends a parameterized statement and bound values to the database; it does not execute this literalized preview.',
+      code: query.resolved_sql,
+      copyLabel: 'Copy SQL',
+    }));
+
+    const queryFacts = inspectorElement('section', 'node-inspector__section');
+    queryFacts.append(inspectorElement('span', 'micro-label', 'QUERY CONTEXT'));
+    const grid = inspectorElement('div', 'node-inspector__facts node-inspector__facts--query');
+    grid.append(
+      inspectorFact('Adapter alias', query.adapter_alias),
+      inspectorFact('Adapter', `${query.adapter_name || query.adapter_alias} · ${query.adapter_type}`),
+      inspectorFact('Source file', query.source_file),
+      inspectorFact('Timeout policy', `${query.timeout_seconds ?? 'none'}s · ${query.timeout_retries ?? 0} retries`),
+      inspectorFact('Query hash', query.query_hash),
+    );
+    queryFacts.append(grid);
+    if (query.inspection_warning) queryFacts.append(inspectorElement('p', 'node-inspector__warning', query.inspection_warning));
+    body.append(queryFacts);
+
+    const driver = inspectorElement('details', 'node-inspector__driver');
+    driver.append(inspectorElement('summary', '', 'Driver statement & bound parameters'));
+    const driverBody = inspectorElement('div', 'node-inspector__driver-body');
+    driverBody.append(inspectorCodeSection({
+      eyebrow: 'PARAMETERIZED EXECUTION',
+      title: 'Driver statement',
+      note: 'This statement shape, together with the bound values below, is what the SQL driver receives.',
+      code: query.statement,
+      copyLabel: 'Copy statement',
+    }));
+    const params = inspectorElement('section', 'node-inspector__section');
+    params.append(inspectorElement('span', 'micro-label', 'BOUND PARAMETERS'));
+    const paramsCode = inspectorElement('pre', 'node-inspector__code node-inspector__code--parameters');
+    paramsCode.append(inspectorElement('code', '', JSON.stringify(query.parameters || {}, null, 2)));
+    params.append(paramsCode);
+    driverBody.append(params);
+    driver.append(driverBody);
+    body.append(driver);
+  } else {
+    const noSql = inspectorElement('section', 'node-inspector__section node-inspector__section--empty');
+    const inspectionError = runNode?.diagnostics?.inspection_error;
+    noSql.append(
+      inspectorElement('span', 'micro-label', 'NODE EVIDENCE'),
+      inspectorElement('h4', '', node.subtype === 'sql' ? 'SQL evidence is unavailable for this run.' : 'This node does not execute SQL.'),
+      inspectorElement(
+        'p',
+        'node-inspector__note',
+        inspectionError?.message || 'Status, duration, cache origin, outputs and failures remain available in the run record.',
+      ),
+    );
+    body.append(noSql);
+  }
+
+  const error = runNode?.error || state.nodeErrors[node.id];
+  if (error) {
+    const failed = inspectorElement('section', 'node-inspector__section node-inspector__section--failure');
+    failed.append(inspectorElement('span', 'micro-label', 'EXECUTION ERROR'), inspectorElement('h4', '', error.message || 'Node execution failed'));
+    const details = inspectorElement('pre', 'node-inspector__code node-inspector__code--error');
+    details.append(inspectorElement('code', '', JSON.stringify(error, null, 2)));
+    failed.append(details);
+    body.append(failed);
+  }
+}
+
+async function showNodeInspector(node) {
+  closeHeaderPopovers();
+  const dialog = $('#node-inspector');
+  renderNodeInspector(node, null, null);
+  dialog.showModal();
+  const runtime = activeRuntime();
+  const runId = runtime?.pendingRunId || runtime?.runId;
+  if (!runId) return;
+  const dashboardId = state.dashboard?.id;
+  $('#node-inspector-body').classList.add('is-loading');
+  try {
+    const record = await request(`/api/runs/${encodeURIComponent(runId)}?${sessionQuery()}`);
+    const run = record.result || record.snapshot;
+    renderNodeInspector(node, record, run?.nodes?.[node.id] || null);
+  } catch (error) {
+    renderNodeInspector(node, {run_id: runId, status: 'failed'}, null, error.message);
+  } finally {
+    $('#node-inspector-body').classList.remove('is-loading');
+    if (state.dashboard?.id !== dashboardId && dialog.open) dialog.close();
+  }
 }
 
 function escapeHtml(value) { const node = document.createElement('div'); node.textContent = value; return node.innerHTML; }
@@ -975,7 +1145,9 @@ window.addEventListener('message', (event) => {
     return;
   }
   if (event.data?.type !== 'dataviz:selections-changed') return;
-  state.canvasSelections = {...state.canvasSelections, ...(event.data.selections || {})};
+  // Canvas messages contain the complete canonical state. Replacing it also
+  // removes keys restored from sessionStorage after a Selection is renamed.
+  state.canvasSelections = {...(event.data.selections || {})};
   saveTabUiState();
 });
 $('#add-root-folder').addEventListener('click', () => openFolderDialog(null));

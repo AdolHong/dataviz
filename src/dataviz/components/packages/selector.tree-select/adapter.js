@@ -16,7 +16,7 @@
     trigger.dataset.selectorTrigger = '';
     trigger.innerHTML = '<span data-selector-summary></span><i aria-hidden="true">⌄</i>';
     const panel = document.createElement('div');
-    panel.className = 'dv-tree-panel';
+    panel.className = 'dv-selector-panel dv-tree-panel';
     panel.dataset.selectorPanel = '';
     panel.hidden = true;
     const search = document.createElement('input');

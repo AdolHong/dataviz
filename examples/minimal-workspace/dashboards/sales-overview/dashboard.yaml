@@ -2,7 +2,8 @@ schema: dataviz/dashboard/v1
 kind: dashboard
 id: sales-overview
 title: 销售概览
-description: dashboard.yaml 只负责分析逻辑；删除 presentation.yaml 后仍可使用默认页面。
+subtitle: "当前取数下限：{{ parameters.min_query_revenue }}"
+description: 收入、订单与区域表现。
 
 adapters:
   warehouse: demo-duckdb

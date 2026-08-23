@@ -13,6 +13,9 @@ DOC_ALIASES = {
     "chart": "charts",
     "view": "charts",
     "source": "sources",
+    "content": "dashboard",
+    "interpolation": "dashboard",
+    "title": "dashboard",
     "selection": "selections",
     "layout": "presentation",
     "style": "presentation",
@@ -27,6 +30,8 @@ DOC_ALIASES = {
     "authoring-log": "ai-authoring",
     "schema": "strict-schema",
     "schemas": "schema-reference",
+    "validate": "validation",
+    "preflight": "validation",
     "version": "versioning-release",
     "migration": "versioning-release",
     "migrate": "versioning-release",
@@ -51,7 +56,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "dataviz schemas dashboard --format json",
             "dataviz list <workspace>",
             "dataviz context <workspace> <dashboard-id> --focus view:<view-id> --format json",
-            "dataviz validate <workspace>",
+            "dataviz validate <workspace> --dashboard <dashboard-id> --format json",
             "dataviz query <workspace> <dashboard-id> --source <source-id> --format json",
             "dataviz report <workspace> <dashboard-id> --output <workspace>/dist/report.html",
             "dataviz serve <workspace> --port 8080",
@@ -101,7 +106,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
         "steps": [
             {"stage": "1. Discover", "command": "dataviz list <workspace>", "stop_when": "确认 Dashboard id、文件夹名和节点 id。"},
             {"stage": "2. Read", "command": "dataviz context <workspace> <dashboard-id> --focus view:<id> --format json", "stop_when": "只掌握当前任务的依赖闭包、Selection 和组件契约。"},
-            {"stage": "3. Validate", "command": "dataviz validate <workspace>", "stop_when": "没有 error 诊断。"},
+            {"stage": "3. Validate", "command": "dataviz validate <workspace> --dashboard <dashboard-id> --format json", "stop_when": "passed=true；没有 error，团队要求时也没有 warning。"},
             {"stage": "4. Source", "command": "dataviz query <workspace> <dashboard-id> --source <source-id> --format json", "stop_when": "原始字段、类型和行数正确。"},
             {"stage": "5. Compute", "command": "dataviz output <workspace> <dashboard-id> transform:<id>/<name>", "stop_when": "View 所需 Named Output 正确。"},
             {"stage": "6. Render", "command": "dataviz report <workspace> <dashboard-id> --output <workspace>/dist/check.html", "stop_when": "默认 Renderer 成功。"},
@@ -121,28 +126,45 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
         "identity": {
             "folder_name": "导航和分享看到的画布名称；## 前缀片段表达目录位置。",
             "id": "稳定程序身份；CLI、API、DAG、Presentation 引用和运行状态使用。",
-            "title_subtitle_description": "页面内容；title 为空时回退到文件夹末级名称。",
+            "title_subtitle_description": "页面内容；可引用本次已提交的 Query Parameter，title 为空时回退到文件夹末级名称。",
         },
         "minimal_example": """schema: dataviz/dashboard/v1
 kind: dashboard
 id: sales-overview
 title: 销售概览
+subtitle: "仓 {{ parameters.warehouse_id }} · 商品 {{ parameters.product_id }}"
 adapters: {warehouse: team-duckdb}
+query_parameters:
+  - {id: warehouse_id, label: 仓, default: 5740}
+  - {id: product_id, label: 商品, default: "980464683"}
 sources:
   - id: sales
     kind: source
     type: sql
     adapter: warehouse
     code: sources/sales.sql
+    params: [warehouse_id, product_id]
 views:
   - {id: trend, title: 收入趋势, input: sales, template: line, x: date, y: revenue}
 sections:
   - {id: overview, title: 概览, template: single, views: [trend]}
 """,
+        "parameter_interpolation": {
+            "syntax": "{{ parameters.<id> }}",
+            "fields": [
+                "dashboard title/subtitle/description/assumptions",
+                "section title/description",
+                "view title/description and markdown text",
+            ],
+            "lifecycle": "只读取最近一次 Run query 已提交的参数；编辑表单不会改旧数据集标题，重新查询后 Server 与导出 HTML 同步更新。",
+            "formatting": "date_range 显示为“开始 至 结束”；选择参数优先显示 choice label；多值使用顿号连接。",
+            "validation": "只允许直接参数引用；未知 ID、Selection、运算和任意 Jinja 表达式由 dataviz validate 拒绝。",
+        },
         "rules": [
             "Parameter、Source、Transform、Selection、Section 和 View id 在各自作用域内稳定且唯一。",
             "极简看板不需要 presentation.yaml、CSS、JS 或 Canvas 文件。",
             "dashboard.yaml 中只保留逻辑和最小布局；视觉优化按 ID 放入 presentation.yaml。",
+            "分析对象应优先进入 title/subtitle/section/view 内容层级，不要只藏在 Parameters 弹层。",
         ],
         "related": ["sources", "charts", "selections", "presentation", "strict-schema"],
     },
@@ -188,9 +210,11 @@ adapters:
         },
         "python_contract": "Python entrypoint 接收 ExecutionContext；读取 context.params 和可选 context.adapter，并返回单值或与 outputs 完全一致的命名字典。Server Transform 的 context.adapter 始终为空。",
         "verification": [
-            "dataviz validate <workspace>",
+            "dataviz validate <workspace> --dashboard <dashboard-id> --format json",
             "dataviz query <workspace> <dashboard-id> --source <source-id> --format json",
-            "检查 schema、row_count、preview、node.error 和 node.log。",
+            "Server 中打开 Sources 并点击节点，检查本次 Run 的状态、缓存来源、耗时和错误。",
+            "SQL Source 额外核对 Resolved SQL、参数化 Driver statement、bound parameters、Adapter、超时策略和 query hash。",
+            "Resolved SQL 只用于人类 review；数据库仍接收参数化 statement 与 bound values。",
         ],
         "related": ["adapters", "outputs", "server-transforms", "troubleshooting"],
     },
@@ -567,6 +591,46 @@ sections:
         ],
         "rule": "修改 DSL 必须先修改 Pydantic 模型；CLI 输出自动变化，不复制维护字段清单。",
         "related": ["strict-schema", "components", "ai-authoring"],
+    },
+    "validation": {
+        "summary": "每次修改 Dashboard 后先运行的静态 preflight；不连接数据库、不启动 Server，也不执行 Source。",
+        "recommended_command": "dataviz validate <workspace> --dashboard <dashboard-id> --format json",
+        "options": {
+            "--dashboard / -d": "只检查一个 Dashboard 及其 Workspace 级依赖；其他损坏 Dashboard 不污染本次结果。",
+            "--format json": "输出稳定 dataviz/validation/v1 机器契约；默认 text 面向人阅读。",
+            "--strict": "warning 也返回 exit code 1，适合 CI 或分享前门禁。",
+        },
+        "checks": [
+            "Workspace/Dashboard 严格 Schema 和 retired/unknown 字段。",
+            "Adapter 绑定、Source 类型兼容和本地配置可解析性；不会输出凭证。",
+            "SQL 文件存在且 UTF-8 可读；命名占位符与 Source params 双向一致。",
+            "Source、Transform、Named Output、Browser Transform、View 和 Section 引用。",
+            "Query Parameter 内容插值、Selection canonical key 和绑定。",
+            "Presentation、Renderer、Canvas 与本地资源路径。",
+            "Python code_dependencies 和 python_dependencies。",
+        ],
+        "json_contract": {
+            "status": "valid | valid_with_warnings | invalid",
+            "passed": "是否满足当前 strict 策略",
+            "queries_executed": "固定为 0，证明这是纯静态检查",
+            "checks": "固定检查域及 passed/warning/failed 结果",
+            "diagnostics": "level/code/category/dashboard/file/field/message/details/hint",
+            "next_actions": "按当前结果生成的最短后续动作",
+            "exit_code": "0 可继续；1 必须修复",
+        },
+        "ai_loop": [
+            "编辑一个逻辑层或 Presentation 层文件。",
+            "运行 focused JSON preflight。",
+            "按 diagnostics 中的 code、file、field、details 和 hint 修复第一类错误。",
+            "重复 validate，直到 passed=true。",
+            "然后才 query 单个 Source/Output，最后 report 或 serve。",
+        ],
+        "sql_parameter_example": {
+            "source": "params: [start_date, region]",
+            "sql": "where dt >= :start_date and region = :region",
+            "errors": "SQL 中出现但 params 未声明 → sql_parameter_undeclared；params 声明但 SQL 未引用 → sql_parameter_unused warning。",
+        },
+        "related": ["workflow", "strict-schema", "sources", "troubleshooting"],
     },
     "strict-schema": {
         "summary": "这是全新 DSL：强制迁移、严格校验，不读取旧字段，也不提供 deprecated 层。",

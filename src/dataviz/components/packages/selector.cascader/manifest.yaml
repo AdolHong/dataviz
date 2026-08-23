@@ -22,6 +22,6 @@ components:
       multi_branch_selection: true
       branch_selection: optional_descendant_toggle
       checked_summary: [child, parent, all]
-    semantic_dom: [.dv-cascader, .dv-cascader-panel, .dv-cascader-columns, .dv-cascader-column, .dv-cascader-option]
-    tokens: [--dv-accent, --dv-green, --dv-ink, --dv-line, --dv-panel]
+    semantic_dom: [.dv-cascader, .dv-selector-panel, .dv-cascader-panel, .dv-cascader-columns, .dv-cascader-column, .dv-cascader-option]
+    tokens: [--dv-accent, --dv-green, --dv-ink, --dv-line, --dv-panel, --dv-overlay-surface]
 runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

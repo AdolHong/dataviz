@@ -27,7 +27,7 @@
     trigger.innerHTML = '<span data-selector-summary></span><i aria-hidden="true">⌄</i>';
 
     const panel = document.createElement('div');
-    panel.className = 'dv-select-panel';
+    panel.className = 'dv-selector-panel dv-select-panel';
     panel.dataset.selectorPanel = '';
     panel.hidden = true;
     const search = document.createElement('input');

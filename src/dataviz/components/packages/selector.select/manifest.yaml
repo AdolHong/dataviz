@@ -13,6 +13,6 @@ components:
       template: select
       options: [search, virtual, search_threshold, virtual_threshold, max_visible_tags, max_selected, hide_selected, placeholder, search_placeholder, select_all_label, invert_label, clear_label, show_unavailable, css_class]
     behavior: {canonical_state: native_select, search: full_list, virtual: automatic, option_groups: true, explicit_all: preserved, bulk_action: select_all_then_invert}
-    semantic_dom: [.dv-select, .dv-choice-trigger, .dv-select-panel, .dv-select-options, .dv-select-group, .dv-choice-option]
-    tokens: [--dv-accent, --dv-green, --dv-ink, --dv-line, --dv-panel]
+    semantic_dom: [.dv-select, .dv-choice-trigger, .dv-selector-panel, .dv-select-panel, .dv-select-options, .dv-select-group, .dv-choice-option]
+    tokens: [--dv-accent, --dv-green, --dv-ink, --dv-line, --dv-panel, --dv-overlay-surface]
 runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

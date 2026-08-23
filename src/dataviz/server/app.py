@@ -15,6 +15,10 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from dataviz.artifacts import ArtifactStore
 from dataviz.components import component_runtime_assets
+from dataviz.content_templates import (
+    default_parameter_values,
+    interpolate_dashboard_content,
+)
 from dataviz.errors import WorkspaceError
 from dataviz.execution.results import RunResult
 from dataviz.execution.references import parse_output_reference
@@ -554,10 +558,19 @@ def create_app(workspace_path: str | Path) -> FastAPI:
             raise HTTPException(409, "Run belongs to another dashboard")
         result = record.snapshot if record else None
         if not result and not record:
+            try:
+                waiting_content = interpolate_dashboard_content(
+                    dashboard.definition,
+                    default_parameter_values(dashboard.definition),
+                    fallback_title=dashboard.canvas_name,
+                )
+                waiting_title = waiting_content.title
+            except ValueError:
+                waiting_title = dashboard.canvas_name
             return HTMLResponse(
                 "<html><body style='font-family:serif;padding:48px;background:#f3f0e7;color:#17211d'>"
                 "<p style='font:12px monospace;color:#e2592a'>CANVAS WAITING</p>"
-                f"<h1>{_escape_html(dashboard.title)}</h1><p>设置参数并运行后，结果将在这里出现。</p>"
+                f"<h1>{_escape_html(waiting_title)}</h1><p>设置参数并运行后，结果将在这里出现。</p>"
                 "<script>['pointerdown','click'].forEach(type=>document.addEventListener(type,()=>parent.postMessage({type:'dataviz:canvas-interaction'},location.origin),true))</script>"
                 "</body></html>"
             )

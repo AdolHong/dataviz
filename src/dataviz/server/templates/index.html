@@ -74,11 +74,16 @@
       </section>
     </main>
   </div>
-  <dialog id="error-dialog">
-    <button class="dialog-close" onclick="this.closest('dialog').close()">×</button>
-    <span class="micro-label">NODE DIAGNOSTIC</span>
-    <h3 id="error-title">Execution error</h3>
-    <pre id="error-content"></pre>
+  <dialog id="node-inspector" class="node-inspector" aria-labelledby="node-inspector-title">
+    <header class="node-inspector__header">
+      <div>
+        <span class="micro-label">RUN EVIDENCE</span>
+        <h3 id="node-inspector-title">Source evidence</h3>
+        <p id="node-inspector-subtitle">Inspect what this node executed for the current run.</p>
+      </div>
+      <button class="dialog-close" type="button" aria-label="Close source evidence" onclick="this.closest('dialog').close()">×</button>
+    </header>
+    <div id="node-inspector-body" class="node-inspector__body" aria-live="polite"></div>
   </dialog>
   <div id="nav-context-menu" class="nav-context-menu" role="menu" hidden></div>
   <dialog id="nav-dialog" class="nav-dialog"></dialog>

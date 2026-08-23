@@ -10,8 +10,13 @@ import yaml
 from packaging.requirements import InvalidRequirement, Requirement
 from pydantic import ValidationError
 
+from dataviz.content_templates import (
+    content_template_fields,
+    inspect_parameter_template,
+)
 from dataviz.errors import Diagnostic, WorkspaceError
 from dataviz.execution.references import parse_output_reference
+from dataviz.sql_contract import sql_parameter_names
 from dataviz.workspace.models import (
     BrowserTransformDefinition,
     DashboardDefinition,
@@ -43,7 +48,13 @@ def read_yaml(path: Path) -> dict[str, Any]:
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
-        raise WorkspaceError(f"Invalid YAML: {exc}", file=path) from exc
+        mark = getattr(exc, "problem_mark", None)
+        details = {
+            "problem": getattr(exc, "problem", None) or str(exc),
+            "line": mark.line + 1 if mark is not None else None,
+            "column": mark.column + 1 if mark is not None else None,
+        }
+        raise WorkspaceError(f"Invalid YAML: {exc}", file=path, details=details) from exc
     if not isinstance(data, dict):
         raise WorkspaceError("YAML document must be an object", file=path)
     return data
@@ -433,7 +444,19 @@ def _relative_path(root: Path, path: Path) -> str:
 
 
 def _diagnostic_from_error(error: WorkspaceError, *, code: str) -> Diagnostic:
-    return Diagnostic("error", error.message, error.file, code=code)
+    field = None
+    if isinstance(error.details, list) and error.details:
+        location = error.details[0].get("loc")
+        if location:
+            field = ".".join(str(item) for item in location)
+    return Diagnostic(
+        "error",
+        error.message,
+        error.file,
+        field,
+        code,
+        error.details,
+    )
 
 
 def _runtime_id(preferred: str, path: Path, root: Path, used: set[str]) -> str:
@@ -828,6 +851,29 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
         parameter_ids = {item.id for item in dashboard.definition.query_parameters}
         view_ids = set(dashboard.views)
 
+        for field, value in content_template_fields(dashboard.definition):
+            references, template_errors = inspect_parameter_template(value)
+            for message in template_errors:
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        message,
+                        definition_path,
+                        field,
+                        "content_template_invalid",
+                    )
+                )
+            for parameter_id in sorted(references - parameter_ids):
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"Content references unknown Query Parameter: {parameter_id}",
+                        definition_path,
+                        field,
+                        "content_parameter_unknown",
+                    )
+                )
+
         for source_path, source in dashboard.sources.values():
             if source.type == "file" and not source.path:
                 diagnostics.append(
@@ -932,6 +978,50 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             field,
                         )
                     )
+            if source.type == "sql" and source.code:
+                code_path = _code_path(source_path, source.code)
+                if code_path.exists():
+                    try:
+                        sql = code_path.read_text(encoding="utf-8")
+                    except (OSError, UnicodeError) as error:
+                        diagnostics.append(
+                            Diagnostic(
+                                "error",
+                                f"SQL source could not be read: {error}",
+                                str(code_path),
+                                "code",
+                                "sql_file_unreadable",
+                            )
+                        )
+                    else:
+                        declared = set(source.params)
+                        referenced = sql_parameter_names(sql)
+                        undeclared = sorted(referenced - declared)
+                        unused = sorted(declared - referenced)
+                        if undeclared:
+                            diagnostics.append(
+                                Diagnostic(
+                                    "error",
+                                    "SQL uses named parameters not declared in Source params: "
+                                    + ", ".join(undeclared),
+                                    str(source_path),
+                                    "params",
+                                    "sql_parameter_undeclared",
+                                    {"parameters": undeclared, "sql_file": str(code_path)},
+                                )
+                            )
+                        if unused:
+                            diagnostics.append(
+                                Diagnostic(
+                                    "warning",
+                                    "Source params are not referenced by SQL: "
+                                    + ", ".join(unused),
+                                    str(source_path),
+                                    "params",
+                                    "sql_parameter_unused",
+                                    {"parameters": unused, "sql_file": str(code_path)},
+                                )
+                            )
             for dependency in source.code_dependencies:
                 dependency_path = _code_path(source_path, dependency)
                 if not dependency_path.exists():

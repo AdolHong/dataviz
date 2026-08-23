@@ -133,6 +133,14 @@ class Executor:
                 for node_id, node in plan.nodes.items()
             },
         )
+        for node_id, node in plan.nodes.items():
+            result.nodes[node_id].diagnostics = self._inspect_node(
+                node,
+                dashboard,
+                parameters,
+                result,
+                store,
+            )
 
         def publish_snapshot() -> None:
             if snapshot_observer:
@@ -172,6 +180,7 @@ class Executor:
                             node_type=node.kind,
                             status="blocked",
                             finished_at=now(),
+                            diagnostics=result.nodes[node_id].diagnostics,
                             error={"type": "dependency_failed", "message": "An upstream node failed"},
                         )
                         pending.remove(node_id)
@@ -216,6 +225,7 @@ class Executor:
                                 node_type=node.kind,
                                 status="failed",
                                 finished_at=now(),
+                                diagnostics=result.nodes[node_id].diagnostics,
                                 error=error,
                             )
                         result.nodes[node_id] = node_result
@@ -290,6 +300,7 @@ class Executor:
     ) -> NodeResult:
         started = time.perf_counter()
         started_at = now()
+        diagnostics = dict(run_result.nodes[node.id].diagnostics)
         emit("node_started", node)
         try:
             context = self._context_for_node(node, dashboard, parameters, run_result, store)
@@ -307,6 +318,7 @@ class Executor:
                     finished_at=now(),
                     duration_ms=duration,
                     outputs=cached,
+                    diagnostics=diagnostics,
                 )
             if node.kind == "source" and definition.type == "python":
                 outputs = execute_python_node(
@@ -370,6 +382,7 @@ class Executor:
                 finished_at=now(),
                 duration_ms=duration,
                 outputs=outputs,
+                diagnostics=diagnostics,
             )
         except Exception as exc:
             duration = int((time.perf_counter() - started) * 1000)
@@ -401,9 +414,45 @@ class Executor:
                 started_at=started_at,
                 finished_at=now(),
                 duration_ms=duration,
+                diagnostics=diagnostics,
                 log=log,
                 error=error,
             )
+
+    def _inspect_node(
+        self,
+        node: PlanNode,
+        dashboard: LoadedDashboard,
+        parameters: dict[str, Any],
+        run_result: RunResult,
+        store: ArtifactStore,
+    ) -> dict[str, Any]:
+        if node.kind != "source" or node.definition.type != "sql":
+            return {}
+        try:
+            context = self._context_for_node(
+                node,
+                dashboard,
+                parameters,
+                run_result,
+                store,
+            )
+            request = SourceRequest(
+                definition_path=node.definition_path,
+                definition=node.definition,
+                context=context,
+                adapters=self.adapters,
+                adapter_bindings=dashboard.definition.adapters,
+                node_id=node.id,
+            )
+            return SOURCE_RUNNERS["sql"].diagnostics(request)
+        except Exception as error:
+            return {
+                "inspection_error": {
+                    "type": type(error).__name__,
+                    "message": str(error),
+                }
+            }
 
     def _context_for_node(
         self,

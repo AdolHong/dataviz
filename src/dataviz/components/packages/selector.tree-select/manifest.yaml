@@ -11,6 +11,6 @@ components:
     logic: {type: multi_select, fields: [path_fields], value_shape: [[level-1, level-2, leaf]]}
     presentation: {template: tree-select, options: [level_labels, placeholder, search_placeholder, path_separator, default_expand_depth, hierarchy_selection, checked_strategy, max_visible_tags, css_class]}
     behavior: {selection: leaves, parent_context: persistent, search: full-path, branch_selection: optional_descendant_toggle, checked_summary: [child, parent, all]}
-    semantic_dom: [.dv-tree-select, .dv-tree-panel, .dv-tree-list, .dv-tree-option]
-    tokens: [--dv-accent, --dv-green, --dv-ink, --dv-line, --dv-panel]
+    semantic_dom: [.dv-tree-select, .dv-selector-panel, .dv-tree-panel, .dv-tree-list, .dv-tree-option]
+    tokens: [--dv-accent, --dv-green, --dv-ink, --dv-line, --dv-panel, --dv-overlay-surface]
 runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

@@ -127,6 +127,18 @@ def test_cli_docs_provide_onboarding_chart_recipes_and_error_recovery():
     assert quickstart.exit_code == 0
     assert "dataviz query" in quickstart.stdout
     assert "不要从自定义 HTML/CSS/JS 开始" in quickstart.stdout
+    interpolation = CliRunner().invoke(
+        app, ["docs", "interpolation", "--format", "json"]
+    )
+    assert interpolation.exit_code == 0
+    interpolation_docs = json.loads(interpolation.stdout)
+    assert interpolation_docs["topic"] == "dashboard"
+    assert interpolation_docs["parameter_interpolation"]["syntax"] == (
+        "{{ parameters.<id> }}"
+    )
+    assert "最近一次 Run query" in (
+        interpolation_docs["parameter_interpolation"]["lifecycle"]
+    )
     runtime_docs = CliRunner().invoke(app, ["docs", "runtime-limits", "--format", "json"])
     assert runtime_docs.exit_code == 0
     assert "Arrow IPC" in runtime_docs.stdout
@@ -512,4 +524,7 @@ def test_default_renderer_builds_templates_and_portable_report(tmp_path: Path):
     assert "event.composedPath()" in report
     assert "page.scrollTop += event.deltaY * multiplier" in report
     assert "overscroll-behavior:auto" in report
+    assert ".dv-view--perspective .dv-view-body { position:relative" in report
+    assert ".dv-perspective { position:absolute; inset:0" in report
+    assert "--psp-sidebar--background:var(--psp--background-color,#fff)" in report
     assert "canvas/script.js" not in report

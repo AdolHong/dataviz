@@ -12,6 +12,9 @@ components:
       state_owner: native form control
       event_contract: bubbling input and change
       enhancement: progressive
+      overlay_surface: opaque_by_default
+    semantic_dom: [.dv-selector, .dv-selector-panel, .dv-choice-trigger, .dv-choice-option]
+    tokens: [--dv-accent, --dv-green, --dv-ink, --dv-line, --dv-panel, --dv-overlay-surface]
 runtime:
   controller: controller.js
   adapter: adapter.js

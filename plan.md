@@ -15,6 +15,7 @@ Dataviz 只优化两件事：
 
 - 执行链为 `Adapter → Source → Server Transform → Named Output → Browser Transform → View Renderer → Presentation`，两个 Transform 都可选。
 - Query Parameter 触发服务端执行；Selection 只处理浏览器已有数据。
+- 页面内容可用受限 `{{ parameters.<id> }}` 引用最近一次 Run 已提交的 Query Parameter；Selection 不进入查询标题插值。
 - View 只等待自己的依赖闭包，不受无关慢分支或失败分支阻塞。
 - 无 Presentation 时使用朴素文档流；完整 Canvas 不受坐标网格约束。
 - `dashboard.yaml` 负责分析逻辑，`presentation.yaml` 负责可选视觉覆盖。
@@ -34,6 +35,7 @@ Dataviz 只优化两件事：
 - [x] Python 节点 fresh spawn 子进程、硬超时、完整 traceback 和 execution-log Artifact。
 - [x] 缓存指纹覆盖入口代码、`code_dependencies`、声明依赖包版本、参数、Adapter 和上游 Artifact。
 - [x] `run --target` 与 `output` 支持按依赖闭包执行和检查任意 Named Output。
+- [x] SQL Source 在 Run Snapshot/Result 中保存无凭证查询证据：解析 SQL、实际参数化 statement、bound parameters、Adapter 类型、SQL 文件、超时策略和 query hash；成功、缓存、失败状态一致可查。
 
 ### 渐进式 Runtime
 
@@ -53,6 +55,7 @@ Dataviz 只优化两件事：
 - [x] 跨作用域级联会收缩选项并清理失效值；单 Selector 支持 `path_fields` 多层 Cascader。
 - [x] Registry v3 的 `select`、`segmented`、`checkbox-group`、`cascader`、`tree-select`、`date-range` Selector；搜索与虚拟滚动是 `select` 能力，不再是独立模板。
 - [x] Selection 面板点击外部或按 Esc 收起；View 级交互只重绘目标 View。
+- [x] Canvas 完整 Selection 状态采用替换语义；历史 sessionStorage key 在接收时清理，导出边界再次按当前 Contract 过滤。
 - [x] Server 和导出 HTML 共用同一 Selection、Transform 与 Renderer Runtime。
 
 ### Renderer、模板与 Presentation
@@ -64,6 +67,7 @@ Dataviz 只优化两件事：
 - [x] 默认 Section/View 单列文档流和语义 Section 模板。
 - [x] 功能 CSS 与默认视觉 CSS 分层；可选 `presentation.yaml` 按稳定 ID 覆盖。
 - [x] 自定义 Canvas 可以自由布局稳定 View Host，不依赖坐标网格协议。
+- [x] Dashboard、Section、View 与 Markdown 内容支持安全 Query Parameter 插值，并随 Server Run 和导出 HTML 使用同一已提交参数上下文。
 - [x] `dataviz/runtime/v1` Manifest 作为 Python 生成层与浏览器实现之间的边界。
 
 ### Workspace 与 AI 开发体验
@@ -72,6 +76,7 @@ Dataviz 只优化两件事：
 - [x] 文件夹最后一段直接作为导航显示名，不读取额外别名。
 - [x] 单个损坏、重复或手动移除的 Dashboard fail-soft，不拖垮整个 Workspace。
 - [x] 严格 Pydantic Schema；未知字段、无效引用和损坏资源给出结构化诊断。
+- [x] `dataviz validate` 升级为无查询静态 preflight：支持 `--dashboard` 聚焦、`dataviz/validation/v1` JSON、稳定检查域/错误码/修复提示、SQL 参数双向检查和 `--strict` CI 门禁。
 - [x] Component Registry 覆盖全部严格 View/Section/Layout/Theme 模板。
 - [x] `docs`、`components`、`gallery`、`context --focus`、`scaffold` 和 `benchmark` CLI。
 - [x] 内置 Gallery 使用生产 DSL 与 Runtime，并可导出为交互 HTML。
@@ -81,8 +86,8 @@ Dataviz 只优化两件事：
 
 2026-08-23 本地核验结果：
 
-- [x] Python 3.12：113 项 unit/contract tests 通过；Chromium、Firefox、WebKit 各 7 项真实浏览器 tests 通过。
-- [x] Python 3.11 与 3.14：各 113 项 unit/contract tests 通过；3.11–3.14 的干净 wheel 安装均完成 CLI、Schema、Component、Workspace 和 HTML smoke。
+- [x] Python 3.11、3.12、3.13、3.14：各 124 项 unit/contract tests 通过；Chromium、Firefox、WebKit 各 9 项真实浏览器 tests 通过。
+- [x] 0.1.1 pip ZIP 在干净 Python 3.12 环境完成 `version`、`docs validation`、`init`、focused `validate` 和 HTML report smoke；wheel、sdist、ZIP 均确认不包含 `.venv`、`build/`、Workspace `.dataviz` 或 `uv.lock`。
 - [x] 四个示例 Workspace 严格校验通过。
 - [x] Canvas、Declarative、Worker 与 Web Component Adapter JavaScript 通过 `node --check`。
 - [x] README 最小 Dashboard 通过当前 Pydantic Schema。
@@ -99,6 +104,8 @@ P0、P1A、P1B 与 P2 已在当前版本完成并通过第 3 节的验证。这�
 ### P0：正确性与开发可靠性（已完成）
 
 - [x] 真实 Chromium E2E 覆盖点击外部收起、Selection 三级联动、Cascader 多分支选择、View 重绘隔离、Table/Perspective 滚动、渐进分支失败和连续 Run 隔离。
+- [x] 真实 Chromium E2E 覆盖 Query Parameter 内容只在重新 Run 后更新、历史 Selection key 清理和导出 Contract 白名单。
+- [x] Server Sources 弹层中的每个节点都可打开 Run Evidence；SQL 同时展示可读 Resolved SQL 与真实参数化 Driver statement，避免用户只能接受结果而无法 review 查询过程。
 - [x] DuckDB 与 SQLAlchemy Adapter 统一使用独立查询进程、硬 timeout/cancel 和 `query_timeout` / `query_connection_error` / `query_execution_error` 分类；SQL 默认单次 120 秒、超时立即额外重试一次，Source 可覆盖次数；失败只沿对应 DAG 分支传播。
 - [x] 源码安装不再依赖 editable `.pth`：文档与 CI 统一使用 `--no-editable`，覆盖 macOS、Linux、重复 CLI 导入和发行 ZIP 干净安装。
 - [x] RunRecord、Artifact 和缓存具备数量/时间保留策略；`dataviz clean` 默认 dry-run，显式 `--apply` 后清理，活动 Run 始终受保护。

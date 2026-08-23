@@ -15,10 +15,12 @@ from markupsafe import Markup
 
 from dataviz.artifacts import ArtifactStore
 from dataviz.components import component_runtime_assets
+from dataviz.content_templates import interpolate_dashboard_content
 from dataviz.errors import ExecutionFailure
 from dataviz.execution.plan import reachable_output_references
 from dataviz.execution.results import RunResult
 from dataviz.templates import COMPONENT_REGISTRY_VERSION, RUNTIME_PROTOCOL_SCHEMA
+from dataviz.workspace.models import DashboardDefinition, DeclarativeViewDefinition
 from dataviz.workspace.selections import compile_selection_contract
 from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace
 from dataviz.workspace.selector_templates import resolve_selector_presentation
@@ -49,24 +51,42 @@ class CanvasRenderer:
             raise ExecutionFailure(
                 "Static rendering is not implemented for declarative Views; use --chart-mode interactive"
             )
+        try:
+            content_definition = interpolate_dashboard_content(
+                dashboard.definition,
+                result.parameters,
+                fallback_title=dashboard.canvas_name,
+            )
+        except ValueError as error:
+            raise ExecutionFailure(f"Invalid content template: {error}") from error
         store = ArtifactStore(self.workspace.root, result.run_id)
-        declarative_views = {item.id: item for item in dashboard.definition.views}
+        declarative_views = {item.id: item for item in content_definition.views}
         view_html = {
-            view_id: self._client_view_html(dashboard, view_id, result)
+            view_id: self._client_view_html(
+                dashboard,
+                view_id,
+                result,
+                declarative=declarative_views.get(view_id),
+            )
             for view_id in dashboard.views
         }
 
         def view(view_id: str) -> str:
-            return view_html.get(view_id, self._client_view_html(dashboard, view_id, result))
+            return view_html.get(
+                view_id,
+                self._client_view_html(
+                    dashboard,
+                    view_id,
+                    result,
+                    declarative=declarative_views.get(view_id),
+                ),
+            )
 
-        canvas = dashboard.definition.canvas
+        canvas = content_definition.canvas
         if canvas.template:
             template_text = (dashboard.root / canvas.template).read_text(encoding="utf-8")
             environment = Environment(autoescape=True, undefined=StrictUndefined)
             template = environment.from_string(template_text)
-            content_definition = dashboard.definition.model_copy(
-                update={"title": dashboard.title}
-            )
             body = template.render(
                 workspace=self.workspace.definition,
                 dashboard=content_definition,
@@ -80,7 +100,13 @@ class CanvasRenderer:
                 views=view_html,
             )
         else:
-            body = self._default_body(dashboard, view_html, result.parameters, result.selections)
+            body = self._default_body(
+                dashboard,
+                content_definition,
+                view_html,
+                result.parameters,
+                result.selections,
+            )
 
         functional_style = (PACKAGE_ROOT / "server" / "static" / "canvas-functional.css").read_text(encoding="utf-8")
         component_assets = component_runtime_assets()
@@ -149,8 +175,8 @@ class CanvasRenderer:
         worker_source = self._browser_transform_worker_source(dashboard)
         browser_transform_script = self._browser_transform_script(dashboard)
         declarative_script = self._declarative_script(dashboard)
-        view_specs, repeat_specs = self._declarative_manifest(dashboard)
-        document_title = title or dashboard.title
+        view_specs, repeat_specs = self._declarative_manifest(content_definition)
+        document_title = title or content_definition.title
         portable = (
             asset_mode in {"inline", "server"}
             and chart_mode == "interactive"
@@ -217,9 +243,14 @@ class CanvasRenderer:
 </html>"""
 
     def _client_view_html(
-        self, dashboard: LoadedDashboard, view_id: str, result: RunResult
+        self,
+        dashboard: LoadedDashboard,
+        view_id: str,
+        result: RunResult,
+        *,
+        declarative: DeclarativeViewDefinition | None = None,
     ) -> str:
-        declarative = dashboard.views.get(view_id)
+        declarative = declarative or dashboard.views.get(view_id)
         title = (declarative.title or declarative.id) if declarative else view_id
         status = declarative.template if declarative else "browser"
         controls = self._context_selection_controls(dashboard, result, "view", view_id)
@@ -287,11 +318,11 @@ class CanvasRenderer:
         )
 
     def _declarative_manifest(
-        self, dashboard: LoadedDashboard
+        self, definition: DashboardDefinition
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        view_specs = [item.model_dump(mode="json") for item in dashboard.definition.views]
+        view_specs = [item.model_dump(mode="json") for item in definition.views]
         repeat_specs: list[dict[str, Any]] = []
-        for section in dashboard.definition.sections:
+        for section in definition.sections:
             if not section.repeat:
                 continue
             view_ids = list(section.views)
@@ -664,14 +695,15 @@ class CanvasRenderer:
     def _default_body(
         self,
         dashboard: LoadedDashboard,
+        definition: DashboardDefinition,
         views: dict[str, str],
         parameters: dict[str, Any],
         selections: dict[str, Any],
     ) -> str:
-        definition = dashboard.definition
         assumptions = "".join(f"<li>{html.escape(value)}</li>" for value in definition.assumptions)
         presentation_views = dashboard.presentation.views if dashboard.presentation else {}
         all_view_ids = list(dashboard.views)
+        declarative_views = {item.id: item for item in definition.views}
         run_state = SimpleNamespace(selections=selections)
 
         def view_item(view_id: str) -> str:
@@ -693,7 +725,7 @@ class CanvasRenderer:
                 )
             return (
                 f'<div class="dv-section-view {html.escape(css_class)}" style="{style}">'
-                f'{views.get(view_id, self._client_view_html(dashboard, view_id, run_state))}'
+                f'{views.get(view_id, self._client_view_html(dashboard, view_id, run_state, declarative=declarative_views.get(view_id)))}'
                 "</div>"
             )
 
@@ -737,7 +769,7 @@ class CanvasRenderer:
 <header class="dv-report-header dv-report-header--compact">
   <div>
     <p class="dv-eyebrow">{html.escape(definition.id.upper())}</p>
-    <h1>{html.escape(dashboard.title)}</h1>
+    <h1>{html.escape(definition.title)}</h1>
     {f'<p class="dv-subtitle">{html.escape(definition.subtitle)}</p>' if definition.subtitle else ''}
     {f'<p class="dv-deck">{html.escape(definition.description)}</p>' if definition.description else ''}
   </div>

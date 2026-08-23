@@ -66,12 +66,14 @@ class Diagnostic:
     file: str | None = None
     field: str | None = None
     code: str = "validation"
+    details: Any = None
 
-    def as_dict(self) -> dict[str, str | None]:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "level": self.level,
             "code": self.code,
             "message": self.message,
             "file": self.file,
             "field": self.field,
+            "details": self.details,
         }

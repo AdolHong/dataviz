@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import multiprocessing
+import hashlib
 import os
 import re
 import shutil
@@ -19,6 +20,7 @@ from dataviz.errors import (
     SourceFailure,
 )
 from dataviz.sources.base import SourceRequest
+from dataviz.sql_contract import resolve_sql_preview
 
 
 DEFAULT_SQL_TIMEOUT_SECONDS = 120.0
@@ -40,6 +42,13 @@ _QUERY_TIMEOUT_MARKERS = (
     "cancelled due to timeout",
     "canceled due to timeout",
 )
+
+
+def _relative_debug_path(path: Path, workspace_root: Path) -> str:
+    try:
+        return str(path.relative_to(workspace_root))
+    except ValueError:
+        return str(path)
 
 
 def _terminate_process(process: multiprocessing.Process) -> None:
@@ -305,6 +314,63 @@ def execute_sql_query(
 
 
 class SqlSourceRunner:
+    def diagnostics(self, request: SourceRequest) -> dict[str, Any]:
+        definition = request.definition
+        code_path = (request.definition_path.parent / definition.code).resolve()
+        query = code_path.read_text(encoding="utf-8")
+        parameters = {
+            name: request.context.params.get(name)
+            for name in definition.params
+        }
+        adapter_alias = definition.adapter or ""
+        adapter_name = request.adapter_bindings.get(adapter_alias, adapter_alias)
+        adapter_type = "unknown"
+        inspection_warning = None
+        try:
+            adapter = request.adapters.runtime_config(
+                adapter_alias,
+                request.adapter_bindings,
+            )
+            adapter_type = str(adapter.get("type") or "unknown")
+        except Exception as error:
+            inspection_warning = str(error)
+        statement = (
+            re.sub(r":([A-Za-z_]\w*)", r"$\1", query)
+            if adapter_type == "duckdb"
+            else query
+        )
+        timeout_seconds = (
+            definition.timeout_seconds
+            if definition.timeout_seconds is not None
+            else DEFAULT_SQL_TIMEOUT_SECONDS
+        )
+        timeout_retries = (
+            definition.timeout_retries
+            if definition.timeout_retries is not None
+            else DEFAULT_SQL_TIMEOUT_RETRIES
+        )
+        return {
+            "query": {
+                "kind": "sql",
+                "source_file": _relative_debug_path(
+                    code_path,
+                    request.context.workspace_root,
+                ),
+                "adapter_alias": adapter_alias,
+                "adapter_name": adapter_name,
+                "adapter_type": adapter_type,
+                "statement": statement,
+                "resolved_sql": resolve_sql_preview(statement, parameters),
+                "parameters": parameters,
+                "timeout_seconds": timeout_seconds,
+                "timeout_retries": timeout_retries,
+                "query_hash": hashlib.sha256(
+                    statement.encode("utf-8")
+                ).hexdigest(),
+                "inspection_warning": inspection_warning,
+            }
+        }
+
     def execute(self, request: SourceRequest) -> pd.DataFrame:
         definition = request.definition
         adapter_name = definition.adapter

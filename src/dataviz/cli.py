@@ -39,7 +39,8 @@ from dataviz.renderer_contract import run_renderer_contract
 from dataviz.schema_docs import schema_catalog, schema_model_contract
 from dataviz.server import create_app
 from dataviz.templates import component_catalog
-from dataviz.workspace import load_workspace, validate_workspace
+from dataviz.validation import format_validation_text, validate_preflight
+from dataviz.workspace import load_workspace
 
 
 app = typer.Typer(
@@ -314,19 +315,40 @@ def list_dashboards(workspace: Path = typer.Argument(..., exists=True, file_okay
 
 
 @app.command()
-def validate(workspace: Path = typer.Argument(..., exists=True, file_okay=False)) -> None:
-    """Validate YAML schemas, references, code files and canvas assets."""
+def validate(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    dashboard: str | None = typer.Option(
+        None,
+        "--dashboard",
+        "-d",
+        help="Validate one Dashboard id and its Workspace-level dependencies.",
+    ),
+    output_format: str = typer.Option(
+        "text",
+        "--format",
+        help="text for humans or json for a stable AI-readable contract.",
+    ),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Return exit code 1 for warnings as well as errors.",
+    ),
+) -> None:
+    """Run a static preflight without querying data or starting a Server."""
+    if output_format not in {"text", "json"}:
+        raise typer.BadParameter("--format must be text or json")
     try:
-        loaded = load_workspace(workspace)
-        diagnostics = validate_workspace(loaded)
-        print_json(
-            {
-                "status": "valid" if not any(item.level == "error" for item in diagnostics) else "invalid",
-                "diagnostics": [item.as_dict() for item in diagnostics],
-            }
+        report = validate_preflight(
+            workspace,
+            dashboard_id=dashboard,
+            strict=strict,
         )
-        if any(item.level == "error" for item in diagnostics):
-            raise typer.Exit(1)
+        if output_format == "json":
+            print_json(report)
+        else:
+            typer.echo(format_validation_text(report))
+        if not report["passed"]:
+            raise typer.Exit(report["exit_code"])
     except typer.Exit:
         raise
     except Exception as exc:

@@ -9,6 +9,7 @@ from dataviz.artifacts import ArtifactStore
 from dataviz.errors import QueryExecutionFailure, QueryTimeoutFailure
 from dataviz.execution import Executor
 from dataviz.sources import sql as sql_runtime
+from dataviz.sql_contract import resolve_sql_preview
 from dataviz.workspace import load_workspace, validate_workspace
 
 
@@ -81,6 +82,14 @@ def test_sql_source_with_timeout_returns_table_and_cleans_temporary_file(tmp_pat
 
     assert result.status == "success"
     assert frame.to_dict(orient="records") == [{"value": 1}]
+    query_evidence = result.nodes["source:query"].diagnostics["query"]
+    assert query_evidence["adapter_alias"] == "warehouse"
+    assert query_evidence["adapter_type"] == "duckdb"
+    assert query_evidence["statement"] == "select 1 as value"
+    assert query_evidence["resolved_sql"] == "select 1 as value"
+    assert query_evidence["source_file"].endswith("sources/query.sql")
+    assert query_evidence["timeout_seconds"] == 10
+    assert "url" not in query_evidence
     assert not (root / ".dataviz" / "runs" / result.run_id / "tmp").exists()
 
 
@@ -105,8 +114,30 @@ def test_sql_timeout_hard_cancels_only_its_node_and_is_structured(tmp_path: Path
     assert node.error["details"]["attempt"] == 2
     assert node.error["details"]["max_attempts"] == 2
     assert node.error["details"]["timeout_retries"] == 1
+    assert node.diagnostics["query"]["resolved_sql"].startswith("select sum(sin(i))")
+    assert node.diagnostics["query"]["timeout_seconds"] == 0.1
     assert node.log is not None
     assert not (root / ".dataviz" / "runs" / result.run_id / "tmp").exists()
+
+
+def test_resolved_sql_preview_only_literalizes_code_parameters():
+    query = """select :name as person, ':name' as literal, amount::text
+-- :name remains a comment
+/* $name remains a comment */
+select $body$:name and $name stay literal$body$
+where owner = $name and missing = :missing
+"""
+
+    resolved = resolve_sql_preview(query, {"name": "O'Reilly"})
+
+    assert "select 'O''Reilly' as person" in resolved
+    assert "':name' as literal" in resolved
+    assert "amount::text" in resolved
+    assert "-- :name remains a comment" in resolved
+    assert "/* $name remains a comment */" in resolved
+    assert "$body$:name and $name stay literal$body$" in resolved
+    assert "owner = 'O''Reilly'" in resolved
+    assert "missing = :missing" in resolved
 
 
 def test_sql_timeout_does_not_block_an_independent_fast_branch(tmp_path: Path):

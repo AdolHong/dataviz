@@ -9,6 +9,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 import uvicorn
@@ -103,6 +104,125 @@ def _run_and_wait(page: Page, expected: str = "Ready") -> None:
         expected,
         timeout=30_000,
     )
+
+
+@pytest.mark.e2e
+def test_committed_parameter_content_and_stale_selection_export(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(MINIMAL, tmp_path / "content-workspace")
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        expect(frame.locator(".dv-subtitle")).to_have_text("当前取数下限：0")
+
+        page.locator("#query-parameters-control summary").click()
+        parameter = page.locator(
+            '#parameter-form input[name="min_query_revenue"]'
+        )
+        parameter.fill("150000")
+        expect(frame.locator(".dv-subtitle")).to_have_text("当前取数下限：0")
+        _run_and_wait(page)
+        expect(frame.locator(".dv-subtitle")).to_have_text(
+            "当前取数下限：150000",
+            timeout=20_000,
+        )
+
+        inject_stale_state = """() => {
+          const sessionId = sessionStorage.getItem('dataviz.tab-session.v1');
+          const key = `dataviz.tab-ui.${sessionId}`;
+          const saved = JSON.parse(sessionStorage.getItem(key));
+          saved.dashboards['sales-overview'].canvasSelections = {
+            'view:deleted/value': ['stale'],
+          };
+          sessionStorage.setItem(key, JSON.stringify(saved));
+        }"""
+        page.evaluate(inject_stale_state)
+        page.reload(wait_until="domcontentloaded")
+        expect(page.locator("#run-button")).to_be_enabled(timeout=10_000)
+        _run_and_wait(page)
+        page.wait_for_function(
+            """() => {
+              const sessionId = sessionStorage.getItem('dataviz.tab-session.v1');
+              const saved = JSON.parse(
+                sessionStorage.getItem(`dataviz.tab-ui.${sessionId}`)
+              );
+              return !('view:deleted/value' in (
+                saved.dashboards['sales-overview'].canvasSelections || {}
+              ));
+            }""",
+            timeout=20_000,
+        )
+        remaining = page.evaluate(
+            """() => {
+              const sessionId = sessionStorage.getItem('dataviz.tab-session.v1');
+              const saved = JSON.parse(
+                sessionStorage.getItem(`dataviz.tab-ui.${sessionId}`)
+              );
+              return Object.keys(
+                saved.dashboards['sales-overview'].canvasSelections || {}
+              );
+            }"""
+        )
+        assert "view:deleted/value" not in remaining
+
+        # Keep the restored stale key in memory by blocking the Canvas state
+        # message. The export boundary must independently enforce the current
+        # Dashboard contract instead of trusting sessionStorage.
+        page.evaluate(inject_stale_state)
+        page.reload(wait_until="domcontentloaded")
+        expect(page.locator("#run-button")).to_be_enabled(timeout=10_000)
+        page.evaluate(
+            """() => window.addEventListener('message', (event) => {
+              if (event.data?.type === 'dataviz:selections-changed') {
+                event.stopImmediatePropagation();
+              }
+            }, true)"""
+        )
+        _run_and_wait(page)
+        with page.expect_download(timeout=20_000) as download_info:
+            page.locator("#download-button").click()
+        download = download_info.value
+        supplied = json.loads(parse_qs(urlparse(download.url).query)["selections"][0])
+        assert "view:deleted/value" not in supplied
+
+        report_path = tmp_path / "parameter-report.html"
+        download.save_as(report_path)
+        report = report_path.read_text(encoding="utf-8")
+        assert '<p class="dv-subtitle">当前取数下限：150000</p>' in report
+
+
+@pytest.mark.e2e
+def test_sources_inspector_exposes_resolved_and_parameterized_sql(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(MINIMAL, tmp_path / "source-evidence-workspace")
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        page.locator("#query-parameters-control summary").click()
+        page.locator('#parameter-form input[name="min_query_revenue"]').fill("150000")
+        _run_and_wait(page)
+
+        page.locator("#query-diagnostics > summary").click()
+        source = page.locator('[data-node-id="source:sales"]')
+        expect(source).to_be_visible()
+        source.click()
+
+        inspector = page.locator("#node-inspector")
+        expect(inspector).to_be_visible()
+        expect(inspector.locator("#node-inspector-title")).to_have_text("销售数据")
+        expect(inspector).to_contain_text("Resolved SQL")
+        expect(inspector).to_contain_text("revenue >= 150000")
+        expect(inspector).to_contain_text("demo-duckdb · duckdb")
+        expect(inspector).to_contain_text(
+            "dashboards/sales-overview/sources/sales.sql"
+        )
+
+        inspector.locator(".node-inspector__driver > summary").click()
+        expect(inspector).to_contain_text("Driver statement")
+        expect(inspector).to_contain_text("$min_query_revenue")
+        expect(inspector).to_contain_text('"min_query_revenue": 150000')
 
 
 @pytest.mark.e2e
@@ -267,6 +387,16 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
             '[data-selection-key="view:detail-table/product"] [data-selector-template="select"]'
         )
         grouped_select.locator("[data-selector-trigger]").click()
+        select_panel = grouped_select.locator(".dv-select-panel")
+        expect(select_panel).to_be_visible()
+        panel_surface = select_panel.evaluate(
+            """panel => ({
+              sharedClass: panel.classList.contains('dv-selector-panel'),
+              background: getComputedStyle(panel).backgroundColor,
+            })"""
+        )
+        assert panel_surface["sharedClass"] is True
+        assert panel_surface["background"] not in {"transparent", "rgba(0, 0, 0, 0)"}
         assert grouped_select.locator(".dv-select-group").all_text_contents() == [
             "Core", "New"
         ]
@@ -554,19 +684,58 @@ def test_selection_cascade_popovers_view_isolation_and_table_wheel(
 
 
 @pytest.mark.e2e
-def test_perspective_reaches_terminal_state_and_releases_page_wheel(
+def test_perspective_fills_view_uses_opaque_settings_and_releases_page_wheel(
     page: Page, tmp_path: Path
 ):
     workspace = _copy_workspace(MINIMAL, tmp_path / "minimal")
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    dashboard_path.write_text(
+        dashboard_path.read_text(encoding="utf-8").replace(
+            "settings: false", "settings: true"
+        ),
+        encoding="utf-8",
+    )
     with _running_server(workspace) as base_url:
         _open_dashboard(page, base_url, "sales-overview")
         _run_and_wait(page)
         frame = page.frame_locator("#canvas-frame")
         perspective = frame.locator('[data-view-id="sales-perspective"]')
         expect(perspective).to_have_attribute("data-view-status", "ready", timeout=30_000)
-        expect(perspective.locator("perspective-viewer")).to_have_count(1, timeout=30_000)
+        viewer = perspective.locator("perspective-viewer")
+        expect(viewer).to_have_count(1, timeout=30_000)
 
-        identity = perspective.locator("perspective-viewer").evaluate(
+        dimensions = viewer.evaluate(
+            """viewer => ({
+              body: viewer.closest('.dv-view-body').getBoundingClientRect().height,
+              viewer: viewer.getBoundingClientRect().height,
+            })"""
+        )
+        assert dimensions["body"] >= 320
+        assert abs(dimensions["body"] - dimensions["viewer"]) <= 1
+
+        settings_surface = viewer.evaluate(
+            """viewer => {
+              const panel = viewer.shadowRoot.querySelector('#settings_panel');
+              const style = getComputedStyle(panel);
+              return {
+                color: style.backgroundColor,
+                image: style.backgroundImage,
+              };
+            }"""
+        )
+        assert settings_surface["color"] == "rgb(255, 255, 255)"
+        assert settings_surface["image"] == "none"
+
+        plugin_choice = viewer.locator(
+            '.plugin-select-item[data-plugin="Datagrid"]'
+        )
+        expect(plugin_choice).to_be_visible(timeout=10_000)
+        plugin_choice.click()
+        expect(viewer.locator("#plugin_selector_container")).to_have_class(
+            re.compile(r"\bopen\b")
+        )
+
+        identity = viewer.evaluate(
             "viewer => (viewer.__datavizTestIdentity = crypto.randomUUID())"
         )
         dashboard_select = page.locator(
@@ -577,11 +746,11 @@ def test_perspective_reaches_terminal_state_and_releases_page_wheel(
             """() => document.querySelector('#canvas-frame').contentWindow
               .datavizRuntime.metrics.perspective.updated >= 1"""
         )
-        assert perspective.locator("perspective-viewer").evaluate(
+        assert viewer.evaluate(
             "viewer => viewer.__datavizTestIdentity"
         ) == identity
 
-        scroll_after = perspective.locator("perspective-viewer").evaluate(
+        scroll_after = viewer.evaluate(
             """viewer => {
               window.scrollTo(0, 0);
               viewer.dispatchEvent(new WheelEvent('wheel', {

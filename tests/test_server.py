@@ -61,6 +61,12 @@ def test_server_run_and_canvas():
             break
         time.sleep(0.05)
     assert record and record["status"] == "success", record
+    target_evidence = record["result"]["nodes"]["source:targets"]["diagnostics"]["query"]
+    assert target_evidence["adapter_alias"] == "demo-sqlite"
+    assert target_evidence["resolved_sql"]
+    assert target_evidence["statement"]
+    assert target_evidence["parameters"] == {"target_factor": 1.0}
+    assert "url" not in target_evidence
     assert record["result"]["selections"]["dashboard:sales/region"] == [
         "North",
         "South",
@@ -87,6 +93,21 @@ def test_server_run_and_canvas():
     assert '<option value="East" selected>' in report.text
     assert '<option value="West">' in report.text
     assert '"region": "West"' in report.text
+
+
+def test_server_shell_exposes_source_evidence_inspector():
+    client = TestClient(create_app(MINIMAL_WORKSPACE))
+
+    shell = client.get("/")
+
+    assert shell.status_code == 200
+    assert 'id="node-inspector"' in shell.text
+    assert 'id="node-inspector-body"' in shell.text
+    script = client.get("/static/app.js")
+    assert script.status_code == 200
+    assert "function showNodeInspector(node)" in script.text
+    assert "Resolved SQL" in script.text
+    assert "Driver statement & bound parameters" in script.text
 
 
 def test_server_streams_large_tables_as_gzipped_arrow_without_json_materialization():
@@ -167,6 +188,9 @@ def test_server_app_selections_are_browser_only():
     assert "dataviz:canvas-interaction" in script
     assert "window.addEventListener('message'" in script
     assert "closeHeaderPopovers();" in script
+    assert "filter(([key]) => validKeys.has(key))" in script
+    assert "state.canvasSelections = {...(event.data.selections || {})};" in script
+    assert "state.canvasSelections = {...state.canvasSelections" not in script
     assert "/static/app.js?v=" in template
     select_block = script[script.index("function selectDashboard"):script.index("function parameters")]
     assert "eventSource.close()" not in select_block

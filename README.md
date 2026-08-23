@@ -43,11 +43,13 @@ Presentation
 - `small-multiples` 与 `selection-gallery` 重复 View；内置搜索、分页式 DOM 上限、视口懒渲染和离屏图表回收。
 - 默认单列页面、语义 Section 模板、可选 Presentation 和不受坐标网格限制的完整 Canvas。
 - 分支级渐进执行：一个 View 的依赖完成后即可展示，不等待无关慢分支。
+- Sources 是可点击的查询证据入口：每个节点展示本次 Run 的状态、执行/缓存来源、耗时与错误；SQL 还展示解析后 SQL、参数化 Driver statement、bound parameters、Adapter 和超时策略。
 - 同一浏览器 tab 内按 Dashboard 隔离状态；不同 tab、浏览器和用户不共享 Selection 或默认缓存。
 - 大 Table 自动使用 Arrow IPC；Server 走 HTTP gzip，HTML 导出使用 gzip + base64 分片并在浏览器延迟解码。
 - 可交互 HTML 导出；Server 与 HTML 使用同一浏览器 Runtime。
 - 文件夹驱动的导航、拖动移动、空目录和回收站。
 - 面向 AI 的内置文档、Pydantic 生成 Schema、Component Registry、Gallery、focused Context、Scaffold、确定性 Benchmark 和真实 authoring 日志。
+- `dataviz validate` 静态 preflight：支持 Dashboard 聚焦、稳定 JSON 错误码、修复提示和严格 CI 模式，不查询数据即可检查 Schema、Adapter、SQL 参数、DAG、Selection、Renderer 与资源。
 - 严格 DSL 版本、离线迁移器、可复现 pip ZIP，以及 Python/浏览器/发行物 CI 矩阵。
 
 完整职责边界见 [产品架构](docs/product-architecture.md)，当前完成度与后续工作见 [计划](plan.md)。
@@ -75,7 +77,7 @@ uv run --no-editable dataviz serve myworkspace --port 8080
 安装发布 ZIP 或 wheel 后，不再需要 `uv run`：
 
 ```bash
-python -m pip install /path/to/workspace-dataviz-0.1.0.zip
+python -m pip install /path/to/workspace-dataviz-0.1.2.zip
 dataviz serve /path/to/workspace --port 8080
 ```
 
@@ -92,8 +94,8 @@ ZIP 同时生成 `.zip.sha256`；内容使用固定顺序和时间戳。发布�
 
 ```bash
 cd dist
-shasum -a 256 -c workspace-dataviz-0.1.0.zip.sha256
-python -m pip install workspace-dataviz-0.1.0.zip
+shasum -a 256 -c workspace-dataviz-0.1.2.zip.sha256
+python -m pip install workspace-dataviz-0.1.2.zip
 dataviz version
 ```
 
@@ -119,17 +121,41 @@ dataviz components --format json
 
 dataviz list /path/to/workspace
 dataviz context /path/to/workspace DASHBOARD_ID --focus view:VIEW_ID --format json
-dataviz validate /path/to/workspace
+dataviz validate /path/to/workspace --dashboard DASHBOARD_ID --format json
 ```
 
 `context` 也会返回 `authoring_feedback`，提示 AI 在任务结束时写入 Workspace 根目录的 `dataviz-authoring.jsonl`。该文件只保存实际测得的首次成功、修正轮次、耗时、可用 Token 与不清晰点；缺失 Token 保持 `unknown`，不做估算。它可提交 Git 或直接分享给 Dataviz 作者，详见 [AI Authoring 真实评测协议](docs/authoring-evaluation.md)。
 
 这套记录解决的是“可以用真实任务评估 AI 开发效率”，并不代表目前已经证明 Dataviz 节省了固定比例的 Token。首次成功率、输入/输出量和目标阈值必须在积累真实 `dataviz-authoring.jsonl` 后再确定。
 
+### 编辑后的固定 Preflight
+
+每次修改 `dashboard.yaml`、Source/Transform、SQL、Presentation 或资源路径后，先执行：
+
+```bash
+dataviz validate WORKSPACE --dashboard DASHBOARD_ID --format json
+```
+
+该命令使用稳定的 `dataviz/validation/v1` 输出，且 `queries_executed` 固定为 `0`。它不会连接数据库、执行 Source 或启动 Server，适合 AI 在把结果交给用户之前反复运行。重点字段是：
+
+- `passed` 与 `exit_code`：是否可以进入 query/report 阶段。
+- `checks`：Schema、Adapter、SQL、DAG、内容/Selection、Presentation 和依赖七个检查域。
+- `diagnostics`：稳定 `code`、Dashboard、相对文件、字段、Schema 细节和可执行的 `hint`。
+- `next_actions`：当前状态下最短的后续动作。
+
+分享或 CI 门禁可增加 `--strict`，让 warning 也返回退出码 `1`。默认输出是面向人的 text；AI 和自动化统一使用 `--format json`。只改一个 Dashboard 时应始终带 `--dashboard`，避免 Workspace 中另一个暂时损坏的画布干扰本次迭代。完整契约可运行：
+
+```bash
+dataviz docs validation --format json
+```
+
+通过 preflight 后再逐层查询。Server 页面中可打开 `Sources` 并点击节点核对本次 Run 证据；SQL 的 `Resolved SQL` 是便于 review 的字面量预览，实际数据库请求仍是参数化 Driver statement 与 bound parameters，不会把拼接后的预览 SQL 用于执行。
+
 常用开发命令：
 
 ```bash
 # 分层检查 Source、Named Output 和完整 DAG
+dataviz validate WORKSPACE --dashboard DASHBOARD_ID --format json
 dataviz query WORKSPACE DASHBOARD_ID --source SOURCE_ID --param start_date=2026-01-01
 dataviz output WORKSPACE DASHBOARD_ID transform:MODEL_ID/trend --format json
 dataviz run WORKSPACE DASHBOARD_ID --target transform:MODEL_ID/trend
@@ -254,6 +280,33 @@ sections:
 ```
 
 `input: sales` 是 `source:sales/main` 的简写。没有 `presentation.yaml` 时，Section 和 View 按声明顺序自上而下展示。
+
+### 让分析对象出现在页面中
+
+Query Parameter 不应只藏在 Header 弹层。Dashboard、Section 和 View 的内容字段可以直接引用本次查询已经提交的参数：
+
+```yaml
+title: 小时销售与晚间占比
+subtitle: "仓 {{ parameters.warehouse_id }} · 商品 {{ parameters.product_id }}"
+description: "{{ parameters.start_date }} 至 {{ parameters.end_date }}"
+
+query_parameters:
+  - {id: warehouse_id, label: 仓, default: 5740}
+  - {id: product_id, label: 商品, default: "980464683"}
+  - {id: start_date, type: date, default: "2026-08-09"}
+  - {id: end_date, type: date, default: "2026-08-22"}
+
+sources:
+  - id: hourly-sales
+    type: sql
+    adapter: warehouse
+    code: sources/hourly-sales.sql
+    params: [warehouse_id, product_id, start_date, end_date]
+```
+
+只支持安全、可校验的 `{{ parameters.<id> }}` 直接引用，不执行任意 Jinja 或表达式。可用字段包括 Dashboard 的 `title/subtitle/description/assumptions`、Section 的 `title/description`、View 的 `title/description` 和 Markdown `text`。选择参数优先显示 choice label，`date_range` 显示为“开始 至 结束”，多值使用顿号连接。
+
+Server 中编辑参数不会立刻改动旧数据集的标题；点击 **Run query** 后，数据和内容一起提交更新。导出 HTML 固定保存这次 Run 的参数上下文。运行 `dataviz docs interpolation` 可查看机器可读契约。
 
 ## Adapter 与凭证
 
@@ -458,12 +511,12 @@ done
 node --check src/dataviz/server/static/canvas-runtime.js
 node --check src/dataviz/server/static/declarative-runtime.js
 node --check src/dataviz/server/static/runtime-web-component-adapter.js
-uv run --no-editable dataviz validate examples/minimal-workspace
-uv run --no-editable dataviz validate examples/sales-workspace
-uv run --no-editable dataviz validate examples/repeat-workspace
-uv run --no-editable dataviz validate examples/legacy-showcase
+uv run --no-editable dataviz validate examples/minimal-workspace --format json
+uv run --no-editable dataviz validate examples/sales-workspace --format json
+uv run --no-editable dataviz validate examples/repeat-workspace --format json
+uv run --no-editable dataviz validate examples/legacy-showcase --format json
 ```
 
-2026-08-23 的本地基线是：Python 3.12 下 111 项 unit/contract tests；Chromium、Firefox、WebKit 各 7 项真实浏览器 tests；Python 3.11 与 3.14 各 111 项 unit/contract tests。Python 3.11–3.14 均完成干净 wheel 安装；wheel、sdist、pip ZIP 均完成干净 Python 3.12 安装和 HTML 报告生成。持续集成定义见 [quality.yml](.github/workflows/quality.yml)。
+2026-08-23 的 0.1.1 本地基线是：Python 3.11、3.12、3.13、3.14 各 124 项 unit/contract tests；Chromium、Firefox、WebKit 各 9 项真实浏览器 tests。0.1.1 pip ZIP 已在干净 Python 3.12 环境完成安装，并执行 `version`、`docs validation`、`init`、focused `validate` 和交互 HTML 报告 smoke；wheel、sdist 与 ZIP 均确认不包含 `.venv`、`build/`、Workspace `.dataviz` 或 `uv.lock`。持续集成定义见 [quality.yml](.github/workflows/quality.yml)。
 
 长期目标是一套低误导、可扩展且适合 AI 编写的看板 DSL。模板是否节省 Token 将通过真实任务中的首次成功率、输入/输出量、修正轮次和完成时间衡量；当前优先保证功能正确、默认体验稳定和诊断清晰。

@@ -5,6 +5,7 @@ const state = {
   dashboardStates: new Map(),
   preferredDashboardId: null,
   selectionTimer: null,
+  computeTimer: null,
   draggedNavigation: null,
   sidebarWidth: 220,
   sidebarCollapsed: false,
@@ -16,8 +17,10 @@ function runtimeFor(dashboardId) {
     state.dashboardStates.set(dashboardId, {
       runId: null,
       pendingRunId: null,
-      committedParameters: null,
-      parameterValues: null,
+      committedQueryParameters: null,
+      queryParameterValues: null,
+      committedComputeParameters: null,
+      draftComputeParameters: null,
       dashboardSelectionValues: null,
       eventSource: null,
       nodeErrors: {},
@@ -26,6 +29,7 @@ function runtimeFor(dashboardId) {
       queryStatus: 'idle',
       queryLabel: 'Not run',
       message: 'Sources are ready to run.',
+      previousQueryState: null,
     });
   }
   return state.dashboardStates.get(dashboardId);
@@ -35,7 +39,16 @@ function activeRuntime() {
   return state.dashboard ? runtimeFor(state.dashboard.id) : null;
 }
 
-for (const property of ['runId', 'pendingRunId', 'committedParameters', 'eventSource', 'nodeErrors', 'canvasSelections']) {
+for (const property of [
+  'runId',
+  'pendingRunId',
+  'committedQueryParameters',
+  'committedComputeParameters',
+  'draftComputeParameters',
+  'eventSource',
+  'nodeErrors',
+  'canvasSelections',
+]) {
   Object.defineProperty(state, property, {
     get() { return activeRuntime()?.[property] ?? (property.endsWith('Errors') || property.endsWith('Selections') ? {} : null); },
     set(value) { const runtime = activeRuntime(); if (runtime) runtime[property] = value; },
@@ -43,7 +56,7 @@ for (const property of ['runId', 'pendingRunId', 'committedParameters', 'eventSo
 }
 
 async function resolveTabSessionId() {
-  const storageKey = 'dataviz.tab-session.v1';
+  const storageKey = 'dataviz.tab-session.v2';
   let sessionId = sessionStorage.getItem(storageKey) || crypto.randomUUID();
   if (!('BroadcastChannel' in window)) {
     sessionStorage.setItem(storageKey, sessionId);
@@ -77,13 +90,15 @@ function saveTabUiState() {
   const dashboards = {};
   for (const [dashboardId, runtime] of state.dashboardStates) {
     dashboards[dashboardId] = {
-      parameterValues: runtime.parameterValues,
+      queryParameterValues: runtime.queryParameterValues,
+      committedComputeParameters: runtime.committedComputeParameters,
+      draftComputeParameters: runtime.draftComputeParameters,
       dashboardSelectionValues: runtime.dashboardSelectionValues,
       canvasSelections: runtime.canvasSelections,
     };
   }
   sessionStorage.setItem(
-    `dataviz.tab-ui.${state.sessionId}`,
+    `dataviz.tab-ui.v2.${state.sessionId}`,
     JSON.stringify({
       activeDashboardId: state.dashboard?.id || state.preferredDashboardId,
       sidebar: {width: state.sidebarWidth, collapsed: state.sidebarCollapsed},
@@ -114,7 +129,7 @@ function applySidebarState({persist = false} = {}) {
 
 function restoreTabUiState() {
   try {
-    const saved = JSON.parse(sessionStorage.getItem(`dataviz.tab-ui.${state.sessionId}`) || '{}');
+    const saved = JSON.parse(sessionStorage.getItem(`dataviz.tab-ui.v2.${state.sessionId}`) || '{}');
     state.preferredDashboardId = saved.activeDashboardId || null;
     state.sidebarWidth = Number(saved.sidebar?.width) || 220;
     state.sidebarCollapsed = Boolean(saved.sidebar?.collapsed);
@@ -185,6 +200,96 @@ async function request(url, options = {}) {
   return response.json();
 }
 
+function collectCanvasSnapshot() {
+  const requestId = crypto.randomUUID();
+  const frame = $('#canvas-frame');
+  return new Promise((resolve, reject) => {
+    const requestSnapshot = () => frame.contentWindow?.postMessage(
+      {type:'dataviz:collect-snapshot', request_id:requestId},
+      window.location.origin,
+    );
+    // Query completion and the final Canvas bootstrap are independent browser
+    // events. Retry the idempotent request while a newly loaded iframe installs
+    // its Runtime listener instead of losing the first postMessage in that gap.
+    const retry = setInterval(requestSnapshot, 100);
+    const timer = setTimeout(() => {
+      clearInterval(retry);
+      window.removeEventListener('message', receive);
+      reject(new Error('Canvas did not provide snapshot Outputs in time'));
+    }, 10_000);
+    const receive = event => {
+      if (
+        event.origin !== window.location.origin
+        || event.source !== frame.contentWindow
+        || event.data?.type !== 'dataviz:snapshot-collected'
+        || event.data.request_id !== requestId
+      ) return;
+      clearTimeout(timer);
+      clearInterval(retry);
+      window.removeEventListener('message', receive);
+      if (event.data.error) reject(new Error(event.data.error.message || 'Snapshot collection failed'));
+      else if (event.data.missing?.length) reject(new Error(`Run analysis before export: ${event.data.missing.join(', ')}`));
+      else resolve(event.data.outputs || {});
+    };
+    window.addEventListener('message', receive);
+    requestSnapshot();
+  });
+}
+
+async function downloadReport() {
+  if (!state.runId || !state.dashboard) return;
+  const button = $('#download-button');
+  button.disabled = true;
+  const previous = button.textContent;
+  button.textContent = 'Preparing…';
+  try {
+    const snapshotOutputs = await collectCanvasSnapshot();
+    const response = await fetch(
+      `/api/dashboards/${encodeURIComponent(state.dashboard.id)}/report`,
+      {
+        method:'POST',
+        cache:'no-store',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          session_id:state.sessionId,
+          run_id:state.runId,
+          selections:selections(),
+          compute_parameters:activeRuntime()?.committedComputeParameters || computeParameters(),
+          snapshot_outputs:snapshotOutputs,
+        }),
+      },
+    );
+    if (!response.ok) {
+      let message = response.statusText;
+      try {
+        const payload = await response.json();
+        message = typeof payload.detail === 'string'
+          ? payload.detail
+          : payload.detail?.message || JSON.stringify(payload.detail || payload);
+      } catch (_) {}
+      throw new Error(message);
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1]
+      || `${state.dashboard.id}-${state.runId}.html`;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (error) {
+    activeRuntime().message = error.message;
+    $('#run-message').textContent = error.message;
+  } finally {
+    button.textContent = previous;
+    button.disabled = !state.runId;
+  }
+}
+
 function selectorTemplate(parameter, presentation = {}) {
   if (presentation.template && presentation.template !== 'auto') return presentation.template;
   if (parameter.type === 'date_range') return 'date-range';
@@ -214,6 +319,8 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
     const choices = enhancedBoolean && !(parameter.choices || []).length
       ? [{label: 'Yes', value: true}, {label: 'No', value: false}]
       : (parameter.choices || []);
+    const typedChoices = choices.some(choice => typeof choice.value !== 'string');
+    input.dataset.valueEncoding = typedChoices ? 'json' : 'string';
     if (behavior.selection === true && parameter.type !== 'multi_select') {
       const empty = document.createElement('option');
       empty.value = '';
@@ -224,13 +331,13 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
     }
     for (const choice of choices) {
       const option = document.createElement('option');
-      option.value = choice.value;
+      option.value = typedChoices ? JSON.stringify(choice.value) : String(choice.value);
       option.textContent = choice.label;
       if (choice.group) option.dataset.group = choice.group;
       if (choice.description) option.dataset.description = choice.description;
       if (choice.keywords?.length) option.dataset.keywords = choice.keywords.join(' ');
       const defaults = Array.isArray(parameter.default) ? parameter.default : [parameter.default];
-      option.selected = defaults.map(String).includes(String(choice.value));
+      option.selected = defaults.map(value => typedChoices ? JSON.stringify(value) : String(value)).includes(option.value);
       input.append(option);
     }
     if (!input.multiple && parameter.default == null && behavior.selection !== true) {
@@ -238,12 +345,24 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
     }
   } else {
     input = document.createElement('input');
-    input.type = parameter.type === 'boolean' ? 'checkbox' : parameter.type === 'number' ? 'number' : parameter.type === 'date' ? 'date' : 'text';
+    input.type = parameter.type === 'boolean'
+      ? 'checkbox'
+      : ['number', 'integer'].includes(parameter.type)
+      ? 'number'
+      : parameter.type === 'date'
+      ? 'date'
+      : 'text';
     if (parameter.type === 'date_range') input.dataset.selectorNative = '';
     if (parameter.type === 'boolean') input.checked = Boolean(parameter.default);
     else if (Array.isArray(parameter.default)) input.value = parameter.default.join(',');
     else input.value = parameter.default ?? '';
   }
+  input.required = Boolean(parameter.required);
+  if (parameter.placeholder) input.placeholder = parameter.placeholder;
+  if (parameter.min != null) input.min = parameter.min;
+  if (parameter.max != null) input.max = parameter.max;
+  if (parameter.step != null) input.step = parameter.step;
+  else if (parameter.type === 'integer') input.step = '1';
   input.id = inputId;
   input.name = name;
   input.dataset.type = parameter.type;
@@ -327,7 +446,8 @@ function nodeRow(node) {
 function selectDashboard(id) {
   if (state.dashboard) {
     const previous = activeRuntime();
-    previous.parameterValues = parameters();
+    previous.queryParameterValues = queryParameters();
+    previous.draftComputeParameters = computeParameters();
     previous.dashboardSelectionValues = formValues($('#dashboard-selection-form'));
     saveTabUiState();
   }
@@ -338,10 +458,31 @@ function selectDashboard(id) {
   document.querySelectorAll('.nav-button').forEach((node) => node.classList.toggle('active', node.dataset.id === id));
   const runnable = Boolean(state.dashboard.runnable);
   $('#parameter-form').replaceChildren(...state.dashboard.query_parameters.map((item) => field(item)));
+  $('#compute-parameter-form').replaceChildren(
+    ...state.dashboard.compute_parameters.map((item) => {
+      const control = field(item);
+      control.dataset.computeParameter = item.id;
+      control.dataset.computeTrigger = item.trigger || 'manual';
+      return control;
+    }),
+  );
+  const hasAnalysisActions = (state.dashboard.nodes || []).some(
+    (node) => node.type === 'interactive_transform' && node.trigger !== 'auto',
+  );
+  $('#compute-parameters-control').dataset.empty = String(
+    state.dashboard.compute_parameters.length === 0 && !hasAnalysisActions,
+  );
   const dashboardControls = state.dashboard.selections.filter((item) => item.origin === 'dashboard');
   $('#dashboard-selection-form').replaceChildren(...dashboardControls.map(selectionField));
   window.datavizComponents?.hydrate(document);
-  setFormValues($('#parameter-form'), runtime.parameterValues || runtime.committedParameters || {});
+  setFormValues(
+    $('#parameter-form'),
+    runtime.queryParameterValues || runtime.committedQueryParameters || {},
+  );
+  setFormValues(
+    $('#compute-parameter-form'),
+    runtime.draftComputeParameters || runtime.committedComputeParameters || {},
+  );
   setFormValues($('#dashboard-selection-form'), runtime.dashboardSelectionValues || {});
   updateDashboardSelectionSummary();
   $('#node-list').replaceChildren(...state.dashboard.nodes.map(nodeRow));
@@ -349,15 +490,18 @@ function selectDashboard(id) {
     node.dataset.status = runtime.nodeStatuses[node.dataset.nodeId] || 'not_run';
   });
   $('#query-diagnostics').open = false;
-  $('#query-diagnostics').dataset.status = runnable ? runtime.queryStatus : 'failed';
+  $('#query-diagnostics').dataset.status = runnable ? runtime.queryStatus : 'error';
   $('#query-diagnostics-label').textContent = runnable ? runtime.queryLabel : state.dashboard.status;
   $('#run-message').textContent = runnable ? runtime.message : (state.dashboard.message || 'Dashboard unavailable.');
   setQueryState();
   setSelectionsEnabled(Boolean(runtime.runId));
+  setComputeState();
   const run = runtime.runId ? `&run_id=${encodeURIComponent(runtime.runId)}` : '';
   $('#canvas-frame').dataset.runId = runtime.runId || '';
   $('#canvas-frame').src = `/api/dashboards/${encodeURIComponent(id)}/canvas?${sessionQuery()}${run}`;
-  $('#run-button').disabled = !runnable || Boolean(runtime.pendingRunId);
+  $('#run-button').disabled = !runnable;
+  $('#run-button').classList.toggle('is-cancelling', Boolean(runtime.pendingRunId));
+  $('#run-button').lastChild.textContent = runtime.pendingRunId ? 'Cancel query' : 'Run query';
   $('#download-button').disabled = !runtime.runId;
   saveTabUiState();
 }
@@ -366,19 +510,23 @@ function setFormValues(form, values) {
   for (const input of form.elements) {
     if (!input.name || !(input.name in values)) continue;
     const value = values[input.name];
-    if (input.dataset.type === 'boolean' && input.tagName === 'SELECT') input.value = value == null ? '' : String(value);
+    if (input.dataset.type === 'boolean' && input.tagName === 'SELECT') input.value = value == null ? '' : JSON.stringify(value);
     else if (input.dataset.type === 'boolean') input.checked = Boolean(value);
     else if (input.multiple) {
-      const selected = new Set((Array.isArray(value) ? value : [value]).map(String));
-      for (const option of input.options) option.selected = selected.has(String(option.value));
+      const selected = new Set((Array.isArray(value) ? value : [value]).map(item => input.dataset.valueEncoding === 'json' ? JSON.stringify(item) : String(item)));
+      for (const option of input.options) option.selected = selected.has(option.value);
     } else if (Array.isArray(value)) input.value = value.join(',');
     else input.value = value ?? '';
     input._syncChoiceControl?.();
   }
 }
 
-function parameters() {
+function queryParameters() {
   return formValues($('#parameter-form'));
+}
+
+function computeParameters() {
+  return formValues($('#compute-parameter-form'));
 }
 
 function selections() {
@@ -391,9 +539,16 @@ function formValues(form) {
   const values = {};
   for (const input of form.elements) {
     if (!input.name) continue;
-    if (input.dataset.type === 'boolean' && input.tagName === 'SELECT') values[input.name] = input.value === '' ? null : input.value === 'true';
+    const decode = value => input.dataset.valueEncoding === 'json' ? JSON.parse(value) : value;
+    if (input.dataset.type === 'boolean' && input.tagName === 'SELECT') values[input.name] = input.value === '' ? null : decode(input.value);
     else if (input.dataset.type === 'boolean') values[input.name] = input.checked;
-    else if (input.multiple) values[input.name] = [...input.selectedOptions].map((item) => item.value);
+    else if (input.multiple) values[input.name] = [...input.selectedOptions].map((item) => decode(item.value));
+    else if (input.dataset.type === 'number') values[input.name] = input.value === '' ? null : Number(input.value);
+    // Keep the raw numeric meaning. parseInt("1.5") would silently turn an
+    // invalid integer into 1 before the shared value contract can reject it.
+    else if (input.dataset.type === 'integer') values[input.name] = input.value === '' ? null : Number(input.value);
+    else if (input.dataset.type === 'date_range') values[input.name] = input.value ? input.value.split(',', 2).map((item) => item.trim()) : [];
+    else if (input.tagName === 'SELECT' && input.value !== '') values[input.name] = decode(input.value);
     else values[input.name] = input.value;
   }
   return values;
@@ -403,22 +558,52 @@ async function runDashboard() {
   if (!state.dashboard) return;
   const dashboardId = state.dashboard.id;
   const runtime = runtimeFor(dashboardId);
-  if (runtime.pendingRunId) return;
+  if (runtime.pendingRunId) {
+    const runId = runtime.pendingRunId;
+    $('#run-button').disabled = true;
+    $('#run-button').lastChild.textContent = 'Cancelling…';
+    try {
+      await request(`/api/runs/${encodeURIComponent(runId)}?${sessionQuery()}`, {method:'DELETE'});
+      runtime.message = 'Cancelling this Dashboard query…';
+      $('#run-message').textContent = runtime.message;
+    } catch (error) {
+      $('#run-button').disabled = false;
+      $('#run-button').lastChild.textContent = 'Cancel query';
+      runtime.message = error.message;
+      $('#run-message').textContent = error.message;
+    }
+    return;
+  }
+  if (!$('#parameter-form').checkValidity()) {
+    $('#parameter-form').reportValidity();
+    return;
+  }
   closeHeaderPopovers();
+  runtime.previousQueryState = {
+    status:runtime.queryStatus,
+    label:runtime.queryLabel,
+    message:runtime.message,
+  };
   $('#run-button').disabled = true;
-  $('#query-diagnostics').dataset.status = 'running';
+  $('#query-diagnostics').dataset.status = 'loading';
   $('#query-diagnostics-label').textContent = 'Loading';
   $('#run-message').textContent = 'Querying a new dataset…';
   document.querySelectorAll('.node').forEach((node) => node.dataset.status = 'not_run');
   try {
-    runtime.parameterValues = parameters();
+    runtime.queryParameterValues = queryParameters();
     const response = await request(`/api/dashboards/${encodeURIComponent(dashboardId)}/runs`, {
-      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({session_id: state.sessionId, parameters: runtime.parameterValues})
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({
+        session_id: state.sessionId,
+        query_parameters: runtime.queryParameterValues,
+      })
     });
     runtime.pendingRunId = response.run_id;
-    runtime.queryStatus = 'running';
+    runtime.queryStatus = 'loading';
     runtime.queryLabel = 'Loading';
     runtime.message = 'Querying a new dataset…';
+    $('#run-button').disabled = false;
+    $('#run-button').classList.add('is-cancelling');
+    $('#run-button').lastChild.textContent = 'Cancel query';
     if (state.dashboard?.id === dashboardId) {
       const frame = $('#canvas-frame');
       frame.dataset.runId = response.run_id;
@@ -426,14 +611,16 @@ async function runDashboard() {
     }
     listen(response.run_id, dashboardId);
   } catch (error) {
-    runtime.queryStatus = 'failed';
+    runtime.queryStatus = 'error';
     runtime.queryLabel = 'Failed';
     runtime.message = error.message;
     if (state.dashboard?.id === dashboardId) {
       $('#run-message').textContent = error.message;
-      $('#query-diagnostics').dataset.status = 'failed';
+      $('#query-diagnostics').dataset.status = 'error';
       $('#query-diagnostics-label').textContent = 'Failed';
       $('#run-button').disabled = false;
+      $('#run-button').classList.remove('is-cancelling');
+      $('#run-button').lastChild.textContent = 'Run query';
     }
   }
 }
@@ -443,21 +630,34 @@ function listen(runId, dashboardId) {
   runtime.eventSource?.close();
   const source = new EventSource(`/api/runs/${runId}/events?${sessionQuery()}`);
   runtime.eventSource = source;
-  const names = ['node_queued','node_started','node_retrying','node_succeeded','node_failed','node_blocked'];
+  const names = ['node_queued','node_started','node_progress','node_retrying','node_ready','node_error','node_cancelled','node_unavailable'];
   for (const name of names) source.addEventListener(name, (message) => updateEvent(JSON.parse(message.data), dashboardId));
   source.addEventListener('run_ready', () => finishRun(runId, dashboardId));
-  source.addEventListener('run_failed', () => finishRun(runId, dashboardId));
+  source.addEventListener('run_error', () => finishRun(runId, dashboardId));
+  source.addEventListener('run_cancelled', () => finishRun(runId, dashboardId));
   source.addEventListener('stream_end', () => source.close());
   source.onerror = () => { if (source.readyState === EventSource.CLOSED) return; };
 }
 
 function updateEvent(event, dashboardId) {
   const runtime = runtimeFor(dashboardId);
-  const statusMap = {node_queued:'queued', node_started:'running', node_retrying:'running', node_succeeded:'succeeded', node_failed:'failed', node_blocked:'blocked'};
+  const statusMap = {
+    node_queued: 'queued',
+    node_started: 'loading',
+    node_progress: 'loading',
+    node_retrying: 'loading',
+    node_ready: 'ready',
+    node_error: 'error',
+    node_cancelled: 'cancelled',
+    node_unavailable: 'unavailable',
+  };
   runtime.nodeStatuses[event.node_id] = statusMap[event.event] || 'not_run';
   if (event.error) runtime.nodeErrors[event.node_id] = event.error;
   const label = event.node_id ? event.node_id.replace(':', ' · ') : 'run';
-  runtime.message = event.message || `${label} — ${statusMap[event.event] || event.event}${event.duration_ms ? ` · ${event.duration_ms}ms` : ''}`;
+  const progress = event.event === 'node_progress' && Number.isFinite(Number(event.data?.value))
+    ? ` · ${Math.round(Number(event.data.value) * 100)}%`
+    : '';
+  runtime.message = `${event.message || `${label} — ${statusMap[event.event] || event.event}`}${progress}${event.duration_ms ? ` · ${event.duration_ms}ms` : ''}`;
   if (state.dashboard?.id === dashboardId) {
     const node = document.querySelector(`[data-node-id="${CSS.escape(event.node_id)}"]`);
     if (node) node.dataset.status = runtime.nodeStatuses[event.node_id];
@@ -470,32 +670,45 @@ async function finishRun(runId, dashboardId) {
   if (runId !== runtime.pendingRunId) return;
   const record = await request(`/api/runs/${runId}?${sessionQuery()}`);
   const status = record.result?.status || record.status;
-  runtime.message = status === 'success' ? 'Dataset query completed.' : `Query finished with status: ${status}`;
+  runtime.message = status === 'ready' ? 'Dataset query completed.' : `Query finished with status: ${status}`;
   runtime.pendingRunId = null;
-  if (record.result) {
+  const committed = record.result && ['ready', 'partial'].includes(status);
+  if (committed) {
     runtime.runId = runId;
-    runtime.committedParameters = record.result.parameters;
-    runtime.queryStatus = status === 'success' ? 'success' : 'failed';
-    runtime.queryLabel = status === 'success' ? 'Ready' : status === 'partial' ? 'Partial' : 'Failed';
+    runtime.committedQueryParameters = record.result.query_parameters;
+    runtime.queryStatus = ['ready', 'partial'].includes(status) ? status : 'error';
+    runtime.queryLabel = status === 'ready' ? 'Ready' : status === 'partial' ? 'Partial' : 'Failed';
   } else {
-    runtime.queryStatus = 'failed';
-    runtime.queryLabel = 'Failed';
-    runtime.message = 'Query failed. The previously loaded dataset is unchanged.';
+    const previous = runtime.previousQueryState;
+    runtime.queryStatus = previous?.status || (runtime.runId ? 'ready' : status);
+    runtime.queryLabel = previous?.label || (runtime.runId ? 'Ready' : status === 'cancelled' ? 'Cancelled' : 'Failed');
+    runtime.message = status === 'cancelled'
+      ? 'Query cancelled. The previously loaded dataset is unchanged.'
+      : 'Query failed. The previously loaded dataset is unchanged.';
   }
+  runtime.previousQueryState = null;
   if (state.dashboard?.id === dashboardId) {
     $('#run-message').textContent = runtime.message;
     $('#run-button').disabled = false;
+    $('#run-button').classList.remove('is-cancelling');
+    $('#run-button').lastChild.textContent = 'Run query';
     $('#download-button').disabled = !runtime.runId;
     $('#query-diagnostics').dataset.status = runtime.queryStatus;
     $('#query-diagnostics-label').textContent = runtime.queryLabel;
     setSelectionsEnabled(Boolean(runtime.runId));
-    setQueryState(record.result ? null : runtime.message);
-    if (record.result) {
+    setComputeState();
+    setQueryState(committed ? null : runtime.message);
+    if (committed) {
       const frame = $('#canvas-frame');
       if (frame.dataset.runId !== runId) {
         frame.dataset.runId = runId;
         frame.src = `/api/dashboards/${encodeURIComponent(dashboardId)}/canvas?${sessionQuery()}&run_id=${encodeURIComponent(runId)}`;
       }
+    } else {
+      const frame = $('#canvas-frame');
+      const restored = runtime.runId ? `&run_id=${encodeURIComponent(runtime.runId)}` : '';
+      frame.dataset.runId = runtime.runId || '';
+      frame.src = `/api/dashboards/${encodeURIComponent(dashboardId)}/canvas?${sessionQuery()}${restored}`;
     }
   }
 }
@@ -507,6 +720,78 @@ function setSelectionsEnabled(enabled) {
   }
 }
 
+function setComputeEnabled(enabled) {
+  for (const input of $('#compute-parameter-form').elements) {
+    input.disabled = !enabled;
+    input._syncChoiceControl?.();
+  }
+}
+
+function changedComputeParameters() {
+  const runtime = activeRuntime();
+  if (!runtime) return [];
+  const committed = runtime.committedComputeParameters || Object.fromEntries(
+    (state.dashboard?.compute_parameters || []).map((item) => [item.id, item.default]),
+  );
+  const draft = computeParameters();
+  const keys = new Set([...Object.keys(committed), ...Object.keys(draft)]);
+  return [...keys].filter(
+    (key) => JSON.stringify(normalized(committed[key])) !== JSON.stringify(normalized(draft[key])),
+  );
+}
+
+function setComputeState() {
+  const definitions = state.dashboard?.compute_parameters || [];
+  const runtime = activeRuntime();
+  const changed = changedComputeParameters();
+  const actionable = (state.dashboard?.nodes || []).some(
+    (node) => node.type === 'interactive_transform' && node.trigger !== 'auto',
+  );
+  const enabled = Boolean(runtime?.runId) && (definitions.length > 0 || actionable);
+  setComputeEnabled(Boolean(runtime?.runId) && definitions.length > 0);
+  $('#compute-control-meta').textContent = definitions.length
+    ? changed.length
+      ? `${changed.length} draft change${changed.length === 1 ? '' : 's'}`
+      : `${definitions.length} parameter${definitions.length === 1 ? '' : 's'}`
+    : actionable ? 'Run on demand' : 'None';
+  const status = $('#compute-state');
+  status.dataset.stale = String(changed.length > 0);
+  status.textContent = !runtime?.runId
+    ? 'Run query before analysis.'
+    : changed.length
+    ? `${changed.length} value${changed.length === 1 ? '' : 's'} not applied.`
+    : actionable ? 'Ready to run on demand.' : 'Results are current.';
+  $('#compute-apply').disabled = !enabled;
+}
+
+function sendCompute(values, {commit = false, apply = false, manualTargets = []} = {}) {
+  if (!state.runId) return;
+  $('#canvas-frame').contentWindow?.postMessage(
+    {
+      type: 'dataviz:set-compute',
+      compute_parameters: values,
+      commit,
+      apply,
+      manual_targets: manualTargets,
+    },
+    window.location.origin,
+  );
+}
+
+function applyComputeParameters() {
+  const runtime = activeRuntime();
+  if (!runtime?.runId) return;
+  runtime.draftComputeParameters = computeParameters();
+  const manualTargets = (state.dashboard?.nodes || [])
+    .filter((node) => node.type === 'interactive_transform' && node.trigger === 'manual')
+    .map((node) => node.local_id);
+  sendCompute(runtime.draftComputeParameters, {
+    commit: true,
+    apply: true,
+    manualTargets,
+  });
+}
+
 function normalized(value) {
   if (Array.isArray(value)) return value.map(normalized);
   if (value === null || value === undefined) return '';
@@ -514,10 +799,10 @@ function normalized(value) {
 }
 
 function pendingParametersMatchDataset() {
-  if (!state.committedParameters) return false;
-  const pending = parameters();
-  const keys = new Set([...Object.keys(pending), ...Object.keys(state.committedParameters)]);
-  return [...keys].every((key) => JSON.stringify(normalized(pending[key])) === JSON.stringify(normalized(state.committedParameters[key])));
+  if (!state.committedQueryParameters) return false;
+  const pending = queryParameters();
+  const keys = new Set([...Object.keys(pending), ...Object.keys(state.committedQueryParameters)]);
+  return [...keys].every((key) => JSON.stringify(normalized(pending[key])) === JSON.stringify(normalized(state.committedQueryParameters[key])));
 }
 
 function setQueryState(message = null) {
@@ -723,9 +1008,45 @@ function renderNodeInspector(node, record, runNode, failure = null) {
   }
 }
 
+async function appendNodeLog(runId, runNode, requestId) {
+  const artifactId = runNode?.log?.artifact_id;
+  if (!artifactId) return;
+  const body = $('#node-inspector-body');
+  try {
+    const response = await fetch(
+      `/api/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}?${sessionQuery()}`,
+      {cache: 'no-store'},
+    );
+    if (!response.ok) throw new Error(`Execution log is unavailable (${response.status})`);
+    const raw = await response.text();
+    let code = raw;
+    try { code = JSON.stringify(JSON.parse(raw), null, 2); } catch (_) {}
+    const dialog = $('#node-inspector');
+    if (!dialog.open || dialog.dataset.requestId !== requestId) return;
+    body.append(inspectorCodeSection({
+      eyebrow: 'EXECUTION LOG',
+      title: 'Structured node log',
+      note: 'Saved dataviz/execution-log/v1 evidence, including context.log records and complete Python failure tracebacks.',
+      code,
+      copyLabel: 'Copy log',
+    }));
+  } catch (error) {
+    const dialog = $('#node-inspector');
+    if (!dialog.open || dialog.dataset.requestId !== requestId) return;
+    const warning = inspectorElement('section', 'node-inspector__section node-inspector__section--failure');
+    warning.append(
+      inspectorElement('span', 'micro-label', 'LOG UNAVAILABLE'),
+      inspectorElement('h4', '', error.message),
+    );
+    body.append(warning);
+  }
+}
+
 async function showNodeInspector(node) {
   closeHeaderPopovers();
   const dialog = $('#node-inspector');
+  const requestId = crypto.randomUUID();
+  dialog.dataset.requestId = requestId;
   renderNodeInspector(node, null, null);
   dialog.showModal();
   const runtime = activeRuntime();
@@ -736,12 +1057,18 @@ async function showNodeInspector(node) {
   try {
     const record = await request(`/api/runs/${encodeURIComponent(runId)}?${sessionQuery()}`);
     const run = record.result || record.snapshot;
-    renderNodeInspector(node, record, run?.nodes?.[node.id] || null);
+    const runNode = run?.nodes?.[node.id] || null;
+    if (dialog.dataset.requestId !== requestId) return;
+    renderNodeInspector(node, record, runNode);
+    await appendNodeLog(runId, runNode, requestId);
   } catch (error) {
-    renderNodeInspector(node, {run_id: runId, status: 'failed'}, null, error.message);
+    if (dialog.dataset.requestId !== requestId) return;
+    renderNodeInspector(node, {run_id: runId, status: 'error'}, null, error.message);
   } finally {
-    $('#node-inspector-body').classList.remove('is-loading');
-    if (state.dashboard?.id !== dashboardId && dialog.open) dialog.close();
+    if (dialog.dataset.requestId === requestId) {
+      $('#node-inspector-body').classList.remove('is-loading');
+      if (state.dashboard?.id !== dashboardId && dialog.open) dialog.close();
+    }
   }
 }
 
@@ -1083,18 +1410,17 @@ async function boot() {
   const remembered = await request(`/api/session/runs?${sessionQuery()}`);
   for (const record of remembered.runs || []) {
     const runtime = runtimeFor(record.dashboard_id);
-    runtime.committedParameters = record.parameters;
-    if (!runtime.parameterValues) runtime.parameterValues = record.parameters;
-    if (!runtime.dashboardSelectionValues && record.selections) runtime.dashboardSelectionValues = record.selections;
+    runtime.committedQueryParameters = record.query_parameters;
+    if (!runtime.queryParameterValues) runtime.queryParameterValues = record.query_parameters;
     runtime.nodeStatuses = record.nodes || {};
     if (record.ready) {
       runtime.runId = record.run_id;
-      runtime.queryStatus = record.status === 'success' ? 'success' : 'failed';
-      runtime.queryLabel = record.status === 'success' ? 'Ready' : record.status === 'partial' ? 'Partial' : 'Failed';
-      runtime.message = record.status === 'success' ? 'Dataset query completed.' : `Query finished with status: ${record.status}`;
-    } else if (record.status === 'running') {
+      runtime.queryStatus = ['ready', 'partial'].includes(record.status) ? record.status : 'error';
+      runtime.queryLabel = record.status === 'ready' ? 'Ready' : record.status === 'partial' ? 'Partial' : 'Failed';
+      runtime.message = record.status === 'ready' ? 'Dataset query completed.' : `Query finished with status: ${record.status}`;
+    } else if (['queued', 'loading'].includes(record.status)) {
       runtime.pendingRunId = record.run_id;
-      runtime.queryStatus = 'running';
+      runtime.queryStatus = 'loading';
       runtime.queryLabel = 'Loading';
       runtime.message = 'Querying a new dataset…';
       listen(record.run_id, record.dashboard_id);
@@ -1104,22 +1430,22 @@ async function boot() {
 }
 
 $('#run-button').addEventListener('click', runDashboard);
-$('#download-button').addEventListener('click', () => {
-  if (state.runId) {
-    const initialSelections = encodeURIComponent(JSON.stringify(selections()));
-    window.location.href = `/api/dashboards/${encodeURIComponent(state.dashboard.id)}/report?${sessionQuery()}&run_id=${encodeURIComponent(state.runId)}&selections=${initialSelections}`;
-  }
-});
+$('#download-button').addEventListener('click', downloadReport);
 $('#canvas-frame').addEventListener('load', () => {
   applyViewSelections();
+  const runtime = activeRuntime();
+  if (runtime) {
+    const values = runtime.committedComputeParameters || runtime.draftComputeParameters || computeParameters();
+    sendCompute(values, {commit: true});
+  }
 });
 $('#parameter-form').addEventListener('input', () => setQueryState());
 $('#parameter-form').addEventListener('input', () => {
-  if (activeRuntime()) activeRuntime().parameterValues = parameters();
+  if (activeRuntime()) activeRuntime().queryParameterValues = queryParameters();
   saveTabUiState();
 });
 $('#parameter-form').addEventListener('change', () => {
-  if (activeRuntime()) activeRuntime().parameterValues = parameters();
+  if (activeRuntime()) activeRuntime().queryParameterValues = queryParameters();
   saveTabUiState();
   setQueryState();
 });
@@ -1129,6 +1455,33 @@ $('#dashboard-selection-form').addEventListener('input', () => {
   updateDashboardSelectionSummary();
   scheduleViewSelections();
 });
+const onComputeDraft = (event) => {
+  const runtime = activeRuntime();
+  if (!runtime) return;
+  runtime.draftComputeParameters = computeParameters();
+  saveTabUiState();
+  setComputeState();
+  sendCompute(runtime.draftComputeParameters);
+  const control = event.target.closest('[data-compute-parameter]');
+  if (control?.dataset.computeTrigger !== 'auto') return;
+  window.clearTimeout(state.computeTimer);
+  const definition = state.dashboard.compute_parameters.find(
+    (item) => item.id === control.dataset.computeParameter,
+  );
+  const consumers = (state.dashboard.nodes || []).filter(
+    (node) => node.type === 'interactive_transform'
+      && (definition?.consumers || []).includes(node.local_id),
+  );
+  const delay = Math.max(0, ...consumers.map((node) => Number(node.debounce_ms || 300)));
+  state.computeTimer = window.setTimeout(() => {
+    sendCompute({[control.dataset.computeParameter]: runtime.draftComputeParameters[control.dataset.computeParameter]}, {
+      commit: true,
+    });
+  }, delay);
+};
+$('#compute-parameter-form').addEventListener('input', onComputeDraft);
+$('#compute-parameter-form').addEventListener('change', onComputeDraft);
+$('#compute-apply').addEventListener('click', applyComputeParameters);
 $('#dashboard-selection-form').addEventListener('change', () => {
   if (activeRuntime()) activeRuntime().dashboardSelectionValues = formValues($('#dashboard-selection-form'));
   saveTabUiState();
@@ -1144,11 +1497,22 @@ window.addEventListener('message', (event) => {
     closeHeaderPopovers();
     return;
   }
-  if (event.data?.type !== 'dataviz:selections-changed') return;
-  // Canvas messages contain the complete canonical state. Replacing it also
-  // removes keys restored from sessionStorage after a Selection is renamed.
-  state.canvasSelections = {...(event.data.selections || {})};
-  saveTabUiState();
+  if (event.data?.type === 'dataviz:compute-changed') {
+    const runtime = activeRuntime();
+    if (!runtime) return;
+    runtime.committedComputeParameters = {...(event.data.compute_parameters || {})};
+    runtime.draftComputeParameters = {...(event.data.draft_compute_parameters || {})};
+    setFormValues($('#compute-parameter-form'), runtime.draftComputeParameters);
+    setComputeState();
+    saveTabUiState();
+    return;
+  }
+  if (event.data?.type === 'dataviz:selections-changed') {
+    // Canvas messages contain the complete canonical state. Replacing it also
+    // removes keys restored from sessionStorage after a Selection is renamed.
+    state.canvasSelections = {...(event.data.selections || {})};
+    saveTabUiState();
+  }
 });
 $('#add-root-folder').addEventListener('click', () => openFolderDialog(null));
 $('#sidebar-toggle').addEventListener('click', toggleSidebar);

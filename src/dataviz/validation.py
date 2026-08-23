@@ -13,16 +13,16 @@ from dataviz.workspace.loader import (
 )
 
 
-VALIDATION_SCHEMA = "dataviz/validation/v1"
+VALIDATION_SCHEMA = "dataviz/validation/v2"
 
 _CHECKS = (
     ("schema-contracts", "Workspace and Dashboard schemas"),
     ("adapter-bindings", "Adapter bindings and source compatibility"),
     ("sql-contracts", "SQL files and named parameter contracts"),
-    ("data-graph", "Source, Transform, Output and View references"),
+    ("data-graph", "Source, Dataset/Interactive Transform, Output and View references"),
     ("content-contracts", "Content interpolation and Selection contracts"),
     ("presentation-assets", "Presentation, Renderer and local assets"),
-    ("runtime-dependencies", "Python code dependencies and installed packages"),
+    ("runtime-dependencies", "Runtime, code and package dependencies"),
 )
 
 
@@ -44,7 +44,8 @@ def _diagnostic_category(item: Diagnostic) -> str:
     ):
         return "presentation-assets"
     if (
-        "python_dependencies" in field
+        code.startswith("pyodide_")
+        or "python_dependencies" in field
         or "code_dependencies" in field
         or "dependency" in message
     ):
@@ -70,21 +71,39 @@ def _hint_for(item: Diagnostic) -> str:
     if code == "dashboard_scope_ambiguous":
         return "Use the unique runtime Dashboard id from `dataviz list <workspace>`."
     if code == "sql_parameter_undeclared":
-        return "Declare every named SQL placeholder in Source `params`, and declare the same id in Dashboard `query_parameters`."
+        return "Declare every named SQL placeholder in Source `query_params`, and declare the same id in Dashboard `query_parameters`."
     if code == "sql_parameter_unused":
-        return "Remove the unused Source param or reference it as a named placeholder in the SQL file."
+        return "Remove the unused Source `query_params` entry or reference it as a named placeholder in the SQL file."
     if code == "sql_file_unreadable":
         return "Save the SQL file as UTF-8 and verify that the current user can read it."
     if code.startswith("adapter_") or field == "adapter":
         return "Bind the Dashboard alias to a Workspace Adapter and define credentials only in `adapters.local.yaml` or environment variables."
     if code.startswith("content_"):
-        return "Use only `{{ parameters.<id> }}` with an existing Query Parameter; arbitrary template expressions are not supported."
+        return (
+            "Use `{{ parameters.<id> }}`, `{{ compute.<id> }}`, or a scoped Selection reference: "
+            "`{{ selections.dashboard.<id> }}`, "
+            "`{{ selections.section.<section-id>.<id> }}`, or "
+            "`{{ selections.view.<view-id>.<id> }}`. Arbitrary expressions and "
+            "cross-scope Selection dependencies are not supported."
+        )
     if code.startswith("presentation_"):
         return "Fix the referenced id or asset in `presentation.yaml`; delete the override to fall back to the default Renderer."
     if "does not exist" in item.message:
         return "Fix the relative path or add the missing file, then run this preflight again."
     if "unknown query parameter" in item.message.lower():
-        return "Add the id to Dashboard `query_parameters`, or remove it from this node's `params`."
+        return "Add the id to Dashboard `query_parameters`, or remove it from this node's `query_params`."
+    if code.startswith("pyodide_bundle_"):
+        return (
+            "Use the complete official Pyodide distribution at "
+            "`runtime.pyodide_bundle_path`; it must include the core Runtime, "
+            "pyodide-lock.json, and every locked wheel in the declared dependency closure."
+        )
+    if code.startswith("pyodide_"):
+        return "Use a Pyodide/WASM or pure-Python dependency, switch to browser-js, or run the Interactive Transform as server-python."
+    if code in {"dataset_cycle", "interactive_cycle"}:
+        return "Break the reported dependency cycle; every input must point to an earlier explicit Named Output."
+    if code == "compute_trigger_ambiguous":
+        return "Use one trigger policy for every Interactive Transform that consumes this Compute Parameter."
     if field.startswith(("inputs", "views", "sections")) or "reference" in item.message.lower():
         return "Use `dataviz context <workspace> <dashboard-id> --format json` to inspect valid node and Output ids."
     if "python_dependencies" in field:

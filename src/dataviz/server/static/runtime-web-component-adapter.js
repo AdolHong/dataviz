@@ -1,12 +1,14 @@
 (function installDatavizWebComponentAdapter(global) {
   'use strict';
 
-  const PROTOCOL = 'dataviz/runtime/v1';
+  const PROTOCOL = 'dataviz/runtime/v2';
   const canonical = reference => {
     const raw = String(reference || '').trim();
     if (!raw) throw new Error('Output reference cannot be empty');
-    const node = raw.includes(':') ? raw : `source:${raw}`;
-    return node.includes('/') ? node : `${node}/main`;
+    if (!/^(source|dataset|interactive):[^/]+\/[^/]+$/.test(raw)) {
+      throw new Error(`Output reference must be explicit: ${raw}`);
+    }
+    return raw;
   };
   const rows = value => {
     if (value?.__datavizArrowOutput && typeof value.rows === 'function') return value.rows();
@@ -33,8 +35,11 @@
         : item.definition?.type === 'date_range' ? 'between' : 'equals')
       : item.binding?.operator;
     if (operator === 'in') return (Array.isArray(value) ? value : [value]).map(String).includes(String(actual));
-    if (operator === 'between') return !Array.isArray(value) || value.length < 2
-      || (String(actual) >= String(value[0]) && String(actual) <= String(value[1]));
+    if (operator === 'between') {
+      const range = Array.isArray(value) ? value : [];
+      return (!range[0] || String(actual) >= String(range[0]))
+        && (!range[1] || String(actual) <= String(range[1]));
+    }
     if (operator === 'contains') return String(actual ?? '').includes(String(value ?? ''));
     if (operator === 'gte') return Number(actual) >= Number(value);
     if (operator === 'lte') return Number(actual) <= Number(value);
@@ -43,14 +48,14 @@
     return String(actual ?? '') === String(value ?? '');
   };
 
-  class DatavizRuntimeV1Client {
+  class DatavizRuntimeV2Client {
     constructor(manifest) {
       if (manifest?.protocol?.schema !== PROTOCOL) {
         throw new Error(`Unsupported Dataviz Runtime protocol: ${manifest?.protocol?.schema || 'missing'}`);
       }
       this.manifest = manifest;
     }
-    static fromWindow() { return new DatavizRuntimeV1Client(global.dataviz); }
+    static fromWindow() { return new DatavizRuntimeV2Client(global.dataviz); }
     output(reference) {
       return this.manifest.portable?.outputs?.[canonical(reference)];
     }
@@ -88,7 +93,7 @@
     }
     render() {
       try {
-        const client = DatavizRuntimeV1Client.fromWindow();
+        const client = DatavizRuntimeV2Client.fromWindow();
         const view = this.getAttribute('view');
         const value = view
           ? client.viewRows(view, this.getAttribute('input') || 'main')
@@ -114,7 +119,7 @@
     }
   }
 
-  global.DatavizRuntimeV1Client = DatavizRuntimeV1Client;
+  global.DatavizRuntimeV2Client = DatavizRuntimeV2Client;
   if (!global.customElements.get('dataviz-output')) {
     global.customElements.define('dataviz-output', DatavizOutputElement);
   }

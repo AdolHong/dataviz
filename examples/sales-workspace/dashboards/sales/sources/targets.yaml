@@ -6,6 +6,7 @@ description: 内存 SQLite SQL 查询
 type: sql
 adapter: demo-sqlite
 code: targets.sql
-params: [target_factor]
+query_params: [target_factor]
+outputs: {main: {kind: table}}
 cache:
   mode: session

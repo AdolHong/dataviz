@@ -1,0 +1,10 @@
+schema: dataviz/source/v1
+kind: source
+id: parameterized
+name: 参数化 DuckDB 查询
+type: sql
+adapter: warehouse
+code: parameterized.sql
+query_params: [multiplier, row_count]
+outputs: {main: {kind: table}}
+cache: {mode: session}

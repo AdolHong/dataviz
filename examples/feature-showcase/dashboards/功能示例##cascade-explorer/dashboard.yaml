@@ -1,0 +1,88 @@
+schema: dataviz/dashboard/v2
+kind: dashboard
+id: cascade-explorer
+title: 级联选择器
+description: 对照 SQL、Workspace 文件 Adapter 与看板内置 CSV，验证三级 Selection 只在浏览器选择样本。
+adapters:
+  warehouse: demo-duckdb
+  uploads: shared-files
+dashboard_selections:
+  - id: province
+    field: province
+    type: multi_select
+    label: 省份
+    default: [广东, 福建]
+    choices:
+      - {label: 广东, value: 广东}
+      - {label: 福建, value: 福建}
+sources:
+  - sources/cities.yaml
+  - sources/uploaded.yaml
+  - sources/bundled.yaml
+views:
+  - id: map-bars
+    title: 区县值分布
+    input: source:cities/main
+    template: bar
+    engine: echarts
+    x: district
+    y: val
+    series: city
+    aggregate: sum
+
+  - id: city-detail
+    title: 级联后的城市明细
+    input: source:cities/main
+    template: table
+    columns: [province, city, district, val]
+    limit: 40
+    selections:
+      - id: district
+        type: multi_select
+        label: 区县
+        path_fields: [province, city, district]
+        default: []
+      - id: min_value
+        field: val
+        type: number
+        label: 最低值
+        default: 0
+    selection_bindings:
+      min_value: {field: val, operator: gte}
+
+  - id: uploaded-file
+    title: Workspace Adapter 文件
+    input: source:uploaded-file/main
+    template: bar
+    engine: echarts
+    x: label
+    y: val
+    aggregate: sum
+
+  - id: bundled-file
+    title: 随看板分享的文件
+    input: source:bundled-file/main
+    template: table
+    columns: [id, label, val]
+    limit: 20
+
+sections:
+  - id: geography
+    title: 地理级联
+    selections:
+      - id: city
+        field: city
+        type: multi_select
+        label: 城市
+        default: [深圳, 佛山, 厦门]
+        choices:
+          - {label: 深圳, value: 深圳}
+          - {label: 佛山, value: 佛山}
+          - {label: 厦门, value: 厦门}
+    views: [map-bars, city-detail]
+  - {id: files, title: 文件来源, views: [uploaded-file, bundled-file]}
+canvas:
+  template: canvas/template.html
+  style: canvas/style.css
+  use_default_style: true
+  client_libraries: [echarts]

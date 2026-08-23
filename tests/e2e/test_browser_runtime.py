@@ -7,12 +7,15 @@ import shutil
 import socket
 import threading
 import time
+import zipfile
 from contextlib import contextmanager
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
 
 import pytest
 import uvicorn
+import yaml
 from playwright.sync_api import Browser, Page, expect, sync_playwright
 
 from dataviz.server import create_app
@@ -20,8 +23,9 @@ from dataviz.cli import _copy_gallery_workspace
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SHOWCASE = ROOT / "examples" / "legacy-showcase"
+SHOWCASE = ROOT / "examples" / "feature-showcase"
 MINIMAL = ROOT / "examples" / "minimal-workspace"
+SALES = ROOT / "examples" / "sales-workspace"
 PROGRESSIVE = ROOT / "tests" / "fixtures" / "progressive-workspace"
 WORKER = ROOT / "tests" / "fixtures" / "browser-worker-workspace"
 REPEAT = ROOT / "examples" / "repeat-workspace"
@@ -90,6 +94,173 @@ def _copy_workspace(source: Path, destination: Path) -> Path:
     return destination
 
 
+@contextmanager
+def _running_static_server(directory: Path):
+    class QuietHandler(SimpleHTTPRequestHandler):
+        def log_message(self, _format, *_args):
+            return
+
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        partial(QuietHandler, directory=str(directory)),
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        thread.join(timeout=10)
+        server.server_close()
+
+
+def _build_interactive_runtime_workspace(root: Path) -> Path:
+    dashboard = root / "dashboards" / "runtime-matrix"
+    (dashboard / "data").mkdir(parents=True)
+    (dashboard / "transforms").mkdir()
+    (root / "pyodide").mkdir()
+    (root / "workspace.yaml").write_text(
+        """schema: dataviz/workspace/v1
+kind: workspace
+id: interactive-runtime-e2e
+title: Interactive Runtime E2E
+runtime:
+  pyodide_asset_policy: bundle
+  pyodide_bundle_path: pyodide
+""",
+        encoding="utf-8",
+    )
+    (dashboard / "dashboard.yaml").write_text(
+        """schema: dataviz/dashboard/v2
+kind: dashboard
+id: runtime-matrix
+title: Interactive Runtime Matrix
+compute_parameters:
+  - {id: factor, label: Factor, type: number, default: 2}
+sources:
+  - id: raw
+    type: file
+    path: data/rows.csv
+    format: csv
+    outputs: {main: {kind: table}}
+interactive_transforms:
+  - transforms/server.yaml
+  - transforms/browser.yaml
+views:
+  - {id: server-table, title: Server Python, template: table, input: interactive:server/main}
+  - {id: browser-table, title: Browser Python, template: table, input: interactive:browser/main}
+sections:
+  - {id: results, title: Runtime results, template: split, views: [server-table, browser-table]}
+""",
+        encoding="utf-8",
+    )
+    (dashboard / "data" / "rows.csv").write_text(
+        "name,value\nalpha,1\nbeta,2\n", encoding="utf-8"
+    )
+    (dashboard / "transforms" / "server.yaml").write_text(
+        """schema: dataviz/interactive-transform/v1
+kind: interactive_transform
+id: server
+runtime: server-python
+code: server.py
+inputs: {rows: source:raw/main}
+compute_params: [factor]
+trigger: auto
+debounce_ms: 0
+export: {mode: snapshot}
+outputs:
+  main:
+    kind: table
+    schema: [{name: name}, {name: value}]
+cache: {mode: none}
+""",
+        encoding="utf-8",
+    )
+    (dashboard / "transforms" / "server.py").write_text(
+        """def transform(context):
+    frame = context.table("rows").copy()
+    frame["value"] = frame["value"] * context.compute_params["factor"] + 100
+    context.progress(0.5, "server midpoint")
+    return {"main": frame}
+""",
+        encoding="utf-8",
+    )
+    (dashboard / "transforms" / "browser.yaml").write_text(
+        """schema: dataviz/interactive-transform/v1
+kind: interactive_transform
+id: browser
+runtime: browser-python
+code: browser.py
+inputs: {rows: source:raw/main}
+compute_params: [factor]
+trigger: auto
+debounce_ms: 0
+export: {mode: interactive, assets: bundle}
+outputs:
+  main:
+    kind: table
+    schema: [{name: name}, {name: value}]
+cache: {mode: none}
+""",
+        encoding="utf-8",
+    )
+    (dashboard / "transforms" / "browser.py").write_text(
+        """def transform(context):
+    rows = context.inputs["rows"]
+    if isinstance(rows, dict) and rows.get("__datavizColumnarTable"):
+        columns = rows["columns"]
+        rows = [dict(zip(columns, values)) for values in zip(*columns.values())]
+    factor = context.compute_params["factor"]
+    return {"main": [{"name": row["name"], "value": row["value"] * factor} for row in rows]}
+""",
+        encoding="utf-8",
+    )
+    # A deterministic Pyodide API double keeps this contract test offline. The
+    # Worker boundary, module loading, context transport and lifecycle are real;
+    # Python semantics are covered separately by the Runtime process tests.
+    (root / "pyodide" / "pyodide.mjs").write_text(
+        """export async function loadPyodide() {
+  const values = new Map();
+  const globals = {
+    set(name, value) { values.set(name, value); },
+    get(name) { return values.get(name); },
+    delete(name) { values.delete(name); },
+  };
+  return {
+    globals,
+    FS: {
+      mkdirTree() {}, writeFile() {}, unlink() {}, rmdir() {},
+      readdir() { return ['.', '..']; }, stat() { return {mode:0}; }, isDir() { return false; },
+    },
+    toPy(value) { return value; },
+    setInterruptBuffer() {},
+    async loadPackage() {},
+    async runPythonAsync(source) {
+      if (!source.includes('await _dataviz_execute')) return undefined;
+      const payload = JSON.parse(values.get('__dv_payload'));
+      const input = payload.inputs.rows;
+      const rows = input?.__datavizColumnarTable
+        ? Array.from({length:input.length}, (_, index) => Object.fromEntries(
+            Object.entries(input.columns).map(([name, column]) => [name, column[index]])
+          ))
+        : input;
+      const factor = Number(payload.compute_params.factor);
+      return JSON.stringify({main:rows.map(row => ({name:row.name, value:Number(row.value) * factor}))});
+    },
+  };
+}
+""",
+        encoding="utf-8",
+    )
+    for name in ("pyodide.asm.mjs", "pyodide.asm.wasm", "python_stdlib.zip"):
+        (root / "pyodide" / name).write_bytes(b"offline contract fixture")
+    (root / "pyodide" / "pyodide-lock.json").write_text(
+        json.dumps({"info": {"python": "3.14.0"}, "packages": {}}),
+        encoding="utf-8",
+    )
+    return root
+
+
 def _open_dashboard(page: Page, base_url: str, dashboard_id: str) -> None:
     page.goto(base_url, wait_until="domcontentloaded")
     dashboard = page.locator(f'[data-nav-type="dashboard"][data-id="{dashboard_id}"]')
@@ -130,8 +301,8 @@ def test_committed_parameter_content_and_stale_selection_export(
         )
 
         inject_stale_state = """() => {
-          const sessionId = sessionStorage.getItem('dataviz.tab-session.v1');
-          const key = `dataviz.tab-ui.${sessionId}`;
+          const sessionId = sessionStorage.getItem('dataviz.tab-session.v2');
+          const key = `dataviz.tab-ui.v2.${sessionId}`;
           const saved = JSON.parse(sessionStorage.getItem(key));
           saved.dashboards['sales-overview'].canvasSelections = {
             'view:deleted/value': ['stale'],
@@ -144,9 +315,9 @@ def test_committed_parameter_content_and_stale_selection_export(
         _run_and_wait(page)
         page.wait_for_function(
             """() => {
-              const sessionId = sessionStorage.getItem('dataviz.tab-session.v1');
+              const sessionId = sessionStorage.getItem('dataviz.tab-session.v2');
               const saved = JSON.parse(
-                sessionStorage.getItem(`dataviz.tab-ui.${sessionId}`)
+                sessionStorage.getItem(`dataviz.tab-ui.v2.${sessionId}`)
               );
               return !('view:deleted/value' in (
                 saved.dashboards['sales-overview'].canvasSelections || {}
@@ -156,9 +327,9 @@ def test_committed_parameter_content_and_stale_selection_export(
         )
         remaining = page.evaluate(
             """() => {
-              const sessionId = sessionStorage.getItem('dataviz.tab-session.v1');
+              const sessionId = sessionStorage.getItem('dataviz.tab-session.v2');
               const saved = JSON.parse(
-                sessionStorage.getItem(`dataviz.tab-ui.${sessionId}`)
+                sessionStorage.getItem(`dataviz.tab-ui.v2.${sessionId}`)
               );
               return Object.keys(
                 saved.dashboards['sales-overview'].canvasSelections || {}
@@ -181,16 +352,105 @@ def test_committed_parameter_content_and_stale_selection_export(
             }, true)"""
         )
         _run_and_wait(page)
-        with page.expect_download(timeout=20_000) as download_info:
-            page.locator("#download-button").click()
+        with page.expect_request(
+            lambda request: request.method == "POST" and request.url.endswith("/report"),
+            timeout=20_000,
+        ) as request_info:
+            with page.expect_download(timeout=20_000) as download_info:
+                page.locator("#download-button").click()
         download = download_info.value
-        supplied = json.loads(parse_qs(urlparse(download.url).query)["selections"][0])
+        supplied = request_info.value.post_data_json["selections"]
         assert "view:deleted/value" not in supplied
 
         report_path = tmp_path / "parameter-report.html"
         download.save_as(report_path)
         report = report_path.read_text(encoding="utf-8")
         assert '<p class="dv-subtitle">当前取数下限：150000</p>' in report
+
+
+@pytest.mark.e2e
+def test_section_selection_updates_bound_title_without_redrawing_siblings(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(MINIMAL, tmp_path / "selection-content-workspace")
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    trend = next(item for item in definition["sections"] if item["id"] == "trend")
+    trend["title"] = "{{ selections.section.trend.focus_region }}趋势与结构"
+    trend["selections"] = [
+        {
+            "id": "focus_region",
+            "field": "region",
+            "type": "single_select",
+            "default": "华东",
+            "choices": [
+                {"label": "华东区域", "value": "华东"},
+                {"label": "华南区域", "value": "华南"},
+            ],
+        }
+    ]
+    comparison = next(
+        item for item in definition["views"] if item["id"] == "region-comparison"
+    )
+    comparison["description"] = (
+        "当前分析：{{ selections.section.trend.focus_region }}"
+    )
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        title = frame.locator('[data-section-id="trend"] h2')
+        description = frame.locator(
+            '[data-view-id="region-comparison"] .dv-view-description'
+        )
+        expect(title).to_have_text("华东区域趋势与结构", timeout=20_000)
+        expect(description).to_have_text("当前分析：华东区域")
+
+        frame.locator("body").evaluate(
+            """() => {
+              const sibling = document.querySelector('[data-view-id="total-revenue"]');
+              sibling.__selectionContentIdentity = crypto.randomUUID();
+              const original = window.datavizRuntime.renderViews.bind(window.datavizRuntime);
+              window.__selectionContentRenderCalls = [];
+              window.datavizRuntime.renderViews = context => {
+                window.__selectionContentRenderCalls.push(context.affectedViewIds);
+                return original(context);
+              };
+            }"""
+        )
+        selector = frame.locator(
+            'select[data-selection-input="section:trend/focus_region"]'
+        )
+        selector.select_option("华南", force=True)
+        expect(title).to_have_text("华南区域趋势与结构", timeout=10_000)
+        expect(description).to_have_text("当前分析：华南区域")
+        affected = frame.locator("body").evaluate(
+            "() => window.__selectionContentRenderCalls.at(-1)"
+        )
+        assert set(affected) == {"revenue-trend", "region-comparison"}
+        assert frame.locator('[data-view-id="total-revenue"]').evaluate(
+            "node => Boolean(node.__selectionContentIdentity)"
+        )
+
+        with page.expect_download(timeout=20_000) as download_info:
+            page.locator("#download-button").click()
+        report_path = tmp_path / "selection-content-report.html"
+        download_info.value.save_as(report_path)
+        report = report_path.read_text(encoding="utf-8")
+        assert (
+            '<h2 data-dv-content-field="sections.trend.title">'
+            "华南区域趋势与结构</h2>"
+        ) in report
+        assert (
+            'data-dv-content-field="views.region-comparison.description">'
+            "当前分析：华南区域</p>"
+        ) in report
+        assert '"content_bindings": {' in report
 
 
 @pytest.mark.e2e
@@ -226,11 +486,33 @@ def test_sources_inspector_exposes_resolved_and_parameterized_sql(
 
 
 @pytest.mark.e2e
-def test_web_component_reference_adapter_consumes_runtime_v1_without_canvas_runtime(
+def test_sources_inspector_loads_structured_python_execution_log(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(SALES, tmp_path / "python-log-workspace")
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales")
+        _run_and_wait(page)
+
+        page.locator("#query-diagnostics > summary").click()
+        transform = page.locator('[data-node-id="dataset:sales-metrics"]')
+        expect(transform).to_be_visible()
+        transform.click()
+
+        inspector = page.locator("#node-inspector")
+        expect(inspector).to_be_visible()
+        expect(inspector.locator("#node-inspector-title")).to_have_text("销售衍生指标")
+        expect(inspector).to_contain_text("Structured node log")
+        expect(inspector).to_contain_text("dataviz/execution-log/v1")
+        expect(inspector).to_contain_text("runtime_completed")
+
+
+@pytest.mark.e2e
+def test_web_component_reference_adapter_consumes_runtime_v2_without_canvas_runtime(
     page: Page,
 ):
     manifest = {
-        "protocol": {"schema": "dataviz/runtime/v1", "component_registry_version": "3.0.0"},
+        "protocol": {"schema": "dataviz/runtime/v2", "component_registry_version": "3.0.0"},
         "selections": {"dashboard:probe/region": ["East"]},
         "view_specs": [{"id": "detail", "inputs": {"main": "source:data/main"}}],
         "portable": {
@@ -439,6 +721,21 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         expect(date_range.locator("input[data-selection-input]")).to_have_value(
             "2026-01-01,2026-03-31"
         )
+        date_range.locator("button", has_text="Clear").click()
+        expect(date_range.locator("input[data-selection-input]")).to_have_value("")
+        frame.locator("body").evaluate(
+            """() => new Promise((resolve, reject) => {
+              const deadline = performance.now() + 3000;
+              const check = () => {
+                const value = window.dataviz.selections['view:detail-table/date-window'];
+                if (Array.isArray(value) && value.length === 0) return resolve();
+                if (performance.now() > deadline) return reject(new Error(JSON.stringify(value)));
+                setTimeout(check, 25);
+              };
+              check();
+            })"""
+        )
+        expect(detail).not_to_contain_text("No rows match the current selections")
 
         # Build a 1,000-option Story fixture against the public package API.
         frame.locator("body").evaluate(
@@ -505,7 +802,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
             ["East"], force=True
         )
         custom = frame.locator('[data-view-id="custom-specimen"]')
-        expect(custom).to_have_attribute("data-view-status", "failed", timeout=10_000)
+        expect(custom).to_have_attribute("data-view-status", "error", timeout=10_000)
         boundary = frame.locator("body").evaluate(
             """() => window.datavizRuntime.rendererErrors.get('custom-specimen')"""
         )
@@ -772,7 +1069,7 @@ def test_perspective_fills_view_uses_opaque_settings_and_releases_page_wheel(
 
 
 @pytest.mark.e2e
-def test_browser_transform_worker_cancellation_timeout_and_serializable_error(
+def test_browser_js_interactive_worker_cancellation_timeout_and_serializable_error(
     page: Page, tmp_path: Path
 ):
     workspace = _copy_workspace(WORKER, tmp_path / "worker")
@@ -785,7 +1082,7 @@ def test_browser_transform_worker_cancellation_timeout_and_serializable_error(
         expect(table).to_contain_text("20")
         metrics = frame.locator("body").evaluate(
             """() => ({
-              worker: window.datavizRuntime.metrics.browserTransforms,
+              worker: window.datavizRuntime.metrics.interactiveTransforms,
               leakedEntrypoint: typeof window.transform,
             })"""
         )
@@ -803,7 +1100,7 @@ def test_browser_transform_worker_cancellation_timeout_and_serializable_error(
         page.wait_for_function(
             """() => {
               const runtime = document.querySelector('#canvas-frame').contentWindow.datavizRuntime;
-              return runtime.metrics.browserTransforms.cancelled >= 1
+              return runtime.metrics.interactiveTransforms.cancelled >= 1
                 && runtime.activeTransforms.size === 0;
             }""",
             timeout=10_000,
@@ -813,16 +1110,75 @@ def test_browser_transform_worker_cancellation_timeout_and_serializable_error(
         delay.evaluate(
             "input => { input.value = '500'; input.dispatchEvent(new Event('change', {bubbles:true})); }"
         )
-        expect(table).to_have_attribute("data-view-status", "failed", timeout=10_000)
+        expect(table).to_have_attribute("data-view-status", "error", timeout=10_000)
         error = frame.locator("body").evaluate(
             """() => {
               const value = window.datavizRuntime.transformErrors.get('scaled');
               return {code:value.code, name:value.name, message:value.message, worker:value.worker};
             }"""
         )
-        assert error["code"] == "browser_transform_timeout"
+        assert error["code"] == "interactive_transform_timeout"
         assert error["name"] == "TimeoutError"
         assert error["worker"] is True
+
+
+@pytest.mark.e2e
+def test_server_and_browser_python_share_output_contract_and_export_runtime(
+    page: Page, tmp_path: Path
+):
+    workspace = _build_interactive_runtime_workspace(tmp_path / "runtime-matrix")
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "runtime-matrix")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        server_table = frame.locator('[data-view-id="server-table"]')
+        browser_table = frame.locator('[data-view-id="browser-table"]')
+        expect(server_table).to_have_attribute("data-view-status", "ready", timeout=20_000)
+        expect(browser_table).to_have_attribute("data-view-status", "ready", timeout=20_000)
+        expect(server_table).to_contain_text("104")
+        expect(browser_table).to_contain_text("4")
+        original_run = page.locator("#canvas-frame").get_attribute("data-run-id")
+
+        page.locator("#compute-parameters-control summary").click()
+        factor = page.locator('#compute-parameter-form input[name="factor"]')
+        factor.fill("3")
+        factor.dispatch_event("change")
+        expect(server_table).to_contain_text("106", timeout=20_000)
+        expect(browser_table).to_contain_text("6", timeout=20_000)
+        assert page.locator("#canvas-frame").get_attribute("data-run-id") == original_run
+        runtime_state = frame.locator("body").evaluate(
+            """() => ({
+              committed:window.dataviz.compute_parameters.factor,
+              browserWorkers:window.datavizRuntime.metrics.interactiveTransforms.completed,
+              active:window.datavizRuntime.activeTransforms.size,
+            })"""
+        )
+        assert runtime_state == {"committed": 3, "browserWorkers": 2, "active": 0}
+
+        with page.expect_download(timeout=30_000) as download_info:
+            page.locator("#download-button").click()
+        download = download_info.value
+        assert download.suggested_filename.endswith(".zip")
+        archive = tmp_path / "runtime-report.zip"
+        download.save_as(archive)
+        extracted = tmp_path / "runtime-report"
+        with zipfile.ZipFile(archive) as bundle:
+            bundle.extractall(extracted)
+            names = set(bundle.namelist())
+        html_name = next(name for name in names if name.endswith(".html"))
+        assert any(name.endswith(".assets/pyodide/pyodide.mjs") for name in names)
+
+    with _running_static_server(extracted) as report_url:
+        page.goto(f"{report_url}/{html_name}", wait_until="domcontentloaded")
+        exported_server = page.locator('[data-view-id="server-table"]')
+        exported_browser = page.locator('[data-view-id="browser-table"]')
+        expect(exported_server).to_have_attribute("data-view-status", "ready", timeout=20_000)
+        expect(exported_browser).to_have_attribute("data-view-status", "ready", timeout=20_000)
+        expect(exported_server).to_contain_text("106")
+        expect(exported_browser).to_contain_text("6")
+        assert page.locator("body").evaluate(
+            "() => window.datavizRuntime.metrics.interactiveTransforms.completed"
+        ) >= 1
 
 
 @pytest.mark.e2e
@@ -833,7 +1189,16 @@ def test_arrow_transport_and_repeat_thousand_group_search_lazy_budget(
     sql = workspace / "dashboards" / "store-performance" / "sources" / "store-sales.sql"
     sql.write_text(sql.read_text(encoding="utf-8").replace("range(1, 101)", "range(1, 1001)"), encoding="utf-8")
     dashboard = workspace / "dashboards" / "store-performance" / "dashboard.yaml"
-    dashboard.write_text(dashboard.read_text(encoding="utf-8").replace("limit: 100", "limit: 1000"), encoding="utf-8")
+    definition = yaml.safe_load(dashboard.read_text(encoding="utf-8"))
+    definition["sections"][1]["repeat"]["limit"] = 1000
+    all_store_view = next(
+        item for item in definition["views"] if item["id"] == "all-store-trend"
+    )
+    all_store_view["description"] = "每家门店共享同一份 Dataset。"
+    dashboard.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
 
     with _running_server(workspace) as base_url:
         _open_dashboard(page, base_url, "store-performance")
@@ -842,6 +1207,9 @@ def test_arrow_transport_and_repeat_thousand_group_search_lazy_budget(
         host = frame.locator('[data-repeat-section="all-stores"]')
         expect(host).to_have_attribute("data-repeat-count", "1000", timeout=30_000)
         expect(host).to_have_attribute("data-repeat-rendered-cards", "40")
+        expect(host.locator(":scope > .dv-repeat-card").first.locator(".dv-view-description")).to_have_text(
+            "每家门店共享同一份 Dataset。"
+        )
         assert frame.locator("body").evaluate(
             """() => {
               const output = window.dataviz.portable.outputs['source:store-sales/main'];
@@ -881,7 +1249,9 @@ def test_progressive_failure_and_consecutive_run_are_isolated(
     workspace = _copy_workspace(PROGRESSIVE, tmp_path / "progressive")
     slow_code = workspace / "dashboards" / "progressive" / "sources" / "slow.py"
     slow_code.write_text(
-        "import time\n\ndef load(context):\n    time.sleep(1.2)\n    raise RuntimeError('expected branch failure')\n",
+        # Leave a deterministic observation window after the fast branch is
+        # visible, even on a cold browser/CI worker.
+        "import time\n\ndef load(context):\n    time.sleep(4)\n    raise RuntimeError('expected branch failure')\n",
         encoding="utf-8",
     )
 
@@ -892,9 +1262,9 @@ def test_progressive_failure_and_consecutive_run_are_isolated(
         fast = frame.locator('[data-view-id="fast-view"]')
         slow = frame.locator('[data-view-id="slow-view"]')
         expect(fast).to_have_attribute("data-view-status", "ready", timeout=15_000)
-        expect(slow).to_have_attribute("data-view-status", "waiting")
+        expect(slow).to_have_attribute("data-view-status", "loading")
         first_run_id = page.locator("#canvas-frame").get_attribute("data-run-id")
-        expect(slow).to_have_attribute("data-view-status", "failed", timeout=15_000)
+        expect(slow).to_have_attribute("data-view-status", "error", timeout=15_000)
         expect(page.locator("#query-diagnostics-label")).to_have_text("Partial")
 
         slow_code.write_text(

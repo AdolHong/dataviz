@@ -6,14 +6,20 @@ import shutil
 import yaml
 
 from dataviz.content_templates import (
+    build_content_bindings,
     format_parameter_value,
-    inspect_parameter_template,
+    format_selection_value,
+    inspect_content_template,
     interpolate_dashboard_content,
 )
 from dataviz.execution import Executor
 from dataviz.rendering import CanvasRenderer
 from dataviz.workspace import load_workspace, validate_workspace
-from dataviz.workspace.models import DashboardDefinition, ParameterDefinition
+from dataviz.workspace.models import (
+    DashboardDefinition,
+    QueryParameterDefinition,
+    SelectionDefinition,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,8 +27,8 @@ MINIMAL = ROOT / "examples" / "minimal-workspace"
 
 
 def test_parameter_content_templates_format_human_facing_values():
-    period = ParameterDefinition(id="period", type="date_range")
-    stores = ParameterDefinition.model_validate(
+    period = QueryParameterDefinition(id="period", type="date_range")
+    stores = QueryParameterDefinition.model_validate(
         {
             "id": "stores",
             "type": "multi_select",
@@ -40,21 +46,96 @@ def test_parameter_content_templates_format_human_facing_values():
         "2026-08-09 至 2026-08-22"
     )
     assert format_parameter_value([5740, 5750], stores) == "上海仓、杭州仓"
-    assert inspect_parameter_template("仓 {{ parameters.store_id }}")[0] == {"store_id"}
-    assert inspect_parameter_template("{{ selections.region }}")[1]
+    inspection = inspect_content_template("仓 {{ parameters.store_id }}")
+    assert inspection.query_parameters == {"store_id"}
+    assert inspect_content_template("{{ selections.region }}").errors
+
+
+def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
+    definition = DashboardDefinition.model_validate(
+        {
+            "schema": "dataviz/dashboard/v2",
+            "id": "hourly-sales",
+            "title": "小时销售",
+            "dashboard_selections": [
+                {
+                    "id": "region",
+                    "type": "single_select",
+                    "default": "south",
+                    "choices": [{"label": "华南", "value": "south"}],
+                }
+            ],
+            "sections": [
+                {
+                    "id": "night_analysis",
+                    "title": "{{ selections.section.night_analysis.dow }}各小时销售分析",
+                    "description": "{{ selections.dashboard.region }}区域",
+                    "selections": [
+                        {
+                            "id": "dow",
+                            "type": "single_select",
+                            "default": 5,
+                            "choices": [
+                                {"label": "周四", "value": 4},
+                                {"label": "周五", "value": 5},
+                            ],
+                        }
+                    ],
+                    "views": ["detail"],
+                }
+            ],
+            "views": [
+                {
+                    "id": "detail",
+                    "title": "{{ selections.section.night_analysis.dow }}明细",
+                    "description": "统计{{ selections.section.night_analysis.dow }}的数据",
+                    "template": "table",
+                }
+            ],
+        }
+    )
+    selected = {"section:night_analysis/dow": 4}
+    resolved = interpolate_dashboard_content(definition, {}, {}, selected)
+    bindings = build_content_bindings(definition, {})
+
+    assert resolved.sections[0].title == "周四各小时销售分析"
+    assert resolved.sections[0].description == "华南区域"
+    assert resolved.views[0].title == "周四明细"
+    assert resolved.views[0].description == "统计周四的数据"
+    binding = bindings["sections.night_analysis.title"]
+    assert binding["template"] == (
+        "{{ selections.section.night_analysis.dow }}各小时销售分析"
+    )
+    assert binding["references"][0]["key"] == "section:night_analysis/dow"
+    assert binding["target"] == {
+        "scope": "section",
+        "owner_id": "night_analysis",
+        "property": "title",
+    }
+    selection = SelectionDefinition.model_validate(
+        {
+            "id": "dow",
+            "type": "multi_select",
+            "choices": [
+                {"label": "周四", "value": 4},
+                {"label": "周五", "value": 5},
+            ],
+        }
+    )
+    assert format_selection_value([4, 5], selection) == "全部"
 
 
 def test_interpolation_is_limited_to_declarative_content_fields():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v1",
+            "schema": "dataviz/dashboard/v2",
             "id": "hourly-sales",
             "title": "商品 {{ parameters.product_id }}",
             "subtitle": "{{ parameters.period }}",
             "description": "仓 {{ parameters.store_id }}",
             "assumptions": ["当前商品：{{ parameters.product_id }}"],
             "query_parameters": [
-                {"id": "store_id", "default": 5740},
+                {"id": "store_id", "type": "integer", "default": 5740},
                 {"id": "product_id", "default": "980464683"},
                 {"id": "period", "type": "date_range", "default": []},
             ],
@@ -98,14 +179,87 @@ def test_default_renderer_uses_committed_parameters_in_server_and_export_content
     dashboard = workspace.dashboard("sales-overview")
     result = Executor(workspace).run(
         "sales-overview",
-        params={"min_query_revenue": 150000},
+        query_parameters={"min_query_revenue": 150000},
         refresh=True,
     )
     rendered = CanvasRenderer(workspace).render(dashboard, result, asset_mode="inline")
 
     assert '<p class="dv-subtitle">当前取数下限：150000</p>' in rendered
     assert "{{ parameters.min_query_revenue }}" not in rendered
-    assert '"parameters": {"min_query_revenue": 150000}' in rendered
+    assert '"query_parameters": {"min_query_revenue": 150000}' in rendered
+
+
+def test_default_view_shell_renders_static_and_dynamic_descriptions(tmp_path: Path):
+    root = tmp_path / "workspace"
+    shutil.copytree(MINIMAL, root, ignore=shutil.ignore_patterns(".dataviz", "dist"))
+    dashboard_path = root / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    total = next(item for item in definition["views"] if item["id"] == "total-revenue")
+    comparison = next(
+        item for item in definition["views"] if item["id"] == "region-comparison"
+    )
+    total["description"] = "汇总当前样本的收入。"
+    comparison["description"] = "当前区域：{{ selections.dashboard.region }}"
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    workspace = load_workspace(root)
+    dashboard = workspace.dashboard("sales-overview")
+    result = Executor(workspace).run("sales-overview", refresh=True)
+    rendered = CanvasRenderer(workspace).render(dashboard, result, asset_mode="inline")
+
+    assert '<div class="dv-view-heading">' in rendered
+    assert (
+        '<p class="dv-view-description">汇总当前样本的收入。</p>'
+        in rendered
+    )
+    assert (
+        '<p class="dv-view-description" '
+        'data-dv-content-field="views.region-comparison.description">'
+        '当前区域：全部</p>'
+    ) in rendered
+
+
+def test_custom_canvas_content_helper_keeps_selection_binding(tmp_path: Path):
+    root = tmp_path / "workspace"
+    shutil.copytree(MINIMAL, root, ignore=shutil.ignore_patterns(".dataviz", "dist"))
+    dashboard_root = root / "dashboards" / "sales-overview"
+    dashboard_path = dashboard_root / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    trend = next(item for item in definition["sections"] if item["id"] == "trend")
+    trend["title"] = "{{ selections.section.trend.dow }}趋势"
+    trend["selections"] = [
+        {
+            "id": "dow",
+            "field": "region",
+            "type": "single_select",
+            "default": "华东",
+            "choices": [{"label": "周五", "value": "华东"}],
+        }
+    ]
+    definition["canvas"] = {"template": "canvas/content.html"}
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    canvas_path = dashboard_root / "canvas" / "content.html"
+    canvas_path.parent.mkdir(parents=True)
+    canvas_path.write_text(
+        '<h2>{{ content("sections.trend.title") }}</h2>{{ view("revenue-trend") }}',
+        encoding="utf-8",
+    )
+
+    workspace = load_workspace(root)
+    dashboard = workspace.dashboard("sales-overview")
+    result = Executor(workspace).run("sales-overview", refresh=True)
+    rendered = CanvasRenderer(workspace).render(dashboard, result, asset_mode="inline")
+
+    assert (
+        '<h2><span data-dv-content-field="sections.trend.title">'
+        "周五趋势</span></h2>"
+    ) in rendered
 
 
 def test_validate_rejects_unknown_and_executable_content_expressions(tmp_path: Path):
@@ -115,6 +269,17 @@ def test_validate_rejects_unknown_and_executable_content_expressions(tmp_path: P
     definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
     definition["title"] = "{{ parameters.deleted_id }}"
     definition["subtitle"] = "{{ parameters.min_query_revenue + 1 }}"
+    definition["description"] = "{{ selections.section.trend.dow }}"
+    definition["sections"][1]["selections"] = [
+        {
+            "id": "dow",
+            "type": "single_select",
+            "choices": [{"label": "周五", "value": 5}],
+        }
+    ]
+    definition["views"][0]["description"] = (
+        "{{ selections.section.missing.dow }}"
+    )
     dashboard_path.write_text(
         yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
@@ -124,3 +289,5 @@ def test_validate_rejects_unknown_and_executable_content_expressions(tmp_path: P
 
     assert any(item.code == "content_parameter_unknown" for item in diagnostics)
     assert any(item.code == "content_template_invalid" for item in diagnostics)
+    assert any(item.code == "content_selection_out_of_scope" for item in diagnostics)
+    assert any(item.code == "content_selection_unknown" for item in diagnostics)

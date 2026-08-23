@@ -12,7 +12,7 @@ from dataviz.workspace import compile_selection_contract, load_workspace, valida
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE = ROOT / "examples" / "sales-workspace"
-SHOWCASE_WORKSPACE = ROOT / "examples" / "legacy-showcase"
+SHOWCASE_WORKSPACE = ROOT / "examples" / "feature-showcase"
 
 
 def test_workspace_is_valid():
@@ -20,7 +20,7 @@ def test_workspace_is_valid():
     diagnostics = validate_workspace(workspace)
     assert not [item for item in diagnostics if item.level == "error"]
     assert set(workspace.dashboards["sales"].sources) == {"orders", "targets"}
-    assert set(workspace.dashboards["sales"].transforms) == {"sales-metrics"}
+    assert set(workspace.dashboards["sales"].dataset_transforms) == {"sales-metrics"}
 
 
 def test_workspace_uses_physical_names_for_renamed_copied_and_deleted_dashboards(tmp_path: Path):
@@ -112,10 +112,10 @@ def test_query_targets_and_all_three_source_types():
     workspace = load_workspace(WORKSPACE)
     executor = Executor(workspace)
     for source in ("orders", "targets"):
-        result = executor.run("sales", targets=[f"source:{source}"])
-        assert result.status == "success", result.model_dump_json(indent=2)
+        result = executor.run("sales", targets=[f"source:{source}/main"])
+        assert result.status == "ready", result.model_dump_json(indent=2)
         node = result.nodes[f"source:{source}"]
-        assert node.status == "succeeded"
+        assert node.status == "ready"
         assert node.outputs["main"].kind == "table"
 
     showcase = load_workspace(SHOWCASE_WORKSPACE)
@@ -124,24 +124,24 @@ def test_query_targets_and_all_three_source_types():
     assert showcase.dashboard("source-lab").sources["forecast"][1].type == "python"
 
 
-def test_default_run_executes_sources_and_server_transforms():
+def test_default_run_executes_sources_and_dataset_transforms():
     workspace = load_workspace(WORKSPACE)
     result = Executor(workspace).run("sales")
-    assert result.status == "success", result.model_dump_json(indent=2)
+    assert result.status == "ready", result.model_dump_json(indent=2)
     assert set(result.nodes) == {
         "source:orders",
         "source:targets",
-        "transform:sales-metrics",
+        "dataset:sales-metrics",
     }
     assert set(result.outputs) == {
         "source:orders/main",
         "source:targets/main",
-        "transform:sales-metrics/trend",
-        "transform:sales-metrics/completion",
+        "dataset:sales-metrics/trend",
+        "dataset:sales-metrics/completion",
     }
 
 
-def test_three_level_selections_compile_and_do_not_invalidate_sources():
+def test_three_level_selections_are_browser_state_and_do_not_enter_query_run():
     workspace = load_workspace(WORKSPACE)
     dashboard = workspace.dashboard("sales")
     contract = compile_selection_contract(dashboard.definition)
@@ -150,21 +150,25 @@ def test_three_level_selections_compile_and_do_not_invalidate_sources():
 
     executor = Executor(workspace)
     executor.run("sales")
-    filtered = executor.run(
-        "sales",
-        selections={"region": ["North"], "min_revenue": 15000, "min_orders": 120},
-    )
-    assert filtered.status == "success"
-    assert filtered.selections == {
-        "dashboard:sales/region": ["North"],
-        "section:pulse/min_revenue": 15000,
-        "view:detail/min_orders": 120,
-    }
+    filtered = executor.run("sales")
+    assert filtered.status == "ready"
+    assert not hasattr(filtered, "selections")
     assert all(
         filtered.nodes[f"source:{source_id}"].result_origin == "cache"
         for source_id in ("orders", "targets")
     )
-    assert filtered.nodes["transform:sales-metrics"].result_origin == "cache"
+    assert filtered.nodes["dataset:sales-metrics"].result_origin == "cache"
+
+    report = CanvasRenderer(workspace).render(
+        dashboard,
+        filtered,
+        selections={
+            "dashboard:sales/region": ["North"],
+            "section:pulse/min_revenue": 15000,
+            "view:detail/min_orders": 120,
+        },
+    )
+    assert '"dashboard:sales/region": ["North"]' in report
 
 
 def test_custom_canvas_and_report(tmp_path: Path):
@@ -201,16 +205,16 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert "viewportWidth - gutter * 2" in report
     assert "available.forEach(option => { option.selected = !allSelected; });" in report
     assert "normalizeAll" not in report
-    assert "const changedOutputs = await datavizRuntime.runTransforms(preliminaryKeys);" in report
+    assert "await datavizRuntime.runTransforms(changedSelectionKeys);" in report
     assert "refreshCascadingSelections();\n  readSelectionInputs();" in report
-    assert "affectedViews(changedSelectionKeys, changedOutputs)" in report
-    assert "changedSelectionKeys?.length === 0" in report
+    assert "affectedViews(changedSelectionKeys, new Set())" in report
+    assert "changedSelectionKeys == null || changedSelectionKeys.length" in report
     assert "datavizSelectionCanApply" in report
     assert "dataset does not expose the selected field" in report
     assert "state.selection.matches(row, item, state.selections[item.key])" in report
     assert "document.documentElement.dataset.selecting" not in report
     assert '"source:orders/main": [' in report
-    assert '"transform:sales-metrics/trend": [' in report
+    assert '"dataset:sales-metrics/trend": [' in report
     assert "window.datavizRuntime.registerView" in report
     assert "window.datavizClient" not in report
     assert "@perspective-dev/viewer@5.2.0" not in report
@@ -224,13 +228,18 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert "descriptor.legendInteraction !== 'filter'" in report
     assert "replaceMerge:['xAxis', 'series']" in report
     assert "state.table.replace(state.latestRows)" in report
+    assert "window.datavizInteractivePythonWorkerSource=" not in report
+    assert '"pyodide_index_url"' not in report
 
 
 def test_report_selection_is_initial_state_not_an_export_cut(tmp_path: Path):
     workspace = load_workspace(WORKSPACE)
-    result = Executor(workspace).run("sales", selections={"region": ["East"]})
+    result = Executor(workspace).run("sales")
     output = CanvasRenderer(workspace).write_report(
-        workspace.dashboard("sales"), result, tmp_path / "interactive.html"
+        workspace.dashboard("sales"),
+        result,
+        tmp_path / "interactive.html",
+        selections={"dashboard:sales/region": ["East"]},
     )
     report = output.read_text(encoding="utf-8")
     assert '<option value="East" selected>' in report

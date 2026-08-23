@@ -60,7 +60,9 @@
       if (start.control.value) end.control.min = start.control.value;
       const invalidOrder = Boolean(start.control.value && end.control.value && start.control.value > end.control.value);
       if (invalidOrder) end.control.value = start.control.value;
-      input.value = [start.control.value, end.control.value].join(',');
+      input.value = start.control.value || end.control.value
+        ? [start.control.value, end.control.value].join(',')
+        : '';
       status.textContent = start.control.value || end.control.value
         ? `${start.control.value || '…'} → ${end.control.value || '…'}`
         : 'All dates';

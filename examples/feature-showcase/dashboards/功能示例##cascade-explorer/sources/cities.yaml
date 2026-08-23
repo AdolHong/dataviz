@@ -1,0 +1,9 @@
+schema: dataviz/source/v1
+kind: source
+id: cities
+name: 城市 SQL
+type: sql
+adapter: warehouse
+code: cities.sql
+outputs: {main: {kind: table}}
+cache: {mode: none}

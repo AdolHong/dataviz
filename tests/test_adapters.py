@@ -11,10 +11,10 @@ from dataviz.workspace import load_workspace, validate_workspace
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SHOWCASE = ROOT / "examples" / "legacy-showcase"
+SHOWCASE = ROOT / "examples" / "feature-showcase"
 
 
-def test_adapter_bindings_and_all_migrated_dashboards_run():
+def test_adapter_bindings_and_all_example_dashboards_run():
     workspace = load_workspace(SHOWCASE)
     assert not [item for item in validate_workspace(workspace) if item.level == "error"]
     assert set(workspace.dashboards) == {
@@ -26,13 +26,13 @@ def test_adapter_bindings_and_all_migrated_dashboards_run():
     executor = Executor(workspace)
     for dashboard_id in workspace.dashboards:
         result = executor.run(dashboard_id)
-        assert result.status == "success", result.model_dump_json(indent=2)
+        assert result.status == "ready", result.model_dump_json(indent=2)
 
 
 def test_file_adapter_and_bundled_file_are_both_available():
     result = Executor(load_workspace(SHOWCASE)).run("cascade-explorer")
-    assert result.nodes["source:uploaded-file"].status == "succeeded"
-    assert result.nodes["source:bundled-file"].status == "succeeded"
+    assert result.nodes["source:uploaded-file"].status == "ready"
+    assert result.nodes["source:bundled-file"].status == "ready"
 
 
 def test_mysql_and_starrocks_urls_use_local_environment(monkeypatch):
@@ -91,7 +91,7 @@ title: Adapter tests
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v1
+        """schema: dataviz/dashboard/v2
 kind: dashboard
 id: adapter-source
 title: Adapter source
@@ -141,7 +141,7 @@ outputs:
         result.outputs["source:api/main"]
     )
 
-    assert result.status == "success"
+    assert result.status == "ready"
     assert value == {
         "name": "team-api",
         "type": "http",

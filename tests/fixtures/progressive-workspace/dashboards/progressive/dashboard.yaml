@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v1
+schema: dataviz/dashboard/v2
 kind: dashboard
 id: progressive
 title: Progressive branch check
@@ -10,16 +10,15 @@ views:
   - id: fast-view
     title: Fast branch
     template: table
-    input: fast
+    input: source:fast/main
     columns: [branch, value]
   - id: slow-view
     title: Slow branch
     template: table
-    input: slow
+    input: source:slow/main
     columns: [branch, value]
 sections:
   - id: branches
     title: Independent branches
     template: comparison
     views: [fast-view, slow-view]
-

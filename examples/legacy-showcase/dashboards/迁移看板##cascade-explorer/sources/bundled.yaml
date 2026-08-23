@@ -1,8 +1,0 @@
-schema: dataviz/source/v1
-kind: source
-id: bundled-file
-name: 看板内置 CSV
-type: file
-path: ../data/fixed.csv
-format: csv
-cache: {mode: persistent}

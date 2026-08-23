@@ -45,14 +45,26 @@
               <div id="query-state" class="query-state">No dataset loaded.</div>
             </div>
           </details>
+          <details id="compute-parameters-control" class="header-control" data-header-popover data-overlay-floating="true" data-overlay-width="560">
+            <summary class="header-control__trigger">
+              <span class="header-control__index header-control__index--compute">02</span>
+              <span><strong>Analysis</strong><small id="compute-control-meta">None</small></span>
+              <i>⌄</i>
+            </summary>
+            <div class="header-control__popover header-control__popover--compute">
+              <div class="section-heading"><span>02</span><div><h3>Compute parameters</h3><p>Recompute declared analysis branches without querying data again.</p></div></div>
+              <form id="compute-parameter-form" class="parameter-form"></form>
+              <footer class="compute-actions"><span id="compute-state">Results are current.</span><button id="compute-apply" class="button button--run" type="button" disabled>Run analysis</button></footer>
+            </div>
+          </details>
           <details id="dashboard-selections-control" class="header-control" data-header-popover data-overlay-floating="true" data-overlay-width="760">
             <summary class="header-control__trigger">
-              <span class="header-control__index header-control__index--selection">02</span>
+              <span class="header-control__index header-control__index--selection">03</span>
               <span><strong>Selections</strong><small id="dashboard-control-meta">None</small></span>
               <i>⌄</i>
             </summary>
             <div class="header-control__popover header-control__popover--selections">
-              <div class="section-heading"><span>02</span><div><h3>Dashboard selections</h3><p>Choose included rows and redraw all views without querying.</p></div></div>
+              <div class="section-heading"><span>03</span><div><h3>Dashboard selections</h3><p>Choose included rows and redraw all views without querying.</p></div></div>
               <form id="dashboard-selection-form" class="selection-form"></form>
             </div>
           </details>

@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v1
+schema: dataviz/dashboard/v2
 kind: dashboard
 id: sales-overview
 title: 销售概览
@@ -20,7 +20,8 @@ sources:
     type: sql
     adapter: warehouse
     code: sources/sales.sql
-    params: [min_query_revenue]
+    query_params: [min_query_revenue]
+    outputs: {main: {kind: table}}
 
 dashboard_selections:
   - id: region
@@ -36,7 +37,7 @@ dashboard_selections:
 views:
   - id: total-revenue
     title: 总收入
-    input: sales
+    input: source:sales/main
     template: metric
     value: revenue
     label: 当前选择范围
@@ -44,7 +45,7 @@ views:
 
   - id: total-orders
     title: 总订单
-    input: sales
+    input: source:sales/main
     template: metric
     value: orders
     label: 当前选择范围
@@ -52,7 +53,7 @@ views:
 
   - id: revenue-trend
     title: 收入趋势
-    input: sales
+    input: source:sales/main
     template: line
     x: day
     y: revenue
@@ -61,7 +62,7 @@ views:
 
   - id: region-comparison
     title: 区域收入
-    input: sales
+    input: source:sales/main
     template: bar
     x: region
     y: revenue
@@ -69,7 +70,7 @@ views:
 
   - id: sales-detail
     title: 展示型销售明细
-    input: sales
+    input: source:sales/main
     template: table
     columns: [day, region, revenue, orders]
     limit: 50
@@ -82,7 +83,7 @@ views:
 
   - id: sales-perspective
     title: 可透视销售明细
-    input: sales
+    input: source:sales/main
     template: perspective
     columns: [day, region, revenue, orders]
     config:

@@ -1,7 +1,7 @@
-schema: dataviz/dashboard/v1
+schema: dataviz/dashboard/v2
 kind: dashboard
 id: worker-runtime
-title: Browser Transform Worker
+title: Browser JS Interactive Worker
 
 dashboard_selections:
   - id: delay_ms
@@ -14,14 +14,15 @@ sources:
     type: file
     path: data/rows.csv
     format: csv
+    outputs: {main: {kind: table}}
 
-browser_transforms:
+interactive_transforms:
   - transforms/scaled.yaml
 
 views:
   - id: scaled-table
     title: Scaled rows
-    input: browser:scaled/main
+    input: interactive:scaled/main
     template: table
     columns: [name, value]
 
@@ -29,4 +30,3 @@ sections:
   - id: results
     title: Results
     views: [scaled-table]
-

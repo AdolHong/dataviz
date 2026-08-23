@@ -14,6 +14,7 @@ from typing import Any
 import pandas as pd
 
 from dataviz.errors import (
+    ExecutionFailure,
     QueryConnectionFailure,
     QueryExecutionFailure,
     QueryTimeoutFailure,
@@ -194,6 +195,7 @@ def execute_sql_query(
     run_id: str,
     node_id: str,
     definition_path: Path,
+    cancel_event: Any | None = None,
 ) -> pd.DataFrame:
     """Execute SQL in a disposable process so timeout means actual cancellation."""
     safe_node_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", node_id)
@@ -246,6 +248,17 @@ def execute_sql_query(
                     payload = None
                 if payload is not None:
                     break
+            if cancel_event is not None and cancel_event.is_set():
+                _terminate_process(process)
+                raise ExecutionFailure(
+                    "SQL query was cancelled",
+                    file=definition_path,
+                    details={
+                        "code": "cancelled",
+                        "node_id": node_id,
+                        "adapter_type": adapter.get("type"),
+                    },
+                )
             if deadline is not None and time.monotonic() >= deadline:
                 _terminate_process(process)
                 raise QueryTimeoutFailure(
@@ -319,8 +332,8 @@ class SqlSourceRunner:
         code_path = (request.definition_path.parent / definition.code).resolve()
         query = code_path.read_text(encoding="utf-8")
         parameters = {
-            name: request.context.params.get(name)
-            for name in definition.params
+            name: request.context.query_params.get(name)
+            for name in definition.query_params
         }
         adapter_alias = definition.adapter or ""
         adapter_name = request.adapter_bindings.get(adapter_alias, adapter_alias)
@@ -380,7 +393,10 @@ class SqlSourceRunner:
         if not code_path.exists():
             raise SourceFailure("SQL file does not exist", file=code_path)
         query = code_path.read_text(encoding="utf-8")
-        parameters = {name: request.context.params.get(name) for name in definition.params}
+        parameters = {
+            name: request.context.query_params.get(name)
+            for name in definition.query_params
+        }
         adapter = request.adapters.runtime_config(adapter_name, request.adapter_bindings)
         timeout_seconds = (
             definition.timeout_seconds
@@ -404,6 +420,7 @@ class SqlSourceRunner:
                     run_id=request.context.run_id,
                     node_id=request.node_id,
                     definition_path=code_path,
+                    cancel_event=request.cancel_event,
                 )
             except QueryTimeoutFailure as exc:
                 details = dict(exc.details or {})

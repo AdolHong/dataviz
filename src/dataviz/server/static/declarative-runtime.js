@@ -175,7 +175,9 @@ const dvRepeatInstances = (spec, view, state) => {
   const instances = groups.map(group => ({
     key: group.key,
     id: `${view.id}@${encodeURIComponent(spec.section)}/${group.values.map(value => encodeURIComponent(String(value ?? ''))).join('/')}`,
+    sourceViewId: view.id,
     title: dvRepeatTitle(spec.title, group.row, spec.by),
+    description: view.description || '',
     searchText: [
       dvRepeatTitle(spec.title, group.row, spec.by),
       ...group.values,

@@ -1,0 +1,9 @@
+schema: dataviz/source/v1
+kind: source
+id: metrics
+name: 城市经营指标
+type: sql
+adapter: warehouse
+code: metrics.sql
+outputs: {main: {kind: table}}
+cache: {mode: session}

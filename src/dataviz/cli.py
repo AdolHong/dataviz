@@ -25,22 +25,33 @@ from dataviz.authoring_log import (
     finish_authoring_session,
     start_authoring_session,
 )
+from dataviz.authoring_evaluation import (
+    AUTHORING_APPROACHES,
+    authoring_evaluation_protocol,
+    authoring_task_catalog,
+    build_authoring_evaluation_report,
+    inspect_authoring_trial,
+    prepare_authoring_trial,
+    record_authoring_assessment,
+)
 from dataviz.artifacts import ArtifactStore
 from dataviz.components import component_story_catalog, validate_component_packages
-from dataviz.errors import DatavizError
+from dataviz.errors import DatavizError, ExecutionFailure
 from dataviz.frontend_adapters import frontend_adapter_catalog, frontend_adapter_source
 from dataviz.documentation import DOC_TOPICS, docs_catalog, resolve_doc_topic
-from dataviz.execution import Executor
+from dataviz.execution import Executor, InteractionExecutor
+from dataviz.execution.interactive import load_run_result, resolve_compute_parameters
+from dataviz.execution.plan import reachable_output_references
 from dataviz.execution.references import parse_output_reference
 from dataviz.maintenance import cleanup_workspace_storage
-from dataviz.migrations import CURRENT_SCHEMAS, migrate_workspace
 from dataviz.rendering import CanvasRenderer, template_catalog
 from dataviz.renderer_contract import run_renderer_contract
-from dataviz.schema_docs import schema_catalog, schema_model_contract
+from dataviz.schema_docs import CURRENT_SCHEMAS, schema_catalog, schema_model_contract
 from dataviz.server import create_app
 from dataviz.templates import component_catalog
 from dataviz.validation import format_validation_text, validate_preflight
 from dataviz.workspace import load_workspace
+from dataviz.workspace.selections import resolve_selection_values
 
 
 app = typer.Typer(
@@ -114,7 +125,7 @@ def _browser_runtime_benchmark(
     query_started = time.perf_counter()
     result = Executor(workspace).run(dashboard.definition.id, refresh=True)
     query_ms = (time.perf_counter() - query_started) * 1000
-    if result.status not in {"success", "partial"}:
+    if result.status not in {"ready", "partial"}:
         raise RuntimeError(f"Runtime benchmark query ended with {result.status}")
 
     with TemporaryDirectory(prefix="dataviz-runtime-benchmark-") as directory:
@@ -228,7 +239,7 @@ Finish the returned session with `dataviz authoring finish`. Commit the generate
 `dataviz-authoring.jsonl` when its task text and notes contain no sensitive data;
 sharing that file gives the Dataviz author real retry, time and documentation-friction data.
 """,
-        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v1
+        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v2
 kind: dashboard
 id: hello
 title: Hello dashboard
@@ -248,10 +259,11 @@ sources:
     type: file
     path: data/sample.csv
     format: csv
+    outputs: {main: {kind: table}}
 views:
   - id: summary
     title: Sample values
-    input: data
+    input: source:data/main
     template: bar
     x: category
     y: value
@@ -302,8 +314,16 @@ def list_dashboards(workspace: Path = typer.Argument(..., exists=True, file_okay
                         ),
                         "presentation_active": bool(entry.dashboard and entry.dashboard.presentation),
                         "sources": list(entry.dashboard.sources) if entry.dashboard else [],
-                        "server_transforms": list(entry.dashboard.transforms) if entry.dashboard else [],
-                        "browser_transforms": list(entry.dashboard.browser_transforms) if entry.dashboard else [],
+                        "dataset_transforms": (
+                            list(entry.dashboard.dataset_transforms)
+                            if entry.dashboard
+                            else []
+                        ),
+                        "interactive_transforms": (
+                            list(entry.dashboard.interactive_transforms)
+                            if entry.dashboard
+                            else []
+                        ),
                         "views": list(entry.dashboard.views) if entry.dashboard else [],
                     }
                     for entry in loaded.catalog
@@ -508,27 +528,6 @@ def version(output_format: str = typer.Option("json", "--format", help="json or 
         )
 
 
-@app.command("migrate")
-def migrate(
-    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
-    apply: bool = typer.Option(
-        False,
-        "--apply",
-        help="Apply registered offline migrations. Without it this is a dry run.",
-    ),
-) -> None:
-    """Inspect or apply explicit DSL migrations; Runtime never runs legacy protocols."""
-    try:
-        report = migrate_workspace(workspace, apply=apply)
-        print_json({"status": "blocked" if report["blockers"] else "success", **report})
-        if report["blockers"]:
-            raise typer.Exit(1)
-    except typer.Exit:
-        raise
-    except Exception as exc:
-        handle_error(exc)
-
-
 @app.command("frontend-adapters")
 def frontend_adapters(
     name: str | None = typer.Argument(None, help="Adapter id, for example web-component"),
@@ -537,7 +536,7 @@ def frontend_adapters(
     ),
     output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
 ) -> None:
-    """Inspect frontend implementations that consume dataviz/runtime/v1."""
+    """Inspect frontend implementations that consume dataviz/runtime/v2."""
     if output_format not in {"markdown", "json"}:
         raise typer.BadParameter("--format must be markdown or json")
     catalog = frontend_adapter_catalog()
@@ -589,20 +588,45 @@ def _first_attempt_value(value: str) -> bool | None:
 @authoring_app.command("start")
 def authoring_start(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
-    task: str = typer.Option(..., "--task", help="Concrete dashboard authoring task"),
+    task: str | None = typer.Option(None, "--task", help="Concrete ad-hoc authoring task"),
     dashboard: str | None = typer.Option(None, "--dashboard"),
     model: str | None = typer.Option(None, "--model"),
     tool: str | None = typer.Option(None, "--tool"),
+    trial_directory: Path | None = typer.Option(
+        None,
+        "--trial-dir",
+        exists=True,
+        file_okay=False,
+        help="Prepared fixed-task directory; supplies task, approach and trial identity",
+    ),
     notes: str = typer.Option("", "--notes"),
 ) -> None:
     """Start one append-only, shareable authoring measurement session."""
     try:
+        trial = inspect_authoring_trial(trial_directory) if trial_directory else None
+        if trial is not None:
+            if not trial["integrity_passed"] or not trial["assessment_valid"]:
+                raise ValueError(
+                    "Prepared trial is invalid; run `dataviz authoring verify TRIAL_DIR`"
+                )
+            if task is not None:
+                raise ValueError("--task and --trial-dir are mutually exclusive")
+            if not model or not tool:
+                raise ValueError("Benchmark trials require both --model and --tool")
+            task = trial["task"]
+        elif not task or not task.strip():
+            raise ValueError("Provide --task for ad-hoc work or --trial-dir for a benchmark")
         event = start_authoring_session(
             workspace,
             task=task,
             dashboard_id=dashboard,
             model=model,
             tool=tool,
+            benchmark_task=trial["benchmark_task"] if trial else None,
+            approach=trial["approach"] if trial else None,
+            trial_id=trial["trial_id"] if trial else None,
+            task_contract_sha256=trial["task_contract_sha256"] if trial else None,
+            fixture_sha256=trial["fixture_sha256"] if trial else None,
             notes=notes,
         )
         print_json(
@@ -610,6 +634,9 @@ def authoring_start(
                 "status": "started",
                 "session_id": event.session_id,
                 "log": str(workspace.resolve() / AUTHORING_LOG_NAME),
+                "benchmark_task": event.benchmark_task,
+                "approach": event.approach,
+                "trial_id": event.trial_id,
                 "next": (
                     f"dataviz authoring finish {workspace} {event.session_id} "
                     "--outcome success --first-attempt success --correction-rounds 0"
@@ -618,6 +645,169 @@ def authoring_start(
         )
     except Exception as exc:
         handle_error(exc)
+
+
+@authoring_app.command("tasks")
+def authoring_tasks(
+    task: str | None = typer.Argument(None, help="Optional fixed evaluation task id"),
+    output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
+) -> None:
+    """List the five fixed Dataviz versus standalone-HTML evaluation tasks."""
+    if output_format not in {"markdown", "json"}:
+        raise typer.BadParameter("--format must be markdown or json")
+    try:
+        payload = authoring_task_catalog(task)
+    except Exception as exc:
+        handle_error(exc)
+        return
+    if output_format == "json":
+        print_json(payload)
+        return
+    typer.echo("# Dataviz AI authoring evaluation tasks\n")
+    for definition in payload["tasks"].values():
+        typer.echo(f"## {definition['id']} · {definition['title']}\n")
+        typer.echo(f"{definition['brief']}\n")
+        typer.echo("Acceptance:\n")
+        for item in definition["acceptance"]:
+            typer.echo(f"- [{item['id']}] {item['criterion']}")
+        typer.echo()
+
+
+@authoring_app.command("protocol")
+def authoring_protocol(
+    task: str | None = typer.Option(None, "--task"),
+    output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
+) -> None:
+    """Print the reproducible paired-evaluation protocol without running an AI."""
+    if output_format not in {"markdown", "json"}:
+        raise typer.BadParameter("--format must be markdown or json")
+    try:
+        payload = authoring_evaluation_protocol(task)
+    except Exception as exc:
+        handle_error(exc)
+        return
+    if output_format == "json":
+        print_json(payload)
+        return
+    typer.echo("# Dataviz AI authoring paired protocol\n")
+    typer.echo(f"{payload['quality_gate']}\n")
+    typer.echo(f"{payload['token_rule']}\n")
+    typer.echo("Run the same task once with `dataviz` and once with `standalone-html`, using the same `trial_id`.\n")
+    for name, command in payload["commands"].items():
+        typer.echo(f"- {name}: `{command}`")
+
+
+@authoring_app.command("prepare")
+def authoring_prepare(
+    task: str = typer.Argument(..., help="One id from `dataviz authoring tasks`"),
+    destination: Path = typer.Argument(...),
+    approach: str = typer.Option(..., "--approach", help="dataviz or standalone-html"),
+    trial_id: str = typer.Option(..., "--trial-id"),
+) -> None:
+    """Create a neutral data/task pack for one side of a paired trial."""
+    try:
+        payload = prepare_authoring_trial(
+            task,
+            destination,
+            approach=approach,
+            trial_id=trial_id,
+        )
+        print_json(payload)
+    except Exception as exc:
+        handle_error(exc)
+
+
+@authoring_app.command("verify")
+def authoring_verify(
+    trial_directory: Path = typer.Argument(..., exists=True, file_okay=False),
+    output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
+) -> None:
+    """Verify fixed task/input hashes and the evidence-backed acceptance record."""
+    if output_format not in {"markdown", "json"}:
+        raise typer.BadParameter("--format must be markdown or json")
+    payload = inspect_authoring_trial(trial_directory)
+    if output_format == "json":
+        print_json(payload)
+    else:
+        typer.echo(f"# Authoring trial · {payload['trial_id']}\n")
+        typer.echo(f"- Input integrity: {'passed' if payload['integrity_passed'] else 'failed'}")
+        typer.echo(f"- Assessment structure: {'valid' if payload['assessment_valid'] else 'invalid'}")
+        typer.echo(f"- Quality gate: {'passed' if payload['quality_passed'] else 'not passed'}")
+        for item in payload["checks"]:
+            typer.echo(f"- [{item['status']}] {item['id']}: {item['evidence'] or 'no evidence'}")
+        for item in payload["diagnostics"]:
+            typer.echo(f"- ERROR {item['code']}: {item['message']}")
+    if not payload["integrity_passed"] or not payload["assessment_valid"]:
+        raise typer.Exit(code=1)
+
+
+@authoring_app.command("assess")
+def authoring_assess(
+    trial_directory: Path = typer.Argument(..., exists=True, file_okay=False),
+    check_id: str = typer.Argument(...),
+    status: str = typer.Option(..., "--status", help="passed, failed or unmeasured"),
+    assessor: str | None = typer.Option(
+        None, "--assessor", help="human, automation or mixed"
+    ),
+    evidence: str = typer.Option("", "--evidence"),
+) -> None:
+    """Record evidence for exactly one fixed acceptance check."""
+    try:
+        payload = record_authoring_assessment(
+            trial_directory,
+            check_id,
+            status=status,
+            assessor=assessor,
+            evidence=evidence,
+        )
+        print_json(
+            {
+                "status": "recorded",
+                "check_id": check_id,
+                "quality_passed": payload["quality_passed"],
+                "remaining": [
+                    item["id"]
+                    for item in payload["checks"]
+                    if item["status"] != "passed"
+                ],
+            }
+        )
+    except Exception as exc:
+        handle_error(exc)
+
+
+@authoring_app.command("compare")
+def authoring_compare(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    task: str | None = typer.Option(None, "--task"),
+    output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
+) -> None:
+    """Compare complete Dataviz/standalone-HTML trial pairs using real measurements."""
+    if output_format not in {"markdown", "json"}:
+        raise typer.BadParameter("--format must be markdown or json")
+    try:
+        sessions = authoring_log_report(workspace)["sessions"]
+        payload = build_authoring_evaluation_report(sessions, task_id=task)
+    except Exception as exc:
+        handle_error(exc)
+        return
+    if output_format == "json":
+        print_json(payload)
+        return
+    typer.echo("# Dataviz AI authoring comparison\n")
+    typer.echo(f"- Complete pairs: {payload['complete_pairs']}")
+    typer.echo(f"- Identity-matched pairs: {payload['comparable_pairs']}")
+    typer.echo(f"- Both approaches passed: {payload['quality_pairs']}")
+    typer.echo(f"- Measured sessions: {payload['sessions']}")
+    for approach in AUTHORING_APPROACHES:
+        metrics = payload["approaches"][approach]
+        typer.echo(
+            f"- {approach}: {metrics['successful']}/{metrics['sessions']} successful; "
+            f"first-attempt {metrics['first_attempt_success_rate'] if metrics['first_attempt_success_rate'] is not None else 'unmeasured'}; "
+            f"input tokens {metrics['mean_input_tokens'] if metrics['mean_input_tokens'] is not None else 'unmeasured'}"
+        )
+    if payload["diagnostics"]:
+        typer.echo("\nIncomplete/duplicate trial pairs are excluded; inspect `--format json` for diagnostics.")
 
 
 @authoring_app.command("note")
@@ -658,10 +848,18 @@ def authoring_finish(
     input_tokens: int | None = typer.Option(None, "--input-tokens", min=0),
     output_tokens: int | None = typer.Option(None, "--output-tokens", min=0),
     docs_used: list[str] | None = typer.Option(None, "--docs-used"),
+    trial_directory: Path | None = typer.Option(
+        None,
+        "--trial-dir",
+        exists=True,
+        file_okay=False,
+        help="Required for a fixed benchmark session; rechecks fixtures and acceptance evidence",
+    ),
     notes: str = typer.Option("", "--notes"),
 ) -> None:
     """Finish a session with measured quality, retries, elapsed time and token usage."""
     try:
+        trial = inspect_authoring_trial(trial_directory) if trial_directory else None
         event = finish_authoring_session(
             workspace,
             session_id,
@@ -671,6 +869,14 @@ def authoring_finish(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             docs_used=docs_used,
+            trial_integrity_passed=trial["integrity_passed"] if trial else None,
+            acceptance_passed=trial["quality_passed"] if trial else None,
+            acceptance_results=trial["checks"] if trial else None,
+            benchmark_task=trial["benchmark_task"] if trial else None,
+            approach=trial["approach"] if trial else None,
+            trial_id=trial["trial_id"] if trial else None,
+            task_contract_sha256=trial["task_contract_sha256"] if trial else None,
+            fixture_sha256=trial["fixture_sha256"] if trial else None,
             notes=notes,
         )
         print_json(
@@ -680,6 +886,8 @@ def authoring_finish(
                 "outcome": event.outcome,
                 "elapsed_seconds": event.elapsed_seconds,
                 "token_source": event.token_source,
+                "trial_integrity_passed": event.trial_integrity_passed,
+                "acceptance_passed": event.acceptance_passed,
             }
         )
     except Exception as exc:
@@ -1039,7 +1247,7 @@ def query(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     dashboard: str = typer.Argument(...),
     source: str = typer.Option(..., "--source"),
-    param: list[str] | None = typer.Option(None, "--param"),
+    query_param: list[str] | None = typer.Option(None, "--query-param"),
     output_format: str = typer.Option("json", "--format"),
     refresh: bool = typer.Option(False, "--refresh"),
 ) -> None:
@@ -1047,7 +1255,10 @@ def query(
     try:
         loaded = load_workspace(workspace)
         result = Executor(loaded).run(
-            dashboard, params=parse_params(param), targets=[f"source:{source}"], refresh=refresh
+            dashboard,
+            query_parameters=parse_params(query_param),
+            targets=[f"source:{source}/main"],
+            refresh=refresh,
         )
         node = result.nodes[f"source:{source}"]
         artifact = node.outputs.get("main")
@@ -1060,7 +1271,7 @@ def query(
                     "status": result.status,
                     "run_id": result.run_id,
                     "source": source,
-                    "parameters": result.parameters,
+                    "query_parameters": result.query_parameters,
                     "schema": artifact.schema_,
                     "row_count": artifact.metadata.get("row_count"),
                     "preview": artifact.preview,
@@ -1076,7 +1287,7 @@ def query(
                 typer.echo(frame.to_markdown(index=False))
             else:
                 typer.echo(frame.to_string(index=False))
-        if result.status == "failed":
+        if result.status == "error":
             raise typer.Exit(1)
     except typer.Exit:
         raise
@@ -1089,9 +1300,9 @@ def inspect_output(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     dashboard: str = typer.Argument(...),
     reference: str = typer.Argument(
-        ..., help="Named Output, for example transform:sales-metrics/trend"
+        ..., help="Base Named Output, for example dataset:sales-metrics/trend"
     ),
-    param: list[str] | None = typer.Option(None, "--param"),
+    query_param: list[str] | None = typer.Option(None, "--query-param"),
     output_format: str = typer.Option("json", "--format", help="json, csv, markdown, or text"),
     limit: int = typer.Option(100, "--limit", min=1),
     refresh: bool = typer.Option(False, "--refresh"),
@@ -1103,13 +1314,13 @@ def inspect_output(
         loaded = load_workspace(workspace)
         parsed = parse_output_reference(reference)
         canonical = parsed.canonical
-        if parsed.node_id.startswith("browser:"):
+        if parsed.node_id.startswith("interactive:"):
             raise typer.BadParameter(
-                "Browser Transform outputs only exist in HTML; inspect their server input or export a report"
+                "Interactive Outputs require `dataviz compute`; `dataviz output` only executes the Query DAG"
             )
         result = Executor(loaded).run(
             dashboard,
-            params=parse_params(param),
+            query_parameters=parse_params(query_param),
             targets=[canonical],
             refresh=refresh,
         )
@@ -1139,7 +1350,7 @@ def inspect_output(
                 "status": result.status,
                 "run_id": result.run_id,
                 "reference": canonical,
-                "parameters": result.parameters,
+                "query_parameters": result.query_parameters,
                 "artifact": artifact.model_dump(mode="json", by_alias=True),
                 "value": value,
                 "truncated": (
@@ -1155,27 +1366,91 @@ def inspect_output(
 
 
 @app.command()
+def compute(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    dashboard: str = typer.Argument(...),
+    interactive_transform: str = typer.Argument(..., help="Interactive Transform id"),
+    run_id: str = typer.Option(..., "--run-id", help="Completed immutable Query Run id"),
+    compute_param: list[str] | None = typer.Option(None, "--compute-param"),
+    selection: list[str] | None = typer.Option(None, "--selection"),
+    output_name: str | None = typer.Option(
+        None, "--output-name", help="Named Output to print for non-JSON formats"
+    ),
+    output_format: str = typer.Option(
+        "json", "--format", help="json, csv, markdown, or text"
+    ),
+    limit: int = typer.Option(100, "--limit", min=1),
+    refresh: bool = typer.Option(False, "--refresh"),
+) -> None:
+    """Run one server-python Interactive Transform against an existing Query Run."""
+    try:
+        if output_format not in {"json", "csv", "markdown", "text"}:
+            raise typer.BadParameter("--format must be json, csv, markdown, or text")
+        loaded = load_workspace(workspace)
+        run_result = load_run_result(loaded.root, run_id)
+        if run_result.dashboard != dashboard:
+            raise typer.BadParameter(
+                f"Query Run {run_id} belongs to {run_result.dashboard}, not {dashboard}"
+            )
+        interaction = InteractionExecutor(loaded).execute(
+            run_result,
+            interactive_transform,
+            compute_parameters=parse_params(compute_param),
+            selections=parse_params(selection),
+            refresh=refresh,
+        )
+        if output_format == "json":
+            print_json(interaction)
+        else:
+            if not output_name:
+                raise typer.BadParameter("--output-name is required for non-JSON formats")
+            reference = f"interactive:{interactive_transform}/{output_name}"
+            artifact = interaction.outputs.get(reference)
+            if artifact is None:
+                raise typer.BadParameter(
+                    f"Unknown or unavailable Interactive Output: {reference}"
+                )
+            value = ArtifactStore(loaded.root, run_id).read_value(artifact)
+            if artifact.kind == "table":
+                frame = value.head(limit)
+                if output_format == "csv":
+                    typer.echo(frame.to_csv(index=False), nl=False)
+                elif output_format == "markdown":
+                    typer.echo(frame.to_markdown(index=False))
+                else:
+                    typer.echo(frame.to_string(index=False))
+            else:
+                typer.echo(str(value))
+        if interaction.status != "ready":
+            raise typer.Exit(1)
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        handle_error(exc)
+
+
+@app.command()
 def run(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     dashboard: str = typer.Argument(...),
-    param: list[str] | None = typer.Option(None, "--param"),
+    query_param: list[str] | None = typer.Option(None, "--query-param"),
     target: list[str] | None = typer.Option(
-        None, "--target", help="Source/Transform node or Named Output; repeatable"
+        None, "--target", help="Source/Dataset node or Base Named Output; repeatable"
     ),
     refresh: bool = typer.Option(False, "--refresh"),
     allow_partial: bool = typer.Option(False, "--allow-partial"),
 ) -> None:
-    """Execute the Source and Server Transform DAG."""
+    """Execute the immutable Source and Dataset Transform Query DAG."""
     try:
         loaded = load_workspace(workspace)
         result = Executor(loaded).run(
             dashboard,
-            params=parse_params(param),
+            query_parameters=parse_params(query_param),
             targets=target,
             refresh=refresh,
         )
         print_json(result)
-        if result.status != "success" and not (allow_partial and result.status == "partial"):
+        if result.status != "ready" and not (allow_partial and result.status == "partial"):
             raise typer.Exit(1)
     except typer.Exit:
         raise
@@ -1188,7 +1463,8 @@ def report(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     dashboard: str = typer.Argument(...),
     output: Path = typer.Option(..., "--output"),
-    param: list[str] | None = typer.Option(None, "--param"),
+    query_param: list[str] | None = typer.Option(None, "--query-param"),
+    compute_param: list[str] | None = typer.Option(None, "--compute-param"),
     selection: list[str] | None = typer.Option(None, "--selection"),
     chart_mode: str = typer.Option("interactive", "--chart-mode"),
     image_format: str = typer.Option("svg", "--image-format"),
@@ -1200,15 +1476,73 @@ def report(
         loaded = load_workspace(workspace)
         result = Executor(loaded).run(
             dashboard,
-            params=parse_params(param),
-            selections=parse_params(selection),
+            query_parameters=parse_params(query_param),
             refresh=refresh,
         )
-        if result.status != "success" and not (allow_partial and result.status == "partial"):
+        if result.status != "ready" and not (allow_partial and result.status == "partial"):
             print_json(result)
             raise typer.Exit(1)
+        loaded_dashboard = loaded.dashboard(dashboard)
+        compute_values = resolve_compute_parameters(
+            loaded_dashboard, parse_params(compute_param)
+        )
+        selection_values, _ = resolve_selection_values(
+            loaded_dashboard.definition, parse_params(selection)
+        )
+        _, interactive_ids = reachable_output_references(loaded_dashboard)
+        derived_outputs = {}
+        snapshot_interactions: set[str] = {
+            transform_id
+            for transform_id in interactive_ids
+            if loaded_dashboard.interactive_transforms[transform_id][1].export.mode
+            == "snapshot"
+        }
+        browser_snapshot_ids = sorted(
+            transform_id
+            for transform_id in snapshot_interactions
+            if loaded_dashboard.interactive_transforms[transform_id][1].runtime
+            in {"browser-js", "browser-python"}
+        )
+        if browser_snapshot_ids:
+            raise ExecutionFailure(
+                "CLI report cannot capture an already-rendered browser snapshot",
+                details={
+                    "code": "browser_snapshot_requires_canvas",
+                    "transforms": browser_snapshot_ids,
+                    "suggestion": (
+                        "Export from the Server page after running the analysis, or use "
+                        "export.mode=interactive/unavailable for browser runtimes"
+                    ),
+                },
+            )
+        interaction_executor = InteractionExecutor(loaded)
+        interaction_results = []
+        for transform_id in interactive_ids:
+            definition = loaded_dashboard.interactive_transforms[transform_id][1]
+            if definition.runtime != "server-python" or definition.export.mode != "snapshot":
+                continue
+            interaction = interaction_executor.execute(
+                result,
+                transform_id,
+                compute_parameters=compute_values,
+                selections=selection_values,
+                refresh=refresh,
+            )
+            interaction_results.append(interaction)
+            if interaction.status != "ready":
+                print_json(interaction)
+                raise typer.Exit(1)
+            derived_outputs.update(interaction.outputs)
         path = CanvasRenderer(loaded).write_report(
-            loaded.dashboard(dashboard), result, output.resolve(), chart_mode=chart_mode, image_format=image_format
+            loaded_dashboard,
+            result,
+            output.resolve(),
+            chart_mode=chart_mode,
+            image_format=image_format,
+            compute_parameters=compute_values,
+            selections=selection_values,
+            derived_outputs=derived_outputs,
+            snapshot_interactions=snapshot_interactions,
         )
         print_json(
             {
@@ -1216,8 +1550,12 @@ def report(
                 "run_id": result.run_id,
                 "report": str(path),
                 "manifest": str(path.with_suffix(path.suffix + ".manifest.json")),
-                "parameters": result.parameters,
-                "selections": result.selections,
+                "query_parameters": result.query_parameters,
+                "compute_parameters": compute_values,
+                "selections": selection_values,
+                "snapshot_interactions": [
+                    value.interaction_id for value in interaction_results
+                ],
                 "warnings": result.warnings,
             }
         )

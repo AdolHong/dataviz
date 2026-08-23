@@ -4,6 +4,7 @@ import base64
 import gzip
 import html
 import json
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,13 +16,20 @@ from markupsafe import Markup
 
 from dataviz.artifacts import ArtifactStore
 from dataviz.components import component_runtime_assets
-from dataviz.content_templates import interpolate_dashboard_content
+from dataviz.content_templates import (
+    build_content_bindings,
+    content_template_fields,
+    interpolate_dashboard_content,
+)
 from dataviz.errors import ExecutionFailure
 from dataviz.execution.plan import reachable_output_references
 from dataviz.execution.results import RunResult
 from dataviz.templates import COMPONENT_REGISTRY_VERSION, RUNTIME_PROTOCOL_SCHEMA
 from dataviz.workspace.models import DashboardDefinition, DeclarativeViewDefinition
-from dataviz.workspace.selections import compile_selection_contract
+from dataviz.workspace.selections import (
+    compile_selection_contract,
+    resolve_selection_values,
+)
 from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace
 from dataviz.workspace.selector_templates import resolve_selector_presentation
 
@@ -43,7 +51,13 @@ class CanvasRenderer:
         asset_mode: str = "server",
         title: str | None = None,
         live: dict[str, str] | None = None,
+        interaction: dict[str, str] | None = None,
         session_id: str | None = None,
+        compute_parameters: dict[str, Any] | None = None,
+        selections: dict[str, Any] | None = None,
+        derived_outputs: dict[str, Any] | None = None,
+        snapshot_interactions: set[str] | None = None,
+        pyodide_index_url: str | None = None,
     ) -> str:
         if chart_mode not in {"interactive", "static"}:
             raise ExecutionFailure("chart_mode must be interactive or static")
@@ -51,22 +65,46 @@ class CanvasRenderer:
             raise ExecutionFailure(
                 "Static rendering is not implemented for declarative Views; use --chart-mode interactive"
             )
+        compute_values = {
+            item.id: (compute_parameters or {}).get(item.id, item.default)
+            for item in dashboard.definition.compute_parameters
+        }
+        selection_values, _ = resolve_selection_values(
+            dashboard.definition, selections
+        )
+        merged_outputs = {**result.outputs, **(derived_outputs or {})}
+        render_state = SimpleNamespace(
+            run_id=result.run_id,
+            status=result.status,
+            query_parameters=result.query_parameters,
+            compute_parameters=compute_values,
+            selections=selection_values,
+            outputs=merged_outputs,
+        )
         try:
+            content_bindings = build_content_bindings(
+                dashboard.definition,
+                result.query_parameters,
+            )
             content_definition = interpolate_dashboard_content(
                 dashboard.definition,
-                result.parameters,
+                result.query_parameters,
+                compute_values,
+                selection_values,
                 fallback_title=dashboard.canvas_name,
             )
         except ValueError as error:
             raise ExecutionFailure(f"Invalid content template: {error}") from error
         store = ArtifactStore(self.workspace.root, result.run_id)
+        binding_fields = set(content_bindings)
         declarative_views = {item.id: item for item in content_definition.views}
         view_html = {
             view_id: self._client_view_html(
                 dashboard,
                 view_id,
-                result,
+                render_state,
                 declarative=declarative_views.get(view_id),
+                binding_fields=binding_fields,
             )
             for view_id in dashboard.views
         }
@@ -77,8 +115,9 @@ class CanvasRenderer:
                 self._client_view_html(
                     dashboard,
                     view_id,
-                    result,
+                    render_state,
                     declarative=declarative_views.get(view_id),
+                    binding_fields=binding_fields,
                 ),
             )
 
@@ -87,16 +126,31 @@ class CanvasRenderer:
             template_text = (dashboard.root / canvas.template).read_text(encoding="utf-8")
             environment = Environment(autoescape=True, undefined=StrictUndefined)
             template = environment.from_string(template_text)
+            content_values = dict(content_template_fields(content_definition))
+
+            def content(field: str) -> Markup:
+                if field not in content_values:
+                    raise ValueError(f"Unknown content field: {field}")
+                value = html.escape(content_values[field])
+                if field not in binding_fields:
+                    return Markup(value)
+                return Markup(
+                    f'<span data-dv-content-field="{html.escape(field, quote=True)}">'
+                    f"{value}</span>"
+                )
+
             body = template.render(
                 workspace=self.workspace.definition,
                 dashboard=content_definition,
-                parameters=result.parameters,
-                selections=result.selections,
+                parameters=result.query_parameters,
+                compute=compute_values,
+                selections=selection_values,
                 run=result,
                 view=lambda value: Markup(view(value)),
                 section_selections=lambda value: Markup(
-                    self._context_selection_controls(dashboard, result, "section", value)
+                    self._context_selection_controls(dashboard, render_state, "section", value)
                 ),
+                content=content,
                 views=view_html,
             )
         else:
@@ -104,8 +158,9 @@ class CanvasRenderer:
                 dashboard,
                 content_definition,
                 view_html,
-                result.parameters,
-                result.selections,
+                result.query_parameters,
+                selection_values,
+                binding_fields,
             )
 
         functional_style = (PACKAGE_ROOT / "server" / "static" / "canvas-functional.css").read_text(encoding="utf-8")
@@ -137,12 +192,12 @@ class CanvasRenderer:
             if view.template in {"line", "bar", "stacked-bar", "pie", "scatter", "heatmap", "radar"}
         ]
         needs_plotly = (
-            "plotly-json" in self._formats(result)
+            "plotly-json" in self._formats(render_state)
             or "plotly" in canvas.client_libraries
             or any(view.engine == "plotly" for view in chart_views)
         )
         needs_echarts = (
-            "echarts-json" in self._formats(result)
+            "echarts-json" in self._formats(render_state)
             or "echarts" in canvas.client_libraries
             or any(view.engine == "echarts" for view in chart_views)
         )
@@ -151,11 +206,18 @@ class CanvasRenderer:
             or any(view.template == "perspective" for view in declarative_views.values())
         )
         transport_runtime = self.workspace.definition.runtime
+        _, reachable_interactive_ids = self._reachable_outputs(dashboard)
+        interactive_table_outputs = any(
+            output.kind == "table"
+            for transform_id in reachable_interactive_ids
+            for output in dashboard.interactive_transforms[transform_id][1].outputs.values()
+        )
         needs_arrow = (
             chart_mode == "interactive"
             and transport_runtime.browser_table_transport != "json"
             and (
                 live is not None
+                or interactive_table_outputs
                 or any(
                     artifact.kind == "table"
                     and (
@@ -163,7 +225,7 @@ class CanvasRenderer:
                         or int(artifact.metadata.get("row_count", 0))
                         >= transport_runtime.arrow_min_rows
                     )
-                    for artifact in result.outputs.values()
+                    for artifact in merged_outputs.values()
                 )
             )
         )
@@ -172,29 +234,51 @@ class CanvasRenderer:
         arrow_script = self._arrow_script() if needs_arrow else ""
         perspective_script = self._perspective_script() if needs_perspective and chart_mode == "interactive" else ""
         runtime = self._runtime_script()
-        worker_source = self._browser_transform_worker_source(dashboard)
-        browser_transform_script = self._browser_transform_script(dashboard)
+        frozen_interactions = snapshot_interactions or set()
+        active_browser_interactions = self._active_browser_interactions(
+            dashboard,
+            asset_mode=asset_mode,
+            snapshot_interactions=frozen_interactions,
+        )
+        worker_source = self._interactive_worker_sources(
+            dashboard,
+            active_ids=active_browser_interactions,
+        )
+        interactive_transform_script = self._interactive_transform_script(
+            dashboard,
+            asset_mode=asset_mode,
+            snapshot_interactions=frozen_interactions,
+        )
         declarative_script = self._declarative_script(dashboard)
         view_specs, repeat_specs = self._declarative_manifest(content_definition)
         document_title = title or content_definition.title
         portable = (
             asset_mode in {"inline", "server"}
             and chart_mode == "interactive"
-            and (bool(result.outputs) or live is not None)
+            and (bool(merged_outputs) or live is not None)
         )
         portable_bundle = (
             self._portable_bundle(
                 dashboard,
-                result,
+                render_state,
                 store,
                 allow_missing=live is not None,
                 asset_mode=asset_mode,
                 session_id=session_id,
+                snapshot_interactions=snapshot_interactions or set(),
             )
             if portable
             else None
         )
-        portable_controls = self._portable_controls(dashboard, result) if portable and asset_mode == "inline" else ""
+        portable_controls = (
+            self._portable_controls(
+                dashboard,
+                render_state,
+                snapshot_interactions=snapshot_interactions or set(),
+            )
+            if portable and asset_mode == "inline"
+            else ""
+        )
         meta = {
             "protocol": {
                 "schema": RUNTIME_PROTOCOL_SCHEMA,
@@ -203,14 +287,41 @@ class CanvasRenderer:
             "run_id": result.run_id,
             "status": result.status,
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "parameters": result.parameters,
-            "selections": result.selections,
+            "query_parameters": result.query_parameters,
+            "compute_parameters": compute_values,
+            "compute_definitions": {
+                item.id: item.model_dump(mode="json")
+                for item in dashboard.definition.compute_parameters
+            },
+            "draft_compute_parameters": dict(compute_values),
+            "selections": selection_values,
+            "content_bindings": content_bindings,
             "portable": portable_bundle,
             "live": live,
+            "interaction": interaction,
+            "asset_mode": asset_mode,
+            "snapshot_interactions": sorted(snapshot_interactions or set()),
             "view_specs": view_specs,
             "repeat_specs": repeat_specs,
             "runtime_versions": {
-                "perspective": self.workspace.definition.runtime.perspective_version,
+                **(
+                    {"perspective": self.workspace.definition.runtime.perspective_version}
+                    if needs_perspective
+                    else {}
+                ),
+                **(
+                    {
+                        "pyodide": self.workspace.definition.runtime.pyodide_version,
+                        "pyodide_index_url": pyodide_index_url
+                        or self._pyodide_index_url(dashboard, asset_mode),
+                    }
+                    if any(
+                        dashboard.interactive_transforms[identifier][1].runtime
+                        == "browser-python"
+                        for identifier in active_browser_interactions
+                    )
+                    else {}
+                ),
             },
         }
         meta_json = json.dumps(meta, ensure_ascii=False, default=str).replace("</", "<\\/")
@@ -235,7 +346,7 @@ class CanvasRenderer:
   {worker_source}
   {component_scripts}
   <script>{runtime}</script>
-  <script>{browser_transform_script}</script>
+  <script>{interactive_transform_script}</script>
   <script>{declarative_script}</script>
   <script>{custom_script}</script>
   <script>if (window.dataviz.portable) {{ window.dataviz.applySelections().catch(error => console.error('[dataviz:init]', error)); window.datavizRuntime.hydrateOutputTransports(); }} if (window.dataviz.live) window.dataviz.connectLive?.();</script>
@@ -249,15 +360,37 @@ class CanvasRenderer:
         result: RunResult,
         *,
         declarative: DeclarativeViewDefinition | None = None,
+        binding_fields: set[str] | None = None,
     ) -> str:
         declarative = declarative or dashboard.views.get(view_id)
         title = (declarative.title or declarative.id) if declarative else view_id
+        description = (declarative.description or "") if declarative else ""
         status = declarative.template if declarative else "browser"
         controls = self._context_selection_controls(dashboard, result, "view", view_id)
+        binding_fields = binding_fields or set()
+        title_field = f"views.{view_id}.title"
+        title_binding = (
+            f' data-dv-content-field="{html.escape(title_field, quote=True)}"'
+            if title_field in binding_fields
+            else ""
+        )
+        description_field = f"views.{view_id}.description"
+        description_binding = (
+            f' data-dv-content-field="{html.escape(description_field, quote=True)}"'
+            if description_field in binding_fields
+            else ""
+        )
+        description_html = (
+            f'<p class="dv-view-description"{description_binding}>{html.escape(description)}</p>'
+            if description or description_binding
+            else ""
+        )
         return (
             f'<article class="dv-view dv-view--client" data-view-id="{html.escape(view_id)}" '
-            'data-view-status="waiting">'
-            f'<header class="dv-view-header"><span>{html.escape(title)}</span>'
+            'data-view-status="loading">'
+            '<header class="dv-view-header"><div class="dv-view-heading">'
+            f'<span class="dv-view-title" role="heading" aria-level="3"{title_binding}>{html.escape(title)}</span>'
+            f'{description_html}</div>'
             f'<div class="dv-view-actions">{controls}<small data-view-status-label>{html.escape(status)}</small></div></header>'
             '<div class="dv-view-body"><div class="dv-view-placeholder">Waiting for dataset</div></div>'
             '</article>'
@@ -342,13 +475,58 @@ class CanvasRenderer:
         return (PACKAGE_ROOT / "server" / "static" / "declarative-runtime.js").read_text(
             encoding="utf-8"
         )
-    def _browser_transform_script(self, dashboard: LoadedDashboard) -> str:
+    def _active_browser_interactions(
+        self,
+        dashboard: LoadedDashboard,
+        *,
+        asset_mode: str,
+        snapshot_interactions: set[str],
+    ) -> set[str]:
+        _, interactive_ids = self._reachable_outputs(dashboard)
+        return {
+            identifier
+            for identifier in interactive_ids
+            if dashboard.interactive_transforms[identifier][1].runtime
+            in {"browser-js", "browser-python"}
+            and not (
+                asset_mode == "inline"
+                and (
+                    identifier in snapshot_interactions
+                    or dashboard.interactive_transforms[identifier][1].export.mode
+                    == "unavailable"
+                )
+            )
+        }
+
+    def _interactive_transform_script(
+        self,
+        dashboard: LoadedDashboard,
+        *,
+        asset_mode: str,
+        snapshot_interactions: set[str],
+    ) -> str:
         registrations = []
-        _, browser_ids = self._reachable_outputs(dashboard)
-        for transform_id in browser_ids:
-            transform_path, definition = dashboard.browser_transforms[transform_id]
-            code_path = (transform_path.parent / definition.code).resolve()
-            code = json.dumps(code_path.read_text(encoding="utf-8"), ensure_ascii=False).replace("</", "<\\/")
+        _, interactive_ids = self._reachable_outputs(dashboard)
+        for transform_id in interactive_ids:
+            transform_path, definition = dashboard.interactive_transforms[transform_id]
+            code = "null"
+            dependencies = "{}"
+            needs_browser_code = definition.runtime != "server-python" and not (
+                asset_mode == "inline"
+                and (
+                    transform_id in snapshot_interactions
+                    or definition.export.mode == "unavailable"
+                )
+            )
+            if needs_browser_code:
+                code_path = (transform_path.parent / definition.code).resolve()
+                code = json.dumps(
+                    code_path.read_text(encoding="utf-8"), ensure_ascii=False
+                ).replace("</", "<\\/")
+                dependencies = json.dumps(
+                    self._browser_dependency_sources(transform_path, definition),
+                    ensure_ascii=False,
+                ).replace("</", "<\\/")
             spec = json.dumps(
                 definition.model_dump(mode="json", by_alias=True),
                 ensure_ascii=False,
@@ -356,24 +534,92 @@ class CanvasRenderer:
             ).replace("</", "<\\/")
             entrypoint = json.dumps(definition.entrypoint)
             registrations.append(
-                f"window.datavizRuntime.registerTransform({spec}, "
-                f"{{code:{code},entrypoint:{entrypoint}}});"
+                f"window.datavizRuntime.registerInteractiveTransform({spec}, "
+                f"{{code:{code},entrypoint:{entrypoint},dependencies:{dependencies}}});"
             )
+        registrations.append("window.datavizRuntime.configureSnapshotControls();")
         return "\n".join(registrations)
 
-    def _browser_transform_worker_source(self, dashboard: LoadedDashboard) -> str:
-        _, browser_ids = self._reachable_outputs(dashboard)
-        if not browser_ids:
+    def _browser_dependency_sources(self, definition_path: Path, definition) -> dict[str, str]:
+        """Embed explicitly declared browser-runtime files under stable relative names."""
+        root = definition_path.parent.resolve()
+        sources: dict[str, str] = {}
+        for value in definition.code_dependencies:
+            path = (root / value).resolve()
+            candidates = [path] if path.is_file() else sorted(
+                item for item in path.rglob("*") if item.is_file()
+            )
+            for candidate in candidates:
+                relative = candidate.relative_to(root).as_posix()
+                try:
+                    sources[relative] = candidate.read_text(encoding="utf-8")
+                except UnicodeError as error:
+                    raise ExecutionFailure(
+                        "Browser Runtime code dependencies must be UTF-8 text",
+                        file=candidate,
+                    ) from error
+        return sources
+
+    def _interactive_worker_sources(
+        self,
+        dashboard: LoadedDashboard,
+        *,
+        active_ids: set[str],
+    ) -> str:
+        if not active_ids:
             return ""
-        source = (
-            PACKAGE_ROOT / "server" / "static" / "browser-transform-worker.js"
-        ).read_text(encoding="utf-8")
-        encoded = json.dumps(source, ensure_ascii=False).replace("</", "<\\/")
-        return f"<script>window.datavizBrowserTransformWorkerSource={encoded};</script>"
+        runtimes = {
+            dashboard.interactive_transforms[identifier][1].runtime
+            for identifier in active_ids
+        }
+        scripts: list[str] = []
+        if "browser-js" in runtimes:
+            source = (
+                PACKAGE_ROOT / "server" / "static" / "interactive-js-worker.js"
+            ).read_text(encoding="utf-8")
+            encoded = json.dumps(source, ensure_ascii=False).replace("</", "<\\/")
+            scripts.append(
+                f"window.datavizInteractiveJsWorkerSource={encoded};"
+            )
+        if "browser-python" in runtimes:
+            source = (
+                PACKAGE_ROOT / "server" / "static" / "interactive-python-worker.mjs"
+            ).read_text(encoding="utf-8")
+            encoded = json.dumps(source, ensure_ascii=False).replace("</", "<\\/")
+            scripts.append(
+                f"window.datavizInteractivePythonWorkerSource={encoded};"
+            )
+        return f"<script>{''.join(scripts)}</script>"
 
     def _reachable_outputs(self, dashboard: LoadedDashboard) -> tuple[set[str], list[str]]:
-        """Return the minimal server payload and Browser Transform dependency order."""
+        """Return the minimal Base payload and Interactive Transform dependency order."""
         return reachable_output_references(dashboard)
+
+    def _browser_python_export_assets(self, dashboard: LoadedDashboard) -> str | None:
+        _, interactive_ids = self._reachable_outputs(dashboard)
+        policies = {
+            dashboard.interactive_transforms[identifier][1].export.assets
+            for identifier in interactive_ids
+            if dashboard.interactive_transforms[identifier][1].runtime == "browser-python"
+            and dashboard.interactive_transforms[identifier][1].export.mode == "interactive"
+        }
+        policies.discard(None)
+        if len(policies) > 1:
+            raise ExecutionFailure(
+                "Reachable browser-python transforms use conflicting export.assets policies"
+            )
+        return next(iter(policies), None)
+
+    def _pyodide_index_url(self, dashboard: LoadedDashboard, asset_mode: str) -> str:
+        runtime = self.workspace.definition.runtime
+        if asset_mode == "inline":
+            export_assets = self._browser_python_export_assets(dashboard)
+            if export_assets == "bundle":
+                return "./pyodide/"
+            return runtime.pyodide_index_url.rstrip("/") + "/"
+        if runtime.pyodide_asset_policy == "cdn":
+            return runtime.pyodide_index_url.rstrip("/") + "/"
+        return "/runtime/pyodide/"
 
     def _portable_bundle(
         self,
@@ -384,11 +630,18 @@ class CanvasRenderer:
         allow_missing: bool = False,
         asset_mode: str = "inline",
         session_id: str | None = None,
+        snapshot_interactions: set[str] | None = None,
     ) -> dict[str, Any]:
         outputs: dict[str, Any] = {}
         output_transports: dict[str, Any] = {}
         output_kinds: dict[str, str] = {}
         reachable, _ = self._reachable_outputs(dashboard)
+        for transform_id in snapshot_interactions or set():
+            definition = dashboard.interactive_transforms[transform_id][1]
+            reachable.update(
+                f"interactive:{transform_id}/{name}"
+                for name in definition.outputs
+            )
         runtime = self.workspace.definition.runtime
         row_count = 0
         payload_bytes = 0
@@ -461,7 +714,7 @@ class CanvasRenderer:
             raise ExecutionFailure(
                 f"Browser payload has {row_count:,} rows; limit is {runtime.max_embedded_rows:,}",
                 details={
-                    "hint": "Aggregate with a Server Transform or raise runtime.max_embedded_rows explicitly.",
+                    "hint": "Aggregate with a Dataset Transform or raise runtime.max_embedded_rows explicitly.",
                     "references": sorted(reachable),
                 },
             )
@@ -490,7 +743,13 @@ class CanvasRenderer:
             },
         }
 
-    def _portable_controls(self, dashboard: LoadedDashboard, result: RunResult) -> str:
+    def _portable_controls(
+        self,
+        dashboard: LoadedDashboard,
+        result,
+        *,
+        snapshot_interactions: set[str],
+    ) -> str:
         contract = compile_selection_contract(dashboard.definition)
         controls: dict[str, dict[str, Any]] = {}
         for view_id, selections in contract.items():
@@ -519,15 +778,39 @@ class CanvasRenderer:
                 f'<small>{len(control["views"])} view{"s" if len(control["views"]) != 1 else ""}</small></div>'
                 f'<strong>{html.escape(definition.label or definition.id)}</strong>{field}</div>'
             )
-        if not any(rendered.values()):
-            return ""
         query_items = "".join(
             f'<div class="dv-query-value"><span>{html.escape(item.label or item.id)}</span>'
-            f'<strong>{html.escape(json.dumps(result.parameters.get(item.id), ensure_ascii=False, default=str))}</strong></div>'
+            f'<strong>{html.escape(json.dumps(result.query_parameters.get(item.id), ensure_ascii=False, default=str))}</strong></div>'
             for item in dashboard.definition.query_parameters
         ) or '<div class="dv-query-value"><span>Query parameters</span><strong>None</strong></div>'
+        compute_consumers: dict[str, list[Any]] = {
+            item.id: [] for item in dashboard.definition.compute_parameters
+        }
+        for transform_id, (_, transform) in dashboard.interactive_transforms.items():
+            for parameter_id in transform.compute_params:
+                compute_consumers.setdefault(parameter_id, []).append(
+                    SimpleNamespace(id=transform_id, definition=transform)
+                )
+        compute_items = []
+        for definition in dashboard.definition.compute_parameters:
+            consumers = compute_consumers.get(definition.id, [])
+            triggers = {item.definition.trigger for item in consumers}
+            trigger = next(iter(triggers), "apply")
+            frozen = any(item.id in snapshot_interactions for item in consumers)
+            field = self._compute_field(
+                definition,
+                result.compute_parameters.get(definition.id, definition.default),
+                trigger=trigger,
+                disabled=frozen,
+            )
+            compute_items.append(
+                f'<label class="dv-compute-control" data-compute-key="{html.escape(definition.id)}" '
+                f'data-compute-trigger="{html.escape(trigger)}" data-compute-frozen="{str(frozen).lower()}">'
+                f'<span>{html.escape(definition.label or definition.id)}</span>{field}'
+                f'{"<small>Fixed snapshot</small>" if frozen else ""}</label>'
+            )
         groups = []
-        group_titles = {"dashboard": ("02", "Dashboard selections", "All views")}
+        group_titles = {"dashboard": ("03", "Dashboard selections", "All views")}
         for origin, values in rendered.items():
             number, title, description = group_titles[origin]
             groups.append(
@@ -537,14 +820,125 @@ class CanvasRenderer:
                 f'<div class="dv-runtime-popover"><header><span>{number}</span><div><strong>{title}</strong><small>Browser-only · redraws embedded views</small></div></header>'
                 f'<div class="dv-report-selection-group__fields">{"".join(values) if values else "<em>None</em>"}</div></div></details>'
             )
+        actionable = [
+            transform_id
+            for transform_id, (_, transform) in dashboard.interactive_transforms.items()
+            if transform.trigger in {"apply", "manual"}
+            and transform_id not in snapshot_interactions
+        ]
+        manual_targets = [
+            transform_id
+            for transform_id in actionable
+            if dashboard.interactive_transforms[transform_id][1].trigger == "manual"
+        ]
         return (
             '<header class="dv-runtime-header" aria-label="Report controls">'
             '<div class="dv-runtime-brand"><span>PORTABLE ANALYSIS</span><strong>Dataset fixed. Views live.</strong></div>'
-            '<nav class="dv-runtime-actions" aria-label="Dataset controls">'
+            '<nav class="dv-runtime-actions" aria-label="Dataset and analysis controls">'
             '<details class="dv-runtime-control" data-runtime-popover data-overlay-floating="true" data-overlay-width="440">'
             '<summary><span>01</span><div><strong>Parameters</strong><small>Fixed snapshot</small></div><i>⌄</i></summary>'
             f'<div class="dv-runtime-popover dv-runtime-popover--query"><header><span>01</span><div><strong>Query snapshot</strong><small>Values embedded in this HTML</small></div></header><div class="dv-runtime-query-values">{query_items}</div></div></details>'
+            f'{self._compute_controls_block(compute_items, bool(actionable), manual_targets)}'
             f'{"".join(groups)}</nav></header>'
+        )
+
+    def _compute_controls_block(
+        self,
+        items: list[str],
+        actionable: bool = False,
+        manual_targets: list[str] | None = None,
+    ) -> str:
+        if not items and not actionable:
+            return ""
+        fields = "".join(items) if items else "<em>No Compute Parameters. Run the declared analysis branch on demand.</em>"
+        encoded_targets = html.escape(
+            json.dumps(manual_targets or [], ensure_ascii=False), quote=True
+        )
+        return (
+            '<details class="dv-runtime-control" data-runtime-popover '
+            'data-overlay-floating="true" data-overlay-width="520">'
+            '<summary><span>02</span><div><strong>Compute</strong>'
+            f'<small>{len(items)} parameter{"" if len(items) == 1 else "s"}</small>'
+            '</div><i>⌄</i></summary><div class="dv-runtime-popover dv-runtime-popover--compute">'
+            '<header><span>02</span><div><strong>Analysis controls</strong>'
+            '<small>Draft values do not replace results until their trigger runs</small></div></header>'
+            f'<div class="dv-compute-fields">{fields}</div>'
+            '<footer><span data-compute-dirty-label>Results are current</span>'
+            f'<button type="button" data-compute-apply data-analysis-always="{str(actionable).lower()}" '
+            f'data-manual-targets="{encoded_targets}">Run analysis</button></footer>'
+            '</div></details>'
+        )
+
+    def _compute_field(
+        self,
+        definition,
+        value: Any,
+        *,
+        trigger: str,
+        disabled: bool,
+    ) -> str:
+        attrs = (
+            f' data-compute-input="{html.escape(definition.id, quote=True)}"'
+            f' data-compute-type="{html.escape(definition.type)}"'
+            f' data-compute-trigger="{html.escape(trigger)}"'
+            + (" disabled" if disabled else "")
+        )
+        if definition.type in {"single_select", "multi_select"}:
+            typed_choices = any(not isinstance(choice.value, str) for choice in definition.choices)
+            encode_choice = (
+                lambda item: json.dumps(item, ensure_ascii=False, separators=(",", ":"))
+                if typed_choices
+                else str(item)
+            )
+            selected = {
+                encode_choice(item)
+                for item in (value if isinstance(value, list) else [value])
+            }
+            options = "".join(
+                f'<option value="{html.escape(encode_choice(choice.value), quote=True)}"'
+                f'{" selected" if encode_choice(choice.value) in selected else ""}>'
+                f'{html.escape(choice.label)}</option>'
+                for choice in definition.choices
+            )
+            multiple = " multiple" if definition.type == "multi_select" else ""
+            encoding = "json" if typed_choices else "string"
+            return f'<select{attrs}{multiple} data-value-encoding="{encoding}">{options}</select>'
+        if definition.type == "boolean":
+            return (
+                f'<input type="checkbox"{attrs}'
+                f'{" checked" if bool(value) else ""}>'
+            )
+        if definition.type == "date_range":
+            values = value if isinstance(value, (list, tuple)) else ["", ""]
+            values = [*values, "", ""]
+            disabled_attr = " disabled" if disabled else ""
+            return (
+                f'<span class="dv-compute-range" data-compute-input="{html.escape(definition.id, quote=True)}" '
+                f'data-compute-type="date_range" data-compute-trigger="{html.escape(trigger)}">'
+                f'<input type="date" data-compute-range="start" value="{html.escape(str(values[0]), quote=True)}"{disabled_attr}>'
+                '<i>—</i>'
+                f'<input type="date" data-compute-range="end" value="{html.escape(str(values[1]), quote=True)}"{disabled_attr}></span>'
+            )
+        input_type = (
+            "number"
+            if definition.type in {"number", "integer"}
+            else "date"
+            if definition.type == "date"
+            else "text"
+        )
+        bounds = ""
+        if definition.min is not None:
+            bounds += f' min="{html.escape(str(definition.min), quote=True)}"'
+        if definition.max is not None:
+            bounds += f' max="{html.escape(str(definition.max), quote=True)}"'
+        if definition.step is not None:
+            bounds += f' step="{html.escape(str(definition.step), quote=True)}"'
+        elif definition.type == "integer":
+            bounds += ' step="1"'
+        return (
+            f'<input type="{input_type}"{attrs}{bounds} '
+            f'value="{html.escape("" if value is None else str(value), quote=True)}" '
+            f'placeholder="{html.escape(definition.placeholder, quote=True)}">'
         )
 
     def _selector_presentation(self, dashboard: LoadedDashboard, key: str, definition) -> dict[str, Any]:
@@ -573,8 +967,6 @@ class CanvasRenderer:
             )
             template = selector.get("template", default_template)
             css_class = html.escape(selector.get("css_class", ""))
-            choice_value = lambda item: str(item).lower() if isinstance(item, bool) else str(item)
-            selected = {choice_value(item) for item in (value if isinstance(value, list) else [value])}
             multiple = " multiple" if definition.type == "multi_select" else ""
             choices = list(definition.choices)
             if definition.type == "boolean" and not choices:
@@ -582,6 +974,13 @@ class CanvasRenderer:
                     SimpleNamespace(label="Yes", value=True, group=None, description="", keywords=[]),
                     SimpleNamespace(label="No", value=False, group=None, description="", keywords=[]),
                 ]
+            typed_choices = any(not isinstance(choice.value, str) for choice in choices)
+            choice_value = (
+                (lambda item: json.dumps(item, ensure_ascii=False, separators=(",", ":")))
+                if typed_choices
+                else (lambda item: str(item))
+            )
+            selected = {choice_value(item) for item in (value if isinstance(value, list) else [value])}
             options = ""
             if definition.type != "multi_select":
                 empty_selected = value is None or value == "" or value == []
@@ -599,7 +998,8 @@ class CanvasRenderer:
                     f'<option value="{html.escape(serialized_value, quote=True)}"{metadata}'
                     f'{" selected" if serialized_value in selected else ""}>{html.escape(choice.label)}</option>'
                 )
-            select = f'<select aria-label="{html.escape(definition.label or definition.id)}" data-selection-input="{escaped_key}"{multiple}>{options}</select>'
+            encoding = "json" if typed_choices else "string"
+            select = f'<select aria-label="{html.escape(definition.label or definition.id)}" data-selection-input="{escaped_key}" data-value-encoding="{encoding}"{multiple}>{options}</select>'
             attrs = (
                 f'data-selector-template="{html.escape(template)}" '
                 f'data-requested-template="{html.escape(selector.get("requested_template", selector.get("template", "auto")))}" '
@@ -645,7 +1045,7 @@ class CanvasRenderer:
                     f' data-checked-strategy="{html.escape(selector.get("checked_strategy", "child"))}"'
                 )
             return f'<div class="dv-selector {css_class}" {attrs}>{select}<div data-selector-mount></div></div>'
-        input_type = "number" if definition.type == "number" else "date" if definition.type == "date" else "text"
+        input_type = "number" if definition.type in {"number", "integer"} else "date" if definition.type == "date" else "text"
         display = ",".join(map(str, value)) if isinstance(value, list) else "" if value is None else str(value)
         if definition.type == "date_range":
             selector = selector or {"template": "date-range"}
@@ -665,8 +1065,22 @@ class CanvasRenderer:
                 f'data-selection-input="{escaped_key}" data-selector-native>'
             )
             return f'<div class="dv-selector {css_class}" {attrs}>{native}<div data-selector-mount></div></div>'
-        placeholder = ""
-        return f'<input type="{input_type}" value="{html.escape(display)}" data-selection-input="{escaped_key}"{placeholder}>'
+        constraints = ""
+        if definition.required:
+            constraints += " required"
+        if definition.min is not None:
+            constraints += f' min="{html.escape(str(definition.min), quote=True)}"'
+        if definition.max is not None:
+            constraints += f' max="{html.escape(str(definition.max), quote=True)}"'
+        if definition.step is not None:
+            constraints += f' step="{html.escape(str(definition.step), quote=True)}"'
+        elif definition.type == "integer":
+            constraints += ' step="1"'
+        return (
+            f'<input type="{input_type}" value="{html.escape(display)}" '
+            f'aria-label="{html.escape(definition.label or definition.id)}" '
+            f'data-selection-input="{escaped_key}"{constraints}>'
+        )
 
     def write_report(
         self,
@@ -676,8 +1090,32 @@ class CanvasRenderer:
         *,
         chart_mode: str = "interactive",
         image_format: str = "svg",
+        compute_parameters: dict[str, Any] | None = None,
+        selections: dict[str, Any] | None = None,
+        derived_outputs: dict[str, Any] | None = None,
+        snapshot_interactions: set[str] | None = None,
     ) -> Path:
         output.parent.mkdir(parents=True, exist_ok=True)
+        pyodide_index_url = None
+        asset_manifest: dict[str, Any] = {}
+        if self._browser_python_export_assets(dashboard) == "bundle":
+            configured = self.workspace.definition.runtime.pyodide_bundle_path
+            if not configured:
+                raise ExecutionFailure(
+                    "browser-python bundle export requires runtime.pyodide_bundle_path"
+                )
+            source = (self.workspace.root / configured).resolve()
+            asset_root = output.parent / f"{output.stem}.assets"
+            target = asset_root / "pyodide"
+            shutil.copytree(source, target, dirs_exist_ok=True)
+            pyodide_index_url = f"./{quote(asset_root.name)}/pyodide/"
+            asset_manifest = {
+                "pyodide": {
+                    "policy": "bundle",
+                    "path": f"{asset_root.name}/pyodide",
+                    "version": self.workspace.definition.runtime.pyodide_version,
+                }
+            }
         output.write_text(
             self.render(
                 dashboard,
@@ -685,11 +1123,40 @@ class CanvasRenderer:
                 chart_mode=chart_mode,
                 image_format=image_format,
                 asset_mode="inline",
+                compute_parameters=compute_parameters,
+                selections=selections,
+                derived_outputs=derived_outputs,
+                snapshot_interactions=snapshot_interactions,
+                pyodide_index_url=pyodide_index_url,
             ),
             encoding="utf-8",
         )
         manifest = output.with_suffix(output.suffix + ".manifest.json")
-        manifest.write_text(result.model_dump_json(indent=2, by_alias=True), encoding="utf-8")
+        manifest.write_text(
+            json.dumps(
+                {
+                    "schema": "dataviz/report-manifest/v2",
+                    "runtime": RUNTIME_PROTOCOL_SCHEMA,
+                    "dashboard": dashboard.definition.id,
+                    "query_run": result.model_dump(mode="json", by_alias=True),
+                    "state": {
+                        "query_parameters": result.query_parameters,
+                        "compute_parameters": compute_parameters or {},
+                        "selections": selections or {},
+                    },
+                    "derived_outputs": {
+                        reference: descriptor.model_dump(mode="json", by_alias=True)
+                        for reference, descriptor in (derived_outputs or {}).items()
+                    },
+                    "snapshot_interactions": sorted(snapshot_interactions or set()),
+                    "assets": asset_manifest,
+                },
+                ensure_ascii=False,
+                indent=2,
+                default=str,
+            ),
+            encoding="utf-8",
+        )
         return output
 
     def _default_body(
@@ -699,8 +1166,14 @@ class CanvasRenderer:
         views: dict[str, str],
         parameters: dict[str, Any],
         selections: dict[str, Any],
+        binding_fields: set[str],
     ) -> str:
-        assumptions = "".join(f"<li>{html.escape(value)}</li>" for value in definition.assumptions)
+        assumptions = "".join(
+            f'<li data-dv-content-field="assumptions[{index}]">{html.escape(value)}</li>'
+            if f"assumptions[{index}]" in binding_fields
+            else f"<li>{html.escape(value)}</li>"
+            for index, value in enumerate(definition.assumptions)
+        )
         presentation_views = dashboard.presentation.views if dashboard.presentation else {}
         all_view_ids = list(dashboard.views)
         declarative_views = {item.id: item for item in definition.views}
@@ -725,7 +1198,7 @@ class CanvasRenderer:
                 )
             return (
                 f'<div class="dv-section-view {html.escape(css_class)}" style="{style}">'
-                f'{views.get(view_id, self._client_view_html(dashboard, view_id, run_state, declarative=declarative_views.get(view_id)))}'
+                f'{views.get(view_id, self._client_view_html(dashboard, view_id, run_state, declarative=declarative_views.get(view_id), binding_fields=binding_fields))}'
                 "</div>"
             )
 
@@ -735,7 +1208,20 @@ class CanvasRenderer:
             view_ids = list(section.views)
             assigned.update(view_ids)
             section_selection = self._context_selection_controls(dashboard, run_state, "section", section.id)
-            description = f'<p>{html.escape(section.description)}</p>' if section.description else ""
+            title_field = f"sections.{section.id}.title"
+            description_field = f"sections.{section.id}.description"
+            title_binding = (
+                f' data-dv-content-field="{html.escape(title_field, quote=True)}"'
+                if title_field in binding_fields
+                else ""
+            )
+            description_binding = description_field in binding_fields
+            description = (
+                f'<p data-dv-content-field="{html.escape(description_field, quote=True)}">'
+                f'{html.escape(section.description)}</p>'
+                if section.description or description_binding
+                else ""
+            )
             if section.repeat:
                 section_style = f' style="--dv-repeat-columns:{max(1, section.columns or 1)}"'
             else:
@@ -754,7 +1240,7 @@ class CanvasRenderer:
             sections.append(
                 f'<section class="dv-section dv-section--{html.escape(section.template)} {html.escape(section.css_class)}" data-section-id="{html.escape(section.id)}"{section_style}>'
                 '<header class="dv-section__header"><div>'
-                f'<p class="dv-section__eyebrow">{html.escape(section.id)}</p><h2>{html.escape(section.title)}</h2>{description}'
+                f'<p class="dv-section__eyebrow">{html.escape(section.id)}</p><h2{title_binding}>{html.escape(section.title)}</h2>{description}'
                 f'</div>{section_selection}</header><div class="dv-section__body">'
                 f'{section_body}</div></section>'
             )
@@ -764,14 +1250,25 @@ class CanvasRenderer:
                 '<section class="dv-section dv-section--stack" data-section-id="overview">'
                 f'<div class="dv-section__body">{"".join(view_item(view_id) for view_id in remaining)}</div></section>'
             )
+        dashboard_title_binding = (
+            ' data-dv-content-field="title"' if "title" in binding_fields else ""
+        )
+        dashboard_subtitle_binding = (
+            ' data-dv-content-field="subtitle"' if "subtitle" in binding_fields else ""
+        )
+        dashboard_description_binding = (
+            ' data-dv-content-field="description"'
+            if "description" in binding_fields
+            else ""
+        )
         return f"""
 <div class="dv-default-shell" style="--dv-columns:{definition.layout.columns};--dv-gap:{definition.layout.gap}px">
 <header class="dv-report-header dv-report-header--compact">
   <div>
     <p class="dv-eyebrow">{html.escape(definition.id.upper())}</p>
-    <h1>{html.escape(definition.title)}</h1>
-    {f'<p class="dv-subtitle">{html.escape(definition.subtitle)}</p>' if definition.subtitle else ''}
-    {f'<p class="dv-deck">{html.escape(definition.description)}</p>' if definition.description else ''}
+    <h1{dashboard_title_binding}>{html.escape(definition.title)}</h1>
+    {f'<p class="dv-subtitle"{dashboard_subtitle_binding}>{html.escape(definition.subtitle)}</p>' if definition.subtitle or 'subtitle' in binding_fields else ''}
+    {f'<p class="dv-deck"{dashboard_description_binding}>{html.escape(definition.description)}</p>' if definition.description or 'description' in binding_fields else ''}
   </div>
 </header>
 {f'<details class="dv-assumptions"><summary>口径与假设</summary><ul>{assumptions}</ul></details>' if assumptions else ''}

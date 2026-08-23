@@ -1,0 +1,81 @@
+schema: dataviz/dashboard/v2
+kind: dashboard
+id: chart-gallery
+title: 多图表陈列室
+description: 用同一份声明式数据契约展示浏览器端 Plotly 与 ECharts 图形语法。
+adapters: {warehouse: demo-duckdb}
+dashboard_selections:
+  - id: province
+    field: province
+    type: multi_select
+    label: 省份
+    default: [广东, 湖南, 福建, 浙江]
+    choices:
+      - {label: 广东, value: 广东}
+      - {label: 湖南, value: 湖南}
+      - {label: 福建, value: 福建}
+      - {label: 浙江, value: 浙江}
+sources: [sources/metrics.yaml]
+interactive_transforms: [transforms/latest-metrics.yaml]
+views:
+  - id: trend
+    title: 季度收入轨迹
+    input: source:metrics/main
+    template: line
+    x: quarter
+    y: revenue
+    series: province
+    aggregate: sum
+
+  - id: ranking
+    title: 城市收入排行
+    input: source:metrics/main
+    template: bar
+    engine: echarts
+    x: city
+    y: revenue
+    aggregate: sum
+    sort: revenue
+
+  - id: composition
+    title: 省份构成
+    input: source:metrics/main
+    template: pie
+    engine: echarts
+    label: province
+    value: revenue
+    aggregate: sum
+
+  - id: scatter
+    title: 订单与收入关系
+    input: source:metrics/main
+    template: scatter
+    x: orders
+    y: revenue
+    size: customers
+    aggregate: none
+
+  - id: radial
+    title: 城市能力雷达
+    input: interactive:latest-metrics/main
+    template: radar
+    engine: echarts
+    label: city
+    columns: [revenue, orders, customers]
+    limit: 5
+
+  - id: records
+    title: 原始数据
+    input: source:metrics/main
+    template: table
+    columns: [province, city, quarter, revenue, orders, customers]
+    limit: 40
+
+sections:
+  - {id: overview, title: 图形总览, views: [trend, ranking, composition]}
+  - {id: details, title: 数据关系, views: [scatter, radial, records]}
+canvas:
+  template: canvas/template.html
+  style: canvas/style.css
+  use_default_style: true
+  client_libraries: [plotly, echarts]

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from dataviz.value_contract import validate_control_definition
 
 
 class Model(BaseModel):
@@ -40,17 +42,32 @@ class RuntimeDefinition(Model):
     echarts_js: str = "https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"
     arrow_js: str = "https://cdn.jsdelivr.net/npm/apache-arrow@21.1.0/Arrow.es2015.min.js"
     perspective_version: str = "5.2.0"
+    pyodide_version: str = "314.0.4"
+    pyodide_asset_policy: Literal["cdn", "bundle"] = "cdn"
+    pyodide_index_url: str = "https://cdn.jsdelivr.net/pyodide/v314.0.4/full/"
+    pyodide_bundle_path: str | None = None
     browser_table_transport: Literal["auto", "json", "arrow"] = "auto"
     arrow_min_rows: int = Field(2_000, ge=1)
     arrow_chunk_bytes: int = Field(524_288, ge=65_536, le=8_388_608)
-    max_workers: int = 4
+    max_workers: int = Field(4, ge=1)
     max_concurrent_runs: int = Field(4, ge=1)
     max_embedded_rows: int = Field(100_000, ge=1)
     max_embedded_bytes: int = Field(25_000_000, ge=1)
     max_retained_runs: int = Field(100, ge=1)
+    max_retained_interactions_per_run: int = Field(200, ge=1)
+    max_retained_run_events: int = Field(2_000, ge=10)
+    max_retained_interaction_events: int = Field(2_000, ge=10)
     run_retention_seconds: int | None = Field(604_800, ge=1)
     max_retained_cache_entries: int = Field(500, ge=1)
     cache_retention_seconds: int | None = Field(2_592_000, ge=1)
+
+    @model_validator(mode="after")
+    def validate_pyodide_assets(self):
+        if self.pyodide_asset_policy == "bundle" and not self.pyodide_bundle_path:
+            raise ValueError(
+                "runtime.pyodide_bundle_path is required when pyodide_asset_policy=bundle"
+            )
+        return self
 
 
 class WorkspaceDefinition(Model):
@@ -72,11 +89,12 @@ class Choice(Model):
     keywords: list[str] = Field(default_factory=list)
 
 
-class ParameterDefinition(Model):
+class _ValueControlDefinition(Model):
     id: str
     type: Literal[
         "string",
         "number",
+        "integer",
         "boolean",
         "date",
         "date_range",
@@ -88,9 +106,41 @@ class ParameterDefinition(Model):
     default: Any = None
     required: bool = False
     choices: list[Choice] = Field(default_factory=list)
+    min: float | int | None = None
+    max: float | int | None = None
+    step: float | int | None = None
+    placeholder: str = ""
+
+    @model_validator(mode="after")
+    def validate_value_contract(self):
+        return validate_control_definition(self)
 
 
-class SelectionDefinition(ParameterDefinition):
+class QueryParameterDefinition(_ValueControlDefinition):
+    """State that creates a new immutable Query Run when committed."""
+
+    @model_validator(mode="after")
+    def validate_static_choices(self):
+        if self.type in {"single_select", "multi_select"} and not self.choices:
+            raise ValueError(
+                "Query Parameter select controls require explicit choices"
+            )
+        return self
+
+
+class ComputeParameterDefinition(_ValueControlDefinition):
+    """State used only by Interactive Transforms after a Query Run exists."""
+
+    @model_validator(mode="after")
+    def validate_static_choices(self):
+        if self.type in {"single_select", "multi_select"} and not self.choices:
+            raise ValueError(
+                "Compute Parameter select controls require explicit choices"
+            )
+        return self
+
+
+class SelectionDefinition(_ValueControlDefinition):
     """A browser-side selection applied after sources have been loaded."""
 
     field: str | None = None
@@ -352,7 +402,7 @@ class DeclarativeViewDefinition(Model):
 
 
 class DashboardDefinition(Model):
-    schema_: Literal["dataviz/dashboard/v1"] = Field(alias="schema")
+    schema_: Literal["dataviz/dashboard/v2"] = Field(alias="schema")
     kind: Literal["dashboard"] = "dashboard"
     id: str
     title: str = ""
@@ -361,12 +411,13 @@ class DashboardDefinition(Model):
     context: dict[str, Any] = Field(default_factory=dict)
     assumptions: list[str] = Field(default_factory=list)
     adapters: dict[str, str] = Field(default_factory=dict)
-    query_parameters: list[ParameterDefinition] = Field(default_factory=list)
+    query_parameters: list[QueryParameterDefinition] = Field(default_factory=list)
+    compute_parameters: list[ComputeParameterDefinition] = Field(default_factory=list)
     dashboard_selections: list[SelectionDefinition] = Field(default_factory=list)
     sections: list[SectionDefinition] = Field(default_factory=list)
     sources: list[str | dict[str, Any]] = Field(default_factory=list)
-    server_transforms: list[str | dict[str, Any]] = Field(default_factory=list)
-    browser_transforms: list[str | dict[str, Any]] = Field(default_factory=list)
+    dataset_transforms: list[str | dict[str, Any]] = Field(default_factory=list)
+    interactive_transforms: list[str | dict[str, Any]] = Field(default_factory=list)
     views: list[DeclarativeViewDefinition] = Field(default_factory=list)
     layout: LayoutDefinition = Field(default_factory=LayoutDefinition)
     theme: ThemeDefinition = Field(default_factory=ThemeDefinition)
@@ -397,7 +448,17 @@ class OutputDefinition(Model):
 class CacheDefinition(Model):
     mode: Literal["none", "session", "ttl", "persistent"] = "session"
     scope: Literal["tab", "workspace"] = "tab"
-    ttl_seconds: int | None = None
+    ttl_seconds: int | None = Field(None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_ttl(self):
+        if self.mode == "ttl" and self.ttl_seconds is None:
+            raise ValueError("cache.ttl_seconds is required when cache.mode=ttl")
+        if self.mode != "ttl" and self.ttl_seconds is not None:
+            raise ValueError("cache.ttl_seconds is only valid when cache.mode=ttl")
+        if self.mode in {"none", "session"} and self.scope != "tab":
+            raise ValueError(f"cache.scope=workspace is not meaningful for mode={self.mode}")
+        return self
 
 
 class SourceDefinition(Model):
@@ -412,48 +473,110 @@ class SourceDefinition(Model):
     code: str | None = None
     adapter: str | None = None
     entrypoint: str = "load"
-    params: list[str] = Field(default_factory=list)
+    query_params: list[str] = Field(default_factory=list)
     options: dict[str, Any] = Field(default_factory=dict)
-    outputs: dict[str, OutputDefinition] = Field(default_factory=dict)
+    outputs: dict[str, OutputDefinition] = Field(min_length=1)
     code_dependencies: list[str] = Field(default_factory=list)
     python_dependencies: list[str] = Field(default_factory=list)
     timeout_seconds: float | None = Field(None, gt=0)
     timeout_retries: int | None = Field(None, ge=0, le=5)
     cache: CacheDefinition = Field(default_factory=CacheDefinition)
 
+    @model_validator(mode="after")
+    def apply_execution_defaults(self):
+        # File reads are local and synchronous. SQL and Python Sources must not
+        # run forever merely because the author omitted an operational setting.
+        if self.type in {"sql", "python"} and self.timeout_seconds is None:
+            self.timeout_seconds = 120.0
+        if self.type == "sql" and self.timeout_retries is None:
+            self.timeout_retries = 1
+        return self
 
-class ServerTransformDefinition(Model):
-    schema_: Literal["dataviz/server-transform/v1"] = Field(alias="schema")
-    kind: Literal["server_transform"] = "server_transform"
+
+class DatasetTransformDefinition(Model):
+    schema_: Literal["dataviz/dataset-transform/v1"] = Field(alias="schema")
+    kind: Literal["dataset_transform"] = "dataset_transform"
     id: str
     name: str | None = None
     description: str = ""
-    runtime: Literal["python"] = "python"
+    runtime: Literal["server-python"] = "server-python"
     code: str
     entrypoint: str = "transform"
     inputs: dict[str, str] = Field(default_factory=dict)
     input_schemas: dict[str, list[ColumnDefinition]] = Field(default_factory=dict)
-    params: list[str] = Field(default_factory=list)
-    outputs: dict[str, OutputDefinition] = Field(default_factory=dict)
+    query_params: list[str] = Field(default_factory=list)
+    outputs: dict[str, OutputDefinition] = Field(min_length=1)
     code_dependencies: list[str] = Field(default_factory=list)
     python_dependencies: list[str] = Field(default_factory=list)
-    timeout_seconds: float | None = Field(None, gt=0)
+    timeout_seconds: float = Field(120.0, gt=0)
     cache: CacheDefinition = Field(default_factory=CacheDefinition)
 
 
-class BrowserTransformDefinition(Model):
-    schema_: Literal["dataviz/browser-transform/v1"] = Field(alias="schema")
-    kind: Literal["browser_transform"] = "browser_transform"
+class InteractiveExportDefinition(Model):
+    mode: Literal["interactive", "snapshot", "unavailable"]
+    assets: Literal["cdn", "bundle"] | None = None
+    reason: str = ""
+
+    @model_validator(mode="after")
+    def require_unavailable_reason(self):
+        if self.mode == "unavailable" and not self.reason.strip():
+            raise ValueError("export.reason is required when export.mode is unavailable")
+        return self
+
+
+class InteractiveTransformDefinition(Model):
+    schema_: Literal["dataviz/interactive-transform/v1"] = Field(alias="schema")
+    kind: Literal["interactive_transform"] = "interactive_transform"
     id: str
     name: str | None = None
     description: str = ""
+    runtime: Literal["server-python", "browser-python", "browser-js"]
     code: str
     entrypoint: str = "transform"
     inputs: dict[str, str] = Field(default_factory=dict)
-    params: list[str] = Field(default_factory=list)
+    input_schemas: dict[str, list[ColumnDefinition]] = Field(default_factory=dict)
+    query_params: list[str] = Field(default_factory=list)
+    compute_params: list[str] = Field(default_factory=list)
     selections: list[str] = Field(default_factory=list)
-    outputs: dict[str, OutputDefinition] = Field(default_factory=dict)
-    timeout_seconds: float = Field(30.0, gt=0, le=300)
+    trigger: Literal["apply", "auto", "manual"] = "apply"
+    debounce_ms: int = Field(300, ge=0, le=10_000)
+    export: InteractiveExportDefinition
+    outputs: dict[str, OutputDefinition] = Field(min_length=1)
+    code_dependencies: list[str] = Field(default_factory=list)
+    python_dependencies: list[str] = Field(default_factory=list)
+    timeout_seconds: float = Field(30.0, gt=0)
+    cache: CacheDefinition = Field(default_factory=CacheDefinition)
+
+    @model_validator(mode="after")
+    def validate_runtime_contract(self):
+        if self.runtime == "server-python" and self.export.mode == "interactive":
+            raise ValueError(
+                "server-python cannot use export.mode=interactive; choose snapshot or unavailable"
+            )
+        if self.runtime == "browser-js" and self.python_dependencies:
+            raise ValueError("browser-js cannot declare python_dependencies")
+        if self.runtime == "browser-js" and self.export.assets is not None:
+            raise ValueError("browser-js does not use export.assets")
+        if (
+            self.runtime == "browser-python"
+            and self.export.mode == "interactive"
+            and self.export.assets is None
+        ):
+            raise ValueError(
+                "browser-python with export.mode=interactive must declare "
+                "export.assets as cdn or bundle"
+            )
+        if self.runtime != "browser-python" and self.export.assets is not None:
+            raise ValueError("export.assets is only valid for browser-python")
+        if self.export.mode != "interactive" and self.export.assets is not None:
+            raise ValueError("export.assets is only valid when export.mode is interactive")
+        if self.runtime in {"browser-js", "browser-python"} and (
+            self.cache.mode not in {"none", "session"} or self.cache.scope != "tab"
+        ):
+            raise ValueError(
+                "Browser Runtime cache supports only mode none/session with scope tab"
+            )
+        return self
 
 
 class AdapterDefinition(Model):

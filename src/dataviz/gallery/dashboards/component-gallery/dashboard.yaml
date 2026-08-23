@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v1
+schema: dataviz/dashboard/v2
 kind: dashboard
 id: component-gallery
 title: Component Gallery
@@ -12,6 +12,7 @@ sources:
     type: file
     path: data/gallery.csv
     format: csv
+    outputs: {main: {kind: table}}
 
 dashboard_selections:
   - id: region
@@ -25,19 +26,19 @@ dashboard_selections:
       - {label: North, value: North}
 
 views:
-  - {id: total-revenue, title: Revenue, template: metric, input: gallery-data, value: revenue, aggregate: sum, label: selected revenue}
-  - {id: total-orders, title: Orders, template: metric, input: gallery-data, value: orders, aggregate: sum, label: selected orders}
-  - {id: revenue-line, title: Line · Plotly, template: line, input: gallery-data, x: month, y: revenue, series: region, aggregate: sum}
-  - {id: category-bars, title: Bar · ECharts, template: bar, engine: echarts, input: gallery-data, x: category, y: revenue, series: region, aggregate: sum}
-  - {id: stacked-orders, title: Stacked bar, template: stacked-bar, engine: echarts, input: gallery-data, x: month, y: orders, series: category, aggregate: sum}
-  - {id: category-share, title: Pie, template: pie, engine: echarts, input: gallery-data, label: category, value: revenue, aggregate: sum}
-  - {id: revenue-scatter, title: Scatter, template: scatter, input: gallery-data, x: orders, y: revenue, series: region, size: satisfaction}
-  - {id: revenue-heatmap, title: Heatmap, template: heatmap, engine: echarts, input: gallery-data, x: month, y: region, z: revenue, aggregate: sum}
-  - {id: store-radar, title: Radar, template: radar, engine: echarts, input: gallery-data, label: store_id, columns: [revenue, orders, satisfaction], limit: 4}
+  - {id: total-revenue, title: Revenue, template: metric, input: source:gallery-data/main, value: revenue, aggregate: sum, label: selected revenue}
+  - {id: total-orders, title: Orders, template: metric, input: source:gallery-data/main, value: orders, aggregate: sum, label: selected orders}
+  - {id: revenue-line, title: Line · Plotly, template: line, input: source:gallery-data/main, x: month, y: revenue, series: region, aggregate: sum}
+  - {id: category-bars, title: Bar · ECharts, template: bar, engine: echarts, input: source:gallery-data/main, x: category, y: revenue, series: region, aggregate: sum}
+  - {id: stacked-orders, title: Stacked bar, template: stacked-bar, engine: echarts, input: source:gallery-data/main, x: month, y: orders, series: category, aggregate: sum}
+  - {id: category-share, title: Pie, template: pie, engine: echarts, input: source:gallery-data/main, label: category, value: revenue, aggregate: sum}
+  - {id: revenue-scatter, title: Scatter, template: scatter, input: source:gallery-data/main, x: orders, y: revenue, series: region, size: satisfaction}
+  - {id: revenue-heatmap, title: Heatmap, template: heatmap, engine: echarts, input: source:gallery-data/main, x: month, y: region, z: revenue, aggregate: sum}
+  - {id: store-radar, title: Radar, template: radar, engine: echarts, input: source:gallery-data/main, label: store_id, columns: [revenue, orders, satisfaction], limit: 4}
   - id: detail-table
     title: Themeable table + View selectors
     template: table
-    input: gallery-data
+    input: source:gallery-data/main
     columns: [date, month, region, category, product, province, city, district, store_id, revenue, orders]
     limit: 100
     selections:
@@ -83,7 +84,7 @@ views:
           - {label: Store S02, value: S02}
           - {label: Store S03, value: S03}
           - {label: Store S04, value: S04}
-  - {id: pivot-table, title: Perspective, template: perspective, input: gallery-data, columns: [month, region, category, revenue, orders]}
+  - {id: pivot-table, title: Perspective, template: perspective, input: source:gallery-data/main, columns: [month, region, category, revenue, orders]}
   - id: narrative
     title: Markdown
     template: markdown
@@ -92,9 +93,9 @@ views:
     title: Image
     template: image
     url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 420'%3E%3Crect width='800' height='420' fill='%2317211d'/%3E%3Ccircle cx='610' cy='120' r='82' fill='%2369dca5'/%3E%3Cpath d='M0 350L250 130L430 290L800 40V420H0Z' fill='%23e2592a'/%3E%3Ctext x='44' y='78' fill='%23fffdf6' font-family='serif' font-size='42'%3EIMAGE VIEW%3C/text%3E%3C/svg%3E"
-  - {id: custom-specimen, title: Custom renderer, template: custom, renderer: gallery.spark, input: gallery-data}
-  - {id: all-store-trend, title: Store trend blueprint, template: line, input: gallery-data, x: month, y: revenue, aggregate: sum}
-  - {id: selected-store-trend, title: Selected store blueprint, template: line, input: gallery-data, x: month, y: revenue, aggregate: sum}
+  - {id: custom-specimen, title: Custom renderer, template: custom, renderer: gallery.spark, input: source:gallery-data/main}
+  - {id: all-store-trend, title: Store trend blueprint, template: line, input: source:gallery-data/main, x: month, y: revenue, aggregate: sum}
+  - {id: selected-store-trend, title: Selected store blueprint, template: line, input: source:gallery-data/main, x: month, y: revenue, aggregate: sum}
 
 sections:
   - id: metrics

@@ -255,15 +255,15 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
     },
     "output.named": {
         "category": "data",
-        "purpose": "Expose stable typed results from a Source or Server Transform",
+        "purpose": "Expose stable typed results from a Source, Dataset Transform, or Interactive Transform",
         "use_when": "Several Views reuse different tables, scalars, text, or objects from one computation",
         "logic": {
-            "reference": "transform:<node-id>/<output-name>",
+            "reference": "source|dataset|interactive:<node-id>/<output-name>",
             "kinds": ["table", "scalar", "object", "text", "html", "chart", "image", "file"],
             "optional": ["schema", "format", "mime_type", "description", "required"],
         },
         "behavior": {
-            "implicit": "A node without outputs has exactly source:<id>/main or transform:<id>/main",
+            "explicit": "Every node declares outputs; even main is referenced explicitly as <kind>:<id>/main",
             "validation": "Declared names, kinds, required outputs, and table schemas are enforced",
         },
         "example": {
@@ -273,14 +273,14 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
             }
         },
     },
-    "transform.server-python": {
+    "dataset-transform.server-python": {
         "category": "transform",
-        "purpose": "Run reviewable complex Python against explicit upstream Named Outputs",
+        "purpose": "Run query-stage Python against explicit Base Named Outputs",
         "logic": {
-            "kind": "server_transform",
-            "runtime": "python",
+            "kind": "dataset_transform",
+            "runtime": "server-python",
             "fields": ["id", "code", "inputs", "outputs"],
-            "optional": ["entrypoint", "params", "input_schemas", "code_dependencies", "python_dependencies", "timeout_seconds", "cache"],
+            "optional": ["entrypoint", "query_params", "input_schemas", "code_dependencies", "python_dependencies", "timeout_seconds", "cache"],
         },
         "behavior": {
             "isolation": "Fresh spawned process per execution",
@@ -289,19 +289,52 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
             "cache": "Code, dependencies, packages, parameters, Adapter, and upstream hashes",
         },
     },
-    "transform.browser-js": {
+    "interactive-transform.browser-js": {
         "category": "transform",
-        "purpose": "Derive browser-only Named Outputs without DOM access or a new query",
+        "purpose": "Derive interactive Named Outputs in a JavaScript Worker without DOM access or a new query",
         "logic": {
-            "kind": "browser_transform",
-            "fields": ["id", "code", "inputs", "outputs"],
-            "optional": ["entrypoint", "params", "selections", "timeout_seconds"],
+            "kind": "interactive_transform",
+            "runtime": "browser-js",
+            "fields": ["id", "runtime", "code", "inputs", "export", "outputs"],
+            "optional": ["entrypoint", "query_params", "compute_params", "selections", "trigger", "debounce_ms", "timeout_seconds", "cache"],
         },
         "behavior": {
             "contract": "Pure serializable sync/async function returning a Named Output object",
             "invalidation": "Only declared Selection dependencies and downstream Views update",
             "execution": "Dedicated Web Worker with cancellation and a hard timeout",
-            "registration": "window.datavizRuntime.registerTransform(spec, {code, entrypoint})",
+            "registration": "window.datavizRuntime.registerInteractiveTransform(spec, {code, entrypoint})",
+        },
+    },
+    "interactive-transform.browser-python": {
+        "category": "transform",
+        "purpose": "Derive portable Named Outputs with Python in a Pyodide module Worker",
+        "logic": {
+            "kind": "interactive_transform",
+            "runtime": "browser-python",
+            "fields": ["id", "runtime", "code", "inputs", "export", "outputs"],
+            "optional": ["entrypoint", "query_params", "compute_params", "selections", "python_dependencies", "code_dependencies", "trigger", "debounce_ms", "timeout_seconds", "cache"],
+        },
+        "behavior": {
+            "contract": "Python returns only serializable Named Outputs; JavaScript owns rendering",
+            "isolation": "Fresh module Worker per generation with Pyodide interrupt and terminate fallback",
+            "transport": "Tables enter Python as columnar data and may become pandas DataFrames on demand",
+            "export": "interactive export declares cdn or bundle assets explicitly",
+        },
+    },
+    "interactive-transform.server-python": {
+        "category": "transform",
+        "purpose": "Run heavy interaction-stage Python against one immutable Query Run",
+        "logic": {
+            "kind": "interactive_transform",
+            "runtime": "server-python",
+            "fields": ["id", "runtime", "code", "inputs", "export", "outputs"],
+            "optional": ["entrypoint", "query_params", "compute_params", "selections", "python_dependencies", "code_dependencies", "trigger", "debounce_ms", "timeout_seconds", "cache"],
+        },
+        "behavior": {
+            "adapter": "Unavailable by contract; Interactive Transform cannot query new data",
+            "isolation": "Fresh process per generation with timeout and cancellation",
+            "scope": "Session, Dashboard, Query Run, Transform, and generation",
+            "export": "Static reports use snapshot or an explicit unavailable state",
         },
     },
     "renderer.custom": {
@@ -320,7 +353,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
 
 
 COMPONENT_REGISTRY_VERSION = "3.0.0"
-RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v1"
+RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v2"
 
 
 def _generated_component_templates() -> dict[str, dict[str, Any]]:
@@ -455,7 +488,7 @@ def template_catalog() -> dict[str, Any]:
             "optional": True,
             "id_scopes": ["sections", "views"],
             "visual_fields": ["theme", "layout", "sections", "views", "assets", "canvas"],
-            "protected_logic": ["adapters", "query_parameters", "sources", "server_transforms", "browser_transforms", "selections", "views"],
+            "protected_logic": ["adapters", "query_parameters", "compute_parameters", "sources", "dataset_transforms", "interactive_transforms", "dashboard_selections", "sections", "views"],
         },
         "selection_operators": ["auto", "equals", "in", "between", "contains", "gte", "lte", "gt", "lt"],
         "extension_path": [

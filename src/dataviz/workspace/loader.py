@@ -2,28 +2,35 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
 import importlib.metadata
+import json
 from pathlib import Path
+import re
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 from packaging.requirements import InvalidRequirement, Requirement
+from packaging.utils import canonicalize_name
 from pydantic import ValidationError
 
 from dataviz.content_templates import (
+    allowed_content_selections,
+    content_selection_contract,
     content_template_fields,
-    inspect_parameter_template,
+    inspect_content_template,
 )
 from dataviz.errors import Diagnostic, WorkspaceError
 from dataviz.execution.references import parse_output_reference
 from dataviz.sql_contract import sql_parameter_names
 from dataviz.workspace.models import (
-    BrowserTransformDefinition,
     DashboardDefinition,
+    DatasetTransformDefinition,
     DeclarativeViewDefinition,
+    InteractiveTransformDefinition,
     NavigationItem,
     PresentationDefinition,
-    ServerTransformDefinition,
     SourceDefinition,
     TrashItemDefinition,
     WorkspaceDefinition,
@@ -75,7 +82,7 @@ def parse_model(model_type, path: Path):
             file=path,
             details={
                 "expected": expected_schema,
-                "migration": "dataviz migrate <workspace> --apply",
+                "docs": "dataviz docs dashboard",
             },
         )
     try:
@@ -91,8 +98,8 @@ class LoadedDashboard:
     definition: DashboardDefinition
     logic_definition: DashboardDefinition
     sources: dict[str, tuple[Path, SourceDefinition]]
-    transforms: dict[str, tuple[Path, ServerTransformDefinition]]
-    browser_transforms: dict[str, tuple[Path, BrowserTransformDefinition]]
+    dataset_transforms: dict[str, tuple[Path, DatasetTransformDefinition]]
+    interactive_transforms: dict[str, tuple[Path, InteractiveTransformDefinition]]
     views: dict[str, DeclarativeViewDefinition]
     presentation_path: Path | None = None
     presentation: PresentationDefinition | None = None
@@ -203,8 +210,8 @@ def load_dashboard(path: Path) -> LoadedDashboard:
             else:
                 presentation = candidate
     sources: dict[str, tuple[Path, SourceDefinition]] = {}
-    transforms: dict[str, tuple[Path, ServerTransformDefinition]] = {}
-    browser_transforms: dict[str, tuple[Path, BrowserTransformDefinition]] = {}
+    dataset_transforms: dict[str, tuple[Path, DatasetTransformDefinition]] = {}
+    interactive_transforms: dict[str, tuple[Path, InteractiveTransformDefinition]] = {}
 
     for source_entry in definition.sources:
         if isinstance(source_entry, str):
@@ -226,45 +233,45 @@ def load_dashboard(path: Path) -> LoadedDashboard:
             raise WorkspaceError(f"Duplicate source id: {source.id}", file=source_path)
         sources[source.id] = (source_path, source)
 
-    for transform_entry in definition.server_transforms:
+    for transform_entry in definition.dataset_transforms:
         if isinstance(transform_entry, str):
             transform_path = (root / transform_entry).resolve()
-            transform = parse_model(ServerTransformDefinition, transform_path)
+            transform = parse_model(DatasetTransformDefinition, transform_path)
         else:
             transform_path = definition_path
             try:
-                transform = ServerTransformDefinition.model_validate(
-                    {"schema": "dataviz/server-transform/v1", **transform_entry}
+                transform = DatasetTransformDefinition.model_validate(
+                    {"schema": "dataviz/dataset-transform/v1", **transform_entry}
                 )
             except ValidationError as exc:
                 raise WorkspaceError(
-                    "Inline server transform schema validation failed",
+                    "Inline Dataset Transform schema validation failed",
                     file=definition_path,
                     details=exc.errors(),
                 ) from exc
-        if transform.id in transforms:
-            raise WorkspaceError(f"Duplicate server transform id: {transform.id}", file=transform_path)
-        transforms[transform.id] = (transform_path, transform)
+        if transform.id in dataset_transforms:
+            raise WorkspaceError(f"Duplicate Dataset Transform id: {transform.id}", file=transform_path)
+        dataset_transforms[transform.id] = (transform_path, transform)
 
-    for transform_entry in definition.browser_transforms:
+    for transform_entry in definition.interactive_transforms:
         if isinstance(transform_entry, str):
             transform_path = (root / transform_entry).resolve()
-            transform = parse_model(BrowserTransformDefinition, transform_path)
+            transform = parse_model(InteractiveTransformDefinition, transform_path)
         else:
             transform_path = definition_path
             try:
-                transform = BrowserTransformDefinition.model_validate(
-                    {"schema": "dataviz/browser-transform/v1", **transform_entry}
+                transform = InteractiveTransformDefinition.model_validate(
+                    {"schema": "dataviz/interactive-transform/v1", **transform_entry}
                 )
             except ValidationError as exc:
                 raise WorkspaceError(
-                    "Inline browser transform schema validation failed",
+                    "Inline Interactive Transform schema validation failed",
                     file=definition_path,
                     details=exc.errors(),
                 ) from exc
-        if transform.id in browser_transforms:
-            raise WorkspaceError(f"Duplicate browser transform id: {transform.id}", file=transform_path)
-        browser_transforms[transform.id] = (transform_path, transform)
+        if transform.id in interactive_transforms:
+            raise WorkspaceError(f"Duplicate Interactive Transform id: {transform.id}", file=transform_path)
+        interactive_transforms[transform.id] = (transform_path, transform)
 
     views: dict[str, DeclarativeViewDefinition] = {}
     for view in definition.views:
@@ -289,8 +296,8 @@ def load_dashboard(path: Path) -> LoadedDashboard:
         definition=definition,
         logic_definition=logic_definition,
         sources=sources,
-        transforms=transforms,
-        browser_transforms=browser_transforms,
+        dataset_transforms=dataset_transforms,
+        interactive_transforms=interactive_transforms,
         views=views,
         presentation_path=presentation_path if presentation_path.exists() else None,
         presentation=presentation,
@@ -756,6 +763,14 @@ def _code_path(definition_path: Path, value: str) -> Path:
     return (definition_path.parent / value).resolve()
 
 
+def _is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 def _python_dependency_error(value: str) -> str | None:
     try:
         requirement = Requirement(value)
@@ -775,13 +790,375 @@ def _python_dependency_error(value: str) -> str | None:
     return None
 
 
+_PYODIDE_PACKAGE_VERSIONS: dict[str, dict[str, str]] = {
+    # Generated from the official full/pyodide-lock.json for the Runtime pinned
+    # by WorkspaceDefinition. Keeping this versioned prevents a stale global
+    # native-package blacklist from rejecting packages that Pyodide later ships.
+    "314.0.4": {
+        "duckdb": "1.5.1",
+        "jinja2": "3.1.6",
+        "lightgbm": "4.6.0",
+        "matplotlib": "3.10.8",
+        "networkx": "3.6.1",
+        "numpy": "2.4.3",
+        "packaging": "26.1",
+        "pandas": "3.0.2",
+        "polars": "1.33.1",
+        "pyarrow": "22.0.0",
+        "pydantic": "2.12.5",
+        "scikit-learn": "1.8.0",
+        "scipy": "1.18.0",
+        "statsmodels": "0.14.6",
+        "sympy": "1.14.0",
+        "xgboost": "2.1.4",
+    }
+}
+
+
+_PYODIDE_CORE_ASSETS = (
+    "pyodide.mjs",
+    "pyodide.asm.mjs",
+    "pyodide.asm.wasm",
+    "python_stdlib.zip",
+    "pyodide-lock.json",
+)
+
+
+def _browser_python_bundle_requirements(
+    workspace: LoadedWorkspace,
+) -> list[tuple[str, Path]]:
+    """Return dependencies that must be resolvable without a network request."""
+    requirements: list[tuple[str, Path]] = []
+    live_bundle = workspace.definition.runtime.pyodide_asset_policy == "bundle"
+    for dashboard in workspace.dashboards.values():
+        for transform_path, transform in dashboard.interactive_transforms.values():
+            if transform.runtime != "browser-python":
+                continue
+            exported_bundle = (
+                transform.export.mode == "interactive"
+                and transform.export.assets == "bundle"
+            )
+            if not live_bundle and not exported_bundle:
+                continue
+            requirements.extend(
+                (dependency, transform_path)
+                for dependency in transform.python_dependencies
+            )
+    return requirements
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _validate_pyodide_bundle(
+    workspace: LoadedWorkspace,
+    bundle_path: Path,
+) -> list[Diagnostic]:
+    """Validate the core Runtime and the offline wheel dependency closure."""
+    field = "runtime.pyodide_bundle_path"
+    missing_core = [
+        name for name in _PYODIDE_CORE_ASSETS if not (bundle_path / name).is_file()
+    ]
+    if missing_core:
+        return [
+            Diagnostic(
+                "error",
+                "Pyodide bundle is missing required Runtime assets: "
+                + ", ".join(missing_core),
+                str(bundle_path),
+                field,
+                "pyodide_bundle_incomplete",
+                {"missing": missing_core},
+            )
+        ]
+
+    lock_path = bundle_path / "pyodide-lock.json"
+    try:
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        return [
+            Diagnostic(
+                "error",
+                f"Pyodide bundle lockfile is invalid: {error}",
+                str(lock_path),
+                field,
+                "pyodide_bundle_lock_invalid",
+            )
+        ]
+    raw_packages = lock.get("packages") if isinstance(lock, dict) else None
+    if not isinstance(raw_packages, dict):
+        return [
+            Diagnostic(
+                "error",
+                "Pyodide bundle lockfile must contain a packages object",
+                str(lock_path),
+                field,
+                "pyodide_bundle_lock_invalid",
+            )
+        ]
+
+    packages: dict[str, dict[str, Any]] = {}
+    for key, value in raw_packages.items():
+        if not isinstance(value, dict):
+            continue
+        package_name = value.get("name") if isinstance(value.get("name"), str) else key
+        packages[canonicalize_name(package_name)] = value
+
+    diagnostics: list[Diagnostic] = []
+    roots: set[str] = set()
+    requirements = _browser_python_bundle_requirements(workspace)
+    if requirements:
+        # The Worker loads micropip before installing any declared dependency.
+        roots.add("micropip")
+    for value, transform_path in requirements:
+        try:
+            requirement = Requirement(value)
+        except InvalidRequirement:
+            # The normal dependency validator reports the authoring error.
+            continue
+        if requirement.marker and not requirement.marker.evaluate():
+            continue
+        if requirement.url:
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    "A bundled browser-python report cannot be offline while a Python "
+                    f"dependency uses an external URL: {requirement}",
+                    str(transform_path),
+                    "python_dependencies",
+                    "pyodide_bundle_external_dependency",
+                    {"dependency": value},
+                )
+            )
+            continue
+        name = canonicalize_name(requirement.name)
+        roots.add(name)
+        package = packages.get(name)
+        if package is None:
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    f"Pyodide bundle lockfile does not contain {requirement.name}",
+                    str(lock_path),
+                    field,
+                    "pyodide_bundle_dependency_missing",
+                    {"dependency": value, "package": name},
+                )
+            )
+            continue
+        version = package.get("version")
+        if (
+            isinstance(version, str)
+            and requirement.specifier
+            and version not in requirement.specifier
+        ):
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    f"Pyodide bundle contains {requirement.name}=={version}; "
+                    f"expected {requirement.specifier}",
+                    str(lock_path),
+                    field,
+                    "pyodide_bundle_dependency_version_mismatch",
+                    {"dependency": value, "available": version},
+                )
+            )
+
+    required_packages: set[str] = set()
+    missing_lock_packages: set[str] = set()
+    pending = list(roots)
+    while pending:
+        name = canonicalize_name(pending.pop())
+        if name in required_packages or name in missing_lock_packages:
+            continue
+        package = packages.get(name)
+        if package is None:
+            missing_lock_packages.add(name)
+            continue
+        required_packages.add(name)
+        dependencies = package.get("depends", [])
+        if isinstance(dependencies, list):
+            pending.extend(
+                dependency
+                for dependency in dependencies
+                if isinstance(dependency, str)
+            )
+
+    if missing_lock_packages:
+        diagnostics.append(
+            Diagnostic(
+                "error",
+                "Pyodide bundle lockfile is missing transitive packages: "
+                + ", ".join(sorted(missing_lock_packages)),
+                str(lock_path),
+                field,
+                "pyodide_bundle_dependency_closure_incomplete",
+                {"missing_packages": sorted(missing_lock_packages)},
+            )
+        )
+
+    missing_assets: list[dict[str, str]] = []
+    corrupt_assets: list[dict[str, str]] = []
+    for name in sorted(required_packages):
+        package = packages[name]
+        filename = package.get("file_name")
+        if not isinstance(filename, str) or not filename.strip():
+            missing_assets.append({"package": name, "file": "<missing file_name>"})
+            continue
+        asset = (bundle_path / filename).resolve()
+        if not _is_within(asset, bundle_path) or not asset.is_file():
+            missing_assets.append({"package": name, "file": filename})
+            continue
+        expected_hash = package.get("sha256")
+        if (
+            isinstance(expected_hash, str)
+            and re.fullmatch(r"[0-9a-fA-F]{64}", expected_hash)
+            and _file_sha256(asset) != expected_hash.lower()
+        ):
+            corrupt_assets.append({"package": name, "file": filename})
+
+    if missing_assets:
+        diagnostics.append(
+            Diagnostic(
+                "error",
+                "Pyodide bundle is missing wheels required by browser-python",
+                str(bundle_path),
+                field,
+                "pyodide_bundle_wheels_missing",
+                {"missing": missing_assets},
+            )
+        )
+    if corrupt_assets:
+        diagnostics.append(
+            Diagnostic(
+                "error",
+                "Pyodide bundle contains package files whose SHA-256 does not match the lockfile",
+                str(bundle_path),
+                field,
+                "pyodide_bundle_wheel_hash_mismatch",
+                {"corrupt": corrupt_assets},
+            )
+        )
+    return diagnostics
+
+
+def _browser_python_dependency_diagnostic(
+    value: str, pyodide_version: str
+) -> tuple[str, str, str] | None:
+    """Return (level, code, message) for an offline, versioned Pyodide check."""
+    try:
+        requirement = Requirement(value)
+    except InvalidRequirement as error:
+        return "error", "pyodide_dependency_invalid", f"Invalid browser-python dependency {value!r}: {error}"
+    normalized = requirement.name.lower().replace("_", "-")
+    if requirement.url:
+        filename = Path(urlparse(requirement.url).path).name.lower()
+        if filename.endswith(".whl") and not (
+            "none-any.whl" in filename
+            or "emscripten" in filename
+            or "wasm32" in filename
+        ):
+            return (
+                "error",
+                "pyodide_wheel_incompatible",
+                f"browser-python wheel is not pure Python or Emscripten/WASM: {filename}",
+            )
+        if not filename.endswith((".whl", ".tar.gz", ".zip")):
+            return "warning", "pyodide_dependency_unverified", f"Could not classify browser-python dependency URL: {requirement.url}"
+        return None
+    exact_versions = {
+        spec.version
+        for spec in requirement.specifier
+        if spec.operator == "==" and "*" not in spec.version
+    }
+    if len(exact_versions) != 1 or len(list(requirement.specifier)) != 1:
+        return (
+            "error",
+            "pyodide_dependency_unpinned",
+            f"browser-python dependency {requirement.name} must use one exact == version",
+        )
+    pinned = next(iter(exact_versions))
+    catalog = _PYODIDE_PACKAGE_VERSIONS.get(pyodide_version)
+    if catalog is None:
+        return (
+            "warning",
+            "pyodide_catalog_unavailable",
+            f"Dataviz has no offline package catalog for Pyodide {pyodide_version}; "
+            f"verify {requirement.name}=={pinned} against that Runtime's pyodide-lock.json",
+        )
+    available = catalog.get(normalized)
+    if available is not None and available != pinned:
+        return (
+            "error",
+            "pyodide_dependency_version_mismatch",
+            f"Pyodide {pyodide_version} bundles {requirement.name}=={available}, "
+            f"not {pinned}",
+        )
+    if available is None:
+        return (
+            "warning",
+            "pyodide_dependency_unverified",
+            f"{requirement.name}=={pinned} is not in the bundled Pyodide "
+            f"{pyodide_version} catalog; verify that a pure-Python or WASM wheel exists",
+        )
+    return None
+
+
+def _duplicates(values: list[str]) -> list[str]:
+    return sorted({value for value in values if values.count(value) > 1})
+
+
+def _cycle_nodes(graph: dict[str, set[str]]) -> list[str]:
+    incoming = {node: set(dependencies) for node, dependencies in graph.items()}
+    ready = [node for node, dependencies in incoming.items() if not dependencies]
+    visited: set[str] = set()
+    while ready:
+        current = ready.pop()
+        if current in visited:
+            continue
+        visited.add(current)
+        for node, dependencies in incoming.items():
+            if current in dependencies:
+                dependencies.remove(current)
+                if not dependencies:
+                    ready.append(node)
+    return sorted(set(graph) - visited)
+
+
+def _interactive_ancestors(
+    dashboard: LoadedDashboard, transform_id: str
+) -> set[str]:
+    result: set[str] = set()
+    pending = [transform_id]
+    while pending:
+        current = pending.pop()
+        definition = dashboard.interactive_transforms[current][1]
+        for value in definition.inputs.values():
+            try:
+                reference = parse_output_reference(value)
+            except Exception:
+                continue
+            if not reference.node_id.startswith("interactive:"):
+                continue
+            dependency = reference.node_id.split(":", 1)[1]
+            if dependency in dashboard.interactive_transforms and dependency not in result:
+                result.add(dependency)
+                pending.append(dependency)
+    return result
+
+
 def _reference_error(
     reference: str,
     *,
     sources: dict[str, tuple[Path, SourceDefinition]],
-    transforms: dict[str, tuple[Path, ServerTransformDefinition]],
-    browser_transforms: dict[str, tuple[Path, BrowserTransformDefinition]],
-    allow_browser: bool,
+    dataset_transforms: dict[str, tuple[Path, DatasetTransformDefinition]],
+    interactive_transforms: dict[str, tuple[Path, InteractiveTransformDefinition]],
+    allow_interactive: bool,
 ) -> str | None:
     try:
         parsed = parse_output_reference(reference)
@@ -790,21 +1167,26 @@ def _reference_error(
     kind, _, node_id = parsed.node_id.partition(":")
     collections = {
         "source": sources,
-        "transform": transforms,
-        "browser": browser_transforms,
+        "dataset": dataset_transforms,
+        "interactive": interactive_transforms,
     }
-    if kind == "browser" and not allow_browser:
-        return "Server nodes cannot depend on browser outputs"
+    if kind == "interactive" and not allow_interactive:
+        return "Query DAG nodes cannot depend on Interactive Outputs"
     collection = collections.get(kind)
     if collection is None or node_id not in collection:
         return f"Unknown output node: {parsed.node_id}"
     definition = collection[node_id][1]
     outputs = definition.outputs
-    if outputs and parsed.output not in outputs:
+    if parsed.output not in outputs:
         return f"Unknown output {parsed.output!r} on {parsed.node_id}"
-    if not outputs and parsed.output != "main":
-        return f"{parsed.node_id} only has implicit output 'main'"
     return None
+
+
+def _safe_output_reference(reference: str):
+    try:
+        return parse_output_reference(reference)
+    except Exception:
+        return None
 
 
 def _reference_kind(reference: str, dashboard: LoadedDashboard) -> str | None:
@@ -812,18 +1194,16 @@ def _reference_kind(reference: str, dashboard: LoadedDashboard) -> str | None:
     kind, _, node_id = parsed.node_id.partition(":")
     collection = {
         "source": dashboard.sources,
-        "transform": dashboard.transforms,
-        "browser": dashboard.browser_transforms,
+        "dataset": dashboard.dataset_transforms,
+        "interactive": dashboard.interactive_transforms,
     }[kind]
     definition = collection[node_id][1]
-    if definition.outputs:
-        output = definition.outputs.get(parsed.output)
-        return output.kind if output else None
-    return "table" if kind == "source" else None
+    output = definition.outputs.get(parsed.output)
+    return output.kind if output else None
 
 
 def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
-    """Validate the strict v1 contract and all cross-file references."""
+    """Validate the strict v2 contract and every cross-file/runtime reference."""
     diagnostics: list[Diagnostic] = list(workspace.load_diagnostics)
     if not workspace.dashboards:
         diagnostics.append(
@@ -845,15 +1225,62 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
             )
         )
 
+    runtime = workspace.definition.runtime
+    # A local bundle may be selected only by an exported browser-python branch
+    # even when the live Server itself uses the CDN. Validate every configured
+    # bundle path, not only the live Runtime policy.
+    if runtime.pyodide_bundle_path:
+        bundle_path = (workspace.root / runtime.pyodide_bundle_path).resolve()
+        if not _is_within(bundle_path, workspace.root):
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    "Pyodide bundle must stay inside the Workspace",
+                    str(workspace.definition_path),
+                    "runtime.pyodide_bundle_path",
+                    "pyodide_bundle_outside_workspace",
+                )
+            )
+        else:
+            diagnostics.extend(_validate_pyodide_bundle(workspace, bundle_path))
+
     for dashboard in workspace.dashboards.values():
         diagnostics.extend(dashboard.presentation_diagnostics or [])
         definition_path = str(dashboard.definition_path)
         parameter_ids = {item.id for item in dashboard.definition.query_parameters}
+        compute_parameter_ids = {
+            item.id for item in dashboard.definition.compute_parameters
+        }
+        selection_contract = content_selection_contract(dashboard.definition)
         view_ids = set(dashboard.views)
 
+        duplicate_contracts = {
+            "query_parameters": _duplicates(
+                [item.id for item in dashboard.definition.query_parameters]
+            ),
+            "compute_parameters": _duplicates(
+                [item.id for item in dashboard.definition.compute_parameters]
+            ),
+            "dashboard_selections": _duplicates(
+                [item.id for item in dashboard.definition.dashboard_selections]
+            ),
+        }
+        for field, duplicate_ids in duplicate_contracts.items():
+            if duplicate_ids:
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"Duplicate ids in {field}: {', '.join(duplicate_ids)}",
+                        definition_path,
+                        field,
+                        "state_id_duplicate",
+                        {"ids": duplicate_ids},
+                    )
+                )
+
         for field, value in content_template_fields(dashboard.definition):
-            references, template_errors = inspect_parameter_template(value)
-            for message in template_errors:
+            inspection = inspect_content_template(value)
+            for message in inspection.errors:
                 diagnostics.append(
                     Diagnostic(
                         "error",
@@ -863,7 +1290,9 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         "content_template_invalid",
                     )
                 )
-            for parameter_id in sorted(references - parameter_ids):
+            for parameter_id in sorted(
+                inspection.query_parameters - parameter_ids
+            ):
                 diagnostics.append(
                     Diagnostic(
                         "error",
@@ -873,8 +1302,54 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         "content_parameter_unknown",
                     )
                 )
+            for parameter_id in sorted(
+                inspection.compute_parameters - compute_parameter_ids
+            ):
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"Content references unknown Compute Parameter: {parameter_id}",
+                        definition_path,
+                        field,
+                        "content_compute_parameter_unknown",
+                    )
+                )
+            known_selection_references = inspection.selections & set(selection_contract)
+            for expression in sorted(inspection.selections - set(selection_contract)):
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"Content references unknown Selection: {expression}",
+                        definition_path,
+                        field,
+                        "content_selection_unknown",
+                    )
+                )
+            for expression in sorted(
+                known_selection_references
+                - allowed_content_selections(dashboard.definition, field)
+            ):
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"Content references Selection outside its visible scope: {expression}",
+                        definition_path,
+                        field,
+                        "content_selection_out_of_scope",
+                    )
+                )
 
         for source_path, source in dashboard.sources.values():
+            if not _is_within(source_path, dashboard.root):
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        "Source definition must stay inside its Dashboard folder",
+                        str(source_path),
+                        "sources",
+                        "source_definition_outside_dashboard",
+                    )
+                )
             if source.type == "file" and not source.path:
                 diagnostics.append(
                     Diagnostic("error", "File source requires path", str(source_path), "path")
@@ -952,14 +1427,14 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         "timeout_retries",
                     )
                 )
-            for parameter in source.params:
+            for parameter in source.query_params:
                 if parameter not in parameter_ids:
                     diagnostics.append(
                         Diagnostic(
                             "error",
                             f"Unknown query parameter: {parameter}",
                             str(source_path),
-                            "params",
+                            "query_params",
                         )
                     )
             for field in ("path", "code"):
@@ -969,6 +1444,17 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                 if field == "path" and source.adapter:
                     continue
                 path = _code_path(source_path, value)
+                if not _is_within(path, dashboard.root):
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Source {field} must stay inside its Dashboard folder",
+                            str(path),
+                            field,
+                            "source_asset_outside_dashboard",
+                        )
+                    )
+                    continue
                 if not path.exists():
                     diagnostics.append(
                         Diagnostic(
@@ -994,7 +1480,7 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             )
                         )
                     else:
-                        declared = set(source.params)
+                        declared = set(source.query_params)
                         referenced = sql_parameter_names(sql)
                         undeclared = sorted(referenced - declared)
                         unused = sorted(declared - referenced)
@@ -1002,10 +1488,10 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             diagnostics.append(
                                 Diagnostic(
                                     "error",
-                                    "SQL uses named parameters not declared in Source params: "
+                                    "SQL uses named parameters not declared in Source query_params: "
                                     + ", ".join(undeclared),
                                     str(source_path),
-                                    "params",
+                                    "query_params",
                                     "sql_parameter_undeclared",
                                     {"parameters": undeclared, "sql_file": str(code_path)},
                                 )
@@ -1014,17 +1500,27 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             diagnostics.append(
                                 Diagnostic(
                                     "warning",
-                                    "Source params are not referenced by SQL: "
+                                    "Source query_params are not referenced by SQL: "
                                     + ", ".join(unused),
                                     str(source_path),
-                                    "params",
+                                    "query_params",
                                     "sql_parameter_unused",
                                     {"parameters": unused, "sql_file": str(code_path)},
                                 )
                             )
             for dependency in source.code_dependencies:
                 dependency_path = _code_path(source_path, dependency)
-                if not dependency_path.exists():
+                if not _is_within(dependency_path, dashboard.root):
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            "Python Source code dependency must stay inside its Dashboard folder",
+                            str(dependency_path),
+                            "code_dependencies",
+                            "code_dependency_outside_dashboard",
+                        )
+                    )
+                elif not dependency_path.exists():
                     diagnostics.append(
                         Diagnostic(
                             "error",
@@ -1044,24 +1540,54 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         )
                     )
 
-        for transform_path, transform in dashboard.transforms.values():
+        for transform_path, transform in dashboard.dataset_transforms.values():
             code_path = _code_path(transform_path, transform.code)
-            if not code_path.exists():
+            if not _is_within(transform_path, dashboard.root):
                 diagnostics.append(
                     Diagnostic(
                         "error",
-                        "Server Transform code does not exist",
+                        "Dataset Transform definition must stay inside its Dashboard folder",
+                        str(transform_path),
+                        "dataset_transforms",
+                        "dataset_definition_outside_dashboard",
+                    )
+                )
+            if not _is_within(code_path, dashboard.root):
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        "Dataset Transform code must stay inside its Dashboard folder",
+                        str(code_path),
+                        "code",
+                        "dataset_code_outside_dashboard",
+                    )
+                )
+            elif not code_path.exists():
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        "Dataset Transform code does not exist",
                         str(code_path),
                         "code",
                     )
                 )
             for dependency in transform.code_dependencies:
                 dependency_path = _code_path(transform_path, dependency)
-                if not dependency_path.exists():
+                if not _is_within(dependency_path, dashboard.root):
                     diagnostics.append(
                         Diagnostic(
                             "error",
-                            "Server Transform code dependency does not exist",
+                            "Dataset Transform code dependency must stay inside its Dashboard folder",
+                            str(dependency_path),
+                            "code_dependencies",
+                            "code_dependency_outside_dashboard",
+                        )
+                    )
+                elif not dependency_path.exists():
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            "Dataset Transform code dependency does not exist",
                             str(dependency_path),
                             "code_dependencies",
                         )
@@ -1076,23 +1602,23 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             "python_dependencies",
                         )
                     )
-            for parameter in transform.params:
+            for parameter in transform.query_params:
                 if parameter not in parameter_ids:
                     diagnostics.append(
                         Diagnostic(
                             "error",
                             f"Unknown query parameter: {parameter}",
                             str(transform_path),
-                            "params",
+                            "query_params",
                         )
                     )
             for name, reference in transform.inputs.items():
                 message = _reference_error(
                     reference,
                     sources=dashboard.sources,
-                    transforms=dashboard.transforms,
-                    browser_transforms=dashboard.browser_transforms,
-                    allow_browser=False,
+                    dataset_transforms=dashboard.dataset_transforms,
+                    interactive_transforms=dashboard.interactive_transforms,
+                    allow_interactive=False,
                 )
                 if message:
                     diagnostics.append(
@@ -1120,25 +1646,134 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
             for selections in selection_contract.values()
             for item in selections
         }
-        for transform_path, transform in dashboard.browser_transforms.values():
+        for transform_path, transform in dashboard.interactive_transforms.values():
             code_path = _code_path(transform_path, transform.code)
-            if not code_path.exists():
+            if not _is_within(transform_path, dashboard.root):
                 diagnostics.append(
                     Diagnostic(
                         "error",
-                        "Browser Transform code does not exist",
+                        "Interactive Transform definition must stay inside its Dashboard folder",
+                        str(transform_path),
+                        "interactive_transforms",
+                        "interactive_definition_outside_dashboard",
+                    )
+                )
+            if not _is_within(code_path, dashboard.root):
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        "Interactive Transform code must stay inside its Dashboard folder",
+                        str(code_path),
+                        "code",
+                        "interactive_code_outside_dashboard",
+                    )
+                )
+            elif not code_path.exists():
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        "Interactive Transform code does not exist",
                         str(code_path),
                         "code",
                     )
                 )
-            for parameter in transform.params:
+            if (
+                transform.runtime in {"browser-js", "browser-python"}
+                and not _is_within(code_path, transform_path.parent)
+            ):
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        "Browser Interactive Transform code must stay inside the "
+                        "Transform definition folder",
+                        str(code_path),
+                        "code",
+                        "browser_code_outside_transform_package",
+                    )
+                )
+            for dependency in transform.code_dependencies:
+                dependency_path = _code_path(transform_path, dependency)
+                if not _is_within(dependency_path, dashboard.root):
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            "Interactive Transform code dependency must stay inside its Dashboard folder",
+                            str(dependency_path),
+                            "code_dependencies",
+                            "code_dependency_outside_dashboard",
+                        )
+                    )
+                elif not dependency_path.exists():
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            "Interactive Transform code dependency does not exist",
+                            str(dependency_path),
+                            "code_dependencies",
+                            "interactive_code_dependency_missing",
+                        )
+                    )
+                elif (
+                    transform.runtime in {"browser-js", "browser-python"}
+                    and not _is_within(dependency_path, transform_path.parent)
+                ):
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            "Browser code dependency must stay inside the Transform "
+                            "definition folder",
+                            str(dependency_path),
+                            "code_dependencies",
+                            "browser_dependency_outside_transform_package",
+                        )
+                    )
+            if transform.runtime == "server-python":
+                for dependency in transform.python_dependencies:
+                    if message := _python_dependency_error(dependency):
+                        diagnostics.append(
+                            Diagnostic(
+                                "error",
+                                message,
+                                str(transform_path),
+                                "python_dependencies",
+                                "python_dependency_unavailable",
+                            )
+                        )
+            elif transform.runtime == "browser-python":
+                for dependency in transform.python_dependencies:
+                    result = _browser_python_dependency_diagnostic(
+                        dependency, workspace.definition.runtime.pyodide_version
+                    )
+                    if result:
+                        level, code, message = result
+                        diagnostics.append(
+                            Diagnostic(
+                                level,
+                                message,
+                                str(transform_path),
+                                "python_dependencies",
+                                code,
+                                {"dependency": dependency},
+                            )
+                        )
+            for parameter in transform.query_params:
                 if parameter not in parameter_ids:
                     diagnostics.append(
                         Diagnostic(
                             "error",
                             f"Unknown query parameter: {parameter}",
                             str(transform_path),
-                            "params",
+                            "query_params",
+                        )
+                    )
+            for parameter in transform.compute_params:
+                if parameter not in compute_parameter_ids:
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Unknown Compute Parameter: {parameter}",
+                            str(transform_path),
+                            "compute_params",
                         )
                     )
             for selection in transform.selections:
@@ -1155,9 +1790,9 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                 message = _reference_error(
                     reference,
                     sources=dashboard.sources,
-                    transforms=dashboard.transforms,
-                    browser_transforms=dashboard.browser_transforms,
-                    allow_browser=True,
+                    dataset_transforms=dashboard.dataset_transforms,
+                    interactive_transforms=dashboard.interactive_transforms,
+                    allow_interactive=True,
                 )
                 if message:
                     diagnostics.append(
@@ -1168,6 +1803,171 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             f"inputs.{name}",
                         )
                     )
+            for name in transform.input_schemas:
+                if name not in transform.inputs:
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Input schema references undeclared input: {name}",
+                            str(transform_path),
+                            f"input_schemas.{name}",
+                            "interactive_input_schema_unknown",
+                        )
+                    )
+
+        dataset_graph: dict[str, set[str]] = {
+            transform_id: {
+                parsed.node_id.split(":", 1)[1]
+                for reference in transform.inputs.values()
+                if (parsed := _safe_output_reference(reference)) is not None
+                and parsed.node_id.startswith("dataset:")
+                and parsed.node_id.split(":", 1)[1] in dashboard.dataset_transforms
+            }
+            for transform_id, (_, transform) in dashboard.dataset_transforms.items()
+        }
+        if cycle := _cycle_nodes(dataset_graph):
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    f"Dataset Transform dependency graph contains a cycle: {', '.join(cycle)}",
+                    definition_path,
+                    "dataset_transforms",
+                    "dataset_cycle",
+                    {"nodes": cycle},
+                )
+            )
+
+        interactive_graph: dict[str, set[str]] = {
+            transform_id: {
+                parsed.node_id.split(":", 1)[1]
+                for reference in transform.inputs.values()
+                if (parsed := _safe_output_reference(reference)) is not None
+                and parsed.node_id.startswith("interactive:")
+                and parsed.node_id.split(":", 1)[1] in dashboard.interactive_transforms
+            }
+            for transform_id, (_, transform) in dashboard.interactive_transforms.items()
+        }
+        if cycle := _cycle_nodes(interactive_graph):
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    f"Interactive Transform dependency graph contains a cycle: {', '.join(cycle)}",
+                    definition_path,
+                    "interactive_transforms",
+                    "interactive_cycle",
+                    {"nodes": cycle},
+                )
+            )
+
+        for transform_id, (transform_path, transform) in dashboard.interactive_transforms.items():
+            ancestors = _interactive_ancestors(dashboard, transform_id)
+            if transform.runtime == "server-python":
+                browser_ancestors = sorted(
+                    ancestor
+                    for ancestor in ancestors
+                    if dashboard.interactive_transforms[ancestor][1].runtime
+                    in {"browser-js", "browser-python"}
+                )
+                if browser_ancestors:
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            "server-python cannot depend on browser Runtime outputs: "
+                            + ", ".join(browser_ancestors),
+                            str(transform_path),
+                            "inputs",
+                            "server_interactive_depends_on_browser",
+                            {"dependency_chain": browser_ancestors},
+                        )
+                    )
+            if transform.export.mode == "interactive":
+                invalid_ancestors = []
+                for ancestor in sorted(ancestors):
+                    dependency = dashboard.interactive_transforms[ancestor][1]
+                    stateful_snapshot = (
+                        dependency.export.mode != "interactive"
+                        and bool(dependency.compute_params or dependency.selections)
+                    )
+                    unavailable = dependency.export.mode == "unavailable"
+                    if stateful_snapshot or unavailable:
+                        invalid_ancestors.append(ancestor)
+                if invalid_ancestors:
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            "An interactive export cannot depend on stateful snapshot/unavailable "
+                            "Interactive Transforms: " + ", ".join(invalid_ancestors),
+                            str(transform_path),
+                            "export.mode",
+                            "interactive_export_dependency_not_portable",
+                            {"dependency_chain": invalid_ancestors},
+                        )
+                    )
+
+            if (
+                transform.runtime == "browser-python"
+                and transform.export.assets == "bundle"
+                and not workspace.definition.runtime.pyodide_bundle_path
+            ):
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        "browser-python export.assets=bundle requires "
+                        "workspace runtime.pyodide_bundle_path",
+                        str(transform_path),
+                        "export.assets",
+                        "pyodide_bundle_not_configured",
+                    )
+                )
+
+        browser_python_asset_modes = {
+            transform.export.assets
+            for _, transform in dashboard.interactive_transforms.values()
+            if transform.runtime == "browser-python"
+            and transform.export.mode != "unavailable"
+            and transform.export.assets is not None
+        }
+        if len(browser_python_asset_modes) > 1:
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    "All browser-python Interactive Transforms in one Dashboard must "
+                    "use the same export.assets policy",
+                    definition_path,
+                    "interactive_transforms",
+                    "pyodide_asset_policy_ambiguous",
+                    {"policies": sorted(browser_python_asset_modes)},
+                )
+            )
+
+        trigger_consumers: dict[str, list[tuple[str, str]]] = {
+            parameter_id: [] for parameter_id in compute_parameter_ids
+        }
+        for transform_id, (_, transform) in dashboard.interactive_transforms.items():
+            for parameter_id in transform.compute_params:
+                trigger_consumers.setdefault(parameter_id, []).append(
+                    (transform_id, transform.trigger)
+                )
+        for parameter_id, consumers in trigger_consumers.items():
+            triggers = {trigger for _, trigger in consumers}
+            if len(triggers) > 1:
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"Compute Parameter {parameter_id} has consumers with incompatible "
+                        f"triggers: {', '.join(sorted(triggers))}",
+                        definition_path,
+                        "compute_parameters",
+                        "compute_trigger_ambiguous",
+                        {
+                            "parameter": parameter_id,
+                            "consumers": [
+                                {"transform": identifier, "trigger": trigger}
+                                for identifier, trigger in consumers
+                            ],
+                        },
+                    )
+                )
 
         for view in dashboard.definition.views:
             template = VIEW_TEMPLATES[view.template]
@@ -1198,9 +1998,9 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                 message = _reference_error(
                     reference,
                     sources=dashboard.sources,
-                    transforms=dashboard.transforms,
-                    browser_transforms=dashboard.browser_transforms,
-                    allow_browser=True,
+                    dataset_transforms=dashboard.dataset_transforms,
+                    interactive_transforms=dashboard.interactive_transforms,
+                    allow_interactive=True,
                 )
                 if message:
                     diagnostics.append(
@@ -1240,9 +2040,9 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
             message = _reference_error(
                 reference,
                 sources=dashboard.sources,
-                transforms=dashboard.transforms,
-                browser_transforms=dashboard.browser_transforms,
-                allow_browser=True,
+                dataset_transforms=dashboard.dataset_transforms,
+                interactive_transforms=dashboard.interactive_transforms,
+                allow_interactive=True,
             )
             if message:
                 diagnostics.append(
@@ -1330,9 +2130,9 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                     message = _reference_error(
                         section.repeat.input,
                         sources=dashboard.sources,
-                        transforms=dashboard.transforms,
-                        browser_transforms=dashboard.browser_transforms,
-                        allow_browser=True,
+                        dataset_transforms=dashboard.dataset_transforms,
+                        interactive_transforms=dashboard.interactive_transforms,
+                        allow_interactive=True,
                     )
                     if message:
                         diagnostics.append(

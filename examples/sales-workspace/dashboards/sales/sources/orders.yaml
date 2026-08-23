@@ -6,5 +6,6 @@ description: CSV 文件读取
 type: file
 path: ../data/orders.csv
 format: csv
+outputs: {main: {kind: table}}
 cache:
   mode: persistent

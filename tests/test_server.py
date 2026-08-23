@@ -11,8 +11,9 @@ import yaml
 from fastapi.testclient import TestClient
 
 from dataviz.server import create_app
-from dataviz.server.manager import RunManager
+from dataviz.server.manager import InteractionRecord, RunManager, RunRecord
 from dataviz.execution.cache import NodeCache
+from dataviz.execution.events import ExecutionEvent
 from dataviz.sources import SOURCE_RUNNERS
 from dataviz.workspace import load_workspace
 from dataviz.workspace.models import CacheDefinition
@@ -51,41 +52,57 @@ def test_server_run_and_canvas():
     }
     started = client.post(
         "/api/dashboards/sales/runs",
-        json={"session_id": SESSION_A, "parameters": {"target_factor": 1.0}},
+        json={
+            "session_id": SESSION_A,
+            "query_parameters": {"target_factor": 1.0},
+            "refresh": True,
+        },
     ).json()
     run_id = started["run_id"]
     record = None
     for _ in range(100):
         record = client.get(f"/api/runs/{run_id}", params={"session_id": SESSION_A}).json()
-        if record["status"] in {"success", "partial", "failed"}:
+        if record["status"] in {"ready", "partial", "error"}:
             break
         time.sleep(0.05)
-    assert record and record["status"] == "success", record
+    assert record and record["status"] == "ready", record
     target_evidence = record["result"]["nodes"]["source:targets"]["diagnostics"]["query"]
     assert target_evidence["adapter_alias"] == "demo-sqlite"
     assert target_evidence["resolved_sql"]
     assert target_evidence["statement"]
     assert target_evidence["parameters"] == {"target_factor": 1.0}
     assert "url" not in target_evidence
-    assert record["result"]["selections"]["dashboard:sales/region"] == [
-        "North",
-        "South",
-        "East",
-        "West",
-    ]
+    transform = record["result"]["nodes"]["dataset:sales-metrics"]
+    assert transform["log"]["metadata"]["structured"] is True
+    execution_log = client.get(
+        f"/api/runs/{run_id}/artifacts/{transform['log']['artifact_id']}",
+        params={"session_id": SESSION_A},
+    )
+    assert execution_log.status_code == 200
+    assert execution_log.headers["cache-control"] == "private, no-store"
+    assert execution_log.json()["schema"] == "dataviz/execution-log/v1"
+    assert any(
+        item.get("event") == "runtime_completed"
+        for item in execution_log.json()["records"]
+    )
+    assert client.get(
+        f"/api/runs/{run_id}/artifacts/{transform['log']['artifact_id']}",
+        params={"session_id": SESSION_B},
+    ).status_code == 404
     canvas = client.get(
         f"/api/dashboards/sales/canvas?run_id={run_id}",
         params={"session_id": SESSION_A},
     )
     assert canvas.status_code == 200
     assert "FIELD NOTE / 026" in canvas.text
-    assert '"portable": {"outputs": {"source:orders/main": [' in canvas.text
+    assert '"source:orders/main": [' in canvas.text
     assert "PORTABLE ANALYSIS" not in canvas.text
-    report = client.get(
-        f"/api/dashboards/sales/report?run_id={run_id}",
-        params={
+    report = client.post(
+        "/api/dashboards/sales/report",
+        json={
             "session_id": SESSION_A,
-            "selections": '{"dashboard:sales/region":["East"]}',
+            "run_id": run_id,
+            "selections": {"dashboard:sales/region": ["East"]},
         },
     )
     assert report.status_code == 200
@@ -108,23 +125,25 @@ def test_server_shell_exposes_source_evidence_inspector():
     assert "function showNodeInspector(node)" in script.text
     assert "Resolved SQL" in script.text
     assert "Driver statement & bound parameters" in script.text
+    assert "Structured node log" in script.text
+    assert "async function appendNodeLog" in script.text
 
 
 def test_server_streams_large_tables_as_gzipped_arrow_without_json_materialization():
     client = TestClient(create_app(REPEAT_WORKSPACE))
     started = client.post(
         "/api/dashboards/store-performance/runs",
-        json={"session_id": SESSION_A, "parameters": {}, "refresh": True},
+        json={"session_id": SESSION_A, "query_parameters": {}, "refresh": True},
     ).json()
     run_id = started["run_id"]
     for _ in range(120):
         record = client.get(
             f"/api/runs/{run_id}", params={"session_id": SESSION_A}
         ).json()
-        if record["status"] in {"success", "partial", "failed"}:
+        if record["status"] in {"ready", "partial", "error"}:
             break
         time.sleep(0.05)
-    assert record["status"] == "success"
+    assert record["status"] == "ready"
 
     metadata = client.get(
         f"/api/runs/{run_id}/outputs/source:store-sales/main",
@@ -192,7 +211,7 @@ def test_server_app_selections_are_browser_only():
     assert "state.canvasSelections = {...(event.data.selections || {})};" in script
     assert "state.canvasSelections = {...state.canvasSelections" not in script
     assert "/static/app.js?v=" in template
-    select_block = script[script.index("function selectDashboard"):script.index("function parameters")]
+    select_block = script[script.index("function selectDashboard"):script.index("function queryParameters")]
     assert "eventSource.close()" not in select_block
 
 
@@ -350,16 +369,16 @@ def test_run_ready_is_emitted_after_result_is_available():
     manager = RunManager(load_workspace(WORKSPACE))
     record = manager.start(
         "sales",
-        {"region": ["North"], "target_factor": 1.0},
+        {"target_factor": 1.0},
         session_id=SESSION_A,
     )
     for _ in range(100):
-        if record.status in {"success", "partial", "failed"}:
+        if record.status in {"ready", "partial", "error"}:
             break
         time.sleep(0.05)
     assert record.result is not None
     names = [event.event for event in record.events]
-    assert "run_completed" in names
+    assert "run_started" in names
     assert names[-1] == "run_ready"
 
 
@@ -375,29 +394,29 @@ def test_fast_dag_branch_publishes_output_before_slow_branch_finishes(
         encoding="utf-8",
     )
     (dashboard_root / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v1
+        """schema: dataviz/dashboard/v2
 kind: dashboard
 id: progressive
 title: Progressive branches
 sources:
-  - {id: fast, kind: source, type: file, path: data/fast.csv, format: csv}
-  - {id: slow-left, kind: source, type: file, path: data/slow-left.csv, format: csv}
-  - {id: slow-right, kind: source, type: file, path: data/slow-right.csv, format: csv}
-  - {id: unused, kind: source, type: file, path: data/unused.csv, format: csv}
-server_transforms: [transforms/combine.yaml]
+  - {id: fast, kind: source, type: file, path: data/fast.csv, format: csv, outputs: {main: {kind: table}}}
+  - {id: slow-left, kind: source, type: file, path: data/slow-left.csv, format: csv, outputs: {main: {kind: table}}}
+  - {id: slow-right, kind: source, type: file, path: data/slow-right.csv, format: csv, outputs: {main: {kind: table}}}
+  - {id: unused, kind: source, type: file, path: data/unused.csv, format: csv, outputs: {main: {kind: table}}}
+dataset_transforms: [transforms/combine.yaml]
 views:
-  - {id: fast-view, title: Fast, template: table, input: fast}
-  - {id: slow-view, title: Slow, template: table, input: transform:combine/main}
+  - {id: fast-view, title: Fast, template: table, input: source:fast/main}
+  - {id: slow-view, title: Slow, template: table, input: dataset:combine/main}
 sections:
   - {id: results, title: Results, template: stack, views: [fast-view, slow-view]}
 """,
         encoding="utf-8",
     )
     (dashboard_root / "transforms" / "combine.yaml").write_text(
-        """schema: dataviz/server-transform/v1
-kind: server_transform
+        """schema: dataviz/dataset-transform/v1
+kind: dataset_transform
 id: combine
-runtime: python
+runtime: server-python
 code: combine.py
 entrypoint: transform
 inputs:
@@ -436,7 +455,7 @@ def transform(context):
     client = TestClient(create_app(root))
     started = client.post(
         "/api/dashboards/progressive/runs",
-        json={"session_id": SESSION_A, "parameters": {}},
+        json={"session_id": SESSION_A, "query_parameters": {}},
     )
     assert started.status_code == 200
     run_id = started.json()["run_id"]
@@ -457,18 +476,18 @@ def transform(context):
         snapshot = record["snapshot"]
         if snapshot and "source:fast/main" in snapshot["outputs"]:
             fast_snapshot = snapshot
-            assert record["status"] == "running"
+            assert record["status"] == "loading"
             break
         time.sleep(0.01)
     assert fast_snapshot is not None
     assert "source:slow-left/main" not in fast_snapshot["outputs"]
     assert "source:slow-right/main" not in fast_snapshot["outputs"]
-    assert "transform:combine/main" not in fast_snapshot["outputs"]
+    assert "dataset:combine/main" not in fast_snapshot["outputs"]
     assert set(fast_snapshot["nodes"]) == {
         "source:fast",
         "source:slow-left",
         "source:slow-right",
-        "transform:combine",
+        "dataset:combine",
     }
 
     output = client.get(
@@ -485,7 +504,7 @@ def transform(context):
         if record["result"]:
             break
         time.sleep(0.02)
-    assert record["result"]["status"] == "success"
+    assert record["result"]["status"] == "ready"
     event_names = [event["event"] for event in record["events"]]
     fast_ready = next(
         index
@@ -497,7 +516,7 @@ def transform(context):
         index
         for index, event in enumerate(record["events"])
         if event["event"] == "output_ready"
-        and event["data"].get("reference") == "transform:combine/main"
+        and event["data"].get("reference") == "dataset:combine/main"
     )
     assert fast_ready < combined_ready < event_names.index("run_ready")
 
@@ -516,8 +535,8 @@ def test_runs_and_session_cache_are_isolated_per_browser_tab():
         time.sleep(0.05)
 
     assert first.result and second.result
-    assert first.result.parameters["target_factor"] == 1.0
-    assert second.result.parameters["target_factor"] == 1.25
+    assert first.result.query_parameters["target_factor"] == 1.0
+    assert second.result.query_parameters["target_factor"] == 1.25
     assert manager.latest_for(SESSION_A, "sales") is first
     assert manager.latest_for(SESSION_B, "sales") is second
     assert manager.get(first.run_id, SESSION_B) is None
@@ -536,7 +555,7 @@ def test_run_api_rejects_cross_tab_and_cross_dashboard_access():
     client = TestClient(create_app(WORKSPACE))
     started = client.post(
         "/api/dashboards/sales/runs",
-        json={"session_id": SESSION_A, "parameters": {"target_factor": 1.0}},
+        json={"session_id": SESSION_A, "query_parameters": {"target_factor": 1.0}},
     )
     assert started.status_code == 200
     run_id = started.json()["run_id"]
@@ -566,3 +585,147 @@ def test_workspace_cache_scope_is_explicit_opt_in(tmp_path: Path):
 
     assert first.policy_root(tab_policy) != second.policy_root(tab_policy)
     assert first.policy_root(shared_policy) == second.policy_root(shared_policy)
+
+
+def test_manager_bounds_event_history_with_monotonic_offsets_and_cleans_generations(
+    tmp_path: Path,
+):
+    root = tmp_path / "workspace"
+    shutil.copytree(WORKSPACE, root)
+    manager = RunManager(load_workspace(root))
+    run = RunRecord("run_keep", SESSION_A, "sales", status="loading")
+    interaction = InteractionRecord(
+        "ix_keep",
+        1,
+        run.run_id,
+        SESSION_A,
+        "sales",
+        "summary",
+        status="loading",
+    )
+
+    for index in range(15):
+        manager._append_bounded_event(
+            run,
+            ExecutionEvent(event="node_progress", run_id=run.run_id, data={"index": index}),
+            10,
+        )
+        manager._append_bounded_event(
+            interaction,
+            {"event": "node_progress", "index": index},
+            10,
+        )
+
+    assert run.event_offset == interaction.event_offset == 5
+    assert [event.data["index"] for event in run.events] == list(range(5, 15))
+    assert [event["index"] for event in interaction.events] == list(range(5, 15))
+
+    manager.records[run.run_id] = run
+    manager.generations = {
+        (SESSION_A, "sales", run.run_id, "summary"): 1,
+        (SESSION_A, "sales", "run_gone", "summary"): 4,
+    }
+    manager.latest_interactive_nodes = {
+        (SESSION_A, run.run_id, "interactive:summary"): object(),
+        (SESSION_A, "run_gone", "interactive:summary"): object(),
+    }
+
+    manager.cleanup()
+
+    assert set(manager.generations) == {
+        (SESSION_A, "sales", run.run_id, "summary")
+    }
+    assert set(manager.latest_interactive_nodes) == {
+        (SESSION_A, run.run_id, "interactive:summary")
+    }
+
+
+def test_query_cancel_is_tab_scoped_and_same_dashboard_run_supersedes(tmp_path: Path):
+    root = tmp_path / "query-cancel"
+    dashboard = root / "dashboards" / "slow"
+    (dashboard / "sources").mkdir(parents=True)
+    (root / "workspace.yaml").write_text(
+        "schema: dataviz/workspace/v1\nkind: workspace\nid: cancel\ntitle: Cancel\n",
+        encoding="utf-8",
+    )
+    (dashboard / "dashboard.yaml").write_text(
+        """schema: dataviz/dashboard/v2
+kind: dashboard
+id: slow
+title: Slow
+query_parameters:
+  - {id: delay, type: number, default: 2}
+sources: [sources/slow.yaml]
+views:
+  - {id: result, title: Result, template: table, input: source:slow/main}
+sections:
+  - {id: result, title: Result, views: [result]}
+""",
+        encoding="utf-8",
+    )
+    (dashboard / "sources" / "slow.yaml").write_text(
+        """schema: dataviz/source/v1
+kind: source
+id: slow
+type: python
+code: slow.py
+query_params: [delay]
+outputs: {main: {kind: table}}
+cache: {mode: none}
+""",
+        encoding="utf-8",
+    )
+    (dashboard / "sources" / "slow.py").write_text(
+        """import time
+import pandas as pd
+
+def load(context):
+    time.sleep(float(context.query_params["delay"]))
+    return {"main": pd.DataFrame([{"delay": context.query_params["delay"]}])}
+""",
+        encoding="utf-8",
+    )
+
+    client = TestClient(create_app(root))
+    first_a = client.post(
+        "/api/dashboards/slow/runs",
+        json={"session_id": SESSION_A, "query_parameters": {"delay": 5}},
+    ).json()["run_id"]
+    first_b = client.post(
+        "/api/dashboards/slow/runs",
+        json={"session_id": SESSION_B, "query_parameters": {"delay": 0.2}},
+    ).json()["run_id"]
+
+    assert client.delete(
+        f"/api/runs/{first_a}", params={"session_id": SESSION_B}
+    ).status_code == 404
+
+    second_a = client.post(
+        "/api/dashboards/slow/runs",
+        json={"session_id": SESSION_A, "query_parameters": {"delay": 0}},
+    ).json()["run_id"]
+
+    records = {}
+    for _ in range(200):
+        records = {
+            "first_a": client.get(
+                f"/api/runs/{first_a}", params={"session_id": SESSION_A}
+            ).json(),
+            "second_a": client.get(
+                f"/api/runs/{second_a}", params={"session_id": SESSION_A}
+            ).json(),
+            "first_b": client.get(
+                f"/api/runs/{first_b}", params={"session_id": SESSION_B}
+            ).json(),
+        }
+        if all(
+            value["status"] in {"ready", "partial", "error", "cancelled"}
+            for value in records.values()
+        ):
+            break
+        time.sleep(0.03)
+
+    assert records["first_a"]["status"] == "cancelled"
+    assert records["second_a"]["result"]["status"] == "ready"
+    assert records["first_b"]["result"]["status"] == "ready"
+    assert records["first_b"]["result"]["query_parameters"]["delay"] == 0.2

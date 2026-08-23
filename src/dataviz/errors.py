@@ -17,7 +17,13 @@ class DatavizError(Exception):
         self.details = details
 
     def as_dict(self) -> dict[str, Any]:
+        stable_code = (
+            self.details.get("code")
+            if isinstance(self.details, dict) and self.details.get("code")
+            else self.code
+        )
         return {
+            "code": stable_code,
             "type": self.code,
             "message": self.message,
             "file": self.file,

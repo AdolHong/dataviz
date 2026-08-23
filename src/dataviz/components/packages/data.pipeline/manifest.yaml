@@ -6,6 +6,8 @@ purpose: Named Output and transform contracts between data acquisition and prese
 dependencies: []
 components:
   - {id: output.named, purpose: Stable typed addressable output from a Source or Transform, status: stable}
-  - {id: transform.server-python, purpose: Complex trusted server-side transformation, status: stable}
-  - {id: transform.browser-js, purpose: Browser-only serializable transformation, status: stable}
+  - {id: dataset-transform.server-python, purpose: Query-stage Python transformation producing Base Outputs, status: stable}
+  - {id: interactive-transform.browser-js, purpose: Interaction-stage JavaScript transformation producing Derived Outputs, status: stable}
+  - {id: interactive-transform.browser-python, purpose: Interaction-stage Pyodide transformation producing portable Derived Outputs, status: stable}
+  - {id: interactive-transform.server-python, purpose: Interaction-stage server Python computation against one immutable Query Run, status: stable}
 runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

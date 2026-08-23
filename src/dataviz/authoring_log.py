@@ -8,21 +8,22 @@ from statistics import mean
 from typing import Annotated, Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from dataviz import __version__
+from dataviz.authoring_evaluation import AUTHORING_APPROACHES, AUTHORING_TASKS
 from dataviz.errors import ValidationFailure
 
 
-AUTHORING_EVENT_SCHEMA = "dataviz/authoring-event/v1"
-AUTHORING_LOG_REPORT_SCHEMA = "dataviz/authoring-log-report/v1"
+AUTHORING_EVENT_SCHEMA = "dataviz/authoring-event/v3"
+AUTHORING_LOG_REPORT_SCHEMA = "dataviz/authoring-log-report/v3"
 AUTHORING_LOG_NAME = "dataviz-authoring.jsonl"
 
 
 class AuthoringEvent(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    schema_: Literal["dataviz/authoring-event/v1"] = Field(
+    schema_: Literal["dataviz/authoring-event/v3"] = Field(
         AUTHORING_EVENT_SCHEMA, alias="schema"
     )
     event: str
@@ -37,7 +38,37 @@ class AuthoringStarted(AuthoringEvent):
     dashboard_id: str | None = None
     model: str | None = None
     tool: str | None = None
+    benchmark_task: str | None = None
+    approach: Literal["dataviz", "standalone-html"] | None = None
+    trial_id: str | None = None
+    task_contract_sha256: str | None = None
+    fixture_sha256: str | None = None
     notes: str = ""
+
+    @model_validator(mode="after")
+    def validate_benchmark_identity(self):
+        values = [
+            self.benchmark_task,
+            self.approach,
+            self.trial_id,
+            self.task_contract_sha256,
+            self.fixture_sha256,
+        ]
+        if any(value is not None for value in values) and not all(
+            value is not None for value in values
+        ):
+            raise ValueError(
+                "benchmark_task, approach, trial_id, task_contract_sha256 and "
+                "fixture_sha256 must be provided together"
+            )
+        if self.benchmark_task is not None and self.benchmark_task not in AUTHORING_TASKS:
+            raise ValueError(
+                f"Unknown benchmark_task {self.benchmark_task!r}; "
+                f"available: {', '.join(AUTHORING_TASKS)}"
+            )
+        if self.trial_id is not None and not self.trial_id.strip():
+            raise ValueError("trial_id cannot be empty")
+        return self
 
 
 class AuthoringFriction(AuthoringEvent):
@@ -55,6 +86,15 @@ class AuthoringFriction(AuthoringEvent):
     reference: str | None = None
 
 
+class AuthoringAcceptanceResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    status: Literal["passed", "failed", "unmeasured"]
+    assessor: Literal["human", "automation", "mixed"] | None = None
+    evidence: str = ""
+
+
 class AuthoringFinished(AuthoringEvent):
     event: Literal["finished"] = "finished"
     outcome: Literal["success", "partial", "failed", "abandoned"]
@@ -65,6 +105,9 @@ class AuthoringFinished(AuthoringEvent):
     output_tokens: int | None = Field(None, ge=0)
     token_source: Literal["reported", "unknown"] = "unknown"
     docs_used: list[str] = Field(default_factory=list)
+    trial_integrity_passed: bool | None = None
+    acceptance_passed: bool | None = None
+    acceptance_results: list[AuthoringAcceptanceResult] = Field(default_factory=list)
     notes: str = ""
 
 
@@ -145,20 +188,45 @@ def start_authoring_session(
     dashboard_id: str | None = None,
     model: str | None = None,
     tool: str | None = None,
+    benchmark_task: str | None = None,
+    approach: str | None = None,
+    trial_id: str | None = None,
+    task_contract_sha256: str | None = None,
+    fixture_sha256: str | None = None,
     notes: str = "",
 ) -> AuthoringStarted:
     if not task.strip():
         raise ValidationFailure("Authoring task cannot be empty")
     path = authoring_log_path(workspace)
-    event = AuthoringStarted(
-        session_id=f"authoring_{uuid4().hex[:12]}",
-        timestamp=_now(),
-        task=task.strip(),
-        dashboard_id=dashboard_id.strip() if dashboard_id else None,
-        model=model.strip() if model else None,
-        tool=tool.strip() if tool else None,
-        notes=notes.strip(),
-    )
+    try:
+        event = AuthoringStarted(
+            session_id=f"authoring_{uuid4().hex[:12]}",
+            timestamp=_now(),
+            task=task.strip(),
+            dashboard_id=dashboard_id.strip() if dashboard_id else None,
+            model=model.strip() if model else None,
+            tool=tool.strip() if tool else None,
+            benchmark_task=benchmark_task.strip() if benchmark_task else None,
+            approach=approach.strip() if approach else None,
+            trial_id=trial_id.strip() if trial_id else None,
+            task_contract_sha256=task_contract_sha256,
+            fixture_sha256=fixture_sha256,
+            notes=notes.strip(),
+        )
+    except Exception as error:
+        raise ValidationFailure(
+            "Invalid authoring benchmark identity",
+            details={
+                "benchmark_task": benchmark_task,
+                "approach": approach,
+                "trial_id": trial_id,
+                "task_contract_sha256": task_contract_sha256,
+                "fixture_sha256": fixture_sha256,
+                "available_tasks": sorted(AUTHORING_TASKS),
+                "available_approaches": list(AUTHORING_APPROACHES),
+                "error": str(error),
+            },
+        ) from error
     _append(path, event)
     return event
 
@@ -203,6 +271,14 @@ def finish_authoring_session(
     input_tokens: int | None = None,
     output_tokens: int | None = None,
     docs_used: list[str] | None = None,
+    trial_integrity_passed: bool | None = None,
+    acceptance_passed: bool | None = None,
+    acceptance_results: list[dict[str, Any]] | None = None,
+    benchmark_task: str | None = None,
+    approach: str | None = None,
+    trial_id: str | None = None,
+    task_contract_sha256: str | None = None,
+    fixture_sha256: str | None = None,
     notes: str = "",
 ) -> AuthoringFinished:
     start, events = _session_events(workspace, session_id)
@@ -212,6 +288,55 @@ def finish_authoring_session(
         raise ValidationFailure(
             "A first-attempt success cannot have correction rounds",
             details={"correction_rounds": correction_rounds},
+        )
+    benchmark = start.benchmark_task is not None
+    if benchmark:
+        if (
+            trial_integrity_passed is None
+            or acceptance_passed is None
+            or acceptance_results is None
+            or benchmark_task != start.benchmark_task
+            or approach != start.approach
+            or trial_id != start.trial_id
+            or task_contract_sha256 != start.task_contract_sha256
+            or fixture_sha256 != start.fixture_sha256
+        ):
+            raise ValidationFailure(
+                "Benchmark sessions must finish with the same verified trial and a complete assessment",
+                details={
+                    "expected_task_contract_sha256": start.task_contract_sha256,
+                    "actual_task_contract_sha256": task_contract_sha256,
+                    "expected_fixture_sha256": start.fixture_sha256,
+                    "actual_fixture_sha256": fixture_sha256,
+                    "expected_benchmark_task": start.benchmark_task,
+                    "actual_benchmark_task": benchmark_task,
+                    "expected_approach": start.approach,
+                    "actual_approach": approach,
+                    "expected_trial_id": start.trial_id,
+                    "actual_trial_id": trial_id,
+                },
+            )
+        if outcome == "success" and (
+            not trial_integrity_passed or not acceptance_passed
+        ):
+            raise ValidationFailure(
+                "A benchmark cannot be marked success until trial integrity and every acceptance check pass"
+            )
+    elif any(
+        value is not None
+        for value in (
+            trial_integrity_passed,
+            acceptance_passed,
+            acceptance_results,
+            benchmark_task,
+            approach,
+            trial_id,
+            task_contract_sha256,
+            fixture_sha256,
+        )
+    ):
+        raise ValidationFailure(
+            "Trial integrity and acceptance results belong only to benchmark sessions"
         )
     measured_tokens = input_tokens is not None or output_tokens is not None
     finished_at = _now()
@@ -227,6 +352,9 @@ def finish_authoring_session(
             output_tokens=output_tokens,
             token_source="reported" if measured_tokens else "unknown",
             docs_used=sorted({value.strip() for value in docs_used or [] if value.strip()}),
+            trial_integrity_passed=trial_integrity_passed,
+            acceptance_passed=acceptance_passed,
+            acceptance_results=acceptance_results or [],
             notes=notes.strip(),
         )
     except Exception as error:
@@ -259,6 +387,11 @@ def authoring_log_report(
                     "dashboard_id": event.dashboard_id,
                     "model": event.model,
                     "tool": event.tool,
+                    "benchmark_task": event.benchmark_task,
+                    "approach": event.approach,
+                    "trial_id": event.trial_id,
+                    "task_contract_sha256": event.task_contract_sha256,
+                    "fixture_sha256": event.fixture_sha256,
                     "started_at": event.timestamp.isoformat(),
                     "start_notes": event.notes,
                     "dataviz_version": event.dataviz_version,
@@ -285,6 +418,11 @@ def authoring_log_report(
                     "output_tokens": event.output_tokens,
                     "token_source": event.token_source,
                     "docs_used": event.docs_used,
+                    "trial_integrity_passed": event.trial_integrity_passed,
+                    "acceptance_passed": event.acceptance_passed,
+                    "acceptance_results": [
+                        item.model_dump() for item in event.acceptance_results
+                    ],
                     "finish_notes": event.notes,
                     "finished_at": event.timestamp.isoformat(),
                 }
@@ -364,5 +502,6 @@ def authoring_prompt(dashboard_id: str | None = None) -> dict[str, Any]:
             "dataviz authoring finish <workspace> <session-id> --outcome success "
             "--first-attempt success --correction-rounds 0"
         ),
+        "evaluation": "dataviz authoring protocol --format json",
         "rule": "Report real measurements only; leave unavailable token counts unknown.",
     }

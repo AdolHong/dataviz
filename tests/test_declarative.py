@@ -28,7 +28,7 @@ from typer.testing import CliRunner
 WORKSPACE = Path(__file__).parents[1] / "examples" / "minimal-workspace"
 SALES_WORKSPACE = Path(__file__).parents[1] / "examples" / "sales-workspace"
 REPEAT_WORKSPACE = Path(__file__).parents[1] / "examples" / "repeat-workspace"
-SHOWCASE_WORKSPACE = Path(__file__).parents[1] / "examples" / "legacy-showcase"
+SHOWCASE_WORKSPACE = Path(__file__).parents[1] / "examples" / "feature-showcase"
 
 
 def test_template_registry_is_ai_discoverable():
@@ -133,11 +133,17 @@ def test_cli_docs_provide_onboarding_chart_recipes_and_error_recovery():
     assert interpolation.exit_code == 0
     interpolation_docs = json.loads(interpolation.stdout)
     assert interpolation_docs["topic"] == "dashboard"
-    assert interpolation_docs["parameter_interpolation"]["syntax"] == (
+    assert interpolation_docs["content_interpolation"]["parameter_syntax"] == (
         "{{ parameters.<id> }}"
     )
     assert "最近一次 Run query" in (
-        interpolation_docs["parameter_interpolation"]["lifecycle"]
+        interpolation_docs["content_interpolation"]["lifecycle"]["query_parameter"]
+    )
+    assert interpolation_docs["content_interpolation"]["selection_syntax"]["section"] == (
+        "{{ selections.section.<section-id>.<selection-id> }}"
+    )
+    assert "即时更新" in (
+        interpolation_docs["content_interpolation"]["lifecycle"]["selection"]
     )
     runtime_docs = CliRunner().invoke(app, ["docs", "runtime-limits", "--format", "json"])
     assert runtime_docs.exit_code == 0
@@ -436,7 +442,7 @@ def test_declarative_renderer_limits_selection_redraw_to_affected_views():
     rendered = CanvasRenderer(workspace).render(dashboard, result, asset_mode="server")
 
     assert "affected.has(id)" in rendered
-    assert "affectedViews(changedSelectionKeys, changedOutputs)" in rendered
+    assert "affectedViews(changedSelectionKeys, new Set())" in rendered
     assert "datavizRuntime.renderViews" in rendered
     assert "window.datavizClient" not in rendered
 
@@ -474,12 +480,12 @@ def test_selection_contract_is_include_only():
 def test_query_parameter_changes_inline_sql_dataset():
     workspace = load_workspace(WORKSPACE)
     result = Executor(workspace).run(
-        "sales-overview", params={"min_query_revenue": 150000}, refresh=True
+        "sales-overview", query_parameters={"min_query_revenue": 150000}, refresh=True
     )
     artifact = result.nodes["source:sales"].outputs["main"]
     frame = ArtifactStore(workspace.root, result.run_id).read_table(artifact)
 
-    assert result.status == "success"
+    assert result.status == "ready"
     assert frame["revenue"].tolist() == [151000, 164000]
 
 
@@ -499,7 +505,7 @@ def test_default_renderer_builds_templates_and_portable_report(tmp_path: Path):
     assert "Optional presentation-only polish" in report
     assert "min-height:420px" in report
     assert "const datavizViewSpecs" in report
-    assert '"schema": "dataviz/runtime/v1"' in report
+    assert '"schema": "dataviz/runtime/v2"' in report
     assert "window.datavizRuntime.registerView" in report
     assert "window.datavizClient" not in report
     assert '"source:sales/main": [' in report

@@ -7,8 +7,9 @@ DOC_ALIASES = {
     "start": "quickstart",
     "architecture": "pipeline",
     "output": "outputs",
-    "transform": "server-transforms",
-    "browser-transform": "browser-transforms",
+    "dataset-transform": "dataset-transforms",
+    "interactive-transform": "interactive-transforms",
+    "compute": "compute-parameters",
     "renderer": "renderers",
     "chart": "charts",
     "view": "charts",
@@ -26,15 +27,15 @@ DOC_ALIASES = {
     "compact": "ai-authoring",
     "context": "ai-authoring",
     "benchmark": "ai-authoring",
-    "feedback": "ai-authoring",
-    "authoring-log": "ai-authoring",
+    "export": "html-export",
+    "html": "html-export",
+    "offline": "html-export",
+    "pyodide": "html-export",
     "schema": "strict-schema",
     "schemas": "schema-reference",
     "validate": "validation",
     "preflight": "validation",
     "version": "versioning-release",
-    "migration": "versioning-release",
-    "migrate": "versioning-release",
     "release": "versioning-release",
     "frontend-adapter": "frontend-adapters",
     "security": "runtime-limits",
@@ -48,722 +49,486 @@ DOC_ALIASES = {
 
 DOC_TOPICS: dict[str, dict[str, Any]] = {
     "quickstart": {
-        "summary": "AI 从空环境到第一个可验证 HTML 报告的最短路径。",
-        "goal": "先证明数据契约和默认 Renderer 正确，再调整 Presentation 或扩展代码。",
-        "workflow": [
-            "dataviz authoring start <workspace> --dashboard <dashboard-id> --task \"<task>\"",
+        "summary": "从空环境到可验证 Dashboard 和 HTML 报告的最短 v2 路径。",
+        "commands": [
+            "dataviz version",
             "dataviz docs pipeline --format json",
             "dataviz schemas dashboard --format json",
             "dataviz list <workspace>",
             "dataviz context <workspace> <dashboard-id> --focus view:<view-id> --format json",
             "dataviz validate <workspace> --dashboard <dashboard-id> --format json",
-            "dataviz query <workspace> <dashboard-id> --source <source-id> --format json",
-            "dataviz report <workspace> <dashboard-id> --output <workspace>/dist/report.html",
+            "dataviz query <workspace> <dashboard-id> --query-param key=value",
+            "dataviz output <workspace> <dashboard-id> source:<id>/<output>",
+            "dataviz report <workspace> <dashboard-id> --output report.html",
             "dataviz serve <workspace> --port 8080",
-            "dataviz authoring finish <workspace> <session-id> --outcome success --first-attempt success --correction-rounds 0",
         ],
         "rules": [
-            "不要从自定义 HTML/CSS/JS 开始；先使用默认 Renderer。",
-            "Dashboard 只引用 Adapter 名称；账号密码只留在 Workspace 本地配置或环境变量。",
-            "Query Parameter 会重新执行服务端 DAG；Selection 只处理浏览器已经拿到的数据。",
-            "先用 query 检查 Source，再用 output 检查 Named Output，最后渲染 View。",
-            "Schema 是严格契约；未知字段和旧字段直接报错，不存在兼容模式。",
-            "优先读取 focused Context 和单个 Component 契约；不要先吞入完整 Runtime 源码。",
-            "把真实首次成功、修正轮次、耗时、客户端提供的 Token 和不清晰处写入 dataviz-authoring.jsonl；不能测量的值保持 unknown。",
+            "不要从自定义 HTML/CSS/JS 开始；先用默认 Renderer 证明数据契约。",
+            "Adapter 只在 Workspace 定义；Dashboard 只写逻辑别名，不保存账号密码。",
+            "Query Parameter 创建新的 Query Run；Selection 不查询；Compute Parameter 只触发声明它的 Interactive Transform。",
+            "所有 Output 引用必须写完整，例如 source:sales/main、dataset:model/trend、interactive:simulation/result。",
+            "每次修改后运行 validate；未知字段、旧 schema 和不完整引用直接失败。",
         ],
         "success": [
-            "validate 返回 status=valid。",
-            "query/output 返回预期 kind、schema、row_count 和 preview/value。",
-            "report 返回 status=success，并生成 HTML 与 manifest。",
+            "validate 返回 passed=true。",
+            "Query Run 的目标节点为 ready 或 empty。",
+            "HTML report 生成，同时写出 report manifest。",
         ],
-        "related": ["pipeline", "workflow", "dashboard", "strict-schema", "troubleshooting"],
+        "related": ["pipeline", "workflow", "validation", "troubleshooting"],
     },
     "pipeline": {
-        "summary": "Dataviz 的稳定分层：取数、计算、浏览器交互、渲染和视觉编排彼此解耦。",
+        "summary": "稳定主链分成不可变取数阶段与可重复交互计算阶段。",
         "contract": [
-            "Adapter → Workspace 中的连接与文件访问授权。",
-            "Source → 从 File、SQL 或 Python 入口读取外部数据。",
-            "Server Transform（可选）→ 用 Python 消费上游 Named Output，执行复杂计算。",
-            "OutputBundle → 每个 Source/Transform 产出一个或多个有名称、有类型的 Output。",
-            "Browser Transform（可选）→ 用纯 JS 处理已下载数据，不触发查询。",
-            "View Renderer → Plotly、ECharts、Table、Perspective 或自定义生命周期。",
-            "Presentation → 只负责布局、容器、Theme、组件样式和资源。",
+            "Adapter → Source → Dataset Transform（可选）→ Base Named Output",
+            "Base Named Output + Query Parameter 快照 + Selection + Compute Parameter",
+            "→ Interactive Transform（可选）→ Derived Named Output",
+            "→ View Renderer → Presentation",
         ],
-        "boundaries": {
-            "query_parameters": "只进入 Source/Server Transform 执行与缓存键；修改后需要 Run query。",
-            "selections": "只在当前浏览器 tab 的当前 Dashboard 中生效；不进入服务端缓存键。",
-            "dashboard_yaml": "分析逻辑、稳定 ID、数据引用、Selection 和最小阅读顺序。",
-            "presentation_yaml": "可选的视觉覆盖；删除后默认页面仍然可运行。",
-            "view_readiness": "只依赖该 View 的可达 Output；无关慢分支不阻塞，完成 Output 立即增量发布。",
-            "frontend_framework": "只消费 Output、Selection、Runtime Event、View Descriptor 与 Renderer 生命周期协议。",
+        "state_namespaces": {
+            "query_parameters": "提交后创建新 Query Run，只进入声明依赖它们的 Source/Dataset Transform。",
+            "selections": "include-only 浏览器状态；直接筛选 View，并可作为 Interactive Transform 输入。",
+            "compute_parameters": "不取数；提交后只重算声明依赖它们的 Interactive Transform。",
         },
-        "simple_path": "Source 的 main Output 可用 input: sales 直接绑定 View，不需要显式 Transform。",
-        "complex_path": "使用 transform:model/trend 或 browser:derive/summary 绑定稳定 Named Output。",
-        "related": ["outputs", "server-transforms", "browser-transforms", "renderers", "presentation"],
+        "execution": {
+            "query_dag": "Source 与 Dataset Transform；完成的独立分支立即发布 Base Output。",
+            "interactive_dag": "三种 Runtime 共用 Named Output、依赖、状态、缓存和局部失效协议。",
+            "view_isolation": "View 只因自己的 Selection、内容绑定或输入 Output 变化而更新。",
+            "identity": "Interaction 以 tab、Dashboard、Query Run、Transform、generation 隔离。",
+        },
+        "related": ["outputs", "dataset-transforms", "interactive-transforms"],
     },
     "workflow": {
-        "summary": "以最小失败边界开发看板的固定顺序。",
+        "summary": "按最小失败边界开发，避免把数据、计算和样式问题混在一起。",
         "steps": [
-            {"stage": "1. Discover", "command": "dataviz list <workspace>", "stop_when": "确认 Dashboard id、文件夹名和节点 id。"},
-            {"stage": "2. Read", "command": "dataviz context <workspace> <dashboard-id> --focus view:<id> --format json", "stop_when": "只掌握当前任务的依赖闭包、Selection 和组件契约。"},
-            {"stage": "3. Validate", "command": "dataviz validate <workspace> --dashboard <dashboard-id> --format json", "stop_when": "passed=true；没有 error，团队要求时也没有 warning。"},
-            {"stage": "4. Source", "command": "dataviz query <workspace> <dashboard-id> --source <source-id> --format json", "stop_when": "原始字段、类型和行数正确。"},
-            {"stage": "5. Compute", "command": "dataviz output <workspace> <dashboard-id> transform:<id>/<name>", "stop_when": "View 所需 Named Output 正确。"},
-            {"stage": "6. Render", "command": "dataviz report <workspace> <dashboard-id> --output <workspace>/dist/check.html", "stop_when": "默认 Renderer 成功。"},
-            {"stage": "7. Present", "command": "编辑 presentation.yaml 后重新 validate/report", "stop_when": "外观改变但数据口径不变。"},
-            {"stage": "8. Interact", "command": "dataviz serve <workspace>", "stop_when": "Parameter 重新查询，Selection 只局部重绘。"},
+            {"stage": "Discover", "command": "dataviz list <workspace>"},
+            {"stage": "Read", "command": "dataviz context <workspace> <dashboard> --focus view:<id> --format json"},
+            {"stage": "Validate", "command": "dataviz validate <workspace> --dashboard <dashboard> --format json"},
+            {"stage": "Query", "command": "dataviz query <workspace> <dashboard> --source <id>"},
+            {"stage": "Inspect", "command": "dataviz output <workspace> <dashboard> <canonical-output>"},
+            {"stage": "Compute", "command": "dataviz compute <workspace> <dashboard> <transform-id> --run-id <run>"},
+            {"stage": "Render", "command": "dataviz report <workspace> <dashboard> --output report.html"},
+            {"stage": "Interact", "command": "dataviz serve <workspace>"},
         ],
         "do_not": [
-            "不要同时修改 SQL、Transform、字段绑定和 CSS。",
+            "不要同时修改 SQL、Transform、View 字段和 CSS。",
             "不要在 Named Output 尚未正确时调图表 options。",
-            "不要让 Presentation JS 承担本应可测试的业务计算。",
-            "不要为了改一个 View 先读取整个 Gallery 或 1000 行浏览器 Runtime。",
+            "不要让 Presentation 脚本承载可测试的业务计算。",
         ],
-        "related": ["quickstart", "troubleshooting"],
     },
     "dashboard": {
-        "summary": "Dashboard 文件夹、稳定 ID 和最小 dashboard.yaml 契约。",
+        "summary": "dashboard.yaml 是分析逻辑；presentation.yaml 是可删除的视觉覆盖。",
+        "schema": "dataviz/dashboard/v2",
         "identity": {
-            "folder_name": "导航和分享看到的画布名称；## 前缀片段表达目录位置。",
-            "id": "稳定程序身份；CLI、API、DAG、Presentation 引用和运行状态使用。",
-            "title_subtitle_description": "页面内容；可引用本次已提交的 Query Parameter，title 为空时回退到文件夹末级名称。",
+            "folder": "导航显示名及 ## 目录位置；复制、重命名和打包时所见即所得。",
+            "id": "CLI、DAG、API 与 Presentation 使用的稳定程序身份。",
+            "title": "页面内容，可与文件夹名不同；为空时回退到文件夹末级名称。",
         },
-        "minimal_example": """schema: dataviz/dashboard/v1
+        "minimal_example": """schema: dataviz/dashboard/v2
 kind: dashboard
 id: sales-overview
 title: 销售概览
-subtitle: "仓 {{ parameters.warehouse_id }} · 商品 {{ parameters.product_id }}"
-adapters: {warehouse: team-duckdb}
+subtitle: "仓 {{ parameters.warehouse_id }}"
 query_parameters:
   - {id: warehouse_id, label: 仓, default: 5740}
-  - {id: product_id, label: 商品, default: "980464683"}
 sources:
   - id: sales
     kind: source
-    type: sql
-    adapter: warehouse
-    code: sources/sales.sql
-    params: [warehouse_id, product_id]
+    type: file
+    path: data/sales.csv
+    outputs: {main: {kind: table}}
 views:
-  - {id: trend, title: 收入趋势, input: sales, template: line, x: date, y: revenue}
+  - {id: trend, title: 收入趋势, input: source:sales/main, template: line, x: date, y: revenue}
 sections:
-  - {id: overview, title: 概览, template: single, views: [trend]}
+  - {id: overview, title: 概览, views: [trend]}
 """,
-        "parameter_interpolation": {
-            "syntax": "{{ parameters.<id> }}",
+        "content_interpolation": {
+            "parameter_syntax": "{{ parameters.<id> }}",
+            "compute_syntax": "{{ compute.<id> }}",
+            "selection_syntax": {
+                "dashboard": "{{ selections.dashboard.<selection-id> }}",
+                "section": "{{ selections.section.<section-id>.<selection-id> }}",
+                "view": "{{ selections.view.<view-id>.<selection-id> }}",
+            },
             "fields": [
                 "dashboard title/subtitle/description/assumptions",
                 "section title/description",
-                "view title/description and markdown text",
+                "view title/description/markdown text",
             ],
-            "lifecycle": "只读取最近一次 Run query 已提交的参数；编辑表单不会改旧数据集标题，重新查询后 Server 与导出 HTML 同步更新。",
-            "formatting": "date_range 显示为“开始 至 结束”；选择参数优先显示 choice label；多值使用顿号连接。",
-            "validation": "只允许直接参数引用；未知 ID、Selection、运算和任意 Jinja 表达式由 dataviz validate 拒绝。",
+            "lifecycle": {
+                "query_parameter": "展示最近一次 Run query 已提交的值；草稿值不会伪装成当前结果。",
+                "compute_parameter": "展示产生当前 Derived Output 的已提交值。",
+                "selection": "浏览器 Selection 变化后即时更新可见文案与受影响 View。",
+            },
         },
-        "rules": [
-            "Parameter、Source、Transform、Selection、Section 和 View id 在各自作用域内稳定且唯一。",
-            "极简看板不需要 presentation.yaml、CSS、JS 或 Canvas 文件。",
-            "dashboard.yaml 中只保留逻辑和最小布局；视觉优化按 ID 放入 presentation.yaml。",
-            "分析对象应优先进入 title/subtitle/section/view 内容层级，不要只藏在 Parameters 弹层。",
-        ],
-        "related": ["sources", "charts", "selections", "presentation", "strict-schema"],
+        "related": ["presentation", "selections", "compute-parameters"],
     },
     "adapters": {
-        "summary": "把凭证留在 Workspace，让可分享 Dashboard 只绑定 Adapter 名称。",
+        "summary": "连接配置属于 Workspace；可分享的 Dashboard 只引用逻辑 Adapter 名。",
+        "supported": ["duckdb", "mysql", "starrocks", "sqlalchemy", "file root", "Python Source adapter config"],
         "rules": [
-            "Dashboard adapters 把逻辑别名映射到 Workspace Adapter，例如 warehouse: team-starrocks。",
-            "真实账号密码放在 auth/adapters.local.yaml 或环境变量中，不提交 Git。",
-            "同事复制 Dashboard 后，只需修改 Adapter 映射，不改 SQL 和业务代码。",
-            "DuckDB 使用 duckdb Adapter；MySQL 和 StarRocks 可通过 SQLAlchemy/MySQL wire protocol。",
-            "files Adapter 的 root 是访问边界，Source 不能通过 .. 越界。",
-            "自定义 Python Source 可通过 context.adapter 读取已解析的 config、secrets 和常用连接字段。",
-            "Adapter secrets 只进入可信 Python Source 子进程；Runtime 不主动把它们写入 Artifact、日志或导出 HTML，入口代码也不能主动泄露。",
+            "密码使用环境变量字段或未提交的 adapters.local.yaml。",
+            "更换团队环境只修改 Dashboard adapter 别名映射。",
+            "Interactive Transform 永远没有 Adapter，不能借交互状态重新查数。",
         ],
-        "example": """# auth/adapters.local.yaml
-adapters:
-  local-warehouse:
-    type: duckdb
-    database: data/warehouse.duckdb
-  team-starrocks:
-    type: sqlalchemy
-    env: STARROCKS_URL
-""",
-        "related": ["sources", "runtime-limits", "troubleshooting"],
     },
     "sources": {
-        "summary": "Source 只负责读取外部数据；跨 Dataset 计算应进入 Server Transform。",
-        "types": {
-            "file": "读取 CSV、Parquet、JSON/JSONL 或可选 Excel；可使用 Workspace files Adapter。",
-            "sql": "通过 DuckDB、MySQL、StarRocks 等 Workspace Adapter 执行参数化 SQL。",
-            "python": "调用可信 Python 入口读取特殊外部系统；可绑定 Adapter，但不消费其他节点输入。",
-        },
+        "summary": "Source 是唯一外部取数入口，类型为 file、sql 或 python。",
+        "required": ["schema", "kind", "id", "type", "outputs"],
         "examples": {
-            "bundled_csv": "{id: orders, kind: source, type: file, path: data/orders.csv, format: csv}",
-            "duckdb_sql": "{id: sales, kind: source, type: sql, adapter: warehouse, code: sources/sales.sql, params: [start_date], timeout_seconds: 120, timeout_retries: 1}",
-            "python": "{id: api, kind: source, type: python, adapter: crm, code: sources/api.py, entrypoint: load, params: [account], timeout_seconds: 30}",
+            "file": "{schema: dataviz/source/v1, kind: source, id: sales, type: file, path: data/sales.csv, outputs: {main: {kind: table}}}",
+            "sql": "{schema: dataviz/source/v1, kind: source, id: sales, type: sql, adapter: warehouse, code: sales.sql, query_params: [start_date], outputs: {main: {kind: table}}}",
+            "python": "{schema: dataviz/source/v1, kind: source, id: api, type: python, code: api.py, outputs: {main: {kind: table}}}",
         },
-        "sql_timeout_policy": {
-            "defaults": {"timeout_seconds": 120, "timeout_retries": 1},
-            "meaning": "timeout_retries 是首次尝试之外的立即重试次数；0 关闭重试，最大 5。",
-            "scope": "只重试 query_timeout；连接、权限、语法和其他执行错误不重试。",
-            "upper_bound": "单个 SQL Source 的最坏耗时约为 timeout_seconds × (timeout_retries + 1)。",
-        },
-        "python_contract": "Python entrypoint 接收 ExecutionContext；读取 context.params 和可选 context.adapter，并返回单值或与 outputs 完全一致的命名字典。Server Transform 的 context.adapter 始终为空。",
-        "verification": [
-            "dataviz validate <workspace> --dashboard <dashboard-id> --format json",
-            "dataviz query <workspace> <dashboard-id> --source <source-id> --format json",
-            "Server 中打开 Sources 并点击节点，检查本次 Run 的状态、缓存来源、耗时和错误。",
-            "SQL Source 额外核对 Resolved SQL、参数化 Driver statement、bound parameters、Adapter、超时策略和 query hash。",
-            "Resolved SQL 只用于人类 review；数据库仍接收参数化 statement 与 bound values。",
-        ],
-        "related": ["adapters", "outputs", "server-transforms", "troubleshooting"],
+        "timeouts": "SQL/Python 默认 120 秒；SQL timeout_retries 默认 1，超时后立即使用新连接重试。",
+        "debug": "Server 的 Sources 面板公开参数化 SQL、解析后 SQL、绑定参数、Adapter 类型、超时和重试证据。",
     },
     "outputs": {
-        "summary": "OutputBundle 是 Source、Server Transform 和 Browser Transform 共用的命名结果契约。",
-        "references": ["source:sales/main", "transform:sales-model/trend", "browser:latest/summary"],
+        "summary": "所有数据节点都必须声明类型明确且名称稳定的 Output。",
+        "canonical_references": [
+            "source:<id>/<name>",
+            "dataset:<id>/<name>",
+            "interactive:<id>/<name>",
+        ],
         "kinds": ["table", "scalar", "object", "text", "html", "chart", "image", "file"],
-        "declaration": """outputs:
-  trend:
-    kind: table
-    schema:
-      - {name: date, required: true, nullable: false}
-      - {name: revenue, dtype: float64}
-  total: {kind: scalar}
-  narrative: {kind: text}
-""",
         "rules": [
-            "未声明 outputs 的节点只产生 main。",
-            "声明 outputs 后，返回名称必须完全匹配；缺少或多出名称都失败。",
-            "table 可声明列、精确 pandas dtype、required 和 nullable 边界契约。",
-            "input: sales 是 source:sales/main 的正式简写；复杂引用使用完整 canonical reference。",
+            "main 也必须显式声明和引用，不接受裸 id。",
+            "返回值必须与声明名称完全一致；缺失或多余 Output 都失败。",
+            "table 可声明列、dtype、nullable 与 required 作为节点边界契约。",
         ],
-        "commands": [
-            "dataviz output <workspace> <dashboard-id> source:sales/main --format json",
-            "dataviz output <workspace> <dashboard-id> transform:model/trend --format csv",
-        ],
-        "related": ["server-transforms", "browser-transforms", "renderers"],
     },
-    "server-transforms": {
-        "summary": "用隔离 Python 进程完成可复用、可审查的复杂服务端计算。",
-        "definition": """schema: dataviz/server-transform/v1
-kind: server_transform
-id: sales-model
-runtime: python
-code: sales_model.py
-entrypoint: transform
-inputs:
-  orders: source:orders/main
-  targets: source:targets/main
-params: [forecast_factor]
-outputs:
-  trend: {kind: table}
-  completion: {kind: table}
-code_dependencies: [helpers/]
-python_dependencies: [scikit-learn>=1.5]
-timeout_seconds: 60
-cache: {mode: session, scope: tab}
-""",
-        "python": """def transform(context):
-    orders = context.table("orders").copy()
-    targets = context.table("targets")
-    factor = context.params["forecast_factor"]
-    orders["forecast"] = orders["revenue"] * factor
-    return {"trend": orders, "completion": build_completion(orders, targets)}
-""",
-        "runtime": [
-            "每次执行使用 fresh spawn 子进程；timeout_seconds 到期会硬终止。",
-            "失败保存完整 traceback 和 execution-log Artifact，节点外只返回短摘要。",
-            "缓存指纹包含入口代码、code_dependencies、Python 包版本、参数、Adapter 和上游 Artifact。",
-            "产品定位是可信单机执行；不把多租户 CPU/内存配额混入当前 DSL。",
-        ],
-        "related": ["outputs", "runtime-limits", "troubleshooting"],
-    },
-    "browser-transforms": {
-        "summary": "用独立 Web Worker 中的无 DOM JavaScript 处理浏览器已有数据，并精确声明 Selection 失效依赖。",
-        "definition": """schema: dataviz/browser-transform/v1
-kind: browser_transform
-id: latest
-code: latest.js
-entrypoint: transform
-inputs:
-  sales: transform:sales-model/trend
-selections: [dashboard:sales/region]
+    "dataset-transforms": {
+        "summary": "Dataset Transform 在 Query DAG 中加工取数结果，并固化为 Base Output。",
+        "schema": "dataviz/dataset-transform/v1",
+        "runtime": "server-python",
+        "example": """schema: dataviz/dataset-transform/v1
+kind: dataset_transform
+id: features
+runtime: server-python
+code: features.py
+inputs: {sales: source:sales/main}
+query_params: [start_date]
 outputs:
   rows: {kind: table}
-timeout_seconds: 30
+  total: {kind: scalar}
+timeout_seconds: 120
 """,
-        "javascript": """async function transform(context) {
-  const rows = context.inputs.sales || [];
-  const selected = context.selections["dashboard:sales/region"] || [];
-  return {rows: selected.length ? rows.filter(row => selected.includes(row.region)) : rows};
-}
-""",
-        "context": ["inputs", "input(name)", "parameters", "selections", "frame(rows)"],
-        "rules": [
-            "函数可以同步返回或返回 Promise，但结果必须可结构化克隆；函数、DOM、循环引用等输出会得到 browser_transform_not_serializable。",
-            "禁止访问 DOM；页面行为属于 Renderer 或 Presentation extension。",
-            "selections 只列真实依赖的 canonical selection key，Runtime 才能局部失效。",
-            "失败只阻断依赖该 Output 的分支，不重绘无关 View。",
-            "每次执行使用 fresh Worker；新 Selection/Output 会取消旧任务，timeout_seconds 默认 30 秒、最大 300 秒。",
-            "错误稳定携带 code/name/message/stack/transform_id/worker，取消和超时可以被 AI 直接区分。",
+        "context": [
+            "context.inputs / context.input(name) / context.table(name)",
+            "context.query_params",
+            "context.compute_params={} / context.selections={}",
+            "context.adapter=None",
+            "context.progress(value, message)",
+            "context.log(message, level='info', **fields)",
         ],
-        "related": ["outputs", "selections", "renderers", "runtime-limits"],
+        "behavior": [
+            "独立 spawn 子进程、硬超时、完整 traceback 与日志 Artifact。",
+            "缓存覆盖代码、递归声明依赖、包版本、Query Parameter、上游 hash 与 Source Adapter 指纹。",
+            "Selection 和 Compute Parameter 不会执行 Query DAG。",
+        ],
     },
-    "renderers": {
-        "summary": "Renderer 只把 Named Output 转成 View，并遵守统一生命周期。",
-        "built_in": ["Plotly", "ECharts", "Table", "Perspective", "Markdown/Text", "Image"],
-        "lifecycle": ["validate(descriptor)", "mount(context, descriptor)", "update(context, descriptor, state)", "dispose(context, state)"],
-        "custom": """window.datavizRuntime.registerRenderer("team.sparkline", {
-  validate(descriptor) { if (!Array.isArray(descriptor.rows)) throw new Error("table required"); },
-  mount(context, descriptor) {
-    const node = document.createElement("div");
-    context.body.append(node);
-    this.update(context, descriptor, {node});
-    return {node};
-  },
-  update(_context, descriptor, state) {
-    state.node.textContent = JSON.stringify(descriptor.rows);
-    return state;
-  },
-  dispose(_context, state) { state.node.remove(); }
-});
-""",
-        "view": "{id: spark, template: custom, renderer: team.sparkline, input: sales}",
+    "interactive-transforms": {
+        "summary": "Interactive Transform 在不可变 Query Run 上按 Selection/Compute Parameter 重算 Derived Output。",
+        "schema": "dataviz/interactive-transform/v1",
+        "common_fields": ["runtime", "inputs", "query_params", "compute_params", "selections", "trigger", "export", "outputs"],
+        "runtimes": {
+            "browser-js": "JavaScript Web Worker；Server 与 HTML 共用；支持 Promise、progress、timeout、cancel。",
+            "browser-python": "Pyodide module Worker；支持纯 Python/Pyodide wheel；图表仍由 JS Renderer 绘制。",
+            "server-python": "独立服务端进程；可用任意已安装 Python 依赖；不能访问 Adapter；HTML 只允许 snapshot/unavailable。",
+        },
+        "runtime_choice": {
+            "default_order": ["browser-js", "browser-python", "server-python"],
+            "rule": (
+                "当三者都能清楚、可靠地表达同一逻辑且数据规模适合浏览器时，"
+                "优先 browser-js，其次 browser-python，最后 server-python。"
+            ),
+            "reason": (
+                "这个顺序优化启动开销、分发体积和 HTML 可移植性，不表示 JavaScript "
+                "在所有算法上都比原生 Python 更快。原生依赖、大模型、运筹求解或大数据量仍应选择 server-python。"
+            ),
+        },
+        "triggers": {
+            "apply": "默认；用户提交相关草稿后执行。",
+            "auto": "输入变化后 debounce，并取消同一 Transform 的旧 generation。",
+            "manual": "仅明确指定 Transform 时执行，同时补齐其依赖闭包。",
+        },
+        "export_modes": {
+            "interactive": "HTML 中继续计算；仅 browser-js/browser-python。",
+            "snapshot": "导出时固化 Derived Output 及产生它的状态，相关控件只读。",
+            "unavailable": "HTML 明确显示缺失能力与原因。",
+        },
         "rules": [
-            "自定义 Renderer 通过显式 ID 注册，不覆盖 Canvas 全局渲染函数。",
-            "同步或异步 lifecycle 失败会生成 renderer_lifecycle_error，只标记当前 View，并保留 renderer/phase/view_id/stack。",
-            "优先使用内置 Renderer；只有无法表达的视觉类型才增加扩展。",
+            "只返回 Named Output，不接触 DOM，不调用 Renderer。",
+            "输入只能是已声明 Base/Derived Output；没有 Adapter，也没有 Source API。",
+            "generation 采用最后写入获胜，旧任务不能覆盖新结果。",
+            "server-python 可调用 context.progress 与 context.log；日志保存为结构化 Artifact。",
         ],
+        "related": ["html-export", "compute-parameters", "outputs"],
+    },
+    "html-export": {
+        "summary": (
+            "HTML 固化 Query Run；只有 Browser Runtime 能在脱离 Dataviz Server 后继续计算。"
+        ),
+        "runtime_matrix": {
+            "browser-js": "interactive/snapshot/unavailable；interactive 不需要 Python 或 Pyodide。",
+            "browser-python": "interactive/snapshot/unavailable；interactive 需要 Pyodide CDN 或 bundle。",
+            "server-python": (
+                "只能 snapshot 或 unavailable。导出页没有 Python Server，不能继续执行模型、"
+                "运筹或其他 server-python 逻辑。"
+            ),
+        },
+        "pyodide_assets": {
+            "cdn": (
+                "下载较小的 HTML，打开时从 runtime.pyodide_index_url 加载 Pyodide；"
+                "公司内网或离线环境可能失败。"
+            ),
+            "bundle": (
+                "从 runtime.pyodide_bundle_path 复制已校验的本地 Pyodide 分发。CLI 输出 HTML + "
+                "<name>.assets/pyodide + manifest；Server 下载 ZIP。它是自包含文件包，不是单一 HTML。"
+            ),
+            "bundle_contract": (
+                "目录根部必须包含 pyodide.mjs、pyodide.asm.mjs、pyodide.asm.wasm、"
+                "python_stdlib.zip 和 pyodide-lock.json。validate 会继续检查 micropip、"
+                "声明依赖的传递 wheel 闭包与 SHA-256。"
+            ),
+            "serve": (
+                "bundle 报告应解压后通过 HTTP 静态服务打开；module Worker/WASM 不保证在 file:// 下工作。"
+            ),
+            "conditional": (
+                "没有可执行 browser-python 分支时，报告不嵌入 Python Worker、不写 Pyodide URL，"
+                "也不复制 Pyodide 资产。snapshot/unavailable 分支同样不携带无用 Runtime。"
+            ),
+        },
         "commands": [
-            "dataviz components renderer.custom",
-            "dataviz scaffold renderer.custom --id team.spark --output ./team-spark",
-            "dataviz renderer-test ./team-spark/assets/team.spark.js --renderer-id team.spark --contract ./team-spark/assets/team.spark.contract.json",
-            "dataviz templates",
+            "dataviz report <workspace> <dashboard> --output report.html",
+            "python -m http.server 8081 -d <report-directory>",
         ],
-        "related": ["charts", "tables", "presentation"],
+        "related": ["interactive-transforms", "pipeline", "troubleshooting"],
     },
-    "charts": {
-        "summary": "Plotly/ECharts 声明式 View 配方、必填字段和最短排错路径。",
-        "field_matrix": {
-            "metric": {"required": ["input"], "optional": ["value", "aggregate", "label"]},
-            "line": {"required": ["input", "x", "y"], "optional": ["series", "aggregate", "engine"]},
-            "bar": {"required": ["input", "x", "y"], "optional": ["series", "aggregate", "engine"]},
-            "stacked-bar": {"required": ["input", "x", "y", "series"], "optional": ["aggregate", "engine"]},
-            "pie": {"required": ["input", "label", "value"], "optional": ["aggregate", "engine"]},
-            "scatter": {"required": ["input", "x", "y"], "optional": ["series", "color", "size", "engine"]},
-            "heatmap": {"required": ["input", "x", "y", "z"], "optional": ["aggregate", "engine"]},
-        },
-        "minimal_examples": {
-            "plotly_line": "{id: revenue-trend, input: sales, template: line, engine: plotly, x: date, y: revenue, series: region}",
-            "echarts_bar": "{id: region-bars, input: sales, template: bar, engine: echarts, x: region, y: revenue, aggregate: sum}",
-            "heatmap": "{id: matrix, input: sales, template: heatmap, engine: echarts, x: month, y: region, z: revenue, aggregate: sum}",
-        },
-        "preflight": [
-            "output preview 中必须存在编码字段，大小写完全一致。",
-            "数值编码应为数值类型；日期和类别列不能意外全为空。",
-            "先只保留必填字段完成渲染，再逐项加入 series/color/size/options。",
-            "engine 只允许 plotly 或 echarts；普通图表不需要 Python 画图代码。",
+    "compute-parameters": {
+        "summary": "Compute Parameter 控制取数后的复杂分析，不创建新 Query Run。",
+        "types": ["string", "number", "integer", "boolean", "date", "date_range", "single_select", "multi_select"],
+        "lifecycle": [
+            "draft：控件正在编辑但尚未产生当前结果。",
+            "committed：Interactive Transform 本次执行使用的值。",
+            "result state：内容绑定和 provenance 只描述真正产生当前 Output 的 committed 值。",
         ],
-        "related": ["outputs", "tables", "workflow", "troubleshooting"],
-    },
-    "tables": {
-        "summary": "普通 Table 与 Perspective 是两个独立模板。",
-        "templates": {
-            "table": "展示型明细表；columns、limit、格式和 CSS 容易定制。",
-            "perspective": "分析型 Web Component；支持排序、筛选、分组、透视和图形探索。",
-        },
-        "examples": {
-            "table": "{id: detail, title: 明细, input: sales, template: table, columns: [date, region, revenue], limit: 200}",
-            "perspective": "{id: pivot, title: 透视分析, input: sales, template: perspective, columns: [region, revenue], config: {plugin: Datagrid, group_by: [region]}}",
-        },
-        "rules": [
-            "需要品牌化样式或固定列展示时使用 table。",
-            "需要用户现场分析和透视时使用 perspective。",
-            "两个模板都只在内部可以消费滚轮时拦截滚动，到边界或内容不足时交还页面。",
-            "Perspective 更新复用 Viewer/Table 并执行 replace + flush；dispose 会断开 observer，并依次 delete Viewer 与 Table。",
-        ],
-        "related": ["charts", "presentation"],
-    },
-    "repeated-views": {
-        "summary": "用一个 View 蓝图巡检全部分组，或只渲染用户选中的分组。",
-        "templates": {
-            "small-multiples": "按 repeat.by 展示全部分组；适合 100 家门店全量巡检。",
-            "selection-gallery": "搜索/级联多选后只创建选中分组；空选择显示提示。",
-        },
-        "minimal_example": """views:
-  - {id: store-trend, input: sales, template: line, x: week, y: revenue}
-sections:
-  - id: stores
-    title: Store performance
-    template: small-multiples
-    views: [store-trend]
-    repeat:
-      view: store-trend
-      by: [store_id]
-      title: "{store_name}"
-      render: lazy
-      searchable: true
-      page_size: 40
-      recycle_offscreen: true
-""",
-        "rules": [
-            "Repeat Section 复用一个浏览器 Dataset，不复制 Source 查询。",
-            "searchable 搜索所有分组，page_size 只限制当前卡片 DOM，不截断 Dataset。",
-            "lazy 使用 IntersectionObserver，在接近视口时创建图表实例；recycle_offscreen 离屏后 dispose，滚回再创建。",
-            "selection-gallery 可配 searchable 或 cascader Selector。",
-            "导出 HTML 保留完整 Dataset；导出 Selection 只是初始状态。",
-        ],
-        "commands": [
-            "dataviz components section.small-multiples",
-            "dataviz components section.selection-gallery",
-            "dataviz benchmark <workspace> <dashboard> --browser-runtime --format json",
-        ],
-        "related": ["charts", "selections", "presentation"],
+        "cli": "dataviz compute <workspace> <dashboard> <transform-id> --run-id <run> --compute-param seed=42",
     },
     "selections": {
-        "summary": "Query Parameter 与 Dashboard/Section/View Selection 的职责和级联。",
+        "summary": "Selection 是 include-only 的浏览器样本选择，可直接筛选 View，也可驱动 Interactive Transform。",
         "scopes": {
-            "query_parameters": "服务端取数参数；修改后必须重新 Run query。",
-            "dashboard_selections": "浏览器端影响所有绑定 View。",
-            "section_selections": "只影响所属 Section 的绑定 View。",
-            "view_selections": "只影响单个 View，不重绘兄弟 View。",
+            "dashboard": "影响全部声明可见的 View。",
+            "section": "影响该 Section 的 View。",
+            "view": "只影响单个 View。",
         },
-        "rules": [
-            "Selection 只有 include 语义；空选择表示不施加 include 约束，显式选择全部值会保留完整 canonical state，不再自动折叠为空。",
-            "Dashboard → Section → View 逐级收缩可用选项，并清除已失效选择。",
-            "一个 Selection 内的层级值用 path_fields，并在 Presentation 选择 cascader。",
-            "type/field/path_fields/choices 属于 dashboard.yaml 数据契约；搜索、虚拟滚动和视觉 variant 属于 presentation.yaml。",
-            "Selection 状态按浏览器 tab 与 Dashboard 隔离，不在用户和 tab 之间共享。",
-            "CLI query/run 只接受 Query Parameter；report --selection 仅设置导出页初始值。",
-        ],
         "selector_choice": {
-            "auto": "single_select <= 4 使用 segmented；multi_select <= 8 使用 checkbox-group；更大的平面集合使用 select；path_fields 使用 cascader；date_range 使用 date-range。",
-            "select": "统一的平面单选/多选。search 与 virtual 使用 auto/always/never；无需更换模板即可从 10 个选项扩展到 1,000 个选项。",
-            "segmented": "不超过 4 个的单选或 Selection 布尔三态；variant: radio 可改为换行 Radio 语言。",
-            "checkbox-group": "不超过 8 个的多选；全选会真实勾选全部值并把操作切换为反选，可从全集取消少数项；variant: tags 提供 Checkable Tag 外观。",
-            "cascader": "省/市/区县等路径；hierarchy_selection: cascade 可用父节点批量选择后代叶子。",
-            "tree-select": "大型或窄面板层级；支持搜索、跨分支选择、父节点半选和后代批量选择。checked_strategy 只改变摘要，不改变叶路径值。",
-            "date-range": "两个可 review 的原生日期输入；支持 min/max、开放端点和命名 presets。",
+            "auto": "按类型、选项规模和 path_fields 确定组件。",
+            "select": "大量平面选项；search/virtual 支持 auto/always/never。",
+            "segmented": "少量单选。",
+            "checkbox-group": "少量多选，支持全选、反选和逐项取消。",
+            "cascader": "path_fields 定义的多级路径。",
+            "tree-select": "树状多选与父子策略。",
+            "date-range": "日期区间及 preset。",
         },
-        "presentation_fields": {
-            "common": "template、variant、placeholder、all_label、select_all_label、invert_label、clear_label、show_unavailable、css_class。",
-            "select": "search/virtual: auto|always|never；search_threshold、virtual_threshold、max_visible_tags、max_selected、hide_selected、item_height、viewport_height、overscan。多选的全选/反选保留显式值。",
-            "choice_metadata": "dashboard.yaml 的每个 Choice 可声明 group、description、keywords；Select 搜索会同时匹配标签、值和这些元数据。",
-            "hierarchy": "level_labels、path_separator、hierarchy_selection: leaf|cascade、checked_strategy: child|parent|all、default_expand_depth。child 显示叶路径，parent 折叠完整分支，all 同时显示推导出的父路径与叶路径；canonical state 始终是叶路径。",
-            "date_range": "start_label、end_label、min、max、allow_open_range、presets[{label,start,end}]。当前内置组件是日粒度；month/quarter/year 专用输入尚未实现。",
+        "canonical_keys": [
+            "dashboard:<dashboard-id>/<selection-id>",
+            "section:<section-id>/<selection-id>",
+            "view:<view-id>/<selection-id>",
+        ],
+        "behavior": [
+            "级联上游域改变时，会移除不可用的下游已选值。",
+            "直接 View Selection 不重绘无关 View。",
+            "导出 HTML 保留完整 Dataset；Selection 是初始状态，不是导出裁剪。",
+        ],
+    },
+    "renderers": {
+        "summary": "Renderer 只消费 Named Output 和 View descriptor，不执行业务取数。",
+        "built_in": ["metric", "plotly", "echarts", "table", "perspective", "markdown", "image", "custom"],
+        "lifecycle": ["validate", "mount", "update", "dispose"],
+        "isolation": "一个 Renderer 失败只影响自己的 View；输入没有变化时不 update。",
+    },
+    "charts": {
+        "summary": "默认图表模板覆盖常见 Plotly/ECharts 场景，业务逻辑留在 Transform。",
+        "field_matrix": {
+            "line": {"required": ["input", "x", "y"], "optional": ["series", "aggregate", "sort"]},
+            "bar": {"required": ["input", "x", "y"], "optional": ["series", "aggregate", "sort"]},
+            "stacked-bar": {"required": ["input", "x", "y", "series"]},
+            "pie": {"required": ["input", "label", "value"]},
+            "scatter": {"required": ["input", "x", "y"], "optional": ["color", "size"]},
+            "heatmap": {"required": ["input", "x", "y", "z"]},
+            "radar": {"required": ["input", "x", "y"], "optional": ["series"]},
         },
-        "interaction_contract": [
-            "原生 select/input 是唯一 canonical state；视觉 Adapter 不持有第二份业务值。",
-            "空 multi_select 与显式全选是不同状态：前者是不施加约束，后者保存所有当前值；两者在当前数据上结果相同，但后者允许立即取消少数项，也不会吞掉用户操作。",
-            "Selection 单选的隐藏空值表示 All，避免浏览器在无默认值时自动选中第一项。",
-            "所有浮层复用 runtime.overlay：同组互斥、点击外部关闭、Esc、焦点返回和视口重定位。",
-            "显式 template 覆盖 auto；解析后的 template 与 auto_reason 会进入 Runtime DOM，便于调试。",
-        ],
-        "select_example": """# presentation.yaml\nselectors:\n  dashboard:sales/region:\n    template: select\n    search: auto\n    virtual: auto\n    search_threshold: 9\n    virtual_threshold: 200\n    max_visible_tags: 2\n    max_selected: 20\n""",
-        "small_option_examples": """# presentation.yaml\nselectors:\n  dashboard:sales/status:\n    template: segmented\n    variant: radio\n  section:stores/channel:\n    template: checkbox-group\n    variant: tags\n""",
-        "hierarchy_example": """# dashboard.yaml\n- id: location\n  type: multi_select\n  field: district\n  path_fields: [province, city, district]\n\n# presentation.yaml\nselectors:\n  view:detail/location:\n    template: cascader\n    level_labels: [Province, City, District]\n    hierarchy_selection: cascade\n    checked_strategy: child\n""",
-        "date_range_example": """selectors:\n  view:detail/window:\n    template: date-range\n    min: '2026-01-01'\n    max: '2026-12-31'\n    presets:\n      - {label: Q1, start: '2026-01-01', end: '2026-03-31'}\n""",
-        "version_policy": "Registry v3 只接受当前公开 Component ID；未知模板直接校验失败，不提供别名或旧 Registry 迁移路径。",
-        "commands": [
-            "dataviz docs selections",
-            "dataviz components selector.select",
-            "dataviz components selector.cascader",
-            "dataviz components selector.tree-select",
-            "dataviz components selector.date-range",
-            "dataviz scaffold selector.select --id region",
-            "dataviz scaffold selector.checkbox-group --id channel",
-            "dataviz scaffold selector.segmented --id status",
-            "dataviz scaffold selector.cascader --id location",
-            "dataviz scaffold selector.tree-select --id location-tree",
-            "dataviz scaffold selector.date-range --id window",
-        ],
-        "related": ["browser-transforms", "presentation", "workflow"],
+        "rule": "先验证字段、聚合和 Named Output，再用 Presentation options 调视觉细节。",
+    },
+    "tables": {
+        "summary": "普通 Table 用于可定制展示；Perspective 用于排序、筛选和透视分析。",
+        "templates": {
+            "table": "自定义列、格式、对齐、紧凑度和条纹样式。",
+            "perspective": "Perspective v5 Web Component；拥有独立分析 UI 和配置。",
+        },
+        "scroll": "表格和 Perspective 仅在内部仍可滚动时消费滚轮；边界把滚轮交还页面。",
+    },
+    "repeated-views": {
+        "summary": "一个 View 蓝图可按实体平铺或由 Selection 选择后重复。",
+        "templates": {
+            "small-multiples": "按 repeat.by 生成所有实体，支持分页、懒挂载与离屏回收。",
+            "selection-gallery": "先搜索/级联选择实体，再只创建选中的 View 实例。",
+        },
+        "rule": "所有实例共享一个 Named Output，不为每个实体重复查询 Source。",
     },
     "presentation": {
-        "summary": "用可选 presentation.yaml 调整页面，不改变分析逻辑。",
-        "boundary": [
-            "dashboard.yaml：Adapter、Source、Transform、参数、Selection、View 数据绑定和最小顺序。",
-            "presentation.yaml：Theme、布局、Section/View 容器、Selector 模板、CSS/JS 资源。",
-            "Presentation 只能通过稳定 ID 引用逻辑对象；失效引用给 warning 并忽略。",
-        ],
-        "extension_order": [
-            "默认 Renderer",
-            "Section/View/Layout 模板",
-            "Theme 和模板参数",
-            "CSS token 与局部 css_class",
-            "单 View 自定义 Renderer",
-            "完整自定义 Canvas",
-        ],
-        "layout_rules": [
-            "默认 Section 是自上而下的文档流，不需要坐标或 Mosaic 配置。",
-            "grid、split、chart-and-table 等是可选语义模板；View 只用 span/min_height 做提示。",
-            "完整 Canvas 可以自由编排稳定 View Host，不受默认 Layout 限制。",
-            "canvas-functional.css 始终加载以保证交互；canvas.css 是可替换的默认视觉层。",
-        ],
-        "commands": ["dataviz components", "dataviz templates", "dataviz context <workspace> <dashboard-id> --focus view:<id> --format json"],
-        "related": ["dashboard", "selections", "renderers"],
+        "summary": "可选 Presentation 按稳定 ID 覆盖布局、容器、Theme、Selector 和资源，不改变逻辑。",
+        "file": "dashboard 文件夹中的 presentation.yaml；删除后退化为自上而下的默认布局。",
+        "extension_path": ["默认模板", "模板参数", "Theme token", "局部 CSS class/options", "自定义 Renderer", "自定义 Canvas"],
+        "non_goals": ["坐标/Mosaic 编辑器", "让 CSS 决定数据依赖", "在 Presentation 中保存密钥"],
     },
     "components": {
-        "summary": "用物理 Component Package、Registry v3、Story Gallery 和 Scaffold 发现并复用 Section/View/Selector/Renderer。",
-        "contract": [
-            "manifest.yaml：版本、owner、依赖、组件和公开契约。",
-            "controller.js：headless state、Overlay 或 lifecycle。",
-            "adapter.js：当前 Vanilla Runtime 或未来 React/Vue 如何消费 dataviz/runtime/v1。",
-            "style.css：必需 functional CSS、可覆盖 token 和稳定 semantic DOM。",
-            "story.yaml：Gallery specimen 的唯一清单来源。",
-            "test.yaml：行为、键盘、可访问性、视觉几何或性能契约。",
-        ],
+        "summary": "Component Registry 是 AI 选择 View、Section、Selector、Runtime 和扩展点的机器可读目录。",
         "commands": [
-            "dataviz components --format json",
             "dataviz components --check --format json",
-            "dataviz components selector.select --format json",
-            "dataviz components selector.cascader --format json",
-            "dataviz scaffold view.line --id revenue",
-            "dataviz scaffold selector.select --id region",
-            "dataviz scaffold selector.checkbox-group --id channel",
-            "dataviz scaffold selector.segmented --id status",
-            "dataviz scaffold selector.cascader --id location",
-            "dataviz scaffold selector.tree-select --id location-tree",
-            "dataviz gallery",
-            "dataviz gallery --output component-gallery.html",
+            "dataviz components <component-id> --format json",
+            "dataviz scaffold <component-id> --id <id> --format json",
+            "dataviz gallery --output gallery.html",
         ],
-        "rules": [
-            "Registry 的每个 Component 必须有物理 owner；同生命周期模板可以共享一个实现 Package。",
-            "components --check 拒绝缺失六类资产、重复 owner、未知依赖、错误 Story/Test 引用和 Registry 漏项。",
-            "普通需求先选内置模板；自定义 Renderer 是单 View 逃生口；完整 Canvas 是最后一层。",
-            "Gallery available 直接由 story.yaml 推导；Gallery 索引、锚点和导航运行时自动生成。",
-            "随包分发的 Gallery 会复制到临时 Workspace 运行，不向 site-packages 写 Artifact。",
-            "runtime.overlay 统一同组互斥、外部点击、Esc/焦点返回和视口重定位；组件不得另写全局关闭状态。",
-            "Selector Adapter 必须保留原生 form control 作为 canonical state，Server 和 HTML 才能共用语义。",
-            "CLI 组件文档直接读取 Component Registry v3 和物理 Package，不维护第二份手写字段表。",
-        ],
-        "related": ["charts", "selections", "presentation", "ai-authoring"],
+        "contract": ["logic fields", "behavior", "semantic DOM", "CSS tokens", "story", "contract tests"],
     },
     "ai-authoring": {
-        "summary": "减少 AI 输入、输出和试错的可执行工作流；不预设未经真实任务验证的 Token 目标。",
-        "focused_context": {
-            "view": "只包含该 View、所属 Section、有效 Selection、可达 Browser/Server DAG、代码和相关组件契约。",
-            "section": "包含该 Section 的 View/Repeat 蓝图及共同依赖。",
-            "source_transform_browser": "包含目标节点及其上游服务端依赖闭包。",
-            "component": "不携带 Workspace，只返回一个 Component 契约与 recipe 入口。",
-        },
+        "summary": "AI 应读取任务相关的最小契约，而不是整个 Runtime 源码。",
         "commands": [
-            "dataviz authoring start <workspace> --dashboard <id> --task \"<task>\" --model <model>",
-            "dataviz authoring note <workspace> <session-id> --category documentation --reference <topic> --message \"<problem>\"",
-            "dataviz authoring finish <workspace> <session-id> --outcome success --first-attempt failure --correction-rounds 2 --input-tokens <measured> --output-tokens <measured>",
-            "dataviz authoring show <workspace> --format json",
-            "dataviz schemas dashboard --format json",
             "dataviz context <workspace> <dashboard> --focus view:<id> --format json",
-            "dataviz context <workspace> <dashboard> --focus component:view.line --format json",
-            "dataviz scaffold dashboard --id sales --output <workspace>/dashboards/sales",
-            "dataviz benchmark <workspace> <dashboard> --format json",
-            "dataviz benchmark <workspace> <dashboard> --focus section:<id> --format json",
-            "dataviz benchmark <workspace> <dashboard> --browser-runtime --format json",
+            "dataviz context <workspace> <dashboard> --focus dataset:<id> --format json",
+            "dataviz context <workspace> <dashboard> --focus interactive:<id> --format json",
+            "dataviz context <workspace> <dashboard> --focus component:<id> --format json",
+            "dataviz benchmark <workspace> <dashboard>",
+            "dataviz authoring tasks --format json",
+            "dataviz authoring protocol --format json",
+            "dataviz authoring prepare <task> <directory> --approach dataviz|standalone-html --trial-id <trial>",
+            "dataviz authoring assess <directory> <check-id> --status passed --assessor automation --evidence <evidence>",
+            "dataviz authoring verify <directory> --format json",
+            "dataviz authoring compare <measurement-workspace> --format json",
         ],
-        "benchmark": [
-            "当前命令确定性记录 authoring files 的文件数、行数、字符和 UTF-8 bytes。",
-            "同时比较完整 Context 与每个 View focused Context 的 bytes 和缩减比例。",
-            "--browser-runtime 会执行一次查询和 HTML 导出，并在真实 Chromium 中记录 Arrow、Worker、Repeat 分组/DOM/挂载峰值、页面时序和控制台错误。",
-            "不把 bytes 粗暴换算为 Token；模型、Tokenizer、首次成功率和修正轮次需要后续真实 eval。",
-            "最终评测必须同时覆盖默认看板、三级 Selection、复杂 Transform、多 Output、自定义 Renderer/Canvas。",
-        ],
-        "feedback_log": [
-            "Workspace 根目录的 dataviz-authoring.jsonl 是 append-only、可提交 Git、可直接分享的真实任务记录。",
-            "started / friction / finished 事件使用 dataviz/authoring-event/v1；损坏单行会产生诊断，不吞掉其他会话。",
-            "首次成功指第一次实现经过 validate、目标 Output 与渲染验证，无需修改；correction_rounds 是之后的实现修正轮次。",
-            "elapsed_seconds 由 CLI 按 start/finish 自动记录；Token 只接受 authoring client 的实际值，不由 bytes 推算。",
-            "不要在 task、notes 或 friction 中写凭证、原始敏感数据或个人信息。",
-        ],
-        "related": ["workflow", "components", "troubleshooting"],
+        "evaluation": {
+            "design": "同一固定任务、模型、客户端/工具和权限做 Dataviz 与 standalone HTML 成对试验。",
+            "quality_gate": "固定任务/输入 SHA-256；每条验收项必须记录 assessor 与证据。只有两边输入完整并通过全部验收的 identity-matched pair 才进入效率聚合。",
+            "measurements": [
+                "client 实际报告的 input/output tokens",
+                "首次成功率",
+                "行为修正轮次",
+                "完成时间",
+                "分类 friction",
+            ],
+            "rule": "缺失 Token 保持 unmeasured；不按字符数或文件大小估算。",
+        },
+        "goal": "先追求可用性和低试错；Token 节省比例只能由真实任务测量，不能预设。",
     },
     "schema-reference": {
-        "summary": "从当前安装版本的 Pydantic 模型生成 AI 可读字段契约，避免文档与校验器漂移。",
+        "summary": "schemas 命令直接由安装版本的严格 Pydantic 模型生成，不维护手写副本。",
         "commands": [
-            "dataviz schemas",
-            "dataviz schemas dashboard --format json",
-            "dataviz schemas source --full --format json",
-            "dataviz components view.line --format json",
+            "dataviz schemas --format json",
+            "dataviz schemas dashboard --full --format json",
+            "dataviz schemas interactive-transform --full --format json",
         ],
-        "boundary": [
-            "schemas 负责字段、类型、默认值、约束和完整 JSON Schema。",
-            "components 负责行为、生命周期、semantic DOM、样式 token、Story 和契约测试。",
-            "context --focus 只组合当前任务可达的 Schema/Component/代码切片。",
-        ],
-        "rule": "修改 DSL 必须先修改 Pydantic 模型；CLI 输出自动变化，不复制维护字段清单。",
-        "related": ["strict-schema", "components", "ai-authoring"],
     },
     "validation": {
-        "summary": "每次修改 Dashboard 后先运行的静态 preflight；不连接数据库、不启动 Server，也不执行 Source。",
+        "summary": "validate 是每次修改后的零查询静态门禁，优先把错误暴露给 AI。",
         "recommended_command": "dataviz validate <workspace> --dashboard <dashboard-id> --format json",
-        "options": {
-            "--dashboard / -d": "只检查一个 Dashboard 及其 Workspace 级依赖；其他损坏 Dashboard 不污染本次结果。",
-            "--format json": "输出稳定 dataviz/validation/v1 机器契约；默认 text 面向人阅读。",
-            "--strict": "warning 也返回 exit code 1，适合 CI 或分享前门禁。",
-        },
-        "checks": [
-            "Workspace/Dashboard 严格 Schema 和 retired/unknown 字段。",
-            "Adapter 绑定、Source 类型兼容和本地配置可解析性；不会输出凭证。",
-            "SQL 文件存在且 UTF-8 可读；命名占位符与 Source params 双向一致。",
-            "Source、Transform、Named Output、Browser Transform、View 和 Section 引用。",
-            "Query Parameter 内容插值、Selection canonical key 和绑定。",
-            "Presentation、Renderer、Canvas 与本地资源路径。",
-            "Python code_dependencies 和 python_dependencies。",
+        "coverage": [
+            "schema、未知字段、重复 ID 和本地路径边界",
+            "显式 Output 引用、缺失 Output、两个 DAG 的环和跨 Runtime 非法依赖",
+            "Query/Compute/Selection namespace 与 trigger 冲突",
+            "Interactive export.mode、Pyodide 依赖和 bundle 资产",
+            "SQL named parameter、Python 依赖和输入/输出 Schema",
+            "View/Section/Presentation/Selector 引用",
         ],
         "json_contract": {
-            "status": "valid | valid_with_warnings | invalid",
-            "passed": "是否满足当前 strict 策略",
-            "queries_executed": "固定为 0，证明这是纯静态检查",
-            "checks": "固定检查域及 passed/warning/failed 结果",
-            "diagnostics": "level/code/category/dashboard/file/field/message/details/hint",
-            "next_actions": "按当前结果生成的最短后续动作",
-            "exit_code": "0 可继续；1 必须修复",
+            "queries_executed": "固定为 0；静态验证不触发任何数据源。",
+            "passed": "无 error；--strict 时 warning 也令 exit code 非零。",
+            "diagnostic": "包含稳定 code、field/JSON path、file、details 和 hint。",
         },
-        "ai_loop": [
-            "编辑一个逻辑层或 Presentation 层文件。",
-            "运行 focused JSON preflight。",
-            "按 diagnostics 中的 code、file、field、details 和 hint 修复第一类错误。",
-            "重复 validate，直到 passed=true。",
-            "然后才 query 单个 Source/Output，最后 report 或 serve。",
-        ],
         "sql_parameter_example": {
-            "source": "params: [start_date, region]",
-            "sql": "where dt >= :start_date and region = :region",
-            "errors": "SQL 中出现但 params 未声明 → sql_parameter_undeclared；params 声明但 SQL 未引用 → sql_parameter_unused warning。",
+            "errors": ["sql_parameter_undeclared", "sql_parameter_unused"],
+            "fix": "同时更新 SQL placeholder、Source query_params 和 Dashboard query_parameters。",
         },
-        "related": ["workflow", "strict-schema", "sources", "troubleshooting"],
     },
     "strict-schema": {
-        "summary": "这是全新 DSL：强制迁移、严格校验，不读取旧字段，也不提供 deprecated 层。",
+        "summary": "只接受当前 DSL；不提供 deprecated 层、字段别名、自动迁移或双协议 Runtime。",
+        "current": {
+            "dashboard": "dataviz/dashboard/v2",
+            "runtime": "dataviz/runtime/v2",
+            "dataset_transform": "dataviz/dataset-transform/v1",
+            "interactive_transform": "dataviz/interactive-transform/v1",
+        },
         "rules": [
-            "统一使用 View，不接受 Widget 目录、widget 字段或 widget helper。",
-            "统一使用 Selection，不接受 filters、dashboard_filters、filter_bindings 或 exclude mode。",
-            "统一使用 Workspace Adapter，不读取 connections 文件。",
-            "workspace.yaml 只用 folders；不接受 navigation 或 trash 持久化树。",
-            "Dashboard 目录必须直接位于 dashboards/ 下，多层逻辑路径编码为 父##子##画布。",
-            "View 使用 input/inputs，不接受 source 字段。",
-            "Layout 不接受 x/y/height/row_height/items 坐标字段；默认按 Section/View 顺序排布。",
-            "Source 不使用 depends_on；跨 Dataset 计算必须声明 Server Transform inputs。",
-            "未知字段由 Pydantic extra=forbid 直接报错。",
-            "独立 workspace/dashboard/presentation/source/transform 文件必须显式携带 schema；版本 URI 是 Literal，不接受未来或旧版本字符串。",
+            "未知字段 extra=forbid。",
+            "旧 Dashboard、旧 Transform 名称和隐式 Output 引用直接报错。",
+            "仓库示例与调用方必须一次性改写后再运行。",
         ],
-        "migration_policy": "先运行 dataviz migrate <workspace> 查看计划，再显式 --apply；未知旧版本没有注册路径时阻断。迁移是离线文件改写，Runtime 永远只执行当前协议。",
-        "related": ["dashboard", "pipeline", "troubleshooting"],
     },
     "frontend-adapters": {
-        "summary": "用第二个 Web Component 参考实现验证 dataviz/runtime/v1 不依赖默认 Vanilla Canvas 内部函数。",
+        "summary": "前端实现只消费 dataviz/runtime/v2 Manifest/Event/Output，不读取 Python 内部对象。",
         "commands": [
             "dataviz frontend-adapters --format json",
-            "dataviz frontend-adapters web-component --format json",
-            "dataviz frontend-adapters web-component --output runtime-v1-adapter.js",
+            "dataviz frontend-adapters web-component --output runtime-adapter.js",
         ],
-        "contract": [
-            "Vanilla 是生产 Adapter；Web Component 是无框架、零依赖的契约探针，不替代完整默认 Renderer。",
-            "DatavizRuntimeV1Client 只读取 protocol、portable outputs/view_inputs/selection_contract、view_specs 和 selections。",
-            "参考 <dataviz-output> 支持 output/view 与 json/count/table，用公共 selection contract 做 include 筛选。",
-            "它不引用 window.datavizRuntime、Python CanvasRenderer 私有结构或默认 View Renderer。",
-            "Server 可从 /runtime/web-component-adapter.js 提供资源，CLI 也能复制为独立 JS。",
-        ],
-        "events": ["dataviz:ready", "dataviz:selectionchange", "dataviz:outputschange"],
-        "related": ["pipeline", "renderers", "versioning-release"],
+        "public": ["canonical Named Output", "Selection/Compute state", "node lifecycle", "Renderer lifecycle"],
     },
     "versioning-release": {
-        "summary": "严格 DSL、离线迁移、可读 changelog 与三种 pip 发行物的发布流程。",
-        "commands": [
-            "dataviz version",
-            "dataviz migrate <workspace>",
-            "dataviz migrate <workspace> --apply",
-            "uv build",
-            "python scripts/build_release_zip.py",
-        ],
-        "version_change": [
-            "新增 schema URI 和严格 Pydantic 模型；不要让旧、新协议同时进入 Runtime。",
-            "为旧 URI 注册确定性的离线 migration，并提供 before/after fixture、幂等和 blocker 测试。",
-            "先发布 migrate 工具与 CHANGELOG，再要求 Workspace 文件迁移，最后删除旧实现代码。",
-            "更新 Component Registry/Runtime protocol 时分别版本化，不用 package version 暗示全部协议同步变化。",
-        ],
+        "summary": "版本发布验证当前契约，不把旧 DSL 重新带回发行包。",
+        "commands": ["dataviz version", "uv build", "python scripts/build_release_zip.py"],
         "release_contract": [
-            "Python 3.11、3.12、3.13、3.14 分别跑 unit/contract tests。",
-            "Chromium、Firefox、WebKit 分别跑真实浏览器 Runtime tests。",
-            "wheel、sdist、pip-installable ZIP 在干净 venv 中安装，并运行 version/schemas/components/init/validate/report smoke。",
-            "ZIP 内容可复现，发布时同时生成 SHA-256；发行包禁止包含 .venv、build、缓存和运行 Artifact。",
+            "Python 3.11–3.14 运行 unit/contract tests。",
+            "Chromium/Firefox/WebKit 运行真实 Runtime tests。",
+            "wheel、sdist、pip ZIP 在干净 venv 中运行 version/schemas/components/init/validate/report smoke。",
+            "发行包排除 .venv、build、缓存和运行 Artifact。",
         ],
-        "related": ["strict-schema", "schema-reference", "frontend-adapters"],
     },
     "runtime-limits": {
-        "summary": "当前已实现的运行治理和必须显式知道的边界。",
+        "summary": "当前是可信单机 Runtime，但仍提供可预测的 timeout、cancel、缓存和清理。",
         "implemented": [
-            "Python Source/Server Transform 使用独立 spawn 进程和可选硬超时。",
-            "SQL Source 使用独立查询进程；硬超时会终止进程并释放连接，MySQL/StarRocks 同时设置 Session 查询超时。",
-            "SQL Source 默认单次 120 秒并在 timeout 后立即额外重试一次；timeout_seconds 与 timeout_retries 可按 Source 覆盖。",
-            "每次 SQL 重试创建新进程和新连接，并通过 node_retrying 事件公开尝试进度；非超时错误不会重试。",
-            "SQL 错误稳定分类为 query_timeout、query_connection_error 和 query_execution_error。",
-            "Python 失败保留完整 traceback 与日志 Artifact。",
-            "Workspace max_concurrent_runs 限制并发 Run 数。",
-            "max_embedded_rows 与 max_embedded_bytes 在导出/页面前阻止失控 payload。",
-            "缓存覆盖上游 Artifact、入口代码、声明代码依赖、包版本、参数和 Adapter 指纹。",
-            "浏览器只嵌入可达 Named Output；不同 Dashboard、tab、浏览器状态相互隔离。",
-            "默认 Run 从 View/Repeat/Canvas 输入反推最小服务端目标闭包。",
-            "运行中 NodeResult 与 output_ready 持续提交；每个 View 可在自己的依赖完成后先展示。",
-            "RunRecord、Run Artifact 和缓存按 Workspace 数量/时间策略自动淘汰，正在运行的 Run 始终受保护。",
-            "Browser Transform 在 fresh Web Worker 中运行，支持 Promise、supersede cancellation、timeout_seconds 和结构化错误。",
-            "大 Table 自动切换 Arrow IPC；Server 使用 HTTP gzip，HTML 使用 gzip + base64 分片，浏览器异步解码后发布 Output。",
-            "Perspective 明确执行 create/update/flush/dispose，并检查 v5 主版本与必要 API。",
-            "Repeat 使用全量分组搜索、page_size DOM 上限、IntersectionObserver 懒挂载和离屏 Renderer 回收。",
+            "SQL/Python Source 与 Dataset Transform 独立进程；SQL 默认 120 秒并立即重试一次。",
+            "server-python Interactive Transform 使用独立进程和 generation 取消。",
+            "browser-js/browser-python 使用 Web Worker、timeout、supersede cancellation 和结构化错误。",
+            "大 Table 自动使用 Arrow IPC；浏览器按需物化行。",
+            "节点独立发布，失败分支不阻塞无关分支。",
+            "Run、cache、Worker、PyProxy、Renderer 与订阅均有 dispose/淘汰路径。",
         ],
         "current_limits": [
-            "Arrow 当前优化传输和初始解析；Selection/图表/Browser Transform 消费数据时仍会按需物化 JavaScript 行对象。",
-            "Server 与导出仍传输完整可达 Output；尚未实现列式浏览器执行、服务端分页或可见 Record Batch 请求。",
-            "当前是可信单机工具，不提供多租户 CPU/内存配额。",
-            "Workspace Python、JS 和自定义 Canvas 都是可信本地代码，不能运行不可信包。",
+            "可信本地 Python/JavaScript 不是不可信代码沙箱。",
+            "没有多租户 CPU/内存配额。",
+            "Server 与 HTML 仍传输完整可达 Output，未实现服务端分页。",
         ],
-        "related": ["server-transforms", "browser-transforms", "maintenance", "troubleshooting"],
+        "related": ["interactive-transforms", "maintenance"],
     },
     "maintenance": {
-        "summary": "限制长期 Server 的 RunRecord、Artifact 与缓存增长，并用安全的 dry-run 清理本地状态。",
-        "runtime_fields": {
-            "max_retained_runs": 100,
-            "run_retention_seconds": 604800,
-            "max_retained_cache_entries": 500,
-            "cache_retention_seconds": 2592000,
-        },
+        "summary": "安全清理 Workspace 的 Run Artifact 和缓存。",
         "commands": [
             "dataviz clean <workspace>",
             "dataviz clean <workspace> --keep-runs 20 --run-max-age-hours 48",
             "dataviz clean <workspace> --all --apply",
         ],
         "rules": [
-            "默认是 dry-run，只返回候选路径、原因和字节数；必须显式 --apply 才删除。",
-            "清理目标只允许位于 Workspace/.dataviz/runs 或 cache 内。",
-            "Server 自动清理时，queued/running 和仍由 API 保留的 Run 不会被删除。",
-            "--runs/--no-runs 与 --cache/--no-cache 可分别控制两类数据。",
+            "默认 dry-run；必须显式 --apply 才删除。",
+            "只允许删除 Workspace/.dataviz/runs 与 cache 中的目标。",
+            "活动 Run 始终受保护。",
         ],
-        "related": ["runtime-limits", "troubleshooting"],
     },
     "troubleshooting": {
-        "summary": "按执行层定位错误，避免同时修改多层。",
+        "summary": "沿 Pipeline 分层定位，保留可复查证据。",
         "triage": [
-            {"symptom": "Workspace 无法加载", "action": "运行 validate；修复 YAML、未知字段、路径和重复 ID。"},
-            {"symptom": "Source 失败", "action": "单独 query；检查 Adapter、参数、SQL/Python traceback。"},
-            {"symptom": "StarRocks 偶发超时", "action": "查看 node_retrying 与最终 error.details；按 Source 调整 timeout_seconds/timeout_retries，不要重试语法或权限错误。"},
-            {"symptom": "Transform 失败", "action": "用 output 只执行目标闭包；检查 input schema、node.error.traceback 和 node.log。"},
-            {"symptom": "查询成功但图为空", "action": "检查 Named Output 字段、类型、空值以及 Selection 后行数。"},
-            {"symptom": "一个 View 报错", "action": "缩减到模板必填字段，并确认其 input reference。"},
-            {"symptom": "默认页面正常，自定义页面失败", "action": "问题位于 Presentation/Renderer/CSS/JS；逐层恢复。"},
-            {"symptom": "Server 正常，HTML 导出失败", "action": "检查 payload 限额、manifest、JS 资产和浏览器控制台。"},
-            {"symptom": "源码环境出现 ModuleNotFoundError: dataviz", "action": "使用 uv sync --extra dev --no-editable；框架源码变化后增加 --reinstall-package workspace-dataviz，并始终用 uv run --no-editable dataviz。"},
+            {"symptom": "Workspace 无法加载", "action": "先运行 validate，修复 schema、路径和重复 ID。"},
+            {"symptom": "Source 失败", "action": "单独 query；查看解析 SQL、Adapter、参数、timeout 和 traceback。"},
+            {"symptom": "Dataset Transform 失败", "action": "output 目标闭包；检查 input schema、node.error.traceback 和 node.log。"},
+            {"symptom": "Interactive Transform 失败", "action": "检查 Runtime、trigger、canonical state、generation 与 export.mode。"},
+            {"symptom": "查询成功但 View 为空", "action": "检查 Named Output 字段、类型、Selection 后行数和 View input。"},
+            {"symptom": "Server 正常但 HTML 失败", "action": "检查 export.mode；server-python 不能离线重算。browser-python 再检查 CDN/bundle、manifest，并通过 HTTP 打开。"},
+            {"symptom": "源码环境 ModuleNotFoundError", "action": "运行 uv sync --python 3.12 --extra dev，并确认当前目录是 dataviz-tool。"},
         ],
         "evidence": [
             "dataviz validate 的完整 JSON。",
-            "dataviz query/output 的 status、schema、preview/value、node.error 和 node.log。",
-            "dataviz context --focus view:<id> --format json 中的依赖切片与组件契约。",
-            "导出 HTML 同目录的 .manifest.json。",
+            "query/output/compute 的状态、Node error、traceback、log 和 provenance。",
+            "Sources 面板中的参数化 SQL 与解析 SQL。",
+            "HTML 同目录的 manifest。",
         ],
-        "reset": [
-            "保留一个 Source、一个 Named Output 和一个最小 View。",
-            "暂时移除 presentation.yaml 和自定义 assets。",
-            "默认 Renderer 成功后，每次只恢复一个配置。",
-        ],
-        "related": ["workflow", "strict-schema", "runtime-limits"],
     },
 }
 

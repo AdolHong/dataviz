@@ -9,27 +9,29 @@ from dataviz import __version__
 from dataviz.errors import ValidationFailure
 from dataviz.workspace.models import (
     AdapterDefinition,
-    BrowserTransformDefinition,
     CacheDefinition,
+    ComputeParameterDefinition,
     DashboardDefinition,
+    DatasetTransformDefinition,
     DeclarativeViewDefinition,
     LayoutDefinition,
     OutputDefinition,
-    ParameterDefinition,
+    InteractiveExportDefinition,
+    InteractiveTransformDefinition,
     PresentationDefinition,
     PresentationSelectorDefinition,
+    QueryParameterDefinition,
     RepeatDefinition,
     RuntimeDefinition,
     SectionDefinition,
     SelectionDefinition,
-    ServerTransformDefinition,
     SourceDefinition,
     ThemeDefinition,
     WorkspaceDefinition,
 )
 
 
-SCHEMA_CATALOG_VERSION = "dataviz/schema-catalog/v1"
+SCHEMA_CATALOG_VERSION = "dataviz/schema-catalog/v2"
 SCHEMA_MODELS: OrderedDict[str, type[BaseModel]] = OrderedDict(
     [
         ("workspace", WorkspaceDefinition),
@@ -37,10 +39,12 @@ SCHEMA_MODELS: OrderedDict[str, type[BaseModel]] = OrderedDict(
         ("dashboard", DashboardDefinition),
         ("presentation", PresentationDefinition),
         ("source", SourceDefinition),
-        ("server-transform", ServerTransformDefinition),
-        ("browser-transform", BrowserTransformDefinition),
+        ("dataset-transform", DatasetTransformDefinition),
+        ("interactive-transform", InteractiveTransformDefinition),
+        ("interactive-export", InteractiveExportDefinition),
         ("adapter", AdapterDefinition),
-        ("parameter", ParameterDefinition),
+        ("query-parameter", QueryParameterDefinition),
+        ("compute-parameter", ComputeParameterDefinition),
         ("selection", SelectionDefinition),
         ("section", SectionDefinition),
         ("repeat", RepeatDefinition),
@@ -52,6 +56,17 @@ SCHEMA_MODELS: OrderedDict[str, type[BaseModel]] = OrderedDict(
         ("selector-presentation", PresentationSelectorDefinition),
     ]
 )
+
+
+CURRENT_SCHEMAS = {
+    "workspace": "dataviz/workspace/v1",
+    "dashboard": "dataviz/dashboard/v2",
+    "presentation": "dataviz/presentation/v1",
+    "source": "dataviz/source/v1",
+    "dataset_transform": "dataviz/dataset-transform/v1",
+    "interactive_transform": "dataviz/interactive-transform/v1",
+    "runtime": "dataviz/runtime/v2",
+}
 
 
 def _type_name(schema: dict[str, Any]) -> str:

@@ -26,9 +26,10 @@ from dataviz.workspace.selections import compile_selection_contract
 RUNTIME_CONTRACT = [
     "Adapter",
     "Source",
-    "Server Transform",
-    "Named Output",
-    "Browser Transform",
+    "Dataset Transform",
+    "Base Named Output",
+    "Interactive Transform",
+    "Derived Named Output",
     "View Renderer",
     "Presentation",
 ]
@@ -57,13 +58,20 @@ def parse_context_focus(value: str | None) -> ContextFocus | None:
                     "view:revenue-trend",
                     "section:overview",
                     "source:sales",
-                    "transform:sales-model",
-                    "browser:visible-sales",
+                    "dataset:sales-model",
+                    "interactive:visible-sales",
                     "component:selector.cascader",
                 ]
             },
         )
-    if kind not in {"view", "section", "source", "transform", "browser", "component"}:
+    if kind not in {
+        "view",
+        "section",
+        "source",
+        "dataset",
+        "interactive",
+        "component",
+    }:
         raise ValidationFailure(f"Unsupported context focus kind: {kind}")
     return ContextFocus(kind, identifier)
 
@@ -123,7 +131,7 @@ def _source_payload(workspace: LoadedWorkspace, path: Path, definition: Any) -> 
     }
 
 
-def _server_transform_payload(
+def _dataset_transform_payload(
     workspace: LoadedWorkspace, path: Path, definition: Any
 ) -> dict[str, Any]:
     return {
@@ -134,7 +142,7 @@ def _server_transform_payload(
     }
 
 
-def _browser_transform_payload(
+def _interactive_transform_payload(
     workspace: LoadedWorkspace, path: Path, definition: Any
 ) -> dict[str, Any]:
     return {
@@ -166,29 +174,31 @@ def _presentation_assets(
 
 
 def _declared_output_references(kind: str, identifier: str, definition: Any) -> list[str]:
-    names = list(definition.outputs) or ["main"]
+    names = list(definition.outputs)
     return [f"{kind}:{identifier}/{name}" for name in names]
 
 
-def _browser_and_server_closure(
+def _interactive_and_base_closure(
     dashboard: LoadedDashboard, references: list[str]
 ) -> tuple[set[str], set[str]]:
     pending = [parse_output_reference(reference).canonical for reference in references]
-    browser_ids: set[str] = set()
-    server_references: set[str] = set()
+    interactive_ids: set[str] = set()
+    base_references: set[str] = set()
     while pending:
         reference = parse_output_reference(pending.pop())
-        if reference.node_id.startswith("browser:"):
+        if reference.node_id.startswith("interactive:"):
             transform_id = reference.node_id.split(":", 1)[1]
-            if transform_id in browser_ids:
+            if transform_id in interactive_ids:
                 continue
-            if transform_id not in dashboard.browser_transforms:
-                raise ValidationFailure(f"Unknown Browser Transform: {transform_id}")
-            browser_ids.add(transform_id)
-            pending.extend(dashboard.browser_transforms[transform_id][1].inputs.values())
+            if transform_id not in dashboard.interactive_transforms:
+                raise ValidationFailure(f"Unknown Interactive Transform: {transform_id}")
+            interactive_ids.add(transform_id)
+            pending.extend(
+                dashboard.interactive_transforms[transform_id][1].inputs.values()
+            )
         else:
-            server_references.add(reference.canonical)
-    return browser_ids, server_references
+            base_references.add(reference.canonical)
+    return interactive_ids, base_references
 
 
 def _focused_ids(
@@ -214,11 +224,11 @@ def _focused_ids(
             view_ids.add(section.repeat.view)
         if section.repeat and section.repeat.input:
             references.append(section.repeat.input)
-    elif focus.kind in {"source", "transform", "browser"}:
+    elif focus.kind in {"source", "dataset", "interactive"}:
         collection = {
             "source": dashboard.sources,
-            "transform": dashboard.transforms,
-            "browser": dashboard.browser_transforms,
+            "dataset": dashboard.dataset_transforms,
+            "interactive": dashboard.interactive_transforms,
         }[focus.kind]
         if focus.identifier not in collection:
             raise ValidationFailure(f"Unknown {focus.kind.title()}: {focus.identifier}")
@@ -234,15 +244,17 @@ def _focused_ids(
     for view_id in view_ids:
         references.extend(dashboard.views[view_id].input_refs.values())
 
-    browser_ids, server_references = _browser_and_server_closure(dashboard, references)
+    interactive_ids, base_references = _interactive_and_base_closure(
+        dashboard, references
+    )
     source_ids: set[str] = set()
     transform_ids: set[str] = set()
-    if server_references:
-        plan = compile_plan(dashboard, targets=sorted(server_references))
+    if base_references:
+        plan = compile_plan(dashboard, targets=sorted(base_references))
         for node_id in plan.nodes:
             kind, identifier = node_id.split(":", 1)
             (source_ids if kind == "source" else transform_ids).add(identifier)
-    return view_ids, section_ids, source_ids, transform_ids, browser_ids
+    return view_ids, section_ids, source_ids, transform_ids, interactive_ids
 
 
 def _focused_presentation(
@@ -278,8 +290,8 @@ def _focused_templates(
     section_ids: set[str],
     selection_keys: set[str],
     *,
-    include_server_transform: bool,
-    include_browser_transform: bool,
+    include_dataset_transform: bool,
+    interactive_runtimes: set[str],
 ) -> dict[str, Any]:
     catalog = template_catalog()
     view_templates = {dashboard.views[value].template for value in view_ids}
@@ -303,10 +315,10 @@ def _focused_templates(
     component_ids.add(f"theme.{dashboard.definition.theme.preset}")
     if any(dashboard.views[value].template == "custom" for value in view_ids):
         component_ids.add("renderer.custom")
-    if include_server_transform:
-        component_ids.update({"transform.server-python", "output.named"})
-    if include_browser_transform:
-        component_ids.update({"transform.browser-js", "output.named"})
+    if include_dataset_transform:
+        component_ids.update({"dataset-transform.server-python", "output.named"})
+    for runtime in interactive_runtimes:
+        component_ids.update({f"interactive-transform.{runtime}", "output.named"})
     components = component_catalog()
     return {
         "component_registry_version": COMPONENT_REGISTRY_VERSION,
@@ -365,10 +377,10 @@ def build_context_payload(
         view_ids = set(dashboard.views)
         section_ids = {value.id for value in dashboard.definition.sections}
         source_ids = set(dashboard.sources)
-        transform_ids = set(dashboard.transforms)
-        browser_ids = set(dashboard.browser_transforms)
+        transform_ids = set(dashboard.dataset_transforms)
+        interactive_ids = set(dashboard.interactive_transforms)
     else:
-        view_ids, section_ids, source_ids, transform_ids, browser_ids = _focused_ids(
+        view_ids, section_ids, source_ids, transform_ids, interactive_ids = _focused_ids(
             dashboard, parsed_focus
         )
 
@@ -382,18 +394,23 @@ def build_context_payload(
     relevant_params = {
         parameter
         for identifier in source_ids
-        for parameter in dashboard.sources[identifier][1].params
+        for parameter in dashboard.sources[identifier][1].query_params
     }
     relevant_params.update(
         parameter
         for identifier in transform_ids
-        for parameter in dashboard.transforms[identifier][1].params
+        for parameter in dashboard.dataset_transforms[identifier][1].query_params
     )
     relevant_params.update(
         parameter
-        for identifier in browser_ids
-        for parameter in dashboard.browser_transforms[identifier][1].params
+        for identifier in interactive_ids
+        for parameter in dashboard.interactive_transforms[identifier][1].query_params
     )
+    relevant_compute_params = {
+        parameter
+        for identifier in interactive_ids
+        for parameter in dashboard.interactive_transforms[identifier][1].compute_params
+    }
 
     if parsed_focus is None:
         logic_definition: dict[str, Any] = dashboard.logic_definition.model_dump(
@@ -433,6 +450,11 @@ def build_context_payload(
                 for value in dashboard.logic_definition.query_parameters
                 if value.id in relevant_params
             ],
+            "compute_parameters": [
+                value.model_dump(mode="json")
+                for value in dashboard.logic_definition.compute_parameters
+                if value.id in relevant_compute_params
+            ],
             "dashboard_selections": [
                 value.model_dump(mode="json")
                 for value in dashboard.logic_definition.dashboard_selections
@@ -465,8 +487,11 @@ def build_context_payload(
             view_ids,
             section_ids,
             selection_keys,
-            include_server_transform=bool(transform_ids),
-            include_browser_transform=bool(browser_ids),
+            include_dataset_transform=bool(transform_ids),
+            interactive_runtimes={
+                dashboard.interactive_transforms[value][1].runtime
+                for value in interactive_ids
+            },
         )
 
     return {
@@ -498,13 +523,17 @@ def build_context_payload(
             key: _source_payload(workspace, *dashboard.sources[key])
             for key in sorted(source_ids)
         },
-        "server_transforms": {
-            key: _server_transform_payload(workspace, *dashboard.transforms[key])
+        "dataset_transforms": {
+            key: _dataset_transform_payload(
+                workspace, *dashboard.dataset_transforms[key]
+            )
             for key in sorted(transform_ids)
         },
-        "browser_transforms": {
-            key: _browser_transform_payload(workspace, *dashboard.browser_transforms[key])
-            for key in sorted(browser_ids)
+        "interactive_transforms": {
+            key: _interactive_transform_payload(
+                workspace, *dashboard.interactive_transforms[key]
+            )
+            for key in sorted(interactive_ids)
         },
         "views": {
             key: dashboard.views[key].model_dump(mode="json") for key in sorted(view_ids)
@@ -619,8 +648,8 @@ def build_authoring_benchmark(
         },
         "structure": {
             "sources": len(dashboard.sources),
-            "server_transforms": len(dashboard.transforms),
-            "browser_transforms": len(dashboard.browser_transforms),
+            "dataset_transforms": len(dashboard.dataset_transforms),
+            "interactive_transforms": len(dashboard.interactive_transforms),
             "sections": len(dashboard.definition.sections),
             "views": len(dashboard.views),
             "selection_bindings": sum(
@@ -653,7 +682,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         files = {
             "dashboard.yaml": _yaml(
                 {
-                    "schema": "dataviz/dashboard/v1",
+                    "schema": "dataviz/dashboard/v2",
                     "kind": "dashboard",
                     "id": item_id,
                     "title": item_id.replace("-", " ").title(),
@@ -665,6 +694,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                             "type": "file",
                             "path": "data/data.csv",
                             "format": "csv",
+                            "outputs": {"main": {"kind": "table"}},
                         }
                     ],
                     "views": [
@@ -672,7 +702,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                             "id": "overview",
                             "title": "Overview",
                             "template": "table",
-                            "input": "data",
+                            "input": "source:data/main",
                         }
                     ],
                     "sections": [
@@ -689,6 +719,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
             "kind": "source",
             "id": item_id,
             "type": source_type,
+            "outputs": {"main": {"kind": "table"}},
         }
         files = {}
         if source_type == "file":
@@ -701,18 +732,18 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
             definition.update({"code": f"{item_id}.py", "entrypoint": "load"})
             files[f"{item_id}.py"] = (
                 "def load(context):\n"
-                "    # context.params and context.adapter are explicit inputs.\n"
+                "    # context.query_params and context.adapter are explicit inputs.\n"
                 "    return [{\"category\": \"A\", \"value\": 1}]\n"
             )
         files = {f"{item_id}.yaml": _yaml(definition), **files}
-    elif recipe == "transform.server-python":
+    elif recipe == "dataset-transform.server-python":
         files = {
             f"{item_id}.yaml": _yaml(
                 {
-                    "schema": "dataviz/server-transform/v1",
-                    "kind": "server_transform",
+                    "schema": "dataviz/dataset-transform/v1",
+                    "kind": "dataset_transform",
                     "id": item_id,
-                    "runtime": "python",
+                    "runtime": "server-python",
                     "code": f"{item_id}.py",
                     "inputs": {"data": "source:data/main"},
                     "outputs": {"main": {"kind": "table"}},
@@ -724,22 +755,39 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                 "    return {\"main\": rows}\n"
             ),
         }
-    elif recipe == "transform.browser-js":
+    elif recipe in {
+        "interactive-transform.browser-js",
+        "interactive-transform.browser-python",
+        "interactive-transform.server-python",
+    }:
+        runtime = recipe.rsplit(".", 1)[1]
+        suffix = "js" if runtime == "browser-js" else "py"
         files = {
             f"{item_id}.yaml": _yaml(
                 {
-                    "schema": "dataviz/browser-transform/v1",
-                    "kind": "browser_transform",
+                    "schema": "dataviz/interactive-transform/v1",
+                    "kind": "interactive_transform",
                     "id": item_id,
-                    "code": f"{item_id}.js",
+                    "runtime": runtime,
+                    "code": f"{item_id}.{suffix}",
                     "inputs": {"data": "source:data/main"},
+                    "compute_params": [],
+                    "selections": [],
+                    "trigger": "apply",
+                    "export": {
+                        "mode": "interactive"
+                        if runtime != "server-python"
+                        else "snapshot"
+                    },
                     "outputs": {"main": {"kind": "table"}},
                 }
             ),
-            f"{item_id}.js": (
+            f"{item_id}.{suffix}": (
                 "function transform(context) {\n"
                 "  return {main: context.inputs.data.map(row => ({...row}))};\n"
                 "}\n"
+                if suffix == "js"
+                else "def transform(context):\n    return {\"main\": context.table(\"data\")}\n"
             ),
         }
     elif recipe.startswith("view."):
@@ -893,8 +941,10 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
             "source.file",
             "source.sql",
             "source.python",
-            "transform.server-python",
-            "transform.browser-js",
+            "dataset-transform.server-python",
+            "interactive-transform.browser-js",
+            "interactive-transform.browser-python",
+            "interactive-transform.server-python",
             "renderer.custom",
             *(f"view.{value}" for value in VIEW_TEMPLATES),
             *(f"section.{value}" for value in SECTION_TEMPLATES),

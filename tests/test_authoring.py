@@ -89,9 +89,9 @@ def test_component_registry_is_backed_by_complete_physical_packages():
         "schema": "dataviz/component-package-report/v1",
         "valid": True,
         "packages": 13,
-        "components": 45,
+        "components": 47,
         "stories": 23,
-        "tests": 54,
+        "tests": 56,
         "errors": [],
     }
     assert set(component_index()) == set(catalog)
@@ -178,12 +178,12 @@ def test_focused_context_contains_only_the_view_dependency_closure():
     assert distribution["mode"] == "focused"
     assert set(distribution["views"]) == {"distribution"}
     assert set(distribution["sources"]) == {"orders"}
-    assert distribution["server_transforms"] == {}
+    assert distribution["dataset_transforms"] == {}
     assert set(distribution["effective_selections"]) == {"distribution"}
     assert set(distribution["templates"]["views"]) == {"bar"}
 
     assert set(revenue["sources"]) == {"orders", "targets"}
-    assert set(revenue["server_transforms"]) == {"sales-metrics"}
+    assert set(revenue["dataset_transforms"]) == {"sales-metrics"}
     assert revenue["dashboard_logic"]["query_parameters"][0]["id"] == "target_factor"
     assert context_size(distribution)["utf8_bytes"] < context_size(full)["utf8_bytes"]
 
@@ -319,7 +319,7 @@ def test_builtin_gallery_is_a_valid_real_workspace_and_exports(tmp_path: Path):
         workspace.dashboard("component-gallery"), result, tmp_path / "gallery.html"
     )
 
-    assert result.status == "success"
+    assert result.status == "ready"
     html = report.read_text(encoding="utf-8")
     assert "Component Gallery" in html
     assert "registerRenderer('gallery.spark'" in html

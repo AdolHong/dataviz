@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v1
+schema: dataviz/dashboard/v2
 kind: dashboard
 id: store-performance
 title: 百店业绩巡检
@@ -14,11 +14,12 @@ sources:
     type: sql
     adapter: warehouse
     code: sources/store-sales.sql
+    outputs: {main: {kind: table}}
 
 views:
   - id: all-store-trend
     title: 门店周度收入
-    input: store-sales
+    input: source:store-sales/main
     template: line
     engine: plotly
     x: week
@@ -30,7 +31,7 @@ views:
 
   - id: selected-store-trend
     title: 选中门店周度收入
-    input: store-sales
+    input: source:store-sales/main
     template: line
     engine: plotly
     x: week

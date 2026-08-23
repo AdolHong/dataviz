@@ -1,11 +1,15 @@
-schema: dataviz/browser-transform/v1
-kind: browser_transform
+schema: dataviz/interactive-transform/v1
+kind: interactive_transform
 id: scaled
 code: scaled.js
 entrypoint: transform
+runtime: browser-js
 inputs:
   rows: source:raw/main
 selections: [dashboard:worker-runtime/delay_ms]
+trigger: auto
+debounce_ms: 0
+export: {mode: interactive}
 outputs:
   main:
     kind: table

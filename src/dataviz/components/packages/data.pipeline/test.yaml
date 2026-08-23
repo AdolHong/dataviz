@@ -1,5 +1,7 @@
 schema: dataviz/component-test/v1
 tests:
   - {id: output.named.contract, component: output.named, kind: contract, assertions: [canonical-reference, typed-value, deterministic-address]}
-  - {id: transform.server-python.contract, component: transform.server-python, kind: contract, assertions: [declared-inputs, named-outputs, schema-validation]}
-  - {id: transform.browser-js.contract, component: transform.browser-js, kind: contract, assertions: [worker-isolation, timeout, serializable-output]}
+  - {id: dataset-transform.server-python.contract, component: dataset-transform.server-python, kind: contract, assertions: [declared-inputs, named-outputs, schema-validation]}
+  - {id: interactive-transform.browser-js.contract, component: interactive-transform.browser-js, kind: contract, assertions: [worker-isolation, timeout, serializable-output]}
+  - {id: interactive-transform.browser-python.contract, component: interactive-transform.browser-python, kind: contract, assertions: [module-worker, pyodide-dependencies, named-outputs]}
+  - {id: interactive-transform.server-python.contract, component: interactive-transform.server-python, kind: contract, assertions: [query-run-artifacts, adapter-denied, generation-isolation]}

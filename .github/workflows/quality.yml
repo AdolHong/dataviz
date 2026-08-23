@@ -56,7 +56,8 @@ jobs:
       - run: |
           node --check src/dataviz/server/static/canvas-runtime.js
           node --check src/dataviz/server/static/declarative-runtime.js
-          node --check src/dataviz/server/static/browser-transform-worker.js
+          node --check src/dataviz/server/static/interactive-js-worker.js
+          node --check src/dataviz/server/static/interactive-python-worker.mjs
           node --check src/dataviz/server/static/runtime-web-component-adapter.js
 
   browsers:

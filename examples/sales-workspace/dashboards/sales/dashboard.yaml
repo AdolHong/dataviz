@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v1
+schema: dataviz/dashboard/v2
 kind: dashboard
 id: sales
 title: 销售脉搏
@@ -9,7 +9,7 @@ context:
   owner: analytics-studio
 assumptions:
   - 所有金额均为含税人民币元
-  - 预测值为历史收入乘以 1.08，仅用于演示 Server Transform
+  - 预测值为历史收入乘以 1.08，仅用于演示 Dataset Transform
 query_parameters:
   - id: target_factor
     type: number
@@ -29,13 +29,13 @@ dashboard_selections:
 sources:
   - sources/orders.yaml
   - sources/targets.yaml
-server_transforms:
+dataset_transforms:
   - transforms/sales-metrics.yaml
 views:
   - id: revenue
     title: 收入与预测轨迹
     description: Plotly 动态折线
-    input: transform:sales-metrics/trend
+    input: dataset:sales-metrics/trend
     template: line
     x: date
     y: [revenue, forecast_revenue]
@@ -46,7 +46,7 @@ views:
   - id: target
     title: 区域目标完成度
     description: ECharts 动态条形图
-    input: transform:sales-metrics/completion
+    input: dataset:sales-metrics/completion
     template: bar
     engine: echarts
     x: region
@@ -58,7 +58,7 @@ views:
   - id: distribution
     title: 订单分布
     description: ECharts 动态订单分布
-    input: orders
+    input: source:orders/main
     template: bar
     engine: echarts
     x: region
@@ -70,7 +70,7 @@ views:
   - id: detail
     title: 明细检查
     description: 可定制普通表格
-    input: orders
+    input: source:orders/main
     template: table
     columns: [date, region, revenue, orders]
     limit: 100

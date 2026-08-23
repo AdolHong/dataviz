@@ -4,5 +4,5 @@ id: fast
 type: python
 code: fast.py
 timeout_seconds: 10
+outputs: {main: {kind: table}}
 cache: {mode: none}
-

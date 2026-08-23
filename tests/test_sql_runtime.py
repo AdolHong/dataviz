@@ -34,13 +34,13 @@ def _sql_workspace(
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v1
+        """schema: dataviz/dashboard/v2
 kind: dashboard
 id: sql-test
 title: SQL test
 sources: [sources/query.yaml]
 views:
-  - {id: result, title: Result, template: table, input: query}
+  - {id: result, title: Result, template: table, input: source:query/main}
 sections:
   - {id: main, title: Main, views: [result]}
 """,
@@ -59,6 +59,7 @@ id: query
 type: sql
 adapter: {adapter}
 code: query.sql
+outputs: {{main: {{kind: table}}}}
 {timeout_line}{retry_line}cache: {{mode: none}}
 """,
         encoding="utf-8",
@@ -80,7 +81,7 @@ def test_sql_source_with_timeout_returns_table_and_cleans_temporary_file(tmp_pat
     artifact = result.nodes["source:query"].outputs["main"]
     frame = ArtifactStore(root, result.run_id).read_table(artifact)
 
-    assert result.status == "success"
+    assert result.status == "ready"
     assert frame.to_dict(orient="records") == [{"value": 1}]
     query_evidence = result.nodes["source:query"].diagnostics["query"]
     assert query_evidence["adapter_alias"] == "warehouse"
@@ -107,7 +108,7 @@ def test_sql_timeout_hard_cancels_only_its_node_and_is_structured(tmp_path: Path
     node = result.nodes["source:query"]
 
     assert elapsed < 5
-    assert node.status == "failed"
+    assert node.status == "error"
     assert node.error["type"] == "query_timeout"
     assert node.error["details"]["cancelled"] is True
     assert node.error["details"]["adapter_type"] == "duckdb"
@@ -156,19 +157,20 @@ id: fast
 type: file
 path: fast.csv
 format: csv
+outputs: {main: {kind: table}}
 cache: {mode: none}
 """,
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v1
+        """schema: dataviz/dashboard/v2
 kind: dashboard
 id: sql-test
 title: SQL test
 sources: [sources/query.yaml, sources/fast.yaml]
 views:
-  - {id: timed-out, title: Timed out, template: table, input: query}
-  - {id: fast, title: Fast, template: table, input: fast}
+  - {id: timed-out, title: Timed out, template: table, input: source:query/main}
+  - {id: fast, title: Fast, template: table, input: source:fast/main}
 sections:
   - {id: main, title: Main, views: [timed-out, fast]}
 """,
@@ -179,7 +181,7 @@ sections:
 
     assert result.status == "partial"
     assert result.nodes["source:query"].error["type"] == "query_timeout"
-    assert result.nodes["source:fast"].status == "succeeded"
+    assert result.nodes["source:fast"].status == "ready"
     fast = ArtifactStore(root, result.run_id).read_table(
         result.nodes["source:fast"].outputs["main"]
     )
@@ -209,7 +211,7 @@ def test_sql_defaults_to_120_seconds_and_one_immediate_timeout_retry(
         observer=events.append,
     )
 
-    assert result.status == "success"
+    assert result.status == "ready"
     assert attempts == [120.0, 120.0]
     retry_events = [event for event in events if event.event == "node_retrying"]
     assert len(retry_events) == 1
@@ -242,7 +244,7 @@ def test_sql_timeout_retry_count_is_configurable_and_other_errors_do_not_retry(
 
     monkeypatch.setattr(sql_runtime, "execute_sql_query", succeeds_on_third_attempt)
     retry_result = Executor(load_workspace(retry_root)).run("sql-test", refresh=True)
-    assert retry_result.status == "success"
+    assert retry_result.status == "ready"
     assert retry_attempts == [3.5, 3.5, 3.5]
 
     failure_root = _sql_workspace(
@@ -261,7 +263,7 @@ def test_sql_timeout_retry_count_is_configurable_and_other_errors_do_not_retry(
     failure_result = Executor(load_workspace(failure_root)).run(
         "sql-test", refresh=True
     )
-    assert failure_result.status == "failed"
+    assert failure_result.status == "error"
     assert failure_attempts == 1
     assert (
         failure_result.nodes["source:query"].error["type"]
@@ -296,6 +298,7 @@ id: query
 type: file
 path: query.csv
 format: csv
+outputs: {main: {kind: table}}
 timeout_retries: 1
 cache: {mode: none}
 """,

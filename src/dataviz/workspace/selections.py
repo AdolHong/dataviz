@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from dataviz.errors import ExecutionFailure
+from dataviz.value_contract import ValueContractViolation, normalize_control_value
 from dataviz.workspace.models import DashboardDefinition, SelectionBindingDefinition, SelectionDefinition
 
 SelectionOrigin = Literal["dashboard", "section", "view"]
@@ -88,36 +89,30 @@ def resolve_selection_values(
     contract = compile_selection_contract(dashboard)
     supplied = provided or {}
     all_selections = {item.key: item for values in contract.values() for item in values}
-    short_keys: dict[str, list[str]] = {}
-    for key, item in all_selections.items():
-        short_keys.setdefault(item.id, []).append(key)
     normalized: dict[str, Any] = {}
     unknown = set(supplied)
     for key, item in all_selections.items():
         if key in supplied:
             raw = supplied[key]
             unknown.discard(key)
-        elif item.id in supplied and len(short_keys[item.id]) == 1:
-            raw = supplied[item.id]
-            unknown.discard(item.id)
         else:
             raw = item.definition.default
-        normalized[key] = _coerce(item.definition, raw)
+        try:
+            normalized[key] = normalize_control_value(item.definition, raw)
+        except ValueContractViolation as error:
+            raise ExecutionFailure(
+                f"Invalid Selection {key}: {error.message}",
+                details={
+                    "code": f"selection_{error.code}",
+                    "key": key,
+                    "reason": error.message,
+                },
+            ) from error
     if unknown:
-        raise ExecutionFailure("Unknown or ambiguous selection", details=sorted(unknown))
+        raise ExecutionFailure(
+            "Unknown Selection key",
+            details={"code": "selection_unknown", "keys": sorted(unknown)},
+        )
     by_view = {view_id: {item.id: normalized[item.key] for item in values}
                for view_id, values in contract.items()}
     return normalized, by_view
-
-def _coerce(definition: SelectionDefinition, value: Any) -> Any:
-    if definition.required and (value is None or value == "" or value == []):
-        raise ExecutionFailure(f"Required selection is missing: {definition.id}")
-    if definition.type == "boolean" and isinstance(value, str):
-        return value.lower() in {"true", "1", "yes", "on"}
-    if definition.type == "number" and isinstance(value, str):
-        return float(value) if "." in value else int(value)
-    if definition.type == "multi_select" and isinstance(value, str):
-        return [item.strip() for item in value.split(",") if item.strip()]
-    if definition.type == "date_range" and isinstance(value, str):
-        return [item.strip() for item in value.split(",", 1)]
-    return value

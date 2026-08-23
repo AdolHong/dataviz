@@ -5,12 +5,37 @@ html, body { margin: 0; min-height: 100%; }
 
 .dv-canvas { min-height: 100vh; }
 .dv-view { display: flex; flex-direction: column; min-width: 0; min-height: 220px; overflow: hidden; }
-.dv-view-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.dv-view-actions { display: flex; align-items: center; gap: 8px; }
+.dv-view-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dv-view-heading { display: grid; flex: 1 1 auto; gap: 2px; min-width: 0; }
+.dv-view-title, .dv-view-description { min-width: 0; }
+.dv-view-description { margin: 0; }
+.dv-view-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
 .dv-view-body { flex: 1; min-width: 0; min-height: 0; }
 .dv-chart, .dv-plotly, .dv-echarts { width: 100%; height: 100%; min-height: 260px; }
 .dv-image { display: block; width: 100%; max-width: 100%; }
 .dv-view-error { max-height: 100%; overflow: auto; white-space: pre-wrap; }
+.dv-compute-fields { display: grid; gap: 10px; }
+.dv-compute-control { display: grid; gap: 6px; }
+.dv-compute-control > span { font: 600 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.dv-compute-control > input,
+.dv-compute-control > select,
+.dv-compute-range input {
+  width: 100%; min-height: 38px; padding: 7px 9px;
+  color: var(--dv-ink, #17211d); background: #fff;
+  border: 1px solid var(--dv-line, #d9d3c7); font: inherit;
+}
+.dv-compute-range { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
+.dv-compute-control > small { color: #7b7469; font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.dv-runtime-popover--compute > footer {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--dv-line, #d9d3c7);
+}
+.dv-runtime-popover--compute > footer span { color: #6d756f; font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.dv-runtime-popover--compute > footer button { min-height: 36px; padding: 0 14px; color: #fff; background: var(--dv-ink, #17211d); border: 1px solid var(--dv-ink, #17211d); cursor: pointer; }
+.dv-runtime-popover--compute > footer button:disabled { cursor: default; opacity: .42; }
+.dv-view[data-view-status="stale"] [data-view-status-label] { color: #a86718; }
+.dv-view[data-view-status="unavailable"] [data-view-status-label],
+.dv-view[data-view-status="error"] [data-view-status-label] { color: #b33d31; }
 
 .dv-view-placeholder { display: grid; place-content: center; min-height: 180px; text-align: center; }
 .dv-view-placeholder--live { gap: 10px; }

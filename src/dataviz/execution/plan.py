@@ -33,7 +33,7 @@ def _target_node_id(value: str) -> str:
 def reachable_output_references(
     dashboard: LoadedDashboard,
 ) -> tuple[set[str], list[str]]:
-    """Return server Outputs and Browser Transforms reachable from presentation roots.
+    """Return Base Outputs and Interactive Transforms reachable from presentation roots.
 
     Views, repeated Sections and explicitly declared Canvas inputs are the only
     presentation roots. This keeps an unused Source or Transform from delaying a
@@ -50,38 +50,38 @@ def reachable_output_references(
         for section in dashboard.definition.sections
         if section.repeat and section.repeat.input
     )
-    server_references: set[str] = set()
-    browser_ids: set[str] = set()
+    base_references: set[str] = set()
+    interactive_ids: set[str] = set()
 
     while pending:
         reference = parse_output_reference(pending.pop())
-        if reference.node_id.startswith("browser:"):
+        if reference.node_id.startswith("interactive:"):
             transform_id = reference.node_id.split(":", 1)[1]
-            if transform_id in browser_ids:
+            if transform_id in interactive_ids:
                 continue
-            browser_ids.add(transform_id)
-            transform = dashboard.browser_transforms[transform_id][1]
+            interactive_ids.add(transform_id)
+            transform = dashboard.interactive_transforms[transform_id][1]
             pending.extend(transform.inputs.values())
         else:
-            server_references.add(reference.canonical)
+            base_references.add(reference.canonical)
 
     ordered: list[str] = []
-    remaining = set(browser_ids)
+    remaining = set(interactive_ids)
     while remaining:
         ready = sorted(
             transform_id
             for transform_id in remaining
             if all(
-                not parse_output_reference(reference).node_id.startswith("browser:")
+                not parse_output_reference(reference).node_id.startswith("interactive:")
                 or parse_output_reference(reference).node_id.split(":", 1)[1] in ordered
-                for reference in dashboard.browser_transforms[transform_id][1].inputs.values()
+                for reference in dashboard.interactive_transforms[transform_id][1].inputs.values()
             )
         )
         if not ready:
-            raise ValidationFailure("Browser Transform dependency graph contains a cycle")
+            raise ValidationFailure("Interactive Transform dependency graph contains a cycle")
         ordered.extend(ready)
         remaining.difference_update(ready)
-    return server_references, ordered
+    return base_references, ordered
 
 
 def compile_plan(
@@ -102,8 +102,8 @@ def compile_plan(
             inputs={},
         )
 
-    for transform_id, (path, definition) in dashboard.transforms.items():
-        node_id = f"transform:{transform_id}"
+    for transform_id, (path, definition) in dashboard.dataset_transforms.items():
+        node_id = f"dataset:{transform_id}"
         inputs = {
             name: parse_output_reference(reference)
             for name, reference in definition.inputs.items()
@@ -111,7 +111,7 @@ def compile_plan(
         nodes[node_id] = PlanNode(
             id=node_id,
             local_id=transform_id,
-            kind="transform",
+            kind="dataset_transform",
             definition_path=path,
             definition=definition,
             dependencies={reference.node_id for reference in inputs.values()},

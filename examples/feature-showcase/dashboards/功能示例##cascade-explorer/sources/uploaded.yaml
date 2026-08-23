@@ -1,0 +1,10 @@
+schema: dataviz/source/v1
+kind: source
+id: uploaded-file
+name: Workspace 文件 Adapter
+type: file
+adapter: uploads
+path: uploaded.csv
+format: csv
+outputs: {main: {kind: table}}
+cache: {mode: persistent}

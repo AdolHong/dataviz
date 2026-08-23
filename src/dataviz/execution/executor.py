@@ -15,7 +15,7 @@ from typing import Any, Callable
 
 from packaging.requirements import Requirement
 
-from dataviz.artifacts import ArtifactStore
+from dataviz.artifacts import ArtifactDescriptor, ArtifactStore
 from dataviz.auth import AdapterResolver
 from dataviz.errors import DatavizError, ExecutionFailure
 from dataviz.execution.cache import NodeCache
@@ -27,8 +27,8 @@ from dataviz.execution.python_process import execute_python_node
 from dataviz.execution.results import NodeResult, RunResult
 from dataviz.sources import SOURCE_RUNNERS
 from dataviz.sources.base import SourceRequest
+from dataviz.value_contract import ValueContractViolation, normalize_control_value
 from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace
-from dataviz.workspace.selections import resolve_selection_values
 
 
 def now() -> str:
@@ -74,23 +74,72 @@ def _package_fingerprint(requirements: list[str]) -> dict[str, str]:
     return versions
 
 
-def resolve_parameters(dashboard: LoadedDashboard, values: dict[str, Any] | None) -> dict[str, Any]:
+def _output_status(outputs: dict[str, Any]) -> str:
+    """Use empty only when a node produced tables and every table is empty."""
+    row_counts = [
+        int(item.metadata.get("row_count", 0))
+        for item in outputs.values()
+        if item.kind == "table"
+    ]
+    return "empty" if row_counts and all(value == 0 for value in row_counts) else "ready"
+
+
+def _system_log(level: str, event: str, message: str, **fields: Any) -> dict[str, Any]:
+    return {
+        "timestamp": now(),
+        "level": level,
+        "event": event,
+        "message": message,
+        "fields": fields,
+    }
+
+
+def _write_python_log(
+    store: ArtifactStore,
+    artifact_id: str,
+    records: list[dict[str, Any]],
+    *,
+    node_id: str,
+) -> ArtifactDescriptor:
+    return store.write_json(
+        re.sub(r"[^A-Za-z0-9_.-]+", "_", artifact_id),
+        {"schema": "dataviz/execution-log/v1", "records": records},
+        kind="object",
+        format="json",
+        metadata={
+            "role": "execution_log",
+            "structured": True,
+            "node_id": node_id,
+            "record_count": len(records),
+        },
+    )
+
+
+def resolve_query_parameters(
+    dashboard: LoadedDashboard, values: dict[str, Any] | None
+) -> dict[str, Any]:
     provided = values or {}
+    definitions = {item.id: item for item in dashboard.definition.query_parameters}
+    unknown = sorted(set(provided) - set(definitions))
+    if unknown:
+        raise ExecutionFailure(
+            "Unknown Query Parameters",
+            details={"code": "query_parameter_unknown", "ids": unknown},
+        )
     result: dict[str, Any] = {}
     for definition in dashboard.definition.query_parameters:
         value = provided.get(definition.id, definition.default)
-        if definition.required and (value is None or value == "" or value == []):
-            raise ExecutionFailure(f"Required parameter is missing: {definition.id}")
-        if definition.type == "boolean" and isinstance(value, str):
-            value = value.lower() in {"true", "1", "yes", "on"}
-        elif definition.type == "number" and isinstance(value, str):
-            value = float(value) if "." in value else int(value)
-        elif definition.type == "multi_select" and isinstance(value, str):
-            value = [item.strip() for item in value.split(",") if item.strip()]
-        elif definition.type == "date_range" and isinstance(value, str):
-            value = [item.strip() for item in value.split(",", 1)]
-        result[definition.id] = value
-    result.update({key: value for key, value in provided.items() if key not in result})
+        try:
+            result[definition.id] = normalize_control_value(definition, value)
+        except ValueContractViolation as error:
+            raise ExecutionFailure(
+                f"Invalid Query Parameter {definition.id}: {error.message}",
+                details={
+                    "code": f"query_parameter_{error.code}",
+                    "id": definition.id,
+                    "reason": error.message,
+                },
+            ) from error
     return result
 
 
@@ -105,29 +154,25 @@ class Executor:
         self,
         dashboard_id: str,
         *,
-        params: dict[str, Any] | None = None,
-        selections: dict[str, Any] | None = None,
+        query_parameters: dict[str, Any] | None = None,
         targets: list[str] | None = None,
         refresh: bool = False,
         observer: EventObserver | None = None,
         snapshot_observer: SnapshotObserver | None = None,
         run_id: str | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> RunResult:
         dashboard = self.workspace.dashboard(dashboard_id)
-        parameters = resolve_parameters(dashboard, params)
-        selection_values, _ = resolve_selection_values(
-            dashboard.definition, selections
-        )
+        parameters = resolve_query_parameters(dashboard, query_parameters)
         plan = compile_plan(dashboard, targets=targets)
         run_id = run_id or f"run_{uuid.uuid4().hex[:16]}"
         store = ArtifactStore(self.workspace.root, run_id)
         result = RunResult(
             run_id=run_id,
-            status="running",
+            status="loading",
             workspace=self.workspace.definition.id,
             dashboard=dashboard.definition.id,
-            parameters=parameters,
-            selections=selection_values,
+            query_parameters=parameters,
             nodes={
                 node_id: NodeResult(node_id=node_id, node_type=node.kind, status="not_run")
                 for node_id, node in plan.nodes.items()
@@ -147,7 +192,7 @@ class Executor:
                 snapshot_observer(result.model_copy(deep=True))
 
         def declared_output_references(node: PlanNode) -> list[str]:
-            names = list(getattr(node.definition, "outputs", {}) or {}) or ["main"]
+            names = list(node.definition.outputs)
             return [f"{node.id}/{name}" for name in names]
 
         def emit(event_name: str, node: PlanNode | None = None, **kwargs: Any) -> None:
@@ -163,7 +208,10 @@ class Executor:
                     observer(event)
 
         publish_snapshot()
-        emit("run_started", data={"targets": sorted(plan.targets), "parameters": parameters, "selections": selection_values})
+        emit(
+            "run_started",
+            data={"targets": sorted(plan.targets), "query_parameters": parameters},
+        )
         pending = set(plan.nodes)
         running: dict[Future, str] = {}
         max_workers = max(1, self.workspace.definition.runtime.max_workers)
@@ -171,14 +219,41 @@ class Executor:
         with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="dataviz") as pool:
             while pending or running:
                 progressed = False
-                for node_id in list(pending):
-                    node = plan.nodes[node_id]
-                    dependency_results = [result.nodes[value] for value in node.dependencies]
-                    if any(item.status in {"failed", "blocked", "cancelled"} for item in dependency_results):
+                if cancel_event is not None and cancel_event.is_set() and pending:
+                    for node_id in sorted(pending):
+                        node = plan.nodes[node_id]
                         result.nodes[node_id] = NodeResult(
                             node_id=node_id,
                             node_type=node.kind,
-                            status="blocked",
+                            status="cancelled",
+                            finished_at=now(),
+                            diagnostics=result.nodes[node_id].diagnostics,
+                            error={
+                                "type": "ExecutionCancelled",
+                                "message": "Query Run was cancelled before this node started",
+                                "code": "cancelled",
+                            },
+                        )
+                        emit(
+                            "node_cancelled",
+                            node,
+                            error=result.nodes[node_id].error,
+                            data={"outputs": declared_output_references(node)},
+                        )
+                    pending.clear()
+                    publish_snapshot()
+                    progressed = True
+                for node_id in list(pending):
+                    node = plan.nodes[node_id]
+                    dependency_results = [result.nodes[value] for value in node.dependencies]
+                    if any(
+                        item.status in {"error", "unavailable", "cancelled"}
+                        for item in dependency_results
+                    ):
+                        result.nodes[node_id] = NodeResult(
+                            node_id=node_id,
+                            node_type=node.kind,
+                            status="unavailable",
                             finished_at=now(),
                             diagnostics=result.nodes[node_id].diagnostics,
                             error={"type": "dependency_failed", "message": "An upstream node failed"},
@@ -186,15 +261,17 @@ class Executor:
                         pending.remove(node_id)
                         publish_snapshot()
                         emit(
-                            "node_blocked",
+                            "node_unavailable",
                             node,
                             error=result.nodes[node_id].error,
                             data={"outputs": declared_output_references(node)},
                         )
                         progressed = True
-                    elif all(item.status == "succeeded" for item in dependency_results):
+                    elif all(item.status in {"ready", "empty"} for item in dependency_results):
                         result.nodes[node_id].status = "queued"
                         emit("node_queued", node)
+                        result.nodes[node_id].status = "loading"
+                        publish_snapshot()
                         future = pool.submit(
                             self._execute_node,
                             node,
@@ -204,6 +281,7 @@ class Executor:
                             store,
                             refresh,
                             emit,
+                            cancel_event,
                         )
                         running[future] = node_id
                         pending.remove(node_id)
@@ -223,20 +301,20 @@ class Executor:
                             node_result = NodeResult(
                                 node_id=node_id,
                                 node_type=node.kind,
-                                status="failed",
+                                status="error",
                                 finished_at=now(),
                                 diagnostics=result.nodes[node_id].diagnostics,
                                 error=error,
                             )
                         result.nodes[node_id] = node_result
-                        if node_result.status == "succeeded":
+                        if node_result.status in {"ready", "empty"}:
                             for name, descriptor in node_result.outputs.items():
                                 result.outputs[f"{node_id}/{name}"] = descriptor
                         publish_snapshot()
                         declared_outputs = declared_output_references(node)
-                        if node_result.status == "succeeded":
+                        if node_result.status in {"ready", "empty"}:
                             emit(
-                                "node_succeeded",
+                                "node_ready",
                                 node,
                                 duration_ms=node_result.duration_ms,
                                 data={
@@ -254,9 +332,17 @@ class Executor:
                                         "artifact": descriptor.model_dump(mode="json", by_alias=True),
                                     },
                                 )
+                        elif node_result.status == "cancelled":
+                            emit(
+                                "node_cancelled",
+                                node,
+                                duration_ms=node_result.duration_ms,
+                                error=node_result.error,
+                                data={"outputs": declared_outputs},
+                            )
                         else:
                             emit(
-                                "node_failed",
+                                "node_error",
                                 node,
                                 duration_ms=node_result.duration_ms,
                                 error=node_result.error,
@@ -266,26 +352,45 @@ class Executor:
                 if not progressed and pending:
                     raise ExecutionFailure("Execution deadlock detected", details=sorted(pending))
 
-        succeeded_targets = [result.nodes[node_id].status == "succeeded" for node_id in plan.targets]
-        failures = [item for item in result.nodes.values() if item.status in {"failed", "blocked"}]
-        if all(succeeded_targets) and not failures:
-            result.status = "success"
+        succeeded_targets = [
+            result.nodes[node_id].status in {"ready", "empty"}
+            for node_id in plan.targets
+        ]
+        failures = [
+            item
+            for item in result.nodes.values()
+            if item.status in {"error", "unavailable"}
+        ]
+        cancelled = any(
+            result.nodes[node_id].status == "cancelled" for node_id in plan.targets
+        ) or (cancel_event is not None and cancel_event.is_set())
+        if cancelled:
+            result.status = "cancelled"
+        elif all(succeeded_targets) and not failures:
+            result.status = "ready"
         elif any(succeeded_targets):
             result.status = "partial"
         else:
-            result.status = "failed"
+            result.status = "error"
         result.finished_at = now()
         result.outputs = {
             f"{node_id}/{name}": descriptor
             for node_id, node in result.nodes.items()
-            if node.status == "succeeded"
+            if node.status in {"ready", "empty"}
             for name, descriptor in node.outputs.items()
         }
         publish_snapshot()
         (store.run_root / "result.json").write_text(
             result.model_dump_json(indent=2, by_alias=True), encoding="utf-8"
         )
-        emit(f"run_{'completed' if result.status in {'success', 'partial'} else 'failed'}", data={"status": result.status})
+        terminal_event = (
+            "run_ready"
+            if result.status in {"ready", "partial"}
+            else "run_cancelled"
+            if result.status == "cancelled"
+            else "run_error"
+        )
+        emit(terminal_event, data={"status": result.status})
         return result
 
     def _execute_node(
@@ -297,11 +402,31 @@ class Executor:
         store: ArtifactStore,
         refresh: bool,
         emit,
+        cancel_event: threading.Event | None,
     ) -> NodeResult:
         started = time.perf_counter()
         started_at = now()
         diagnostics = dict(run_result.nodes[node.id].diagnostics)
         emit("node_started", node)
+        context: ExecutionContext | None = None
+        execution_logs: list[dict[str, Any]] = []
+        is_python_node = node.kind == "dataset_transform" or (
+            node.kind == "source" and node.definition.type == "python"
+        )
+
+        def collect_log(record: dict[str, Any]) -> None:
+            normalized = {**record, "node_id": node.id}
+            execution_logs.append(normalized)
+            emit(
+                "node_log",
+                node,
+                message=str(normalized.get("message", "")),
+                data={
+                    "level": normalized.get("level", "info"),
+                    "fields": normalized.get("fields", {}),
+                },
+            )
+
         try:
             context = self._context_for_node(node, dashboard, parameters, run_result, store)
             definition = node.definition
@@ -312,7 +437,7 @@ class Executor:
                 return NodeResult(
                     node_id=node.id,
                     node_type=node.kind,
-                    status="succeeded",
+                    status=_output_status(cached),
                     result_origin="cache",
                     started_at=started_at,
                     finished_at=now(),
@@ -321,12 +446,23 @@ class Executor:
                     diagnostics=diagnostics,
                 )
             if node.kind == "source" and definition.type == "python":
+                execution_logs.append(
+                    _system_log("info", "runtime_started", "Python Source started", node_id=node.id)
+                )
                 outputs = execute_python_node(
                     definition=definition,
                     definition_path=node.definition_path,
                     context=context,
                     node_id=node.id,
                     node_kind=node.kind,
+                    cancel_event=cancel_event,
+                    progress_callback=lambda value, message: emit(
+                        "node_progress",
+                        node,
+                        message=message,
+                        data={"value": value},
+                    ),
+                    log_callback=collect_log,
                 )
             elif node.kind == "source":
                 runner = SOURCE_RUNNERS[definition.type]
@@ -351,8 +487,14 @@ class Executor:
                         adapter_bindings=dashboard.definition.adapters,
                         node_id=node.id,
                         on_retry=on_retry,
+                        cancel_event=cancel_event,
                     )
                 )
+                if cancel_event is not None and cancel_event.is_set():
+                    raise ExecutionFailure(
+                        f"{node.id} was cancelled",
+                        details={"code": "cancelled", "node_id": node.id},
+                    )
                 named = bool(definition.outputs) and isinstance(value, dict)
                 outputs = normalize_outputs(
                     value,
@@ -363,26 +505,61 @@ class Executor:
                     metadata={"title": definition.name or node.local_id},
                 )
             else:
+                execution_logs.append(
+                    _system_log(
+                        "info",
+                        "runtime_started",
+                        "Dataset Transform started",
+                        node_id=node.id,
+                    )
+                )
                 outputs = execute_python_node(
                     definition=definition,
                     definition_path=node.definition_path,
                     context=context,
                     node_id=node.id,
                     node_kind=node.kind,
+                    cancel_event=cancel_event,
+                    progress_callback=lambda value, message: emit(
+                        "node_progress",
+                        node,
+                        message=message,
+                        data={"value": value},
+                    ),
+                    log_callback=collect_log,
                 )
             self.cache.save(cache_key, definition.cache, outputs, store)
 
             duration = int((time.perf_counter() - started) * 1000)
+            log = None
+            if is_python_node:
+                execution_logs.append(
+                    _system_log(
+                        "info",
+                        "runtime_completed",
+                        "Python node completed",
+                        node_id=node.id,
+                        duration_ms=duration,
+                    )
+                )
+                log = _write_python_log(
+                    store,
+                    f"{node.id}__execution",
+                    execution_logs,
+                    node_id=node.id,
+                )
+                diagnostics["log_records"] = len(execution_logs)
             return NodeResult(
                 node_id=node.id,
                 node_type=node.kind,
-                status="succeeded",
+                status=_output_status(outputs),
                 result_origin="executed",
                 started_at=started_at,
                 finished_at=now(),
                 duration_ms=duration,
                 outputs=outputs,
                 diagnostics=diagnostics,
+                log=log,
             )
         except Exception as exc:
             duration = int((time.perf_counter() - started) * 1000)
@@ -399,18 +576,42 @@ class Executor:
                 else {"type": type(exc).__name__, "message": str(exc)}
             )
             error["traceback"] = full_traceback
-            log = store.write_text(
-                re.sub(r"[^A-Za-z0-9_.-]+", "_", f"{node.id}__error"),
-                full_traceback,
-                kind="text",
-                format="text",
-                metadata={"role": "execution_log", "node_id": node.id},
-            )
+            if is_python_node:
+                execution_logs.append(
+                    _system_log(
+                        "error",
+                        "runtime_failed",
+                        str(exc),
+                        node_id=node.id,
+                        error_type=type(exc).__name__,
+                        traceback=full_traceback,
+                    )
+                )
+                log = _write_python_log(
+                    store,
+                    f"{node.id}__error",
+                    execution_logs,
+                    node_id=node.id,
+                )
+                diagnostics["log_records"] = len(execution_logs)
+            else:
+                log = store.write_text(
+                    re.sub(r"[^A-Za-z0-9_.-]+", "_", f"{node.id}__error"),
+                    full_traceback,
+                    kind="text",
+                    format="text",
+                    metadata={"role": "execution_log", "node_id": node.id},
+                )
             error["log"] = log.model_dump(mode="json", by_alias=True)
+            cancelled = (
+                isinstance(exc, DatavizError)
+                and isinstance(exc.details, dict)
+                and exc.details.get("code") == "cancelled"
+            )
             return NodeResult(
                 node_id=node.id,
                 node_type=node.kind,
-                status="failed",
+                status="cancelled" if cancelled else "error",
                 started_at=started_at,
                 finished_at=now(),
                 duration_ms=duration,
@@ -418,6 +619,9 @@ class Executor:
                 log=log,
                 error=error,
             )
+        finally:
+            if context is not None:
+                context.dispose()
 
     def _inspect_node(
         self,
@@ -429,6 +633,7 @@ class Executor:
     ) -> dict[str, Any]:
         if node.kind != "source" or node.definition.type != "sql":
             return {}
+        context: ExecutionContext | None = None
         try:
             context = self._context_for_node(
                 node,
@@ -453,6 +658,9 @@ class Executor:
                     "message": str(error),
                 }
             }
+        finally:
+            if context is not None:
+                context.dispose()
 
     def _context_for_node(
         self,
@@ -485,7 +693,9 @@ class Executor:
             workspace_root=self.workspace.root,
             dashboard_root=dashboard.root,
             run_id=run_result.run_id,
-            params=parameters,
+            query_params=parameters,
+            compute_params={},
+            selections={},
             inputs=inputs,
             store=store,
             adapter=adapter,
@@ -505,6 +715,7 @@ class Executor:
                 store.read_table(descriptor),
                 schema,
                 label=f"Input {input_name}",
+                code="input_schema_mismatch",
             )
         return context
 
@@ -543,7 +754,10 @@ class Executor:
         }
         payload = {
             "definition": definition.model_dump(mode="json", by_alias=True),
-            "parameters": {name: parameters.get(name) for name in definition.params},
+            "query_parameters": {
+                name: parameters.get(name)
+                for name in definition.query_params
+            },
             "files": files,
             "upstream": upstream,
             "adapter": (

@@ -18,6 +18,7 @@ class SourceRequest:
     adapter_bindings: dict[str, str]
     node_id: str
     on_retry: Callable[[dict[str, Any]], None] | None = None
+    cancel_event: Any | None = None
 
 
 class SourceRunner(Protocol):

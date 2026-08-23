@@ -1,0 +1,16 @@
+schema: dataviz/workspace/v1
+kind: workspace
+id: feature-showcase
+title: Feature Showcase
+description: 当前 DSL、数据入口、Selection、图表与交互 Runtime 的四个可分享验收看板
+context:
+  language: zh-CN
+  timezone: Asia/Shanghai
+runtime:
+  max_workers: 4
+  plotly_js: bundled
+  echarts_js: https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js
+  perspective_version: 5.2.0
+folders:
+  - path: 功能示例
+    order: 10

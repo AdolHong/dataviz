@@ -4,4 +4,5 @@ id: slow
 type: python
 code: slow.py
 timeout_seconds: 15
+outputs: {main: {kind: table}}
 cache: {mode: none}

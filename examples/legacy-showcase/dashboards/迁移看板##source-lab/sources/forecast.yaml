@@ -1,8 +1,0 @@
-schema: dataviz/source/v1
-kind: source
-id: forecast
-name: Python 预测数据
-type: python
-code: forecast.py
-entrypoint: load
-cache: {mode: session}

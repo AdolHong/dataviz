@@ -1,0 +1,9 @@
+<header class="lab-hero">
+  <div><span>01 / SOURCE STUDY</span><h1>{{ dashboard.title }}</h1></div>
+  <p>{{ dashboard.description }}</p>
+</header>
+<section class="lab-pulse">
+  <div class="lab-main">{{ view("forecast-line") }}</div>
+  <div class="lab-side">{{ view("accuracy") }}</div>
+</section>
+<section class="lab-table">{{ view("sql-matrix") }}</section>

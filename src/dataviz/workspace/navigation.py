@@ -71,7 +71,7 @@ class NavigationEditor:
         if removed:
             names = ", ".join(sorted(removed))
             raise WorkspaceError(
-                f"workspace.yaml contains removed fields: {names}; migrate to folders"
+                f"workspace.yaml contains removed fields: {names}; keep only the current folders contract"
             )
         configured = document.get("folders", [])
         if not isinstance(configured, list):

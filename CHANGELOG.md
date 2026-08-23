@@ -2,6 +2,56 @@
 
 Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本化。这里记录使用者可观察到的变化；字段细节以 `dataviz schemas` 和 `dataviz components` 为准。
 
+## Unreleased
+
+### Breaking architecture
+
+- Dashboard 与 Browser Runtime 升级为严格的 `dataviz/dashboard/v2`、`dataviz/runtime/v2`；查询阶段使用 Dataset Transform，取数后计算使用 Interactive Transform。
+- 新增独立 Compute Parameter，以及 `server-python`、`browser-python`、`browser-js` 三种 Interactive Runtime；三者统一产出 Named Output。
+- Query DAG 与 Interactive DAG 分离；Query Run 固化 Base Output，交互结果按 tab、Dashboard、Run、Transform 和 generation 隔离。
+- HTML Export 强制声明 `interactive`、`snapshot` 或 `unavailable`，不再把 Server Python 伪装成离线交互。
+- 删除旧实验性 Transform 字段、自动迁移命令和 Runtime 兼容分支；仓库示例与测试直接使用当前严格契约。
+
+### Added
+
+- 新增 `dataviz compute`、Compute Control、Interactive Compute API、Pyodide module Worker 和 browser-js Worker。
+- Query 与 Interactive Python 节点支持 cancel、progress、`context.log(...)`、结构化执行日志 Artifact 和完整 traceback；日志可通过 session 隔离的 Artifact API 获取，Query 节点可直接在 Sources 证据面板检查。
+- 页面导出采集 canonical Canvas snapshot，并清除旧 tab 状态中已经不属于当前 Dashboard 的 Selection key。
+- 新增五类固定 AI authoring 对照任务、带任务/输入哈希的 `authoring prepare`、`authoring verify/assess`、`authoring-event/v3` trial identity 与逐项验收证据，以及 `authoring tasks/protocol/compare` 成对评测；只有身份一致、输入完整且两边全部验收通过的 pair 进入效率聚合。
+
+### Fixed
+
+- Query/Compute/Selection 在 Python、父页面与 Canvas 共享严格 Value Contract；整数不再被浏览器静默截断，空日期范围固定为 `[]`，typed choice、required、min/max/step 使用稳定错误码。
+- Named Output 严格校验 required/optional、kind、JSON 与 Table schema；直接返回已有 Artifact 也不能绕过声明契约。
+- server-python Interactive 依赖链可复用相同 Query Run 与状态下已经完成的上游 generation；Interaction/event/cache 内存保留量有界。
+- Run/Interaction 事件截断使用单调 offset，长时间轮询不会因保留窗口移动而漏掉后续事件。
+- snapshot 的可选 Output 不再被误判为缺失并触发重算。
+- Pyodide package catalog 对齐固定 Runtime；bundle 校验核心文件、lockfile、`micropip`、传递 wheel 闭包与 SHA-256 后随 ZIP 分发。没有活动 browser-python 的报告不再携带 Python Worker、Pyodide URL 或 bundle 资产。
+- 源码 CLI 文档固定使用 non-editable `uv sync --reinstall-package workspace-dataviz`，规避部分 macOS/Python 组合忽略 hidden editable `.pth` 导致的 `ModuleNotFoundError`；发布 smoke 仍使用独立干净环境。
+
+### Documentation
+
+- 仓库首页改为面向首次访问者的简明 README；稳定产品设计收敛到 `DESIGN.md`，未完成工作收敛到 `plan.md`，三者都会进入后续源码 ZIP 与 sdist。
+- 删除设计文档中的安装手册、旧版本测试快照和已完成里程碑；明确当前未完成边界、放弃的旧方向与按真实需求触发的候选能力。
+- 明确 Runtime 默认选择 `browser-js → browser-python → server-python` 的适用条件、server-python 无法在独立 HTML 重算，以及 Pyodide CDN/bundle 的内网与离线边界。
+
+## 0.1.4 — 2026-08-23
+
+### Fixed
+
+- 默认 View Shell 现在实际渲染 `description`，并统一覆盖 Table、Perspective、Plotly、ECharts、Custom Renderer 与 Repeat View；动态 Selection 文案原地更新，Server 与导出 HTML 保持一致。
+
+## 0.1.3 — 2026-08-23
+
+### Added
+
+- Dashboard、Section 和 View 内容支持作用域完整的 Selection 绑定；例如 `{{ selections.section.night_analysis.dow }}` 会显示 choice label，并在浏览器内即时更新 Section 标题而不重新查询。
+- `dataviz validate` 会提前报告未知 Selection、跨 Section/View 的不可见依赖和任意表达式；完整 Canvas 可通过 `content("sections.<id>.title")` 输出可绑定内容节点。
+
+### Runtime
+
+- Selection 内容引用本身就是依赖声明；Section 标题变化只更新对应 DOM，View `title/text` 变化才将目标 View 加入局部重绘集合。Server 与导出 HTML 共享同一绑定清单。
+
 ## 0.1.2 — 2026-08-23
 
 ### Fixed
@@ -57,4 +107,4 @@ Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本
 - Query Parameter 重新执行服务端 DAG，Selection 只处理浏览器现有数据。
 - Dashboard 文件夹末级名称是导航显示名；`dashboard.id` 是稳定机器身份。
 
-当前仍是 `0.x`：新 DSL 版本会提供显式离线 migration 和 changelog，但允许强制迁移已有 Workspace。
+当前仍是 `0.x`：Breaking DSL 通过新 Schema URI、Changelog 和人工改写说明发布，不在 Runtime 中维护自动迁移或旧协议分支。

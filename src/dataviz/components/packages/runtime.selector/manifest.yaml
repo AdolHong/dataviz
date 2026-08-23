@@ -1,0 +1,18 @@
+schema: dataviz/component-package/v1
+package: runtime.selector
+version: 1.0.0
+category: runtime
+purpose: Shared native-control bridge, lifecycle and keyboard utilities for selector packages.
+dependencies: [runtime.overlay]
+components:
+  - id: runtime.selector
+    purpose: Hydrate selector adapters while preserving a canonical native form control.
+    status: stable
+    behavior:
+      state_owner: native form control
+      event_contract: bubbling input and change
+      enhancement: progressive
+runtime:
+  controller: controller.js
+  adapter: adapter.js
+  style: style.css

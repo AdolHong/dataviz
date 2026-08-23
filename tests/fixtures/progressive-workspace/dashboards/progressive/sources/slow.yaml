@@ -1,0 +1,7 @@
+schema: dataviz/source/v1
+kind: source
+id: slow
+type: python
+code: slow.py
+timeout_seconds: 15
+cache: {mode: none}

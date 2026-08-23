@@ -1,0 +1,15 @@
+schema: dataviz/component-package/v1
+package: renderer.custom
+version: 1.0.0
+category: renderer
+purpose: Trusted custom View Renderer lifecycle, isolation and contract testing.
+dependencies: [view.declarative]
+components:
+  - id: renderer.custom
+    purpose: Register one custom View Renderer without replacing the Canvas Runtime.
+    status: stable
+    logic:
+      registration: window.datavizRuntime.registerRenderer(id, lifecycle)
+      lifecycle: [validate, mount, update, dispose]
+    behavior: {failure_scope: view, async_lifecycle: supported, structured_error: true}
+runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

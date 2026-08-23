@@ -1,6 +1,0 @@
-connections:
-  demo-sqlite:
-    type: sqlalchemy
-    url: sqlite://
-    description: 内存 SQLite，只用于执行自包含 SQL 示例
-

@@ -1,0 +1,14 @@
+schema: dataviz/component-test/v1
+tests:
+  - id: selector.select.keyboard-and-search
+    component: selector.select
+    kind: browser
+    assertions: [searches every available option, grouped choices expose headings and searchable metadata, arrow keys move the active option, enter commits canonical state, select all preserves every selected option, invert clears the current result set, escape returns focus]
+  - id: selector.select.virtual-dom-bound
+    component: selector.select
+    kind: browser
+    assertions: [one thousand options keep a bounded row DOM, search still covers the complete option set]
+  - id: selector.select.dynamic-reconcile
+    component: selector.select
+    kind: browser
+    assertions: [upstream changes remove unavailable rows, invalid selected values clear immediately]

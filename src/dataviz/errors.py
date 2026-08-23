@@ -41,8 +41,22 @@ class SourceFailure(ExecutionFailure):
     code = "source_error"
 
 
-class WidgetFailure(ExecutionFailure):
-    code = "widget_error"
+class QueryConnectionFailure(SourceFailure):
+    """A SQL Adapter could not establish or configure its connection."""
+
+    code = "query_connection_error"
+
+
+class QueryExecutionFailure(SourceFailure):
+    """A database accepted the connection but rejected or failed the query."""
+
+    code = "query_execution_error"
+
+
+class QueryTimeoutFailure(SourceFailure):
+    """A SQL query exceeded its hard runtime deadline and was cancelled."""
+
+    code = "query_timeout"
 
 
 @dataclass(slots=True)
@@ -61,4 +75,3 @@ class Diagnostic:
             "file": self.file,
             "field": self.field,
         }
-

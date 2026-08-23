@@ -5,3 +5,4 @@ title: Repeat View Templates
 runtime:
   plotly_js: bundled
   max_workers: 4
+  arrow_min_rows: 1000

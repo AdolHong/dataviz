@@ -1,0 +1,15 @@
+schema: dataviz/browser-transform/v1
+kind: browser_transform
+id: scaled
+code: scaled.js
+entrypoint: transform
+inputs:
+  rows: source:raw/main
+selections: [dashboard:worker-runtime/delay_ms]
+outputs:
+  main:
+    kind: table
+    schema:
+      - {name: name}
+      - {name: value}
+timeout_seconds: 0.2

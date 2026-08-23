@@ -1,0 +1,2 @@
+.dv-view[data-view-status="failed"] { --dv-view-status-color: #b83a2f; }
+.dv-view[data-view-status="ready"] { --dv-view-status-color: var(--dv-green, #2f876d); }

@@ -1,7 +1,0 @@
-schema: dataviz/widget/v1
-kind: widget
-id: city-detail
-title: 级联后的城市明细
-runtime: browser
-depends_on: [cities]
-output: {type: table}

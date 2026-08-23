@@ -1,0 +1,16 @@
+schema: dataviz/component-test/v1
+tests:
+  - {id: view.metric.lifecycle, component: view.metric, kind: renderer, assertions: [mount, update, dispose]}
+  - {id: view.line.lifecycle, component: view.line, kind: renderer, assertions: [mount, update, dispose]}
+  - {id: view.bar.lifecycle, component: view.bar, kind: renderer, assertions: [mount, update, dispose]}
+  - {id: view.stacked-bar.lifecycle, component: view.stacked-bar, kind: renderer, assertions: [mount, update, dispose]}
+  - {id: view.pie.lifecycle, component: view.pie, kind: renderer, assertions: [mount, update, dispose]}
+  - {id: view.scatter.lifecycle, component: view.scatter, kind: renderer, assertions: [mount, update, dispose]}
+  - {id: view.heatmap.lifecycle, component: view.heatmap, kind: renderer, assertions: [mount, update, dispose]}
+  - {id: view.radar.lifecycle, component: view.radar, kind: renderer, assertions: [mount, update, dispose]}
+  - {id: view.table.lifecycle, component: view.table, kind: renderer, assertions: [mount, update, dispose, wheel-boundary]}
+  - {id: view.perspective.lifecycle, component: view.perspective, kind: renderer, assertions: [mount, update, dispose, wheel-boundary]}
+  - {id: view.markdown.lifecycle, component: view.markdown, kind: renderer, assertions: [mount, update, dispose]}
+  - {id: view.image.lifecycle, component: view.image, kind: renderer, assertions: [mount, update, dispose]}
+  - {id: view.custom.lifecycle, component: view.custom, kind: renderer, assertions: [mount, update, dispose, view-scoped-error]}
+  - {id: view.echarts-category.legend, component: view.echarts-category, kind: interaction, assertions: [filter, visibility, none]}

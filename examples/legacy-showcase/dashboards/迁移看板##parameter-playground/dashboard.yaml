@@ -9,6 +9,7 @@ query_parameters:
   - {id: row_count, type: number, label: 行数, default: 12}
 dashboard_selections:
   - id: segment
+    field: segment
     type: multi_select
     label: 分组
     default: [Alpha, Beta, Gamma]
@@ -16,17 +17,28 @@ dashboard_selections:
       - {label: Alpha, value: Alpha}
       - {label: Beta, value: Beta}
       - {label: Gamma, value: Gamma}
+sources: [sources/parameterized.yaml]
+views:
+  - id: parameter-line
+    title: 参数生成曲线
+    input: parameterized
+    template: line
+    x: id
+    y: value
+    series: segment
+    aggregate: none
+
+  - id: parameter-table
+    title: 当前数据集快照
+    input: parameterized
+    template: table
+    columns: [id, segment, value, score]
+    limit: 100
+
 sections:
   - {id: experiment, title: 参数实验, views: [parameter-line, parameter-table]}
-sources: [sources/parameterized.yaml]
-widgets:
-  - widgets/parameter-line/widget.yaml
-  - widgets/parameter-table/widget.yaml
 canvas:
   template: canvas/template.html
   style: canvas/style.css
-  script: canvas/script.js
   use_default_style: true
-  client_selections: true
-  client_sources: [parameterized]
   client_libraries: [plotly]

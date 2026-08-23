@@ -9,7 +9,7 @@ context:
   owner: analytics-studio
 assumptions:
   - 所有金额均为含税人民币元
-  - 预测值为历史收入乘以 1.08，仅用于演示 Python source
+  - 预测值为历史收入乘以 1.08，仅用于演示 Server Transform
 query_parameters:
   - id: target_factor
     type: number
@@ -17,6 +17,7 @@ query_parameters:
     default: 1.0
 dashboard_selections:
   - id: region
+    field: region
     type: multi_select
     label: 区域
     default: [North, South, East, West]
@@ -25,50 +26,81 @@ dashboard_selections:
       - {label: 南区, value: South}
       - {label: 东区, value: East}
       - {label: 西区, value: West}
+sources:
+  - sources/orders.yaml
+  - sources/targets.yaml
+server_transforms:
+  - transforms/sales-metrics.yaml
+views:
+  - id: revenue
+    title: 收入与预测轨迹
+    description: Plotly 动态折线
+    input: transform:sales-metrics/trend
+    template: line
+    x: date
+    y: [revenue, forecast_revenue]
+    aggregate: sum
+    selection_bindings:
+      min_revenue: {field: revenue, operator: gte}
+
+  - id: target
+    title: 区域目标完成度
+    description: ECharts 动态条形图
+    input: transform:sales-metrics/completion
+    template: bar
+    engine: echarts
+    x: region
+    y: completion_pct
+    aggregate: none
+    selection_bindings:
+      min_revenue: {field: revenue, operator: gte}
+
+  - id: distribution
+    title: 订单分布
+    description: ECharts 动态订单分布
+    input: orders
+    template: bar
+    engine: echarts
+    x: region
+    y: orders
+    aggregate: sum
+    selection_bindings:
+      min_revenue: {field: revenue, operator: gte}
+
+  - id: detail
+    title: 明细检查
+    description: 可定制普通表格
+    input: orders
+    template: table
+    columns: [date, region, revenue, orders]
+    limit: 100
+    selections:
+      - id: min_orders
+        field: orders
+        type: number
+        label: 最低订单数
+        default: 0
+    selection_bindings:
+      min_orders: {field: orders, operator: gte}
+
 sections:
   - id: pulse
     title: 经营脉搏
     selections:
       - id: min_revenue
+        field: revenue
         type: number
         label: 最低单期收入
         default: 0
-    views:
-      - revenue
-      - target
-      - distribution
+    views: [revenue, target, distribution]
   - id: records
     title: 明细记录
-    views:
-      - widget: detail
-        selections:
-          - id: min_orders
-            type: number
-            label: 最低订单数
-            default: 0
-sources:
-  - sources/orders.yaml
-  - sources/targets.yaml
-  - sources/forecast.yaml
-widgets:
-  - widgets/revenue/widget.yaml
-  - widgets/target/widget.yaml
-  - widgets/distribution/widget.yaml
-  - widgets/detail/widget.yaml
+    views: [detail]
 layout:
   columns: 12
-  row_height: 100
   gap: 18
-  items:
-    - {widget: revenue, x: 0, y: 0, width: 8, height: 4}
-    - {widget: target, x: 8, y: 0, width: 4, height: 4}
-    - {widget: distribution, x: 0, y: 4, width: 5, height: 4}
-    - {widget: detail, x: 5, y: 4, width: 7, height: 4}
 canvas:
   template: canvas/template.html
   style: canvas/style.css
-  script: canvas/script.js
   use_default_style: true
-  client_selections: true
-  client_sources: [orders, targets, forecast]
   client_libraries: [plotly, echarts]

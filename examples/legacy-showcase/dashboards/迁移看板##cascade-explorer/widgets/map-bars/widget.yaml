@@ -1,7 +1,0 @@
-schema: dataviz/widget/v1
-kind: widget
-id: map-bars
-title: 区县值分布
-runtime: browser
-depends_on: [cities]
-output: {type: echarts}

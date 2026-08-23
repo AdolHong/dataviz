@@ -1,19 +1,27 @@
 from __future__ import annotations
 
 import tomllib
+from hashlib import sha256
 from pathlib import Path
-from zipfile import ZIP_DEFLATED, ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
 OUTPUT = ROOT / "dist" / f"workspace-dataviz-{PROJECT['version']}.zip"
-EXCLUDED_PARTS = {"__pycache__", ".pytest_cache"}
+EXCLUDED_PARTS = {"__pycache__", ".pytest_cache", ".dataviz"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".DS_Store"}
 
 
 def included_files() -> list[Path]:
-    files = [ROOT / "pyproject.toml", ROOT / "README.md"]
+    files = [
+        ROOT / "pyproject.toml",
+        ROOT / "setup.py",
+        ROOT / "README.md",
+        ROOT / "MANIFEST.in",
+        ROOT / "CHANGELOG.md",
+    ]
+    files.extend(path for path in (ROOT / "docs").rglob("*.md") if path.is_file())
     files.extend(
         path
         for path in (ROOT / "src" / "dataviz").rglob("*")
@@ -32,11 +40,19 @@ def main() -> None:
     files = included_files()
     with ZipFile(OUTPUT, "w", compression=ZIP_DEFLATED, compresslevel=9) as archive:
         for path in files:
-            archive.write(path, path.relative_to(ROOT).as_posix())
+            info = ZipInfo(path.relative_to(ROOT).as_posix(), date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = ZIP_DEFLATED
+            info.external_attr = 0o644 << 16
+            archive.writestr(info, path.read_bytes(), compress_type=ZIP_DEFLATED, compresslevel=9)
     size = OUTPUT.stat().st_size
+    digest = sha256(OUTPUT.read_bytes()).hexdigest()
+    checksum = OUTPUT.with_suffix(OUTPUT.suffix + ".sha256")
+    checksum.write_text(f"{digest}  {OUTPUT.name}\n", encoding="utf-8")
     print(f"Built {OUTPUT}")
     print(f"Files: {len(files)}")
     print(f"Bytes: {size}")
+    print(f"SHA256: {digest}")
+    print(f"Checksum: {checksum}")
     print(f"Install: python -m pip install {OUTPUT.name}")
 
 

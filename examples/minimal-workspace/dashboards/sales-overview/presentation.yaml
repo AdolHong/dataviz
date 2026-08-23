@@ -15,7 +15,7 @@ layout:
 sections:
   pulse:
     template: band
-    class: presentation-kpi-band
+    css_class: presentation-kpi-band
   trend:
     template: split
   detail:
@@ -23,19 +23,19 @@ sections:
 
 views:
   revenue-trend:
-    width: 8
-    height: 420
+    span: 8
+    min_height: 420
     container: chart
   region-comparison:
-    width: 4
-    height: 420
+    span: 4
+    min_height: 420
     container: chart
   sales-detail:
-    width: 6
+    span: 6
     container: table
-    class: presentation-detail-table
+    css_class: presentation-detail-table
   sales-perspective:
-    width: 6
+    span: 6
     container: table
 
 assets:

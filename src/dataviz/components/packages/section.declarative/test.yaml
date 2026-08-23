@@ -1,0 +1,12 @@
+schema: dataviz/component-test/v1
+tests:
+  - {id: section.single.flow, component: section.single, kind: layout, assertions: [document-order]}
+  - {id: section.stack.flow, component: section.stack, kind: layout, assertions: [document-order]}
+  - {id: section.grid.flow, component: section.grid, kind: layout, assertions: [responsive, no-coordinates]}
+  - {id: section.split.flow, component: section.split, kind: layout, assertions: [responsive, no-coordinates]}
+  - {id: section.hero-metrics.flow, component: section.hero-metrics, kind: layout, assertions: [responsive]}
+  - {id: section.chart-and-table.flow, component: section.chart-and-table, kind: layout, assertions: [responsive]}
+  - {id: section.comparison.flow, component: section.comparison, kind: layout, assertions: [responsive]}
+  - {id: section.band.flow, component: section.band, kind: layout, assertions: [responsive]}
+  - {id: section.small-multiples.scale, component: section.small-multiples, kind: performance, assertions: [lazy-mount, bounded-dom, load-more]}
+  - {id: section.selection-gallery.scale, component: section.selection-gallery, kind: performance, assertions: [search, selected-only, lazy-mount]}

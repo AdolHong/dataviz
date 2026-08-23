@@ -1,7 +1,0 @@
-schema: dataviz/widget/v1
-kind: widget
-id: trend
-title: 季度收入轨迹
-runtime: browser
-depends_on: [metrics]
-output: {type: plotly}

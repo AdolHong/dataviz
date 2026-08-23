@@ -1,5 +1,5 @@
 /* Optional presentation-only polish. Removing this file does not affect data logic. */
-.presentation-kpi-band .dv-widget {
+.presentation-kpi-band .dv-view {
   border-top-color: var(--dv-accent);
 }
 

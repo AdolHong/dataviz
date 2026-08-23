@@ -89,16 +89,13 @@ def decode_dashboard_name(name: str) -> DashboardLocation:
 
 def decode_dashboard_path(dashboards_root: Path, dashboard_root: Path) -> DashboardLocation:
     relative = dashboard_root.relative_to(dashboards_root)
-    parts: list[str] = []
-    trashed = False
-    for index, physical in enumerate(relative.parts):
-        decoded = decode_dashboard_name(physical)
-        if decoded.trashed:
-            if index != 0 or trashed:
-                raise WorkspaceError(f"Trash marker must be the first logical segment: {relative}")
-            trashed = True
-        parts.extend(decoded.segments)
-    return DashboardLocation(tuple(parts), trashed=trashed)
+    if len(relative.parts) != 1:
+        raise WorkspaceError(
+            "Dashboard directories must be direct children of dashboards/; "
+            "encode logical folders with ##",
+            file=dashboard_root,
+        )
+    return decode_dashboard_name(relative.name)
 
 
 def encode_dashboard_name(segments: tuple[str, ...] | list[str], *, trashed: bool = False) -> str:
@@ -118,11 +115,7 @@ def folder_segments(identifier: str) -> tuple[str, ...]:
     if not identifier.startswith(FOLDER_ID_PREFIX):
         raise WorkspaceError(f"Unknown folder id: {identifier}")
     encoded = identifier[len(FOLDER_ID_PREFIX):]
-    try:
-        return normalize_logical_path(_opaque_decode(encoded))
-    except WorkspaceError:
-        # Compatibility with the short-lived readable ``folder:a##b`` ids.
-        return normalize_logical_path(encoded.replace(SEPARATOR, "/"))
+    return normalize_logical_path(_opaque_decode(encoded))
 
 
 def dashboard_trash_id(directory_name: str) -> str:
@@ -133,10 +126,7 @@ def dashboard_trash_name(identifier: str) -> str:
     if not identifier.startswith(DASHBOARD_TRASH_PREFIX):
         raise WorkspaceError(f"Unknown dashboard trash id: {identifier}")
     encoded = identifier[len(DASHBOARD_TRASH_PREFIX):]
-    try:
-        return _opaque_decode(encoded)
-    except WorkspaceError:
-        return encoded
+    return _opaque_decode(encoded)
 
 
 def folder_trash_id(segments: tuple[str, ...] | list[str]) -> str:
@@ -149,10 +139,7 @@ def folder_trash_segments(identifier: str) -> tuple[str, ...]:
     if not identifier.startswith(FOLDER_TRASH_PREFIX):
         raise WorkspaceError(f"Unknown folder trash id: {identifier}")
     encoded = identifier[len(FOLDER_TRASH_PREFIX):]
-    try:
-        return normalize_logical_path(_opaque_decode(encoded))
-    except WorkspaceError:
-        return normalize_logical_path(encoded.replace(SEPARATOR, "/"))
+    return normalize_logical_path(_opaque_decode(encoded))
 
 
 def _opaque_encode(value: str) -> str:

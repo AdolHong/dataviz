@@ -8,13 +8,13 @@ from dataviz.errors import SourceFailure
 from dataviz.sources.base import SourceRequest
 
 
-class FileSourceAdapter:
+class FileSourceRunner:
     def execute(self, request: SourceRequest) -> pd.DataFrame:
         definition = request.definition
         if not definition.path:
             raise SourceFailure("File source requires path", file=request.definition_path)
         if definition.adapter:
-            path = request.connections.resolve_path(
+            path = request.adapters.resolve_path(
                 definition.adapter, definition.path, request.adapter_bindings
             )
         else:

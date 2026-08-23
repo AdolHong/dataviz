@@ -1,0 +1,10 @@
+schema: dataviz/component-test/v1
+tests:
+  - id: selector.checkbox-group.include-state
+    component: selector.checkbox-group
+    kind: browser
+    assertions: [empty values show no checked options and a Select all action, Select all checks every available option without normalization, the action becomes Invert, one option can be removed from the explicit full set, Invert from the full set returns to empty]
+  - id: selector.checkbox-group.cascade
+    component: selector.checkbox-group
+    kind: browser
+    assertions: [unavailable choices disappear by default, invalid values clear after upstream changes, explicit remaining values are preserved]

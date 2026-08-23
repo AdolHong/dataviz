@@ -19,6 +19,10 @@ def load_module(path: Path) -> ModuleType:
         raise ExecutionFailure("Unable to import Python file", file=path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
+    code_root = str(path.parent)
+    inserted = code_root not in sys.path
+    if inserted:
+        sys.path.insert(0, code_root)
     try:
         spec.loader.exec_module(module)
     except Exception as exc:
@@ -32,4 +36,3 @@ def load_entrypoint(path: Path, name: str):
     if not callable(function):
         raise ExecutionFailure(f"Python entrypoint is not callable: {name}", file=path)
     return function
-

@@ -1,0 +1,20 @@
+schema: dataviz/component-package/v1
+package: runtime.overlay
+version: 1.1.0
+category: runtime
+purpose: One overlay controller for popovers, selector panels and future floating components.
+dependencies: []
+components:
+  - id: runtime.overlay
+    purpose: Coordinate positioning, focus return, Escape and outside-click dismissal.
+    status: stable
+    behavior:
+      exclusivity: One open overlay per group
+      dismiss: [outside-pointer, escape, explicit]
+      placement: viewport-aware
+      stacking: Floating panels stay above sibling controls
+      focus_return: trigger
+runtime:
+  controller: controller.js
+  adapter: adapter.js
+  style: style.css

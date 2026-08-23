@@ -1,0 +1,16 @@
+schema: dataviz/component-package/v1
+package: selector.segmented
+version: 1.0.0
+category: selector
+purpose: Visible single selection for a very small option set, with segmented and radio presentations.
+dependencies: [runtime.selector]
+components:
+  - id: selector.segmented
+    purpose: Compare and choose up to four peer values without opening an overlay.
+    status: stable
+    logic: {types: [single_select, boolean], fields: [choices]}
+    presentation: {template: segmented, options: [variant, all_label, show_unavailable, css_class]}
+    behavior: {variants: [default, radio], empty_selection: all_when_used_as_selection}
+    semantic_dom: [.dv-segmented, .dv-segmented__option]
+    tokens: [--dv-accent, --dv-green, --dv-ink, --dv-line, --dv-panel]
+runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

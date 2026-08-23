@@ -1,0 +1,17 @@
+include README.md
+include CHANGELOG.md
+include pyproject.toml
+include setup.py
+recursive-include docs *.md
+graft src/dataviz
+
+# Build metadata and tests are development inputs, not runtime package content.
+prune src/dataviz/gallery/.dataviz
+prune src/workspace_dataviz.egg-info
+prune tests
+prune build
+prune dist
+
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude .DS_Store

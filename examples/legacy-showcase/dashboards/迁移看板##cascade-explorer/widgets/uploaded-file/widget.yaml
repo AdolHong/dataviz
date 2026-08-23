@@ -1,7 +1,0 @@
-schema: dataviz/widget/v1
-kind: widget
-id: uploaded-file
-title: Workspace Adapter 文件
-runtime: browser
-depends_on: [uploaded-file]
-output: {type: echarts}

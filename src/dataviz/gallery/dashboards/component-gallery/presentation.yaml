@@ -1,0 +1,70 @@
+schema: dataviz/presentation/v1
+kind: presentation
+dashboard: component-gallery
+
+theme:
+  preset: editorial
+  accent: "#d9572b"
+  density: comfortable
+
+layout:
+  template: exploration
+  columns: 12
+  gap: 16
+
+selectors:
+  dashboard:component-gallery/region:
+    template: checkbox-group
+    variant: tags
+  section:trends/category:
+    template: checkbox-group
+  view:detail-table/product:
+    template: select
+    search: always
+    search_placeholder: Search product names…
+  view:detail-table/category-focus:
+    template: segmented
+    variant: radio
+  view:detail-table/location:
+    template: cascader
+    level_labels: [Province, City, District]
+    search_placeholder: Search a complete path…
+    hierarchy_selection: cascade
+    checked_strategy: parent
+  view:detail-table/location-tree:
+    template: tree-select
+    level_labels: [Province, City, District]
+    search_placeholder: Search the location tree…
+    hierarchy_selection: cascade
+    checked_strategy: parent
+  view:detail-table/date-window:
+    template: date-range
+    start_label: From
+    end_label: Through
+    presets:
+      - {label: Q1 2026, start: "2026-01-01", end: "2026-03-31"}
+      - {label: February, start: "2026-02-01", end: "2026-02-28"}
+  view:detail-table/store-virtual:
+    template: select
+    virtual: always
+    search: always
+    search_placeholder: Search a large store list…
+    viewport_height: 228
+  section:selected-stores/stores:
+    template: select
+    search: always
+    search_placeholder: Search stores…
+
+views:
+  revenue-line: {span: 7, min_height: 380, container: chart}
+  category-bars: {span: 5, min_height: 380, container: chart}
+  stacked-orders: {span: 7, min_height: 360, container: chart}
+  category-share: {span: 5, min_height: 360, container: chart}
+  revenue-scatter: {span: 6, min_height: 360, container: chart}
+  revenue-heatmap: {span: 6, min_height: 360, container: chart}
+  store-radar: {span: 12, min_height: 420, container: chart}
+  detail-table: {span: 6, min_height: 520, container: table}
+  pivot-table: {span: 6, min_height: 520, container: table}
+  narrative: {span: 4, min_height: 300, container: plain}
+  image-specimen: {span: 4, min_height: 300, container: plain}
+  custom-specimen: {span: 4, min_height: 300, container: elevated}

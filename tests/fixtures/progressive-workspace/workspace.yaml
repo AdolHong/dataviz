@@ -1,0 +1,5 @@
+schema: dataviz/workspace/v1
+kind: workspace
+id: progressive-fixture
+title: Progressive fixture
+

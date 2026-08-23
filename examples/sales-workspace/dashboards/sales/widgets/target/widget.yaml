@@ -1,9 +1,0 @@
-schema: dataviz/widget/v1
-kind: widget
-id: target
-title: 区域目标完成度
-description: ECharts 动态条形图
-runtime: browser
-depends_on: [orders, targets]
-output:
-  type: echarts

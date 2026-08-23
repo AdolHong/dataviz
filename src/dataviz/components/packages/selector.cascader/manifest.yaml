@@ -1,0 +1,27 @@
+schema: dataviz/component-package/v1
+package: selector.cascader
+version: 1.0.0
+category: selector
+purpose: Browse and multi-select complete paths across associated hierarchy levels.
+dependencies: [runtime.selector]
+components:
+  - id: selector.cascader
+    purpose: Preserve parent context for leaf choices such as province, city and district.
+    status: stable
+    logic:
+      type: multi_select
+      fields: [path_fields]
+      value_shape: [[level-1, level-2, leaf]]
+      empty_selection: all paths
+    presentation:
+      template: cascader
+      options: [level_labels, placeholder, search_placeholder, path_separator, empty_text, hierarchy_selection, checked_strategy, max_visible_tags, css_class]
+    behavior:
+      overlay: viewport-aware
+      navigation_state: independent from selection state
+      multi_branch_selection: true
+      branch_selection: optional_descendant_toggle
+      checked_summary: [child, parent, all]
+    semantic_dom: [.dv-cascader, .dv-cascader-panel, .dv-cascader-columns, .dv-cascader-column, .dv-cascader-option]
+    tokens: [--dv-accent, --dv-green, --dv-ink, --dv-line, --dv-panel]
+runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

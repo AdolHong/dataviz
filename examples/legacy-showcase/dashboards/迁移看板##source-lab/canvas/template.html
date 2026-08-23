@@ -3,7 +3,7 @@
   <p>{{ dashboard.description }}</p>
 </header>
 <section class="lab-pulse">
-  <div class="lab-main">{{ widget("forecast-line") }}</div>
-  <div class="lab-side">{{ widget("accuracy") }}</div>
+  <div class="lab-main">{{ view("forecast-line") }}</div>
+  <div class="lab-side">{{ view("accuracy") }}</div>
 </section>
-<section class="lab-table">{{ widget("sql-matrix") }}</section>
+<section class="lab-table">{{ view("sql-matrix") }}</section>

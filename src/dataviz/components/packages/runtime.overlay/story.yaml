@@ -1,0 +1,10 @@
+schema: dataviz/component-story/v1
+stories:
+  - id: runtime.overlay.header
+    component: runtime.overlay
+    title: Exclusive header popovers
+    summary: Opening another control or clicking outside closes the current popover.
+    gallery:
+      dashboard: component-gallery
+      target: "[data-runtime-popover]"
+      anchor: runtime-overlay

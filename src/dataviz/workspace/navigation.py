@@ -66,25 +66,17 @@ class NavigationEditor:
             }
         return document
 
-    def _legacy_folders(
-        self, items: list[dict[str, Any]], parent: tuple[str, ...] = ()
-    ) -> list[dict[str, Any]]:
-        folders: list[dict[str, Any]] = []
-        for item in items:
-            if not isinstance(item, dict) or item.get("kind", "dashboard") != "folder":
-                continue
-            title = validate_segment(str(item.get("title") or item.get("id") or ""))
-            current = (*parent, title)
-            folders.append({"path": "/".join(current), "order": int(item.get("order", 0))})
-            folders.extend(self._legacy_folders(item.get("children") or [], current))
-        return folders
-
     def _folder_records(self, document: dict[str, Any]) -> list[dict[str, Any]]:
-        configured = document.get("folders")
-        if isinstance(configured, list):
-            records = [dict(item) for item in configured if isinstance(item, dict)]
-        else:
-            records = self._legacy_folders(document.get("navigation") or [])
+        removed = {"navigation", "trash"} & document.keys()
+        if removed:
+            names = ", ".join(sorted(removed))
+            raise WorkspaceError(
+                f"workspace.yaml contains removed fields: {names}; migrate to folders"
+            )
+        configured = document.get("folders", [])
+        if not isinstance(configured, list):
+            raise WorkspaceError("workspace.yaml folders must be a list")
+        records = [dict(item) for item in configured if isinstance(item, dict)]
         normalized: list[dict[str, Any]] = []
         seen: set[tuple[bool, tuple[str, ...]]] = set()
         for record in records:
@@ -118,8 +110,6 @@ class NavigationEditor:
                 int(item.get("order", 0)),
             ),
         )
-        document.pop("navigation", None)
-        document.pop("trash", None)
         self.workspace_path.parent.mkdir(parents=True, exist_ok=True)
         handle, temporary = tempfile.mkstemp(
             prefix=".workspace-", suffix=".yaml", dir=self.workspace_path.parent

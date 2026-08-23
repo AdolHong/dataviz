@@ -1,0 +1,2 @@
+.dv-canvas, .dv-section, .dv-view { box-sizing: border-box; }
+.dv-canvas img, .dv-canvas svg, .dv-canvas canvas { max-width: 100%; }

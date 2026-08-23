@@ -1,0 +1,2 @@
+.dv-section { min-width: 0; }
+.dv-section[aria-busy="true"] { cursor: progress; }

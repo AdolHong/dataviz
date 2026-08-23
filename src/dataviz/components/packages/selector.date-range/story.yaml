@@ -1,0 +1,12 @@
+schema: dataviz/component-story/v1
+stories:
+  - id: selector.date-range.basic
+    component: selector.date-range
+    title: Inclusive date range
+    summary: Start and end dates synchronize to the DSL date_range value.
+    gallery: {dashboard: component-gallery, target: "[data-selector-template='date-range']", anchor: selector-date-range}
+  - id: selector.date-range.presets
+    component: selector.date-range
+    title: Reviewable date presets
+    summary: Named exact ranges speed up common analysis windows without hiding the committed start and end values.
+    gallery: {dashboard: component-gallery, target: "[data-selector-template='date-range']", anchor: selector-date-range-presets}

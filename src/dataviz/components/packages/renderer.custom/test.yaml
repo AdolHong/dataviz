@@ -1,0 +1,3 @@
+schema: dataviz/component-test/v1
+tests:
+  - {id: renderer.custom.lifecycle, component: renderer.custom, kind: contract, assertions: [validate, mount, update, dispose, async-await, view-scoped-error]}

@@ -187,13 +187,16 @@ async function request(url, options = {}) {
 
 function selectorTemplate(parameter, presentation = {}) {
   if (presentation.template && presentation.template !== 'auto') return presentation.template;
+  if (parameter.type === 'date_range') return 'date-range';
+  if ((parameter.path_fields || []).length) return 'cascader';
   const count = (parameter.choices || []).length;
-  if (parameter.type === 'multi_select') return count <= 8 ? 'chips' : 'searchable';
-  if (parameter.type === 'single_select') return count <= 20 ? 'dropdown' : 'searchable';
+  if (parameter.type === 'boolean') return 'segmented';
+  if (parameter.type === 'multi_select') return count > 0 && count <= 8 ? 'checkbox-group' : 'select';
+  if (parameter.type === 'single_select') return count > 0 && count <= 4 ? 'segmented' : 'select';
   return 'auto';
 }
 
-function field(parameter, name = parameter.id, presentation = {}) {
+function field(parameter, name = parameter.id, presentation = {}, behavior = {}) {
   const wrapper = document.createElement('div');
   wrapper.className = 'field';
   const label = document.createElement('label');
@@ -201,23 +204,42 @@ function field(parameter, name = parameter.id, presentation = {}) {
   label.htmlFor = inputId;
   label.textContent = parameter.label || parameter.id;
   let input;
-  if (['single_select', 'multi_select'].includes(parameter.type)) {
+  const template = selectorTemplate(parameter, presentation);
+  const enhancedBoolean = parameter.type === 'boolean' && behavior.selection === true;
+  if (['single_select', 'multi_select'].includes(parameter.type) || enhancedBoolean) {
     input = document.createElement('select');
     if (parameter.type === 'multi_select') {
       input.multiple = true;
     }
-    for (const choice of parameter.choices || []) {
+    const choices = enhancedBoolean && !(parameter.choices || []).length
+      ? [{label: 'Yes', value: true}, {label: 'No', value: false}]
+      : (parameter.choices || []);
+    if (behavior.selection === true && parameter.type !== 'multi_select') {
+      const empty = document.createElement('option');
+      empty.value = '';
+      empty.hidden = true;
+      empty.dataset.emptyOption = 'true';
+      empty.selected = parameter.default == null || parameter.default === '';
+      input.append(empty);
+    }
+    for (const choice of choices) {
       const option = document.createElement('option');
       option.value = choice.value;
       option.textContent = choice.label;
+      if (choice.group) option.dataset.group = choice.group;
+      if (choice.description) option.dataset.description = choice.description;
+      if (choice.keywords?.length) option.dataset.keywords = choice.keywords.join(' ');
       const defaults = Array.isArray(parameter.default) ? parameter.default : [parameter.default];
       option.selected = defaults.map(String).includes(String(choice.value));
       input.append(option);
     }
+    if (!input.multiple && parameter.default == null && behavior.selection !== true) {
+      input.selectedIndex = -1;
+    }
   } else {
     input = document.createElement('input');
     input.type = parameter.type === 'boolean' ? 'checkbox' : parameter.type === 'number' ? 'number' : parameter.type === 'date' ? 'date' : 'text';
-    if (parameter.type === 'date_range') input.placeholder = 'start,end';
+    if (parameter.type === 'date_range') input.dataset.selectorNative = '';
     if (parameter.type === 'boolean') input.checked = Boolean(parameter.default);
     else if (Array.isArray(parameter.default)) input.value = parameter.default.join(',');
     else input.value = parameter.default ?? '';
@@ -225,175 +247,59 @@ function field(parameter, name = parameter.id, presentation = {}) {
   input.id = inputId;
   input.name = name;
   input.dataset.type = parameter.type;
-  wrapper.append(label, input);
-  if (['single_select', 'multi_select'].includes(parameter.type)) {
-    const template = selectorTemplate(parameter, presentation);
+  wrapper.append(label);
+  if (['single_select', 'multi_select', 'date_range'].includes(parameter.type) || enhancedBoolean) {
     wrapper.classList.add('field--selector');
     if (presentation.css_class) wrapper.classList.add(...presentation.css_class.split(/\s+/).filter(Boolean));
-    if (template === 'chips' && parameter.type === 'multi_select') {
-      input.classList.add('field__native-choice');
-      wrapper.append(multiSelectChoices(input, presentation));
-    } else if (['dropdown', 'searchable'].includes(template)) {
-      input.classList.add('field__native-choice');
-      wrapper.append(choicePicker(input, {...presentation, template}));
-    }
+    const selector = document.createElement('div');
+    selector.className = 'dv-selector';
+    selector.dataset.selectorTemplate = template;
+    selector.dataset.requestedTemplate = presentation.requested_template || presentation.template || 'auto';
+    selector.dataset.autoReason = presentation.auto_reason || '';
+    selector.dataset.emptyMeansAll = String(Boolean(behavior.selection));
+    selector.dataset.required = String(Boolean(parameter.required));
+    selector.dataset.variant = presentation.variant || 'default';
+    selector.dataset.showUnavailable = String(Boolean(presentation.show_unavailable));
+    selector.dataset.searchMode = presentation.search || 'auto';
+    selector.dataset.virtualMode = presentation.virtual || 'auto';
+    selector.dataset.searchThreshold = String(presentation.search_threshold ?? 9);
+    selector.dataset.virtualThreshold = String(presentation.virtual_threshold ?? 200);
+    selector.dataset.maxVisibleTags = String(presentation.max_visible_tags ?? 2);
+    selector.dataset.maxSelected = String(presentation.max_selected || '');
+    selector.dataset.hideSelected = String(Boolean(presentation.hide_selected));
+    selector.dataset.searchPlaceholder = presentation.search_placeholder || 'Search options…';
+    selector.dataset.emptyText = presentation.empty_text || 'No matching options';
+    selector.dataset.placeholder = presentation.placeholder || 'Choose…';
+    selector.dataset.allLabel = presentation.all_label || 'All';
+    selector.dataset.selectAllLabel = presentation.select_all_label || 'Select all';
+    selector.dataset.invertLabel = presentation.invert_label || 'Invert';
+    selector.dataset.clearLabel = presentation.clear_label || 'Clear';
+    selector.dataset.pathSeparator = presentation.path_separator || ' / ';
+    selector.dataset.hierarchySelection = presentation.hierarchy_selection || 'leaf';
+    selector.dataset.checkedStrategy = presentation.checked_strategy || 'child';
+    selector.dataset.startLabel = presentation.start_label || 'Start';
+    selector.dataset.endLabel = presentation.end_label || 'End';
+    selector.dataset.min = presentation.min || '';
+    selector.dataset.max = presentation.max || '';
+    selector.dataset.allowOpenRange = String(Boolean(presentation.allow_open_range));
+    selector.dataset.presets = JSON.stringify(presentation.presets || []);
+    selector.dataset.itemHeight = String(presentation.item_height || 38);
+    selector.dataset.viewportHeight = String(presentation.viewport_height || 304);
+    selector.dataset.overscan = String(presentation.overscan || 5);
+    selector.dataset.defaultExpandDepth = String(presentation.default_expand_depth || 0);
+    selector.dataset.cascaderLevels = JSON.stringify((parameter.path_fields || []).map((field, index) => ({
+      field,
+      label: presentation.level_labels?.[index] || field,
+    })));
+    const mount = document.createElement('div');
+    mount.dataset.selectorMount = '';
+    input.classList.add('field__native-choice');
+    selector.append(input, mount);
+    wrapper.append(selector);
+  } else {
+    wrapper.append(input);
   }
   return wrapper;
-}
-
-function multiSelectChoices(select, presentation = {}) {
-  const control = document.createElement('div');
-  control.className = 'choice-control';
-  control.setAttribute('role', 'group');
-
-  const all = document.createElement('button');
-  all.type = 'button';
-  all.className = 'choice-chip choice-chip--all';
-  all.textContent = 'All';
-  all.addEventListener('click', () => {
-    if (select.disabled) return;
-    for (const option of select.options) option.selected = true;
-    sync();
-    select.dispatchEvent(new Event('change', {bubbles: true}));
-  });
-  control.append(all);
-
-  const choices = [...select.options].map((option) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'choice-chip';
-    button.textContent = option.textContent;
-    button.dataset.value = option.value;
-    button.addEventListener('click', () => {
-      if (select.disabled) return;
-      option.selected = !option.selected;
-      sync();
-      select.dispatchEvent(new Event('change', {bubbles: true}));
-    });
-    control.append(button);
-    return {button, option};
-  });
-
-  function sync() {
-    const allSelected = choices.length > 0 && choices.every(({option}) => option.selected);
-    all.classList.toggle('is-selected', allSelected);
-    all.setAttribute('aria-pressed', String(allSelected));
-    all.disabled = select.disabled;
-    for (const {button, option} of choices) {
-      button.classList.toggle('is-selected', option.selected);
-      button.setAttribute('aria-pressed', String(option.selected));
-      button.disabled = select.disabled || option.disabled;
-      button.hidden = option.disabled && !presentation.show_unavailable;
-    }
-  }
-
-  select._syncChoiceControl = sync;
-  sync();
-  return control;
-}
-
-function choicePicker(select, presentation = {}) {
-  const picker = document.createElement('div');
-  picker.className = 'choice-picker';
-  picker.dataset.choicePicker = '';
-  const trigger = document.createElement('button');
-  trigger.type = 'button';
-  trigger.className = 'choice-picker__trigger';
-  trigger.setAttribute('aria-expanded', 'false');
-  const summary = document.createElement('span');
-  const chevron = document.createElement('i');
-  chevron.textContent = '⌄';
-  trigger.append(summary, chevron);
-  const panel = document.createElement('div');
-  panel.className = 'choice-picker__panel';
-  panel.hidden = true;
-  let search = null;
-  if (presentation.template === 'searchable') {
-    search = document.createElement('input');
-    search.type = 'search';
-    search.className = 'choice-picker__search';
-    search.placeholder = presentation.search_placeholder || 'Search options…';
-    panel.append(search);
-  }
-  const options = document.createElement('div');
-  options.className = 'choice-picker__options';
-  const empty = document.createElement('div');
-  empty.className = 'choice-picker__empty';
-  empty.textContent = presentation.empty_text || 'No matching options';
-  empty.hidden = true;
-  const rows = [...select.options].map(option => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'choice-picker__option';
-    button.dataset.value = option.value;
-    button.innerHTML = `<span>${escapeHtml(option.textContent)}</span><i>✓</i>`;
-    button.addEventListener('click', () => {
-      if (select.disabled || option.disabled) return;
-      if (select.multiple) option.selected = !option.selected;
-      else {
-        [...select.options].forEach(item => { item.selected = item === option; });
-        close();
-      }
-      sync();
-      select.dispatchEvent(new Event('change', {bubbles: true}));
-    });
-    options.append(button);
-    return {button, option};
-  });
-  panel.append(options, empty);
-  if (select.multiple) {
-    const footer = document.createElement('footer');
-    const all = document.createElement('button');
-    all.type = 'button';
-    all.textContent = 'Select all available';
-    const count = document.createElement('small');
-    all.addEventListener('click', () => {
-      [...select.options].forEach(option => { option.selected = !option.disabled; });
-      sync();
-      select.dispatchEvent(new Event('change', {bubbles: true}));
-    });
-    footer.append(all, count);
-    panel.append(footer);
-    picker._availableCount = count;
-  }
-  const close = () => {
-    panel.hidden = true;
-    trigger.setAttribute('aria-expanded', 'false');
-  };
-  trigger.addEventListener('click', () => {
-    document.querySelectorAll('[data-choice-picker]').forEach(item => { if (item !== picker) item._close?.(); });
-    panel.hidden = !panel.hidden;
-    trigger.setAttribute('aria-expanded', String(!panel.hidden));
-    if (!panel.hidden) search?.focus();
-  });
-  search?.addEventListener('input', sync);
-  function sync() {
-    const query = (search?.value || '').trim().toLocaleLowerCase();
-    let visible = 0;
-    const available = rows.filter(({option}) => !option.disabled);
-    rows.forEach(({button, option}) => {
-      const matches = !query || `${option.textContent} ${option.value}`.toLocaleLowerCase().includes(query);
-      const unavailable = option.disabled;
-      button.hidden = !matches || (unavailable && !presentation.show_unavailable);
-      button.disabled = select.disabled || unavailable;
-      button.classList.toggle('is-selected', option.selected && !unavailable);
-      button.classList.toggle('is-unavailable', unavailable);
-      button.setAttribute('aria-pressed', String(option.selected && !unavailable));
-      if (!button.hidden) visible += 1;
-    });
-    empty.hidden = visible > 0;
-    const selected = available.filter(({option}) => option.selected);
-    summary.textContent = select.multiple
-      ? selected.length === available.length && available.length ? `All (${available.length})` : `${selected.length} selected`
-      : (selected[0]?.option.textContent || 'Choose…');
-    if (picker._availableCount) picker._availableCount.textContent = `${available.length} available`;
-    trigger.disabled = select.disabled;
-  }
-  picker._close = close;
-  select._syncChoiceControl = sync;
-  picker.append(trigger, panel);
-  sync();
-  return picker;
 }
 
 function selectionField(control) {
@@ -402,7 +308,7 @@ function selectionField(control) {
   wrapper.dataset.origin = control.origin;
   const scopeNames = {dashboard: 'All views', section: `Section · ${control.owner_title}`, view: `View · ${control.owner_title}`};
   wrapper.innerHTML = `<div class="selection-scope__meta"><span>${escapeHtml(scopeNames[control.origin])}</span><span>${control.affected_views.length} view${control.affected_views.length === 1 ? '' : 's'}</span></div>`;
-  wrapper.append(field(control.definition, control.key, control.presentation || {}));
+  wrapper.append(field(control.definition, control.key, control.presentation || {}, {selection: true}));
   return wrapper;
 }
 
@@ -434,6 +340,7 @@ function selectDashboard(id) {
   $('#parameter-form').replaceChildren(...state.dashboard.query_parameters.map((item) => field(item)));
   const dashboardControls = state.dashboard.selections.filter((item) => item.origin === 'dashboard');
   $('#dashboard-selection-form').replaceChildren(...dashboardControls.map(selectionField));
+  window.datavizComponents?.hydrate(document);
   setFormValues($('#parameter-form'), runtime.parameterValues || runtime.committedParameters || {});
   setFormValues($('#dashboard-selection-form'), runtime.dashboardSelectionValues || {});
   updateDashboardSelectionSummary();
@@ -448,6 +355,7 @@ function selectDashboard(id) {
   setQueryState();
   setSelectionsEnabled(Boolean(runtime.runId));
   const run = runtime.runId ? `&run_id=${encodeURIComponent(runtime.runId)}` : '';
+  $('#canvas-frame').dataset.runId = runtime.runId || '';
   $('#canvas-frame').src = `/api/dashboards/${encodeURIComponent(id)}/canvas?${sessionQuery()}${run}`;
   $('#run-button').disabled = !runnable || Boolean(runtime.pendingRunId);
   $('#download-button').disabled = !runtime.runId;
@@ -458,7 +366,8 @@ function setFormValues(form, values) {
   for (const input of form.elements) {
     if (!input.name || !(input.name in values)) continue;
     const value = values[input.name];
-    if (input.dataset.type === 'boolean') input.checked = Boolean(value);
+    if (input.dataset.type === 'boolean' && input.tagName === 'SELECT') input.value = value == null ? '' : String(value);
+    else if (input.dataset.type === 'boolean') input.checked = Boolean(value);
     else if (input.multiple) {
       const selected = new Set((Array.isArray(value) ? value : [value]).map(String));
       for (const option of input.options) option.selected = selected.has(String(option.value));
@@ -480,7 +389,8 @@ function formValues(form) {
   const values = {};
   for (const input of form.elements) {
     if (!input.name) continue;
-    if (input.dataset.type === 'boolean') values[input.name] = input.checked;
+    if (input.dataset.type === 'boolean' && input.tagName === 'SELECT') values[input.name] = input.value === '' ? null : input.value === 'true';
+    else if (input.dataset.type === 'boolean') values[input.name] = input.checked;
     else if (input.multiple) values[input.name] = [...input.selectedOptions].map((item) => item.value);
     else values[input.name] = input.value;
   }
@@ -507,6 +417,11 @@ async function runDashboard() {
     runtime.queryStatus = 'running';
     runtime.queryLabel = 'Loading';
     runtime.message = 'Querying a new dataset…';
+    if (state.dashboard?.id === dashboardId) {
+      const frame = $('#canvas-frame');
+      frame.dataset.runId = response.run_id;
+      frame.src = `/api/dashboards/${encodeURIComponent(dashboardId)}/canvas?${sessionQuery()}&run_id=${encodeURIComponent(response.run_id)}`;
+    }
     listen(response.run_id, dashboardId);
   } catch (error) {
     runtime.queryStatus = 'failed';
@@ -526,7 +441,7 @@ function listen(runId, dashboardId) {
   runtime.eventSource?.close();
   const source = new EventSource(`/api/runs/${runId}/events?${sessionQuery()}`);
   runtime.eventSource = source;
-  const names = ['node_queued','node_started','node_succeeded','node_failed','node_blocked'];
+  const names = ['node_queued','node_started','node_retrying','node_succeeded','node_failed','node_blocked'];
   for (const name of names) source.addEventListener(name, (message) => updateEvent(JSON.parse(message.data), dashboardId));
   source.addEventListener('run_ready', () => finishRun(runId, dashboardId));
   source.addEventListener('run_failed', () => finishRun(runId, dashboardId));
@@ -536,11 +451,11 @@ function listen(runId, dashboardId) {
 
 function updateEvent(event, dashboardId) {
   const runtime = runtimeFor(dashboardId);
-  const statusMap = {node_queued:'queued', node_started:'running', node_succeeded:'succeeded', node_failed:'failed', node_blocked:'blocked'};
+  const statusMap = {node_queued:'queued', node_started:'running', node_retrying:'running', node_succeeded:'succeeded', node_failed:'failed', node_blocked:'blocked'};
   runtime.nodeStatuses[event.node_id] = statusMap[event.event] || 'not_run';
   if (event.error) runtime.nodeErrors[event.node_id] = event.error;
   const label = event.node_id ? event.node_id.replace(':', ' · ') : 'run';
-  runtime.message = `${label} — ${statusMap[event.event] || event.event}${event.duration_ms ? ` · ${event.duration_ms}ms` : ''}`;
+  runtime.message = event.message || `${label} — ${statusMap[event.event] || event.event}${event.duration_ms ? ` · ${event.duration_ms}ms` : ''}`;
   if (state.dashboard?.id === dashboardId) {
     const node = document.querySelector(`[data-node-id="${CSS.escape(event.node_id)}"]`);
     if (node) node.dataset.status = runtime.nodeStatuses[event.node_id];
@@ -574,7 +489,11 @@ async function finishRun(runId, dashboardId) {
     setSelectionsEnabled(Boolean(runtime.runId));
     setQueryState(record.result ? null : runtime.message);
     if (record.result) {
-      $('#canvas-frame').src = `/api/dashboards/${encodeURIComponent(dashboardId)}/canvas?${sessionQuery()}&run_id=${encodeURIComponent(runId)}`;
+      const frame = $('#canvas-frame');
+      if (frame.dataset.runId !== runId) {
+        frame.dataset.runId = runId;
+        frame.src = `/api/dashboards/${encodeURIComponent(dashboardId)}/canvas?${sessionQuery()}&run_id=${encodeURIComponent(runId)}`;
+      }
     }
   }
 }
@@ -632,13 +551,11 @@ function updateDashboardSelectionSummary() {
 }
 
 function closeHeaderPopovers(except = null) {
-  document.querySelectorAll('[data-header-popover][open]').forEach((details) => {
-    if (details !== except) details.open = false;
-  });
+  window.datavizComponents?.overlay.closeAll({except, group: 'popover'});
 }
 
 function applyViewSelections() {
-  if (!state.runId) return;
+  if (!state.runId && !state.pendingRunId) return;
   $('#canvas-frame').contentWindow?.postMessage(
     {type: 'dataviz:set-selections', selections: selections()},
     window.location.origin,
@@ -1023,7 +940,9 @@ $('#download-button').addEventListener('click', () => {
     window.location.href = `/api/dashboards/${encodeURIComponent(state.dashboard.id)}/report?${sessionQuery()}&run_id=${encodeURIComponent(state.runId)}&selections=${initialSelections}`;
   }
 });
-$('#canvas-frame').addEventListener('load', applyViewSelections);
+$('#canvas-frame').addEventListener('load', () => {
+  applyViewSelections();
+});
 $('#parameter-form').addEventListener('input', () => setQueryState());
 $('#parameter-form').addEventListener('input', () => {
   if (activeRuntime()) activeRuntime().parameterValues = parameters();
@@ -1046,27 +965,16 @@ $('#dashboard-selection-form').addEventListener('change', () => {
   updateDashboardSelectionSummary();
   scheduleViewSelections();
 });
-document.querySelectorAll('[data-header-popover]').forEach((details) => {
-  details.addEventListener('toggle', () => {
-    if (details.open) closeHeaderPopovers(details);
-  });
-});
 document.addEventListener('click', (event) => {
-  if (!event.target.closest('[data-header-popover]')) closeHeaderPopovers();
-  if (!event.target.closest('[data-choice-picker]')) {
-    document.querySelectorAll('[data-choice-picker]').forEach(item => item._close?.());
-  }
   if (!event.target.closest('#nav-context-menu')) hideNavMenu();
 });
-document.addEventListener('keydown', (event) => {
-  if (event.key !== 'Escape') return;
-  const open = document.querySelector('[data-header-popover][open]');
-  document.querySelectorAll('[data-choice-picker]').forEach(item => item._close?.());
-  closeHeaderPopovers();
-  open?.querySelector('summary')?.focus();
-});
 window.addEventListener('message', (event) => {
-  if (event.origin !== window.location.origin || event.data?.type !== 'dataviz:selections-changed') return;
+  if (event.origin !== window.location.origin) return;
+  if (event.data?.type === 'dataviz:canvas-interaction') {
+    closeHeaderPopovers();
+    return;
+  }
+  if (event.data?.type !== 'dataviz:selections-changed') return;
   state.canvasSelections = {...state.canvasSelections, ...(event.data.selections || {})};
   saveTabUiState();
 });
@@ -1089,5 +997,8 @@ $('.rail').addEventListener('contextmenu', (event) => {
   if (event.target.closest('#dashboard-nav, #nav-trash')) return;
   showNavMenu(event, null);
 });
-window.addEventListener('blur', hideNavMenu);
+window.addEventListener('blur', () => {
+  hideNavMenu();
+  closeHeaderPopovers();
+});
 boot().catch((error) => { document.body.innerHTML = `<pre>${escapeHtml(error.stack || error.message)}</pre>`; });

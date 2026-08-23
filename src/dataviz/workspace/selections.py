@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Literal
 
 from dataviz.errors import ExecutionFailure
-from dataviz.workspace.models import DashboardDefinition, SelectionBindingDefinition, SelectionDefinition, ViewDefinition
+from dataviz.workspace.models import DashboardDefinition, SelectionBindingDefinition, SelectionDefinition
 
 SelectionOrigin = Literal["dashboard", "section", "view"]
 
@@ -23,9 +22,6 @@ class EffectiveSelection:
                 "definition": self.definition.model_dump(mode="json"),
                 "binding": self.binding.model_dump(mode="json")}
 
-def view_definition(value: str | ViewDefinition) -> ViewDefinition:
-    return ViewDefinition(widget=value) if isinstance(value, str) else value
-
 def canonical_selection_key(origin: SelectionOrigin, owner_id: str, selection_id: str) -> str:
     return f"{origin}:{owner_id}/{selection_id}"
 
@@ -37,58 +33,51 @@ def compile_selection_contract(dashboard: DashboardDefinition) -> dict[str, list
                            SelectionBindingDefinition(field=item.field or item.id))
         for item in dashboard.dashboard_selections
     ]
+    section_for_view = {
+        view_id: section
+        for section in dashboard.sections
+        for view_id in section.views
+    }
     contract: dict[str, list[EffectiveSelection]] = {}
-    section_views: set[str] = set()
-    declarative_views = {item.id: item for item in dashboard.views}
-    for section in dashboard.sections:
-        section_selections = [
-            EffectiveSelection(canonical_selection_key("section", section.id, item.id), item.id,
-                               "section", section.id, item,
-                               SelectionBindingDefinition(field=item.field or item.id))
-            for item in section.selections
-        ]
-        for raw_view in section.views:
-            view = view_definition(raw_view)
-            declarative = declarative_views.get(view.widget)
-            section_views.add(view.widget)
-            selections = list(dashboard_selections) + list(section_selections)
-            local = list(declarative.selections) if declarative else []
-            local.extend(view.selections)
-            selections.extend(
-                EffectiveSelection(canonical_selection_key("view", view.widget, item.id), item.id,
-                                   "view", view.widget, item,
-                                   SelectionBindingDefinition(field=item.field or item.id))
-                for item in local
-            )
-            bindings = {
-                name: SelectionBindingDefinition(field=value) if isinstance(value, str) else value
-                for name, value in {**(declarative.selection_bindings if declarative else {}),
-                                    **view.selection_bindings}.items()
-            }
-            contract[view.widget] = [
-                EffectiveSelection(item.key, item.id, item.origin, item.owner_id, item.definition,
-                                   bindings.get(item.id, item.binding))
-                for item in selections
-            ]
-    for widget_path in dashboard.widgets:
-        view_id = Path(widget_path).parent.name
-        if view_id not in section_views:
-            contract.setdefault(view_id, list(dashboard_selections))
     for view in dashboard.views:
-        if view.id in section_views:
-            continue
         selections = list(dashboard_selections)
+        section = section_for_view.get(view.id)
+        if section:
+            selections.extend(
+                EffectiveSelection(
+                    canonical_selection_key("section", section.id, item.id),
+                    item.id,
+                    "section",
+                    section.id,
+                    item,
+                    SelectionBindingDefinition(field=item.field or item.id),
+                )
+                for item in section.selections
+            )
         selections.extend(
-            EffectiveSelection(canonical_selection_key("view", view.id, item.id), item.id,
-                               "view", view.id, item,
-                               SelectionBindingDefinition(field=item.field or item.id))
+            EffectiveSelection(
+                canonical_selection_key("view", view.id, item.id),
+                item.id,
+                "view",
+                view.id,
+                item,
+                SelectionBindingDefinition(field=item.field or item.id),
+            )
             for item in view.selections
         )
-        bindings = {name: SelectionBindingDefinition(field=value) if isinstance(value, str) else value
-                    for name, value in view.selection_bindings.items()}
+        bindings = {
+            name: SelectionBindingDefinition(field=value) if isinstance(value, str) else value
+            for name, value in view.selection_bindings.items()
+        }
         contract[view.id] = [
-            EffectiveSelection(item.key, item.id, item.origin, item.owner_id, item.definition,
-                               bindings.get(item.id, item.binding))
+            EffectiveSelection(
+                item.key,
+                item.id,
+                item.origin,
+                item.owner_id,
+                item.definition,
+                bindings.get(item.id, item.binding),
+            )
             for item in selections
         ]
     return contract

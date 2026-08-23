@@ -1,0 +1,8 @@
+schema: dataviz/source/v1
+kind: source
+id: fast
+type: python
+code: fast.py
+timeout_seconds: 10
+cache: {mode: none}
+

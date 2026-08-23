@@ -1,0 +1,121 @@
+name: Quality, browser and distributions
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python-contracts:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+      - name: Install without editable .pth
+        run: uv sync --python ${{ matrix.python }} --extra dev --no-editable
+      - name: Verify installed CLI and generated contracts
+        run: |
+          uv run --no-editable dataviz --help
+          uv run --no-editable dataviz version
+          uv run --no-editable dataviz schemas dashboard --format json
+          uv run --no-editable dataviz components --check --format json
+      - name: Unit and contract tests
+        run: uv run --no-editable pytest -m "not e2e"
+
+  macos-noneditable:
+    name: macOS non-editable install
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --python 3.12 --extra dev --no-editable
+      - name: Repeated CLI imports and contracts
+        run: |
+          uv run --no-editable dataviz --help
+          uv run --no-editable dataviz --help
+          uv run --no-editable pytest -m "not e2e"
+
+  javascript-syntax:
+    name: JavaScript syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          node --check src/dataviz/server/static/canvas-runtime.js
+          node --check src/dataviz/server/static/declarative-runtime.js
+          node --check src/dataviz/server/static/browser-transform-worker.js
+          node --check src/dataviz/server/static/runtime-web-component-adapter.js
+
+  browsers:
+    name: Browser ${{ matrix.browser }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --python 3.12 --extra dev --no-editable
+      - run: uv run --no-editable playwright install --with-deps ${{ matrix.browser }}
+      - run: uv run --no-editable pytest tests/e2e
+        env:
+          DATAVIZ_BROWSER: ${{ matrix.browser }}
+
+  distributions:
+    name: wheel, sdist and pip ZIP
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Build all formats
+        run: |
+          uv build
+          uv run --python 3.12 --no-project python scripts/build_release_zip.py
+      - name: Clean-install and smoke-test each format
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifacts=("$PWD"/dist/*.whl "$PWD"/dist/*.tar.gz "$PWD"/dist/workspace-dataviz-*.zip)
+          index=0
+          for artifact in "${artifacts[@]}"; do
+            index=$((index + 1))
+            environment="$RUNNER_TEMP/package-$index"
+            workspace="$RUNNER_TEMP/workspace-$index"
+            uv venv "$environment" --python 3.12
+            uv pip install --python "$environment/bin/python" "$artifact"
+            "$environment/bin/dataviz" version
+            "$environment/bin/dataviz" schemas dashboard --format json
+            "$environment/bin/dataviz" components --check --format json
+            "$environment/bin/dataviz" init "$workspace"
+            "$environment/bin/dataviz" validate "$workspace"
+            "$environment/bin/dataviz" report "$workspace" hello --output "$workspace/report.html"
+            test -s "$workspace/report.html"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workspace-dataviz-distributions
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256

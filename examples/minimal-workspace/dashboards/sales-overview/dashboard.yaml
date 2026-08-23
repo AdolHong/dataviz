@@ -35,7 +35,7 @@ dashboard_selections:
 views:
   - id: total-revenue
     title: 总收入
-    source: sales
+    input: sales
     template: metric
     value: revenue
     label: 当前选择范围
@@ -43,7 +43,7 @@ views:
 
   - id: total-orders
     title: 总订单
-    source: sales
+    input: sales
     template: metric
     value: orders
     label: 当前选择范围
@@ -51,7 +51,7 @@ views:
 
   - id: revenue-trend
     title: 收入趋势
-    source: sales
+    input: sales
     template: line
     x: day
     y: revenue
@@ -60,7 +60,7 @@ views:
 
   - id: region-comparison
     title: 区域收入
-    source: sales
+    input: sales
     template: bar
     x: region
     y: revenue
@@ -68,7 +68,7 @@ views:
 
   - id: sales-detail
     title: 展示型销售明细
-    source: sales
+    input: sales
     template: table
     columns: [day, region, revenue, orders]
     limit: 50
@@ -81,7 +81,7 @@ views:
 
   - id: sales-perspective
     title: 可透视销售明细
-    source: sales
+    input: sales
     template: perspective
     columns: [day, region, revenue, orders]
     config:

@@ -1,0 +1,174 @@
+schema: dataviz/dashboard/v1
+kind: dashboard
+id: component-gallery
+title: Component Gallery
+subtitle: Runtime-native specimens
+description: Every specimen uses the same DSL, component behavior and Renderer lifecycle as a real Dashboard.
+
+sources:
+  - id: gallery-data
+    kind: source
+    name: Gallery dataset
+    type: file
+    path: data/gallery.csv
+    format: csv
+
+dashboard_selections:
+  - id: region
+    field: region
+    type: multi_select
+    label: Region tags
+    default: [East, South, North]
+    choices:
+      - {label: East, value: East}
+      - {label: South, value: South}
+      - {label: North, value: North}
+
+views:
+  - {id: total-revenue, title: Revenue, template: metric, input: gallery-data, value: revenue, aggregate: sum, label: selected revenue}
+  - {id: total-orders, title: Orders, template: metric, input: gallery-data, value: orders, aggregate: sum, label: selected orders}
+  - {id: revenue-line, title: Line · Plotly, template: line, input: gallery-data, x: month, y: revenue, series: region, aggregate: sum}
+  - {id: category-bars, title: Bar · ECharts, template: bar, engine: echarts, input: gallery-data, x: category, y: revenue, series: region, aggregate: sum}
+  - {id: stacked-orders, title: Stacked bar, template: stacked-bar, engine: echarts, input: gallery-data, x: month, y: orders, series: category, aggregate: sum}
+  - {id: category-share, title: Pie, template: pie, engine: echarts, input: gallery-data, label: category, value: revenue, aggregate: sum}
+  - {id: revenue-scatter, title: Scatter, template: scatter, input: gallery-data, x: orders, y: revenue, series: region, size: satisfaction}
+  - {id: revenue-heatmap, title: Heatmap, template: heatmap, engine: echarts, input: gallery-data, x: month, y: region, z: revenue, aggregate: sum}
+  - {id: store-radar, title: Radar, template: radar, engine: echarts, input: gallery-data, label: store_id, columns: [revenue, orders, satisfaction], limit: 4}
+  - id: detail-table
+    title: Themeable table + View selectors
+    template: table
+    input: gallery-data
+    columns: [date, month, region, category, product, province, city, district, store_id, revenue, orders]
+    limit: 100
+    selections:
+      - id: product
+        field: product
+        type: multi_select
+        label: Search products
+        choices:
+          - {label: Atlas, value: Atlas, group: Core, description: Established line}
+          - {label: Beacon, value: Beacon, group: Core, description: Established line}
+          - {label: Comet, value: Comet, group: New, description: Growth line}
+          - {label: Delta, value: Delta, group: New, description: Growth line}
+      - id: category-focus
+        field: category
+        type: single_select
+        label: Category focus
+        default: Hardware
+        choices:
+          - {label: Hardware, value: Hardware}
+          - {label: Software, value: Software}
+      - id: location
+        field: district
+        path_fields: [province, city, district]
+        type: multi_select
+        label: Province / city / district
+      - id: location-tree
+        field: district
+        path_fields: [province, city, district]
+        type: multi_select
+        label: Location tree
+      - id: date-window
+        field: date
+        type: date_range
+        label: Date window
+        default: ["2026-01-01", "2026-03-01"]
+      - id: store-virtual
+        field: store_id
+        type: multi_select
+        label: Virtualized stores
+        default: [S01, S02, S03, S04]
+        choices:
+          - {label: Store S01, value: S01}
+          - {label: Store S02, value: S02}
+          - {label: Store S03, value: S03}
+          - {label: Store S04, value: S04}
+  - {id: pivot-table, title: Perspective, template: perspective, input: gallery-data, columns: [month, region, category, revenue, orders]}
+  - id: narrative
+    title: Markdown
+    template: markdown
+    text: "A compact narrative View uses the same container contract as a chart.\n\nUse it for assumptions, decisions and analysis notes."
+  - id: image-specimen
+    title: Image
+    template: image
+    url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 420'%3E%3Crect width='800' height='420' fill='%2317211d'/%3E%3Ccircle cx='610' cy='120' r='82' fill='%2369dca5'/%3E%3Cpath d='M0 350L250 130L430 290L800 40V420H0Z' fill='%23e2592a'/%3E%3Ctext x='44' y='78' fill='%23fffdf6' font-family='serif' font-size='42'%3EIMAGE VIEW%3C/text%3E%3C/svg%3E"
+  - {id: custom-specimen, title: Custom renderer, template: custom, renderer: gallery.spark, input: gallery-data}
+  - {id: all-store-trend, title: Store trend blueprint, template: line, input: gallery-data, x: month, y: revenue, aggregate: sum}
+  - {id: selected-store-trend, title: Selected store blueprint, template: line, input: gallery-data, x: month, y: revenue, aggregate: sum}
+
+sections:
+  - id: metrics
+    title: Metric band
+    description: Compact scalar Renderer states.
+    template: band
+    views: [total-revenue, total-orders]
+
+  - id: trends
+    title: Cartesian and composition
+    description: Section Selection demonstrates a compact selection control.
+    template: grid
+    selections:
+      - id: category
+        field: category
+        type: multi_select
+        label: Category select
+        default: [Hardware, Software]
+        choices:
+          - {label: Hardware, value: Hardware}
+          - {label: Software, value: Software}
+    views: [revenue-line, category-bars, stacked-orders, category-share]
+
+  - id: relationships
+    title: Relationships
+    template: grid
+    views: [revenue-scatter, revenue-heatmap, store-radar]
+
+  - id: analysis
+    title: Analysis tables
+    description: Plain Table remains themeable; Perspective owns pivot interaction.
+    template: comparison
+    views: [detail-table, pivot-table]
+
+  - id: content
+    title: Content and extension points
+    template: grid
+    views: [narrative, image-specimen, custom-specimen]
+
+  - id: all-stores
+    title: Small multiples
+    description: One View blueprint repeated from a shared Dataset.
+    template: small-multiples
+    columns: 2
+    views: [all-store-trend]
+    repeat:
+      view: all-store-trend
+      by: [store_id]
+      title: "Store {store_id}"
+
+  - id: selected-stores
+    title: Selection gallery
+    description: Search first, then create only selected repeated Views.
+    template: selection-gallery
+    columns: 2
+    selections:
+      - id: stores
+        field: store_id
+        type: multi_select
+        label: Stores
+        default: [S01, S03]
+        choices:
+          - {label: Store S01, value: S01}
+          - {label: Store S02, value: S02}
+          - {label: Store S03, value: S03}
+          - {label: Store S04, value: S04}
+    views: [selected-store-trend]
+    repeat:
+      view: selected-store-trend
+      by: [store_id]
+      selection: stores
+      title: "Selected {store_id}"
+      empty_text: Choose stores to create comparison charts.
+
+canvas:
+  scripts: [assets/component-stories.js, assets/gallery-renderer.js]
+  client_libraries: [plotly, echarts, perspective]

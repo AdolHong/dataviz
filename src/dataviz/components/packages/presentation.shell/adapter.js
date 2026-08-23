@@ -1,0 +1,1 @@
+/* Layout and Theme adapters are CSS contracts applied by CanvasRenderer. */

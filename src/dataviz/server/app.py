@@ -4,20 +4,25 @@ import asyncio
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.middleware.gzip import GZipMiddleware
 
 from dataviz.artifacts import ArtifactStore
+from dataviz.components import component_runtime_assets
 from dataviz.errors import WorkspaceError
 from dataviz.execution.results import RunResult
+from dataviz.execution.references import parse_output_reference
 from dataviz.rendering import CanvasRenderer
 from dataviz.server.manager import RunManager
 from dataviz.workspace import load_workspace, validate_workspace
 from dataviz.workspace.selections import compile_selection_contract, resolve_selection_values
+from dataviz.workspace.selector_templates import resolve_selector_presentation
 from dataviz.workspace.navigation import NavigationEditor
 
 
@@ -49,9 +54,45 @@ def create_app(workspace_path: str | Path) -> FastAPI:
     renderer = CanvasRenderer(workspace)
     navigation_editor = NavigationEditor(workspace.root)
     app = FastAPI(title=f"Dataviz · {workspace.definition.title}")
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
     app.state.workspace = workspace
     app.state.manager = manager
     app.mount("/static", StaticFiles(directory=PACKAGE_ROOT / "static"), name="static")
+
+    @app.middleware("http")
+    async def disable_runtime_asset_cache(request: Request, call_next):
+        response = await call_next(request)
+        if (
+            request.url.path == "/"
+            or request.url.path.startswith("/static/")
+            or request.url.path.endswith("/canvas")
+        ):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+    def refresh_workspace() -> None:
+        """Rebuild the in-memory catalog from the filesystem source of truth."""
+        fresh = load_workspace(workspace.root)
+        workspace.definition_path = fresh.definition_path
+        workspace.definition = fresh.definition
+        workspace.dashboards = fresh.dashboards
+        workspace.catalog = fresh.catalog
+        workspace.load_diagnostics = fresh.load_diagnostics
+        workspace.navigation = fresh.navigation
+        workspace.trash = fresh.trash
+        workspace.readme = fresh.readme
+
+    def dashboard_from_disk(dashboard_id: str):
+        """Resolve a dashboard, rescanning after an external rename/delete."""
+        try:
+            dashboard = workspace.dashboard(dashboard_id)
+        except WorkspaceError:
+            refresh_workspace()
+            return workspace.dashboard(dashboard_id)
+        if dashboard.definition_path.is_file():
+            return dashboard
+        refresh_workspace()
+        return workspace.dashboard(dashboard_id)
 
     def checked_session(value: str) -> str:
         if not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", value or ""):
@@ -68,8 +109,43 @@ def create_app(workspace_path: str | Path) -> FastAPI:
 
         return Response(get_plotlyjs(), media_type="application/javascript")
 
+    @app.get("/runtime/components.css")
+    def component_styles():
+        return Response(
+            component_runtime_assets()["style"],
+            media_type="text/css",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/runtime/components.js")
+    def component_scripts():
+        assets = component_runtime_assets()
+        source = "\n".join(
+            f"/* Component Package: {item['package']} · {item['kind']} */\n{item['source']}"
+            for item in assets["scripts"]
+        )
+        return Response(
+            source,
+            media_type="application/javascript",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get("/runtime/web-component-adapter.js")
+    def web_component_adapter():
+        return Response(
+            (PACKAGE_ROOT / "static" / "runtime-web-component-adapter.js").read_text(
+                encoding="utf-8"
+            ),
+            media_type="application/javascript",
+            headers={"Cache-Control": "no-store"},
+        )
+
     @app.get("/api/workspace")
     def workspace_summary():
+        # Dashboard directory names are the navigation labels. Users and AI may
+        # copy, rename or remove them without going through this server, so the
+        # filesystem must be rescanned before publishing the tree.
+        refresh_workspace()
         diagnostics = [item.as_dict() for item in validate_workspace(workspace)]
         dashboards = []
         for entry in workspace.catalog:
@@ -78,7 +154,6 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                 "id": entry.id,
                 "canvas_name": entry.canvas_name,
                 "title": entry.title,
-                "route": entry.navigation.route if entry.navigation else None,
                 "path": entry.relative_path,
                 "status": entry.status,
                 "runnable": entry.runnable,
@@ -102,9 +177,12 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                 continue
             selection_contract = compile_selection_contract(dashboard.definition)
             section_titles = {item.id: item.title for item in dashboard.definition.sections}
-            widget_titles = {widget_id: widget.title for widget_id, (_, widget) in dashboard.widgets.items()}
+            view_titles = {
+                view_id: view.title or view_id
+                for view_id, view in dashboard.views.items()
+            }
             selection_controls = {}
-            for widget_id, effective in selection_contract.items():
+            for view_id, effective in selection_contract.items():
                 for item in effective:
                     control = selection_controls.setdefault(
                         item.key,
@@ -118,14 +196,14 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                                 if item.origin == "dashboard"
                                 else section_titles.get(item.owner_id, item.owner_id)
                                 if item.origin == "section"
-                                else widget_titles.get(item.owner_id, item.owner_id)
+                                else view_titles.get(item.owner_id, item.owner_id)
                             ),
                             "definition": item.definition.model_dump(mode="json"),
                             "presentation": _selector_presentation(dashboard, item.key, item.definition),
                             "affected_views": [],
                         },
                     )
-                    control["affected_views"].append(widget_id)
+                    control["affected_views"].append(view_id)
             dashboards.append(
                 {
                     **base,
@@ -146,8 +224,8 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                     "query_parameters": [item.model_dump(mode="json") for item in dashboard.definition.query_parameters],
                     "selections": list(selection_controls.values()),
                     "selection_contract": {
-                        widget_id: [item.as_dict() for item in effective]
-                        for widget_id, effective in selection_contract.items()
+                        view_id: [item.as_dict() for item in effective]
+                        for view_id, effective in selection_contract.items()
                     },
                     "nodes": [
                         {
@@ -159,17 +237,27 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                             "description": source.description,
                         }
                         for source_id, (_, source) in dashboard.sources.items()
+                    ] + [
+                        {
+                            "id": f"transform:{transform_id}",
+                            "local_id": transform_id,
+                            "type": "server_transform",
+                            "subtype": transform.runtime,
+                            "title": transform.name or transform_id,
+                            "description": transform.description,
+                        }
+                        for transform_id, (_, transform) in dashboard.transforms.items()
                     ],
                     "views": [
                         {
-                            "id": widget_id,
-                            "local_id": widget_id,
+                            "id": view_id,
+                            "local_id": view_id,
                             "type": "view",
-                            "subtype": "browser",
-                            "title": widget.title,
-                            "description": widget.description,
+                            "subtype": view.template,
+                            "title": view.title or view_id,
+                            "description": view.description,
                         }
-                        for widget_id, (_, widget) in dashboard.widgets.items()
+                        for view_id, view in dashboard.views.items()
                     ],
                 }
             )
@@ -180,20 +268,11 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                 "physical_navigation": True,
                 "dashboard_path_separator": "##",
             },
-            "folders": _folder_summary(workspace.definition.navigation),
-            "trash": [item.model_dump(mode="json") for item in workspace.definition.trash],
+            "folders": _folder_summary(workspace.navigation),
+            "trash": [item.model_dump(mode="json") for item in workspace.trash],
             "dashboards": dashboards,
             "diagnostics": diagnostics,
         }
-
-    def refresh_workspace() -> None:
-        fresh = load_workspace(workspace.root)
-        workspace.definition_path = fresh.definition_path
-        workspace.definition = fresh.definition
-        workspace.dashboards = fresh.dashboards
-        workspace.catalog = fresh.catalog
-        workspace.load_diagnostics = fresh.load_diagnostics
-        workspace.readme = fresh.readme
 
     def apply_navigation_change(action) -> dict[str, Any]:
         try:
@@ -250,7 +329,7 @@ def create_app(workspace_path: str | Path) -> FastAPI:
     @app.post("/api/dashboards/{dashboard_id}/runs")
     def start_run(dashboard_id: str, request: RunRequest):
         try:
-            workspace.dashboard(dashboard_id)
+            dashboard_from_disk(dashboard_id)
         except WorkspaceError as error:
             raise HTTPException(409, error.message) from error
         record = manager.start(
@@ -270,6 +349,7 @@ def create_app(workspace_path: str | Path) -> FastAPI:
             "run_id": run_id,
             "dashboard_id": record.dashboard_id,
             "status": record.status,
+            "snapshot": record.snapshot.model_dump(mode="json", by_alias=True) if record.snapshot else None,
             "result": record.result.model_dump(mode="json", by_alias=True) if record.result else None,
             "error": record.error,
             "events": [event.model_dump(mode="json") for event in record.events],
@@ -284,11 +364,11 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                     "run_id": record.run_id,
                     "dashboard_id": record.dashboard_id,
                     "status": record.status,
-                    "parameters": record.result.parameters if record.result else None,
-                    "selections": record.result.selections if record.result else None,
+                    "parameters": (record.snapshot.parameters if record.snapshot else record.requested_parameters),
+                    "selections": record.snapshot.selections if record.snapshot else None,
                     "nodes": {
                         node_id: node.status
-                        for node_id, node in (record.result.nodes.items() if record.result else [])
+                        for node_id, node in (record.snapshot.nodes.items() if record.snapshot else [])
                     },
                     "ready": record.result is not None,
                 }
@@ -320,13 +400,14 @@ def create_app(workspace_path: str | Path) -> FastAPI:
     @app.get("/api/runs/{run_id}/artifacts/{artifact_id}")
     def get_artifact(run_id: str, artifact_id: str, session_id: str):
         record = manager.get(run_id, checked_session(session_id))
-        if not record or not record.result:
+        snapshot = record.snapshot if record else None
+        if not record or not snapshot:
             raise HTTPException(404, "Run result not found")
         artifact = next(
             (
                 item
-                for node in record.result.nodes.values()
-                for item in node.artifacts
+                for node in snapshot.nodes.values()
+                for item in node.outputs.values()
                 if item.artifact_id == artifact_id
             ),
             None,
@@ -337,6 +418,102 @@ def create_app(workspace_path: str | Path) -> FastAPI:
         if not path or not path.exists() or workspace.root not in path.parents:
             raise HTTPException(404, "Artifact file not found")
         return FileResponse(path, media_type=artifact.mime_type, filename=path.name)
+
+    @app.get("/api/runs/{run_id}/outputs/{reference:path}")
+    def get_output(
+        run_id: str,
+        reference: str,
+        session_id: str,
+        output_format: Literal["auto", "json", "arrow"] = Query("auto", alias="format"),
+    ):
+        record = manager.get(run_id, checked_session(session_id))
+        snapshot = record.snapshot if record else None
+        if not record or not snapshot:
+            raise HTTPException(404, "Run snapshot not found")
+        try:
+            canonical = parse_output_reference(reference).canonical
+        except Exception as error:
+            raise HTTPException(422, str(error)) from error
+        artifact = snapshot.outputs.get(canonical)
+        if artifact is None:
+            raise HTTPException(404, "Output is not ready")
+        store = ArtifactStore(workspace.root, run_id)
+        runtime = workspace.definition.runtime
+        if artifact.kind == "table":
+            row_count = int(artifact.metadata.get("row_count", 0))
+            if row_count > runtime.max_embedded_rows:
+                raise HTTPException(
+                    413,
+                    f"Output has {row_count:,} rows; browser limit is {runtime.max_embedded_rows:,}",
+                )
+            use_arrow = output_format == "arrow" or (
+                output_format == "auto"
+                and runtime.browser_table_transport != "json"
+                and (
+                    runtime.browser_table_transport == "arrow"
+                    or row_count >= runtime.arrow_min_rows
+                )
+            )
+            if use_arrow and output_format == "arrow":
+                arrow_value = store.read_arrow_ipc(artifact)
+                if len(arrow_value) > runtime.max_embedded_bytes:
+                    raise HTTPException(
+                        413,
+                        f"Arrow Output is {len(arrow_value):,} bytes; browser limit is {runtime.max_embedded_bytes:,}",
+                    )
+                return Response(
+                    arrow_value,
+                    media_type="application/vnd.apache.arrow.stream",
+                    headers={
+                        "X-Dataviz-Reference": canonical,
+                        "X-Dataviz-Row-Count": str(row_count),
+                        "Cache-Control": "private, no-store",
+                    },
+                )
+            if use_arrow:
+                encoded_reference = "/".join(
+                    quote(part, safe="")
+                    for part in canonical.split("/")
+                )
+                return {
+                    "reference": canonical,
+                    "kind": artifact.kind,
+                    "transport": {
+                        "encoding": "arrow-ipc",
+                        "compression": "http",
+                        "url": (
+                            f"/api/runs/{run_id}/outputs/{encoded_reference}"
+                            f"?session_id={session_id}&format=arrow"
+                        ),
+                        "row_count": row_count,
+                        "schema": artifact.schema_ or [],
+                        "content_hash": artifact.content_hash,
+                    },
+                    "artifact": artifact.model_dump(mode="json", by_alias=True),
+                }
+            value = store.read_value(artifact)
+            value = json.loads(value.to_json(orient="records", date_format="iso"))
+        else:
+            value = store.read_value(artifact)
+        if isinstance(value, Path):
+            value = None
+        encoded = json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":")).encode("utf-8")
+        if len(encoded) > runtime.max_embedded_bytes:
+            raise HTTPException(
+                413,
+                f"Output is {len(encoded):,} bytes; browser limit is {runtime.max_embedded_bytes:,}",
+            )
+        return {
+            "reference": canonical,
+            "kind": artifact.kind,
+            "value": value,
+            "artifact": artifact.model_dump(mode="json", by_alias=True),
+            "artifact_url": (
+                f"/api/runs/{run_id}/artifacts/{artifact.artifact_id}?session_id={session_id}"
+                if artifact.path
+                else None
+            ),
+        }
 
     def resolve_result(
         dashboard_id: str, run_id: str | None, session_id: str
@@ -352,7 +529,7 @@ def create_app(workspace_path: str | Path) -> FastAPI:
     @app.get("/api/dashboards/{dashboard_id}/canvas", response_class=HTMLResponse)
     def dashboard_canvas(dashboard_id: str, session_id: str, run_id: str | None = None):
         try:
-            dashboard = workspace.dashboard(dashboard_id)
+            dashboard = dashboard_from_disk(dashboard_id)
         except WorkspaceError:
             try:
                 entry = workspace.catalog_entry(dashboard_id)
@@ -366,16 +543,49 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                 f"<p style='font:12px monospace;color:#d95f35'>{entry.status.upper()}</p>"
                 f"<h1>{title}</h1><p>{message}</p><code>{path}</code>"
                 "<p style='margin-top:28px;color:#68716c'>其他看板仍可正常使用。修复该看板目录后刷新页面即可。</p>"
+                "<script>['pointerdown','click'].forEach(type=>document.addEventListener(type,()=>parent.postMessage({type:'dataviz:canvas-interaction'},location.origin),true))</script>"
                 "</body></html>"
             )
-        result = resolve_result(dashboard_id, run_id, session_id)
-        if not result:
+        checked = checked_session(session_id)
+        record = manager.get(run_id, checked) if run_id else manager.latest_for(checked, dashboard_id)
+        if run_id and not record:
+            raise HTTPException(404, "Run not found in this browser-tab session")
+        if record and record.dashboard_id != dashboard_id:
+            raise HTTPException(409, "Run belongs to another dashboard")
+        result = record.snapshot if record else None
+        if not result and not record:
             return HTMLResponse(
                 "<html><body style='font-family:serif;padding:48px;background:#f3f0e7;color:#17211d'>"
                 "<p style='font:12px monospace;color:#e2592a'>CANVAS WAITING</p>"
-                f"<h1>{_escape_html(dashboard.title)}</h1><p>设置参数并运行后，结果将在这里出现。</p></body></html>"
+                f"<h1>{_escape_html(dashboard.title)}</h1><p>设置参数并运行后，结果将在这里出现。</p>"
+                "<script>['pointerdown','click'].forEach(type=>document.addEventListener(type,()=>parent.postMessage({type:'dataviz:canvas-interaction'},location.origin),true))</script>"
+                "</body></html>"
             )
-        return HTMLResponse(renderer.render(dashboard, result, asset_mode="server"))
+        if result is None:
+            result = RunResult(
+                run_id=record.run_id,
+                status="running",
+                workspace=workspace.definition.id,
+                dashboard=dashboard_id,
+                parameters=record.requested_parameters,
+            )
+        live = None
+        if record and record.result is None:
+            live = {
+                "run_id": record.run_id,
+                "session_id": checked,
+                "events_url": f"/api/runs/{record.run_id}/events?session_id={checked}",
+                "outputs_url": f"/api/runs/{record.run_id}/outputs",
+            }
+        return HTMLResponse(
+            renderer.render(
+                dashboard,
+                result,
+                asset_mode="server",
+                live=live,
+                session_id=checked,
+            )
+        )
 
     @app.get("/api/dashboards/{dashboard_id}/report")
     def download_report(
@@ -383,14 +593,16 @@ def create_app(workspace_path: str | Path) -> FastAPI:
         session_id: str,
         run_id: str | None = None,
         selection_values: str | None = Query(None, alias="selections"),
-        legacy_filter_values: str | None = Query(None, alias="filters"),
     ):
-        dashboard = workspace.dashboard(dashboard_id)
+        try:
+            dashboard = dashboard_from_disk(dashboard_id)
+        except WorkspaceError as error:
+            raise HTTPException(404, error.message) from error
         result = resolve_result(dashboard_id, run_id, session_id)
         if not result:
             raise HTTPException(409, "Dashboard has no completed run")
         export_result = result
-        supplied_values = selection_values or legacy_filter_values
+        supplied_values = selection_values
         if supplied_values:
             try:
                 supplied = json.loads(supplied_values)
@@ -438,20 +650,4 @@ def _folder_summary(
 
 def _selector_presentation(dashboard, key: str, definition) -> dict[str, Any]:
     selector = dashboard.presentation.selectors.get(key) if dashboard.presentation else None
-    result = selector.model_dump(mode="json") if selector else {
-        "template": "auto",
-        "show_unavailable": False,
-        "search_placeholder": "Search options…",
-        "empty_text": "No matching options",
-        "css_class": "",
-    }
-    if result["template"] == "auto":
-        if definition.path_fields:
-            result["template"] = "cascader"
-            return result
-        choice_count = len(definition.choices)
-        if definition.type == "multi_select":
-            result["template"] = "chips" if choice_count <= 8 else "searchable"
-        elif definition.type == "single_select":
-            result["template"] = "dropdown" if choice_count <= 20 else "searchable"
-    return result
+    return resolve_selector_presentation(definition, selector)

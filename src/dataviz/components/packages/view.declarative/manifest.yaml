@@ -1,0 +1,22 @@
+schema: dataviz/component-package/v1
+package: view.declarative
+version: 1.0.0
+category: view
+purpose: Declarative View descriptors and Renderer adapters supplied by the Canvas Runtime.
+dependencies: [runtime.overlay]
+components:
+  - {id: view.metric, purpose: Single scalar or aggregated KPI, status: stable}
+  - {id: view.line, purpose: Trend or ordered series, status: stable}
+  - {id: view.bar, purpose: Category comparison, status: stable}
+  - {id: view.stacked-bar, purpose: Part-to-whole category comparison, status: stable}
+  - {id: view.pie, purpose: Compact part-to-whole view, status: stable}
+  - {id: view.scatter, purpose: Relationship between measures, status: stable}
+  - {id: view.heatmap, purpose: Two-dimensional intensity matrix, status: stable}
+  - {id: view.radar, purpose: Compare measures across entities, status: stable}
+  - {id: view.table, purpose: Themeable presentation table, status: stable}
+  - {id: view.perspective, purpose: Interactive table sorting filtering and pivoting, status: stable}
+  - {id: view.markdown, purpose: Narrative text, status: stable}
+  - {id: view.image, purpose: Image or generated visual, status: stable}
+  - {id: view.custom, purpose: Registered custom Renderer host, status: stable}
+  - {id: view.echarts-category, purpose: ECharts category legend interaction contract, status: stable}
+runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

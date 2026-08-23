@@ -16,7 +16,3 @@ __all__ = [
     "resolve_selection_values",
     "validate_workspace",
 ]
-
-# Deprecated Python API aliases.
-compile_filter_contract = compile_selection_contract
-resolve_filter_values = resolve_selection_values

@@ -1,0 +1,7 @@
+schema: dataviz/workspace/v1
+kind: workspace
+id: browser-worker-tests
+title: Browser Worker Tests
+runtime:
+  plotly_js: bundled
+

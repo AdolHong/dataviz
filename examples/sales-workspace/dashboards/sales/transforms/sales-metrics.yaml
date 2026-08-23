@@ -1,0 +1,16 @@
+schema: dataviz/server-transform/v1
+kind: server_transform
+id: sales-metrics
+name: 销售衍生指标
+description: 从订单与目标 Dataset 生成预测轨迹和目标完成度。
+runtime: python
+code: sales_metrics.py
+entrypoint: transform
+inputs:
+  orders: source:orders/main
+  targets: source:targets/main
+outputs:
+  trend: {kind: table, description: 实际收入与预测收入轨迹}
+  completion: {kind: table, description: 各区域目标完成度}
+code_dependencies: []
+cache: {mode: session}

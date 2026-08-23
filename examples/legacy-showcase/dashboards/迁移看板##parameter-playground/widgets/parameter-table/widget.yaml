@@ -1,7 +1,0 @@
-schema: dataviz/widget/v1
-kind: widget
-id: parameter-table
-title: 当前数据集快照
-runtime: browser
-depends_on: [parameterized]
-output: {type: table}

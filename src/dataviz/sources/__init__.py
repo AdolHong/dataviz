@@ -1,11 +1,9 @@
-from dataviz.sources.file import FileSourceAdapter
-from dataviz.sources.python import PythonSourceAdapter
-from dataviz.sources.sql import SqlSourceAdapter
+from dataviz.sources.file import FileSourceRunner
+from dataviz.sources.sql import SqlSourceRunner
 
-SOURCE_ADAPTERS = {
-    "file": FileSourceAdapter(),
-    "python": PythonSourceAdapter(),
-    "sql": SqlSourceAdapter(),
+SOURCE_RUNNERS = {
+    "file": FileSourceRunner(),
+    "sql": SqlSourceRunner(),
 }
 
-__all__ = ["SOURCE_ADAPTERS"]
+__all__ = ["SOURCE_RUNNERS"]

@@ -18,7 +18,7 @@ sources:
 views:
   - id: all-store-trend
     title: 门店周度收入
-    source: store-sales
+    input: store-sales
     template: line
     engine: plotly
     x: week
@@ -30,7 +30,7 @@ views:
 
   - id: selected-store-trend
     title: 选中门店周度收入
-    source: store-sales
+    input: store-sales
     template: line
     engine: plotly
     x: week

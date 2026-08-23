@@ -1,12 +1,11 @@
 schema: dataviz/source/v1
-kind: datasource
+kind: source
 id: targets
 name: 区域目标
 description: 内存 SQLite SQL 查询
 type: sql
-connection: demo-sqlite
+adapter: demo-sqlite
 code: targets.sql
 params: [target_factor]
 cache:
   mode: session
-

@@ -1,0 +1,11 @@
+schema: dataviz/browser-transform/v1
+kind: browser_transform
+id: latest-metrics
+name: 最新季度指标
+description: 在浏览器中选取最新季度，避免为了轻量展示计算重新查询。
+code: latest_metrics.js
+entrypoint: transform
+inputs:
+  metrics: source:metrics/main
+params: []
+selections: []

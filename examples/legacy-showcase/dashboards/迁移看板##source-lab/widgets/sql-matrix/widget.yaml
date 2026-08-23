@@ -1,7 +1,0 @@
-schema: dataviz/widget/v1
-kind: widget
-id: sql-matrix
-title: DuckDB 查询明细
-runtime: browser
-depends_on: [sql-grid]
-output: {type: table}

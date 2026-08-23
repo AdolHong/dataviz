@@ -1,0 +1,8 @@
+schema: dataviz/component-story/v1
+stories:
+  - {id: view.metric.basic, component: view.metric, title: Metric, summary: Aggregated scalar state, gallery: {dashboard: component-gallery, target: "[data-view-id='total-revenue']", anchor: view-metric}}
+  - {id: view.line.plotly, component: view.line, title: Plotly line, summary: Interactive ordered series, gallery: {dashboard: component-gallery, target: "[data-view-id='revenue-line']", anchor: view-line}}
+  - {id: view.bar.echarts, component: view.bar, title: ECharts bar, summary: Category comparison with explicit legend semantics, gallery: {dashboard: component-gallery, target: "[data-view-id='category-bars']", anchor: view-bar}}
+  - {id: view.table.basic, component: view.table, title: Themeable table, summary: Plain semantic table, gallery: {dashboard: component-gallery, target: "[data-view-id='detail-table']", anchor: view-table}}
+  - {id: view.perspective.basic, component: view.perspective, title: Perspective, summary: Pivot and analytical table, gallery: {dashboard: component-gallery, target: "[data-view-id='pivot-table']", anchor: view-perspective}}
+  - {id: view.custom.basic, component: view.custom, title: Custom Renderer, summary: Lifecycle extension point, gallery: {dashboard: component-gallery, target: "[data-view-id='custom-specimen']", anchor: view-custom}}

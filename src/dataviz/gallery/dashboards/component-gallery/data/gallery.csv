@@ -1,0 +1,13 @@
+date,month,region,category,product,province,city,district,store_id,revenue,orders,satisfaction,cost
+2026-01-01,2026-01,East,Hardware,Atlas,Zhejiang,Hangzhou,Xihu,S01,128000,420,82,76000
+2026-02-01,2026-02,East,Software,Beacon,Zhejiang,Hangzhou,Binjiang,S01,142000,458,86,81000
+2026-03-01,2026-03,East,Hardware,Comet,Jiangsu,Nanjing,Xuanwu,S01,151000,481,88,85000
+2026-01-01,2026-01,South,Software,Delta,Guangdong,Shenzhen,Nanshan,S02,116000,390,79,69000
+2026-02-01,2026-02,South,Hardware,Atlas,Guangdong,Shenzhen,Futian,S02,133000,432,83,74000
+2026-03-01,2026-03,South,Software,Beacon,Guangdong,Foshan,Shunde,S02,147000,470,87,80000
+2026-01-01,2026-01,North,Hardware,Comet,Beijing,Beijing,Chaoyang,S03,104000,351,76,65000
+2026-02-01,2026-02,North,Software,Delta,Beijing,Beijing,Haidian,S03,121000,398,81,70000
+2026-03-01,2026-03,North,Hardware,Atlas,Hebei,Shijiazhuang,Changan,S03,136000,443,84,77000
+2026-01-01,2026-01,East,Software,Beacon,Shanghai,Shanghai,Pudong,S04,119000,407,80,72000
+2026-02-01,2026-02,East,Hardware,Comet,Shanghai,Shanghai,Xuhui,S04,139000,449,85,79000
+2026-03-01,2026-03,East,Software,Delta,Zhejiang,Ningbo,Yinzhou,S04,158000,502,90,88000

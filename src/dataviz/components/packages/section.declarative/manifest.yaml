@@ -1,0 +1,18 @@
+schema: dataviz/component-package/v1
+package: section.declarative
+version: 1.0.0
+category: section
+purpose: Document-flow Section composition and repeated View orchestration.
+dependencies: [runtime.selector, view.declarative]
+components:
+  - {id: section.single, purpose: One full-width View, status: stable}
+  - {id: section.stack, purpose: Full-width narrative sequence, status: stable}
+  - {id: section.grid, purpose: Equal-weight responsive Views, status: stable}
+  - {id: section.split, purpose: Primary View with a companion, status: stable}
+  - {id: section.hero-metrics, purpose: Hero chart followed by KPI cards, status: stable}
+  - {id: section.chart-and-table, purpose: Chart beside an analysis table, status: stable}
+  - {id: section.comparison, purpose: Two equal Views, status: stable}
+  - {id: section.band, purpose: Compact KPI strip, status: stable}
+  - {id: section.small-multiples, purpose: Repeat one View blueprint for every data group, status: stable}
+  - {id: section.selection-gallery, purpose: Repeat only selected data groups, status: stable}
+runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

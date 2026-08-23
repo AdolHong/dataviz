@@ -6,5 +6,5 @@
 .pulse-footer { display:flex; justify-content:space-between; gap:20px; margin-top:20px; padding-top:12px; border-top:1px solid var(--dv-ink); font:10px "DM Mono",monospace; letter-spacing:.08em; text-transform:uppercase; }
 .portable-bars{display:flex;flex-direction:column;justify-content:center;gap:18px;height:100%;padding:18px 10px}.portable-bars__row{display:grid;grid-template-columns:54px minmax(0,1fr) 48px;gap:10px;align-items:center;font:10px "DM Mono",monospace}.portable-bars__row>div{height:20px;background:#e6e1d5}.portable-bars__row i{display:block;height:100%;background:#263d33;transition:width .28s ease}.portable-bars__row strong{text-align:right;font-weight:500}
 .pulse-hero .dv-deck { max-width:54ch; }
-.pulse-lead .dv-widget,.pulse-lower .dv-widget { min-height:100%; }
+.pulse-lead .dv-view,.pulse-lower .dv-view { min-height:100%; }
 @media(max-width:980px){.pulse-lead,.pulse-lower{grid-template-columns:1fr}.pulse-number{display:none}.pulse-wide,.pulse-narrow{min-height:360px}}

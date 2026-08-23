@@ -4,6 +4,8 @@ import time
 import shutil
 from pathlib import Path
 
+import pandas as pd
+import pyarrow as pa
 import yaml
 
 from fastapi.testclient import TestClient
@@ -11,6 +13,7 @@ from fastapi.testclient import TestClient
 from dataviz.server import create_app
 from dataviz.server.manager import RunManager
 from dataviz.execution.cache import NodeCache
+from dataviz.sources import SOURCE_RUNNERS
 from dataviz.workspace import load_workspace
 from dataviz.workspace.models import CacheDefinition
 
@@ -18,6 +21,7 @@ from dataviz.workspace.models import CacheDefinition
 ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE = ROOT / "examples" / "sales-workspace"
 MINIMAL_WORKSPACE = ROOT / "examples" / "minimal-workspace"
+REPEAT_WORKSPACE = ROOT / "examples" / "repeat-workspace"
 SESSION_A = "tab_session_a123"
 SESSION_B = "tab_session_b456"
 
@@ -69,7 +73,7 @@ def test_server_run_and_canvas():
     )
     assert canvas.status_code == 200
     assert "FIELD NOTE / 026" in canvas.text
-    assert '"portable": {"sources": {"orders": [' in canvas.text
+    assert '"portable": {"outputs": {"source:orders/main": [' in canvas.text
     assert "PORTABLE ANALYSIS" not in canvas.text
     report = client.get(
         f"/api/dashboards/sales/report?run_id={run_id}",
@@ -85,7 +89,74 @@ def test_server_run_and_canvas():
     assert '"region": "West"' in report.text
 
 
+def test_server_streams_large_tables_as_gzipped_arrow_without_json_materialization():
+    client = TestClient(create_app(REPEAT_WORKSPACE))
+    started = client.post(
+        "/api/dashboards/store-performance/runs",
+        json={"session_id": SESSION_A, "parameters": {}, "refresh": True},
+    ).json()
+    run_id = started["run_id"]
+    for _ in range(120):
+        record = client.get(
+            f"/api/runs/{run_id}", params={"session_id": SESSION_A}
+        ).json()
+        if record["status"] in {"success", "partial", "failed"}:
+            break
+        time.sleep(0.05)
+    assert record["status"] == "success"
+
+    metadata = client.get(
+        f"/api/runs/{run_id}/outputs/source:store-sales/main",
+        params={"session_id": SESSION_A},
+    )
+    assert metadata.status_code == 200
+    transport = metadata.json()["transport"]
+    assert transport["encoding"] == "arrow-ipc"
+    assert transport["row_count"] == 1200
+    assert "value" not in metadata.json()
+
+    arrow = client.get(transport["url"])
+    assert arrow.status_code == 200
+    assert arrow.headers["content-type"].startswith("application/vnd.apache.arrow.stream")
+    assert arrow.headers["content-encoding"] == "gzip"
+    table = pa.ipc.open_stream(arrow.content).read_all()
+    assert table.num_rows == 1200
+
+    canvas = client.get(
+        f"/api/dashboards/store-performance/canvas?run_id={run_id}",
+        params={"session_id": SESSION_A},
+    )
+    assert '"output_transports": {"source:store-sales/main": {' in canvas.text
+    assert '"store_id": "S001"' not in canvas.text
+
+
+def test_server_rescans_physical_dashboard_names_without_aliases(tmp_path: Path):
+    root = tmp_path / "workspace"
+    shutil.copytree(WORKSPACE, root)
+    client = TestClient(create_app(root))
+
+    original = root / "dashboards" / "sales"
+    renamed = root / "dashboards" / "团队分析##销售看板"
+    original.rename(renamed)
+
+    # The app was created before the external rename. Canvas resolution and
+    # navigation must still recover from the filesystem without a restart.
+    canvas = client.get(
+        "/api/dashboards/sales/canvas",
+        params={"session_id": SESSION_A},
+    )
+    assert canvas.status_code == 200
+    assert "销售脉搏" in canvas.text
+
+    summary = client.get("/api/workspace").json()
+    dashboard = next(item for item in summary["dashboards"] if item["id"] == "sales")
+    assert dashboard["canvas_name"] == "销售看板"
+    assert dashboard["logical_path"] == "团队分析/销售看板"
+    assert dashboard["path"].endswith("团队分析##销售看板")
+
+
 def test_server_app_selections_are_browser_only():
+    template = (ROOT / "src" / "dataviz" / "server" / "templates" / "index.html").read_text()
     script = (ROOT / "src" / "dataviz" / "server" / "static" / "app.js").read_text()
     query_block = script[script.index("async function runDashboard"):script.index("function listen")]
     assert "session_id: state.sessionId" in query_block
@@ -93,6 +164,10 @@ def test_server_app_selections_are_browser_only():
     assert "dataviz:set-selections" in script
     assert "dashboardStates: new Map()" in script
     assert "BroadcastChannel" in script
+    assert "dataviz:canvas-interaction" in script
+    assert "window.addEventListener('message'" in script
+    assert "closeHeaderPopovers();" in script
+    assert "/static/app.js?v=" in template
     select_block = script[script.index("function selectDashboard"):script.index("function parameters")]
     assert "eventSource.close()" not in select_block
 
@@ -112,7 +187,7 @@ def test_server_sidebar_is_resizable_collapsible_and_tab_local():
     assert "--sidebar-width" in style
 
 
-def test_server_ignores_stale_legacy_entries_and_exposes_local_additions(tmp_path: Path):
+def test_server_diagnoses_removed_navigation_field_and_exposes_physical_dashboards(tmp_path: Path):
     root = tmp_path / "workspace"
     shutil.copytree(WORKSPACE, root)
     shutil.copytree(root / "dashboards" / "sales", root / "dashboards" / "local-copy")
@@ -132,12 +207,17 @@ def test_server_ignores_stale_legacy_entries_and_exposes_local_additions(tmp_pat
     client = TestClient(create_app(root))
     response = client.get("/api/workspace")
     assert response.status_code == 200
-    dashboards = {item["id"]: item for item in response.json()["dashboards"]}
+    payload = response.json()
+    dashboards = {item["id"]: item for item in payload["dashboards"]}
     assert "gone" not in dashboards
     assert dashboards["local-copy"]["discovered"] is True
     assert dashboards["local-copy"]["canvas_name"] == "local-copy"
     assert dashboards["local-copy"]["title"] == "Local copy"
     assert dashboards["local-copy"]["logical_path"] == "local-copy"
+    assert any(
+        item["code"] == "workspace_definition_invalid"
+        for item in payload["diagnostics"]
+    )
 
 
 def test_server_recovers_from_invalid_workspace_yaml(tmp_path: Path):
@@ -257,6 +337,145 @@ def test_run_ready_is_emitted_after_result_is_available():
     names = [event.event for event in record.events]
     assert "run_completed" in names
     assert names[-1] == "run_ready"
+
+
+def test_fast_dag_branch_publishes_output_before_slow_branch_finishes(
+    tmp_path: Path, monkeypatch
+):
+    root = tmp_path / "progressive"
+    dashboard_root = root / "dashboards" / "progressive"
+    (dashboard_root / "data").mkdir(parents=True)
+    (dashboard_root / "transforms").mkdir()
+    (root / "workspace.yaml").write_text(
+        "schema: dataviz/workspace/v1\nkind: workspace\nid: progressive\ntitle: Progressive\n",
+        encoding="utf-8",
+    )
+    (dashboard_root / "dashboard.yaml").write_text(
+        """schema: dataviz/dashboard/v1
+kind: dashboard
+id: progressive
+title: Progressive branches
+sources:
+  - {id: fast, kind: source, type: file, path: data/fast.csv, format: csv}
+  - {id: slow-left, kind: source, type: file, path: data/slow-left.csv, format: csv}
+  - {id: slow-right, kind: source, type: file, path: data/slow-right.csv, format: csv}
+  - {id: unused, kind: source, type: file, path: data/unused.csv, format: csv}
+server_transforms: [transforms/combine.yaml]
+views:
+  - {id: fast-view, title: Fast, template: table, input: fast}
+  - {id: slow-view, title: Slow, template: table, input: transform:combine/main}
+sections:
+  - {id: results, title: Results, template: stack, views: [fast-view, slow-view]}
+""",
+        encoding="utf-8",
+    )
+    (dashboard_root / "transforms" / "combine.yaml").write_text(
+        """schema: dataviz/server-transform/v1
+kind: server_transform
+id: combine
+runtime: python
+code: combine.py
+entrypoint: transform
+inputs:
+  left: source:slow-left/main
+  right: source:slow-right/main
+outputs:
+  main: {kind: table}
+cache: {mode: none}
+""",
+        encoding="utf-8",
+    )
+    (dashboard_root / "transforms" / "combine.py").write_text(
+        """import pandas as pd
+
+def transform(context):
+    return {"main": pd.concat([context.table("left"), context.table("right")])}
+""",
+        encoding="utf-8",
+    )
+    for name in ("fast", "slow-left", "slow-right", "unused"):
+        (dashboard_root / "data" / f"{name}.csv").write_text(
+            f"branch,value\n{name},1\n", encoding="utf-8"
+        )
+
+    class DelayedFileRunner:
+        def execute(self, request):
+            if request.definition.id in {"slow-left", "slow-right"}:
+                time.sleep(0.45)
+            elif request.definition.id == "fast":
+                time.sleep(0.02)
+            else:
+                raise AssertionError("Unused source must not execute")
+            return pd.DataFrame([{"branch": request.definition.id, "value": 1}])
+
+    monkeypatch.setitem(SOURCE_RUNNERS, "file", DelayedFileRunner())
+    client = TestClient(create_app(root))
+    started = client.post(
+        "/api/dashboards/progressive/runs",
+        json={"session_id": SESSION_A, "parameters": {}},
+    )
+    assert started.status_code == 200
+    run_id = started.json()["run_id"]
+
+    canvas = client.get(
+        "/api/dashboards/progressive/canvas",
+        params={"session_id": SESSION_A, "run_id": run_id},
+    )
+    assert canvas.status_code == 200
+    assert '"live": {' in canvas.text
+    assert "window.dataviz.connectLive?.()" in canvas.text
+
+    fast_snapshot = None
+    for _ in range(60):
+        record = client.get(
+            f"/api/runs/{run_id}", params={"session_id": SESSION_A}
+        ).json()
+        snapshot = record["snapshot"]
+        if snapshot and "source:fast/main" in snapshot["outputs"]:
+            fast_snapshot = snapshot
+            assert record["status"] == "running"
+            break
+        time.sleep(0.01)
+    assert fast_snapshot is not None
+    assert "source:slow-left/main" not in fast_snapshot["outputs"]
+    assert "source:slow-right/main" not in fast_snapshot["outputs"]
+    assert "transform:combine/main" not in fast_snapshot["outputs"]
+    assert set(fast_snapshot["nodes"]) == {
+        "source:fast",
+        "source:slow-left",
+        "source:slow-right",
+        "transform:combine",
+    }
+
+    output = client.get(
+        f"/api/runs/{run_id}/outputs/source:fast/main",
+        params={"session_id": SESSION_A},
+    )
+    assert output.status_code == 200
+    assert output.json()["value"] == [{"branch": "fast", "value": 1}]
+
+    for _ in range(300):
+        record = client.get(
+            f"/api/runs/{run_id}", params={"session_id": SESSION_A}
+        ).json()
+        if record["result"]:
+            break
+        time.sleep(0.02)
+    assert record["result"]["status"] == "success"
+    event_names = [event["event"] for event in record["events"]]
+    fast_ready = next(
+        index
+        for index, event in enumerate(record["events"])
+        if event["event"] == "output_ready"
+        and event["data"].get("reference") == "source:fast/main"
+    )
+    combined_ready = next(
+        index
+        for index, event in enumerate(record["events"])
+        if event["event"] == "output_ready"
+        and event["data"].get("reference") == "transform:combine/main"
+    )
+    assert fast_ready < combined_ready < event_names.index("run_ready")
 
 
 def test_runs_and_session_cache_are_isolated_per_browser_tab():

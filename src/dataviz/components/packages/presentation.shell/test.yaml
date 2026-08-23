@@ -1,0 +1,11 @@
+schema: dataviz/component-test/v1
+tests:
+  - {id: layout.overview.contract, component: layout.overview, kind: layout, assertions: [responsive, no-coordinate-lock]}
+  - {id: layout.monitoring.contract, component: layout.monitoring, kind: layout, assertions: [responsive, no-coordinate-lock]}
+  - {id: layout.report.contract, component: layout.report, kind: layout, assertions: [responsive, no-coordinate-lock]}
+  - {id: layout.exploration.contract, component: layout.exploration, kind: layout, assertions: [responsive, no-coordinate-lock]}
+  - {id: layout.freeform.contract, component: layout.freeform, kind: layout, assertions: [custom-canvas, stable-view-hosts]}
+  - {id: theme.plain.tokens, component: theme.plain, kind: visual, assertions: [contrast, token-overrides]}
+  - {id: theme.editorial.tokens, component: theme.editorial, kind: visual, assertions: [contrast, token-overrides]}
+  - {id: theme.terminal.tokens, component: theme.terminal, kind: visual, assertions: [contrast, token-overrides]}
+  - {id: theme.business.tokens, component: theme.business, kind: visual, assertions: [contrast, token-overrides]}

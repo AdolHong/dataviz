@@ -1,3 +1,3 @@
 <header class="param-hero"><span>04</span><div><small>QUERY ≠ SELECTION</small><h1>{{ dashboard.title }}</h1><p>{{ dashboard.description }}</p></div></header>
 <section class="param-summary"><div><b>{{ parameters.multiplier }}</b><span>当前倍率</span></div><div><b>{{ parameters.row_count }}</b><span>查询行数</span></div><p>更改 Header 中的 Query 后必须重新运行；切换 Selection 会立即重绘下方两张 View。</p></section>
-<section class="param-grid"><div>{{ widget("parameter-line") }}</div><div>{{ widget("parameter-table") }}</div></section>
+<section class="param-grid"><div>{{ view("parameter-line") }}</div><div>{{ view("parameter-table") }}</div></section>

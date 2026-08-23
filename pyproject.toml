@@ -11,6 +11,7 @@ dependencies = [
   "kaleido>=1.0",
   "markdown>=3.7",
   "matplotlib>=3.9",
+  "packaging>=24",
   "pandas>=2.2",
   "plotly>=6.1",
   "pymysql>=1.1",
@@ -24,7 +25,7 @@ dependencies = [
 
 [project.optional-dependencies]
 excel = ["openpyxl>=3.1"]
-dev = ["httpx>=0.28", "pytest>=8.3"]
+dev = ["httpx>=0.28", "playwright>=1.55", "pytest>=8.3"]
 
 [project.scripts]
 dataviz = "dataviz.cli:app"
@@ -37,8 +38,16 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-dataviz = ["server/static/*", "server/templates/*"]
+dataviz = ["server/static/*", "server/templates/*", "gallery/**/*", "components/packages/**/*"]
+
+[tool.setuptools.exclude-package-data]
+dataviz = [
+  "gallery/.dataviz/*",
+  "gallery/.dataviz/**/*",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+pythonpath = ["src"]
+markers = ["e2e: real-browser runtime tests"]

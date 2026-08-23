@@ -1,0 +1,11 @@
+schema: dataviz/component-package/v1
+package: data.pipeline
+version: 1.0.0
+category: data
+purpose: Named Output and transform contracts between data acquisition and presentation.
+dependencies: []
+components:
+  - {id: output.named, purpose: Stable typed addressable output from a Source or Transform, status: stable}
+  - {id: transform.server-python, purpose: Complex trusted server-side transformation, status: stable}
+  - {id: transform.browser-js, purpose: Browser-only serializable transformation, status: stable}
+runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

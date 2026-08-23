@@ -1,0 +1,32 @@
+schema: dataviz/dashboard/v1
+kind: dashboard
+id: worker-runtime
+title: Browser Transform Worker
+
+dashboard_selections:
+  - id: delay_ms
+    label: Worker delay
+    type: number
+    default: 5
+
+sources:
+  - id: raw
+    type: file
+    path: data/rows.csv
+    format: csv
+
+browser_transforms:
+  - transforms/scaled.yaml
+
+views:
+  - id: scaled-table
+    title: Scaled rows
+    input: browser:scaled/main
+    template: table
+    columns: [name, value]
+
+sections:
+  - id: results
+    title: Results
+    views: [scaled-table]
+

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Model(BaseModel):
-    model_config = ConfigDict(extra="allow", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
 class ContextDefinition(Model):
@@ -19,8 +19,6 @@ class NavigationItem(Model):
     kind: Literal["dashboard", "folder"] = "dashboard"
     id: str
     title: str
-    dashboard: str | None = None
-    route: str | None = None
     order: int = 0
     children: list["NavigationItem"] = Field(default_factory=list)
 
@@ -40,19 +38,28 @@ class WorkspaceFolderDefinition(Model):
 class RuntimeDefinition(Model):
     plotly_js: str = "bundled"
     echarts_js: str = "https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"
+    arrow_js: str = "https://cdn.jsdelivr.net/npm/apache-arrow@21.1.0/Arrow.es2015.min.js"
     perspective_version: str = "5.2.0"
+    browser_table_transport: Literal["auto", "json", "arrow"] = "auto"
+    arrow_min_rows: int = Field(2_000, ge=1)
+    arrow_chunk_bytes: int = Field(524_288, ge=65_536, le=8_388_608)
     max_workers: int = 4
+    max_concurrent_runs: int = Field(4, ge=1)
+    max_embedded_rows: int = Field(100_000, ge=1)
+    max_embedded_bytes: int = Field(25_000_000, ge=1)
+    max_retained_runs: int = Field(100, ge=1)
+    run_retention_seconds: int | None = Field(604_800, ge=1)
+    max_retained_cache_entries: int = Field(500, ge=1)
+    cache_retention_seconds: int | None = Field(2_592_000, ge=1)
 
 
 class WorkspaceDefinition(Model):
-    schema_: str = Field("dataviz/workspace/v1", alias="schema")
+    schema_: Literal["dataviz/workspace/v1"] = Field(alias="schema")
     kind: Literal["workspace"] = "workspace"
     id: str
     title: str
     description: str = ""
     context: ContextDefinition = Field(default_factory=ContextDefinition)
-    navigation: list[NavigationItem] = Field(default_factory=list)
-    trash: list[TrashItemDefinition] = Field(default_factory=list)
     folders: list[WorkspaceFolderDefinition] = Field(default_factory=list)
     runtime: RuntimeDefinition = Field(default_factory=RuntimeDefinition)
 
@@ -60,6 +67,9 @@ class WorkspaceDefinition(Model):
 class Choice(Model):
     label: str
     value: Any
+    group: str | None = None
+    description: str = ""
+    keywords: list[str] = Field(default_factory=list)
 
 
 class ParameterDefinition(Model):
@@ -85,7 +95,6 @@ class SelectionDefinition(ParameterDefinition):
 
     field: str | None = None
     path_fields: list[str] = Field(default_factory=list, min_length=0)
-    mode: Literal["include", "exclude"] = "include"
     cascade: bool = True
 
 
@@ -104,33 +113,11 @@ class SelectionBindingDefinition(Model):
     ] = "auto"
 
 
-class ViewDefinition(Model):
-    widget: str
-    selections: list[SelectionDefinition] = Field(
-        default_factory=list,
-        validation_alias=AliasChoices("selections", "filters"),
-    )
-    selection_bindings: dict[str, str | SelectionBindingDefinition] = Field(
-        default_factory=dict,
-        validation_alias=AliasChoices("selection_bindings", "filter_bindings"),
-    )
-
-    @property
-    def filters(self) -> list[SelectionDefinition]:
-        """Deprecated compatibility alias for pre-selection dashboards."""
-        return self.selections
-
-    @property
-    def filter_bindings(self) -> dict[str, str | SelectionBindingDefinition]:
-        """Deprecated compatibility alias for pre-selection dashboards."""
-        return self.selection_bindings
-
-
 class RepeatDefinition(Model):
     """Create multiple instances from one declarative View blueprint."""
 
     view: str | None = None
-    source: str | None = None
+    input: str | None = None
     by: list[str] = Field(min_length=1)
     selection: str | None = None
     title: str = "{value}"
@@ -138,6 +125,10 @@ class RepeatDefinition(Model):
     order_by: str | None = None
     order: Literal["asc", "desc"] = "asc"
     render: Literal["lazy", "eager"] = "lazy"
+    searchable: bool = True
+    search_placeholder: str = "Search groups…"
+    page_size: int = Field(40, ge=1, le=500)
+    recycle_offscreen: bool = True
     empty_text: str = "Choose one or more items to compare."
 
 
@@ -156,20 +147,12 @@ class SectionDefinition(Model):
         "band",
         "small-multiples",
         "selection-gallery",
-    ] = "grid"
+    ] = "stack"
     columns: int | None = None
-    css_class: str = Field("", validation_alias=AliasChoices("css_class", "class"))
-    selections: list[SelectionDefinition] = Field(
-        default_factory=list,
-        validation_alias=AliasChoices("selections", "filters"),
-    )
-    views: list[str | ViewDefinition] = Field(default_factory=list)
+    css_class: str = ""
+    selections: list[SelectionDefinition] = Field(default_factory=list)
+    views: list[str] = Field(default_factory=list)
     repeat: RepeatDefinition | None = None
-
-    @property
-    def filters(self) -> list[SelectionDefinition]:
-        """Deprecated compatibility alias for pre-selection dashboards."""
-        return self.selections
 
 
 class CanvasDefinition(Model):
@@ -177,37 +160,16 @@ class CanvasDefinition(Model):
     style: str | None = None
     script: str | None = None
     use_default_style: bool = True
-    client_selections: bool = Field(
-        False,
-        validation_alias=AliasChoices("client_selections", "client_filters"),
-    )
-    client_sources: list[str] = Field(default_factory=list)
     client_libraries: list[Literal["plotly", "echarts", "perspective"]] = Field(default_factory=list)
     styles: list[str] = Field(default_factory=list)
     scripts: list[str] = Field(default_factory=list)
-
-    @property
-    def client_filters(self) -> bool:
-        """Deprecated compatibility alias for pre-selection dashboards."""
-        return self.client_selections
-
-
-class LayoutItem(Model):
-    widget: str = Field(validation_alias=AliasChoices("widget", "view"))
-    x: int = 0
-    y: int = 0
-    width: int = 6
-    height: int = 3
-    min_height: int | None = None
-    css_class: str = ""
+    inputs: list[str] = Field(default_factory=list)
 
 
 class LayoutDefinition(Model):
     template: Literal["overview", "monitoring", "report", "exploration", "freeform"] = "overview"
     columns: int = 12
-    row_height: int = 92
     gap: int = 18
-    items: list[LayoutItem] = Field(default_factory=list)
 
 
 class ThemeDefinition(Model):
@@ -231,7 +193,6 @@ class PresentationThemeDefinition(Model):
 class PresentationLayoutDefinition(Model):
     template: Literal["overview", "monitoring", "report", "exploration", "freeform"] | None = None
     columns: int | None = Field(None, ge=1, le=24)
-    row_height: int | None = Field(None, ge=1)
     gap: int | None = Field(None, ge=0)
 
 
@@ -249,28 +210,66 @@ class PresentationSectionDefinition(Model):
         "selection-gallery",
     ] | None = None
     columns: int | None = Field(None, ge=1, le=24)
-    css_class: str = Field("", validation_alias=AliasChoices("css_class", "class"))
+    css_class: str = ""
 
 
 class PresentationViewDefinition(Model):
-    width: int | None = Field(None, ge=1, le=24)
-    height: int | None = Field(None, ge=1)
+    span: int | None = Field(None, ge=1, le=24)
+    min_height: int | None = Field(None, ge=1)
     container: Literal["panel", "metric", "chart", "table", "plain", "elevated"] | None = None
-    css_class: str = Field("", validation_alias=AliasChoices("css_class", "class"))
+    css_class: str = ""
     engine: Literal["plotly", "echarts"] | None = None
     options: dict[str, Any] = Field(default_factory=dict)
     config: dict[str, Any] = Field(default_factory=dict)
 
 
+class DateRangePresetDefinition(Model):
+    label: str
+    start: str
+    end: str
+
+
 class PresentationSelectorDefinition(Model):
-    template: Literal["auto", "chips", "dropdown", "searchable", "cascader"] = "auto"
+    template: Literal[
+        "auto",
+        "select",
+        "segmented",
+        "checkbox-group",
+        "cascader",
+        "date-range",
+        "tree-select",
+    ] = "auto"
+    variant: Literal["default", "tags", "radio"] = "default"
     show_unavailable: bool = False
+    search: Literal["auto", "always", "never"] = "auto"
+    virtual: Literal["auto", "always", "never"] = "auto"
+    search_threshold: int = Field(9, ge=0)
+    virtual_threshold: int = Field(200, ge=1)
+    max_visible_tags: int = Field(2, ge=0, le=20)
+    max_selected: int | None = Field(None, ge=1)
+    hide_selected: bool = False
     search_placeholder: str = "Search options…"
     empty_text: str = "No matching options"
     placeholder: str = "Choose…"
+    all_label: str = "All"
+    select_all_label: str = "Select all"
+    invert_label: str = "Invert"
+    clear_label: str = "Clear"
     level_labels: list[str] = Field(default_factory=list)
     path_separator: str = " / "
-    css_class: str = Field("", validation_alias=AliasChoices("css_class", "class"))
+    hierarchy_selection: Literal["leaf", "cascade"] = "leaf"
+    checked_strategy: Literal["all", "parent", "child"] = "child"
+    start_label: str = "Start"
+    end_label: str = "End"
+    min: str | None = None
+    max: str | None = None
+    allow_open_range: bool = False
+    presets: list[DateRangePresetDefinition] = Field(default_factory=list)
+    item_height: int = Field(38, ge=28, le=80)
+    viewport_height: int = Field(304, ge=120, le=720)
+    overscan: int = Field(5, ge=1, le=40)
+    default_expand_depth: int = Field(0, ge=0, le=12)
+    css_class: str = ""
 
 
 class PresentationAssetsDefinition(Model):
@@ -285,7 +284,7 @@ class PresentationCanvasDefinition(Model):
 
 
 class PresentationDefinition(Model):
-    schema_: str = Field("dataviz/presentation/v1", alias="schema")
+    schema_: Literal["dataviz/presentation/v1"] = Field(alias="schema")
     kind: Literal["presentation"] = "presentation"
     dashboard: str
     theme: PresentationThemeDefinition = Field(default_factory=PresentationThemeDefinition)
@@ -309,16 +308,19 @@ class DeclarativeViewDefinition(Model):
         "pie",
         "scatter",
         "heatmap",
+        "radar",
         "table",
         "perspective",
         "markdown",
         "image",
+        "custom",
     ]
+    renderer: str | None = None
     engine: Literal["plotly", "echarts"] = "plotly"
-    source: str | None = None
-    sources: list[str] = Field(default_factory=list)
+    input: str | None = None
+    inputs: dict[str, str] = Field(default_factory=dict)
     x: str | None = None
-    y: str | None = None
+    y: str | list[str] | None = None
     z: str | None = None
     value: str | None = None
     label: str | None = None
@@ -333,32 +335,24 @@ class DeclarativeViewDefinition(Model):
     url: str | None = None
     options: dict[str, Any] = Field(default_factory=dict)
     config: dict[str, Any] = Field(default_factory=dict)
-    selections: list[SelectionDefinition] = Field(
-        default_factory=list,
-        validation_alias=AliasChoices("selections", "filters"),
-    )
-    selection_bindings: dict[str, str | SelectionBindingDefinition] = Field(
-        default_factory=dict,
-        validation_alias=AliasChoices("selection_bindings", "filter_bindings"),
-    )
+    selections: list[SelectionDefinition] = Field(default_factory=list)
+    selection_bindings: dict[str, str | SelectionBindingDefinition] = Field(default_factory=dict)
 
     @property
-    def filters(self) -> list[SelectionDefinition]:
-        """Deprecated compatibility alias for pre-selection dashboards."""
-        return self.selections
+    def input_ref(self) -> str | None:
+        """Return the primary named output consumed by this View."""
+        return self.input or self.inputs.get("main")
 
     @property
-    def filter_bindings(self) -> dict[str, str | SelectionBindingDefinition]:
-        """Deprecated compatibility alias for pre-selection dashboards."""
-        return self.selection_bindings
-
-    @property
-    def source_ids(self) -> list[str]:
-        return list(dict.fromkeys(([self.source] if self.source else []) + self.sources))
+    def input_refs(self) -> dict[str, str]:
+        refs = dict(self.inputs)
+        if self.input:
+            refs.setdefault("main", self.input)
+        return refs
 
 
 class DashboardDefinition(Model):
-    schema_: str = Field("dataviz/dashboard/v1", alias="schema")
+    schema_: Literal["dataviz/dashboard/v1"] = Field(alias="schema")
     kind: Literal["dashboard"] = "dashboard"
     id: str
     title: str = ""
@@ -367,32 +361,37 @@ class DashboardDefinition(Model):
     context: dict[str, Any] = Field(default_factory=dict)
     assumptions: list[str] = Field(default_factory=list)
     adapters: dict[str, str] = Field(default_factory=dict)
-    query_parameters: list[ParameterDefinition] = Field(
-        default_factory=list,
-        validation_alias=AliasChoices("query_parameters", "parameters"),
-    )
-    dashboard_selections: list[SelectionDefinition] = Field(
-        default_factory=list,
-        validation_alias=AliasChoices("dashboard_selections", "dashboard_filters", "filters"),
-    )
+    query_parameters: list[ParameterDefinition] = Field(default_factory=list)
+    dashboard_selections: list[SelectionDefinition] = Field(default_factory=list)
     sections: list[SectionDefinition] = Field(default_factory=list)
     sources: list[str | dict[str, Any]] = Field(default_factory=list)
-    widgets: list[str] = Field(default_factory=list)
+    server_transforms: list[str | dict[str, Any]] = Field(default_factory=list)
+    browser_transforms: list[str | dict[str, Any]] = Field(default_factory=list)
     views: list[DeclarativeViewDefinition] = Field(default_factory=list)
     layout: LayoutDefinition = Field(default_factory=LayoutDefinition)
     theme: ThemeDefinition = Field(default_factory=ThemeDefinition)
     canvas: CanvasDefinition = Field(default_factory=CanvasDefinition)
 
-    @property
-    def dashboard_filters(self) -> list[SelectionDefinition]:
-        """Deprecated compatibility alias for pre-selection dashboards."""
-        return self.dashboard_selections
+class ColumnDefinition(Model):
+    """A lightweight table schema contract used at node boundaries."""
+
+    name: str
+    dtype: str | None = None
+    required: bool = True
+    nullable: bool | None = None
 
 
-# Public import aliases keep Python integrations working while YAML and runtime
-# output use the clearer selection terminology.
-FilterDefinition = SelectionDefinition
-FilterBindingDefinition = SelectionBindingDefinition
+class OutputDefinition(Model):
+    """Declared contract for one stable, named node output."""
+
+    kind: Literal[
+        "table", "scalar", "object", "text", "html", "chart", "image", "file"
+    ] = "table"
+    format: str | None = None
+    mime_type: str | None = None
+    description: str = ""
+    schema_: list[ColumnDefinition] = Field(default_factory=list, alias="schema")
+    required: bool = True
 
 
 class CacheDefinition(Model):
@@ -402,46 +401,64 @@ class CacheDefinition(Model):
 
 
 class SourceDefinition(Model):
-    schema_: str = Field("dataviz/source/v1", alias="schema")
-    kind: Literal["datasource", "source"] = "datasource"
+    schema_: Literal["dataviz/source/v1"] = Field(alias="schema")
+    kind: Literal["source"] = "source"
     id: str
     name: str | None = None
     description: str = ""
     type: Literal["file", "sql", "python"]
     path: str | None = None
     format: str | None = None
-    code: str | None = Field(None, validation_alias=AliasChoices("code", "query"))
+    code: str | None = None
     adapter: str | None = None
-    connection: str | None = None
     entrypoint: str = "load"
     params: list[str] = Field(default_factory=list)
-    depends_on: list[str] = Field(default_factory=list)
     options: dict[str, Any] = Field(default_factory=dict)
+    outputs: dict[str, OutputDefinition] = Field(default_factory=dict)
+    code_dependencies: list[str] = Field(default_factory=list)
+    python_dependencies: list[str] = Field(default_factory=list)
+    timeout_seconds: float | None = Field(None, gt=0)
+    timeout_retries: int | None = Field(None, ge=0, le=5)
     cache: CacheDefinition = Field(default_factory=CacheDefinition)
 
 
-class WidgetOutputDefinition(Model):
-    type: Literal[
-        "auto", "plotly", "echarts", "matplotlib", "table", "perspective", "text", "image"
-    ] = "auto"
-    title: str | None = None
-
-
-class WidgetDefinition(Model):
-    schema_: str = Field("dataviz/widget/v1", alias="schema")
-    kind: Literal["widget"] = "widget"
+class ServerTransformDefinition(Model):
+    schema_: Literal["dataviz/server-transform/v1"] = Field(alias="schema")
+    kind: Literal["server_transform"] = "server_transform"
     id: str
-    title: str
+    name: str | None = None
     description: str = ""
-    runtime: Literal["browser"] = "browser"
-    code: str | None = None
-    depends_on: list[str] = Field(default_factory=list)
+    runtime: Literal["python"] = "python"
+    code: str
+    entrypoint: str = "transform"
+    inputs: dict[str, str] = Field(default_factory=dict)
+    input_schemas: dict[str, list[ColumnDefinition]] = Field(default_factory=dict)
     params: list[str] = Field(default_factory=list)
-    output: WidgetOutputDefinition = Field(default_factory=WidgetOutputDefinition)
+    outputs: dict[str, OutputDefinition] = Field(default_factory=dict)
+    code_dependencies: list[str] = Field(default_factory=list)
+    python_dependencies: list[str] = Field(default_factory=list)
+    timeout_seconds: float | None = Field(None, gt=0)
+    cache: CacheDefinition = Field(default_factory=CacheDefinition)
+
+
+class BrowserTransformDefinition(Model):
+    schema_: Literal["dataviz/browser-transform/v1"] = Field(alias="schema")
+    kind: Literal["browser_transform"] = "browser_transform"
+    id: str
+    name: str | None = None
+    description: str = ""
+    code: str
+    entrypoint: str = "transform"
+    inputs: dict[str, str] = Field(default_factory=dict)
+    params: list[str] = Field(default_factory=list)
+    selections: list[str] = Field(default_factory=list)
+    outputs: dict[str, OutputDefinition] = Field(default_factory=dict)
+    timeout_seconds: float = Field(30.0, gt=0, le=300)
 
 
 class AdapterDefinition(Model):
     type: str = "sqlalchemy"
+    description: str = ""
     url: str | None = None
     env: str | None = None
     database: str | None = None
@@ -453,14 +470,9 @@ class AdapterDefinition(Model):
     password_env: str | None = None
     root: str | None = None
     options: dict[str, Any] = Field(default_factory=dict)
+    config: dict[str, Any] = Field(default_factory=dict)
+    secrets: dict[str, str] = Field(default_factory=dict)
 
 
 class AdaptersFile(Model):
     adapters: dict[str, AdapterDefinition] = Field(default_factory=dict)
-
-
-ConnectionDefinition = AdapterDefinition
-
-
-class ConnectionsFile(Model):
-    connections: dict[str, AdapterDefinition] = Field(default_factory=dict)

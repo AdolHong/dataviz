@@ -1,0 +1,16 @@
+schema: dataviz/component-package/v1
+package: selector.date-range
+version: 1.0.0
+category: selector
+purpose: Select an inclusive start and end date while preserving one canonical value.
+dependencies: [runtime.selector]
+components:
+  - id: selector.date-range
+    purpose: Use two labeled native date controls with optional reviewed presets for a date_range parameter or selection.
+    status: stable
+    logic: {type: date_range, value_shape: [start, end]}
+    presentation: {template: date-range, options: [start_label, end_label, min, max, allow_open_range, presets, clear_label, css_class]}
+    behavior: {inclusive: true, order_validation: true, presets: exact_reviewable_ranges}
+    semantic_dom: [.dv-date-range, .dv-date-range__field]
+    tokens: [--dv-accent, --dv-ink, --dv-line, --dv-panel]
+runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

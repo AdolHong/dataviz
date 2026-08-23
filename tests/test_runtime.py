@@ -12,13 +12,15 @@ from dataviz.workspace import compile_selection_contract, load_workspace, valida
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE = ROOT / "examples" / "sales-workspace"
+SHOWCASE_WORKSPACE = ROOT / "examples" / "legacy-showcase"
 
 
 def test_workspace_is_valid():
     workspace = load_workspace(WORKSPACE)
     diagnostics = validate_workspace(workspace)
     assert not [item for item in diagnostics if item.level == "error"]
-    assert set(workspace.dashboards["sales"].sources) == {"orders", "targets", "forecast"}
+    assert set(workspace.dashboards["sales"].sources) == {"orders", "targets"}
+    assert set(workspace.dashboards["sales"].transforms) == {"sales-metrics"}
 
 
 def test_workspace_uses_physical_names_for_renamed_copied_and_deleted_dashboards(tmp_path: Path):
@@ -38,20 +40,10 @@ def test_workspace_uses_physical_names_for_renamed_copied_and_deleted_dashboards
         yaml.safe_dump(copied_definition, allow_unicode=True, sort_keys=False), encoding="utf-8"
     )
 
-    workspace_path = root / "workspace.yaml"
-    definition = yaml.safe_load(workspace_path.read_text(encoding="utf-8"))
-    definition.setdefault("navigation", []).append(
-        {"id": "deleted", "title": "已删除看板", "dashboard": "dashboards/deleted", "order": 20}
-    )
-    workspace_path.write_text(
-        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False), encoding="utf-8"
-    )
-
     workspace = load_workspace(root)
     entries = {entry.id: entry for entry in workspace.catalog}
     assert entries["sales"].status == "ready"
     assert entries["sales"].relative_path == "dashboards/renamed-sales"
-    assert "deleted" not in entries
     assert entries["copied-analysis"].status == "ready"
     assert entries["copied-analysis"].discovered
     assert entries["copied-analysis"].canvas_name == "copied-analysis"
@@ -116,23 +108,37 @@ def test_workspace_keeps_duplicate_and_invalid_dashboards_visible(tmp_path: Path
     assert any(item.code == "dashboard_id_conflict" for item in validate_workspace(workspace))
 
 
-def test_query_all_three_source_types():
+def test_query_targets_and_all_three_source_types():
     workspace = load_workspace(WORKSPACE)
     executor = Executor(workspace)
-    for source in ("orders", "targets", "forecast"):
-        result = executor.run("sales", source_targets=[source])
+    for source in ("orders", "targets"):
+        result = executor.run("sales", targets=[f"source:{source}"])
         assert result.status == "success", result.model_dump_json(indent=2)
         node = result.nodes[f"source:{source}"]
         assert node.status == "succeeded"
-        assert node.artifacts[0].kind == "table"
+        assert node.outputs["main"].kind == "table"
+
+    showcase = load_workspace(SHOWCASE_WORKSPACE)
+    assert showcase.dashboard("cascade-explorer").sources["bundled-file"][1].type == "file"
+    assert showcase.dashboard("source-lab").sources["sql-grid"][1].type == "sql"
+    assert showcase.dashboard("source-lab").sources["forecast"][1].type == "python"
 
 
-def test_default_run_queries_sources_only():
+def test_default_run_executes_sources_and_server_transforms():
     workspace = load_workspace(WORKSPACE)
     result = Executor(workspace).run("sales")
     assert result.status == "success", result.model_dump_json(indent=2)
-    assert set(result.nodes) == {"source:orders", "source:targets", "source:forecast"}
-    assert result.outputs == {}
+    assert set(result.nodes) == {
+        "source:orders",
+        "source:targets",
+        "transform:sales-metrics",
+    }
+    assert set(result.outputs) == {
+        "source:orders/main",
+        "source:targets/main",
+        "transform:sales-metrics/trend",
+        "transform:sales-metrics/completion",
+    }
 
 
 def test_three_level_selections_compile_and_do_not_invalidate_sources():
@@ -156,9 +162,9 @@ def test_three_level_selections_compile_and_do_not_invalidate_sources():
     }
     assert all(
         filtered.nodes[f"source:{source_id}"].result_origin == "cache"
-        for source_id in ("orders", "targets", "forecast")
+        for source_id in ("orders", "targets")
     )
-    assert filtered.outputs == {}
+    assert filtered.nodes["transform:sales-metrics"].result_origin == "cache"
 
 
 def test_custom_canvas_and_report(tmp_path: Path):
@@ -182,33 +188,42 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert 'data-selection-origin="section"' in report
     assert 'data-selection-origin="view"' in report
     assert "data-selection-input=\"dashboard:sales/region\"" in report
-    assert "closeContextSelectionPopovers" in report
-    assert "event.composedPath()" in report
-    assert "pathContains('.dv-context-selections')" in report
-    assert '"view_sources": {' in report
+    assert 'data-component-package="runtime.overlay"' in report
+    assert "installDatavizOverlay" in report
+    assert "typeof event.composedPath === 'function'" in report
+    assert "root.overlay = {register, registerDetails, hydrate, open, close, closeAll" in report
+    assert '"view_inputs": {' in report
     assert "const refreshCascadingSelections = () =>" in report
     assert "[0, 1, 2].forEach(rank =>" in report
     assert "Commit each scope before deriving the next one" in report
-    assert "const datavizPositionFloatingPanel =" in report
-    assert "if (!activePath.length && selected.size)" in report
+    assert "function position(record)" in report
+    assert "if (!activePath.length && selectedValues.size)" in report
     assert "viewportWidth - gutter * 2" in report
-    assert "option.selected = !option.disabled" in report
-    assert "readSelectionInputs();\n  refreshCascadingSelections();\n  readSelectionInputs();" in report
-    assert "const datavizAffectedViewIds = changedKeys =>" in report
+    assert "available.forEach(option => { option.selected = !allSelected; });" in report
+    assert "normalizeAll" not in report
+    assert "const changedOutputs = await datavizRuntime.runTransforms(preliminaryKeys);" in report
+    assert "refreshCascadingSelections();\n  readSelectionInputs();" in report
+    assert "affectedViews(changedSelectionKeys, changedOutputs)" in report
     assert "changedSelectionKeys?.length === 0" in report
+    assert "datavizSelectionCanApply" in report
+    assert "dataset does not expose the selected field" in report
+    assert "state.selection.matches(row, item, state.selections[item.key])" in report
     assert "document.documentElement.dataset.selecting" not in report
-    assert '"sources": {"orders": [' in report
-    assert "window.datavizClient" in report
+    assert '"source:orders/main": [' in report
+    assert '"transform:sales-metrics/trend": [' in report
+    assert "window.datavizRuntime.registerView" in report
+    assert "window.datavizClient" not in report
     assert "@perspective-dev/viewer@5.2.0" not in report
     assert "perspective-viewer-datagrid.js" not in report
     assert "perspective-viewer-charts.js" not in report
-    assert "if (type === 'table')" in report
-    assert "dv-widget--table" in report
-    assert "renderPerspectiveInto" in report
+    assert "datavizRuntime.registerRenderer('table'" in report
+    assert "datavizRuntime.registerRenderer('perspective'" in report
+    assert "dv-view--table" in report
+    assert "createPerspectiveState" in report
     assert "const bindEchartsLegendInteraction =" in report
     assert "descriptor.legendInteraction !== 'filter'" in report
     assert "replaceMerge:['xAxis', 'series']" in report
-    assert "table.replace(existing.latestRows)" in report
+    assert "state.table.replace(state.latestRows)" in report
 
 
 def test_report_selection_is_initial_state_not_an_export_cut(tmp_path: Path):

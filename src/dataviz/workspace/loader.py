@@ -2,22 +2,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import importlib.metadata
 from pathlib import Path
 from typing import Any
 
 import yaml
+from packaging.requirements import InvalidRequirement, Requirement
 from pydantic import ValidationError
 
 from dataviz.errors import Diagnostic, WorkspaceError
+from dataviz.execution.references import parse_output_reference
 from dataviz.workspace.models import (
+    BrowserTransformDefinition,
     DashboardDefinition,
-    LayoutItem,
+    DeclarativeViewDefinition,
     NavigationItem,
     PresentationDefinition,
+    ServerTransformDefinition,
     SourceDefinition,
     TrashItemDefinition,
-    WidgetOutputDefinition,
-    WidgetDefinition,
     WorkspaceDefinition,
 )
 from dataviz.workspace.naming import (
@@ -30,7 +33,7 @@ from dataviz.workspace.naming import (
     folder_trash_id,
     normalize_logical_path,
 )
-from dataviz.workspace.selections import compile_selection_contract, view_definition
+from dataviz.workspace.selections import compile_selection_contract
 from dataviz.templates import VIEW_TEMPLATES
 
 
@@ -47,8 +50,25 @@ def read_yaml(path: Path) -> dict[str, Any]:
 
 
 def parse_model(model_type, path: Path):
+    value = read_yaml(path)
+    schema_field = model_type.model_fields.get("schema_")
+    if schema_field is not None and "schema" not in value:
+        expected_schema = (
+            model_type.model_json_schema(by_alias=True)
+            .get("properties", {})
+            .get("schema", {})
+            .get("const")
+        )
+        raise WorkspaceError(
+            "Schema header is required for a standalone definition",
+            file=path,
+            details={
+                "expected": expected_schema,
+                "migration": "dataviz migrate <workspace> --apply",
+            },
+        )
     try:
-        return model_type.model_validate(read_yaml(path))
+        return model_type.model_validate(value)
     except ValidationError as exc:
         raise WorkspaceError("Schema validation failed", file=path, details=exc.errors()) from exc
 
@@ -60,7 +80,9 @@ class LoadedDashboard:
     definition: DashboardDefinition
     logic_definition: DashboardDefinition
     sources: dict[str, tuple[Path, SourceDefinition]]
-    widgets: dict[str, tuple[Path, WidgetDefinition]]
+    transforms: dict[str, tuple[Path, ServerTransformDefinition]]
+    browser_transforms: dict[str, tuple[Path, BrowserTransformDefinition]]
+    views: dict[str, DeclarativeViewDefinition]
     presentation_path: Path | None = None
     presentation: PresentationDefinition | None = None
     presentation_diagnostics: list[Diagnostic] | None = None
@@ -94,7 +116,6 @@ class DashboardCatalogEntry:
     relative_path: str
     status: str
     dashboard: LoadedDashboard | None = None
-    navigation: NavigationItem | None = None
     discovered: bool = False
     message: str | None = None
     parent_id: str | None = None
@@ -113,6 +134,8 @@ class LoadedWorkspace:
     dashboards: dict[str, LoadedDashboard]
     catalog: list[DashboardCatalogEntry]
     load_diagnostics: list[Diagnostic]
+    navigation: list[NavigationItem]
+    trash: list[TrashItemDefinition]
     readme: str = ""
 
     @property
@@ -169,7 +192,8 @@ def load_dashboard(path: Path) -> LoadedDashboard:
             else:
                 presentation = candidate
     sources: dict[str, tuple[Path, SourceDefinition]] = {}
-    widgets: dict[str, tuple[Path, WidgetDefinition]] = {}
+    transforms: dict[str, tuple[Path, ServerTransformDefinition]] = {}
+    browser_transforms: dict[str, tuple[Path, BrowserTransformDefinition]] = {}
 
     for source_entry in definition.sources:
         if isinstance(source_entry, str):
@@ -178,7 +202,9 @@ def load_dashboard(path: Path) -> LoadedDashboard:
         else:
             source_path = definition_path
             try:
-                source = SourceDefinition.model_validate(source_entry)
+                source = SourceDefinition.model_validate(
+                    {"schema": "dataviz/source/v1", **source_entry}
+                )
             except ValidationError as exc:
                 raise WorkspaceError(
                     "Inline source schema validation failed",
@@ -189,32 +215,51 @@ def load_dashboard(path: Path) -> LoadedDashboard:
             raise WorkspaceError(f"Duplicate source id: {source.id}", file=source_path)
         sources[source.id] = (source_path, source)
 
-    for relative in definition.widgets:
-        widget_path = (root / relative).resolve()
-        widget = parse_model(WidgetDefinition, widget_path)
-        if widget.id in widgets:
-            raise WorkspaceError(f"Duplicate widget id: {widget.id}", file=widget_path)
-        widgets[widget.id] = (widget_path, widget)
+    for transform_entry in definition.server_transforms:
+        if isinstance(transform_entry, str):
+            transform_path = (root / transform_entry).resolve()
+            transform = parse_model(ServerTransformDefinition, transform_path)
+        else:
+            transform_path = definition_path
+            try:
+                transform = ServerTransformDefinition.model_validate(
+                    {"schema": "dataviz/server-transform/v1", **transform_entry}
+                )
+            except ValidationError as exc:
+                raise WorkspaceError(
+                    "Inline server transform schema validation failed",
+                    file=definition_path,
+                    details=exc.errors(),
+                ) from exc
+        if transform.id in transforms:
+            raise WorkspaceError(f"Duplicate server transform id: {transform.id}", file=transform_path)
+        transforms[transform.id] = (transform_path, transform)
 
-    output_types = {
-        "table": "table",
-        "perspective": "perspective",
-        "markdown": "text",
-        "image": "image",
-    }
+    for transform_entry in definition.browser_transforms:
+        if isinstance(transform_entry, str):
+            transform_path = (root / transform_entry).resolve()
+            transform = parse_model(BrowserTransformDefinition, transform_path)
+        else:
+            transform_path = definition_path
+            try:
+                transform = BrowserTransformDefinition.model_validate(
+                    {"schema": "dataviz/browser-transform/v1", **transform_entry}
+                )
+            except ValidationError as exc:
+                raise WorkspaceError(
+                    "Inline browser transform schema validation failed",
+                    file=definition_path,
+                    details=exc.errors(),
+                ) from exc
+        if transform.id in browser_transforms:
+            raise WorkspaceError(f"Duplicate browser transform id: {transform.id}", file=transform_path)
+        browser_transforms[transform.id] = (transform_path, transform)
+
+    views: dict[str, DeclarativeViewDefinition] = {}
     for view in definition.views:
-        if view.id in widgets:
+        if view.id in views:
             raise WorkspaceError(f"Duplicate view id: {view.id}", file=definition_path)
-        widgets[view.id] = (
-            definition_path,
-            WidgetDefinition(
-                id=view.id,
-                title=view.title or view.id,
-                description=view.description,
-                depends_on=view.source_ids,
-                output=WidgetOutputDefinition(type=output_types.get(view.template, "auto")),
-            ),
-        )
+        views[view.id] = view
 
     if presentation is not None:
         definition = _apply_presentation(
@@ -222,8 +267,9 @@ def load_dashboard(path: Path) -> LoadedDashboard:
             presentation,
             presentation_path,
             presentation_diagnostics,
-            view_ids=set(widgets),
+            view_ids=set(views),
         )
+        views = {view.id: view for view in definition.views}
 
     readme_path = root / "README.md"
     return LoadedDashboard(
@@ -232,7 +278,9 @@ def load_dashboard(path: Path) -> LoadedDashboard:
         definition=definition,
         logic_definition=logic_definition,
         sources=sources,
-        widgets=widgets,
+        transforms=transforms,
+        browser_transforms=browser_transforms,
+        views=views,
         presentation_path=presentation_path if presentation_path.exists() else None,
         presentation=presentation,
         presentation_diagnostics=presentation_diagnostics,
@@ -320,7 +368,6 @@ def _apply_presentation(
         sections[section_id] = replacement
 
     declarative_views = {view.id: view for view in effective.views}
-    layout_items = {item.widget: item for item in effective.layout.items}
     for view_id, override in presentation.views.items():
         view = declarative_views.get(view_id)
         if view_id not in view_ids:
@@ -346,27 +393,6 @@ def _apply_presentation(
             replacement = view.model_copy(update=view_update)
             effective.views[effective.views.index(view)] = replacement
             declarative_views[view_id] = replacement
-
-        layout_item = layout_items.get(view_id)
-        presentation_class = _append_css_class(
-            "",
-            f"dv-view--{override.container}" if override.container else None,
-            override.css_class,
-        )
-        if override.width is not None or override.height is not None or presentation_class:
-            if layout_item is None:
-                layout_item = LayoutItem(widget=view_id)
-                effective.layout.items.append(layout_item)
-            update = {}
-            if override.width is not None:
-                update["width"] = override.width
-            if override.height is not None:
-                update["min_height"] = override.height
-            if presentation_class:
-                update["css_class"] = _append_css_class(layout_item.css_class, presentation_class)
-            replacement = layout_item.model_copy(update=update)
-            effective.layout.items[effective.layout.items.index(layout_item)] = replacement
-            layout_items[view_id] = replacement
 
     canvas_update = _present_fields(presentation.canvas)
     template = canvas_update.get("template")
@@ -424,41 +450,6 @@ def _runtime_id(preferred: str, path: Path, root: Path, used: set[str]) -> str:
     return candidate
 
 
-def walk_navigation(
-    items: list[NavigationItem], parent_id: str | None = None
-) -> list[tuple[NavigationItem, str | None]]:
-    result: list[tuple[NavigationItem, str | None]] = []
-    for item in sorted(items, key=lambda value: value.order):
-        if item.kind == "folder":
-            result.extend(walk_navigation(item.children, item.id))
-        else:
-            result.append((item, parent_id))
-    return result
-
-
-def dashboard_paths(items: list[NavigationItem]) -> list[str]:
-    paths: list[str] = []
-    for item in items:
-        if item.kind == "folder":
-            paths.extend(dashboard_paths(item.children))
-        elif item.dashboard:
-            paths.append(item.dashboard)
-    return paths
-
-
-def _legacy_folder_paths(
-    items: list[NavigationItem], parent: tuple[str, ...] = ()
-) -> list[tuple[tuple[str, ...], int]]:
-    paths: list[tuple[tuple[str, ...], int]] = []
-    for item in items:
-        if item.kind != "folder":
-            continue
-        current = (*parent, item.title)
-        paths.append((current, item.order))
-        paths.extend(_legacy_folder_paths(item.children, current))
-    return paths
-
-
 def _folder_navigation(
     folder_orders: dict[tuple[str, ...], int]
 ) -> list[NavigationItem]:
@@ -507,13 +498,6 @@ def _configured_folder_paths(
             )
             continue
         (trashed if is_trashed else active)[segments] = folder.order
-    if not definition.folders:
-        for segments, order in _legacy_folder_paths(definition.navigation):
-            try:
-                normalized = tuple(normalize_logical_path("/".join(segments)))
-            except WorkspaceError:
-                continue
-            active[normalized] = order
     return active, trashed
 
 
@@ -522,8 +506,7 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
 
     Dashboard placement and trash state come exclusively from the filesystem.
     ``workspace.yaml`` contributes empty logical folders, ordering and runtime
-    settings. Legacy navigation folders are accepted as folder metadata, but
-    legacy dashboard references no longer override what exists on disk.
+    settings. Removed workspace fields are diagnosed and never converted.
     """
     root = Path(path).expanduser().resolve()
     definition_path = root / "workspace.yaml"
@@ -532,7 +515,9 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
         definition = parse_model(WorkspaceDefinition, definition_path)
     except WorkspaceError as error:
         load_diagnostics.append(_diagnostic_from_error(error, code="workspace_definition_invalid"))
-        definition = WorkspaceDefinition(id=root.name, title=root.name)
+        definition = WorkspaceDefinition(
+            schema="dataviz/workspace/v1", id=root.name, title=root.name
+        )
 
     dashboards_root = root / "dashboards"
     discovered_paths: set[Path] = set()
@@ -544,12 +529,14 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
 
     loaded_by_path: dict[Path, LoadedDashboard] = {}
     errors_by_path: dict[Path, WorkspaceError] = {}
+    directory_errors_by_path: dict[Path, WorkspaceError] = {}
     locations_by_path: dict[Path, DashboardLocation] = {}
     for dashboard_path in sorted(discovered_paths, key=lambda value: _relative_path(root, value)):
         try:
             locations_by_path[dashboard_path] = decode_dashboard_path(dashboards_root, dashboard_path)
         except WorkspaceError as error:
             locations_by_path[dashboard_path] = DashboardLocation((dashboard_path.name,), False)
+            directory_errors_by_path[dashboard_path] = error
             load_diagnostics.append(
                 Diagnostic(
                     "warning",
@@ -580,8 +567,9 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
         for index in range(1, len(location.segments)):
             active_folders.setdefault(location.segments[:index], 0)
         dashboard = loaded_by_path.get(selected)
-        if dashboard is None:
-            error = errors_by_path[selected]
+        directory_error = directory_errors_by_path.get(selected)
+        if dashboard is None or directory_error is not None:
+            error = directory_error or errors_by_path[selected]
             preferred = location.leaf
             runtime_id = _runtime_id(preferred, selected, root, used_runtime_ids)
             catalog.append(
@@ -617,7 +605,7 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
             )
         )
 
-    definition.navigation = _folder_navigation(active_folders)
+    navigation = _folder_navigation(active_folders)
 
     # Trash is derived from encoded directory names and trashed empty-folder metadata.
     synthetic_trash = []
@@ -665,7 +653,6 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
                         kind="dashboard",
                         id=dashboard.definition.id if dashboard else location.leaf,
                         title=location.leaf,
-                        dashboard=_relative_path(root, dashboard_path),
                     )
                 )
             return NavigationItem(
@@ -695,7 +682,6 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
             kind="dashboard",
             id=dashboard.definition.id if dashboard else location.leaf,
             title=title,
-            dashboard=_relative_path(root, selected),
         )
         synthetic_trash.append(
             {
@@ -705,7 +691,7 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
                 "item": item.model_dump(mode="json"),
             }
         )
-    definition.trash = [TrashItemDefinition.model_validate(item) for item in synthetic_trash]
+    trash = [TrashItemDefinition.model_validate(item) for item in synthetic_trash]
 
     id_counts: dict[str, int] = {}
     for entry in catalog:
@@ -728,6 +714,8 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
         dashboards=dashboards,
         catalog=catalog,
         load_diagnostics=load_diagnostics,
+        navigation=navigation,
+        trash=trash,
         readme=readme_path.read_text(encoding="utf-8") if readme_path.exists() else "",
     )
 
@@ -741,165 +729,593 @@ def _modified_at(path: Path) -> str:
     return datetime.fromtimestamp(timestamp, timezone.utc).isoformat()
 
 
+def _code_path(definition_path: Path, value: str) -> Path:
+    return (definition_path.parent / value).resolve()
+
+
+def _python_dependency_error(value: str) -> str | None:
+    try:
+        requirement = Requirement(value)
+    except InvalidRequirement as error:
+        return f"Invalid Python dependency {value!r}: {error}"
+    if requirement.marker and not requirement.marker.evaluate():
+        return None
+    try:
+        version = importlib.metadata.version(requirement.name)
+    except importlib.metadata.PackageNotFoundError:
+        return f"Python dependency is not installed: {requirement.name}"
+    if requirement.specifier and version not in requirement.specifier:
+        return (
+            f"Python dependency {requirement.name} has version {version}; "
+            f"expected {requirement.specifier}"
+        )
+    return None
+
+
+def _reference_error(
+    reference: str,
+    *,
+    sources: dict[str, tuple[Path, SourceDefinition]],
+    transforms: dict[str, tuple[Path, ServerTransformDefinition]],
+    browser_transforms: dict[str, tuple[Path, BrowserTransformDefinition]],
+    allow_browser: bool,
+) -> str | None:
+    try:
+        parsed = parse_output_reference(reference)
+    except Exception as error:
+        return str(error)
+    kind, _, node_id = parsed.node_id.partition(":")
+    collections = {
+        "source": sources,
+        "transform": transforms,
+        "browser": browser_transforms,
+    }
+    if kind == "browser" and not allow_browser:
+        return "Server nodes cannot depend on browser outputs"
+    collection = collections.get(kind)
+    if collection is None or node_id not in collection:
+        return f"Unknown output node: {parsed.node_id}"
+    definition = collection[node_id][1]
+    outputs = definition.outputs
+    if outputs and parsed.output not in outputs:
+        return f"Unknown output {parsed.output!r} on {parsed.node_id}"
+    if not outputs and parsed.output != "main":
+        return f"{parsed.node_id} only has implicit output 'main'"
+    return None
+
+
+def _reference_kind(reference: str, dashboard: LoadedDashboard) -> str | None:
+    parsed = parse_output_reference(reference)
+    kind, _, node_id = parsed.node_id.partition(":")
+    collection = {
+        "source": dashboard.sources,
+        "transform": dashboard.transforms,
+        "browser": dashboard.browser_transforms,
+    }[kind]
+    definition = collection[node_id][1]
+    if definition.outputs:
+        output = definition.outputs.get(parsed.output)
+        return output.kind if output else None
+    return "table" if kind == "source" else None
+
+
 def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
+    """Validate the strict v1 contract and all cross-file references."""
     diagnostics: list[Diagnostic] = list(workspace.load_diagnostics)
     if not workspace.dashboards:
-        diagnostics.append(Diagnostic("warning", "Workspace has no dashboards", str(workspace.definition_path)))
+        diagnostics.append(
+            Diagnostic("warning", "Workspace has no dashboards", str(workspace.definition_path))
+        )
+
+    try:
+        from dataviz.auth import AdapterResolver
+
+        adapter_resolver = AdapterResolver(workspace.root)
+    except Exception as error:
+        adapter_resolver = None
+        diagnostics.append(
+            Diagnostic(
+                "error",
+                f"Adapter configuration is invalid: {error}",
+                str(workspace.root),
+                code="adapter_configuration_invalid",
+            )
+        )
 
     for dashboard in workspace.dashboards.values():
         diagnostics.extend(dashboard.presentation_diagnostics or [])
+        definition_path = str(dashboard.definition_path)
         parameter_ids = {item.id for item in dashboard.definition.query_parameters}
-        node_ids = set(dashboard.sources) | set(dashboard.widgets)
+        view_ids = set(dashboard.views)
+
         for source_path, source in dashboard.sources.values():
             if source.type == "file" and not source.path:
-                diagnostics.append(Diagnostic("error", "File source requires path", str(source_path), "path"))
+                diagnostics.append(
+                    Diagnostic("error", "File source requires path", str(source_path), "path")
+                )
             if source.type in {"sql", "python"} and not source.code:
-                diagnostics.append(Diagnostic("error", f"{source.type} source requires code", str(source_path), "code"))
-            if source.type == "sql" and not (source.adapter or source.connection):
-                diagnostics.append(Diagnostic("error", "SQL source requires adapter", str(source_path), "adapter"))
-            for dependency in source.depends_on:
-                if dependency not in dashboard.sources:
-                    diagnostics.append(Diagnostic("error", f"Unknown source dependency: {dependency}", str(source_path), "depends_on"))
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"{source.type} source requires code",
+                        str(source_path),
+                        "code",
+                    )
+                )
+            if source.type == "sql" and not source.adapter:
+                diagnostics.append(
+                    Diagnostic("error", "SQL source requires adapter", str(source_path), "adapter")
+                )
+            if source.adapter and adapter_resolver:
+                try:
+                    _, adapter = adapter_resolver.resolve(
+                        source.adapter, dashboard.definition.adapters
+                    )
+                except Exception as error:
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            str(error),
+                            str(source_path),
+                            "adapter",
+                            "adapter_not_configured",
+                        )
+                    )
+                else:
+                    allowed = (
+                        {"file", "files", "local_files"}
+                        if source.type == "file"
+                        else {"duckdb", "mysql", "starrocks", "sqlalchemy"}
+                    )
+                    if source.type in {"file", "sql"} and adapter.type not in allowed:
+                        diagnostics.append(
+                            Diagnostic(
+                                "error",
+                                f"Adapter type {adapter.type!r} cannot be used by a {source.type} Source",
+                                str(source_path),
+                                "adapter",
+                                "adapter_type_mismatch",
+                            )
+                        )
+            if source.type != "python" and (
+                source.code_dependencies or source.python_dependencies
+            ):
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        "code_dependencies and python_dependencies are only valid for Python sources",
+                        str(source_path),
+                        "type",
+                    )
+                )
+            if source.type == "file" and source.timeout_seconds is not None:
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        "timeout_seconds is only valid for SQL and Python sources",
+                        str(source_path),
+                        "timeout_seconds",
+                    )
+                )
+            if source.type != "sql" and source.timeout_retries is not None:
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        "timeout_retries is only valid for SQL sources",
+                        str(source_path),
+                        "timeout_retries",
+                    )
+                )
             for parameter in source.params:
                 if parameter not in parameter_ids:
-                    diagnostics.append(Diagnostic("error", f"Unknown parameter: {parameter}", str(source_path), "params"))
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Unknown query parameter: {parameter}",
+                            str(source_path),
+                            "params",
+                        )
+                    )
+            for field in ("path", "code"):
+                value = getattr(source, field)
+                if not value:
+                    continue
+                if field == "path" and source.adapter:
+                    continue
+                path = _code_path(source_path, value)
+                if not path.exists():
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Source {field} does not exist",
+                            str(path),
+                            field,
+                        )
+                    )
+            for dependency in source.code_dependencies:
+                dependency_path = _code_path(source_path, dependency)
+                if not dependency_path.exists():
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            "Python Source code dependency does not exist",
+                            str(dependency_path),
+                            "code_dependencies",
+                        )
+                    )
+            for dependency in source.python_dependencies:
+                if message := _python_dependency_error(dependency):
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            message,
+                            str(source_path),
+                            "python_dependencies",
+                        )
+                    )
 
-        for widget_path, widget in dashboard.widgets.values():
-            code_path = widget_path.parent / widget.code if widget.code else None
-            if code_path and not code_path.exists():
-                diagnostics.append(Diagnostic("error", "View code does not exist", str(code_path), "code"))
-            for dependency in widget.depends_on:
-                if dependency not in dashboard.sources:
-                    diagnostics.append(Diagnostic("error", f"Unknown view source: {dependency}", str(widget_path), "depends_on"))
-            for parameter in widget.params:
+        for transform_path, transform in dashboard.transforms.values():
+            code_path = _code_path(transform_path, transform.code)
+            if not code_path.exists():
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        "Server Transform code does not exist",
+                        str(code_path),
+                        "code",
+                    )
+                )
+            for dependency in transform.code_dependencies:
+                dependency_path = _code_path(transform_path, dependency)
+                if not dependency_path.exists():
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            "Server Transform code dependency does not exist",
+                            str(dependency_path),
+                            "code_dependencies",
+                        )
+                    )
+            for dependency in transform.python_dependencies:
+                if message := _python_dependency_error(dependency):
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            message,
+                            str(transform_path),
+                            "python_dependencies",
+                        )
+                    )
+            for parameter in transform.params:
                 if parameter not in parameter_ids:
-                    diagnostics.append(Diagnostic("error", f"Unknown parameter: {parameter}", str(widget_path), "params"))
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Unknown query parameter: {parameter}",
+                            str(transform_path),
+                            "params",
+                        )
+                    )
+            for name, reference in transform.inputs.items():
+                message = _reference_error(
+                    reference,
+                    sources=dashboard.sources,
+                    transforms=dashboard.transforms,
+                    browser_transforms=dashboard.browser_transforms,
+                    allow_browser=False,
+                )
+                if message:
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Input {name}: {message}",
+                            str(transform_path),
+                            f"inputs.{name}",
+                        )
+                    )
+            for name in transform.input_schemas:
+                if name not in transform.inputs:
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Input schema references undeclared input: {name}",
+                            str(transform_path),
+                            f"input_schemas.{name}",
+                        )
+                    )
 
-        layout_widgets = {item.widget for item in dashboard.definition.layout.items}
-        for widget_id in layout_widgets - set(dashboard.widgets):
-            diagnostics.append(Diagnostic("error", f"Layout references unknown widget: {widget_id}", str(dashboard.definition_path), "layout.items"))
+        selection_contract = compile_selection_contract(dashboard.definition)
+        selection_keys = {
+            item.key
+            for selections in selection_contract.values()
+            for item in selections
+        }
+        for transform_path, transform in dashboard.browser_transforms.values():
+            code_path = _code_path(transform_path, transform.code)
+            if not code_path.exists():
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        "Browser Transform code does not exist",
+                        str(code_path),
+                        "code",
+                    )
+                )
+            for parameter in transform.params:
+                if parameter not in parameter_ids:
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Unknown query parameter: {parameter}",
+                            str(transform_path),
+                            "params",
+                        )
+                    )
+            for selection in transform.selections:
+                if selection not in selection_keys:
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Unknown canonical Selection key: {selection}",
+                            str(transform_path),
+                            "selections",
+                        )
+                    )
+            for name, reference in transform.inputs.items():
+                message = _reference_error(
+                    reference,
+                    sources=dashboard.sources,
+                    transforms=dashboard.transforms,
+                    browser_transforms=dashboard.browser_transforms,
+                    allow_browser=True,
+                )
+                if message:
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Input {name}: {message}",
+                            str(transform_path),
+                            f"inputs.{name}",
+                        )
+                    )
 
         for view in dashboard.definition.views:
             template = VIEW_TEMPLATES[view.template]
-            missing = []
-            for field in template["fields"]:
-                value = view.source_ids if field == "source" else getattr(view, field, None)
-                if value is None or value == "" or value == []:
-                    missing.append(field)
+            missing = [
+                field
+                for field in template["fields"]
+                if not getattr(view, field, None)
+            ]
             if missing:
                 diagnostics.append(
                     Diagnostic(
                         "error",
                         f"View {view.id} template {view.template} requires: {', '.join(missing)}",
-                        str(dashboard.definition_path),
+                        definition_path,
                         "views",
+                    )
+                )
+            if view.template == "markdown" and not view.text and not view.input_ref:
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"View {view.id} markdown requires text or input",
+                        definition_path,
+                        "views",
+                    )
+                )
+            for name, reference in view.input_refs.items():
+                message = _reference_error(
+                    reference,
+                    sources=dashboard.sources,
+                    transforms=dashboard.transforms,
+                    browser_transforms=dashboard.browser_transforms,
+                    allow_browser=True,
+                )
+                if message:
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"View {view.id} input {name}: {message}",
+                            definition_path,
+                            "views.inputs",
+                        )
+                    )
+                elif name == "main":
+                    output_kind = _reference_kind(reference, dashboard)
+                    table_templates = {
+                        "line", "bar", "stacked-bar", "pie", "scatter", "heatmap",
+                        "radar", "table", "perspective",
+                    }
+                    if view.template in table_templates and output_kind not in {None, "table"}:
+                        diagnostics.append(
+                            Diagnostic(
+                                "error",
+                                f"View {view.id} template {view.template} requires a table input, got {output_kind}",
+                                definition_path,
+                                "views.input",
+                            )
+                        )
+                    if view.template == "metric" and output_kind == "table" and not view.value:
+                        diagnostics.append(
+                            Diagnostic(
+                                "error",
+                                f"View {view.id} metric requires value for a table input",
+                                definition_path,
+                                "views.value",
+                            )
+                        )
+
+        for reference in dashboard.definition.canvas.inputs:
+            message = _reference_error(
+                reference,
+                sources=dashboard.sources,
+                transforms=dashboard.transforms,
+                browser_transforms=dashboard.browser_transforms,
+                allow_browser=True,
+            )
+            if message:
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"Canvas input: {message}",
+                        definition_path,
+                        "canvas.inputs",
                     )
                 )
 
         section_ids: set[str] = set()
-        section_widgets: set[str] = set()
+        assigned_views: set[str] = set()
+        repeat_templates = {"small-multiples", "selection-gallery"}
         for section in dashboard.definition.sections:
             if section.id in section_ids:
-                diagnostics.append(Diagnostic("error", f"Duplicate section id: {section.id}", str(dashboard.definition_path), "sections"))
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"Duplicate section id: {section.id}",
+                        definition_path,
+                        "sections",
+                    )
+                )
             section_ids.add(section.id)
-            repeat_templates = {"small-multiples", "selection-gallery"}
             if section.template in repeat_templates and not section.repeat:
-                diagnostics.append(Diagnostic("error", f"Section {section.id} template {section.template} requires repeat", str(dashboard.definition_path), "sections.repeat"))
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"Section {section.id} template {section.template} requires repeat",
+                        definition_path,
+                        "sections.repeat",
+                    )
+                )
             if section.repeat and section.template not in repeat_templates:
-                diagnostics.append(Diagnostic("error", f"Section {section.id} repeat requires a repeat Section template", str(dashboard.definition_path), "sections.template"))
-            repeated_view_ids = [view_definition(value).widget for value in section.views]
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"Section {section.id} repeat requires a repeat Section template",
+                        definition_path,
+                        "sections.template",
+                    )
+                )
+            for view_id in section.views:
+                if view_id not in view_ids:
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Section references unknown View: {view_id}",
+                            definition_path,
+                            "sections.views",
+                        )
+                    )
+                if view_id in assigned_views:
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"View belongs to more than one Section: {view_id}",
+                            definition_path,
+                            "sections.views",
+                        )
+                    )
+                assigned_views.add(view_id)
             if section.repeat:
-                repeat_view = section.repeat.view or (repeated_view_ids[0] if repeated_view_ids else None)
-                if not repeat_view:
-                    diagnostics.append(Diagnostic("error", f"Section {section.id} repeat requires a View blueprint", str(dashboard.definition_path), "sections.repeat.view"))
-                elif repeat_view not in repeated_view_ids:
-                    diagnostics.append(Diagnostic("error", f"Section {section.id} repeat View must also appear in sections.views: {repeat_view}", str(dashboard.definition_path), "sections.repeat.view"))
-                if len(repeated_view_ids) != 1:
-                    diagnostics.append(Diagnostic("error", f"Section {section.id} repeat currently supports exactly one View blueprint", str(dashboard.definition_path), "sections.views"))
-                if section.repeat.source and section.repeat.source not in dashboard.sources:
-                    diagnostics.append(Diagnostic("error", f"Section {section.id} repeat references unknown source: {section.repeat.source}", str(dashboard.definition_path), "sections.repeat.source"))
+                repeat_view = section.repeat.view or (section.views[0] if section.views else None)
+                if repeat_view not in section.views:
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Section {section.id} repeat View must appear in sections.views",
+                            definition_path,
+                            "sections.repeat.view",
+                        )
+                    )
+                if len(section.views) != 1:
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Section {section.id} repeat supports exactly one View blueprint",
+                            definition_path,
+                            "sections.views",
+                        )
+                    )
+                if section.repeat.input:
+                    message = _reference_error(
+                        section.repeat.input,
+                        sources=dashboard.sources,
+                        transforms=dashboard.transforms,
+                        browser_transforms=dashboard.browser_transforms,
+                        allow_browser=True,
+                    )
+                    if message:
+                        diagnostics.append(
+                            Diagnostic(
+                                "error",
+                                f"Section {section.id} repeat input: {message}",
+                                definition_path,
+                                "sections.repeat.input",
+                            )
+                        )
                 if section.template == "selection-gallery":
                     selection_ids = {item.id for item in section.selections}
-                    if not section.selections:
-                        diagnostics.append(Diagnostic("error", f"Section {section.id} selection-gallery requires a Section Selection", str(dashboard.definition_path), "sections.selections"))
+                    if not selection_ids:
+                        diagnostics.append(
+                            Diagnostic(
+                                "error",
+                                f"Section {section.id} selection-gallery requires a Section Selection",
+                                definition_path,
+                                "sections.selections",
+                            )
+                        )
                     elif section.repeat.selection and section.repeat.selection not in selection_ids:
-                        diagnostics.append(Diagnostic("error", f"Section {section.id} repeat references unknown Section Selection: {section.repeat.selection}", str(dashboard.definition_path), "sections.repeat.selection"))
-            for raw_view in section.views:
-                view = view_definition(raw_view)
-                if view.widget not in dashboard.widgets:
-                    diagnostics.append(Diagnostic("error", f"Section references unknown widget: {view.widget}", str(dashboard.definition_path), "sections.views"))
-                if view.widget in section_widgets:
-                    diagnostics.append(Diagnostic("error", f"Widget belongs to more than one section: {view.widget}", str(dashboard.definition_path), "sections.views"))
-                section_widgets.add(view.widget)
+                        diagnostics.append(
+                            Diagnostic(
+                                "error",
+                                f"Section {section.id} repeat references unknown Section Selection",
+                                definition_path,
+                                "sections.repeat.selection",
+                            )
+                        )
 
-        contract = compile_selection_contract(dashboard.definition)
-        for widget_id, selections in contract.items():
+        for view_id, selections in selection_contract.items():
             ids = [item.id for item in selections]
             duplicates = sorted({item for item in ids if ids.count(item) > 1})
             if duplicates:
-                diagnostics.append(Diagnostic("error", f"Selection ids shadow each other for view {widget_id}: {', '.join(duplicates)}", str(dashboard.definition_path), "sections"))
-            raw_view = next(
-                (
-                    view_definition(value)
-                    for section in dashboard.definition.sections
-                    for value in section.views
-                    if view_definition(value).widget == widget_id
-                ),
-                None,
-            )
-            if raw_view:
-                unknown_bindings = set(raw_view.selection_bindings) - set(ids)
-                for selection_id in sorted(unknown_bindings):
-                    diagnostics.append(Diagnostic("error", f"View {widget_id} binds unknown selection: {selection_id}", str(dashboard.definition_path), "selection_bindings"))
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"Selection ids shadow each other for View {view_id}: {', '.join(duplicates)}",
+                        definition_path,
+                        "selections",
+                    )
+                )
+            view = dashboard.views[view_id]
+            for selection_id in sorted(set(view.selection_bindings) - set(ids)):
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"View {view_id} binds unknown Selection: {selection_id}",
+                        definition_path,
+                        "selection_bindings",
+                    )
+                )
 
         canvas = dashboard.definition.canvas
-        declarative = bool(dashboard.definition.views)
-        exposed_sources = set(canvas.client_sources)
-        exposed_sources.update(
-            source_id
-            for view in dashboard.definition.views
-            for source_id in view.source_ids
-        )
-        exposed_sources.update(
-            section.repeat.source
-            for section in dashboard.definition.sections
-            if section.repeat and section.repeat.source
-        )
-        has_view_selections = bool(dashboard.definition.dashboard_selections) or any(
-            section.selections
-            or any(view_definition(value).selections for value in section.views)
-            for section in dashboard.definition.sections
-        ) or any(view.selections for view in dashboard.definition.views)
-        if (
-            has_view_selections
-            and not canvas.client_selections
-            and not declarative
-        ):
-            diagnostics.append(Diagnostic("warning", "HTML export selections are snapshot-only because canvas.client_selections is false", str(dashboard.definition_path), "canvas.client_selections"))
-        if canvas.client_selections and not canvas.script and not declarative:
-            diagnostics.append(Diagnostic("error", "canvas.client_selections requires a canvas script that registers window.datavizClient", str(dashboard.definition_path), "canvas.script"))
-        if canvas.client_sources and not canvas.script and not declarative:
-            diagnostics.append(Diagnostic("error", "canvas.client_sources requires a browser canvas script", str(dashboard.definition_path), "canvas.script"))
-        if canvas.client_selections and not exposed_sources:
-            diagnostics.append(Diagnostic("error", "canvas.client_selections requires an explicit canvas.client_sources allowlist", str(dashboard.definition_path), "canvas.client_sources"))
-        for source_id in exposed_sources:
-            if source_id not in dashboard.sources:
-                diagnostics.append(Diagnostic("error", f"Canvas client_sources references unknown source: {source_id}", str(dashboard.definition_path), "canvas.client_sources"))
-        for widget_path, widget in dashboard.widgets.values():
-            for source_id in widget.depends_on:
-                if source_id not in exposed_sources:
-                    diagnostics.append(Diagnostic("error", f"View {widget.id} source is not exposed through canvas.client_sources: {source_id}", str(widget_path), "depends_on"))
         for field in ("template", "style", "script"):
             value = getattr(canvas, field)
             if value and not (dashboard.root / value).exists():
-                diagnostics.append(Diagnostic("error", f"Canvas {field} does not exist", str(dashboard.root / value), f"canvas.{field}"))
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"Canvas {field} does not exist",
+                        str(dashboard.root / value),
+                        f"canvas.{field}",
+                    )
+                )
         for field, values in (("styles", canvas.styles), ("scripts", canvas.scripts)):
             for value in values:
                 if not (dashboard.root / value).exists():
                     diagnostics.append(
                         Diagnostic(
                             "warning",
-                            f"Presentation asset does not exist and will be ignored: {value}",
+                            f"Presentation asset does not exist: {value}",
                             str(dashboard.root / value),
                             f"canvas.{field}",
                             "presentation_asset_missing",

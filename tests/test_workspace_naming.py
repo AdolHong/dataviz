@@ -30,12 +30,12 @@ def test_dashboard_directory_protocol_round_trips():
     assert location.folder_segments == ("Adol",)
 
 
-def test_legacy_nested_physical_path_is_read_as_one_logical_path(tmp_path: Path):
+def test_nested_physical_dashboard_path_is_rejected(tmp_path: Path):
     dashboards = tmp_path / "dashboards"
     dashboard = dashboards / "Adol" / "weekly##sales"
     dashboard.mkdir(parents=True)
-    location = decode_dashboard_path(dashboards, dashboard)
-    assert location.segments == ("Adol", "weekly", "sales")
+    with pytest.raises(WorkspaceError, match="direct children"):
+        decode_dashboard_path(dashboards, dashboard)
 
 
 @pytest.mark.parametrize(

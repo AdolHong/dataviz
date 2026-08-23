@@ -1,0 +1,10 @@
+schema: dataviz/component-test/v1
+tests:
+  - id: runtime.overlay.keyboard
+    component: runtime.overlay
+    kind: accessibility
+    assertions: [aria-expanded, escape-closes, focus-returns, outside-pointer-closes]
+  - id: runtime.overlay.stacking
+    component: runtime.overlay
+    kind: interaction
+    assertions: [floating-panel-above-later-sibling-controls]

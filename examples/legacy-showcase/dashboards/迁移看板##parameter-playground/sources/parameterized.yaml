@@ -1,5 +1,5 @@
 schema: dataviz/source/v1
-kind: datasource
+kind: source
 id: parameterized
 name: 参数化 DuckDB 查询
 type: sql

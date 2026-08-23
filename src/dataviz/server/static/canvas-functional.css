@@ -1,0 +1,39 @@
+/* Runtime-critical component structure. Always loaded, including custom canvases. */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+[hidden] { display: none !important; }
+
+.dv-canvas { min-height: 100vh; }
+.dv-view { display: flex; flex-direction: column; min-width: 0; min-height: 220px; overflow: hidden; }
+.dv-view-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dv-view-actions { display: flex; align-items: center; gap: 8px; }
+.dv-view-body { flex: 1; min-width: 0; min-height: 0; }
+.dv-chart, .dv-plotly, .dv-echarts { width: 100%; height: 100%; min-height: 260px; }
+.dv-image { display: block; width: 100%; max-width: 100%; }
+.dv-view-error { max-height: 100%; overflow: auto; white-space: pre-wrap; }
+
+.dv-view-placeholder { display: grid; place-content: center; min-height: 180px; text-align: center; }
+.dv-view-placeholder--live { gap: 10px; }
+.dv-view-placeholder--live > span {
+  width: 36px;
+  height: 3px;
+  margin: auto;
+  background: currentColor;
+  animation: dv-live-pulse 1s ease-in-out infinite alternate;
+}
+@keyframes dv-live-pulse { to { opacity: .25; transform: scaleX(.45); } }
+
+.dv-view--table .dv-view-body { display: flex; flex-direction: column; overflow: hidden; }
+.dv-table-wrap { width: 100%; max-height: 100%; overflow: auto; overscroll-behavior: auto; }
+.dv-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.dv-table th { position: sticky; z-index: 2; top: 0; }
+.dv-view--perspective .dv-view-body { display: flex; min-height: 320px; overflow: hidden; }
+.dv-perspective { display: block; flex: 1; width: 100%; height: 100%; min-height: 320px; }
+.dv-perspective-loading { display: grid; place-content: center; min-height: 300px; width: 100%; }
+
+.dv-repeat { min-width: 0; }
+.dv-repeat-toolbar { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; }
+.dv-repeat-search { flex: 1; min-width: 160px; }
+.dv-repeat-search > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.dv-repeat-search > input { width: 100%; }
+.dv-repeat-card { min-width: 0; }

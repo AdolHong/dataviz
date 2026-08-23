@@ -1,4 +1,3 @@
-from dataviz.auth.resolver import ConnectionResolver
+from dataviz.auth.resolver import AdapterResolver
 
-__all__ = ["ConnectionResolver"]
-
+__all__ = ["AdapterResolver"]

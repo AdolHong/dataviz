@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Dataviz Workbench</title>
   <link rel="stylesheet" href="/static/server.css">
+  <link rel="stylesheet" href="/runtime/components.css?v=component-v2">
 </head>
 <body>
   <div class="shell">
@@ -32,7 +33,7 @@
           <span aria-hidden="true">◫</span><small>Navigation</small>
         </button>
         <div class="topbar-actions">
-          <details id="query-parameters-control" class="header-control" data-header-popover>
+          <details id="query-parameters-control" class="header-control" data-header-popover data-overlay-floating="true" data-overlay-width="520">
             <summary class="header-control__trigger">
               <span class="header-control__index">01</span>
               <span><strong>Parameters</strong><small id="query-control-meta">Not applied</small></span>
@@ -44,7 +45,7 @@
               <div id="query-state" class="query-state">No dataset loaded.</div>
             </div>
           </details>
-          <details id="dashboard-selections-control" class="header-control" data-header-popover>
+          <details id="dashboard-selections-control" class="header-control" data-header-popover data-overlay-floating="true" data-overlay-width="760">
             <summary class="header-control__trigger">
               <span class="header-control__index header-control__index--selection">02</span>
               <span><strong>Selections</strong><small id="dashboard-control-meta">None</small></span>
@@ -56,7 +57,7 @@
             </div>
           </details>
           <button id="download-button" class="button button--ghost" disabled>Export HTML</button>
-          <details id="query-diagnostics" class="query-diagnostics" data-status="idle" data-header-popover>
+          <details id="query-diagnostics" class="query-diagnostics" data-status="idle" data-header-popover data-overlay-floating="true" data-overlay-width="620">
             <summary class="button button--ghost"><span class="query-diagnostics__light"></span><span class="query-diagnostics__copy"><strong>Sources</strong><small id="query-diagnostics-label">Not run</small></span><span class="query-diagnostics__chevron">⌄</span></summary>
             <div class="query-diagnostics__popover">
               <div class="section-heading"><span>↳</span><div><h3>Data sources</h3><p>Execution details for File, SQL and Python sources.</p></div></div>
@@ -81,6 +82,7 @@
   </dialog>
   <div id="nav-context-menu" class="nav-context-menu" role="menu" hidden></div>
   <dialog id="nav-dialog" class="nav-dialog"></dialog>
-  <script type="module" src="/static/app.js"></script>
+  <script src="/runtime/components.js?v=component-v2"></script>
+  <script type="module" src="/static/app.js?v=runtime-v2"></script>
 </body>
 </html>

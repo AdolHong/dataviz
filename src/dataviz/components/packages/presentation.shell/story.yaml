@@ -1,0 +1,4 @@
+schema: dataviz/component-story/v1
+stories:
+  - {id: layout.exploration.gallery, component: layout.exploration, title: Exploration layout, summary: Selection and analysis-led page, gallery: {dashboard: component-gallery, target: .dv-canvas, anchor: layout-exploration}}
+  - {id: theme.editorial.gallery, component: theme.editorial, title: Editorial theme, summary: Warm paper and ink tokens, gallery: {dashboard: component-gallery, target: .dv-theme--editorial, anchor: theme-editorial}}

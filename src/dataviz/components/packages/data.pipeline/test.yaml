@@ -1,0 +1,5 @@
+schema: dataviz/component-test/v1
+tests:
+  - {id: output.named.contract, component: output.named, kind: contract, assertions: [canonical-reference, typed-value, deterministic-address]}
+  - {id: transform.server-python.contract, component: transform.server-python, kind: contract, assertions: [declared-inputs, named-outputs, schema-validation]}
+  - {id: transform.browser-js.contract, component: transform.browser-js, kind: contract, assertions: [worker-isolation, timeout, serializable-output]}

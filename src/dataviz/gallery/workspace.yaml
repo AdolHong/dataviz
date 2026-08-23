@@ -1,0 +1,6 @@
+schema: dataviz/workspace/v1
+kind: workspace
+id: dataviz-component-gallery
+title: Dataviz Component Gallery
+description: Runtime-native stories for Section, View, Selector and Renderer templates.
+

@@ -2,6 +2,34 @@ from __future__ import annotations
 
 from typing import Any
 
+from dataviz.view_contracts import VIEW_TEMPLATE_CONTRACTS
+
+
+_CHART_TEMPLATES = (
+    "line",
+    "bar",
+    "stacked-bar",
+    "pie",
+    "scatter",
+    "heatmap",
+    "radar",
+)
+_CHART_FIELD_MATRIX = {
+    name: {
+        key: contract[key]
+        for key in (
+            "required",
+            "optional",
+            "engine",
+            "aggregate",
+            "field_references",
+        )
+        if key in contract
+    }
+    for name in _CHART_TEMPLATES
+    for contract in [VIEW_TEMPLATE_CONTRACTS[name]]
+}
+
 
 DOC_ALIASES = {
     "start": "quickstart",
@@ -57,7 +85,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "dataviz list <workspace>",
             "dataviz context <workspace> <dashboard-id> --focus view:<view-id> --format json",
             "dataviz validate <workspace> --dashboard <dashboard-id> --format json",
-            "dataviz query <workspace> <dashboard-id> --query-param key=value",
+            "dataviz query <workspace> <dashboard-id> --source <id> --output-name main --query-param key=value",
             "dataviz output <workspace> <dashboard-id> source:<id>/<output>",
             "dataviz report <workspace> <dashboard-id> --output report.html",
             "dataviz serve <workspace> --port 8080",
@@ -94,6 +122,10 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "interactive_dag": "三种 Runtime 共用 Named Output、依赖、状态、缓存和局部失效协议。",
             "view_isolation": "View 只因自己的 Selection、内容绑定或输入 Output 变化而更新。",
             "identity": "Interaction 以 tab、Dashboard、Query Run、Transform、generation 隔离。",
+            "server_interactive_cache": (
+                "Query 计划显式标记 server_interactive_inputs；Server Compute 只读取该 tab Query Run 的 Artifact，"
+                "不会重新执行 Source。运行数据位于 Workspace/.dataviz，不进入 Dashboard。"
+            ),
         },
         "related": ["outputs", "dataset-transforms", "interactive-transforms"],
     },
@@ -129,7 +161,7 @@ id: sales-overview
 title: 销售概览
 subtitle: "仓 {{ parameters.warehouse_id }}"
 query_parameters:
-  - {id: warehouse_id, label: 仓, default: 5740}
+  - {id: warehouse_id, type: integer, label: 仓, default: 5740}
 sources:
   - id: sales
     kind: source
@@ -166,9 +198,12 @@ sections:
         "summary": "连接配置属于 Workspace；可分享的 Dashboard 只引用逻辑 Adapter 名。",
         "supported": ["duckdb", "mysql", "starrocks", "sqlalchemy", "file root", "Python Source adapter config"],
         "rules": [
-            "密码使用环境变量字段或未提交的 adapters.local.yaml。",
+            "非敏感定义放在 auth/adapters.yaml；密码使用环境变量字段或未提交的 auth/adapters.local.yaml。",
             "更换团队环境只修改 Dashboard adapter 别名映射。",
+            "内置类型只接受 file、duckdb、mysql、starrocks、sqlalchemy，不保留旧类型别名。",
+            "validate 会检查被 Source 引用的 Adapter、文件路径和必需环境变量。",
             "Interactive Transform 永远没有 Adapter，不能借交互状态重新查数。",
+            "Dataviz 会脱敏错误和日志；可信 Python Source 仍不得主动把 Adapter 凭据作为 Output 返回。",
         ],
     },
     "sources": {
@@ -259,6 +294,7 @@ timeout_seconds: 120
         "rules": [
             "只返回 Named Output，不接触 DOM，不调用 Renderer。",
             "输入只能是已声明 Base/Derived Output；没有 Adapter，也没有 Source API。",
+            "server-python 输入来自同一 tab、Dashboard 和 Query Run 的不可变 Artifact；交互阶段禁止重查 Source。",
             "generation 采用最后写入获胜，旧任务不能覆盖新结果。",
             "server-python 可调用 context.progress 与 context.log；日志保存为结构化 Artifact。",
         ],
@@ -287,8 +323,8 @@ timeout_seconds: 120
             ),
             "bundle_contract": (
                 "目录根部必须包含 pyodide.mjs、pyodide.asm.mjs、pyodide.asm.wasm、"
-                "python_stdlib.zip 和 pyodide-lock.json。validate 会继续检查 micropip、"
-                "声明依赖的传递 wheel 闭包与 SHA-256。"
+                "python_stdlib.zip、package.json 和 pyodide-lock.json。validate 会检查固定版本，"
+                "按 Emscripten marker 继续检查 micropip、声明依赖的传递 wheel 闭包与必需 SHA-256。"
             ),
             "serve": (
                 "bundle 报告应解压后通过 HTTP 静态服务打开；module Worker/WASM 不保证在 file:// 下工作。"
@@ -296,6 +332,10 @@ timeout_seconds: 120
             "conditional": (
                 "没有可执行 browser-python 分支时，报告不嵌入 Python Worker、不写 Pyodide URL，"
                 "也不复制 Pyodide 资产。snapshot/unavailable 分支同样不携带无用 Runtime。"
+            ),
+            "other_assets": (
+                "Pyodide bundle 不等于整页离线：Plotly 内嵌；ECharts/Arrow 只有配置本地文件时离线；"
+                "Perspective 当前仍依赖 CDN。manifest 只判断声明的 Runtime/View 资产，不分析自定义脚本请求。"
             ),
         },
         "commands": [
@@ -343,21 +383,14 @@ timeout_seconds: 120
     },
     "renderers": {
         "summary": "Renderer 只消费 Named Output 和 View descriptor，不执行业务取数。",
-        "built_in": ["metric", "plotly", "echarts", "table", "perspective", "markdown", "image", "custom"],
+        "view_templates": list(VIEW_TEMPLATE_CONTRACTS),
+        "chart_engines": ["plotly", "echarts"],
         "lifecycle": ["validate", "mount", "update", "dispose"],
         "isolation": "一个 Renderer 失败只影响自己的 View；输入没有变化时不 update。",
     },
     "charts": {
         "summary": "默认图表模板覆盖常见 Plotly/ECharts 场景，业务逻辑留在 Transform。",
-        "field_matrix": {
-            "line": {"required": ["input", "x", "y"], "optional": ["series", "aggregate", "sort"]},
-            "bar": {"required": ["input", "x", "y"], "optional": ["series", "aggregate", "sort"]},
-            "stacked-bar": {"required": ["input", "x", "y", "series"]},
-            "pie": {"required": ["input", "label", "value"]},
-            "scatter": {"required": ["input", "x", "y"], "optional": ["color", "size"]},
-            "heatmap": {"required": ["input", "x", "y", "z"]},
-            "radar": {"required": ["input", "x", "y"], "optional": ["series"]},
-        },
+        "field_matrix": _CHART_FIELD_MATRIX,
         "rule": "先验证字段、聚合和 Named Output，再用 Presentation options 调视觉细节。",
     },
     "tables": {
@@ -387,10 +420,23 @@ timeout_seconds: 120
         "commands": [
             "dataviz components --check --format json",
             "dataviz components <component-id> --format json",
-            "dataviz scaffold <component-id> --id <id> --format json",
+            "dataviz scaffold --list --format json",
+            "dataviz scaffold <recipe> --id <id> --format json",
             "dataviz gallery --output gallery.html",
         ],
-        "contract": ["logic fields", "behavior", "semantic DOM", "CSS tokens", "story", "contract tests"],
+        "scaffold_rule": "Component IDs and Scaffold recipes are related catalogs, not interchangeable names; discover recipes with scaffold --list.",
+        "contract": [
+            "logic fields",
+            "behavior",
+            "semantic DOM",
+            "CSS tokens",
+            "story",
+            "test declarations",
+        ],
+        "check_scope": (
+            "components --check validates Package metadata/assets and test declarations; "
+            "pytest plus browser E2E execute behavior."
+        ),
     },
     "ai-authoring": {
         "summary": "AI 应读取任务相关的最小契约，而不是整个 Runtime 源码。",
@@ -400,16 +446,19 @@ timeout_seconds: 120
             "dataviz context <workspace> <dashboard> --focus interactive:<id> --format json",
             "dataviz context <workspace> <dashboard> --focus component:<id> --format json",
             "dataviz benchmark <workspace> <dashboard>",
+            "dataviz benchmark <workspace> <dashboard> --browser-runtime --format json",
             "dataviz authoring tasks --format json",
             "dataviz authoring protocol --format json",
             "dataviz authoring prepare <task> <directory> --approach dataviz|standalone-html --trial-id <trial>",
+            "dataviz authoring start <measurement-workspace> --trial-dir <directory> --model <model> --tool <client>",
             "dataviz authoring assess <directory> <check-id> --status passed --assessor automation --evidence <evidence>",
             "dataviz authoring verify <directory> --format json",
+            "dataviz authoring finish <measurement-workspace> <session> --trial-dir <directory> --outcome success --first-attempt success --correction-rounds 0",
             "dataviz authoring compare <measurement-workspace> --format json",
         ],
         "evaluation": {
             "design": "同一固定任务、模型、客户端/工具和权限做 Dataviz 与 standalone HTML 成对试验。",
-            "quality_gate": "固定任务/输入 SHA-256；每条验收项必须记录 assessor 与证据。只有两边输入完整并通过全部验收的 identity-matched pair 才进入效率聚合。",
+            "quality_gate": "固定任务/approach prompt/输入 SHA-256；每条验收项必须记录 assessor 与证据。只有两边 prompt/输入完整并通过全部验收的 identity-matched pair 才进入效率聚合。",
             "measurements": [
                 "client 实际报告的 input/output tokens",
                 "首次成功率",
@@ -418,6 +467,11 @@ timeout_seconds: 120
                 "分类 friction",
             ],
             "rule": "缺失 Token 保持 unmeasured；不按字符数或文件大小估算。",
+        },
+        "runtime_benchmark": {
+            "purpose": "在 Chromium 中等待页面稳定后测量 Query、报告构建、页面就绪、Arrow 传输、Renderer 生命周期和 View 终态。",
+            "schema": "dataviz/browser-runtime-benchmark/v2",
+            "boundary": "它验证页面规模与生命周期，不估算 AI Token，也不替代成对 authoring trial。",
         },
         "goal": "先追求可用性和低试错；Token 节省比例只能由真实任务测量，不能预设。",
     },
@@ -489,13 +543,20 @@ timeout_seconds: 120
             "server-python Interactive Transform 使用独立进程和 generation 取消。",
             "browser-js/browser-python 使用 Web Worker、timeout、supersede cancellation 和结构化错误。",
             "大 Table 自动使用 Arrow IPC；浏览器按需物化行。",
+            "内置数值聚合使用线性 reducer，避免大数组展开触发 JavaScript 参数上限。",
             "节点独立发布，失败分支不阻塞无关分支。",
+            "runtime.max_concurrent_runs 与 max_concurrent_interactions 分别限制单机并发 Query/Server 交互任务。",
+            "Run Artifact 与 NodeCache 只写入 Workspace/.dataviz；默认缓存由 tab session 隔离，Server Interactive 复用同一 Query Run。",
             "Run、cache、Worker、PyProxy、Renderer 与订阅均有 dispose/淘汰路径。",
         ],
         "current_limits": [
             "可信本地 Python/JavaScript 不是不可信代码沙箱。",
             "没有多租户 CPU/内存配额。",
             "Server 与 HTML 仍传输完整可达 Output，未实现服务端分页。",
+            "150K 行已有真实浏览器回归；固定 10K/100K/1M 内存预算仍待建立。",
+            "修改 Workspace Runtime 并发上限后需要重启 Server，已有信号量不会热替换。",
+            "只支持一个 Dataviz Server 进程写一个 Workspace/报告目标；协调锁不是跨进程锁。",
+            "Server 没有账号体系或 HTTP 鉴权，默认只监听回环地址；非回环 --host 必须显式使用 --allow-remote，并由可信网络或外部代理负责访问控制。session_id 不是访问凭证。",
         ],
         "related": ["interactive-transforms", "maintenance"],
     },
@@ -509,7 +570,7 @@ timeout_seconds: 120
         "rules": [
             "默认 dry-run；必须显式 --apply 才删除。",
             "只允许删除 Workspace/.dataviz/runs 与 cache 中的目标。",
-            "活动 Run 始终受保护。",
+            "活动 Query，以及仍被活动 Interaction 消费的 Query Run 和缓存始终受保护。",
         ],
     },
     "troubleshooting": {
@@ -521,7 +582,7 @@ timeout_seconds: 120
             {"symptom": "Interactive Transform 失败", "action": "检查 Runtime、trigger、canonical state、generation 与 export.mode。"},
             {"symptom": "查询成功但 View 为空", "action": "检查 Named Output 字段、类型、Selection 后行数和 View input。"},
             {"symptom": "Server 正常但 HTML 失败", "action": "检查 export.mode；server-python 不能离线重算。browser-python 再检查 CDN/bundle、manifest，并通过 HTTP 打开。"},
-            {"symptom": "源码环境 ModuleNotFoundError", "action": "运行 uv sync --python 3.12 --extra dev，并确认当前目录是 dataviz-tool。"},
+            {"symptom": "源码环境 ModuleNotFoundError", "action": "在 dataviz-tool 下运行 uv sync --python 3.12 --extra dev --no-editable --reinstall-package workspace-dataviz；后续 CLI 使用 uv run --no-editable dataviz。"},
         ],
         "evidence": [
             "dataviz validate 的完整 JSON。",

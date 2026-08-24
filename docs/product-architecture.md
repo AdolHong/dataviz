@@ -77,6 +77,10 @@ validate → prepare → execute → cancel → dispose
 
 每次交互以 `tab + dashboard + query run + transform + generation` 隔离。较新的 generation 只 supersede 相同分支的旧任务；迟到请求会收到 `interaction_generation_stale`，不能覆盖新结果。
 
+Interaction endpoint 从 Query Run 建立时就属于该 Run，不以整次 Query 到达终态为前提。RunManager 持续发布不可变 Query snapshot；某个 Base Output 就绪后，依赖它的 `server-python` 分支可以读取当前 snapshot 并立即运行，无关慢 Source 不构成屏障。当前 Dashboard 若修改了 Query 语义，Query Contract fingerprint 会拒绝复用旧 Run；只修改兼容的 Interactive/Presentation 逻辑时可以继续复用同一批 Base Output，便于开发态迭代。
+
+`execution.plan.server_interactive_base_references()` 在 Query 建立时分类可达 `server-python` 分支所需的 Base Output，并通过 Run API 暴露 `server_interactive_inputs`。数据只保存一份：所有 Query Artifact 位于 Workspace `.dataviz/runs/<run-id>/artifacts/`，不进入 Dashboard；RunManager 用 `tab session + dashboard + run` 控制访问，Interactive Executor 再按 canonical Output reference 读取。Source/Dataset 的 NodeCache key 包含 Dashboard 与节点 ID，默认 tab namespace 位于 `.dataviz/cache/tabs/<session-hash>/`。因此页面刷新可以恢复同一 Run，跨 tab 访问被拒绝，交互执行也没有 Source Runner 回退路径。
+
 `trigger` 支持 `apply`、`auto` 和 `manual`。Compute Control 区分 draft/committed；内容绑定和 provenance 只描述真正产生当前结果的 committed state。
 
 ## 4. Output、状态和证据
@@ -102,7 +106,7 @@ not_run → queued → loading → ready | empty | error | cancelled | unavailab
 
 ## 5. Browser Runtime 与局部更新
 
-Server 与 HTML 共享 `canvas-runtime.js`、Renderer Registry、Selection/Compute Control 和 Overlay 行为。公开边界是 `dataviz/runtime/v2` Manifest、Named Output Store 和 Runtime Event。
+Server 与 HTML 共享 `dataviz/runtime/v2` Manifest、Named Output Store 和 Runtime Event。`canvas-runtime.js` 是共享 Runtime 主机；`data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 分别物理拥有数据 Adapter、Renderer lifecycle、Section/Repeat 和 Presentation state，借 `dataviz:runtime-ready` 装配到主机，不在 Runtime 文件内保留第二份实现。
 
 Runtime 根据显式依赖建立反向索引：
 
@@ -112,7 +116,21 @@ Runtime 根据显式依赖建立反向索引：
 - Compute Parameter 只失效声明消费它的 Interactive Transform 下游。
 - 新 Run 可以显示 stale 旧结果，但不会把两个 Run 的 Output 静默混合。
 
+父页面与 Canvas 的消息同时校验 origin、source、`dashboard_id`、`run_id` 和 `frame_id`。Canvas ready 后主动握手；Query 到达终态时父页面只更新 Interaction endpoint，不重新加载 iframe。
+
+Runtime 将 Selection、Compute Parameter 和 Output 视为三种独立 delta。调用方必须显式传递“全部变化”“部分变化”或“没有变化”，不能用省略参数混淆语义。缺失 Derived Output 只负责首次启动分支；若分支已经 active，无关 Output 发布不会取消或重复启动它。Output signature 未变化时也不会继续传播或重绘。
+
 大 Table 的传输可使用 Arrow IPC/columnar envelope；浏览器按需解码。部分通用 Selector 和 Renderer 首次消费时仍会物化 JavaScript 行对象，当前不承诺完整的浏览器列式查询引擎。
+
+声明式 View、browser-js Worker 和 Custom Canvas 的内置数值聚合使用线性 reducer，不通过 `Math.min(...rows)` / `Math.max(...rows)` 展开大数组。当前真实浏览器回归覆盖 150K 行；这解决参数上限崩溃，但不等于已经证明 1M 行的内存预算。
+
+规模回归入口：
+
+```bash
+dataviz benchmark <workspace> <dashboard> --browser-runtime --format json
+```
+
+浏览器基准等待 Arrow hydration、Interactive Transform、Repeat reconciliation 和已挂载 View 进入稳定状态，并分开记录 Query、报告构建、页面就绪、Arrow 行数/字节/耗时、Renderer mount/update/failure/耗时与 View 终态。
 
 Renderer 生命周期：
 
@@ -121,6 +139,8 @@ validate → mount → update → dispose
 ```
 
 Plotly、ECharts、普通 Table、Perspective、文本、图片和自定义 Renderer 都通过这个边界工作。Perspective 自己拥有内部滚动和 WASM/Table 生命周期；只有内部确实能继续滚动时才拦截滚轮。
+
+失败、取消与 unavailable 节点的结构化错误会进入 portable Output 状态。终态 Run 可以重新打开检查：已经完成的兄弟 View 保持 ready，受影响的 View 显示 error/cancelled/unavailable，而不是返回 500 或无限 loading。
 
 ## 6. HTML Export
 
@@ -139,7 +159,7 @@ browser-python 的 interactive export 支持：
 
 Pyodide Worker、URL 和资产按可执行分支裁剪。没有 browser-python，或分支已经 snapshot/unavailable 时，不携带无用 Python Runtime。
 
-本地 bundle 必须是完整 Pyodide 分发根目录。静态预检检查核心 loader/WASM/stdlib/lockfile，并从 `micropip` 与声明依赖出发验证 lockfile 传递闭包、wheel 文件和 SHA-256；这保证 `bundle` 表示无需外网的运行包，而不只是把 `pyodide.mjs` 复制进报告。
+本地 bundle 必须是版本匹配的完整 Pyodide 分发根目录。静态预检通过 `package.json` 核对 Runtime 版本，按 Emscripten 目标环境解析 dependency marker，检查核心 loader/WASM/stdlib/lockfile，并从 `micropip` 与声明依赖出发验证 lockfile 传递闭包、wheel 文件和必需 SHA-256；这保证 `bundle` 表示无需外网且可验证的运行包，而不只是把 `pyodide.mjs` 复制进报告。
 
 CLI 无浏览器上下文时不会替用户伪造 browser snapshot。需要当前页面交互状态的报告由 Server 页面导出；确定性的默认状态报告可以使用 `dataviz report`。
 
@@ -149,9 +169,11 @@ CLI 无浏览器上下文时不会替用户伪造 browser snapshot。需要当�
 - `dashboard.id` 是 API、DAG、缓存和状态的稳定身份。
 - `##` 编码逻辑目录，`__TRASH__##` 编码回收站。
 - `workspace.yaml` 只补充空目录、顺序和 Runtime 等磁盘命名无法表达的状态。
-- Dashboard 只引用 Adapter 别名；凭证留在 `auth/adapters.local.yaml` 或环境变量。
+- Dashboard 只引用自己声明的逻辑 Adapter reference，再由 Workspace 绑定到具体 Adapter；凭证留在 `auth/adapters.local.yaml` 或环境变量。
 
 Server 状态以浏览器 tab 的 `session_id` 为边界。不同 tab、Dashboard、用户、Query Run 和 Interaction generation 不共享草稿、取消信号或运行证据。内容寻址缓存可以复用相同输入的结果，但不会共享交互状态。
+
+`.dataviz/runs` 与 `.dataviz/cache` 是唯一运行数据根目录，Dashboard 文件夹和 Dashboard ZIP 不包含缓存。所有已发布 Query Output 在有界 Run 保留期内存在；其中 Server Interactive 输入会被显式标记和保护，而不是重复存储。活动 Interaction 消费的 Run 不能被清理。
 
 ## 8. Component 与 Presentation
 
@@ -161,7 +183,7 @@ Server 状态以浏览器 tab 的 `session_id` 为边界。不同 tab、Dashboar
 默认组件 → 模板参数 → Theme token/css_class → 自定义 Renderer → 完整 Canvas
 ```
 
-Component Registry v3 从 `src/dataviz/components/packages/` 扫描 Package。每个 Package 声明 owner、Schema、controller、adapter、功能 CSS、Story 和测试。Overlay、Selector 和 Custom Renderer 已具有独立物理实现；声明式 View/Section、Data Pipeline 与 Presentation 仍有桥接代码，后续归属整理见 [plan](../plan.md)。
+Component Registry v3 从 `src/dataviz/components/packages/` 扫描 Package。每个 Package 声明 owner、Schema、controller、adapter、功能 CSS、Story 和测试声明。`components --check` 只校验这些元数据、资产与声明，pytest/浏览器 E2E 才执行行为。13 个 Package 均为 package-owned；声明式 View/Section、Data Pipeline 与 Presentation 已迁入各自 owner，`declarative-runtime.js` 与 Runtime 中的重复实现已经删除。
 
 ## 9. 静态校验与 AI 开发入口
 
@@ -190,7 +212,7 @@ dataviz authoring verify DIRECTORY --format json
 dataviz authoring compare MEASUREMENT_WORKSPACE --format json
 ```
 
-固定 trial 使用任务契约与输入 SHA-256；逐项验收必须留下 assessor 和证据，只有两种方案均保持输入完整并通过全部验收时才进入效率聚合。
+固定 trial 使用任务契约、approach prompt 与输入 SHA-256；逐项验收必须留下 assessor 和证据，只有两种方案均保持 prompt/输入完整并通过全部验收时才进入效率聚合。
 
 错误应包含稳定 code、文件、字段、节点/依赖细节和修复建议。AI 不需要读取整个 Browser Runtime 才能新增普通看板。
 
@@ -198,7 +220,10 @@ dataviz authoring compare MEASUREMENT_WORKSPACE --format json
 
 - 这是可信单机执行环境，不是不可信代码沙箱，也不提供多租户 CPU/内存额度。
 - 通用服务端分页、按需 Record Batch 和完整浏览器列式执行尚未实现。
-- 部分 Component 已有 owner contract，但物理实现仍位于大型 Runtime 中。
-- Gallery 的完整状态、键盘和超大数据矩阵仍需扩展。
+- 13 个 Component Package 都已物理拥有 controller、adapter 和功能 CSS；共享 Runtime 仍较大，后续只按 Manifest、Output Store、Scheduler、Selection Binding 等主机职责继续拆分。
+- Gallery 已覆盖 Selector、Compute、View、Section 七状态和真实 10/100/1,000 选项；Firefox/WebKit 的窄视口、弹层、滚动、键盘、ARIA、Perspective 恢复和重复 dispose 组合仍需扩展。
 - Token 节省是待真实任务评测的产品假设，不承诺固定数字。
 - 成对评测工具已经实现；真实重复 trial 与结果发布尚待积累。
+- 当前运行协调只支持一个 Dataviz Server 进程写一个 Workspace/报告目标；Runtime 并发上限变更需要重启。
+- Pyodide bundle 只包含 Python Runtime。Perspective 当前仍依赖 CDN；ECharts/Arrow 只有显式本地配置时离线。manifest 的可移植性结论不覆盖自定义脚本自行发起的网络请求。
+- Dataviz 会隔离 Adapter 并脱敏错误/日志，但可信 Python Source 仍有能力主动把秘密作为 Output 返回；这是看板作者必须遵守的边界。

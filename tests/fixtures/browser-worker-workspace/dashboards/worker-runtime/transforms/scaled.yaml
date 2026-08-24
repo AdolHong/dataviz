@@ -6,7 +6,7 @@ entrypoint: transform
 runtime: browser-js
 inputs:
   rows: source:raw/main
-selections: [dashboard:worker-runtime/delay_ms]
+compute_params: [delay_ms]
 trigger: auto
 debounce_ms: 0
 export: {mode: interactive}
@@ -16,4 +16,4 @@ outputs:
     schema:
       - {name: name}
       - {name: value}
-timeout_seconds: 0.2
+timeout_seconds: 1

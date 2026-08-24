@@ -36,6 +36,7 @@ html, body { margin: 0; min-height: 100%; }
 .dv-view[data-view-status="stale"] [data-view-status-label] { color: #a86718; }
 .dv-view[data-view-status="unavailable"] [data-view-status-label],
 .dv-view[data-view-status="error"] [data-view-status-label] { color: #b33d31; }
+.dv-view[data-view-status="cancelled"] [data-view-status-label] { color: #a86718; }
 
 .dv-view-placeholder { display: grid; place-content: center; min-height: 180px; text-align: center; }
 .dv-view-placeholder--live { gap: 10px; }

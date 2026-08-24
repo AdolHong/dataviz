@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import mimetypes
+import hashlib
 import json
 import math
 import re
+import shutil
 from collections.abc import Mapping
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import pandas as pd
@@ -21,7 +24,11 @@ OutputBundle = dict[str, ArtifactDescriptor]
 
 def _artifact_id(node_id: str, output_name: str) -> str:
     raw = node_id if output_name == "main" else f"{node_id}__{output_name}"
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", raw)
+    readable = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._-") or "output"
+    digest = hashlib.sha256(
+        json.dumps([node_id, output_name], ensure_ascii=False).encode("utf-8")
+    ).hexdigest()[:12]
+    return f"{readable[:96]}--{digest}"
 
 
 def _table(value: Any) -> pd.DataFrame:
@@ -145,6 +152,17 @@ def write_output(
     metadata: dict[str, Any] | None = None,
 ) -> ArtifactDescriptor:
     if isinstance(value, ArtifactDescriptor):
+        try:
+            store.verify_owned(value)
+        except ValueError as error:
+            raise ExecutionFailure(
+                f"Output {output_name} references an Artifact outside the current Run",
+                details={
+                    "code": "output_artifact_run_mismatch",
+                    "output": output_name,
+                    "artifact_id": value.artifact_id,
+                },
+            ) from error
         if definition is not None and value.kind != definition.kind:
             raise ExecutionFailure(
                 f"Output {output_name} references a {value.kind} Artifact, "
@@ -216,13 +234,12 @@ def write_output(
         path = Path(value)
         if not path.exists() or not path.is_file():
             raise ExecutionFailure(f"{declared_kind.title()} output is not a file: {path}")
-        raw = path.read_bytes()
         mime_type = (
             definition.mime_type if definition and definition.mime_type else mimetypes.guess_type(path.name)[0]
         ) or "application/octet-stream"
-        return store.write_bytes(
+        return store.write_file(
             artifact_id,
-            raw,
+            path,
             kind=declared_kind,
             format=(definition.format if definition and definition.format else path.suffix.lstrip(".") or "binary"),
             suffix=path.suffix or ".bin",
@@ -260,14 +277,56 @@ def normalize_outputs(
             details={"code": "output_contract_mismatch", "missing": [], "unknown": sorted(unknown)},
         )
 
-    return {
-        name: write_output(
-            store,
-            node_id,
-            name,
-            item,
-            definitions.get(name),
-            metadata=metadata,
-        )
+    # A node publishes one logical bundle. Writing each member independently
+    # used to leave orphaned (or partially replaced) Artifacts when a later
+    # member failed validation or persistence. Back up only the deterministic
+    # target ids touched by this bundle, then restore them on any failure.
+    managed_ids = {
+        name: _artifact_id(node_id, name)
         for name, item in raw_outputs.items()
+        if not isinstance(item, ArtifactDescriptor)
     }
+    with TemporaryDirectory(
+        prefix=".dataviz-output-bundle-",
+        dir=store.artifact_root,
+    ) as backup_directory:
+        backup_root = Path(backup_directory)
+        backups: dict[Path, Path] = {}
+        for artifact_id in managed_ids.values():
+            for existing in store.artifact_root.glob(f"{artifact_id}.*"):
+                if not existing.is_file():
+                    continue
+                backup = backup_root / existing.name
+                shutil.copy2(existing, backup)
+                backups[existing] = backup
+        try:
+            outputs = {
+                name: write_output(
+                    store,
+                    node_id,
+                    name,
+                    item,
+                    definitions.get(name),
+                    metadata=metadata,
+                )
+                for name, item in raw_outputs.items()
+            }
+        except BaseException:
+            for artifact_id in managed_ids.values():
+                for current in store.artifact_root.glob(f"{artifact_id}.*"):
+                    if current.is_file():
+                        current.unlink()
+            for destination, backup in backups.items():
+                shutil.copy2(backup, destination)
+            raise
+
+        retained = {
+            store.resolve(descriptor)
+            for name, descriptor in outputs.items()
+            if name in managed_ids
+        }
+        for artifact_id in managed_ids.values():
+            for stale in store.artifact_root.glob(f"{artifact_id}.*"):
+                if stale.is_file() and stale.resolve() not in retained:
+                    stale.unlink()
+        return outputs

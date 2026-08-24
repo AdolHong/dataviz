@@ -3,6 +3,7 @@ package: runtime.overlay
 version: 1.1.0
 category: runtime
 purpose: One overlay controller for popovers, selector panels and future floating components.
+implementation: {mode: package, sources: []}
 dependencies: []
 components:
   - id: runtime.overlay

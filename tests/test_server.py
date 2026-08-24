@@ -1,22 +1,27 @@
 from __future__ import annotations
 
+import json
 import time
 import shutil
 from pathlib import Path
 
 import pandas as pd
 import pyarrow as pa
+import pytest
 import yaml
 
 from fastapi.testclient import TestClient
 
+from dataviz.artifacts import ArtifactStore
 from dataviz.server import create_app
 from dataviz.server.manager import InteractionRecord, RunManager, RunRecord
 from dataviz.execution.cache import NodeCache
+import dataviz.execution.cache as cache_module
 from dataviz.execution.events import ExecutionEvent
 from dataviz.sources import SOURCE_RUNNERS
 from dataviz.workspace import load_workspace
 from dataviz.workspace.models import CacheDefinition
+from dataviz.workspace.navigation import NavigationEditor
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +30,23 @@ MINIMAL_WORKSPACE = ROOT / "examples" / "minimal-workspace"
 REPEAT_WORKSPACE = ROOT / "examples" / "repeat-workspace"
 SESSION_A = "tab_session_a123"
 SESSION_B = "tab_session_b456"
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _isolate_repository_workspaces(isolated_workspace):
+    global WORKSPACE, MINIMAL_WORKSPACE, REPEAT_WORKSPACE
+    WORKSPACE = isolated_workspace(WORKSPACE)
+    MINIMAL_WORKSPACE = isolated_workspace(MINIMAL_WORKSPACE)
+    REPEAT_WORKSPACE = isolated_workspace(REPEAT_WORKSPACE)
+
+
+def wait_for(predicate, *, timeout: float = 6) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(0.02)
+    raise AssertionError("condition did not become true before timeout")
 
 
 def test_server_exposes_active_presentation_contract():
@@ -36,6 +58,227 @@ def test_server_exposes_active_presentation_contract():
     assert dashboard["presentation"]["file"].endswith("presentation.yaml")
     assert dashboard["presentation"]["diagnostics"] == []
     assert not [item for item in summary["diagnostics"] if item["level"] == "error"]
+
+
+def test_server_never_serves_a_pyodide_bundle_outside_the_workspace(tmp_path: Path):
+    root = tmp_path / "workspace"
+    shutil.copytree(MINIMAL_WORKSPACE, root)
+    outside = tmp_path / "outside-pyodide"
+    outside.mkdir()
+    (outside / "runtime.js").write_text("outside", encoding="utf-8")
+    workspace_path = root / "workspace.yaml"
+    definition = yaml.safe_load(workspace_path.read_text(encoding="utf-8"))
+    definition["runtime"] = {
+        **definition.get("runtime", {}),
+        "pyodide_bundle_path": "../outside-pyodide",
+    }
+    workspace_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    response = TestClient(create_app(root)).get("/runtime/pyodide/runtime.js")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Pyodide bundle is outside the Workspace"
+
+
+def test_queued_query_can_be_cancelled_before_a_global_slot_is_available(
+    tmp_path: Path,
+):
+    root = tmp_path / "workspace"
+    shutil.copytree(MINIMAL_WORKSPACE, root)
+    workspace_path = root / "workspace.yaml"
+    definition = yaml.safe_load(workspace_path.read_text(encoding="utf-8"))
+    definition["runtime"] = {"max_concurrent_runs": 1}
+    workspace_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    manager = RunManager(load_workspace(root))
+    assert manager.run_slots.acquire(timeout=0.1)
+    try:
+        record = manager.start(
+            "sales-overview",
+            {"min_query_revenue": 0},
+            SESSION_A,
+        )
+        wait_for(lambda: any(event.event == "run_queued" for event in record.events))
+        manager.cancel(record.run_id, SESSION_A)
+        wait_for(lambda: record.status == "cancelled", timeout=1)
+
+        assert record.result is None
+        assert record.finished_at is not None
+        assert record.events[-1].event == "run_cancelled"
+        assert record.events[-1].data["phase"] == "queued"
+    finally:
+        manager.run_slots.release()
+
+
+def test_server_rejects_query_when_static_preflight_has_errors(tmp_path: Path):
+    root = tmp_path / "workspace"
+    shutil.copytree(MINIMAL_WORKSPACE, root)
+    presentation_path = root / "dashboards" / "sales-overview" / "presentation.yaml"
+    presentation = yaml.safe_load(presentation_path.read_text(encoding="utf-8"))
+    presentation.setdefault("assets", {}).setdefault("css", []).append(
+        "assets/missing.css"
+    )
+    presentation_path.write_text(
+        yaml.safe_dump(presentation, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    client = TestClient(create_app(root))
+
+    response = client.post(
+        "/api/dashboards/sales-overview/runs",
+        json={"session_id": SESSION_A, "query_parameters": {}},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "dashboard_preflight_failed"
+
+
+def test_run_preflight_reloads_dashboard_files_changed_after_server_start(
+    tmp_path: Path,
+):
+    root = tmp_path / "workspace"
+    shutil.copytree(MINIMAL_WORKSPACE, root)
+    client = TestClient(create_app(root))
+    presentation_path = root / "dashboards" / "sales-overview" / "presentation.yaml"
+    presentation = yaml.safe_load(presentation_path.read_text(encoding="utf-8"))
+    presentation.setdefault("assets", {}).setdefault("css", []).append(
+        "assets/added-after-start.css"
+    )
+    presentation_path.write_text(
+        yaml.safe_dump(presentation, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    response = client.post(
+        "/api/dashboards/sales-overview/runs",
+        json={
+            "session_id": SESSION_A,
+            "query_parameters": {"min_query_revenue": 0},
+        },
+    )
+
+    assert response.status_code == 422
+    diagnostics = response.json()["detail"]["details"]["diagnostics"]
+    assert any(item["code"] == "presentation_asset_missing" for item in diagnostics)
+    assert response.json()["detail"]["details"]["diagnostics"][0]["level"] == "error"
+
+
+def test_workspace_refresh_replaces_the_complete_snapshot(tmp_path: Path):
+    root = tmp_path / "workspace"
+    shutil.copytree(MINIMAL_WORKSPACE, root)
+    app = create_app(root)
+    original = app.state.workspace
+    workspace_path = root / "workspace.yaml"
+    definition = yaml.safe_load(workspace_path.read_text(encoding="utf-8"))
+    definition["title"] = "Reloaded workspace"
+    workspace_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    response = TestClient(app).get("/api/workspace")
+
+    assert response.status_code == 200
+    assert response.json()["workspace"]["title"] == "Reloaded workspace"
+    assert app.state.workspace is not original
+    assert original.definition.title != "Reloaded workspace"
+
+
+def test_workspace_refresh_rebinds_tab_executor_without_mutating_active_snapshot(
+    tmp_path: Path,
+):
+    root = tmp_path / "workspace"
+    shutil.copytree(MINIMAL_WORKSPACE, root)
+    first_workspace = load_workspace(root)
+    manager = RunManager(first_workspace)
+    first_executor = manager.executor_for(SESSION_A)
+    workspace_path = root / "workspace.yaml"
+    definition = yaml.safe_load(workspace_path.read_text(encoding="utf-8"))
+    definition["title"] = "Second snapshot"
+    workspace_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    second_workspace = load_workspace(root)
+
+    manager.install_workspace_snapshot(second_workspace)
+    second_executor = manager.executor_for(SESSION_A)
+
+    assert second_executor is not first_executor
+    assert second_executor.cache is first_executor.cache
+    assert first_executor.workspace is first_workspace
+    assert first_executor.workspace.definition.title != "Second snapshot"
+    assert second_executor.workspace.definition.title == "Second snapshot"
+
+
+def test_existing_run_allows_presentation_edits_but_rejects_query_logic_drift(
+    tmp_path: Path,
+):
+    root = tmp_path / "workspace"
+    shutil.copytree(MINIMAL_WORKSPACE, root)
+    client = TestClient(create_app(root))
+    started = client.post(
+        "/api/dashboards/sales-overview/runs",
+        json={
+            "session_id": SESSION_A,
+            "query_parameters": {"min_query_revenue": 0},
+        },
+    ).json()
+    run_id = started["run_id"]
+    for _ in range(100):
+        record = client.get(
+            f"/api/runs/{run_id}", params={"session_id": SESSION_A}
+        ).json()
+        if record["status"] in {"ready", "partial", "error"}:
+            break
+        time.sleep(0.05)
+    assert record["status"] == "ready"
+
+    presentation_path = root / "dashboards" / "sales-overview" / "presentation.yaml"
+    presentation = yaml.safe_load(presentation_path.read_text(encoding="utf-8"))
+    presentation.setdefault("theme", {})["accent"] = "#123456"
+    presentation_path.write_text(
+        yaml.safe_dump(presentation, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    presentation_only = client.get(
+        "/api/dashboards/sales-overview/canvas",
+        params={
+            "session_id": SESSION_A,
+            "run_id": run_id,
+            "frame_id": "frame_presentation",
+        },
+    )
+    assert presentation_only.status_code == 200
+
+    sql_path = root / "dashboards" / "sales-overview" / "sources" / "sales.sql"
+    sql_path.write_text(
+        sql_path.read_text(encoding="utf-8") + "\n-- changed query contract\n",
+        encoding="utf-8",
+    )
+    stale_canvas = client.get(
+        "/api/dashboards/sales-overview/canvas",
+        params={
+            "session_id": SESSION_A,
+            "run_id": run_id,
+            "frame_id": "frame_stale",
+        },
+    )
+    stale_report = client.post(
+        "/api/dashboards/sales-overview/report",
+        json={"session_id": SESSION_A, "run_id": run_id},
+    )
+
+    assert stale_canvas.status_code == 409
+    assert "QUERY RUN OUTDATED" in stale_canvas.text
+    assert "Run query" in stale_canvas.text
+    assert stale_report.status_code == 409
+    assert stale_report.json()["detail"]["code"] == "query_run_contract_changed"
 
 
 def test_server_run_and_canvas():
@@ -67,7 +310,7 @@ def test_server_run_and_canvas():
         time.sleep(0.05)
     assert record and record["status"] == "ready", record
     target_evidence = record["result"]["nodes"]["source:targets"]["diagnostics"]["query"]
-    assert target_evidence["adapter_alias"] == "demo-sqlite"
+    assert target_evidence["adapter_reference"] == "demo-sqlite"
     assert target_evidence["resolved_sql"]
     assert target_evidence["statement"]
     assert target_evidence["parameters"] == {"target_factor": 1.0}
@@ -91,11 +334,13 @@ def test_server_run_and_canvas():
     ).status_code == 404
     canvas = client.get(
         f"/api/dashboards/sales/canvas?run_id={run_id}",
-        params={"session_id": SESSION_A},
+        params={"session_id": SESSION_A, "frame_id": "frame_contract"},
     )
     assert canvas.status_code == 200
-    assert "FIELD NOTE / 026" in canvas.text
+    assert "CUSTOM CANVAS" in canvas.text
     assert '"source:orders/main": [' in canvas.text
+    assert '"dashboard_id": "sales"' in canvas.text
+    assert '"frame_id": "frame_contract"' in canvas.text
     assert "PORTABLE ANALYSIS" not in canvas.text
     report = client.post(
         "/api/dashboards/sales/report",
@@ -206,6 +451,9 @@ def test_server_app_selections_are_browser_only():
     assert "BroadcastChannel" in script
     assert "dataviz:canvas-interaction" in script
     assert "window.addEventListener('message'" in script
+    assert "event.source === frame.contentWindow" in script
+    assert "sameCanvasIdentity(event.data, identity)" in script
+    assert "frame_id=" in script
     assert "closeHeaderPopovers();" in script
     assert "filter(([key]) => validKeys.has(key))" in script
     assert "state.canvasSelections = {...(event.data.selections || {})};" in script
@@ -276,6 +524,44 @@ def test_server_recovers_from_invalid_workspace_yaml(tmp_path: Path):
     assert summary["dashboards"][0]["title"] == "销售脉搏"
     assert summary["dashboards"][0]["runnable"] is True
     assert any(item["code"] == "workspace_definition_invalid" for item in summary["diagnostics"])
+
+
+def test_navigation_does_not_overwrite_invalid_workspace_yaml(tmp_path: Path):
+    root = tmp_path / "recoverable-workspace"
+    shutil.copytree(WORKSPACE, root)
+    workspace_path = root / "workspace.yaml"
+    broken = "navigation: [broken"
+    workspace_path.write_text(broken, encoding="utf-8")
+    client = TestClient(create_app(root))
+
+    response = client.post("/api/navigation/folders", json={"title": "经营分析"})
+
+    assert response.status_code == 409
+    assert workspace_path.read_text(encoding="utf-8") == broken
+
+
+def test_folder_move_rolls_back_dashboard_names_when_metadata_write_fails(
+    tmp_path: Path,
+    monkeypatch,
+):
+    root = tmp_path / "workspace"
+    shutil.copytree(WORKSPACE, root)
+    editor = NavigationEditor(root)
+    folder_identifier = editor.create_folder("旧目录")
+    entry = load_workspace(root).catalog_entry("sales")
+    editor.place_dashboard(entry, folder_identifier)
+    old_path = root / "dashboards" / "旧目录##sales"
+    new_path = root / "dashboards" / "新目录##sales"
+
+    def fail_write(*_args, **_kwargs):
+        raise OSError("simulated workspace metadata failure")
+
+    monkeypatch.setattr(editor, "_write", fail_write)
+    with pytest.raises(OSError, match="simulated workspace metadata failure"):
+        editor.rename_folder(folder_identifier, "新目录")
+
+    assert old_path.is_dir()
+    assert not new_path.exists()
 
 
 def test_navigation_folders_can_be_created_nested_and_removed_safely(tmp_path: Path):
@@ -404,11 +690,13 @@ sources:
   - {id: slow-right, kind: source, type: file, path: data/slow-right.csv, format: csv, outputs: {main: {kind: table}}}
   - {id: unused, kind: source, type: file, path: data/unused.csv, format: csv, outputs: {main: {kind: table}}}
 dataset_transforms: [transforms/combine.yaml]
+interactive_transforms: [transforms/fast-summary.yaml]
 views:
   - {id: fast-view, title: Fast, template: table, input: source:fast/main}
   - {id: slow-view, title: Slow, template: table, input: dataset:combine/main}
+  - {id: fast-summary, title: Fast summary, template: metric, input: interactive:fast-summary/total}
 sections:
-  - {id: results, title: Results, template: stack, views: [fast-view, slow-view]}
+  - {id: results, title: Results, template: stack, views: [fast-view, fast-summary, slow-view]}
 """,
         encoding="utf-8",
     )
@@ -436,6 +724,26 @@ def transform(context):
 """,
         encoding="utf-8",
     )
+    (dashboard_root / "transforms" / "fast-summary.yaml").write_text(
+        """schema: dataviz/interactive-transform/v1
+kind: interactive_transform
+id: fast-summary
+runtime: server-python
+code: fast_summary.py
+inputs: {rows: source:fast/main}
+trigger: auto
+export: {mode: snapshot}
+outputs: {total: {kind: scalar}}
+cache: {mode: none}
+""",
+        encoding="utf-8",
+    )
+    (dashboard_root / "transforms" / "fast_summary.py").write_text(
+        """def transform(context):
+    return {"total": int(len(context.table("rows")))}
+""",
+        encoding="utf-8",
+    )
     for name in ("fast", "slow-left", "slow-right", "unused"):
         (dashboard_root / "data" / f"{name}.csv").write_text(
             f"branch,value\n{name},1\n", encoding="utf-8"
@@ -444,7 +752,7 @@ def transform(context):
     class DelayedFileRunner:
         def execute(self, request):
             if request.definition.id in {"slow-left", "slow-right"}:
-                time.sleep(0.45)
+                time.sleep(1.5)
             elif request.definition.id == "fast":
                 time.sleep(0.02)
             else:
@@ -477,6 +785,7 @@ def transform(context):
         if snapshot and "source:fast/main" in snapshot["outputs"]:
             fast_snapshot = snapshot
             assert record["status"] == "loading"
+            assert record["server_interactive_inputs"] == ["source:fast/main"]
             break
         time.sleep(0.01)
     assert fast_snapshot is not None
@@ -489,6 +798,37 @@ def transform(context):
         "source:slow-right",
         "dataset:combine",
     }
+
+    interaction = client.post(
+        f"/api/runs/{run_id}/interactions",
+        json={
+            "session_id": SESSION_A,
+            "transform_id": "fast-summary",
+            "generation": 1,
+            "compute_parameters": {},
+            "selections": {},
+        },
+    )
+    assert interaction.status_code == 200, interaction.text
+    interaction_id = interaction.json()["interaction_id"]
+    interaction_record = None
+    for _ in range(200):
+        interaction_record = client.get(
+            f"/api/interactions/{interaction_id}",
+            params={"session_id": SESSION_A},
+        ).json()
+        if interaction_record["status"] in {"ready", "error", "cancelled"}:
+            break
+        time.sleep(0.01)
+    assert interaction_record and interaction_record["status"] == "ready"
+    assert interaction_record["result"]["outputs"][
+        "interactive:fast-summary/total"
+    ]["kind"] == "scalar"
+    during_interaction = client.get(
+        f"/api/runs/{run_id}", params={"session_id": SESSION_A}
+    ).json()
+    assert during_interaction["status"] == "loading"
+    assert during_interaction["result"] is None
 
     output = client.get(
         f"/api/runs/{run_id}/outputs/source:fast/main",
@@ -585,6 +925,105 @@ def test_workspace_cache_scope_is_explicit_opt_in(tmp_path: Path):
 
     assert first.policy_root(tab_policy) != second.policy_root(tab_policy)
     assert first.policy_root(shared_policy) == second.policy_root(shared_policy)
+
+
+def test_cache_hits_are_materialized_into_the_current_run(tmp_path: Path):
+    cache = NodeCache(tmp_path, namespace=SESSION_A)
+    key = cache.key({"node": "source:rows"})
+
+    for mode in ("session", "persistent"):
+        policy = CacheDefinition(mode=mode)
+        original_store = ArtifactStore(tmp_path, f"run_{mode}_original")
+        original = original_store.write_scalar(f"rows_{mode}", 7)
+        cache.save(key, policy, {"main": original}, original_store)
+
+        current_store = ArtifactStore(tmp_path, f"run_{mode}_current")
+        loaded = cache.load(key, policy, current_store)
+
+        assert loaded is not None
+        materialized = loaded["main"]
+        assert Path(materialized.path or "").parts[:3] == (
+            ".dataviz",
+            "runs",
+            f"run_{mode}_current",
+        )
+        assert current_store.read_value(materialized) == 7
+        try:
+            original_store.read_value(materialized)
+        except ValueError as error:
+            assert "does not belong" in str(error)
+        else:
+            raise AssertionError("A cached Artifact leaked across Query Runs")
+
+
+def test_failed_persistent_cache_publish_preserves_the_previous_entry(
+    tmp_path: Path,
+    monkeypatch,
+):
+    cache = NodeCache(tmp_path, namespace=SESSION_A)
+    policy = CacheDefinition(mode="persistent")
+    key = cache.key({"node": "source:rows"})
+    first_store = ArtifactStore(tmp_path, "run_cache_first")
+    cache.save(key, policy, {"main": first_store.write_scalar("rows", 7)}, first_store)
+
+    def fail_publish(*_args, **_kwargs):
+        raise OSError("simulated metadata publish failure")
+
+    monkeypatch.setattr(cache_module, "atomic_write_text", fail_publish)
+    second_store = ArtifactStore(tmp_path, "run_cache_second")
+    cache.save(key, policy, {"main": second_store.write_scalar("rows", 9)}, second_store)
+
+    current_store = ArtifactStore(tmp_path, "run_cache_current")
+    loaded = NodeCache(tmp_path, namespace=SESSION_A).load(key, policy, current_store)
+    assert loaded is not None
+    assert current_store.read_value(loaded["main"]) == 7
+
+
+def test_corrupt_persistent_cache_is_evicted_and_treated_as_a_miss(tmp_path: Path):
+    cache = NodeCache(tmp_path, namespace=SESSION_A)
+    policy = CacheDefinition(mode="persistent")
+    store = ArtifactStore(tmp_path, "run_cache")
+    key = cache.key({"node": "source:rows"})
+    cache.save(key, policy, {"main": store.write_scalar("rows", 7)}, store)
+    entry = cache.policy_root(policy) / key
+
+    (entry / "result.json").write_text("{broken", encoding="utf-8")
+    fresh = NodeCache(tmp_path, namespace=SESSION_A)
+
+    assert fresh.load(key, policy, store) is None
+    assert not entry.exists()
+
+
+def test_persistent_cache_rejects_artifact_paths_outside_managed_storage(
+    tmp_path: Path,
+):
+    cache = NodeCache(tmp_path, namespace=SESSION_A)
+    policy = CacheDefinition(mode="persistent")
+    store = ArtifactStore(tmp_path, "run_cache")
+    key = cache.key({"node": "source:rows"})
+    cache.save(key, policy, {"main": store.write_scalar("rows", 7)}, store)
+    entry = cache.policy_root(policy) / key
+    raw = json.loads((entry / "result.json").read_text(encoding="utf-8"))
+    raw["main"]["path"] = str(tmp_path.parent / "outside.json")
+    (entry / "result.json").write_text(json.dumps(raw), encoding="utf-8")
+
+    assert NodeCache(tmp_path, namespace=SESSION_A).load(key, policy, store) is None
+    assert not entry.exists()
+
+
+def test_persistent_cache_evicts_artifacts_with_wrong_content_hash(tmp_path: Path):
+    cache = NodeCache(tmp_path, namespace=SESSION_A)
+    policy = CacheDefinition(mode="persistent")
+    store = ArtifactStore(tmp_path, "run_cache")
+    key = cache.key({"node": "source:rows"})
+    cache.save(key, policy, {"main": store.write_scalar("rows", 7)}, store)
+    entry = cache.policy_root(policy) / key
+    metadata = json.loads((entry / "result.json").read_text(encoding="utf-8"))
+    cached_artifact = tmp_path / metadata["main"]["path"]
+    cached_artifact.write_text("8", encoding="utf-8")
+
+    assert NodeCache(tmp_path, namespace=SESSION_A).load(key, policy, store) is None
+    assert not entry.exists()
 
 
 def test_manager_bounds_event_history_with_monotonic_offsets_and_cleans_generations(

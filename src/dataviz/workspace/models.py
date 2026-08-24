@@ -1,14 +1,18 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
+from dataviz.identifiers import StableId
 from dataviz.value_contract import validate_control_definition
+from dataviz.view_contracts import validate_view_contract
 
 
 class Model(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    # YAML/JSON accepts only public DSL names. Python attribute names such as
+    # ``schema_`` exist solely to avoid keyword collisions and are not aliases.
+    model_config = ConfigDict(extra="forbid", populate_by_name=False)
 
 
 class ContextDefinition(Model):
@@ -38,7 +42,10 @@ class WorkspaceFolderDefinition(Model):
 
 
 class RuntimeDefinition(Model):
-    plotly_js: str = "bundled"
+    # Plotly ships with the Python package and is always embedded into exported
+    # reports. Accepting arbitrary strings here used to imply a configurability
+    # that the renderer never implemented.
+    plotly_js: Literal["bundled"] = "bundled"
     echarts_js: str = "https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"
     arrow_js: str = "https://cdn.jsdelivr.net/npm/apache-arrow@21.1.0/Arrow.es2015.min.js"
     perspective_version: str = "5.2.0"
@@ -51,6 +58,7 @@ class RuntimeDefinition(Model):
     arrow_chunk_bytes: int = Field(524_288, ge=65_536, le=8_388_608)
     max_workers: int = Field(4, ge=1)
     max_concurrent_runs: int = Field(4, ge=1)
+    max_concurrent_interactions: int = Field(4, ge=1)
     max_embedded_rows: int = Field(100_000, ge=1)
     max_embedded_bytes: int = Field(25_000_000, ge=1)
     max_retained_runs: int = Field(100, ge=1)
@@ -73,7 +81,7 @@ class RuntimeDefinition(Model):
 class WorkspaceDefinition(Model):
     schema_: Literal["dataviz/workspace/v1"] = Field(alias="schema")
     kind: Literal["workspace"] = "workspace"
-    id: str
+    id: StableId
     title: str
     description: str = ""
     context: ContextDefinition = Field(default_factory=ContextDefinition)
@@ -90,7 +98,7 @@ class Choice(Model):
 
 
 class _ValueControlDefinition(Model):
-    id: str
+    id: StableId
     type: Literal[
         "string",
         "number",
@@ -166,7 +174,7 @@ class SelectionBindingDefinition(Model):
 class RepeatDefinition(Model):
     """Create multiple instances from one declarative View blueprint."""
 
-    view: str | None = None
+    view: StableId | None = None
     input: str | None = None
     by: list[str] = Field(min_length=1)
     selection: str | None = None
@@ -183,7 +191,7 @@ class RepeatDefinition(Model):
 
 
 class SectionDefinition(Model):
-    id: str
+    id: StableId
     title: str
     description: str = ""
     template: Literal[
@@ -198,17 +206,15 @@ class SectionDefinition(Model):
         "small-multiples",
         "selection-gallery",
     ] = "stack"
-    columns: int | None = None
+    columns: int | None = Field(None, ge=1, le=24)
     css_class: str = ""
     selections: list[SelectionDefinition] = Field(default_factory=list)
-    views: list[str] = Field(default_factory=list)
+    views: list[StableId] = Field(default_factory=list)
     repeat: RepeatDefinition | None = None
 
 
 class CanvasDefinition(Model):
     template: str | None = None
-    style: str | None = None
-    script: str | None = None
     use_default_style: bool = True
     client_libraries: list[Literal["plotly", "echarts", "perspective"]] = Field(default_factory=list)
     styles: list[str] = Field(default_factory=list)
@@ -218,8 +224,8 @@ class CanvasDefinition(Model):
 
 class LayoutDefinition(Model):
     template: Literal["overview", "monitoring", "report", "exploration", "freeform"] = "overview"
-    columns: int = 12
-    gap: int = 18
+    columns: int = Field(12, ge=1, le=24)
+    gap: int = Field(18, ge=0)
 
 
 class ThemeDefinition(Model):
@@ -336,18 +342,18 @@ class PresentationCanvasDefinition(Model):
 class PresentationDefinition(Model):
     schema_: Literal["dataviz/presentation/v1"] = Field(alias="schema")
     kind: Literal["presentation"] = "presentation"
-    dashboard: str
+    dashboard: StableId
     theme: PresentationThemeDefinition = Field(default_factory=PresentationThemeDefinition)
     layout: PresentationLayoutDefinition = Field(default_factory=PresentationLayoutDefinition)
-    sections: dict[str, PresentationSectionDefinition] = Field(default_factory=dict)
-    views: dict[str, PresentationViewDefinition] = Field(default_factory=dict)
+    sections: dict[StableId, PresentationSectionDefinition] = Field(default_factory=dict)
+    views: dict[StableId, PresentationViewDefinition] = Field(default_factory=dict)
     selectors: dict[str, PresentationSelectorDefinition] = Field(default_factory=dict)
     assets: PresentationAssetsDefinition = Field(default_factory=PresentationAssetsDefinition)
     canvas: PresentationCanvasDefinition = Field(default_factory=PresentationCanvasDefinition)
 
 
 class DeclarativeViewDefinition(Model):
-    id: str
+    id: StableId
     title: str | None = None
     description: str = ""
     template: Literal[
@@ -368,7 +374,7 @@ class DeclarativeViewDefinition(Model):
     renderer: str | None = None
     engine: Literal["plotly", "echarts"] = "plotly"
     input: str | None = None
-    inputs: dict[str, str] = Field(default_factory=dict)
+    inputs: dict[StableId, str] = Field(default_factory=dict)
     x: str | None = None
     y: str | list[str] | None = None
     z: str | None = None
@@ -380,7 +386,7 @@ class DeclarativeViewDefinition(Model):
     columns: list[str] = Field(default_factory=list)
     aggregate: Literal["sum", "mean", "min", "max", "count", "none"] | None = None
     sort: str | None = None
-    limit: int | None = None
+    limit: int | None = Field(None, ge=1)
     text: str | None = None
     url: str | None = None
     options: dict[str, Any] = Field(default_factory=dict)
@@ -400,17 +406,21 @@ class DeclarativeViewDefinition(Model):
             refs.setdefault("main", self.input)
         return refs
 
+    @model_validator(mode="after")
+    def validate_template_contract(self):
+        return validate_view_contract(self)
+
 
 class DashboardDefinition(Model):
     schema_: Literal["dataviz/dashboard/v2"] = Field(alias="schema")
     kind: Literal["dashboard"] = "dashboard"
-    id: str
+    id: StableId
     title: str = ""
     subtitle: str = ""
     description: str = ""
     context: dict[str, Any] = Field(default_factory=dict)
     assumptions: list[str] = Field(default_factory=list)
-    adapters: dict[str, str] = Field(default_factory=dict)
+    adapters: dict[StableId, StableId] = Field(default_factory=dict)
     query_parameters: list[QueryParameterDefinition] = Field(default_factory=list)
     compute_parameters: list[ComputeParameterDefinition] = Field(default_factory=list)
     dashboard_selections: list[SelectionDefinition] = Field(default_factory=list)
@@ -426,7 +436,7 @@ class DashboardDefinition(Model):
 class ColumnDefinition(Model):
     """A lightweight table schema contract used at node boundaries."""
 
-    name: str
+    name: str = Field(min_length=1)
     dtype: str | None = None
     required: bool = True
     nullable: bool | None = None
@@ -443,6 +453,56 @@ class OutputDefinition(Model):
     description: str = ""
     schema_: list[ColumnDefinition] = Field(default_factory=list, alias="schema")
     required: bool = True
+
+    @model_validator(mode="after")
+    def validate_storage_contract(self):
+        """Reject metadata that the Artifact Store would otherwise ignore."""
+        if self.kind != "table" and self.schema_:
+            raise ValueError("output.schema is only valid for kind=table")
+        schema_names = [column.name for column in self.schema_]
+        duplicate_names = sorted(
+            {name for name in schema_names if schema_names.count(name) > 1}
+        )
+        if duplicate_names:
+            raise ValueError(
+                "output.schema contains duplicate columns: "
+                + ", ".join(duplicate_names)
+            )
+
+        fixed_storage = {
+            "table": ("parquet", "application/vnd.apache.parquet"),
+            "scalar": ("json", "application/json"),
+            "object": ("json", "application/json"),
+            "chart": ("json", "application/json"),
+            "html": ("html", "text/html"),
+        }
+        if self.kind in fixed_storage:
+            expected_format, expected_mime = fixed_storage[self.kind]
+            if self.format not in {None, expected_format}:
+                raise ValueError(
+                    f"kind={self.kind} is stored as format={expected_format}; "
+                    f"format={self.format!r} is not supported"
+                )
+            if self.mime_type not in {None, expected_mime}:
+                raise ValueError(
+                    f"kind={self.kind} uses mime_type={expected_mime}; "
+                    f"mime_type={self.mime_type!r} is not supported"
+                )
+        elif self.kind == "text":
+            text_formats = {None, "text", "plain", "markdown"}
+            if self.format not in text_formats:
+                raise ValueError(
+                    "kind=text supports format text, plain, or markdown"
+                )
+            expected_mime = (
+                "text/markdown" if self.format == "markdown" else "text/plain"
+            )
+            if self.mime_type not in {None, expected_mime}:
+                raise ValueError(
+                    f"kind=text with format={self.format or 'text'} uses "
+                    f"mime_type={expected_mime}"
+                )
+        return self
 
 
 class CacheDefinition(Model):
@@ -461,55 +521,101 @@ class CacheDefinition(Model):
         return self
 
 
-class SourceDefinition(Model):
+class _SourceDefinition(Model):
+    """Fields shared by every strict Source variant."""
+
     schema_: Literal["dataviz/source/v1"] = Field(alias="schema")
     kind: Literal["source"] = "source"
-    id: str
+    id: StableId
     name: str | None = None
     description: str = ""
-    type: Literal["file", "sql", "python"]
-    path: str | None = None
-    format: str | None = None
-    code: str | None = None
-    adapter: str | None = None
-    entrypoint: str = "load"
-    query_params: list[str] = Field(default_factory=list)
-    options: dict[str, Any] = Field(default_factory=dict)
-    outputs: dict[str, OutputDefinition] = Field(min_length=1)
-    code_dependencies: list[str] = Field(default_factory=list)
-    python_dependencies: list[str] = Field(default_factory=list)
-    timeout_seconds: float | None = Field(None, gt=0)
-    timeout_retries: int | None = Field(None, ge=0, le=5)
+    outputs: dict[StableId, OutputDefinition] = Field(min_length=1)
     cache: CacheDefinition = Field(default_factory=CacheDefinition)
 
+
+class FileSourceDefinition(_SourceDefinition):
+    type: Literal["file"]
+    path: str
+    format: Literal[
+        "csv", "txt", "parquet", "pq", "json", "jsonl", "xlsx", "xls"
+    ] | None = None
+    adapter: StableId | None = None
+    options: dict[str, Any] = Field(default_factory=dict)
+
     @model_validator(mode="after")
-    def apply_execution_defaults(self):
-        # File reads are local and synchronous. SQL and Python Sources must not
-        # run forever merely because the author omitted an operational setting.
-        if self.type in {"sql", "python"} and self.timeout_seconds is None:
-            self.timeout_seconds = 120.0
-        if self.type == "sql" and self.timeout_retries is None:
-            self.timeout_retries = 1
+    def require_known_file_format(self):
+        if self.format is not None:
+            return self
+        suffix = self.path.rsplit(".", 1)[-1].lower() if "." in self.path else ""
+        supported = {"csv", "txt", "parquet", "pq", "json", "jsonl", "xlsx", "xls"}
+        if suffix not in supported:
+            raise ValueError(
+                "File Source path has no supported extension; declare format explicitly"
+            )
         return self
+
+    @model_validator(mode="after")
+    def require_single_table_output(self):
+        if set(self.outputs) != {"main"} or self.outputs["main"].kind != "table":
+            raise ValueError("File Source outputs must be exactly main: {kind: table}")
+        return self
+
+
+class SqlSourceDefinition(_SourceDefinition):
+    type: Literal["sql"]
+    code: str
+    adapter: StableId
+    query_params: list[StableId] = Field(default_factory=list)
+    timeout_seconds: float = Field(120.0, gt=0)
+    timeout_retries: int = Field(1, ge=0, le=5)
+
+    @model_validator(mode="after")
+    def require_single_table_output(self):
+        if set(self.outputs) != {"main"} or self.outputs["main"].kind != "table":
+            raise ValueError("SQL Source outputs must be exactly main: {kind: table}")
+        return self
+
+
+class PythonSourceDefinition(_SourceDefinition):
+    type: Literal["python"]
+    code: str
+    adapter: StableId | None = None
+    entrypoint: str = "load"
+    query_params: list[StableId] = Field(default_factory=list)
+    code_dependencies: list[str] = Field(default_factory=list)
+    python_dependencies: list[str] = Field(default_factory=list)
+    timeout_seconds: float = Field(120.0, gt=0)
+
+
+SourceDefinition = Annotated[
+    FileSourceDefinition | SqlSourceDefinition | PythonSourceDefinition,
+    Field(discriminator="type"),
+]
+SOURCE_DEFINITION_ADAPTER = TypeAdapter(SourceDefinition)
 
 
 class DatasetTransformDefinition(Model):
     schema_: Literal["dataviz/dataset-transform/v1"] = Field(alias="schema")
     kind: Literal["dataset_transform"] = "dataset_transform"
-    id: str
+    id: StableId
     name: str | None = None
     description: str = ""
     runtime: Literal["server-python"] = "server-python"
     code: str
     entrypoint: str = "transform"
-    inputs: dict[str, str] = Field(default_factory=dict)
-    input_schemas: dict[str, list[ColumnDefinition]] = Field(default_factory=dict)
-    query_params: list[str] = Field(default_factory=list)
-    outputs: dict[str, OutputDefinition] = Field(min_length=1)
+    inputs: dict[StableId, str] = Field(default_factory=dict)
+    input_schemas: dict[StableId, list[ColumnDefinition]] = Field(default_factory=dict)
+    query_params: list[StableId] = Field(default_factory=list)
+    outputs: dict[StableId, OutputDefinition] = Field(min_length=1)
     code_dependencies: list[str] = Field(default_factory=list)
     python_dependencies: list[str] = Field(default_factory=list)
     timeout_seconds: float = Field(120.0, gt=0)
     cache: CacheDefinition = Field(default_factory=CacheDefinition)
+
+    @model_validator(mode="after")
+    def validate_input_schema_columns(self):
+        _require_unique_input_schema_columns(self.input_schemas)
+        return self
 
 
 class InteractiveExportDefinition(Model):
@@ -527,21 +633,21 @@ class InteractiveExportDefinition(Model):
 class InteractiveTransformDefinition(Model):
     schema_: Literal["dataviz/interactive-transform/v1"] = Field(alias="schema")
     kind: Literal["interactive_transform"] = "interactive_transform"
-    id: str
+    id: StableId
     name: str | None = None
     description: str = ""
     runtime: Literal["server-python", "browser-python", "browser-js"]
     code: str
     entrypoint: str = "transform"
-    inputs: dict[str, str] = Field(default_factory=dict)
-    input_schemas: dict[str, list[ColumnDefinition]] = Field(default_factory=dict)
-    query_params: list[str] = Field(default_factory=list)
-    compute_params: list[str] = Field(default_factory=list)
+    inputs: dict[StableId, str] = Field(default_factory=dict)
+    input_schemas: dict[StableId, list[ColumnDefinition]] = Field(default_factory=dict)
+    query_params: list[StableId] = Field(default_factory=list)
+    compute_params: list[StableId] = Field(default_factory=list)
     selections: list[str] = Field(default_factory=list)
     trigger: Literal["apply", "auto", "manual"] = "apply"
     debounce_ms: int = Field(300, ge=0, le=10_000)
     export: InteractiveExportDefinition
-    outputs: dict[str, OutputDefinition] = Field(min_length=1)
+    outputs: dict[StableId, OutputDefinition] = Field(min_length=1)
     code_dependencies: list[str] = Field(default_factory=list)
     python_dependencies: list[str] = Field(default_factory=list)
     timeout_seconds: float = Field(30.0, gt=0)
@@ -549,6 +655,7 @@ class InteractiveTransformDefinition(Model):
 
     @model_validator(mode="after")
     def validate_runtime_contract(self):
+        _require_unique_input_schema_columns(self.input_schemas)
         if self.runtime == "server-python" and self.export.mode == "interactive":
             raise ValueError(
                 "server-python cannot use export.mode=interactive; choose snapshot or unavailable"
@@ -579,6 +686,19 @@ class InteractiveTransformDefinition(Model):
         return self
 
 
+def _require_unique_input_schema_columns(
+    schemas: dict[StableId, list[ColumnDefinition]],
+) -> None:
+    for input_name, schema in schemas.items():
+        names = [column.name for column in schema]
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            raise ValueError(
+                f"input_schemas.{input_name} contains duplicate columns: "
+                + ", ".join(duplicates)
+            )
+
+
 class AdapterDefinition(Model):
     type: str = "sqlalchemy"
     description: str = ""
@@ -598,4 +718,4 @@ class AdapterDefinition(Model):
 
 
 class AdaptersFile(Model):
-    adapters: dict[str, AdapterDefinition] = Field(default_factory=dict)
+    adapters: dict[StableId, AdapterDefinition] = Field(default_factory=dict)

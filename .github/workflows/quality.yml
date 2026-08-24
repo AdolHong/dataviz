@@ -21,16 +21,31 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           enable-cache: true
+      - name: Verify lockfile is current
+        run: uv lock --check
       - name: Install without editable .pth
         run: uv sync --python ${{ matrix.python }} --extra dev --no-editable
+      - name: Verify installed dependency graph
+        run: uv pip check --python .venv/bin/python
       - name: Verify installed CLI and generated contracts
         run: |
           uv run --no-editable dataviz --help
           uv run --no-editable dataviz version
           uv run --no-editable dataviz schemas dashboard --format json
           uv run --no-editable dataviz components --check --format json
+      - name: Static correctness checks
+        if: matrix.python == '3.12'
+        run: |
+          uv run --no-editable ruff check src tests scripts
+          uv run --no-editable python -m compileall -q src tests scripts
+          git diff --check
       - name: Unit and contract tests
         run: uv run --no-editable pytest -m "not e2e"
+      - name: Verify tests did not write into repository fixtures
+        if: matrix.python == '3.12'
+        run: |
+          uv run --no-project python scripts/check_repository_clean.py
+          git diff --exit-code
 
   macos-noneditable:
     name: macOS non-editable install
@@ -41,12 +56,17 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
+      - run: uv lock --check
       - run: uv sync --python 3.12 --extra dev --no-editable
+      - run: uv pip check --python .venv/bin/python
       - name: Repeated CLI imports and contracts
         run: |
           uv run --no-editable dataviz --help
-          uv run --no-editable dataviz --help
+          uv run --no-editable dataviz version
+          uv run --no-editable dataviz components --check --format json
           uv run --no-editable pytest -m "not e2e"
+          uv run --no-project python scripts/check_repository_clean.py
+          git diff --exit-code
 
   javascript-syntax:
     name: JavaScript syntax
@@ -54,11 +74,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: |
-          node --check src/dataviz/server/static/canvas-runtime.js
-          node --check src/dataviz/server/static/declarative-runtime.js
-          node --check src/dataviz/server/static/interactive-js-worker.js
-          node --check src/dataviz/server/static/interactive-python-worker.mjs
-          node --check src/dataviz/server/static/runtime-web-component-adapter.js
+          find src/dataviz -type f \( -name '*.js' -o -name '*.mjs' \) -print0 \
+            | xargs -0 -n1 node --check
 
   browsers:
     name: Browser ${{ matrix.browser }}
@@ -73,7 +90,9 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
+      - run: uv lock --check
       - run: uv sync --python 3.12 --extra dev --no-editable
+      - run: uv pip check --python .venv/bin/python
       - run: uv run --no-editable playwright install --with-deps ${{ matrix.browser }}
       - run: uv run --no-editable pytest tests/e2e
         env:
@@ -88,15 +107,18 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
+      - run: uv lock --check
       - name: Build all formats
         run: |
-          uv build
-          uv run --python 3.12 --no-project python scripts/build_release_zip.py
+          mkdir -p "$RUNNER_TEMP/dataviz-dist"
+          uv build --out-dir "$RUNNER_TEMP/dataviz-dist"
+          uv run --python 3.12 --no-project python scripts/build_release_zip.py \
+            --output-dir "$RUNNER_TEMP/dataviz-dist"
       - name: Clean-install and smoke-test each format
         shell: bash
         run: |
           set -euo pipefail
-          artifacts=("$PWD"/dist/*.whl "$PWD"/dist/*.tar.gz "$PWD"/dist/workspace-dataviz-*.zip)
+          artifacts=("$RUNNER_TEMP"/dataviz-dist/*.whl "$RUNNER_TEMP"/dataviz-dist/*.tar.gz "$RUNNER_TEMP"/dataviz-dist/workspace-dataviz-*.zip)
           index=0
           for artifact in "${artifacts[@]}"; do
             index=$((index + 1))
@@ -116,7 +138,7 @@ jobs:
         with:
           name: workspace-dataviz-distributions
           path: |
-            dist/*.whl
-            dist/*.tar.gz
-            dist/*.zip
-            dist/*.sha256
+            ${{ runner.temp }}/dataviz-dist/*.whl
+            ${{ runner.temp }}/dataviz-dist/*.tar.gz
+            ${{ runner.temp }}/dataviz-dist/*.zip
+            ${{ runner.temp }}/dataviz-dist/*.sha256

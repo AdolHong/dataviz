@@ -3,22 +3,19 @@ from __future__ import annotations
 from typing import Any
 
 from dataviz.components import component_index
+from dataviz.view_contracts import VIEW_TEMPLATE_CONTRACTS
 
 
 VIEW_TEMPLATES: dict[str, dict[str, Any]] = {
-    "metric": {"purpose": "Single scalar or aggregated table KPI", "fields": ["input"], "optional": ["value", "aggregate", "label"]},
-    "line": {"purpose": "Trend or ordered series", "fields": ["input", "x", "y"], "optional": ["series", "aggregate", "engine"]},
-    "bar": {"purpose": "Category comparison", "fields": ["input", "x", "y"], "optional": ["series", "aggregate", "engine"]},
-    "stacked-bar": {"purpose": "Part-to-whole category comparison", "fields": ["input", "x", "y", "series"], "optional": ["aggregate", "engine"]},
-    "pie": {"purpose": "Compact part-to-whole view", "fields": ["input", "label", "value"], "optional": ["aggregate", "engine"]},
-    "scatter": {"purpose": "Relationship between measures", "fields": ["input", "x", "y"], "optional": ["series", "color", "size", "engine"]},
-    "heatmap": {"purpose": "Two-dimensional intensity matrix", "fields": ["input", "x", "y", "z"], "optional": ["aggregate", "engine"]},
-    "radar": {"purpose": "Compare multiple measures across entities", "fields": ["input", "label", "columns"], "optional": ["limit", "engine", "options"]},
-    "table": {"purpose": "Themeable presentation table", "fields": ["input"], "optional": ["columns", "limit", "options"]},
-    "perspective": {"purpose": "Interactive table, sorting, filtering and pivoting", "fields": ["input"], "optional": ["columns", "config"]},
-    "markdown": {"purpose": "Narrative text or text Named Output", "fields": [], "optional": ["input", "text"]},
-    "image": {"purpose": "Image or generated visual", "fields": ["url"], "optional": ["title"]},
-    "custom": {"purpose": "Trusted extension rendered by a registered lifecycle", "fields": ["input", "renderer"], "optional": ["inputs", "options", "config"]},
+    name: {
+        "purpose": contract["purpose"],
+        "fields": list(contract["required"]),
+        "optional": list(contract["optional"]),
+        **({"one_of": contract["one_of"]} if contract.get("one_of") else {}),
+        **({"engine": contract["engine"]} if contract.get("engine") else {}),
+        **({"aggregate": contract["aggregate"]} if contract.get("aggregate") else {}),
+    }
+    for name, contract in VIEW_TEMPLATE_CONTRACTS.items()
 }
 
 SECTION_TEMPLATES: dict[str, dict[str, str]] = {
@@ -159,8 +156,14 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
     "view.table": {
         "category": "view",
         "purpose": "Themeable, readable detail table",
-        "logic": {"template": "table", "fields": ["input"], "optional": ["columns", "limit"]},
-        "presentation": {"options": ["container", "span", "min_height", "css_class"]},
+        "logic": {
+            "template": "table",
+            "fields": ["input"],
+            "optional": ["columns", "sort", "limit", "options"],
+        },
+        "presentation": {
+            "options": ["span", "min_height", "container", "css_class", "options"]
+        },
         "behavior": {"wheel_boundary": "Scroll the table only while it can consume vertical movement; otherwise continue scrolling the page"},
         "semantic_dom": [".dv-view--table", ".dv-table-meta", ".dv-table-wrap", ".dv-table"],
         "tokens": ["--dv-ink", "--dv-line", "--dv-panel", "--dv-paper"],
@@ -192,7 +195,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
                 "id": "district-bars",
                 "template": "bar",
                 "engine": "echarts",
-                "input": "cities",
+                "input": "source:cities/main",
                 "x": "district",
                 "y": "value",
                 "series": "city",
@@ -209,8 +212,14 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
     "view.perspective": {
         "category": "view",
         "purpose": "Interactive sorting, filtering, pivoting and chart exploration",
-        "logic": {"template": "perspective", "fields": ["input"], "optional": ["columns", "config"]},
-        "presentation": {"options": ["container", "span", "min_height", "css_class"]},
+        "logic": {
+            "template": "perspective",
+            "fields": ["input"],
+            "optional": ["columns", "sort", "limit", "config"],
+        },
+        "presentation": {
+            "options": ["span", "min_height", "container", "css_class", "config"]
+        },
         "behavior": {"wheel_boundary": "Shadow-DOM scrolling yields to the page for short data and at the top or bottom boundary"},
         "semantic_dom": [".dv-view--perspective", ".dv-perspective", ".dv-perspective-loading"],
         "tokens": ["--dv-ink", "--dv-line", "--dv-panel", "--dv-paper"],
@@ -364,27 +373,37 @@ def _generated_component_templates() -> dict[str, dict[str, Any]]:
     """
     generated: dict[str, dict[str, Any]] = {}
     for name, definition in VIEW_TEMPLATES.items():
+        optional = definition.get("optional", [])
+        presentation_options = ["span", "min_height", "container", "css_class"]
+        presentation_options.extend(
+            field
+            for field in ("engine", "options", "config")
+            if field in optional and not (field == "engine" and definition.get("engine"))
+        )
+        required_inputs = "input" in definition.get("fields", [])
+        optional_inputs = "input" in optional or "inputs" in optional
         generated[f"view.{name}"] = {
             "category": "view",
             "purpose": definition["purpose"],
             "logic": {
                 "template": name,
                 "fields": definition.get("fields", []),
-                "optional": definition.get("optional", []),
+                "optional": optional,
+                **({"one_of": definition["one_of"]} if definition.get("one_of") else {}),
+                **({"engine": definition["engine"]} if definition.get("engine") else {}),
+                **({"aggregate": definition["aggregate"]} if definition.get("aggregate") else {}),
             },
             "presentation": {
-                "options": [
-                    "span",
-                    "min_height",
-                    "container",
-                    "css_class",
-                    "engine",
-                    "options",
-                    "config",
-                ]
+                "options": presentation_options,
             },
             "behavior": {
-                "input": "Consumes one or more canonical Named Outputs",
+                "input": (
+                    "Consumes a canonical Named Output"
+                    if required_inputs
+                    else "May consume a canonical Named Output"
+                    if optional_inputs
+                    else "Self-contained; consumes no Named Output"
+                ),
                 "lifecycle": ["validate", "mount", "update", "dispose"],
                 "failure_scope": "view",
             },
@@ -461,7 +480,14 @@ def component_catalog(category: str | None = None) -> dict[str, dict[str, Any]]:
             "status": packaged.get("status", "unpackaged") if packaged else "unpackaged",
             **definition,
             "package": package_metadata,
-            "implementation": package_metadata["runtime"] if package_metadata else {},
+            "implementation": (
+                {
+                    **package_metadata["implementation"],
+                    "assets": package_metadata["runtime"],
+                }
+                if package_metadata
+                else {}
+            ),
             "tests": packaged.get("tests", []) if packaged else [],
             "gallery": {
                 "available": bool(story),

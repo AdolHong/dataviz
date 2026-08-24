@@ -1,34 +1,35 @@
 from __future__ import annotations
 
-import hashlib
-import importlib.metadata
 import re
-import sys
 import threading
 import time
 import traceback
 import uuid
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Callable
-
-from packaging.requirements import Requirement
 
 from dataviz.artifacts import ArtifactDescriptor, ArtifactStore
 from dataviz.auth import AdapterResolver
-from dataviz.errors import DatavizError, ExecutionFailure
+from dataviz.errors import DatavizError, ExecutionFailure, ValidationFailure
 from dataviz.execution.cache import NodeCache
 from dataviz.execution.context import ExecutionContext
 from dataviz.execution.events import EventObserver, ExecutionEvent
+from dataviz.execution.fingerprint import query_contract_fingerprint
+from dataviz.execution.node_support import hash_path, output_status, package_fingerprint
 from dataviz.execution.outputs import normalize_outputs, validate_table_schema
 from dataviz.execution.plan import PlanNode, compile_plan
 from dataviz.execution.python_process import execute_python_node
 from dataviz.execution.results import NodeResult, RunResult
+from dataviz.redaction import redact_text, redact_value
 from dataviz.sources import SOURCE_RUNNERS
 from dataviz.sources.base import SourceRequest
 from dataviz.value_contract import ValueContractViolation, normalize_control_value
-from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace
+from dataviz.workspace.loader import (
+    LoadedDashboard,
+    LoadedWorkspace,
+    dashboard_validation_diagnostics,
+)
 
 
 def now() -> str:
@@ -36,52 +37,6 @@ def now() -> str:
 
 
 SnapshotObserver = Callable[[RunResult], None]
-
-
-def _hash_path(path: Path) -> str:
-    if path.is_file():
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    digest = hashlib.sha256()
-    for child in sorted(
-        value
-        for value in path.rglob("*")
-        if value.is_file()
-        and "__pycache__" not in value.parts
-        and value.suffix not in {".pyc", ".pyo"}
-        and ".git" not in value.parts
-    ):
-        digest.update(str(child.relative_to(path)).encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(child.read_bytes())
-        digest.update(b"\0")
-    return digest.hexdigest()
-
-
-def _package_fingerprint(requirements: list[str]) -> dict[str, str]:
-    names = {"workspace-dataviz", "pandas", "pyarrow", "pydantic"}
-    for value in requirements:
-        try:
-            names.add(Requirement(value).name)
-        except Exception:
-            names.add(value)
-    versions: dict[str, str] = {}
-    for name in sorted(names):
-        try:
-            versions[name] = importlib.metadata.version(name)
-        except importlib.metadata.PackageNotFoundError:
-            versions[name] = "missing"
-    versions["python"] = ".".join(map(str, sys.version_info[:3]))
-    return versions
-
-
-def _output_status(outputs: dict[str, Any]) -> str:
-    """Use empty only when a node produced tables and every table is empty."""
-    row_counts = [
-        int(item.metadata.get("row_count", 0))
-        for item in outputs.values()
-        if item.kind == "table"
-    ]
-    return "empty" if row_counts and all(value == 0 for value in row_counts) else "ready"
 
 
 def _system_log(level: str, event: str, message: str, **fields: Any) -> dict[str, Any]:
@@ -144,11 +99,35 @@ def resolve_query_parameters(
 
 
 class Executor:
-    def __init__(self, workspace: LoadedWorkspace, *, cache_namespace: str | None = None):
+    def __init__(
+        self,
+        workspace: LoadedWorkspace,
+        *,
+        cache: NodeCache | None = None,
+        cache_namespace: str | None = None,
+    ):
         self.workspace = workspace
-        self.cache = NodeCache(workspace.root, namespace=cache_namespace)
-        self.adapters = AdapterResolver(workspace.root)
+        self.cache = cache or NodeCache(workspace.root, namespace=cache_namespace)
         self._event_lock = threading.Lock()
+
+    def ensure_valid(self, dashboard_id: str) -> LoadedDashboard:
+        dashboard = self.workspace.dashboard(dashboard_id)
+        errors = [
+            item
+            for item in dashboard_validation_diagnostics(self.workspace, dashboard)
+            if item.level == "error"
+        ]
+        if errors:
+            raise ValidationFailure(
+                f"Dashboard {dashboard.definition.id} failed static preflight",
+                file=dashboard.definition_path,
+                details={
+                    "code": "dashboard_preflight_failed",
+                    "dashboard": dashboard.definition.id,
+                    "diagnostics": [item.as_dict() for item in errors],
+                },
+            )
+        return dashboard
 
     def run(
         self,
@@ -161,17 +140,30 @@ class Executor:
         snapshot_observer: SnapshotObserver | None = None,
         run_id: str | None = None,
         cancel_event: threading.Event | None = None,
+        _dashboard: LoadedDashboard | None = None,
     ) -> RunResult:
-        dashboard = self.workspace.dashboard(dashboard_id)
+        dashboard = _dashboard or self.ensure_valid(dashboard_id)
+        if dashboard.definition.id != dashboard_id:
+            raise ValueError("Prevalidated Dashboard does not match the requested id")
+        workspace_definition = self.workspace.definition.model_copy(deep=True)
         parameters = resolve_query_parameters(dashboard, query_parameters)
+        # Adapter files are an editable Workspace boundary. Resolve one immutable
+        # snapshot per Run instead of retaining the first values seen by a tab.
+        # Keeping it local also prevents concurrent Dashboard Runs from replacing
+        # each other's credentials/configuration mid-execution.
+        adapters = AdapterResolver(self.workspace.root)
         plan = compile_plan(dashboard, targets=targets)
         run_id = run_id or f"run_{uuid.uuid4().hex[:16]}"
         store = ArtifactStore(self.workspace.root, run_id)
         result = RunResult(
             run_id=run_id,
             status="loading",
-            workspace=self.workspace.definition.id,
+            workspace=workspace_definition.id,
             dashboard=dashboard.definition.id,
+            query_scope="dashboard" if targets is None else "targets",
+            query_targets=sorted(plan.targets),
+            query_nodes=sorted(plan.nodes),
+            query_contract_hash=query_contract_fingerprint(dashboard, plan.nodes),
             query_parameters=parameters,
             nodes={
                 node_id: NodeResult(node_id=node_id, node_type=node.kind, status="not_run")
@@ -185,6 +177,7 @@ class Executor:
                 parameters,
                 result,
                 store,
+                adapters,
             )
 
         def publish_snapshot() -> None:
@@ -214,7 +207,7 @@ class Executor:
         )
         pending = set(plan.nodes)
         running: dict[Future, str] = {}
-        max_workers = max(1, self.workspace.definition.runtime.max_workers)
+        max_workers = max(1, workspace_definition.runtime.max_workers)
 
         with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="dataviz") as pool:
             while pending or running:
@@ -282,6 +275,7 @@ class Executor:
                             refresh,
                             emit,
                             cancel_event,
+                            adapters,
                         )
                         running[future] = node_id
                         pending.remove(node_id)
@@ -379,9 +373,23 @@ class Executor:
             if node.status in {"ready", "empty"}
             for name, descriptor in node.outputs.items()
         }
+        if (
+            query_contract_fingerprint(dashboard, result.query_nodes)
+            != result.query_contract_hash
+        ):
+            raise ExecutionFailure(
+                "Dashboard query code changed while the Query Run was executing",
+                details={
+                    "code": "dashboard_changed_during_query",
+                    "run_id": result.run_id,
+                    "dashboard": result.dashboard,
+                    "action": "Run query again",
+                },
+            )
         publish_snapshot()
-        (store.run_root / "result.json").write_text(
-            result.model_dump_json(indent=2, by_alias=True), encoding="utf-8"
+        store.write_run_document(
+            "result.json",
+            result.model_dump_json(indent=2, by_alias=True),
         )
         terminal_event = (
             "run_ready"
@@ -403,6 +411,7 @@ class Executor:
         refresh: bool,
         emit,
         cancel_event: threading.Event | None,
+        adapters: AdapterResolver,
     ) -> NodeResult:
         started = time.perf_counter()
         started_at = now()
@@ -410,12 +419,16 @@ class Executor:
         emit("node_started", node)
         context: ExecutionContext | None = None
         execution_logs: list[dict[str, Any]] = []
+        secrets = adapters.all_redaction_values()
         is_python_node = node.kind == "dataset_transform" or (
             node.kind == "source" and node.definition.type == "python"
         )
 
         def collect_log(record: dict[str, Any]) -> None:
-            normalized = {**record, "node_id": node.id}
+            normalized = redact_value(
+                {**record, "node_id": node.id},
+                secrets,
+            )
             execution_logs.append(normalized)
             emit(
                 "node_log",
@@ -428,16 +441,20 @@ class Executor:
             )
 
         try:
-            context = self._context_for_node(node, dashboard, parameters, run_result, store)
+            context = self._context_for_node(
+                node, dashboard, parameters, run_result, store, adapters
+            )
             definition = node.definition
-            cache_key = self._cache_key(node, dashboard, parameters, run_result)
+            cache_key = self._cache_key(
+                node, dashboard, parameters, run_result, adapters
+            )
             cached = None if refresh else self.cache.load(cache_key, definition.cache, store)
             if cached is not None:
                 duration = int((time.perf_counter() - started) * 1000)
                 return NodeResult(
                     node_id=node.id,
                     node_type=node.kind,
-                    status=_output_status(cached),
+                    status=output_status(cached),
                     result_origin="cache",
                     started_at=started_at,
                     finished_at=now(),
@@ -463,6 +480,7 @@ class Executor:
                         data={"value": value},
                     ),
                     log_callback=collect_log,
+                    redaction_values=secrets,
                 )
             elif node.kind == "source":
                 runner = SOURCE_RUNNERS[definition.type]
@@ -483,7 +501,7 @@ class Executor:
                         definition_path=node.definition_path,
                         definition=definition,
                         context=context,
-                        adapters=self.adapters,
+                        adapters=adapters,
                         adapter_bindings=dashboard.definition.adapters,
                         node_id=node.id,
                         on_retry=on_retry,
@@ -527,6 +545,7 @@ class Executor:
                         data={"value": value},
                     ),
                     log_callback=collect_log,
+                    redaction_values=secrets,
                 )
             self.cache.save(cache_key, definition.cache, outputs, store)
 
@@ -552,7 +571,7 @@ class Executor:
             return NodeResult(
                 node_id=node.id,
                 node_type=node.kind,
-                status=_output_status(outputs),
+                status=output_status(outputs),
                 result_origin="executed",
                 started_at=started_at,
                 finished_at=now(),
@@ -563,17 +582,18 @@ class Executor:
             )
         except Exception as exc:
             duration = int((time.perf_counter() - started) * 1000)
-            local_traceback = traceback.format_exc()
+            local_traceback = redact_text(traceback.format_exc(), secrets)
             remote_traceback = (
                 exc.details.get("traceback")
                 if isinstance(exc, DatavizError) and isinstance(exc.details, dict)
                 else None
             )
-            full_traceback = remote_traceback or local_traceback
-            error = (
+            full_traceback = redact_text(remote_traceback or local_traceback, secrets)
+            error = redact_value(
                 exc.as_dict()
                 if isinstance(exc, DatavizError)
-                else {"type": type(exc).__name__, "message": str(exc)}
+                else {"type": type(exc).__name__, "message": str(exc)},
+                secrets,
             )
             error["traceback"] = full_traceback
             if is_python_node:
@@ -581,7 +601,7 @@ class Executor:
                     _system_log(
                         "error",
                         "runtime_failed",
-                        str(exc),
+                        redact_text(exc, secrets),
                         node_id=node.id,
                         error_type=type(exc).__name__,
                         traceback=full_traceback,
@@ -630,6 +650,7 @@ class Executor:
         parameters: dict[str, Any],
         run_result: RunResult,
         store: ArtifactStore,
+        adapters: AdapterResolver,
     ) -> dict[str, Any]:
         if node.kind != "source" or node.definition.type != "sql":
             return {}
@@ -641,21 +662,26 @@ class Executor:
                 parameters,
                 run_result,
                 store,
+                adapters,
             )
             request = SourceRequest(
                 definition_path=node.definition_path,
                 definition=node.definition,
                 context=context,
-                adapters=self.adapters,
+                adapters=adapters,
                 adapter_bindings=dashboard.definition.adapters,
                 node_id=node.id,
             )
             return SOURCE_RUNNERS["sql"].diagnostics(request)
         except Exception as error:
+            secrets = adapters.redaction_values(
+                node.definition.adapter,
+                dashboard.definition.adapters,
+            )
             return {
                 "inspection_error": {
                     "type": type(error).__name__,
-                    "message": str(error),
+                    "message": redact_text(error, secrets),
                 }
             }
         finally:
@@ -669,6 +695,7 @@ class Executor:
         parameters: dict[str, Any],
         run_result: RunResult,
         store: ArtifactStore,
+        adapters: AdapterResolver,
     ) -> ExecutionContext:
         inputs = {}
         for input_name, reference in node.inputs.items():
@@ -685,7 +712,7 @@ class Executor:
             and node.definition.type == "python"
             and node.definition.adapter
         ):
-            adapter = self.adapters.runtime_config(
+            adapter = adapters.runtime_config(
                 node.definition.adapter,
                 dashboard.definition.adapters,
             )
@@ -725,6 +752,7 @@ class Executor:
         dashboard: LoadedDashboard,
         parameters: dict[str, Any],
         result: RunResult,
+        adapters: AdapterResolver,
     ) -> str:
         definition = node.definition
         files: dict[str, str] = {}
@@ -732,7 +760,7 @@ class Executor:
             value = getattr(definition, field, None)
             if value:
                 if field == "path" and getattr(definition, "adapter", None):
-                    path = self.adapters.resolve_path(
+                    path = adapters.resolve_path(
                         definition.adapter,
                         value,
                         dashboard.definition.adapters,
@@ -740,11 +768,11 @@ class Executor:
                 else:
                     path = (node.definition_path.parent / value).resolve()
                 if path.exists():
-                    files[field] = _hash_path(path)
+                    files[field] = hash_path(path)
         for dependency in getattr(definition, "code_dependencies", []):
             path = (node.definition_path.parent / dependency).resolve()
             if path.exists():
-                files[f"dependency:{dependency}"] = _hash_path(path)
+                files[f"dependency:{dependency}"] = hash_path(path)
         upstream = {
             dependency: {
                 name: item.content_hash
@@ -753,22 +781,24 @@ class Executor:
             for dependency in node.dependencies
         }
         payload = {
+            "dashboard": dashboard.definition.id,
+            "node": node.id,
             "definition": definition.model_dump(mode="json", by_alias=True),
             "query_parameters": {
                 name: parameters.get(name)
-                for name in definition.query_params
+                for name in getattr(definition, "query_params", [])
             },
             "files": files,
             "upstream": upstream,
             "adapter": (
-                self.adapters.fingerprint(
+                adapters.fingerprint(
                     definition.adapter,
                     dashboard.definition.adapters,
                 )
                 if getattr(definition, "adapter", None)
                 else None
             ),
-            "runtime": _package_fingerprint(
+            "runtime": package_fingerprint(
                 getattr(definition, "python_dependencies", [])
             ),
         }

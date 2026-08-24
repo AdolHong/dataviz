@@ -25,11 +25,12 @@ def _sql_workspace(
     dashboard = root / "dashboards" / "sql-test"
     sources = dashboard / "sources"
     sources.mkdir(parents=True)
+    (root / "auth").mkdir()
     (root / "workspace.yaml").write_text(
         "schema: dataviz/workspace/v1\nkind: workspace\nid: sql-tests\ntitle: SQL tests\n",
         encoding="utf-8",
     )
-    (root / "adapters.local.yaml").write_text(
+    (root / "auth" / "adapters.local.yaml").write_text(
         f"adapters:\n  {adapter}:\n    {adapter_yaml}\n",
         encoding="utf-8",
     )
@@ -84,7 +85,7 @@ def test_sql_source_with_timeout_returns_table_and_cleans_temporary_file(tmp_pat
     assert result.status == "ready"
     assert frame.to_dict(orient="records") == [{"value": 1}]
     query_evidence = result.nodes["source:query"].diagnostics["query"]
-    assert query_evidence["adapter_alias"] == "warehouse"
+    assert query_evidence["adapter_reference"] == "warehouse"
     assert query_evidence["adapter_type"] == "duckdb"
     assert query_evidence["statement"] == "select 1 as value"
     assert query_evidence["resolved_sql"] == "select 1 as value"
@@ -287,7 +288,7 @@ def test_database_timeout_errors_are_classified_without_matching_other_sql_error
     )
 
 
-def test_timeout_retries_is_rejected_for_non_sql_sources(tmp_path: Path):
+def test_timeout_retries_is_rejected_by_the_file_source_schema(tmp_path: Path):
     root = _sql_workspace(tmp_path / "workspace", "select 1")
     sources = root / "dashboards" / "sql-test" / "sources"
     (sources / "query.csv").write_text("value\n1\n", encoding="utf-8")
@@ -307,10 +308,11 @@ cache: {mode: none}
 
     diagnostics = validate_workspace(load_workspace(root))
 
+    diagnostic = next(item for item in diagnostics if item.code == "dashboard_invalid")
     assert any(
-        item.field == "timeout_retries"
-        and item.message == "timeout_retries is only valid for SQL sources"
-        for item in diagnostics
+        item["loc"][-1] == "timeout_retries"
+        and item["type"] == "extra_forbidden"
+        for item in diagnostic.details
     )
 
 

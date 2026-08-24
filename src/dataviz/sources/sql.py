@@ -22,10 +22,8 @@ from dataviz.errors import (
 )
 from dataviz.sources.base import SourceRequest
 from dataviz.sql_contract import resolve_sql_preview
+from dataviz.redaction import adapter_secret_values, redact_text, redact_value
 
-
-DEFAULT_SQL_TIMEOUT_SECONDS = 120.0
-DEFAULT_SQL_TIMEOUT_RETRIES = 1
 
 _QUERY_TIMEOUT_CODES = {3024}  # MySQL ER_QUERY_TIMEOUT
 _QUERY_TIMEOUT_CODE_STRINGS = {str(code) for code in _QUERY_TIMEOUT_CODES}
@@ -281,7 +279,9 @@ def execute_sql_query(
 
         process.join(timeout=1)
         if not payload["ok"]:
-            remote = payload["error"]
+            remote = redact_value(
+                payload["error"], adapter_secret_values(adapter)
+            )
             error_type = {
                 "query_connection_error": QueryConnectionFailure,
                 "query_timeout": QueryTimeoutFailure,
@@ -335,33 +335,31 @@ class SqlSourceRunner:
             name: request.context.query_params.get(name)
             for name in definition.query_params
         }
-        adapter_alias = definition.adapter or ""
-        adapter_name = request.adapter_bindings.get(adapter_alias, adapter_alias)
+        adapter_reference = definition.adapter or ""
+        adapter_name = request.adapter_bindings.get(
+            adapter_reference, adapter_reference
+        )
         adapter_type = "unknown"
         inspection_warning = None
+        secrets = request.adapters.redaction_values(
+            adapter_reference,
+            request.adapter_bindings,
+        )
         try:
             adapter = request.adapters.runtime_config(
-                adapter_alias,
+                adapter_reference,
                 request.adapter_bindings,
             )
             adapter_type = str(adapter.get("type") or "unknown")
         except Exception as error:
-            inspection_warning = str(error)
+            inspection_warning = redact_text(error, secrets)
         statement = (
             re.sub(r":([A-Za-z_]\w*)", r"$\1", query)
             if adapter_type == "duckdb"
             else query
         )
-        timeout_seconds = (
-            definition.timeout_seconds
-            if definition.timeout_seconds is not None
-            else DEFAULT_SQL_TIMEOUT_SECONDS
-        )
-        timeout_retries = (
-            definition.timeout_retries
-            if definition.timeout_retries is not None
-            else DEFAULT_SQL_TIMEOUT_RETRIES
-        )
+        timeout_seconds = definition.timeout_seconds
+        timeout_retries = definition.timeout_retries
         return {
             "query": {
                 "kind": "sql",
@@ -369,7 +367,7 @@ class SqlSourceRunner:
                     code_path,
                     request.context.workspace_root,
                 ),
-                "adapter_alias": adapter_alias,
+                "adapter_reference": adapter_reference,
                 "adapter_name": adapter_name,
                 "adapter_type": adapter_type,
                 "statement": statement,
@@ -387,8 +385,6 @@ class SqlSourceRunner:
     def execute(self, request: SourceRequest) -> pd.DataFrame:
         definition = request.definition
         adapter_name = definition.adapter
-        if not definition.code or not adapter_name:
-            raise SourceFailure("SQL source requires code and adapter", file=request.definition_path)
         code_path = (request.definition_path.parent / definition.code).resolve()
         if not code_path.exists():
             raise SourceFailure("SQL file does not exist", file=code_path)
@@ -398,16 +394,8 @@ class SqlSourceRunner:
             for name in definition.query_params
         }
         adapter = request.adapters.runtime_config(adapter_name, request.adapter_bindings)
-        timeout_seconds = (
-            definition.timeout_seconds
-            if definition.timeout_seconds is not None
-            else DEFAULT_SQL_TIMEOUT_SECONDS
-        )
-        timeout_retries = (
-            definition.timeout_retries
-            if definition.timeout_retries is not None
-            else DEFAULT_SQL_TIMEOUT_RETRIES
-        )
+        timeout_seconds = definition.timeout_seconds
+        timeout_retries = definition.timeout_retries
         max_attempts = timeout_retries + 1
         for attempt in range(1, max_attempts + 1):
             try:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,7 +20,7 @@ AUTHORING_LOG_NAME = "dataviz-authoring.jsonl"
 
 
 class AuthoringEvent(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", populate_by_name=False)
 
     schema_: Literal["dataviz/authoring-event/v3"] = Field(
         AUTHORING_EVENT_SCHEMA, alias="schema"
@@ -42,6 +41,7 @@ class AuthoringStarted(AuthoringEvent):
     approach: Literal["dataviz", "standalone-html"] | None = None
     trial_id: str | None = None
     task_contract_sha256: str | None = None
+    task_prompt_sha256: str | None = None
     fixture_sha256: str | None = None
     notes: str = ""
 
@@ -52,14 +52,15 @@ class AuthoringStarted(AuthoringEvent):
             self.approach,
             self.trial_id,
             self.task_contract_sha256,
+            self.task_prompt_sha256,
             self.fixture_sha256,
         ]
         if any(value is not None for value in values) and not all(
             value is not None for value in values
         ):
             raise ValueError(
-                "benchmark_task, approach, trial_id, task_contract_sha256 and "
-                "fixture_sha256 must be provided together"
+                "benchmark_task, approach, trial_id, task_contract_sha256, "
+                "task_prompt_sha256 and fixture_sha256 must be provided together"
             )
         if self.benchmark_task is not None and self.benchmark_task not in AUTHORING_TASKS:
             raise ValueError(
@@ -192,6 +193,7 @@ def start_authoring_session(
     approach: str | None = None,
     trial_id: str | None = None,
     task_contract_sha256: str | None = None,
+    task_prompt_sha256: str | None = None,
     fixture_sha256: str | None = None,
     notes: str = "",
 ) -> AuthoringStarted:
@@ -210,6 +212,7 @@ def start_authoring_session(
             approach=approach.strip() if approach else None,
             trial_id=trial_id.strip() if trial_id else None,
             task_contract_sha256=task_contract_sha256,
+            task_prompt_sha256=task_prompt_sha256,
             fixture_sha256=fixture_sha256,
             notes=notes.strip(),
         )
@@ -221,6 +224,7 @@ def start_authoring_session(
                 "approach": approach,
                 "trial_id": trial_id,
                 "task_contract_sha256": task_contract_sha256,
+                "task_prompt_sha256": task_prompt_sha256,
                 "fixture_sha256": fixture_sha256,
                 "available_tasks": sorted(AUTHORING_TASKS),
                 "available_approaches": list(AUTHORING_APPROACHES),
@@ -278,6 +282,7 @@ def finish_authoring_session(
     approach: str | None = None,
     trial_id: str | None = None,
     task_contract_sha256: str | None = None,
+    task_prompt_sha256: str | None = None,
     fixture_sha256: str | None = None,
     notes: str = "",
 ) -> AuthoringFinished:
@@ -299,6 +304,7 @@ def finish_authoring_session(
             or approach != start.approach
             or trial_id != start.trial_id
             or task_contract_sha256 != start.task_contract_sha256
+            or task_prompt_sha256 != start.task_prompt_sha256
             or fixture_sha256 != start.fixture_sha256
         ):
             raise ValidationFailure(
@@ -306,6 +312,8 @@ def finish_authoring_session(
                 details={
                     "expected_task_contract_sha256": start.task_contract_sha256,
                     "actual_task_contract_sha256": task_contract_sha256,
+                    "expected_task_prompt_sha256": start.task_prompt_sha256,
+                    "actual_task_prompt_sha256": task_prompt_sha256,
                     "expected_fixture_sha256": start.fixture_sha256,
                     "actual_fixture_sha256": fixture_sha256,
                     "expected_benchmark_task": start.benchmark_task,
@@ -332,6 +340,7 @@ def finish_authoring_session(
             approach,
             trial_id,
             task_contract_sha256,
+            task_prompt_sha256,
             fixture_sha256,
         )
     ):
@@ -391,6 +400,7 @@ def authoring_log_report(
                     "approach": event.approach,
                     "trial_id": event.trial_id,
                     "task_contract_sha256": event.task_contract_sha256,
+                    "task_prompt_sha256": event.task_prompt_sha256,
                     "fixture_sha256": event.fixture_sha256,
                     "started_at": event.timestamp.isoformat(),
                     "start_notes": event.notes,

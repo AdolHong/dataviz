@@ -177,7 +177,13 @@ def _number(definition: Any, value: Any, *, integer: bool) -> int | float:
             raise ValueContractViolation(
                 "invalid_step", f"value must follow step {step} from {minimum or 0}"
             )
-    return int(value) if integer else numeric
+    # JavaScript has one Number type, but JSON.stringify() emits integral safe
+    # numbers without a trailing decimal. Preserve that portable wire shape in
+    # Python as well: it keeps SQL integer parameters usable while decimals
+    # remain floats.
+    if integer or (numeric.is_integer() and abs(numeric) <= _MAX_SAFE_INTEGER):
+        return int(numeric)
+    return numeric
 
 
 def normalize_control_value(

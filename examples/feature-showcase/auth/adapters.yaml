@@ -3,10 +3,10 @@ adapters:
     type: duckdb
     database: ':memory:'
   shared-files:
-    type: files
+    type: file
     root: shared-data
 
-  # 复制为 adapters.local.yaml，再填入你自己的环境变量。
+  # 本地凭证写入 adapters.local.yaml，或使用下面声明的环境变量。
   mysql-example:
     type: mysql
     host: 127.0.0.1

@@ -2,7 +2,10 @@ schema: dataviz/component-package/v1
 package: section.declarative
 version: 1.0.0
 category: section
-purpose: Document-flow Section composition and repeated View orchestration.
+purpose: Document-flow Section composition, state propagation and repeated View orchestration.
+implementation:
+  mode: package
+  sources: []
 dependencies: [runtime.selector, view.declarative]
 components:
   - {id: section.single, purpose: One full-width View, status: stable}
@@ -15,4 +18,5 @@ components:
   - {id: section.band, purpose: Compact KPI strip, status: stable}
   - {id: section.small-multiples, purpose: Repeat one View blueprint for every data group, status: stable}
   - {id: section.selection-gallery, purpose: Repeat only selected data groups, status: stable}
+  - {id: section.state, purpose: Semantic aggregate lifecycle state for a Section and its Views, status: stable}
 runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

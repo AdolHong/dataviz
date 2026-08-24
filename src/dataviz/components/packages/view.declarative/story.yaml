@@ -6,3 +6,4 @@ stories:
   - {id: view.table.basic, component: view.table, title: Themeable table, summary: Plain semantic table, gallery: {dashboard: component-gallery, target: "[data-view-id='detail-table']", anchor: view-table}}
   - {id: view.perspective.basic, component: view.perspective, title: Perspective, summary: Pivot and analytical table, gallery: {dashboard: component-gallery, target: "[data-view-id='pivot-table']", anchor: view-perspective}}
   - {id: view.custom.basic, component: view.custom, title: Custom Renderer, summary: Lifecycle extension point, gallery: {dashboard: component-gallery, target: "[data-view-id='custom-specimen']", anchor: view-custom}}
+  - {id: view.state.matrix, component: view.state, title: View state matrix, summary: Every terminal and transitional View state uses one visible and accessible boundary., gallery: {dashboard: component-gallery, target: "#story-view-state-matrix", anchor: view-state-matrix}}

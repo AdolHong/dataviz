@@ -3,7 +3,7 @@ kind: dashboard
 id: worker-runtime
 title: Browser JS Interactive Worker
 
-dashboard_selections:
+compute_parameters:
   - id: delay_ms
     label: Worker delay
     type: number

@@ -3,6 +3,7 @@ package: selector.checkbox-group
 version: 1.1.0
 category: selector
 purpose: Visible multi-selection for a small set, with checkbox and checkable-tag presentations.
+implementation: {mode: package, sources: []}
 dependencies: [runtime.selector]
 components:
   - id: selector.checkbox-group

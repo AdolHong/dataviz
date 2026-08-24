@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-from statistics import mean
 from pathlib import Path
+from statistics import mean
 from typing import Any
+
+from dataviz.filesystem import atomic_write_text, transactional_write_texts
 
 
 AUTHORING_EVALUATION_SCHEMA = "dataviz/authoring-evaluation/v2"
@@ -252,6 +254,43 @@ def _fixture_sha256(files: dict[str, str]) -> str:
     return _canonical_sha256({path: files[path] for path in sorted(files)})
 
 
+def _approach_constraint(approach: str) -> str:
+    if approach == "dataviz":
+        return (
+            "Use the installed Dataviz CLI and current DSL. Begin with `dataviz docs`, "
+            "and do not copy a prebuilt Dashboard."
+        )
+    return (
+        "Build a standalone HTML implementation. "
+        "Do not import or generate code from Dataviz."
+    )
+
+
+def _task_markdown(task_id: str, approach: str, files: dict[str, str]) -> str:
+    definition = AUTHORING_TASKS[task_id]
+    return "\n".join(
+        [
+            f"# {definition['title']}",
+            "",
+            definition["brief"],
+            "",
+            f"Approach constraint: {_approach_constraint(approach)}",
+            "",
+            "## Acceptance",
+            "",
+            *[
+                f"- [{item['id']}] {item['criterion']}"
+                for item in definition["acceptance"]
+            ],
+            "",
+            "## Inputs",
+            "",
+            *[f"- `{name}`" for name in sorted(files)],
+            "",
+        ]
+    )
+
+
 def authoring_task_catalog(task_id: str | None = None) -> dict[str, Any]:
     if task_id is not None and task_id not in AUTHORING_TASKS:
         raise ValueError(
@@ -288,8 +327,9 @@ def authoring_evaluation_protocol(task_id: str | None = None) -> dict[str, Any]:
             ),
             "same_inputs": (
                 "Use prepared trials with the same task-contract and fixture SHA-256, model, "
-                "tool permissions and time budget. Dataviz may use installed CLI docs; "
-                "standalone HTML may use its normal platform/library documentation."
+                "tool permissions and time budget. Each approach has one immutable, hashed "
+                "constraint prompt. Dataviz may use installed CLI docs; standalone HTML may "
+                "use its normal platform/library documentation."
             ),
         },
         "measurements": [
@@ -301,9 +341,9 @@ def authoring_evaluation_protocol(task_id: str | None = None) -> dict[str, Any]:
             "final outcome and categorized friction",
         ],
         "quality_gate": (
-            "Count a success only when trial inputs remain intact and every fixed acceptance "
-            "check records an assessor plus evidence and passes. A smaller answer that does "
-            "not work is not an efficiency win."
+            "Count a success only when the fixed task prompt and inputs remain intact and every "
+            "acceptance check records an assessor plus evidence and passes. A smaller answer "
+            "that does not work is not an efficiency win."
         ),
         "token_rule": (
             "Never estimate model tokens from bytes or characters. Missing client measurements "
@@ -355,45 +395,15 @@ def prepare_authoring_trial(
         raise ValueError(f"Authoring trial destination is not a directory: {root}")
     if root.exists() and any(root.iterdir()):
         raise ValueError(f"Authoring trial directory must be empty: {root}")
-    root.mkdir(parents=True, exist_ok=True)
     definition = catalog["tasks"][task_id]
     fixture_files = AUTHORING_TASK_FIXTURES[task_id]
     files: dict[str, str] = {}
     for relative, content in fixture_files.items():
-        target = root / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8", newline="\n")
         files[relative] = hashlib.sha256(content.encode("utf-8")).hexdigest()
 
-    constraint = (
-        "Use the installed Dataviz CLI and current DSL. Begin with `dataviz docs`, "
-        "and do not copy a prebuilt Dashboard."
-        if approach == "dataviz"
-        else "Build a standalone HTML implementation. Do not import or generate code from Dataviz."
-    )
-    task_markdown = "\n".join(
-        [
-            f"# {definition['title']}",
-            "",
-            definition["brief"],
-            "",
-            f"Approach constraint: {constraint}",
-            "",
-            "## Acceptance",
-            "",
-            *[
-                f"- [{item['id']}] {item['criterion']}"
-                for item in definition["acceptance"]
-            ],
-            "",
-            "## Inputs",
-            "",
-            *[f"- `{name}`" for name in sorted(files)],
-            "",
-        ]
-    )
-    (root / "TASK.md").write_text(task_markdown, encoding="utf-8", newline="\n")
+    task_markdown = _task_markdown(task_id, approach, files)
     task_contract_sha256 = _task_contract_sha256(task_id)
+    task_prompt_sha256 = _sha256_text(task_markdown)
     fixture_sha256 = _fixture_sha256(files)
     manifest = {
         "schema": AUTHORING_TRIAL_SCHEMA,
@@ -404,16 +414,12 @@ def prepare_authoring_trial(
         "acceptance": definition["acceptance"],
         "files": files,
         "task_contract_sha256": task_contract_sha256,
+        "task_prompt_sha256": task_prompt_sha256,
         "fixture_sha256": fixture_sha256,
         "measurement_rule": (
             "Use a fresh AI session. Record actual client token usage; never estimate."
         ),
     }
-    (root / "trial.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
     assessment = {
         "schema": AUTHORING_ASSESSMENT_SCHEMA,
         "benchmark_task": task_id,
@@ -429,10 +435,16 @@ def prepare_authoring_trial(
             for item in definition["acceptance"]
         ],
     }
-    (root / "assessment.json").write_text(
-        json.dumps(assessment, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-        newline="\n",
+    transactional_write_texts(
+        root,
+        {
+            **fixture_files,
+            "TASK.md": task_markdown,
+            "trial.json": json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            "assessment.json": (
+                json.dumps(assessment, ensure_ascii=False, indent=2) + "\n"
+            ),
+        },
     )
     return {**manifest, "directory": str(root)}
 
@@ -476,6 +488,7 @@ def inspect_authoring_trial(destination: Path) -> dict[str, Any]:
     trial_id = manifest.get("trial_id")
     expected_files: dict[str, str] = {}
     expected_contract_sha256: str | None = None
+    expected_prompt_sha256: str | None = None
     expected_fixture_sha256: str | None = None
     if manifest:
         if manifest.get("schema") != AUTHORING_TRIAL_SCHEMA:
@@ -534,6 +547,30 @@ def inspect_authoring_trial(destination: Path) -> dict[str, Any]:
             )
         if not isinstance(trial_id, str) or not trial_id.strip():
             diagnostic("authoring_trial_id_invalid", "Trial id cannot be empty")
+
+    if task_id in AUTHORING_TASKS and approach in AUTHORING_APPROACHES:
+        expected_prompt = _task_markdown(task_id, approach, expected_files)
+        expected_prompt_sha256 = _sha256_text(expected_prompt)
+        if manifest.get("task_prompt_sha256") != expected_prompt_sha256:
+            diagnostic(
+                "authoring_trial_task_prompt_hash_mismatch",
+                "Trial task prompt hash is invalid",
+                expected=expected_prompt_sha256,
+                actual=manifest.get("task_prompt_sha256"),
+            )
+        task_path = root / "TASK.md"
+        actual_prompt_sha256 = (
+            hashlib.sha256(task_path.read_bytes()).hexdigest()
+            if task_path.is_file()
+            else None
+        )
+        if actual_prompt_sha256 != expected_prompt_sha256:
+            diagnostic(
+                "authoring_trial_task_prompt_changed",
+                "TASK.md is missing or differs from the fixed approach prompt",
+                expected=expected_prompt_sha256,
+                actual=actual_prompt_sha256,
+            )
 
     actual_files: dict[str, str | None] = {}
     for relative, expected_hash in expected_files.items():
@@ -678,6 +715,7 @@ def inspect_authoring_trial(destination: Path) -> dict[str, Any]:
         "trial_id": trial_id,
         "task": manifest.get("task"),
         "task_contract_sha256": expected_contract_sha256,
+        "task_prompt_sha256": expected_prompt_sha256,
         "fixture_sha256": expected_fixture_sha256,
         "actual_files": actual_files,
         "integrity_passed": integrity_passed,
@@ -734,10 +772,9 @@ def record_authoring_assessment(
                 }
             )
             break
-    path.write_text(
+    atomic_write_text(
+        path,
         json.dumps(assessment, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-        newline="\n",
     )
     return inspect_authoring_trial(root)
 
@@ -948,8 +985,9 @@ def build_authoring_evaluation_report(
         "diagnostics": diagnostics,
         "interpretation": (
             "Paired aggregates include only identity-matched trials where both approaches "
-            "preserved the fixed inputs and recorded evidence that every acceptance check "
-            "passed. Failed, unassessed or mismatched trials remain visible but cannot "
-            "establish an efficiency win. Null token metrics are unmeasured, never estimated."
+            "preserved the fixed approach prompt and inputs and recorded evidence that every "
+            "acceptance check passed. Failed, unassessed or mismatched trials remain visible "
+            "but cannot establish an efficiency win. Null token metrics are unmeasured, never "
+            "estimated."
         ),
     }

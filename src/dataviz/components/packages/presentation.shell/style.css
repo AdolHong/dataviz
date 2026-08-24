@@ -1,2 +1,66 @@
 .dv-canvas, .dv-section, .dv-view { box-sizing: border-box; }
 .dv-canvas img, .dv-canvas svg, .dv-canvas canvas { max-width: 100%; }
+.dv-default-shell { width: min(1440px, 100%); margin: 0 auto; }
+.dv-layout--report .dv-default-shell { width: min(1080px, 100%); }
+.dv-layout--monitoring { padding: clamp(18px, 2.5vw, 36px); }
+.dv-layout--monitoring .dv-sections { gap: var(--dv-gap, 12px); }
+.dv-layout--monitoring .dv-section__header { margin-bottom: 8px; }
+.dv-layout--exploration .dv-default-shell { width: min(1680px, 100%); }
+.dv-layout--exploration .dv-view--perspective { min-height: 520px; }
+.dv-report-header--compact {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  margin-bottom: 28px;
+  padding-bottom: 20px;
+}
+.dv-report-header--compact h1 {
+  max-width: none;
+  margin: 5px 0 0;
+  font-size: clamp(34px, 4vw, 58px);
+  line-height: 1;
+  letter-spacing: -.035em;
+}
+.dv-report-header--compact .dv-deck { max-width: 72ch; margin-top: 10px; font-size: 16px; }
+.dv-density--compact { --dv-gap: 12px; }
+.dv-density--compact .dv-view-header { min-height: 38px; padding: 8px 11px; }
+.dv-density--compact .dv-view-body { padding: 10px; }
+.dv-density--spacious { --dv-gap: 26px; }
+.dv-theme--business {
+  --dv-paper: #eef2f5;
+  --dv-panel: #fff;
+  --dv-ink: #102033;
+  --dv-line: #cad3dc;
+  --dv-accent: #2457d6;
+  --dv-green: #16735b;
+}
+.dv-theme--terminal {
+  --dv-paper: #0b100e;
+  --dv-panel: #111a16;
+  --dv-ink: #ddf5e8;
+  --dv-line: #2e4439;
+  --dv-accent: #ff7657;
+  --dv-green: #6df0a8;
+  color-scheme: dark;
+}
+.dv-theme--terminal .dv-deck,
+.dv-theme--terminal .dv-section__header p { color: #91a99d; }
+.dv-theme--editorial {
+  --dv-paper: #f5efe3;
+  --dv-panel: #fffaf0;
+  --dv-ink: #221d18;
+  --dv-line: #d8cbbb;
+  --dv-accent: #b9462f;
+  --dv-green: #3e755b;
+}
+[data-component-status="loading"] { cursor: progress; }
+[data-component-status="stale"] { --dv-component-state: #a86718; }
+[data-component-status="error"] { --dv-component-state: #b83a2f; }
+[data-component-status="cancelled"] { --dv-component-state: #a86718; }
+[data-component-status="unavailable"] { --dv-component-state: #66716b; }
+[data-component-state-label] { color: var(--dv-component-state, var(--dv-green, #1c7a55)); }
+@media (max-width: 800px) {
+  .dv-canvas { padding: 20px; }
+  .dv-report-header--compact { display: block; }
+  .dv-report-header--compact h1 { font-size: 38px; }
+}

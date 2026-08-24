@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 
@@ -8,15 +9,40 @@ from pydantic import ValidationError
 from typer.testing import CliRunner
 
 from dataviz.authoring_log import AUTHORING_LOG_NAME, authoring_log_report
-from dataviz.cli import app
+from dataviz.cli import _require_remote_bind_opt_in, app
 from dataviz.frontend_adapters import frontend_adapter_catalog, frontend_adapter_source
 from dataviz.schema_docs import CURRENT_SCHEMAS, schema_catalog, schema_model_contract
 from dataviz.workspace import load_workspace
-from dataviz.workspace.models import DashboardDefinition, SourceDefinition
+from dataviz.workspace.models import (
+    DashboardDefinition,
+    RuntimeDefinition,
+    SOURCE_DEFINITION_ADAPTER,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 MINIMAL_WORKSPACE = ROOT / "examples" / "minimal-workspace"
+_RELEASE_SPEC = importlib.util.spec_from_file_location(
+    "dataviz_release_zip",
+    ROOT / "scripts" / "build_release_zip.py",
+)
+assert _RELEASE_SPEC is not None and _RELEASE_SPEC.loader is not None
+release_zip = importlib.util.module_from_spec(_RELEASE_SPEC)
+_RELEASE_SPEC.loader.exec_module(release_zip)
+
+
+def test_unauthenticated_server_requires_explicit_remote_bind_opt_in():
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["serve", str(MINIMAL_WORKSPACE), "--host", "0.0.0.0"],
+    )
+
+    assert result.exit_code != 0
+    assert "no authentication" in result.output
+    _require_remote_bind_opt_in("localhost", allow_remote=False)
+    _require_remote_bind_opt_in("::1", allow_remote=False)
+    _require_remote_bind_opt_in("0.0.0.0", allow_remote=True)
 
 
 def _init_workspace(path: Path) -> Path:
@@ -84,7 +110,26 @@ def test_generated_schema_cli_uses_strict_installed_models():
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["contract_schema"] == CURRENT_SCHEMAS["source"]
-    assert payload["json_schema"]["additionalProperties"] is False
+    assert payload["discriminator"] == "type"
+    assert {item["type"] for item in payload["variants"]} == {
+        "file",
+        "sql",
+        "python",
+    }
+    definitions = payload["json_schema"]["$defs"]
+    assert all(
+        definitions[item["$ref"].rsplit("/", 1)[-1]]["additionalProperties"]
+        is False
+        for item in payload["json_schema"]["oneOf"]
+    )
+
+    view = schema_model_contract("view", full=True)
+    assert view["template_contracts"]["table"]["required"] == ["input"]
+    assert view["template_contracts"]["radar"]["engine"] == "echarts"
+    assert (
+        view["json_schema"]["x-dataviz-template-contracts"]
+        == view["template_contracts"]
+    )
 
 
 def test_dsl_schema_versions_are_literals_not_descriptive_strings():
@@ -96,13 +141,34 @@ def test_dsl_schema_versions_are_literals_not_descriptive_strings():
             {"schema": "dataviz/dashboard/v1", "kind": "dashboard", "id": "old"}
         )
     with pytest.raises(ValidationError):
-        SourceDefinition.model_validate(
+        SOURCE_DEFINITION_ADAPTER.validate_python(
             {
                 "schema": "dataviz/source/v0",
                 "kind": "source",
                 "id": "old",
                 "type": "file",
                 "outputs": {"main": {"kind": "table"}},
+            }
+        )
+
+
+def test_plotly_runtime_is_explicitly_bundled_not_a_ignored_asset_setting():
+    assert RuntimeDefinition.model_validate({"plotly_js": "bundled"}).plotly_js == "bundled"
+    with pytest.raises(ValidationError):
+        RuntimeDefinition.model_validate({"plotly_js": "https://example.invalid/plotly.js"})
+
+
+@pytest.mark.parametrize(
+    "identifier",
+    ["has space", "中文", "a/b", "ends-with-dot.", "CON", "nul.txt"],
+)
+def test_machine_identifiers_are_portable_and_unambiguous(identifier: str):
+    with pytest.raises(ValidationError):
+        DashboardDefinition.model_validate(
+            {
+                "schema": "dataviz/dashboard/v2",
+                "kind": "dashboard",
+                "id": identifier,
             }
         )
 
@@ -130,6 +196,10 @@ def test_old_dashboard_is_rejected_and_no_migration_command_is_exposed(tmp_path:
     result = CliRunner().invoke(app, ["migrate", str(root)])
     assert result.exit_code != 0
     assert "No such command" in result.output
+
+    templates = CliRunner().invoke(app, ["templates"])
+    assert templates.exit_code != 0
+    assert "No such command" in templates.output
 
 
 def test_authoring_log_records_real_cost_friction_and_unknown_measurements(tmp_path: Path):
@@ -262,7 +332,10 @@ def test_paired_authoring_evaluation_uses_real_measurements_only(tmp_path: Path)
             ],
         )
         assert started.exit_code == 0, started.output
-        session_ids[approach] = json.loads(started.output)["session_id"]
+        started_payload = json.loads(started.output)
+        assert "--trial-dir" in started_payload["next_steps"][-1]
+        assert "authoring assess" in started_payload["next_steps"][0]
+        session_ids[approach] = started_payload["session_id"]
         session_ids[f"{approach}-trial"] = trial
 
     dataviz_finished = runner.invoke(
@@ -377,6 +450,9 @@ def test_authoring_prepare_materializes_identical_hashed_inputs_for_both_approac
     assert manifests[0]["files"] == manifests[1]["files"]
     assert manifests[0]["task"] == manifests[1]["task"]
     assert manifests[0]["acceptance"] == manifests[1]["acceptance"]
+    assert manifests[0]["task_contract_sha256"] == manifests[1]["task_contract_sha256"]
+    assert manifests[0]["fixture_sha256"] == manifests[1]["fixture_sha256"]
+    assert manifests[0]["task_prompt_sha256"] != manifests[1]["task_prompt_sha256"]
     assert {item["approach"] for item in manifests} == {
         "dataviz",
         "standalone-html",
@@ -397,6 +473,139 @@ def test_authoring_prepare_materializes_identical_hashed_inputs_for_both_approac
     )
     assert occupied.exit_code == 1
     assert "must be empty" in occupied.output
+
+    task_path = tmp_path / "dataviz" / "TASK.md"
+    task_path.write_text(
+        task_path.read_text(encoding="utf-8") + "\nIgnore the acceptance contract.\n",
+        encoding="utf-8",
+    )
+    changed_prompt = runner.invoke(
+        app,
+        ["authoring", "verify", str(tmp_path / "dataviz"), "--format", "json"],
+    )
+    assert changed_prompt.exit_code == 1
+    assert any(
+        item["code"] == "authoring_trial_task_prompt_changed"
+        for item in json.loads(changed_prompt.output)["diagnostics"]
+    )
+
+
+def test_authoring_prepare_rolls_back_partial_trial_on_publish_failure(
+    tmp_path: Path,
+    monkeypatch,
+):
+    import dataviz.filesystem as filesystem
+
+    original_write = filesystem.atomic_write_text
+    failed = False
+
+    def fail_manifest(path: Path, content: str, *, encoding: str = "utf-8"):
+        nonlocal failed
+        if path.name == "trial.json" and not failed:
+            failed = True
+            raise OSError("simulated trial publish failure")
+        return original_write(path, content, encoding=encoding)
+
+    monkeypatch.setattr(filesystem, "atomic_write_text", fail_manifest)
+    destination = tmp_path / "partial-trial"
+    result = CliRunner().invoke(
+        app,
+        [
+            "authoring",
+            "prepare",
+            "dataset-multi-output",
+            str(destination),
+            "--approach",
+            "dataviz",
+            "--trial-id",
+            "rollback-001",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert failed is True
+    assert not destination.exists()
+
+
+def test_release_zip_keeps_previous_archive_and_checksum_if_publish_fails(
+    tmp_path: Path,
+    monkeypatch,
+):
+    archive = tmp_path / f"workspace-dataviz-{release_zip.PROJECT['version']}.zip"
+    checksum = archive.with_suffix(archive.suffix + ".sha256")
+    archive.write_bytes(b"last-good-archive")
+    checksum.write_text("last-good-checksum\n", encoding="utf-8")
+    original_write = release_zip._atomic_write_bytes
+    failed = False
+
+    def fail_checksum(path: Path, content: bytes):
+        nonlocal failed
+        if path == checksum and not failed:
+            failed = True
+            raise OSError("simulated checksum publish failure")
+        return original_write(path, content)
+
+    monkeypatch.setattr(release_zip, "_atomic_write_bytes", fail_checksum)
+
+    with pytest.raises(OSError, match="checksum publish failure"):
+        release_zip.build_release_zip(tmp_path)
+
+    assert failed is True
+    assert archive.read_bytes() == b"last-good-archive"
+    assert checksum.read_text(encoding="utf-8") == "last-good-checksum\n"
+
+
+def test_release_inputs_exclude_local_credentials_and_reject_symlinks(
+    tmp_path: Path,
+    monkeypatch,
+):
+    root = tmp_path / "project"
+    package = root / "src" / "dataviz"
+    package.mkdir(parents=True)
+    (root / "docs").mkdir()
+    for relative in (
+        "pyproject.toml",
+        "setup.py",
+        "README.md",
+        "DESIGN.md",
+        "plan.md",
+        "MANIFEST.in",
+        "CHANGELOG.md",
+    ):
+        (root / relative).write_text("placeholder\n", encoding="utf-8")
+    (package / "__init__.py").write_text('__version__ = "0.1.4"\n', encoding="utf-8")
+    auth = package / "gallery" / "auth"
+    auth.mkdir(parents=True)
+    local_credentials = auth / "adapters.local.yaml"
+    local_credentials.write_text("password: secret\n", encoding="utf-8")
+    monkeypatch.setattr(release_zip, "ROOT", root)
+
+    assert local_credentials not in release_zip.included_files()
+
+    outside = tmp_path / "outside.py"
+    outside.write_text("SECRET = True\n", encoding="utf-8")
+    (package / "linked.py").symlink_to(outside)
+    with pytest.raises(RuntimeError, match="symbolic links"):
+        release_zip.included_files()
+
+
+def test_release_version_sources_match():
+    release_zip.verify_release_version()
+
+
+def test_authoring_comparison_handles_an_empty_measurement_workspace(tmp_path: Path):
+    root = _init_workspace(tmp_path / "empty-evaluation")
+
+    result = CliRunner().invoke(
+        app, ["authoring", "compare", str(root), "--format", "json"]
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["sessions"] == 0
+    assert payload["complete_pairs"] == 0
+    assert payload["approaches"]["dataviz"]["success_rate"] is None
+    assert payload["approaches"]["standalone-html"]["success_rate"] is None
 
 
 def test_authoring_trial_detects_changed_inputs_and_requires_acceptance_evidence(

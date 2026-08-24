@@ -14,3 +14,4 @@ tests:
   - {id: view.image.lifecycle, component: view.image, kind: renderer, assertions: [mount, update, dispose]}
   - {id: view.custom.lifecycle, component: view.custom, kind: renderer, assertions: [mount, update, dispose, view-scoped-error]}
   - {id: view.echarts-category.legend, component: view.echarts-category, kind: interaction, assertions: [filter, visibility, none]}
+  - {id: view.state.matrix, component: view.state, kind: browser, assertions: [ready, loading, stale, empty, error, cancelled, unavailable, aria-busy, aria-invalid]}

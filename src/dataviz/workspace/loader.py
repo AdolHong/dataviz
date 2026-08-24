@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import yaml
+from packaging.markers import default_environment
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 from pydantic import ValidationError
@@ -22,6 +23,7 @@ from dataviz.content_templates import (
     inspect_content_template,
 )
 from dataviz.errors import Diagnostic, WorkspaceError
+from dataviz.identifiers import fallback_stable_id
 from dataviz.execution.references import parse_output_reference
 from dataviz.sql_contract import sql_parameter_names
 from dataviz.workspace.models import (
@@ -31,6 +33,7 @@ from dataviz.workspace.models import (
     InteractiveTransformDefinition,
     NavigationItem,
     PresentationDefinition,
+    SOURCE_DEFINITION_ADAPTER,
     SourceDefinition,
     TrashItemDefinition,
     WorkspaceDefinition,
@@ -46,7 +49,7 @@ from dataviz.workspace.naming import (
     normalize_logical_path,
 )
 from dataviz.workspace.selections import compile_selection_contract
-from dataviz.templates import VIEW_TEMPLATES
+from dataviz.view_contracts import referenced_view_fields, validate_view_contract
 
 
 def read_yaml(path: Path) -> dict[str, Any]:
@@ -57,14 +60,29 @@ def read_yaml(path: Path) -> dict[str, Any]:
     except yaml.YAMLError as exc:
         mark = getattr(exc, "problem_mark", None)
         details = {
-            "problem": getattr(exc, "problem", None) or str(exc),
+            "problem": getattr(exc, "problem", None) or "YAML syntax error",
             "line": mark.line + 1 if mark is not None else None,
             "column": mark.column + 1 if mark is not None else None,
         }
-        raise WorkspaceError(f"Invalid YAML: {exc}", file=path, details=details) from exc
+        raise WorkspaceError("Invalid YAML", file=path, details=details) from exc
+    except (OSError, UnicodeError) as exc:
+        raise WorkspaceError(
+            "YAML file cannot be read as UTF-8",
+            file=path,
+            details={"error_type": type(exc).__name__},
+        ) from exc
     if not isinstance(data, dict):
         raise WorkspaceError("YAML document must be an object", file=path)
     return data
+
+
+def _validation_errors(error: ValidationError) -> list[dict[str, Any]]:
+    """Keep model diagnostics useful without echoing complete user input values."""
+    return error.errors(
+        include_url=False,
+        include_context=False,
+        include_input=False,
+    )
 
 
 def parse_model(model_type, path: Path):
@@ -88,7 +106,32 @@ def parse_model(model_type, path: Path):
     try:
         return model_type.model_validate(value)
     except ValidationError as exc:
-        raise WorkspaceError("Schema validation failed", file=path, details=exc.errors()) from exc
+        raise WorkspaceError(
+            "Schema validation failed",
+            file=path,
+            details=_validation_errors(exc),
+        ) from exc
+
+
+def parse_source_definition(path: Path) -> SourceDefinition:
+    value = read_yaml(path)
+    if "schema" not in value:
+        raise WorkspaceError(
+            "Schema header is required for a standalone definition",
+            file=path,
+            details={
+                "expected": "dataviz/source/v1",
+                "docs": "dataviz schemas source --full --format json",
+            },
+        )
+    try:
+        return SOURCE_DEFINITION_ADAPTER.validate_python(value)
+    except ValidationError as exc:
+        raise WorkspaceError(
+            "Source schema validation failed",
+            file=path,
+            details=_validation_errors(exc),
+        ) from exc
 
 
 @dataclass(slots=True)
@@ -105,9 +148,6 @@ class LoadedDashboard:
     presentation: PresentationDefinition | None = None
     presentation_diagnostics: list[Diagnostic] | None = None
     readme: str = ""
-
-    def resolve(self, relative: str | None) -> Path | None:
-        return (self.root / relative).resolve() if relative else None
 
     @property
     def canvas_name(self) -> str:
@@ -163,10 +203,6 @@ class LoadedWorkspace:
     def dashboard(self, identifier: str) -> LoadedDashboard:
         if identifier in self.dashboards:
             return self.dashboards[identifier]
-        normalized = identifier.rstrip("/")
-        for dashboard in self.dashboards.values():
-            if str(dashboard.root.relative_to(self.root)) == normalized:
-                return dashboard
         raise WorkspaceError(f"Unknown dashboard: {identifier}")
 
     def catalog_entry(self, identifier: str) -> DashboardCatalogEntry:
@@ -190,7 +226,7 @@ def load_dashboard(path: Path) -> LoadedDashboard:
         except WorkspaceError as error:
             presentation_diagnostics.append(
                 Diagnostic(
-                    "warning",
+                    "error",
                     f"Presentation ignored: {error.message}",
                     str(presentation_path),
                     code="presentation_invalid",
@@ -200,7 +236,7 @@ def load_dashboard(path: Path) -> LoadedDashboard:
             if candidate.dashboard != logic_definition.id:
                 presentation_diagnostics.append(
                     Diagnostic(
-                        "warning",
+                        "error",
                         f"Presentation targets {candidate.dashboard}, expected {logic_definition.id}; ignored",
                         str(presentation_path),
                         "dashboard",
@@ -215,27 +251,45 @@ def load_dashboard(path: Path) -> LoadedDashboard:
 
     for source_entry in definition.sources:
         if isinstance(source_entry, str):
-            source_path = (root / source_entry).resolve()
-            source = parse_model(SourceDefinition, source_path)
+            source_path = _require_dashboard_asset(
+                root, root, source_entry, "Source definition"
+            )
+            source = parse_source_definition(source_path)
         else:
             source_path = definition_path
             try:
-                source = SourceDefinition.model_validate(
+                source = SOURCE_DEFINITION_ADAPTER.validate_python(
                     {"schema": "dataviz/source/v1", **source_entry}
                 )
             except ValidationError as exc:
                 raise WorkspaceError(
                     "Inline source schema validation failed",
                     file=definition_path,
-                    details=exc.errors(),
+                    details=_validation_errors(exc),
                 ) from exc
         if source.id in sources:
             raise WorkspaceError(f"Duplicate source id: {source.id}", file=source_path)
+        source_data_path = getattr(source, "path", None)
+        source_code_path = getattr(source, "code", None)
+        if source_data_path and not getattr(source, "adapter", None):
+            _require_dashboard_asset(
+                root, source_path.parent, source_data_path, "Source path"
+            )
+        if source_code_path:
+            _require_dashboard_asset(
+                root, source_path.parent, source_code_path, "Source code"
+            )
+        for dependency in getattr(source, "code_dependencies", []):
+            _require_dashboard_asset(
+                root, source_path.parent, dependency, "Source code dependency"
+            )
         sources[source.id] = (source_path, source)
 
     for transform_entry in definition.dataset_transforms:
         if isinstance(transform_entry, str):
-            transform_path = (root / transform_entry).resolve()
+            transform_path = _require_dashboard_asset(
+                root, root, transform_entry, "Dataset Transform definition"
+            )
             transform = parse_model(DatasetTransformDefinition, transform_path)
         else:
             transform_path = definition_path
@@ -247,15 +301,27 @@ def load_dashboard(path: Path) -> LoadedDashboard:
                 raise WorkspaceError(
                     "Inline Dataset Transform schema validation failed",
                     file=definition_path,
-                    details=exc.errors(),
+                    details=_validation_errors(exc),
                 ) from exc
         if transform.id in dataset_transforms:
             raise WorkspaceError(f"Duplicate Dataset Transform id: {transform.id}", file=transform_path)
+        _require_dashboard_asset(
+            root, transform_path.parent, transform.code, "Dataset Transform code"
+        )
+        for dependency in transform.code_dependencies:
+            _require_dashboard_asset(
+                root,
+                transform_path.parent,
+                dependency,
+                "Dataset Transform code dependency",
+            )
         dataset_transforms[transform.id] = (transform_path, transform)
 
     for transform_entry in definition.interactive_transforms:
         if isinstance(transform_entry, str):
-            transform_path = (root / transform_entry).resolve()
+            transform_path = _require_dashboard_asset(
+                root, root, transform_entry, "Interactive Transform definition"
+            )
             transform = parse_model(InteractiveTransformDefinition, transform_path)
         else:
             transform_path = definition_path
@@ -267,16 +333,50 @@ def load_dashboard(path: Path) -> LoadedDashboard:
                 raise WorkspaceError(
                     "Inline Interactive Transform schema validation failed",
                     file=definition_path,
-                    details=exc.errors(),
+                    details=_validation_errors(exc),
                 ) from exc
         if transform.id in interactive_transforms:
             raise WorkspaceError(f"Duplicate Interactive Transform id: {transform.id}", file=transform_path)
+        _require_dashboard_asset(
+            root, transform_path.parent, transform.code, "Interactive Transform code"
+        )
+        for dependency in transform.code_dependencies:
+            _require_dashboard_asset(
+                root,
+                transform_path.parent,
+                dependency,
+                "Interactive Transform code dependency",
+            )
         interactive_transforms[transform.id] = (transform_path, transform)
+
+    canvas = logic_definition.canvas
+    for value in [canvas.template, *canvas.styles, *canvas.scripts]:
+        if value:
+            _require_dashboard_asset(root, root, value, "Canvas asset")
 
     views: dict[str, DeclarativeViewDefinition] = {}
     for view in definition.views:
         if view.id in views:
             raise WorkspaceError(f"Duplicate view id: {view.id}", file=definition_path)
+        if view.template == "image" and view.url:
+            parsed_url = urlparse(view.url)
+            if not parsed_url.scheme and not parsed_url.netloc:
+                asset_path = _require_dashboard_asset(
+                    root,
+                    root,
+                    parsed_url.path,
+                    "Image View asset",
+                )
+                if not asset_path.is_file():
+                    raise WorkspaceError(
+                        f"Image View asset does not exist: {view.url}",
+                        file=definition_path,
+                        details={
+                            "code": "view_image_asset_missing",
+                            "view": view.id,
+                            "url": view.url,
+                        },
+                    )
         views[view.id] = view
 
     if presentation is not None:
@@ -312,6 +412,26 @@ def _present_fields(model) -> dict[str, Any]:
         for key, value in model.model_dump(mode="python", exclude_none=True).items()
         if key in model.model_fields_set
     }
+
+
+def _require_dashboard_asset(
+    dashboard_root: Path,
+    base: Path,
+    value: str,
+    label: str,
+) -> Path:
+    path = (base / value).resolve()
+    if not _is_within(path, dashboard_root):
+        raise WorkspaceError(
+            f"{label} must stay inside its Dashboard folder",
+            file=dashboard_root / "dashboard.yaml",
+            details={
+                "code": "dashboard_asset_outside",
+                "value": value,
+                "resolved_path": str(path),
+            },
+        )
+    return path
 
 
 def _append_css_class(current: str, *values: str | None) -> str:
@@ -356,7 +476,7 @@ def _apply_presentation(
         if selector_key not in selection_keys:
             diagnostics.append(
                 Diagnostic(
-                    "warning",
+                    "error",
                     f"Presentation references unknown selector: {selector_key}",
                     str(presentation_path),
                     f"selectors.{selector_key}",
@@ -370,7 +490,7 @@ def _apply_presentation(
         if section is None:
             diagnostics.append(
                 Diagnostic(
-                    "warning",
+                    "error",
                     f"Presentation references unknown section: {section_id}",
                     str(presentation_path),
                     f"sections.{section_id}",
@@ -391,7 +511,7 @@ def _apply_presentation(
         if view_id not in view_ids:
             diagnostics.append(
                 Diagnostic(
-                    "warning",
+                    "error",
                     f"Presentation references unknown view: {view_id}",
                     str(presentation_path),
                     f"views.{view_id}",
@@ -409,38 +529,113 @@ def _apply_presentation(
             view_update["config"] = _deep_merge(view.config, override.config)
         if view is not None and view_update:
             replacement = view.model_copy(update=view_update)
+            try:
+                validate_view_contract(replacement)
+            except ValueError as exc:
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"Presentation override is invalid for View {view_id}: {exc}",
+                        str(presentation_path),
+                        f"views.{view_id}",
+                        "presentation_view_contract_invalid",
+                    )
+                )
+                continue
             effective.views[effective.views.index(view)] = replacement
             declarative_views[view_id] = replacement
 
     canvas_update = _present_fields(presentation.canvas)
     template = canvas_update.get("template")
-    if template and not (presentation_path.parent / template).exists():
-        diagnostics.append(
-            Diagnostic(
-                "warning",
-                f"Presentation canvas template does not exist and will be ignored: {template}",
-                str(presentation_path.parent / template),
-                "canvas.template",
-                "presentation_asset_missing",
+    if template:
+        template_path = (presentation_path.parent / template).resolve()
+        if not _is_within(template_path, presentation_path.parent):
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    f"Presentation canvas template escapes its Dashboard folder: {template}",
+                    str(presentation_path),
+                    "canvas.template",
+                    "presentation_asset_outside_dashboard",
+                    {"resolved_path": str(template_path)},
+                )
             )
-        )
-        canvas_update.pop("template")
+            canvas_update.pop("template")
+        elif not template_path.is_file():
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    f"Presentation canvas template does not exist and will be ignored: {template}",
+                    str(template_path),
+                    "canvas.template",
+                    "presentation_asset_missing",
+                )
+            )
+            canvas_update.pop("template")
     libraries = canvas_update.pop("client_libraries", [])
     if libraries:
         canvas_update["client_libraries"] = list(
             dict.fromkeys([*effective.canvas.client_libraries, *libraries])
         )
-    if presentation.assets.css:
+    safe_css = _presentation_assets(
+        presentation.assets.css,
+        presentation_path,
+        diagnostics,
+        field="assets.css",
+    )
+    safe_js = _presentation_assets(
+        presentation.assets.js,
+        presentation_path,
+        diagnostics,
+        field="assets.js",
+    )
+    if safe_css:
         canvas_update["styles"] = list(
-            dict.fromkeys([*effective.canvas.styles, *presentation.assets.css])
+            dict.fromkeys([*effective.canvas.styles, *safe_css])
         )
-    if presentation.assets.js:
+    if safe_js:
         canvas_update["scripts"] = list(
-            dict.fromkeys([*effective.canvas.scripts, *presentation.assets.js])
+            dict.fromkeys([*effective.canvas.scripts, *safe_js])
         )
     if canvas_update:
         effective.canvas = effective.canvas.model_copy(update=canvas_update)
     return effective
+
+
+def _presentation_assets(
+    values: list[str],
+    presentation_path: Path,
+    diagnostics: list[Diagnostic],
+    *,
+    field: str,
+) -> list[str]:
+    safe: list[str] = []
+    for value in values:
+        path = (presentation_path.parent / value).resolve()
+        if not _is_within(path, presentation_path.parent):
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    f"Presentation asset escapes its Dashboard folder: {value}",
+                    str(presentation_path),
+                    field,
+                    "presentation_asset_outside_dashboard",
+                    {"resolved_path": str(path)},
+                )
+            )
+        elif not path.is_file():
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    f"Presentation asset does not exist and will be ignored: {value}",
+                    str(path),
+                    field,
+                    "presentation_asset_missing",
+                )
+            )
+        else:
+            safe.append(value)
+    return safe
 
 
 def _relative_path(root: Path, path: Path) -> str:
@@ -545,8 +740,9 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
         definition = parse_model(WorkspaceDefinition, definition_path)
     except WorkspaceError as error:
         load_diagnostics.append(_diagnostic_from_error(error, code="workspace_definition_invalid"))
+        fallback_id = fallback_stable_id(str(root), prefix="workspace")
         definition = WorkspaceDefinition(
-            schema="dataviz/workspace/v1", id=root.name, title=root.name
+            schema="dataviz/workspace/v1", id=fallback_id, title=root.name
         )
 
     dashboards_root = root / "dashboards"
@@ -648,6 +844,42 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
             for other in trashed_folders
         )
     ]
+
+    def trash_folder_item(
+        path: tuple[str, ...],
+        folder_paths: set[tuple[str, ...]],
+        grouped_dashboard_paths: list[Path],
+    ) -> NavigationItem:
+        child_folders = sorted(
+            candidate
+            for candidate in folder_paths
+            if len(candidate) == len(path) + 1 and candidate[:-1] == path
+        )
+        dashboard_items = []
+        for dashboard_path in grouped_dashboard_paths:
+            location = locations_by_path[dashboard_path]
+            if location.folder_segments != path:
+                continue
+            dashboard = loaded_by_path.get(dashboard_path)
+            dashboard_items.append(
+                NavigationItem(
+                    kind="dashboard",
+                    id=dashboard.definition.id if dashboard else location.leaf,
+                    title=location.leaf,
+                )
+            )
+        return NavigationItem(
+            kind="folder",
+            id=folder_id(path),
+            title=path[-1],
+            order=trashed_folders.get(path, 0),
+            children=[
+                trash_folder_item(child, folder_paths, grouped_dashboard_paths)
+                for child in child_folders
+            ]
+            + dashboard_items,
+        )
+
     for segments in sorted(trash_roots):
         folder_paths = {
             path
@@ -666,34 +898,7 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
                 for index in range(len(segments), len(location.folder_segments) + 1)
             )
 
-        def trash_folder_item(path: tuple[str, ...]) -> NavigationItem:
-            child_folders = sorted(
-                candidate
-                for candidate in folder_paths
-                if len(candidate) == len(path) + 1 and candidate[:-1] == path
-            )
-            dashboard_items = []
-            for dashboard_path in grouped_dashboards:
-                location = locations_by_path[dashboard_path]
-                if location.folder_segments != path:
-                    continue
-                dashboard = loaded_by_path.get(dashboard_path)
-                dashboard_items.append(
-                    NavigationItem(
-                        kind="dashboard",
-                        id=dashboard.definition.id if dashboard else location.leaf,
-                        title=location.leaf,
-                    )
-                )
-            return NavigationItem(
-                kind="folder",
-                id=folder_id(path),
-                title=path[-1],
-                order=trashed_folders.get(path, 0),
-                children=[trash_folder_item(child) for child in child_folders] + dashboard_items,
-            )
-
-        item = trash_folder_item(segments)
+        item = trash_folder_item(segments, folder_paths, grouped_dashboards)
         synthetic_trash.append(
             {
                 "trash_id": folder_trash_id(segments),
@@ -733,8 +938,22 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
             entry.status = "conflict"
             entry.message = f"Duplicate dashboard id: {entry.dashboard.definition.id}"
             load_diagnostics.append(
-                Diagnostic("warning", entry.message, str(entry.dashboard.definition_path), code="dashboard_id_conflict")
+                Diagnostic(
+                    "error",
+                    entry.message,
+                    str(entry.dashboard.definition_path),
+                    code="dashboard_id_conflict",
+                )
             )
+            entry.dashboard = None
+    conflicting_ids = {
+        dashboard_id for dashboard_id, count in id_counts.items() if count > 1
+    }
+    dashboards = {
+        runtime_id: dashboard
+        for runtime_id, dashboard in dashboards.items()
+        if dashboard.definition.id not in conflicting_ids
+    }
 
     readme_path = root / "README.md"
     return LoadedWorkspace(
@@ -821,6 +1040,7 @@ _PYODIDE_CORE_ASSETS = (
     "pyodide.asm.wasm",
     "python_stdlib.zip",
     "pyodide-lock.json",
+    "package.json",
 )
 
 
@@ -861,6 +1081,22 @@ def _validate_pyodide_bundle(
 ) -> list[Diagnostic]:
     """Validate the core Runtime and the offline wheel dependency closure."""
     field = "runtime.pyodide_bundle_path"
+    symlinks = sorted(
+        path.relative_to(bundle_path).as_posix()
+        for path in bundle_path.rglob("*")
+        if path.is_symlink()
+    )
+    if symlinks:
+        return [
+            Diagnostic(
+                "error",
+                "Pyodide bundle cannot contain symbolic links",
+                str(bundle_path),
+                field,
+                "pyodide_bundle_symlink_unsupported",
+                {"symlinks": symlinks},
+            )
+        ]
     missing_core = [
         name for name in _PYODIDE_CORE_ASSETS if not (bundle_path / name).is_file()
     ]
@@ -874,6 +1110,39 @@ def _validate_pyodide_bundle(
                 field,
                 "pyodide_bundle_incomplete",
                 {"missing": missing_core},
+            )
+        ]
+
+    package_manifest_path = bundle_path / "package.json"
+    try:
+        package_manifest = json.loads(
+            package_manifest_path.read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        return [
+            Diagnostic(
+                "error",
+                f"Pyodide package manifest is invalid: {error}",
+                str(package_manifest_path),
+                field,
+                "pyodide_bundle_manifest_invalid",
+            )
+        ]
+    bundle_version = (
+        package_manifest.get("version")
+        if isinstance(package_manifest, dict)
+        else None
+    )
+    expected_version = workspace.definition.runtime.pyodide_version
+    if bundle_version != expected_version:
+        return [
+            Diagnostic(
+                "error",
+                f"Pyodide bundle version is {bundle_version!r}; expected {expected_version}",
+                str(package_manifest_path),
+                field,
+                "pyodide_bundle_version_mismatch",
+                {"expected": expected_version, "actual": bundle_version},
             )
         ]
 
@@ -902,6 +1171,28 @@ def _validate_pyodide_bundle(
             )
         ]
 
+    marker_environment = default_environment()
+    lock_info = lock.get("info", {}) if isinstance(lock, dict) else {}
+    python_full_version = (
+        lock_info.get("python") if isinstance(lock_info, dict) else None
+    )
+    if not isinstance(python_full_version, str) or not python_full_version:
+        python_full_version = marker_environment["python_full_version"]
+    python_version = ".".join(python_full_version.split(".")[:2])
+    marker_environment.update(
+        {
+            "implementation_name": "cpython",
+            "implementation_version": python_full_version,
+            "os_name": "posix",
+            "platform_machine": "wasm32",
+            "platform_python_implementation": "CPython",
+            "platform_system": "Emscripten",
+            "python_full_version": python_full_version,
+            "python_version": python_version,
+            "sys_platform": "emscripten",
+        }
+    )
+
     packages: dict[str, dict[str, Any]] = {}
     for key, value in raw_packages.items():
         if not isinstance(value, dict):
@@ -921,7 +1212,11 @@ def _validate_pyodide_bundle(
         except InvalidRequirement:
             # The normal dependency validator reports the authoring error.
             continue
-        if requirement.marker and not requirement.marker.evaluate():
+        # Browser dependencies are resolved by Pyodide, so environment markers
+        # must be evaluated for Emscripten rather than the host running validate.
+        if requirement.marker and not requirement.marker.evaluate(
+            environment=marker_environment
+        ):
             continue
         if requirement.url:
             diagnostics.append(
@@ -1003,6 +1298,7 @@ def _validate_pyodide_bundle(
         )
 
     missing_assets: list[dict[str, str]] = []
+    unhashed_assets: list[dict[str, str]] = []
     corrupt_assets: list[dict[str, str]] = []
     for name in sorted(required_packages):
         package = packages[name]
@@ -1015,11 +1311,11 @@ def _validate_pyodide_bundle(
             missing_assets.append({"package": name, "file": filename})
             continue
         expected_hash = package.get("sha256")
-        if (
-            isinstance(expected_hash, str)
-            and re.fullmatch(r"[0-9a-fA-F]{64}", expected_hash)
-            and _file_sha256(asset) != expected_hash.lower()
+        if not isinstance(expected_hash, str) or not re.fullmatch(
+            r"[0-9a-fA-F]{64}", expected_hash
         ):
+            unhashed_assets.append({"package": name, "file": filename})
+        elif _file_sha256(asset) != expected_hash.lower():
             corrupt_assets.append({"package": name, "file": filename})
 
     if missing_assets:
@@ -1031,6 +1327,17 @@ def _validate_pyodide_bundle(
                 field,
                 "pyodide_bundle_wheels_missing",
                 {"missing": missing_assets},
+            )
+        )
+    if unhashed_assets:
+        diagnostics.append(
+            Diagnostic(
+                "error",
+                "Pyodide bundle lockfile lacks a valid SHA-256 for required package files",
+                str(lock_path),
+                field,
+                "pyodide_bundle_wheel_hash_missing",
+                {"unhashed": unhashed_assets},
             )
         )
     if corrupt_assets:
@@ -1202,6 +1509,18 @@ def _reference_kind(reference: str, dashboard: LoadedDashboard) -> str | None:
     return output.kind if output else None
 
 
+def _reference_output_definition(reference: str, dashboard: LoadedDashboard):
+    parsed = parse_output_reference(reference)
+    kind, _, node_id = parsed.node_id.partition(":")
+    collection = {
+        "source": dashboard.sources,
+        "dataset": dashboard.dataset_transforms,
+        "interactive": dashboard.interactive_transforms,
+    }[kind]
+    definition = collection[node_id][1]
+    return definition.outputs.get(parsed.output)
+
+
 def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
     """Validate the strict v2 contract and every cross-file/runtime reference."""
     diagnostics: list[Diagnostic] = list(workspace.load_diagnostics)
@@ -1226,6 +1545,48 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
         )
 
     runtime = workspace.definition.runtime
+    for field in ("echarts_js", "arrow_js"):
+        configured = getattr(runtime, field)
+        parsed = urlparse(configured)
+        if parsed.scheme in {"http", "https"}:
+            continue
+        asset_path = (workspace.root / configured).resolve()
+        if not _is_within(asset_path, workspace.root):
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    f"Local Runtime asset must stay inside the Workspace: {configured}",
+                    str(workspace.definition_path),
+                    f"runtime.{field}",
+                    "runtime_asset_outside_workspace",
+                    {"asset": configured},
+                )
+            )
+        elif not asset_path.is_file():
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    f"Local Runtime asset does not exist: {configured}",
+                    str(workspace.definition_path),
+                    f"runtime.{field}",
+                    "runtime_asset_missing",
+                    {"asset": configured},
+                )
+            )
+        else:
+            try:
+                asset_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError) as error:
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"Local Runtime asset is not readable UTF-8 JavaScript: {configured}",
+                        str(workspace.definition_path),
+                        f"runtime.{field}",
+                        "runtime_asset_unreadable",
+                        {"asset": configured, "error_type": type(error).__name__},
+                    )
+                )
     # A local bundle may be selected only by an exported browser-python branch
     # even when the live Server itself uses the CDN. Validate every configured
     # bundle path, not only the live Runtime policy.
@@ -1350,27 +1711,11 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         "source_definition_outside_dashboard",
                     )
                 )
-            if source.type == "file" and not source.path:
-                diagnostics.append(
-                    Diagnostic("error", "File source requires path", str(source_path), "path")
-                )
-            if source.type in {"sql", "python"} and not source.code:
-                diagnostics.append(
-                    Diagnostic(
-                        "error",
-                        f"{source.type} source requires code",
-                        str(source_path),
-                        "code",
-                    )
-                )
-            if source.type == "sql" and not source.adapter:
-                diagnostics.append(
-                    Diagnostic("error", "SQL source requires adapter", str(source_path), "adapter")
-                )
-            if source.adapter and adapter_resolver:
+            source_adapter = getattr(source, "adapter", None)
+            if source_adapter and adapter_resolver:
                 try:
                     _, adapter = adapter_resolver.resolve(
-                        source.adapter, dashboard.definition.adapters
+                        source_adapter, dashboard.definition.adapters
                     )
                 except Exception as error:
                     diagnostics.append(
@@ -1384,7 +1729,7 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                     )
                 else:
                     allowed = (
-                        {"file", "files", "local_files"}
+                        {"file"}
                         if source.type == "file"
                         else {"duckdb", "mysql", "starrocks", "sqlalchemy"}
                     )
@@ -1398,36 +1743,68 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                                 "adapter_type_mismatch",
                             )
                         )
-            if source.type != "python" and (
-                source.code_dependencies or source.python_dependencies
-            ):
-                diagnostics.append(
-                    Diagnostic(
-                        "error",
-                        "code_dependencies and python_dependencies are only valid for Python sources",
-                        str(source_path),
-                        "type",
-                    )
-                )
-            if source.type == "file" and source.timeout_seconds is not None:
-                diagnostics.append(
-                    Diagnostic(
-                        "error",
-                        "timeout_seconds is only valid for SQL and Python sources",
-                        str(source_path),
-                        "timeout_seconds",
-                    )
-                )
-            if source.type != "sql" and source.timeout_retries is not None:
-                diagnostics.append(
-                    Diagnostic(
-                        "error",
-                        "timeout_retries is only valid for SQL sources",
-                        str(source_path),
-                        "timeout_retries",
-                    )
-                )
-            for parameter in source.query_params:
+                    elif source.type in {"sql", "python"}:
+                        try:
+                            adapter_resolver.runtime_config(
+                                source_adapter,
+                                dashboard.definition.adapters,
+                            )
+                        except Exception as error:
+                            diagnostics.append(
+                                Diagnostic(
+                                    "error",
+                                    f"Adapter runtime configuration is incomplete: {error}",
+                                    str(source_path),
+                                    "adapter",
+                                    "adapter_runtime_configuration_invalid",
+                                )
+                            )
+                        else:
+                            if source.type == "sql":
+                                try:
+                                    adapter_resolver.validate_sql_driver(
+                                        source_adapter,
+                                        dashboard.definition.adapters,
+                                    )
+                                except Exception as error:
+                                    diagnostics.append(
+                                        Diagnostic(
+                                            "error",
+                                            str(error),
+                                            str(source_path),
+                                            "adapter",
+                                            "adapter_sql_driver_invalid",
+                                        )
+                                    )
+                    elif source.type == "file":
+                        try:
+                            data_path = adapter_resolver.resolve_path(
+                                source_adapter,
+                                source.path,
+                                dashboard.definition.adapters,
+                            )
+                        except Exception as error:
+                            diagnostics.append(
+                                Diagnostic(
+                                    "error",
+                                    str(error),
+                                    str(source_path),
+                                    "path",
+                                    "source_asset_invalid",
+                                )
+                            )
+                        else:
+                            if not data_path.is_file():
+                                diagnostics.append(
+                                    Diagnostic(
+                                        "error",
+                                        "File Source data file does not exist",
+                                        str(data_path),
+                                        "path",
+                                        "source_asset_missing",
+                                    )
+                                )
+            for parameter in getattr(source, "query_params", []):
                 if parameter not in parameter_ids:
                     diagnostics.append(
                         Diagnostic(
@@ -1436,12 +1813,38 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             str(source_path),
                             "query_params",
                         )
+                        )
+            if source.type == "file":
+                file_format = (
+                    source.format
+                    or Path(source.path).suffix.removeprefix(".").lower()
+                )
+                reader_dependency = {
+                    "xlsx": "openpyxl>=3.1",
+                    "xls": "xlrd>=2.0",
+                }.get(file_format)
+                if reader_dependency and (
+                    message := _python_dependency_error(reader_dependency)
+                ):
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Excel File Source reader dependency is unavailable: {message}",
+                            str(source_path),
+                            "format",
+                            "file_reader_dependency_unavailable",
+                            {
+                                "format": file_format,
+                                "dependency": reader_dependency,
+                                "install": "pip install 'workspace-dataviz[excel]'",
+                            },
+                        )
                     )
             for field in ("path", "code"):
-                value = getattr(source, field)
+                value = getattr(source, field, None)
                 if not value:
                     continue
-                if field == "path" and source.adapter:
+                if field == "path" and source_adapter:
                     continue
                 path = _code_path(source_path, value)
                 if not _is_within(path, dashboard.root):
@@ -1455,11 +1858,11 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         )
                     )
                     continue
-                if not path.exists():
+                if not path.is_file():
                     diagnostics.append(
                         Diagnostic(
                             "error",
-                            f"Source {field} does not exist",
+                            f"Source {field} does not exist or is not a file",
                             str(path),
                             field,
                         )
@@ -1508,7 +1911,7 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                                     {"parameters": unused, "sql_file": str(code_path)},
                                 )
                             )
-            for dependency in source.code_dependencies:
+            for dependency in getattr(source, "code_dependencies", []):
                 dependency_path = _code_path(source_path, dependency)
                 if not _is_within(dependency_path, dashboard.root):
                     diagnostics.append(
@@ -1529,7 +1932,7 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             "code_dependencies",
                         )
                     )
-            for dependency in source.python_dependencies:
+            for dependency in getattr(source, "python_dependencies", []):
                 if message := _python_dependency_error(dependency):
                     diagnostics.append(
                         Diagnostic(
@@ -1970,30 +2373,6 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                 )
 
         for view in dashboard.definition.views:
-            template = VIEW_TEMPLATES[view.template]
-            missing = [
-                field
-                for field in template["fields"]
-                if not getattr(view, field, None)
-            ]
-            if missing:
-                diagnostics.append(
-                    Diagnostic(
-                        "error",
-                        f"View {view.id} template {view.template} requires: {', '.join(missing)}",
-                        definition_path,
-                        "views",
-                    )
-                )
-            if view.template == "markdown" and not view.text and not view.input_ref:
-                diagnostics.append(
-                    Diagnostic(
-                        "error",
-                        f"View {view.id} markdown requires text or input",
-                        definition_path,
-                        "views",
-                    )
-                )
             for name, reference in view.input_refs.items():
                 message = _reference_error(
                     reference,
@@ -2013,6 +2392,9 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                     )
                 elif name == "main":
                     output_kind = _reference_kind(reference, dashboard)
+                    output_definition = _reference_output_definition(
+                        reference, dashboard
+                    )
                     table_templates = {
                         "line", "bar", "stacked-bar", "pie", "scatter", "heatmap",
                         "radar", "table", "perspective",
@@ -2035,6 +2417,63 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                                 "views.value",
                             )
                         )
+                    if (
+                        output_kind == "table"
+                        and output_definition is not None
+                        and output_definition.schema_
+                    ):
+                        declared_fields = {
+                            column.name for column in output_definition.schema_
+                        }
+                        unknown_fields = sorted(
+                            referenced_view_fields(view) - declared_fields
+                        )
+                        if unknown_fields:
+                            diagnostics.append(
+                                Diagnostic(
+                                    "error",
+                                    f"View {view.id} references undeclared table fields: "
+                                    + ", ".join(unknown_fields),
+                                    definition_path,
+                                    "views",
+                                    "view_field_unknown",
+                                    {
+                                        "view": view.id,
+                                        "reference": reference,
+                                        "unknown": unknown_fields,
+                                        "declared": sorted(declared_fields),
+                                    },
+                                )
+                            )
+                        selection_fields = {
+                            field
+                            for item in selection_contract.get(view.id, [])
+                            for field in (
+                                item.definition.path_fields
+                                or [item.binding.field or item.id]
+                            )
+                        }
+                        unknown_selection_fields = sorted(
+                            selection_fields - declared_fields
+                        )
+                        if unknown_selection_fields:
+                            diagnostics.append(
+                                Diagnostic(
+                                    "error",
+                                    f"View {view.id} Selection contract references "
+                                    "undeclared table fields: "
+                                    + ", ".join(unknown_selection_fields),
+                                    definition_path,
+                                    "views.selection_bindings",
+                                    "selection_field_unknown",
+                                    {
+                                        "view": view.id,
+                                        "reference": reference,
+                                        "unknown": unknown_selection_fields,
+                                        "declared": sorted(declared_fields),
+                                    },
+                                )
+                            )
 
         for reference in dashboard.definition.canvas.inputs:
             message = _reference_error(
@@ -2188,7 +2627,7 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                 )
 
         canvas = dashboard.definition.canvas
-        for field in ("template", "style", "script"):
+        for field in ("template",):
             value = getattr(canvas, field)
             if value and not (dashboard.root / value).exists():
                 diagnostics.append(
@@ -2204,7 +2643,7 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                 if not (dashboard.root / value).exists():
                     diagnostics.append(
                         Diagnostic(
-                            "warning",
+                            "error",
                             f"Presentation asset does not exist: {value}",
                             str(dashboard.root / value),
                             f"canvas.{field}",
@@ -2212,3 +2651,27 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         )
                     )
     return diagnostics
+
+
+def dashboard_validation_diagnostics(
+    workspace: LoadedWorkspace,
+    dashboard: LoadedDashboard,
+) -> list[Diagnostic]:
+    """Return global and dashboard-local diagnostics without leaking sibling failures."""
+    other_roots = [
+        entry.path.resolve()
+        for entry in workspace.catalog
+        if entry.path.resolve() != dashboard.root.resolve()
+    ]
+    selected: list[Diagnostic] = []
+    for diagnostic in validate_workspace(workspace):
+        if not diagnostic.file:
+            selected.append(diagnostic)
+            continue
+        raw = Path(diagnostic.file).expanduser()
+        path = raw.resolve() if raw.is_absolute() else (workspace.root / raw).resolve()
+        if _is_within(path, dashboard.root):
+            selected.append(diagnostic)
+        elif not any(_is_within(path, root) for root in other_roots):
+            selected.append(diagnostic)
+    return selected

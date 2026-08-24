@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import json
+import ipaddress
+import shlex
 import shutil
-import sys
 import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-import pandas as pd
 import typer
 import yaml
 
@@ -17,6 +17,7 @@ from dataviz.authoring import (
     build_authoring_benchmark,
     build_context_payload,
     scaffold_recipe,
+    scaffold_recipes,
 )
 from dataviz.authoring_log import (
     AUTHORING_LOG_NAME,
@@ -38,6 +39,7 @@ from dataviz.artifacts import ArtifactStore
 from dataviz.components import component_story_catalog, validate_component_packages
 from dataviz.errors import DatavizError, ExecutionFailure
 from dataviz.frontend_adapters import frontend_adapter_catalog, frontend_adapter_source
+from dataviz.filesystem import atomic_write_text, transactional_write_texts
 from dataviz.documentation import DOC_TOPICS, docs_catalog, resolve_doc_topic
 from dataviz.execution import Executor, InteractionExecutor
 from dataviz.execution.interactive import load_run_result, resolve_compute_parameters
@@ -70,6 +72,22 @@ app.add_typer(authoring_app, name="authoring")
 GALLERY_WORKSPACE = Path(__file__).resolve().parent / "gallery"
 
 
+def _require_remote_bind_opt_in(host: str, *, allow_remote: bool) -> None:
+    """Keep the unauthenticated local Server on loopback unless explicitly exposed."""
+    normalized = host.strip().removeprefix("[").removesuffix("]")
+    is_loopback = normalized.casefold() == "localhost"
+    if not is_loopback:
+        try:
+            is_loopback = ipaddress.ip_address(normalized).is_loopback
+        except ValueError:
+            is_loopback = False
+    if not is_loopback and not allow_remote:
+        raise typer.BadParameter(
+            "Dataviz Server has no authentication. Non-loopback --host requires "
+            "the explicit --allow-remote opt-in and a trusted network boundary."
+        )
+
+
 def _copy_gallery_workspace(parent: Path) -> Path:
     """Materialize the read-only packaged Gallery as an ephemeral workspace."""
     destination = parent / "gallery"
@@ -80,11 +98,11 @@ def _copy_gallery_workspace(parent: Path) -> Path:
     )
     stories = [component_story_catalog()[key] for key in sorted(component_story_catalog())]
     story_asset = destination / "dashboards" / "component-gallery" / "assets" / "component-stories.js"
-    story_asset.write_text(
+    atomic_write_text(
+        story_asset,
         "window.datavizComponentStories = "
         + json.dumps(stories, ensure_ascii=False, indent=2).replace("</", "<\\/")
         + ";\n",
-        encoding="utf-8",
     )
     return destination
 
@@ -129,11 +147,13 @@ def _browser_runtime_benchmark(
         raise RuntimeError(f"Runtime benchmark query ended with {result.status}")
 
     with TemporaryDirectory(prefix="dataviz-runtime-benchmark-") as directory:
+        report_started = time.perf_counter()
         report = CanvasRenderer(workspace).write_report(
             dashboard,
             result,
             Path(directory) / "benchmark.html",
         )
+        report_ms = (time.perf_counter() - report_started) * 1000
         browser_started = time.perf_counter()
         with sync_playwright() as playwright:
             try:
@@ -150,6 +170,7 @@ def _browser_runtime_benchmark(
                 if message.type == "error"
                 else None,
             )
+            page_started = time.perf_counter()
             page.goto(report.as_uri(), wait_until="domcontentloaded")
             page.wait_for_function(
                 """() => {
@@ -159,10 +180,23 @@ def _browser_runtime_benchmark(
                     Object.prototype.hasOwnProperty.call(portable.outputs, reference));
                   const repeats = [...document.querySelectorAll('.dv-repeat')];
                   const repeatReady = repeats.every(host => host.dataset.repeatCount !== undefined);
-                  return window.datavizRuntime && hydrated && repeatReady;
+                  const views = [...document.querySelectorAll('.dv-view')].filter(root =>
+                    !root.classList.contains('dv-repeat-card')
+                    || root.dataset.repeatMounted === 'true'
+                  );
+                  const terminal = new Set([
+                    'ready', 'empty', 'stale', 'error', 'cancelled', 'unavailable',
+                  ]);
+                  const viewsSettled = views.every(root => terminal.has(root.dataset.viewStatus));
+                  return window.datavizRuntime
+                    && hydrated
+                    && repeatReady
+                    && viewsSettled
+                    && window.datavizRuntime.activeTransforms.size === 0;
                 }""",
                 timeout=timeout_seconds * 1000,
             )
+            page_ready_ms = (time.perf_counter() - page_started) * 1000
             metrics = page.evaluate(
                 """() => ({
                   runtime: window.datavizRuntime.metrics,
@@ -178,14 +212,21 @@ def _browser_runtime_benchmark(
                     build_ms: Number(host.dataset.repeatBuildMs || 0),
                     reconcile_ms: Number(host.dataset.repeatReconcileMs || 0),
                   })),
+                  view_states: [...document.querySelectorAll('.dv-view')].reduce((counts, root) => {
+                    const status = root.dataset.viewStatus || 'unknown';
+                    counts[status] = (counts[status] || 0) + 1;
+                    return counts;
+                  }, {}),
                   navigation: performance.getEntriesByType('navigation')[0]?.toJSON?.() || {},
                 })"""
             )
             browser.close()
         browser_ms = (time.perf_counter() - browser_started) * 1000
     return {
-        "schema": "dataviz/browser-runtime-benchmark/v1",
+        "schema": "dataviz/browser-runtime-benchmark/v2",
         "query_ms": round(query_ms, 2),
+        "report_build_ms": round(report_ms, 2),
+        "page_ready_ms": round(page_ready_ms, 2),
         "browser_total_ms": round(browser_ms, 2),
         "timeout_seconds": timeout_seconds,
         "console_errors": console_errors,
@@ -211,10 +252,11 @@ def handle_error(exc: Exception) -> None:
 @app.command()
 def init(path: Path = typer.Argument(..., help="New workspace directory")) -> None:
     """Create a minimal Git-friendly workspace."""
-    if path.exists() and any(path.iterdir()):
-        raise typer.BadParameter(f"Directory is not empty: {path}")
-    path.mkdir(parents=True, exist_ok=True)
-    (path / "dashboards" / "hello" / "data").mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        if not path.is_dir():
+            raise typer.BadParameter(f"Workspace path is not a directory: {path}")
+        if any(path.iterdir()):
+            raise typer.BadParameter(f"Directory is not empty: {path}")
     files = {
         "workspace.yaml": """schema: dataviz/workspace/v1
 kind: workspace
@@ -223,7 +265,8 @@ title: My Analysis
 description: A workspace-first dashboard project
 folders: []
 """,
-        ".gitignore": "auth/adapters.local.yaml\nadapters.local.yaml\n.dataviz/\ndist/\n",
+        ".gitignore": "auth/adapters.local.yaml\n.dataviz/\ndist/\n",
+        "auth/adapters.yaml": "adapters: {}\n",
         "README.md": """# My Analysis
 
 Run with `dataviz serve .`.
@@ -280,10 +323,7 @@ theme:
 """,
         "dashboards/hello/data/sample.csv": "category,value\nA,12\nB,19\nC,8\n",
     }
-    for relative, content in files.items():
-        destination = path / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(content, encoding="utf-8")
+    transactional_write_texts(path, files)
     print_json({"status": "success", "workspace": str(path.resolve())})
 
 
@@ -373,12 +413,6 @@ def validate(
         raise
     except Exception as exc:
         handle_error(exc)
-
-
-@app.command()
-def templates() -> None:
-    """List stable templates for AI and dashboard authors."""
-    print_json(template_catalog())
 
 
 def _doc_heading(value: str) -> str:
@@ -494,13 +528,68 @@ def schemas(
     typer.echo(f"# Dataviz schema · {payload['name']}\n")
     typer.echo(f"Model: `{payload['model']}`  ")
     typer.echo(f"Contract: `{payload['contract_schema'] or 'embedded'}`\n")
-    typer.echo("| Field | Required | Type | Default | Description |")
-    typer.echo("| --- | --- | --- | --- | --- |")
-    for field in payload["fields"]:
+    if payload.get("variants"):
         typer.echo(
-            f"| {field['name']} | {'yes' if field['required'] else 'no'} | "
-            f"{_markdown_scalar(field['type'])} | {_markdown_scalar(field.get('default'))} | "
-            f"{_markdown_scalar(field.get('description'))} |"
+            "Variants: "
+            + ", ".join(
+                f"`{item['type']}`" for item in payload["variants"]
+            )
+            + f" (discriminator: `{payload['discriminator']}`)\n"
+        )
+    has_variants = bool(payload.get("variants"))
+    if has_variants:
+        typer.echo("| Field | Required in | Applies to | Type | Default | Description |")
+        typer.echo("| --- | --- | --- | --- | --- | --- |")
+    else:
+        typer.echo("| Field | Required | Type | Default | Description |")
+        typer.echo("| --- | --- | --- | --- | --- |")
+    for field in payload["fields"]:
+        if has_variants:
+            typer.echo(
+                f"| {field['name']} | "
+                f"{_markdown_scalar(field.get('required_in', []))} | "
+                f"{_markdown_scalar(field.get('variants', []))} | "
+                f"{_markdown_scalar(field['type'])} | "
+                f"{_markdown_scalar(field.get('default'))} | "
+                f"{_markdown_scalar(field.get('description'))} |"
+            )
+        else:
+            typer.echo(
+                f"| {field['name']} | {'yes' if field['required'] else 'no'} | "
+                f"{_markdown_scalar(field['type'])} | {_markdown_scalar(field.get('default'))} | "
+                f"{_markdown_scalar(field.get('description'))} |"
+            )
+    template_contracts = payload.get("template_contracts", {})
+    if template_contracts:
+        typer.echo("\n## Template contracts\n")
+        typer.echo("| Template | Required | Optional | Additional constraint |")
+        typer.echo("| --- | --- | --- | --- |")
+        for template, contract in template_contracts.items():
+            constraints = []
+            if contract.get("one_of"):
+                constraints.append(f"one of {contract['one_of']}")
+            if contract.get("engine"):
+                constraints.append(f"engine={contract['engine']}")
+            if contract.get("aggregate"):
+                constraints.append(f"aggregate in {contract['aggregate']}")
+            typer.echo(
+                f"| {template} | {_markdown_scalar(contract['required'])} | "
+                f"{_markdown_scalar(contract['optional'])} | "
+                f"{_markdown_scalar('; '.join(constraints) or None)} |"
+            )
+    adapter_contracts = payload.get("adapter_contracts", {})
+    if adapter_contracts:
+        typer.echo("\n## Built-in Adapter contracts\n")
+        typer.echo("| Type | Optional fields | Connection requirement |")
+        typer.echo("| --- | --- | --- |")
+        for adapter_type, contract in adapter_contracts.items():
+            typer.echo(
+                f"| {adapter_type} | {_markdown_scalar(contract['optional'])} | "
+                f"{_markdown_scalar(contract.get('connection'))} |"
+            )
+        typer.echo(
+            "\nUnknown Adapter types are reserved for trusted Python Sources and use "
+            "the generic configuration envelope."
         )
     if full:
         typer.echo("\n## Complete JSON Schema\n")
@@ -553,8 +642,7 @@ def frontend_adapters(
             handle_error(exc)
             return
         output = output.resolve()
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(source, encoding="utf-8")
+        atomic_write_text(output, source)
         print_json({"status": "success", "adapter": name, "output": str(output)})
         return
     payload: Any = catalog[name] if name else catalog
@@ -626,9 +714,26 @@ def authoring_start(
             approach=trial["approach"] if trial else None,
             trial_id=trial["trial_id"] if trial else None,
             task_contract_sha256=trial["task_contract_sha256"] if trial else None,
+            task_prompt_sha256=trial["task_prompt_sha256"] if trial else None,
             fixture_sha256=trial["fixture_sha256"] if trial else None,
             notes=notes,
         )
+        workspace_arg = shlex.quote(str(workspace.resolve()))
+        session_arg = shlex.quote(event.session_id)
+        finish_command = (
+            f"dataviz authoring finish {workspace_arg} {session_arg} "
+            "--outcome success --first-attempt success --correction-rounds 0"
+        )
+        if trial_directory:
+            trial_arg = shlex.quote(str(trial_directory.resolve()))
+            next_steps = [
+                f"dataviz authoring assess {trial_arg} CHECK_ID --status passed "
+                "--assessor ASSESSOR --evidence EVIDENCE",
+                f"dataviz authoring verify {trial_arg} --format json",
+                f"{finish_command} --trial-dir {trial_arg}",
+            ]
+        else:
+            next_steps = [finish_command]
         print_json(
             {
                 "status": "started",
@@ -637,10 +742,7 @@ def authoring_start(
                 "benchmark_task": event.benchmark_task,
                 "approach": event.approach,
                 "trial_id": event.trial_id,
-                "next": (
-                    f"dataviz authoring finish {workspace} {event.session_id} "
-                    "--outcome success --first-attempt success --correction-rounds 0"
-                ),
+                "next_steps": next_steps,
             }
         )
     except Exception as exc:
@@ -876,6 +978,7 @@ def authoring_finish(
             approach=trial["approach"] if trial else None,
             trial_id=trial["trial_id"] if trial else None,
             task_contract_sha256=trial["task_contract_sha256"] if trial else None,
+            task_prompt_sha256=trial["task_prompt_sha256"] if trial else None,
             fixture_sha256=trial["fixture_sha256"] if trial else None,
             notes=notes,
         )
@@ -950,7 +1053,7 @@ def components(
     check_packages: bool = typer.Option(
         False,
         "--check",
-        help="Validate every physical Manifest, Controller, Adapter, Style, Story and Test",
+        help="Validate package metadata/assets and report explicit bridge ownership",
     ),
 ) -> None:
     """Browse component contracts, examples, semantic DOM and style tokens."""
@@ -966,7 +1069,13 @@ def components(
             typer.echo(f"# Component Package check · {status}\n")
             typer.echo(
                 f"{report['packages']} packages · {report['components']} components · "
-                f"{report['stories']} stories · {report['tests']} tests"
+                f"{report['stories']} stories · {report['test_declarations']} test declarations · "
+                f"{report['package_implemented']} package-owned / "
+                f"{report['bridge_implemented']} bridged"
+            )
+            typer.echo(
+                "\nThis check validates package metadata, assets and test declarations; "
+                "pytest/E2E executes behavior."
             )
             for error in report["errors"]:
                 typer.echo(f"- {error}")
@@ -1020,8 +1129,15 @@ def gallery(
     ),
     host: str = typer.Option("127.0.0.1", "--host"),
     port: int = typer.Option(8079, "--port"),
+    allow_remote: bool = typer.Option(
+        False,
+        "--allow-remote",
+        help="Acknowledge that this unauthenticated Server will accept remote connections",
+    ),
 ) -> None:
     """Open the runtime-native Section, View, Selector and Renderer Gallery."""
+    if output is None:
+        _require_remote_bind_opt_in(host, allow_remote=allow_remote)
     try:
         with TemporaryDirectory(prefix="dataviz-gallery-") as temporary:
             gallery_root = _copy_gallery_workspace(Path(temporary))
@@ -1108,9 +1224,12 @@ def context(
 
 @app.command()
 def scaffold(
-    recipe: str = typer.Argument(
-        ...,
-        help="Recipe such as dashboard, view.line, selector.cascader, or transform.server-python",
+    recipe: str | None = typer.Argument(
+        None,
+        help=(
+            "Recipe such as dashboard, view.line, selector.cascader, "
+            "dataset-transform.server-python, or interactive-transform.browser-js"
+        ),
     ),
     identifier: str = typer.Option("example", "--id", help="Stable id used in generated files"),
     output: Path | None = typer.Option(
@@ -1118,38 +1237,48 @@ def scaffold(
     ),
     force: bool = typer.Option(False, "--force", help="Overwrite existing recipe files"),
     output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
+    list_recipes: bool = typer.Option(
+        False, "--list", help="List every recipe accepted by this installed version"
+    ),
 ) -> None:
     """Print or materialize a strict current-schema authoring recipe."""
     try:
         if output_format not in {"markdown", "json"}:
             raise typer.BadParameter("--format must be markdown or json")
+        if list_recipes:
+            if output is not None:
+                raise typer.BadParameter("--output cannot be used with --list")
+            catalog = {
+                "schema": "dataviz/scaffold-catalog/v1",
+                "recipes": list(scaffold_recipes()),
+            }
+            if output_format == "json":
+                print_json(catalog)
+            else:
+                typer.echo("# Dataviz scaffold recipes\n")
+                for name in catalog["recipes"]:
+                    typer.echo(f"- `{name}`")
+            return
+        if recipe is None:
+            raise typer.BadParameter("Provide a recipe, or use --list")
         payload = scaffold_recipe(recipe, identifier)
         if output is not None:
             root = output.resolve()
-            conflicts = [
-                str(relative)
-                for relative in payload["files"]
-                if (root / relative).exists() and not force
-            ]
-            if conflicts:
-                raise typer.BadParameter(
-                    "Refusing to overwrite existing files: " + ", ".join(conflicts)
+            try:
+                written = transactional_write_texts(
+                    root,
+                    payload["files"],
+                    overwrite=force,
                 )
-            written = []
-            for relative, content in payload["files"].items():
-                destination = (root / relative).resolve()
-                if not destination.is_relative_to(root):
-                    raise typer.BadParameter(f"Recipe path escapes output directory: {relative}")
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_text(content, encoding="utf-8")
-                written.append(str(destination))
+            except (FileExistsError, IsADirectoryError, NotADirectoryError, ValueError) as error:
+                raise typer.BadParameter(str(error)) from error
             print_json(
                 {
                     "status": "success",
                     "recipe": recipe,
                     "id": identifier,
                     "output": str(root),
-                    "files": written,
+                    "files": [str(path) for path in written],
                     "next": "dataviz validate <workspace>",
                 }
             )
@@ -1194,7 +1323,7 @@ def benchmark(
         help="Browser Runtime benchmark deadline",
     ),
 ) -> None:
-    """Measure authoring code and deterministic context size without guessing tokens."""
+    """Measure authoring footprint and, optionally, the real browser Runtime."""
     try:
         if output_format not in {"markdown", "json"}:
             raise typer.BadParameter("--format must be markdown or json")
@@ -1229,7 +1358,18 @@ def benchmark(
         )
         if payload.get("browser_runtime"):
             runtime = payload["browser_runtime"]
-            typer.echo(f"- Browser Runtime: {runtime['browser_total_ms']} ms")
+            transport = runtime["runtime"].get("transports", {})
+            renderers = runtime["runtime"].get("renderers", {})
+            typer.echo(
+                f"- Browser Runtime: query {runtime['query_ms']} ms; "
+                f"report {runtime['report_build_ms']} ms; "
+                f"page ready {runtime['page_ready_ms']} ms"
+            )
+            typer.echo(
+                f"- Arrow: {transport.get('arrowRows', 0)} rows / "
+                f"{transport.get('arrowBytes', 0)} bytes; "
+                f"renderer failures: {renderers.get('failed', 0)}"
+            )
             typer.echo(
                 f"- Repeat Sections: {len(runtime['repeat_sections'])}; "
                 f"max groups: {max((item['groups'] for item in runtime['repeat_sections']), default=0)}"
@@ -1247,46 +1387,66 @@ def query(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     dashboard: str = typer.Argument(...),
     source: str = typer.Option(..., "--source"),
+    output_name: str = typer.Option("main", "--output-name"),
     query_param: list[str] | None = typer.Option(None, "--query-param"),
-    output_format: str = typer.Option("json", "--format"),
+    output_format: str = typer.Option(
+        "json", "--format", help="json, csv, markdown, or text"
+    ),
+    limit: int = typer.Option(100, "--limit", min=1),
     refresh: bool = typer.Option(False, "--refresh"),
 ) -> None:
-    """Query a File, SQL or Python source without starting a server."""
+    """Query one named Source Output without starting a server."""
     try:
+        if output_format not in {"json", "csv", "markdown", "text"}:
+            raise typer.BadParameter("--format must be json, csv, markdown, or text")
         loaded = load_workspace(workspace)
+        reference = parse_output_reference(f"source:{source}/{output_name}")
         result = Executor(loaded).run(
             dashboard,
             query_parameters=parse_params(query_param),
-            targets=[f"source:{source}/main"],
+            targets=[reference.canonical],
             refresh=refresh,
         )
-        node = result.nodes[f"source:{source}"]
-        artifact = node.outputs.get("main")
+        node = result.nodes[reference.node_id]
+        artifact = node.outputs.get(reference.output)
         if not artifact:
             print_json(result)
             raise typer.Exit(1)
+        store = ArtifactStore(loaded.root, result.run_id)
+        value = store.read_value(artifact)
+        truncated = False
+        if artifact.kind == "table":
+            frame = value.head(limit)
+            truncated = int(artifact.metadata.get("row_count", 0)) > limit
+            if output_format == "csv":
+                typer.echo(frame.to_csv(index=False), nl=False)
+                return
+            if output_format == "markdown":
+                typer.echo(frame.to_markdown(index=False))
+                return
+            if output_format == "text":
+                typer.echo(frame.to_string(index=False))
+                return
+            value = json.loads(frame.to_json(orient="records", date_format="iso"))
+        elif output_format != "json":
+            typer.echo(str(value))
+            return
         if output_format == "json":
             print_json(
                 {
                     "status": result.status,
                     "run_id": result.run_id,
                     "source": source,
+                    "reference": reference.canonical,
                     "query_parameters": result.query_parameters,
                     "schema": artifact.schema_,
                     "row_count": artifact.metadata.get("row_count"),
-                    "preview": artifact.preview,
+                    "value": value,
+                    "truncated": truncated,
                     "artifact": artifact.model_dump(mode="json", by_alias=True),
                     "node": node.model_dump(mode="json", by_alias=True),
                 }
             )
-        else:
-            frame = pd.DataFrame(artifact.preview or [])
-            if output_format == "csv":
-                typer.echo(frame.to_csv(index=False), nl=False)
-            elif output_format == "markdown":
-                typer.echo(frame.to_markdown(index=False))
-            else:
-                typer.echo(frame.to_string(index=False))
         if result.status == "error":
             raise typer.Exit(1)
     except typer.Exit:
@@ -1466,8 +1626,6 @@ def report(
     query_param: list[str] | None = typer.Option(None, "--query-param"),
     compute_param: list[str] | None = typer.Option(None, "--compute-param"),
     selection: list[str] | None = typer.Option(None, "--selection"),
-    chart_mode: str = typer.Option("interactive", "--chart-mode"),
-    image_format: str = typer.Option("svg", "--image-format"),
     refresh: bool = typer.Option(False, "--refresh"),
     allow_partial: bool = typer.Option(False, "--allow-partial"),
 ) -> None:
@@ -1537,19 +1695,22 @@ def report(
             loaded_dashboard,
             result,
             output.resolve(),
-            chart_mode=chart_mode,
-            image_format=image_format,
             compute_parameters=compute_values,
             selections=selection_values,
             derived_outputs=derived_outputs,
             snapshot_interactions=snapshot_interactions,
         )
+        manifest_path = path.with_suffix(path.suffix + ".manifest.json")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         print_json(
             {
                 "status": "success",
                 "run_id": result.run_id,
                 "report": str(path),
-                "manifest": str(path.with_suffix(path.suffix + ".manifest.json")),
+                "manifest": str(manifest_path),
+                "portable_without_network": manifest["portable_without_network"],
+                "portability_scope": manifest["portability_scope"],
+                "network_dependencies": manifest["network_dependencies"],
                 "query_parameters": result.query_parameters,
                 "compute_parameters": compute_values,
                 "selections": selection_values,
@@ -1657,13 +1818,18 @@ def serve(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     host: str = typer.Option("127.0.0.1", "--host"),
     port: int = typer.Option(8080, "--port"),
-    reload: bool = typer.Option(False, "--reload"),
+    allow_remote: bool = typer.Option(
+        False,
+        "--allow-remote",
+        help="Acknowledge that this unauthenticated Server will accept remote connections",
+    ),
 ) -> None:
     """Start the human-facing interactive dashboard server."""
+    _require_remote_bind_opt_in(host, allow_remote=allow_remote)
     import uvicorn
 
     application = create_app(workspace)
-    uvicorn.run(application, host=host, port=port, reload=reload)
+    uvicorn.run(application, host=host, port=port)
 
 
 if __name__ == "__main__":

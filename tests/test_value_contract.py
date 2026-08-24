@@ -14,6 +14,7 @@ from dataviz.workspace.models import (
     Choice,
     ComputeParameterDefinition,
     DashboardDefinition,
+    DeclarativeViewDefinition,
     InteractiveExportDefinition,
     InteractiveTransformDefinition,
     QueryParameterDefinition,
@@ -38,6 +39,62 @@ def test_control_defaults_are_validated_when_the_dsl_is_loaded():
         )
 
 
+def test_view_templates_reject_ignored_fields_and_require_real_renderer_paths():
+    table = DeclarativeViewDefinition(
+        id="detail",
+        template="table",
+        input="source:data/main",
+        columns=["category", "value"],
+    )
+    assert table.columns == ["category", "value"]
+
+    with pytest.raises(ValidationError, match="does not use fields: x"):
+        DeclarativeViewDefinition(
+            id="detail",
+            template="table",
+            input="source:data/main",
+            x="category",
+        )
+    with pytest.raises(ValidationError, match="requires engine=echarts"):
+        DeclarativeViewDefinition(
+            id="radar",
+            template="radar",
+            input="source:data/main",
+            label="entity",
+            columns=["quality", "speed"],
+        )
+    with pytest.raises(ValidationError, match="requires one of: input, text"):
+        DeclarativeViewDefinition(id="note", template="markdown")
+    with pytest.raises(ValidationError, match="does not support aggregate=none"):
+        DeclarativeViewDefinition(
+            id="total",
+            template="metric",
+            input="source:data/main",
+            value="amount",
+            aggregate="none",
+        )
+    with pytest.raises(ValidationError, match="engine=echarts does not use config"):
+        DeclarativeViewDefinition(
+            id="chart",
+            template="bar",
+            engine="echarts",
+            input="source:data/main",
+            x="category",
+            y="amount",
+            config={"responsive": True},
+        )
+
+    radar = DeclarativeViewDefinition(
+        id="radar",
+        template="radar",
+        engine="echarts",
+        input="source:data/main",
+        label="entity",
+        columns=["quality", "speed"],
+    )
+    assert radar.engine == "echarts"
+
+
 def test_date_range_empty_and_open_values_have_one_canonical_shape():
     definition = SelectionDefinition(id="period", type="date_range")
 
@@ -59,6 +116,8 @@ def test_portable_numbers_and_dates_reject_browser_python_ambiguities():
     for value in (" ", "0x10", "0b10", "1_000"):
         with pytest.raises(Exception, match="must be a number"):
             normalize_control_value(number, value)
+    assert normalize_control_value(number, "12.0") == 12
+    assert isinstance(normalize_control_value(number, "12.0"), int)
     assert normalize_control_value(number, "-1.25e2") == -125.0
     with pytest.raises(Exception, match="exact JavaScript range"):
         normalize_control_value(integer, 9_007_199_254_740_992)
@@ -96,7 +155,13 @@ def test_query_compute_and_selection_resolvers_share_strict_contracts():
                     ],
                 }
             ],
-            "views": [{"id": "result", "template": "metric"}],
+            "views": [
+                {
+                    "id": "result",
+                    "template": "metric",
+                    "input": "source:result/main",
+                }
+            ],
         }
     )
     dashboard = SimpleNamespace(definition=definition)

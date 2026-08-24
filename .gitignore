@@ -11,9 +11,7 @@ __pycache__/
 # Runtime output belongs to the local workspace, not source control.
 **/.dataviz/
 **/dist/
-**/auth/connections.local.yaml
 **/auth/adapters.local.yaml
-**/adapters.local.yaml
 
 build/
 dist/

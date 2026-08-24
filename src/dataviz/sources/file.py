@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pandas as pd
 
 from dataviz.errors import SourceFailure
@@ -11,8 +9,6 @@ from dataviz.sources.base import SourceRequest
 class FileSourceRunner:
     def execute(self, request: SourceRequest) -> pd.DataFrame:
         definition = request.definition
-        if not definition.path:
-            raise SourceFailure("File source requires path", file=request.definition_path)
         if definition.adapter:
             path = request.adapters.resolve_path(
                 definition.adapter, definition.path, request.adapter_bindings
@@ -32,7 +28,7 @@ class FileSourceRunner:
                 if format_name == "jsonl":
                     options.setdefault("lines", True)
                 return pd.read_json(path, **options)
-            if format_name in {"xlsx", "xls", "excel"}:
+            if format_name in {"xlsx", "xls"}:
                 return pd.read_excel(path, **options)
         except Exception as exc:
             raise SourceFailure(f"Failed to read {format_name} file: {exc}", file=path) from exc

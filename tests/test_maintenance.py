@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 
 from dataviz.cli import app
 from dataviz.maintenance import cleanup_workspace_storage
-from dataviz.server.manager import RunManager, RunRecord
+from dataviz.server.manager import InteractionRecord, RunManager, RunRecord
 from dataviz.workspace import load_workspace
 
 
@@ -147,3 +147,92 @@ def test_run_manager_bounds_completed_records_and_their_artifacts(tmp_path: Path
     assert manager.latest == {("tab-a", "dashboard-a"): "run_2"}
     assert report["deleted_count"] == 2
     assert (root / ".dataviz" / "runs" / "run_2").exists()
+
+
+def test_run_retention_limit_is_applied_per_browser_session(tmp_path: Path):
+    root = _workspace(tmp_path / "workspace")
+    workspace = load_workspace(root)
+    workspace.definition.runtime.max_retained_runs = 1
+    workspace.definition.runtime.run_retention_seconds = None
+    manager = RunManager(workspace)
+    now = time.time()
+
+    for session, offset in (("tab-a", 0), ("tab-b", 10)):
+        for index in range(2):
+            run_id = f"run_{session[-1]}_{index}"
+            timestamp = now - offset - (2 - index)
+            _entry(root / ".dataviz" / "runs" / run_id, timestamp)
+            manager.records[run_id] = RunRecord(
+                run_id=run_id,
+                session_id=session,
+                dashboard_id="dashboard-a",
+                status="success",
+                created_at=timestamp,
+                finished_at=timestamp,
+            )
+        manager.latest[(session, "dashboard-a")] = f"run_{session[-1]}_1"
+
+    report = manager.cleanup()
+
+    assert set(manager.records) == {"run_a_1", "run_b_1"}
+    assert set(manager.latest.values()) == {"run_a_1", "run_b_1"}
+    assert report["deleted_count"] == 2
+    assert (root / ".dataviz" / "runs" / "run_a_1").exists()
+    assert (root / ".dataviz" / "runs" / "run_b_1").exists()
+
+
+def test_active_interaction_protects_its_query_run_and_cache_from_cleanup(
+    tmp_path: Path,
+):
+    root = _workspace(tmp_path / "workspace")
+    workspace = load_workspace(root)
+    workspace.definition.runtime.max_retained_runs = 1
+    workspace.definition.runtime.max_retained_cache_entries = 0
+    workspace.definition.runtime.run_retention_seconds = None
+    workspace.definition.runtime.cache_retention_seconds = None
+    manager = RunManager(workspace)
+    now = time.time()
+
+    _entry(root / ".dataviz" / "runs" / "run_active", now - 100)
+    _entry(root / ".dataviz" / "runs" / "run_new", now)
+    cache_entry = root / ".dataviz" / "cache" / "workspace" / "old"
+    _cache_entry(cache_entry, now - 100)
+    manager.records["run_active"] = RunRecord(
+        run_id="run_active",
+        session_id="tab-a",
+        dashboard_id="dashboard-a",
+        status="ready",
+        created_at=now - 100,
+        finished_at=now - 100,
+    )
+    manager.records["run_new"] = RunRecord(
+        run_id="run_new",
+        session_id="tab-a",
+        dashboard_id="dashboard-a",
+        status="ready",
+        created_at=now,
+        finished_at=now,
+    )
+    interaction = InteractionRecord(
+        interaction_id="ix_active",
+        generation=1,
+        run_id="run_active",
+        session_id="tab-a",
+        dashboard_id="dashboard-a",
+        target="summary",
+        status="loading",
+    )
+    manager.interactions[interaction.interaction_id] = interaction
+
+    active_report = manager.cleanup()
+
+    assert set(manager.records) == {"run_active", "run_new"}
+    assert active_report["deleted_count"] == 0
+    assert cache_entry.exists()
+
+    interaction.status = "ready"
+    completed_report = manager.cleanup()
+
+    assert set(manager.records) == {"run_new"}
+    assert completed_report["deleted_count"] == 2
+    assert not cache_entry.exists()

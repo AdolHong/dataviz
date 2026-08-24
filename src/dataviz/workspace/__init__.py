@@ -3,6 +3,7 @@ from dataviz.workspace.loader import (
     DashboardCatalogEntry,
     LoadedDashboard,
     LoadedWorkspace,
+    dashboard_validation_diagnostics,
     load_workspace,
     validate_workspace,
 )
@@ -12,6 +13,7 @@ __all__ = [
     "LoadedDashboard",
     "LoadedWorkspace",
     "compile_selection_contract",
+    "dashboard_validation_diagnostics",
     "load_workspace",
     "resolve_selection_values",
     "validate_workspace",

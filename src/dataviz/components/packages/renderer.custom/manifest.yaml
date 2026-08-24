@@ -3,6 +3,7 @@ package: renderer.custom
 version: 1.0.0
 category: renderer
 purpose: Trusted custom View Renderer lifecycle, isolation and contract testing.
+implementation: {mode: package, sources: []}
 dependencies: [view.declarative]
 components:
   - id: renderer.custom

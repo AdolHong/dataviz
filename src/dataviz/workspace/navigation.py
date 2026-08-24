@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-import tempfile
 import threading
 import uuid
 from pathlib import Path
@@ -10,6 +8,8 @@ from typing import Any, Iterable
 import yaml
 
 from dataviz.errors import WorkspaceError
+from dataviz.filesystem import atomic_write_text
+from dataviz.identifiers import fallback_stable_id
 from dataviz.workspace.loader import DashboardCatalogEntry, read_yaml
 from dataviz.workspace.naming import (
     DASHBOARD_TRASH_PREFIX,
@@ -55,16 +55,14 @@ class NavigationEditor:
         self.dashboards_root = self.root / "dashboards"
 
     def _read(self) -> dict[str, Any]:
-        try:
-            document = read_yaml(self.workspace_path)
-        except WorkspaceError:
-            document = {
+        if not self.workspace_path.exists():
+            return {
                 "schema": "dataviz/workspace/v1",
                 "kind": "workspace",
-                "id": self.root.name,
+                "id": fallback_stable_id(str(self.root), prefix="workspace"),
                 "title": self.root.name,
             }
-        return document
+        return read_yaml(self.workspace_path)
 
     def _folder_records(self, document: dict[str, Any]) -> list[dict[str, Any]]:
         removed = {"navigation", "trash"} & document.keys()
@@ -76,7 +74,9 @@ class NavigationEditor:
         configured = document.get("folders", [])
         if not isinstance(configured, list):
             raise WorkspaceError("workspace.yaml folders must be a list")
-        records = [dict(item) for item in configured if isinstance(item, dict)]
+        if any(not isinstance(item, dict) for item in configured):
+            raise WorkspaceError("workspace.yaml folders entries must be objects")
+        records = [dict(item) for item in configured]
         normalized: list[dict[str, Any]] = []
         seen: set[tuple[bool, tuple[str, ...]]] = set()
         for record in records:
@@ -110,19 +110,34 @@ class NavigationEditor:
                 int(item.get("order", 0)),
             ),
         )
-        self.workspace_path.parent.mkdir(parents=True, exist_ok=True)
-        handle, temporary = tempfile.mkstemp(
-            prefix=".workspace-", suffix=".yaml", dir=self.workspace_path.parent
-        )
+        content = yaml.safe_dump(document, allow_unicode=True, sort_keys=False)
+        atomic_write_text(self.workspace_path, content)
+
+    def _rename_then_write(
+        self,
+        mappings: dict[Path, Path],
+        document: dict[str, Any],
+        records: list[dict[str, Any]],
+    ) -> None:
+        """Commit navigation metadata or restore every renamed Dashboard."""
+        self._rename_dashboards(mappings)
         try:
-            with os.fdopen(handle, "w", encoding="utf-8") as stream:
-                yaml.safe_dump(document, stream, allow_unicode=True, sort_keys=False)
-            os.replace(temporary, self.workspace_path)
-        except Exception:
+            self._write(document, records)
+        except Exception as error:
             try:
-                Path(temporary).unlink(missing_ok=True)
-            finally:
-                raise
+                self._rename_dashboards(
+                    {target: source for source, target in mappings.items()}
+                )
+            except Exception as rollback_error:
+                raise WorkspaceError(
+                    "Navigation metadata write failed and Dashboard rollback also failed",
+                    file=self.workspace_path,
+                    details={
+                        "write_error": str(error),
+                        "rollback_error": str(rollback_error),
+                    },
+                ) from error
+            raise
 
     def _dashboard_locations(self) -> dict[Path, DashboardLocation]:
         result: dict[Path, DashboardLocation] = {}
@@ -198,7 +213,7 @@ class NavigationEditor:
             for child in self.dashboards_root.iterdir()
             if child.is_dir() and not child.name.startswith(".")
         }
-        for source, target in mappings.items():
+        for target in mappings.values():
             if target.parent != self.dashboards_root.resolve():
                 raise WorkspaceError("Dashboard target must be directly under dashboards/", file=target)
             key = target.name.casefold()
@@ -216,10 +231,8 @@ class NavigationEditor:
                 temporary = self.dashboards_root / f".dataviz-move-{uuid.uuid4().hex}"
                 source.rename(temporary)
                 staged.append((source, temporary, target))
-            completed: list[tuple[Path, Path, Path]] = []
-            for source, temporary, target in staged:
+            for _, temporary, target in staged:
                 temporary.rename(target)
-                completed.append((source, temporary, target))
         except Exception as error:
             for source, temporary, target in reversed(staged):
                 try:
@@ -283,8 +296,7 @@ class NavigationEditor:
             segments = (*target, *location.segments[len(old) :])
             mappings[source] = self.dashboards_root / encode_dashboard_name(segments)
         rewritten = self._rewrite_folder_prefix(records, old, target)
-        self._rename_dashboards(mappings)
-        self._write(document, rewritten)
+        self._rename_then_write(mappings, document, rewritten)
         return {"folder_id": folder_id(target), "path": "/".join(target)}
 
     def create_folder(self, title: str, parent_id: str | None = None) -> str:
@@ -377,8 +389,7 @@ class NavigationEditor:
                 )
             if not represented:
                 rewritten.append({"path": self._record_path(old, trashed=True), "order": 0})
-            self._rename_dashboards(mappings)
-            self._write(document, rewritten)
+            self._rename_then_write(mappings, document, rewritten)
             return folder_trash_id(old)
 
     def restore(self, trash_identifier: str) -> dict[str, str]:
@@ -421,8 +432,7 @@ class NavigationEditor:
                     )
                 if not found and not mappings:
                     raise WorkspaceError("Unknown folder trash item")
-                self._rename_dashboards(mappings)
-                self._write(document, rewritten)
+                self._rename_then_write(mappings, document, rewritten)
                 return {"folder_id": folder_id(old), "path": "/".join(old)}
 
             raise WorkspaceError(f"Unknown trash id: {trash_identifier}")

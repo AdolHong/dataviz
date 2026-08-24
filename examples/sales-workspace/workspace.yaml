@@ -1,8 +1,8 @@
 schema: dataviz/workspace/v1
 kind: workspace
-id: field-notes
-title: Field Notes
-description: 一个同时展示三类数据源与多种可视化产物的示例 workspace
+id: sales-workspace
+title: Sales Workspace
+description: File、SQL、Dataset Transform 与自定义 Canvas 的完整示例
 context:
   language: zh-CN
   timezone: Asia/Shanghai

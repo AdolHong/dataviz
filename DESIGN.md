@@ -216,6 +216,8 @@ browser-js → browser-python → server-python
 ### server-python
 
 - Server 根据 `run_id + Named Output reference` 读取当前 tab 的 Base Artifact，浏览器不重新上传整份 Dataset。
+- Query 计划会显式分类所有被可达 `server-python` 分支消费的 Base Output；分类结果进入 Run 诊断，不能靠 Interactive 运行时临时猜测或重新取数。
+- Artifact 的物理位置是 Workspace `.dataviz/runs/<run-id>/artifacts/`，不在 Dashboard 文件夹；逻辑所有权是 `tab session + dashboard + run + canonical output reference`。刷新同一 tab 可恢复，跨 tab 请求必须拒绝。
 - 每次计算在独立 Python 进程执行，支持 timeout、cancel、traceback、progress 和结构化运行证据。
 - 缓存键至少包含上游 Output content hash、代码/依赖、已提交 Query Parameter、Selection 和 Compute Parameter。
 - 新交互只取消当前 Dashboard 的目标分支，不干扰其他 Dashboard、tab 或用户。
@@ -234,9 +236,9 @@ Pyodide 有两种资产策略：
 - `cdn`：报告较小，打开时从 `runtime.pyodide_index_url` 加载；适合有稳定外网或内部镜像的环境。
 - `bundle`：从 Workspace 的 `runtime.pyodide_bundle_path` 复制经过 `validate` 检查的本地 Pyodide 分发；适合公司内网和离线分发。
 
-`bundle` 当前导出为一个文件包，而不是把 WASM、标准库和 wheel base64 塞进单个 HTML：CLI 产生 `report.html`、`report.assets/pyodide/` 与 manifest，Server 下载 ZIP。解压后应通过 HTTP 静态服务打开，因为 module Worker/WASM 在 `file://` 下没有可靠的跨浏览器行为。
+`bundle` 当前导出为一个文件包，而不是把 WASM、标准库和 wheel base64 塞进单个 HTML：CLI 产生 `report.html`、`report.assets/pyodide/` 与 manifest，Server 下载 ZIP。解压后应通过 HTTP 静态服务打开，因为 module Worker/WASM 在 `file://` 下没有可靠的跨浏览器行为。它只打包 Pyodide：Plotly 由 Dataviz 内嵌，ECharts/Arrow 需要显式配置 Workspace 本地文件，Perspective 当前仍是 CDN-only。manifest 的 `portable_without_network` 只覆盖声明的 Runtime/View 资产；任意 Canvas/Presentation 脚本自行发起的请求不在静态证明范围内。
 
-配置目录必须是官方完整分发的根目录，至少直接包含 `pyodide.mjs`、`pyodide.asm.mjs`、`pyodide.asm.wasm`、`python_stdlib.zip` 与 `pyodide-lock.json`。`validate` 还会沿 lockfile 检查 `micropip`、声明的 Python 包及其传递依赖 wheel，并核对可用的 SHA-256；因此“只有 loader 文件”的伪 bundle 不会通过预检。
+配置目录必须是版本匹配的官方完整分发根目录，至少直接包含 `pyodide.mjs`、`pyodide.asm.mjs`、`pyodide.asm.wasm`、`python_stdlib.zip`、`package.json` 与 `pyodide-lock.json`。`validate` 会核对 `package.json` 版本，在 Pyodide/Emscripten 目标环境中解析 dependency marker，沿 lockfile 检查 `micropip`、声明的 Python 包及其传递依赖 wheel，并要求每个所需文件都有匹配的 SHA-256；因此旧版本、只有 loader 文件或不可验证 wheel 的伪 bundle 都不会通过预检。
 
 Pyodide 是按需能力。只有导出后仍需执行的 `browser-python` 分支才携带 Python Worker、Pyodide URL 或 bundle 资产；没有 `browser-python`，或者该分支已经是 `snapshot/unavailable` 时，不加载也不打包 Pyodide。
 
@@ -277,7 +279,7 @@ unavailable  → 导出页明确展示该分支不可用
 workspace/
 ├── workspace.yaml
 ├── auth/
-│   ├── adapters.example.yaml
+│   ├── adapters.yaml
 │   └── adapters.local.yaml
 └── dashboards/
     └── 业务分析##门店周报/
@@ -293,11 +295,14 @@ workspace/
 - Dashboard 文件夹末级名称是导航显示名，不存在额外导航别名。
 - `##` 前的片段表达逻辑目录；`__TRASH__##` 表示回收站，只改名、不删除文件。
 - `dashboard.id` 是 CLI、API、DAG、缓存与状态使用的稳定机器 ID。
+- 所有机器 ID 使用同一可移植语法：ASCII 字母或下划线开头，只含字母、数字、点、下划线、连字符，不能以点结尾或使用 Windows 保留设备名。显示语言属于文件夹名、title/label/description；机器 ID 不承担展示职责。
 - `title`、`subtitle`、`description` 是页面内容，可以与文件夹名称不同。
 
 `workspace.yaml` 只承担 Workspace 元数据、Runtime 配置、空目录和顺序等无法从 Dashboard 文件夹推导的状态。加载 Workspace 时按磁盘发现 Dashboard；单个损坏 Dashboard 不得拖垮整个 Workspace。
 
-Dashboard 只引用逻辑 Adapter 名称，不保存账号、密码或连接 URL。分享 Dashboard 时，同事只需要绑定自己的 Workspace Adapter。Adapter secret 不进入浏览器、HTML、运行结果或查询证据。
+Dashboard 只引用逻辑 Adapter 名称，不保存账号、密码或连接 URL。分享 Dashboard 时，同事只需要绑定自己的 Workspace Adapter。Dataviz 自己不会把 Adapter secret 序列化进浏览器、HTML 或查询证据，并会从错误、日志和 traceback 中脱敏；但可信 Python Source 拿到 Adapter 后仍能主动把任意值作为业务 Output 返回，作者必须避免输出凭据。
+
+Adapter 只有两个权威位置：提交到 Git 的 `auth/adapters.yaml` 保存非敏感定义，本地忽略的 `auth/adapters.local.yaml` 按同名键覆盖凭证。Runtime 不扫描根目录旧文件或 `*.example.yaml`，避免多个隐式来源造成覆盖顺序不确定。
 
 ## 7. 逻辑与呈现解耦
 
@@ -358,10 +363,17 @@ dataset:features + compute:seed
 
 - `source3` 先完成时，`view2` 先展示，不等待无关分支。
 - `simulation` 只在自己的 Base Output 和已提交交互状态就绪后执行。
+- Interaction endpoint 归属于 Query Run，而不是 Query 的最终状态；一个 Base Output 发布后，其下游 `server-python` 可以立即计算，不必等待无关 Query 分支完成。
 - Interactive 计算不会创建新的 Query Run，也不会修改 Base Named Output。
-- 分支失败只影响该分支下游；每个 View 独立展示 queued/loading/stale/ready/empty/error/unavailable。
+- 分支失败只影响该分支下游；执行队列的 `queued` 在 View 层映射为 `loading`，Component 统一展示 ready/loading/stale/empty/error/cancelled/unavailable 七种状态。
 - 新 Query Run 通过 `run_id` 隔离；同一 Run 内的新交互计算使用独立 generation/interaction id，不能混用旧结果。
 - Run 与 Interaction 的内存事件流都有保留上限；截断使用单调 `event_offset`，轮询/SSE 不会把截断后的数组下标误当成全局事件序号。
+- 活动 Query 以及仍有活动 Interaction 消费的已完成 Query Run 都受保留策略保护；清理不能在长计算期间移除它们的 Artifact 或缓存。
+- Query Run 会持久化所有已发布 Base Output，既用于浏览器传输、报告证据，也用于后续交互。`server-python` 所需引用另有显式分类，但不会复制第二份数据。
+- Source/Dataset 节点缓存的逻辑键包含 Dashboard 和节点 ID，tab scope 再由不可逆 session namespace 隔离；`scope: workspace` 只允许显式选择的确定性内容缓存。
+- Server Interactive 只能读取所属 Query Run 的 Artifact。即使 Source 很慢、已经不可用或凭证变化，也不得在交互路径回退为重新查询；需要新数据时只能明确创建新的 Query Run。
+
+父页面和 Canvas 通过 `dashboard_id + run_id + frame_id` 握手。Query 最终完成时只同步 endpoint 状态，不重载 Canvas；已经挂载的 View、Selection 和 Worker 状态因此不会被整页替换。Selection、Compute Parameter 与 Output 发布都携带显式 delta：某类状态未变化必须表达为空集合，不能被解释成“全部变化”。一个无关 Output 在 Interactive Transform 运行期间发布，也不能仅因派生 Output 尚未产生而取消或重启该分支。
 
 浏览器状态以 tab 为边界：
 
@@ -369,7 +381,7 @@ dataset:features + compute:seed
 - 不同 tab、浏览器和用户不共享交互状态、Run 或运行证据。
 - 一个 Dashboard 的查询或交互计算不会触发、中断另一个 Dashboard。
 - `sessionStorage` 与 Browser Runtime 的 `none/session` cache 只允许 tab scope。
-- Source、Dataset Transform 和 `server-python` Interactive Transform 默认也按 tab/session 隔离；只有显式的 `ttl/persistent + scope: workspace` 才能按内容哈希跨 tab 复用确定性结果。
+- Source、Dataset Transform 和 `server-python` Interactive Transform 默认也按 tab/session 隔离；Source/Dataset 缓存键同时包含 Dashboard 与节点 ID，只有显式的 `ttl/persistent + scope: workspace` 才能按内容哈希跨 tab 复用确定性结果。
 - Workspace cache 只复用 Artifact，不共享草稿、Selection、Run、generation、取消信号或运行证据。
 
 ## 10. 数据执行与可审查性
@@ -397,7 +409,20 @@ Dataset Transform 与 `server-python` Interactive Transform 都是可信单机 P
 
 普通 Table 和 Perspective 是不同模板：前者便于自定义样式，后者提供排序、筛选、分组和透视。Small Multiples/Selection Gallery 从共享 Named Output 和一个 View 蓝图生成实例，不复制查询或计算。
 
-每个 Component 必须有明确 owner，并逐步成为 Schema、headless controller、Runtime Adapter、功能 CSS、Story 和测试的唯一来源。
+每个 Component 都有明确 owner Package；Package 是 headless controller、Runtime Adapter、功能 CSS、Story 和测试声明的唯一实现来源。`canvas-runtime.js` 只保留 Runtime Manifest、Named Output Store、Interactive Scheduler、Selection Binding 等共享主机能力，不再实现声明式 View、Repeat Section、Presentation 或 Data Frame/Interactive Adapter。已删除独立的 `declarative-runtime.js`，Runtime 内也不保留同功能副本。
+
+四个核心 owner 的边界是：
+
+| Package | 唯一拥有的行为 |
+| --- | --- |
+| `data.pipeline` | Frame/Grouped Frame、Named Output 数据 API、三种 Interactive Runtime Adapter |
+| `view.declarative` | View descriptor、内置 Renderer、Perspective/Table/Chart 生命周期与 View 状态边界 |
+| `section.declarative` | Section 编排、Repeat/Selection Gallery、懒挂载与 Section 聚合状态 |
+| `presentation.shell` | Theme/Layout shell 与七状态语义、ARIA 映射 |
+
+Package 内的 `test.yaml` 是机器可读验收声明，不是测试执行器；`dataviz components --check` 验证 Package 元数据、资产和声明，真实行为由 pytest 与浏览器 E2E 执行。当前 Registry 有 13 个 package-owned Package，不存在 bridge implementation。
+
+Gallery 是这些契约的可执行说明，而不是截图目录。Selector、Compute、View、Section 各自拥有 ready/loading/stale/empty/error/cancelled/unavailable 七状态矩阵；Select 另外提供真实含 10、100、1,000 个原生 option 的 Story，验证搜索、自动虚拟化、键盘和有界可视 DOM。
 
 公开浏览器边界是版本化 Runtime Manifest、Output Store 和稳定事件。Vanilla JS、Web Component 或未来 React/Vue Adapter 只能消费公开协议，不能依赖 Python Renderer 私有结构或默认 Runtime 内部函数。
 
@@ -434,23 +459,27 @@ AI 的默认工作应该是选择模板、绑定 Output、填写状态依赖和�
 已经实现：
 
 1. Query Parameter、Selection、Compute Parameter 使用独立 namespace、提交周期和失效路径。
-2. Query DAG 与 Interactive DAG 分离；Base Output 对一次 Query Run 不可变，Derived Output 由 generation 隔离。
+2. Query DAG 与 Interactive DAG 分离；Base Output 对一次 Query Run 不可变，Derived Output 由 generation 隔离；快分支可在无关 Query 分支仍运行时进入 Server/Browser Interactive 计算。
 3. Dataset Transform 使用 `server-python`；Interactive Transform 支持 `server-python`、`browser-python` 和 `browser-js`。
 4. 三种 Interactive Runtime 只接收显式状态和 Named Output，不访问 View DOM；Interactive Runtime 不持有 Adapter。
 5. Query 与 Interaction 都支持局部并发、分支失败隔离、timeout、cancel、progress、缓存证据和资源释放。
 6. Python 节点支持 `context.log(message, level=..., **fields)`；实时事件和 `dataviz/execution-log/v1` Artifact 保留结构化日志及完整失败 traceback，并可通过 session 隔离 API 与 Sources 证据面板检查。
 7. HTML Export 强制声明 `interactive`、`snapshot` 或 `unavailable`；Server Python 不伪造离线交互。
 8. `validate`、`compute`、`docs`、`schemas`、`components`、`context` 和 Scaffold 使用同一当前契约。
-9. 同一 tab 的状态可恢复，不同 tab、Dashboard、用户、Query Run 与 Interaction generation 相互隔离。
-10. `authoring prepare/verify/assess/start/finish/compare` 可以用固定任务、输入完整性、逐项验收证据、真实客户端 Token、首次成功率、修正轮次和耗时对比 Dataviz 与 standalone HTML；缺失 Token 不做估算。
+9. 同一 tab 的状态可恢复，不同 tab、Dashboard、用户、Query Run 与 Interaction generation 相互隔离；父页面/Canvas 消息还校验当前 frame identity。
+10. `authoring prepare/verify/assess/start/finish/compare` 可以用固定任务、经过完整性校验的 approach prompt、输入完整性、逐项验收证据、真实客户端 Token、首次成功率、修正轮次和耗时对比 Dataviz 与 standalone HTML；缺失 Token 不做估算。
+11. `data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 已从 bridge 完整迁入物理 owner Package；Runtime v2 通过公开 ready event 装配且 dispose 幂等。
+12. Gallery 已覆盖四类组件的七状态矩阵，以及真实 10/100/1,000 选项 Select Story；Story 元数据、页面目标与 Chromium 行为测试使用同一 Package。
 
 仍属于后续优化，而不是隐藏的兼容工作：
 
-1. 声明式 View、Perspective、Repeat、Arrow Store 和部分 Section/Presentation 行为尚未完全迁入各自 owner Component Package。
-2. Gallery 仍需补齐完整 Loading/Stale/Empty/Error/Unavailable、键盘和大规模数据状态矩阵。
-3. Arrow 已优化传输和浏览器 Interactive Transform 输入；通用 Selection 与部分 Renderer 首次消费大表时仍可能物化 JavaScript 行对象。
-4. Server 尚未提供通用服务端分页或按需 Record Batch。这应由真实 benchmark 触发，而不是提前扩张 DSL。
-5. authoring 评测工具已实现，但尚未积累足够的重复真实 trial，不能声称固定 Token 节省比例。
+1. Arrow 已优化传输和浏览器 Interactive Transform 输入；通用 Selection 与部分 Renderer 首次消费大表时仍可能物化 JavaScript 行对象。
+2. 内置聚合已经避免把大数组 spread 到 `Math.min/Math.max`，并有 150K 行浏览器回归；固定 10K/100K/1M 内存与耗时证据仍未完成。
+3. Server 尚未提供通用服务端分页或按需 Record Batch。这应由真实 benchmark 触发，而不是提前扩张 DSL。
+4. authoring 评测工具已实现，但尚未积累足够的重复真实 trial，不能声称固定 Token 节省比例。
+5. Firefox/WebKit 仍需扩展窄视口、弹层几何、滚动、键盘、ARIA、Perspective 恢复和重复 dispose 的组合矩阵。
+6. 当前协调模型是单进程：`dataviz serve` 启动一个进程，Run、Navigation、Cache 与报告发布锁不提供跨进程互斥；多个进程不得同时写同一 Workspace/输出路径。Runtime 并发上限在启动时捕获，修改配置后需重启。
+7. Server 不提供账号体系或 HTTP 鉴权，默认只绑定回环地址；非回环 `--host` 必须显式使用 `--allow-remote`，访问控制由可信网络或外部代理承担。`session_id` 是 tab 状态命名空间，不是身份认证。
 
 Component Registry 独立版本化，只在公共组件契约变化时升级，不跟随 Dashboard schema 机械改号。
 

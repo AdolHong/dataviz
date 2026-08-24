@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from dataviz.errors import ValidationFailure
+from dataviz.identifiers import is_stable_id, stable_id_help
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,11 +26,14 @@ def parse_output_reference(value: str) -> OutputReference:
             f"Output reference must include source:, dataset:, or interactive:: {value}"
         )
     kind, _, local_id = node.partition(":")
-    if kind not in {"source", "dataset", "interactive"} or not local_id:
+    if (
+        kind not in {"source", "dataset", "interactive"}
+        or not is_stable_id(local_id)
+    ):
         raise ValidationFailure(f"Invalid output reference: {value}")
-    if not separator or not output or "/" in output:
+    if not separator or not is_stable_id(output):
         raise ValidationFailure(
             "Output reference must include one explicit output name, for example "
-            f"source:{local_id}/main: {value}"
+            f"source:{local_id}/main: {value}. {stable_id_help('Output name')}"
         )
     return OutputReference(node_id=node, output=output)

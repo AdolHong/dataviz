@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import hashlib
-import importlib.metadata
-import json
 import re
-import sys
 import threading
 import time
 import traceback
@@ -15,18 +11,27 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from packaging.requirements import Requirement
+from pydantic import ValidationError
 
 from dataviz.artifacts import ArtifactDescriptor, ArtifactStore
-from dataviz.errors import DatavizError, ExecutionFailure, ValidationFailure
+from dataviz.auth import AdapterResolver
+from dataviz.errors import DatavizError, ExecutionFailure, SourceFailure, ValidationFailure
+from dataviz.identifiers import is_stable_id
 from dataviz.execution.cache import NodeCache
 from dataviz.execution.context import ExecutionContext
+from dataviz.execution.fingerprint import ensure_query_run_compatible
+from dataviz.execution.node_support import hash_path, output_status, package_fingerprint
 from dataviz.execution.outputs import validate_table_schema
 from dataviz.execution.python_process import execute_python_node
 from dataviz.execution.references import OutputReference, parse_output_reference
 from dataviz.execution.results import InteractionResult, NodeResult, RunResult
+from dataviz.redaction import redact_text, redact_value
 from dataviz.value_contract import ValueContractViolation, normalize_control_value
-from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace
+from dataviz.workspace.loader import (
+    LoadedDashboard,
+    LoadedWorkspace,
+    dashboard_validation_diagnostics,
+)
 from dataviz.workspace.selections import resolve_selection_values
 
 
@@ -81,13 +86,12 @@ class InteractivePlanNode:
     dependencies: set[str]
 
 
-def _target_id(value: str) -> str:
+def normalize_interactive_target(value: str) -> str:
     raw = value.strip()
-    if raw.startswith("interactive:"):
-        return raw.split("/", 1)[0].split(":", 1)[1]
-    if ":" in raw or "/" in raw:
+    if not is_stable_id(raw):
         raise ValidationFailure(
-            "Interactive target must be an Interactive Transform id or interactive:<id>"
+            "Interactive target must be a stable Interactive Transform id",
+            details={"code": "interactive_target_invalid", "target": value},
         )
     return raw
 
@@ -95,7 +99,7 @@ def _target_id(value: str) -> str:
 def compile_interactive_plan(
     dashboard: LoadedDashboard, target: str
 ) -> list[InteractivePlanNode]:
-    target_id = _target_id(target)
+    target_id = normalize_interactive_target(target)
     if target_id not in dashboard.interactive_transforms:
         raise ValidationFailure(
             f"Unknown Interactive Transform: {target_id}",
@@ -157,48 +161,6 @@ def compile_interactive_plan(
     ]
 
 
-def _hash_path(path: Path) -> str:
-    if path.is_file():
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    digest = hashlib.sha256()
-    for child in sorted(
-        item
-        for item in path.rglob("*")
-        if item.is_file()
-        and "__pycache__" not in item.parts
-        and item.suffix not in {".pyc", ".pyo"}
-        and ".git" not in item.parts
-    ):
-        digest.update(str(child.relative_to(path)).encode())
-        digest.update(b"\0")
-        digest.update(child.read_bytes())
-        digest.update(b"\0")
-    return digest.hexdigest()
-
-
-def _package_fingerprint(requirements: list[str]) -> dict[str, str]:
-    values: dict[str, str] = {"python": ".".join(map(str, sys.version_info[:3]))}
-    for raw in requirements:
-        try:
-            name = Requirement(raw).name
-        except Exception:
-            name = raw
-        try:
-            values[name] = importlib.metadata.version(name)
-        except importlib.metadata.PackageNotFoundError:
-            values[name] = "missing"
-    return values
-
-
-def _output_status(outputs: dict[str, ArtifactDescriptor]) -> str:
-    row_counts = [
-        int(item.metadata.get("row_count", 0))
-        for item in outputs.values()
-        if item.kind == "table"
-    ]
-    return "empty" if row_counts and all(value == 0 for value in row_counts) else "ready"
-
-
 def _structured_log_record(
     level: str, event: str, message: str, **fields: Any
 ) -> dict[str, Any]:
@@ -246,6 +208,33 @@ class InteractionExecutor:
     ):
         self.workspace = workspace
         self.cache = cache or NodeCache(workspace.root, namespace=cache_namespace)
+        try:
+            self.redaction_values = AdapterResolver(
+                workspace.root
+            ).all_redaction_values()
+        except SourceFailure:
+            # Static preflight reports invalid Adapter files. Interactive computation
+            # may still inspect an existing Run that does not consume that Adapter.
+            self.redaction_values = ()
+
+    def ensure_valid(self, dashboard_id: str) -> LoadedDashboard:
+        dashboard = self.workspace.dashboard(dashboard_id)
+        errors = [
+            item
+            for item in dashboard_validation_diagnostics(self.workspace, dashboard)
+            if item.level == "error"
+        ]
+        if errors:
+            raise ValidationFailure(
+                f"Dashboard {dashboard.definition.id} failed static preflight",
+                file=dashboard.definition_path,
+                details={
+                    "code": "dashboard_preflight_failed",
+                    "dashboard": dashboard.definition.id,
+                    "diagnostics": [item.as_dict() for item in errors],
+                },
+            )
+        return dashboard
 
     def execute(
         self,
@@ -260,15 +249,58 @@ class InteractionExecutor:
         cancel_event: threading.Event | None = None,
         observer: InteractionObserver | None = None,
         reusable_nodes: dict[str, NodeResult] | None = None,
+        _dashboard: LoadedDashboard | None = None,
     ) -> InteractionResult:
-        dashboard = self.workspace.dashboard(run.dashboard)
-        if run.status not in {"ready", "partial"}:
+        dashboard = _dashboard or self.ensure_valid(run.dashboard)
+        if dashboard.definition.id != run.dashboard:
+            raise ValueError("Prevalidated Dashboard does not match the Query Run")
+        runtime = self.workspace.definition.runtime.model_copy(deep=True)
+        ensure_query_run_compatible(dashboard, run)
+        target_id = normalize_interactive_target(target)
+        plan = compile_interactive_plan(dashboard, target_id)
+        if run.status not in {"loading", "ready", "partial"}:
             raise ExecutionFailure(
-                "Interactive computation requires a completed Query Run",
+                "Interactive computation requires an active or completed Query Run",
                 details={"code": "query_run_not_ready", "status": run.status},
             )
-        plan = compile_interactive_plan(dashboard, target)
-        target_id = _target_id(target)
+        missing_inputs = sorted(
+            {
+                reference.canonical
+                for node in plan
+                for reference in node.inputs.values()
+                if not reference.node_id.startswith("interactive:")
+                and reference.canonical not in run.outputs
+            }
+        )
+        if missing_inputs:
+            loading = run.status == "loading"
+            raise ExecutionFailure(
+                (
+                    "Interactive computation inputs are not ready"
+                    if loading
+                    else "Query Run does not contain the Interactive Transform inputs"
+                ),
+                details={
+                    "code": (
+                        "interactive_input_not_ready"
+                        if loading
+                        else "query_run_missing_interactive_inputs"
+                    ),
+                    "references": missing_inputs,
+                    "required_targets": sorted(
+                        {
+                            parse_output_reference(reference).node_id
+                            for reference in missing_inputs
+                        }
+                    ),
+                    "status": run.status,
+                    "action": (
+                        "Wait for this Query Run branch"
+                        if loading
+                        else "Run query again with the required targets"
+                    ),
+                },
+            )
         interaction_id = interaction_id or f"ix_{uuid.uuid4().hex[:16]}"
         compute_values = resolve_compute_parameters(dashboard, compute_parameters)
         selection_values, _ = resolve_selection_values(
@@ -331,7 +363,7 @@ class InteractionExecutor:
             nodes = {node.id: node for node in plan}
             pending = set(nodes)
             running: dict[Future, str] = {}
-            max_workers = max(1, self.workspace.definition.runtime.max_workers)
+            max_workers = max(1, runtime.max_workers)
             with ThreadPoolExecutor(
                 max_workers=max_workers,
                 thread_name_prefix=f"dataviz-{interaction_id}",
@@ -425,9 +457,9 @@ class InteractionExecutor:
                 "unavailable": "unavailable",
             }.get(target_node.status, "error")
         result.finished_at = _now()
-        result_path = store.run_root / f"interaction-{interaction_id}.json"
-        result_path.write_text(
-            result.model_dump_json(indent=2, by_alias=True), encoding="utf-8"
+        store.write_run_document(
+            f"interaction-{interaction_id}.json",
+            result.model_dump_json(indent=2, by_alias=True),
         )
         emit("interaction_finished", status=result.status)
         return result
@@ -453,7 +485,10 @@ class InteractionExecutor:
         execution_logs: list[dict[str, Any]] = []
 
         def collect_log(record: dict[str, Any]) -> None:
-            normalized = {**record, "node_id": node.id, "generation": interaction.generation}
+            normalized = redact_value(
+                {**record, "node_id": node.id, "generation": interaction.generation},
+                self.redaction_values,
+            )
             execution_logs.append(normalized)
             emit(
                 "node_log",
@@ -527,18 +562,25 @@ class InteractionExecutor:
                     for name, descriptor in inputs.items()
                 },
             }
-            reusable_files_exist = reusable is not None and all(
-                not descriptor.path
-                or (self.workspace.root / descriptor.path).is_file()
-                for descriptor in reusable.outputs.values()
-            )
+            reusable_artifacts_valid = False
+            if reusable is not None:
+                descriptors = list(reusable.outputs.values())
+                if reusable.log is not None:
+                    descriptors.append(reusable.log)
+                try:
+                    for descriptor in descriptors:
+                        store.verify_owned(descriptor)
+                except (OSError, ValueError):
+                    pass
+                else:
+                    reusable_artifacts_valid = True
             if (
                 not refresh
                 and allow_generation_reuse
                 and reusable is not None
                 and reusable.status in {"ready", "empty"}
                 and reusable.diagnostics.get("cache_key") == cache_key
-                and reusable_files_exist
+                and reusable_artifacts_valid
             ):
                 return reusable.model_copy(
                     deep=True,
@@ -561,7 +603,7 @@ class InteractionExecutor:
                 return NodeResult(
                     node_id=node.id,
                     node_type="interactive_transform",
-                    status=_output_status(cached),
+                    status=output_status(cached),
                     result_origin="cache",
                     started_at=started_at,
                     finished_at=_now(),
@@ -596,6 +638,7 @@ class InteractionExecutor:
                     message=message,
                 ),
                 log_callback=collect_log,
+                redaction_values=self.redaction_values,
             )
             self.cache.save(cache_key, node.definition.cache, outputs, store)
             duration_ms = int((time.perf_counter() - started) * 1000)
@@ -620,7 +663,7 @@ class InteractionExecutor:
             return NodeResult(
                 node_id=node.id,
                 node_type="interactive_transform",
-                status=_output_status(outputs),
+                status=output_status(outputs),
                 result_origin="executed",
                 started_at=started_at,
                 finished_at=_now(),
@@ -630,17 +673,21 @@ class InteractionExecutor:
                 log=log,
             )
         except Exception as error:
-            full_traceback = (
+            raw_traceback = (
                 error.details.get("traceback")
                 if isinstance(error, DatavizError)
                 and isinstance(error.details, dict)
                 and error.details.get("traceback")
                 else traceback.format_exc()
             )
-            payload = (
-                error.as_dict()
-                if isinstance(error, DatavizError)
-                else {"type": type(error).__name__, "message": str(error)}
+            full_traceback = redact_text(raw_traceback, self.redaction_values)
+            payload = redact_value(
+                (
+                    error.as_dict()
+                    if isinstance(error, DatavizError)
+                    else {"type": type(error).__name__, "message": str(error)}
+                ),
+                self.redaction_values,
             )
             payload["traceback"] = full_traceback
             cancelled = (
@@ -652,7 +699,7 @@ class InteractionExecutor:
                 _structured_log_record(
                     "error",
                     "runtime_failed",
-                    str(error),
+                    redact_text(error, self.redaction_values),
                     node_id=node.id,
                     generation=interaction.generation,
                     error_type=type(error).__name__,
@@ -689,11 +736,11 @@ class InteractionExecutor:
         files: dict[str, str] = {}
         code_path = (node.definition_path.parent / node.definition.code).resolve()
         if code_path.exists():
-            files["code"] = _hash_path(code_path)
+            files["code"] = hash_path(code_path)
         for dependency in node.definition.code_dependencies:
             path = (node.definition_path.parent / dependency).resolve()
             if path.exists():
-                files[f"dependency:{dependency}"] = _hash_path(path)
+                files[f"dependency:{dependency}"] = hash_path(path)
         payload = {
             "protocol": "dataviz/interactive-transform/v1",
             "definition": node.definition.model_dump(mode="json", by_alias=True),
@@ -705,16 +752,54 @@ class InteractionExecutor:
             "query_parameters": context.query_params,
             "compute_parameters": context.compute_params,
             "selections": context.selections,
-            "runtime": _package_fingerprint(node.definition.python_dependencies),
+            "runtime": package_fingerprint(node.definition.python_dependencies),
         }
         return self.cache.key(payload)
 
 
 def load_run_result(workspace_root: Path, run_id: str) -> RunResult:
-    path = workspace_root / ".dataviz" / "runs" / run_id / "result.json"
+    if not is_stable_id(run_id):
+        raise ExecutionFailure(
+            f"Invalid Query Run id: {run_id}",
+            details={"code": "query_run_id_invalid", "run_id": run_id},
+        )
+    path = workspace_root.resolve() / ".dataviz" / "runs" / run_id / "result.json"
     if not path.is_file():
         raise ExecutionFailure(
             f"Query Run does not exist: {run_id}",
             details={"code": "query_run_not_found", "run_id": run_id},
         )
-    return RunResult.model_validate_json(path.read_text(encoding="utf-8"))
+    try:
+        result = RunResult.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValidationError) as error:
+        raise ExecutionFailure(
+            f"Query Run metadata is corrupt: {run_id}",
+            details={
+                "code": "query_run_corrupt",
+                "run_id": run_id,
+                "path": str(path),
+            },
+        ) from error
+    store = ArtifactStore(workspace_root, run_id)
+    artifacts = {
+        descriptor.artifact_id: descriptor
+        for node in result.nodes.values()
+        for descriptor in [*node.outputs.values(), *([node.log] if node.log else [])]
+    }
+    artifacts.update(
+        {descriptor.artifact_id: descriptor for descriptor in result.outputs.values()}
+    )
+    try:
+        for descriptor in artifacts.values():
+            store.verify_owned(descriptor)
+    except (OSError, ValueError) as error:
+        raise ExecutionFailure(
+            f"Query Run Artifact is corrupt: {run_id}",
+            details={
+                "code": "query_run_artifact_corrupt",
+                "run_id": run_id,
+                "artifact_id": descriptor.artifact_id,
+                "message": str(error),
+            },
+        ) from error
+    return result

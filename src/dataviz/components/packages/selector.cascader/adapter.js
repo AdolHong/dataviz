@@ -45,7 +45,11 @@
       onOpen: () => render(true),
     });
     const pathSource = () => {
-      const supplied = root.selectorPathOptions?.({selector, input, levels}) || [];
+      const supplied = typeof root.selectorPathOptions === 'function'
+        ? root.selectorPathOptions({selector, input, levels}) || []
+        : Array.from(input.options).map(option => {
+          try { return JSON.parse(option.value); } catch (_error) { return null; }
+        }).filter(Boolean);
       const unique = new Map();
       supplied.forEach(path => {
         if (!Array.isArray(path) || path.length !== levels.length || path.some(value => value == null)) return;

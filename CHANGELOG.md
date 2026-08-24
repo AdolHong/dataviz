@@ -2,7 +2,7 @@
 
 Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本化。这里记录使用者可观察到的变化；字段细节以 `dataviz schemas` 和 `dataviz components` 为准。
 
-## Unreleased
+## 0.2.0 — 2026-08-24
 
 ### Breaking architecture
 
@@ -17,17 +17,38 @@ Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本
 - 新增 `dataviz compute`、Compute Control、Interactive Compute API、Pyodide module Worker 和 browser-js Worker。
 - Query 与 Interactive Python 节点支持 cancel、progress、`context.log(...)`、结构化执行日志 Artifact 和完整 traceback；日志可通过 session 隔离的 Artifact API 获取，Query 节点可直接在 Sources 证据面板检查。
 - 页面导出采集 canonical Canvas snapshot，并清除旧 tab 状态中已经不属于当前 Dashboard 的 Selection key。
-- 新增五类固定 AI authoring 对照任务、带任务/输入哈希的 `authoring prepare`、`authoring verify/assess`、`authoring-event/v3` trial identity 与逐项验收证据，以及 `authoring tasks/protocol/compare` 成对评测；只有身份一致、输入完整且两边全部验收通过的 pair 进入效率聚合。
+- 新增五类固定 AI authoring 对照任务、带任务/prompt/输入哈希的 `authoring prepare`、`authoring verify/assess`、`authoring-event/v3` trial identity 与逐项验收证据，以及 `authoring tasks/protocol/compare` 成对评测；只有身份一致、prompt/输入完整且两边全部验收通过的 pair 进入效率聚合。
+- `authoring start` 返回按顺序可执行的 `next_steps`，benchmark 的 finish 提示保留必需的 trial directory，并安全引用包含空格的路径。
+- `benchmark --browser-runtime` 升级为浏览器 Runtime v2 基准：分别记录 Query、报告构建、页面稳定时间，以及 Arrow 行数/字节/耗时、Renderer 生命周期和最终 View 状态。
+- 核心写入边界增加事务性发布：Scaffold、AI trial、持久缓存、HTML/manifest/assets 与发行 ZIP/checksum 在失败时保留上一份完整结果。
+- Artifact、缓存与代码依赖使用流式 SHA-256；大文件复制采用校验后的原子流式写入，避免整文件缓冲。
+- Gallery 新增 Selector、Compute、View、Section 的 ready/loading/stale/empty/error/cancelled/unavailable 七状态矩阵，以及实际包含 10、100、1,000 个原生选项的 Select Story。
+- Query Run 现在公开 `server_interactive_inputs`，显式列出后续服务端交互计算依赖的 Base Output；Artifact 与缓存只写入 Workspace `.dataviz`，不污染可分享 Dashboard。
+
+### Changed
+
+- 删除与 `components` 重复的公开 `dataviz templates` 命令；模板发现统一走 `components`、`schemas`、`docs` 与 `scaffold`。
+- `components --check` 明确只验证 Package 元数据、资产与测试声明；行为测试由 pytest/浏览器 E2E 执行。
+- `data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 完整迁入各自 owner Component Package；13 个 Package 现在全部为 package-owned，删除 `declarative-runtime.js` 和 Runtime 中的重复实现。
 
 ### Fixed
 
-- Query/Compute/Selection 在 Python、父页面与 Canvas 共享严格 Value Contract；整数不再被浏览器静默截断，空日期范围固定为 `[]`，typed choice、required、min/max/step 使用稳定错误码。
+- Query Run 建立后即可向 Canvas 提供 Interaction endpoint；依赖已就绪 Base Output 的 Server/Browser Interactive 分支不再等待无关慢 Source，Query 完成也不再通过重载 iframe 破坏现有交互状态。
+- Selection、Compute Parameter 与 Output 发布使用显式 delta；Selection 不再误触发 compute-only 分支，无关 Output 不再取消并重启 active Transform，值未变化的 Output 不再重复传播。
+- 父页面与 Canvas 消息校验 `dashboard_id + run_id + frame_id`，旧 iframe 或其他 Run 的迟到消息不能更新当前 tab 状态。
+- 删除旧 Server capability fallback；导航显示名严格由 Dashboard 文件夹末级名称决定，不再回退到页面 title。
+- Query/Compute/Selection 在 Python、父页面与 Canvas 共享严格 Value Contract；安全整数保持整数 wire shape，超范围整数不再被浏览器静默截断，空日期范围固定为 `[]`，typed choice、required、min/max/step 使用稳定错误码。
 - Named Output 严格校验 required/optional、kind、JSON 与 Table schema；直接返回已有 Artifact 也不能绕过声明契约。
 - server-python Interactive 依赖链可复用相同 Query Run 与状态下已经完成的上游 generation；Interaction/event/cache 内存保留量有界。
 - Run/Interaction 事件截断使用单调 offset，长时间轮询不会因保留窗口移动而漏掉后续事件。
 - snapshot 的可选 Output 不再被误判为缺失并触发重算。
-- Pyodide package catalog 对齐固定 Runtime；bundle 校验核心文件、lockfile、`micropip`、传递 wheel 闭包与 SHA-256 后随 ZIP 分发。没有活动 browser-python 的报告不再携带 Python Worker、Pyodide URL 或 bundle 资产。
+- Pyodide package catalog 对齐固定 Runtime；bundle 核对 `package.json` 版本，并按 Emscripten marker 校验核心文件、lockfile、`micropip`、传递 wheel 闭包与必需 SHA-256 后随 ZIP 分发。没有活动 browser-python 的报告不再携带 Python Worker、Pyodide URL 或 bundle 资产。
 - 源码 CLI 文档固定使用 non-editable `uv sync --reinstall-package workspace-dataviz`，规避部分 macOS/Python 组合忽略 hidden editable `.pth` 导致的 `ModuleNotFoundError`；发布 smoke 仍使用独立干净环境。
+- 声明式 View、browser-js Worker 与 Custom Canvas 的数值聚合改为线性 reducer，大表 min/max 不再因展开数组超过 JavaScript 参数上限而崩溃。
+- Arrow Table 作为 Metric 输入时不再被误判成 scalar 并显示 `[object Object]`；没有 descriptor 的 View 进入明确的 `empty` 终态。
+- Live Canvas 处理 node/run cancelled；失败或取消的终态 Run 可重新打开并显示分支错误，不再因为缺失 Output 返回 500 或永久停在 rendering。
+- 后台保留策略不再清理仍被活动 Interaction 消费的 Query Run 与缓存，避免长时间模型/运筹计算被误取消。
+- Source/Dataset 缓存键补入 Dashboard 与节点身份，并继续由 tab session namespace 隔离；Server Interactive 只读取所属 Query Run 的不可变 Artifact，不会因 Selection/Compute 变化重新查询 Source。
 
 ### Documentation
 
@@ -91,7 +112,7 @@ Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本
 - 声明式 View/Section/Selector、Component Package Registry、Gallery 与 Custom Renderer lifecycle。
 - `docs`、`schemas`、`components`、`context`、`scaffold`、`benchmark` 与 `authoring` AI 开发接口。
 - append-only `dataviz-authoring.jsonl`，记录真实首次成功、修正轮次、耗时、Token 和 friction。
-- `dataviz migrate` 离线迁移入口、严格 `dataviz/*/v1` Literal 以及 Web Component Runtime v1 参考 Adapter。
+- 严格 `dataviz/*/v1` Literal 以及 Web Component Runtime v1 参考 Adapter。
 - Python 3.11–3.14、Chromium/Firefox/WebKit 和 wheel/sdist/ZIP 发布验证定义。
 - Component Registry v3 Selection：统一 `select`，增加 `segmented`、`checkbox-group`，强化 Cascader/Tree Select 父子选择与 Date Range presets。
 

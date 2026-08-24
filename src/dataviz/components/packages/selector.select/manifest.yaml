@@ -3,6 +3,7 @@ package: selector.select
 version: 1.1.0
 category: selector
 purpose: One flat single- or multi-select with search, grouping, tag summary and automatic virtualization.
+implementation: {mode: package, sources: []}
 dependencies: [runtime.selector]
 components:
   - id: selector.select

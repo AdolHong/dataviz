@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from dataviz.artifacts import ArtifactDescriptor
+from dataviz.identifiers import StableId
 
 
 class NodeResult(BaseModel):
@@ -37,10 +38,17 @@ class NodeResult(BaseModel):
 class RunResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    run_id: str
+    schema_: Literal["dataviz/query-result/v1"] = Field(
+        "dataviz/query-result/v1", alias="schema"
+    )
+    run_id: StableId
     status: Literal["loading", "ready", "partial", "error", "cancelled"]
-    workspace: str
-    dashboard: str
+    workspace: StableId
+    dashboard: StableId
+    query_scope: Literal["dashboard", "targets"]
+    query_targets: list[str]
+    query_nodes: list[str]
+    query_contract_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     started_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     finished_at: str | None = None
     query_parameters: dict[str, Any] = Field(default_factory=dict)
@@ -57,12 +65,12 @@ class InteractionResult(BaseModel):
     schema_: Literal["dataviz/interaction-result/v1"] = Field(
         "dataviz/interaction-result/v1", alias="schema"
     )
-    interaction_id: str
+    interaction_id: StableId
     generation: int = Field(ge=1)
-    run_id: str
-    workspace: str
-    dashboard: str
-    target: str
+    run_id: StableId
+    workspace: StableId
+    dashboard: StableId
+    target: StableId
     status: Literal["loading", "ready", "partial", "error", "cancelled", "unavailable"]
     started_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     finished_at: str | None = None

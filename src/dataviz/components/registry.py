@@ -11,7 +11,9 @@ import yaml
 COMPONENT_PACKAGE_SCHEMA = "dataviz/component-package/v1"
 COMPONENT_STORY_SCHEMA = "dataviz/component-story/v1"
 COMPONENT_TEST_SCHEMA = "dataviz/component-test/v1"
+COMPONENT_PACKAGE_REPORT_SCHEMA = "dataviz/component-package-report/v3"
 PACKAGE_ROOT = Path(__file__).resolve().parent / "packages"
+DATAVIZ_ROOT = PACKAGE_ROOT.parent.parent
 REQUIRED_FILES = (
     "manifest.yaml",
     "controller.js",
@@ -78,6 +80,7 @@ class ComponentPackage:
             "purpose": self.manifest.get("purpose", ""),
             "dependencies": list(self.dependencies),
             "components": list(self.component_ids),
+            "implementation": dict(self.manifest["implementation"]),
             "runtime": {
                 key: f"components/packages/{self.name}/{value}"
                 for key, value in self.manifest.get("runtime", {}).items()
@@ -106,6 +109,35 @@ def _load_package(root: Path) -> ComponentPackage:
         raise ComponentPackageError(f"Package {root.name} must declare a category")
     if not isinstance(manifest.get("dependencies", []), list):
         raise ComponentPackageError(f"Package {root.name} dependencies must be a list")
+    implementation = manifest.get("implementation")
+    if not isinstance(implementation, dict):
+        raise ComponentPackageError(f"Package {root.name} must declare implementation")
+    mode = implementation.get("mode")
+    sources = implementation.get("sources")
+    if mode not in {"package", "bridge"}:
+        raise ComponentPackageError(
+            f"Package {root.name} implementation.mode must be package or bridge"
+        )
+    if not isinstance(sources, list) or any(
+        not isinstance(source, str) or not source for source in sources
+    ):
+        raise ComponentPackageError(
+            f"Package {root.name} implementation.sources must be a list of paths"
+        )
+    if mode == "package" and sources:
+        raise ComponentPackageError(
+            f"Package {root.name} owns its implementation and must not declare bridge sources"
+        )
+    if mode == "bridge" and not sources:
+        raise ComponentPackageError(
+            f"Bridge Package {root.name} must identify its current implementation sources"
+        )
+    for source in sources:
+        source_path = (DATAVIZ_ROOT / source).resolve()
+        if not source_path.is_relative_to(DATAVIZ_ROOT) or not source_path.is_file():
+            raise ComponentPackageError(
+                f"Package {root.name} has an invalid bridge source: {source}"
+            )
     if not isinstance(manifest.get("runtime"), dict):
         raise ComponentPackageError(f"Package {root.name} runtime must be a mapping")
     if story.get("schema") != COMPONENT_STORY_SCHEMA:
@@ -312,20 +344,32 @@ def validate_component_packages(expected_components: Iterable[str] | None = None
             errors.append({"code": "component_without_test", "components": components_without_tests})
     except ComponentPackageError as exc:
         return {
-            "schema": "dataviz/component-package-report/v1",
+            "schema": COMPONENT_PACKAGE_REPORT_SCHEMA,
+            "scope": "package-metadata-and-test-declarations",
+            "behavior_tests_executed": False,
             "valid": False,
             "packages": 0,
+            "package_implemented": 0,
+            "bridge_implemented": 0,
             "components": 0,
             "stories": 0,
-            "tests": 0,
+            "test_declarations": 0,
             "errors": [{"code": "invalid_component_package", "message": str(exc)}],
         }
+    package_implemented = sum(
+        package.manifest["implementation"]["mode"] == "package"
+        for package in packages.values()
+    )
     return {
-        "schema": "dataviz/component-package-report/v1",
+        "schema": COMPONENT_PACKAGE_REPORT_SCHEMA,
+        "scope": "package-metadata-and-test-declarations",
+        "behavior_tests_executed": False,
         "valid": not errors,
         "packages": len(packages),
+        "package_implemented": package_implemented,
+        "bridge_implemented": len(packages) - package_implemented,
         "components": len(index),
         "stories": len(stories),
-        "tests": len(tests),
+        "test_declarations": len(tests),
         "errors": errors,
     }

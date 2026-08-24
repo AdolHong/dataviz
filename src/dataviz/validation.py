@@ -34,6 +34,8 @@ def _diagnostic_category(item: Diagnostic) -> str:
         return "adapter-bindings"
     if code.startswith("sql_"):
         return "sql-contracts"
+    if code.startswith("source_asset_"):
+        return "data-graph"
     if code.startswith("content_") or "selection" in field or "selection" in message:
         return "content-contracts"
     if (
@@ -45,6 +47,7 @@ def _diagnostic_category(item: Diagnostic) -> str:
         return "presentation-assets"
     if (
         code.startswith("pyodide_")
+        or code.startswith("runtime_asset_")
         or "python_dependencies" in field
         or "code_dependencies" in field
         or "dependency" in message
@@ -68,16 +71,24 @@ def _hint_for(item: Diagnostic) -> str:
         return f"Compare this file with `dataviz schemas {model} --format json`; remove unknown or retired fields."
     if code == "dashboard_not_found":
         return "Run `dataviz list <workspace>` and use the stable Dashboard id shown there."
-    if code == "dashboard_scope_ambiguous":
-        return "Use the unique runtime Dashboard id from `dataviz list <workspace>`."
     if code == "sql_parameter_undeclared":
         return "Declare every named SQL placeholder in Source `query_params`, and declare the same id in Dashboard `query_parameters`."
     if code == "sql_parameter_unused":
         return "Remove the unused Source `query_params` entry or reference it as a named placeholder in the SQL file."
     if code == "sql_file_unreadable":
         return "Save the SQL file as UTF-8 and verify that the current user can read it."
+    if code == "source_asset_missing":
+        return "Add the referenced data/code file, or correct the Source path or file Adapter root."
+    if code in {"source_asset_invalid", "source_asset_outside_dashboard"}:
+        return "Keep Source assets inside the Dashboard folder, or use a file Adapter whose root contains the data file."
+    if code == "view_field_unknown":
+        return "Fix the View field name or declare it in the main table Output schema; dynamic Outputs may omit schema only when static field checking is impossible."
+    if code == "selection_field_unknown":
+        return "Fix the Selection path/binding field or declare it in the selected View input table schema."
+    if code == "file_reader_dependency_unavailable":
+        return "Install the Excel reader extra with `pip install 'workspace-dataviz[excel]'`, then rerun validate."
     if code.startswith("adapter_") or field == "adapter":
-        return "Bind the Dashboard alias to a Workspace Adapter and define credentials only in `adapters.local.yaml` or environment variables."
+        return "Bind the Dashboard Adapter reference to a Workspace Adapter and define credentials only in `auth/adapters.local.yaml` or environment variables."
     if code.startswith("content_"):
         return (
             "Use `{{ parameters.<id> }}`, `{{ compute.<id> }}`, or a scoped Selection reference: "
@@ -96,10 +107,13 @@ def _hint_for(item: Diagnostic) -> str:
         return (
             "Use the complete official Pyodide distribution at "
             "`runtime.pyodide_bundle_path`; it must include the core Runtime, "
-            "pyodide-lock.json, and every locked wheel in the declared dependency closure."
+            "matching package.json, pyodide-lock.json, and every locked package "
+            "in the declared dependency closure."
         )
     if code.startswith("pyodide_"):
         return "Use a Pyodide/WASM or pure-Python dependency, switch to browser-js, or run the Interactive Transform as server-python."
+    if code.startswith("runtime_asset_"):
+        return "Use an http(s) URL, or keep the UTF-8 JavaScript file inside the Workspace and reference it with a relative path."
     if code in {"dataset_cycle", "interactive_cycle"}:
         return "Break the reported dependency cycle; every input must point to an earlier explicit Named Output."
     if code == "compute_trigger_ambiguous":
@@ -130,21 +144,6 @@ def _entry_for_scope(
     direct = [entry for entry in workspace.catalog if entry.id == identifier]
     if len(direct) == 1:
         return direct[0], None
-    aliases = [
-        entry
-        for entry in workspace.catalog
-        if identifier in {entry.relative_path, entry.logical_path}
-    ]
-    if len(aliases) == 1:
-        return aliases[0], None
-    if len(aliases) > 1:
-        return None, Diagnostic(
-            "error",
-            f"Dashboard scope is ambiguous: {identifier}",
-            str(workspace.definition_path),
-            code="dashboard_scope_ambiguous",
-            details={"matches": [entry.id for entry in aliases]},
-        )
     return None, Diagnostic(
         "error",
         f"Unknown dashboard: {identifier}",

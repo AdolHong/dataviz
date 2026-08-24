@@ -3,6 +3,7 @@ package: selector.tree-select
 version: 1.0.0
 category: selector
 purpose: Search, expand and multi-select leaves in a hierarchy without losing parent context.
+implementation: {mode: package, sources: []}
 dependencies: [selector.cascader]
 components:
   - id: selector.tree-select

@@ -3,6 +3,7 @@ package: runtime.selector
 version: 1.0.0
 category: runtime
 purpose: Shared native-control bridge, lifecycle and keyboard utilities for selector packages.
+implementation: {mode: package, sources: []}
 dependencies: [runtime.overlay]
 components:
   - id: runtime.selector

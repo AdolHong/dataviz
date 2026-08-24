@@ -85,6 +85,65 @@ function sessionQuery() {
   return `session_id=${encodeURIComponent(state.sessionId)}`;
 }
 
+function canvasIdentity(frame = $('#canvas-frame')) {
+  return {
+    dashboard_id: frame.dataset.dashboardId || null,
+    run_id: frame.dataset.runId || null,
+    frame_id: frame.dataset.frameId || null,
+  };
+}
+
+function sameCanvasIdentity(left, right) {
+  return ['dashboard_id', 'run_id', 'frame_id'].every(
+    key => (left?.[key] || null) === (right?.[key] || null),
+  );
+}
+
+function loadCanvasFrame(dashboardId, runId = null) {
+  const frame = $('#canvas-frame');
+  const frameId = `frame_${crypto.randomUUID().replaceAll('-', '')}`;
+  frame.dataset.dashboardId = dashboardId;
+  frame.dataset.runId = runId || '';
+  frame.dataset.frameId = frameId;
+  const run = runId ? `&run_id=${encodeURIComponent(runId)}` : '';
+  frame.src = `/api/dashboards/${encodeURIComponent(dashboardId)}/canvas?${sessionQuery()}${run}&frame_id=${encodeURIComponent(frameId)}`;
+}
+
+function postCanvasMessage(payload) {
+  const frame = $('#canvas-frame');
+  const identity = canvasIdentity(frame);
+  if (!identity.dashboard_id || !identity.frame_id || !frame.contentWindow) return false;
+  frame.contentWindow.postMessage({...payload, ...identity}, window.location.origin);
+  return true;
+}
+
+function syncCanvasInteraction() {
+  const runtime = activeRuntime();
+  const identity = canvasIdentity();
+  if (!runtime?.runId || identity.run_id !== runtime.runId) return false;
+  return postCanvasMessage({
+    type: 'dataviz:set-interaction',
+    interaction: {
+      run_id: runtime.runId,
+      session_id: state.sessionId,
+      start_url: `/api/runs/${encodeURIComponent(runtime.runId)}/interactions`,
+      status_url: '/api/interactions/{interaction_id}',
+      outputs_url: '/api/interactions/{interaction_id}/outputs',
+      query_snapshot_available: true,
+      query_complete: true,
+    },
+  });
+}
+
+function isCurrentCanvasMessage(event) {
+  const frame = $('#canvas-frame');
+  const identity = canvasIdentity(frame);
+  return event.origin === window.location.origin
+    && event.source === frame.contentWindow
+    && identity.dashboard_id === state.dashboard?.id
+    && sameCanvasIdentity(event.data, identity);
+}
+
 function saveTabUiState() {
   if (!state.sessionId) return;
   const dashboards = {};
@@ -192,22 +251,27 @@ async function request(url, options = {}) {
       const payload = await response.json();
       message = typeof payload.detail === 'string' ? payload.detail : payload.detail?.message || JSON.stringify(payload.detail || payload);
     } catch (_) {}
-    if (response.status === 404 && url.startsWith('/api/navigation/')) {
-      message = '当前 Server 仍是旧进程，不支持目录管理。请在终端停止并重新运行 dataviz serve。';
-    }
     throw new Error(message);
   }
   return response.json();
 }
 
-function collectCanvasSnapshot() {
+function collectCanvasSnapshot(expectedIdentity) {
   const requestId = crypto.randomUUID();
   const frame = $('#canvas-frame');
+  const targetWindow = frame.contentWindow;
   return new Promise((resolve, reject) => {
-    const requestSnapshot = () => frame.contentWindow?.postMessage(
-      {type:'dataviz:collect-snapshot', request_id:requestId},
-      window.location.origin,
-    );
+    if (!targetWindow || !sameCanvasIdentity(canvasIdentity(frame), expectedIdentity)) {
+      reject(new Error('The active Canvas changed before snapshot collection started'));
+      return;
+    }
+    const requestSnapshot = () => {
+      if (!sameCanvasIdentity(canvasIdentity(frame), expectedIdentity)) return;
+      targetWindow.postMessage(
+        {type:'dataviz:collect-snapshot', request_id:requestId, ...expectedIdentity},
+        window.location.origin,
+      );
+    };
     // Query completion and the final Canvas bootstrap are independent browser
     // events. Retry the idempotent request while a newly loaded iframe installs
     // its Runtime listener instead of losing the first postMessage in that gap.
@@ -220,9 +284,11 @@ function collectCanvasSnapshot() {
     const receive = event => {
       if (
         event.origin !== window.location.origin
-        || event.source !== frame.contentWindow
+        || event.source !== targetWindow
         || event.data?.type !== 'dataviz:snapshot-collected'
         || event.data.request_id !== requestId
+        || !sameCanvasIdentity(event.data, expectedIdentity)
+        || !sameCanvasIdentity(canvasIdentity(frame), expectedIdentity)
       ) return;
       clearTimeout(timer);
       clearInterval(retry);
@@ -238,23 +304,35 @@ function collectCanvasSnapshot() {
 
 async function downloadReport() {
   if (!state.runId || !state.dashboard) return;
+  const identity = canvasIdentity();
+  const dashboardId = state.dashboard.id;
+  const runId = state.runId;
+  const runtime = runtimeFor(dashboardId);
+  const selectionValues = selections();
+  const computeValues = runtime.committedComputeParameters || computeParameters();
   const button = $('#download-button');
   button.disabled = true;
   const previous = button.textContent;
   button.textContent = 'Preparing…';
   try {
-    const snapshotOutputs = await collectCanvasSnapshot();
+    if (identity.dashboard_id !== dashboardId || identity.run_id !== runId) {
+      throw new Error('The active Canvas is not synchronized with the selected Query Run');
+    }
+    const snapshotOutputs = await collectCanvasSnapshot(identity);
+    if (!sameCanvasIdentity(canvasIdentity(), identity)) {
+      throw new Error('The active Canvas changed while the report snapshot was being prepared');
+    }
     const response = await fetch(
-      `/api/dashboards/${encodeURIComponent(state.dashboard.id)}/report`,
+      `/api/dashboards/${encodeURIComponent(dashboardId)}/report`,
       {
         method:'POST',
         cache:'no-store',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
           session_id:state.sessionId,
-          run_id:state.runId,
-          selections:selections(),
-          compute_parameters:activeRuntime()?.committedComputeParameters || computeParameters(),
+          run_id:runId,
+          selections:selectionValues,
+          compute_parameters:computeValues,
           snapshot_outputs:snapshotOutputs,
         }),
       },
@@ -272,7 +350,7 @@ async function downloadReport() {
     const blob = await response.blob();
     const disposition = response.headers.get('Content-Disposition') || '';
     const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1]
-      || `${state.dashboard.id}-${state.runId}.html`;
+      || `${dashboardId}-${runId}.html`;
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -282,8 +360,8 @@ async function downloadReport() {
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   } catch (error) {
-    activeRuntime().message = error.message;
-    $('#run-message').textContent = error.message;
+    runtime.message = error.message;
+    if (state.dashboard?.id === dashboardId) $('#run-message').textContent = error.message;
   } finally {
     button.textContent = previous;
     button.disabled = !state.runId;
@@ -431,6 +509,76 @@ function selectionField(control) {
   return wrapper;
 }
 
+function dashboardSelectionValues() {
+  const form = $('#dashboard-selection-form');
+  const values = formValues(form);
+  const remembered = activeRuntime()?.dashboardSelectionValues || {};
+  for (const input of form.elements) {
+    if (
+      input instanceof HTMLSelectElement
+      && input.options.length === 0
+      && Object.prototype.hasOwnProperty.call(remembered, input.name)
+    ) values[input.name] = remembered[input.name];
+  }
+  return values;
+}
+
+function syncDashboardSelectionOptions(controls = []) {
+  const form = $('#dashboard-selection-form');
+  let changed = false;
+  let synchronized = false;
+  for (const control of controls) {
+    if (!control.observed) continue;
+    const input = form.elements.namedItem(control.key);
+    if (!(input instanceof HTMLSelectElement)) continue;
+    const definition = state.dashboard?.selections.find(item => item.key === control.key)?.definition;
+    const options = control.options || [];
+    const signature = JSON.stringify(options);
+    if (input.dataset.runtimeOptionsSignature === signature) continue;
+    const runtime = activeRuntime();
+    const previous = runtime?.dashboardSelectionValues
+      && Object.prototype.hasOwnProperty.call(runtime.dashboardSelectionValues, control.key)
+      ? runtime.dashboardSelectionValues[control.key]
+      : definition?.default ?? formValues(form)[control.key];
+    const previousValues = input.multiple && Array.isArray(previous) ? previous : [previous];
+    const selected = new Set(previousValues.filter(value => value != null && value !== '').map(value => JSON.stringify(value)));
+    const typed = options.some(option => typeof option.value !== 'string');
+    input.dataset.valueEncoding = typed ? 'json' : 'string';
+    const nodes = [];
+    if (!input.multiple) {
+      const empty = document.createElement('option');
+      empty.value = '';
+      empty.hidden = true;
+      empty.dataset.emptyOption = 'true';
+      empty.selected = selected.size === 0;
+      nodes.push(empty);
+    }
+    for (const item of options) {
+      const option = document.createElement('option');
+      option.value = typed ? JSON.stringify(item.value) : String(item.value);
+      option.textContent = item.label ?? String(item.value);
+      option.disabled = item.available === false;
+      option.selected = !option.disabled && selected.has(JSON.stringify(item.value));
+      if (item.group) option.dataset.group = item.group;
+      if (item.description) option.dataset.description = item.description;
+      if (item.keywords?.length) option.dataset.keywords = item.keywords.join(' ');
+      nodes.push(option);
+    }
+    input.replaceChildren(...nodes);
+    input.dataset.runtimeOptionsSignature = signature;
+    input._syncChoiceControl?.();
+    synchronized = true;
+    const current = formValues(form)[control.key];
+    if (JSON.stringify(previous) !== JSON.stringify(current)) changed = true;
+  }
+  if (!synchronized) return;
+  const runtime = activeRuntime();
+  if (runtime) runtime.dashboardSelectionValues = formValues(form);
+  updateDashboardSelectionSummary();
+  saveTabUiState();
+  if (changed) scheduleViewSelections();
+}
+
 function nodeRow(node) {
   const item = document.createElement('button');
   item.type = 'button';
@@ -448,7 +596,7 @@ function selectDashboard(id) {
     const previous = activeRuntime();
     previous.queryParameterValues = queryParameters();
     previous.draftComputeParameters = computeParameters();
-    previous.dashboardSelectionValues = formValues($('#dashboard-selection-form'));
+    previous.dashboardSelectionValues = dashboardSelectionValues();
     saveTabUiState();
   }
   closeHeaderPopovers();
@@ -474,6 +622,11 @@ function selectDashboard(id) {
   );
   const dashboardControls = state.dashboard.selections.filter((item) => item.origin === 'dashboard');
   $('#dashboard-selection-form').replaceChildren(...dashboardControls.map(selectionField));
+  if (runtime.dashboardSelectionValues == null) {
+    runtime.dashboardSelectionValues = Object.fromEntries(
+      dashboardControls.map(control => [control.key, structuredClone(control.definition.default)]),
+    );
+  }
   window.datavizComponents?.hydrate(document);
   setFormValues(
     $('#parameter-form'),
@@ -496,9 +649,7 @@ function selectDashboard(id) {
   setQueryState();
   setSelectionsEnabled(Boolean(runtime.runId));
   setComputeState();
-  const run = runtime.runId ? `&run_id=${encodeURIComponent(runtime.runId)}` : '';
-  $('#canvas-frame').dataset.runId = runtime.runId || '';
-  $('#canvas-frame').src = `/api/dashboards/${encodeURIComponent(id)}/canvas?${sessionQuery()}${run}`;
+  loadCanvasFrame(id, runtime.runId);
   $('#run-button').disabled = !runnable;
   $('#run-button').classList.toggle('is-cancelling', Boolean(runtime.pendingRunId));
   $('#run-button').lastChild.textContent = runtime.pendingRunId ? 'Cancel query' : 'Run query';
@@ -530,7 +681,7 @@ function computeParameters() {
 }
 
 function selections() {
-  const values = Object.assign({}, state.canvasSelections, formValues($('#dashboard-selection-form')));
+  const values = Object.assign({}, state.canvasSelections, dashboardSelectionValues());
   const validKeys = new Set((state.dashboard?.selections || []).map((selection) => selection.key));
   return Object.fromEntries(Object.entries(values).filter(([key]) => validKeys.has(key)));
 }
@@ -605,9 +756,7 @@ async function runDashboard() {
     $('#run-button').classList.add('is-cancelling');
     $('#run-button').lastChild.textContent = 'Cancel query';
     if (state.dashboard?.id === dashboardId) {
-      const frame = $('#canvas-frame');
-      frame.dataset.runId = response.run_id;
-      frame.src = `/api/dashboards/${encodeURIComponent(dashboardId)}/canvas?${sessionQuery()}&run_id=${encodeURIComponent(response.run_id)}`;
+      loadCanvasFrame(dashboardId, response.run_id);
     }
     listen(response.run_id, dashboardId);
   } catch (error) {
@@ -700,15 +849,15 @@ async function finishRun(runId, dashboardId) {
     setQueryState(committed ? null : runtime.message);
     if (committed) {
       const frame = $('#canvas-frame');
-      if (frame.dataset.runId !== runId) {
-        frame.dataset.runId = runId;
-        frame.src = `/api/dashboards/${encodeURIComponent(dashboardId)}/canvas?${sessionQuery()}&run_id=${encodeURIComponent(runId)}`;
+      if (frame.dataset.runId !== runId || frame.dataset.dashboardId !== dashboardId) {
+        loadCanvasFrame(dashboardId, runId);
       }
+      // A progressive Canvas can finish loading before this Query Run commits.
+      // Always publish the interaction endpoint after commit; the Canvas-ready
+      // handshake below covers the inverse ordering without reloading the frame.
+      syncCanvasInteraction();
     } else {
-      const frame = $('#canvas-frame');
-      const restored = runtime.runId ? `&run_id=${encodeURIComponent(runtime.runId)}` : '';
-      frame.dataset.runId = runtime.runId || '';
-      frame.src = `/api/dashboards/${encodeURIComponent(dashboardId)}/canvas?${sessionQuery()}${restored}`;
+      loadCanvasFrame(dashboardId, runtime.runId);
     }
   }
 }
@@ -766,16 +915,13 @@ function setComputeState() {
 
 function sendCompute(values, {commit = false, apply = false, manualTargets = []} = {}) {
   if (!state.runId) return;
-  $('#canvas-frame').contentWindow?.postMessage(
-    {
-      type: 'dataviz:set-compute',
-      compute_parameters: values,
-      commit,
-      apply,
-      manual_targets: manualTargets,
-    },
-    window.location.origin,
-  );
+  postCanvasMessage({
+    type: 'dataviz:set-compute',
+    compute_parameters: values,
+    commit,
+    apply,
+    manual_targets: manualTargets,
+  });
 }
 
 function applyComputeParameters() {
@@ -843,10 +989,7 @@ function closeHeaderPopovers(except = null) {
 
 function applyViewSelections() {
   if (!state.runId && !state.pendingRunId) return;
-  $('#canvas-frame').contentWindow?.postMessage(
-    {type: 'dataviz:set-selections', selections: selections()},
-    window.location.origin,
-  );
+  postCanvasMessage({type: 'dataviz:set-selections', selections: selections()});
 }
 
 function scheduleViewSelections() {
@@ -954,8 +1097,8 @@ function renderNodeInspector(node, record, runNode, failure = null) {
     queryFacts.append(inspectorElement('span', 'micro-label', 'QUERY CONTEXT'));
     const grid = inspectorElement('div', 'node-inspector__facts node-inspector__facts--query');
     grid.append(
-      inspectorFact('Adapter alias', query.adapter_alias),
-      inspectorFact('Adapter', `${query.adapter_name || query.adapter_alias} · ${query.adapter_type}`),
+      inspectorFact('Adapter reference', query.adapter_reference),
+      inspectorFact('Adapter', `${query.adapter_name || query.adapter_reference} · ${query.adapter_type}`),
       inspectorFact('Source file', query.source_file),
       inspectorFact('Timeout policy', `${query.timeout_seconds ?? 'none'}s · ${query.timeout_retries ?? 0} retries`),
       inspectorFact('Query hash', query.query_hash),
@@ -1083,7 +1226,7 @@ function dashboardButton(dashboard) {
     button.dataset.parentId = dashboard.parent_id || '';
     button.draggable = true;
     const status = dashboard.status === 'ready' ? '' : `<small>${escapeHtml(dashboard.status)}</small>`;
-    button.innerHTML = `<strong>${escapeHtml(dashboard.canvas_name || dashboard.title)}</strong>${status}`;
+    button.innerHTML = `<strong>${escapeHtml(dashboard.canvas_name)}</strong>${status}`;
     button.title = dashboard.message || dashboard.title || dashboard.logical_path || dashboard.path;
     button.addEventListener('click', () => selectDashboard(dashboard.id));
     button.addEventListener('dragstart', (event) => beginNavigationDrag(event, {
@@ -1321,7 +1464,6 @@ function showNavDialog({eyebrow, title, body, submitLabel, onSubmit, danger = fa
 }
 
 function openFolderDialog(parentId) {
-  if (!state.payload.capabilities?.navigation_management) return openServerRestartDialog();
   showNavDialog({
     eyebrow: 'NAVIGATION / NEW', title: '新建目录', submitLabel: '创建目录',
     body: `<label class="nav-dialog__field"><span>目录名称</span><input name="title" required maxlength="80" autocomplete="off"></label><label class="nav-dialog__field"><span>所在位置</span><select name="parent_id">${folderOptions(parentId)}</select></label>`,
@@ -1333,7 +1475,6 @@ function openFolderDialog(parentId) {
 }
 
 function openRenameDialog(folderId) {
-  if (!state.payload.capabilities?.navigation_management) return openServerRestartDialog();
   const folder = state.payload.folders.find((item) => item.id === folderId);
   showNavDialog({
     eyebrow: 'NAVIGATION / RENAME', title: '重命名目录', submitLabel: '保存名称',
@@ -1346,10 +1487,9 @@ function openRenameDialog(folderId) {
 }
 
 function openMoveDialog(dashboardId) {
-  if (!state.payload.capabilities?.navigation_management) return openServerRestartDialog();
   const dashboard = state.payload.dashboards.find((item) => item.id === dashboardId);
   showNavDialog({
-    eyebrow: 'NAVIGATION / MOVE', title: `移动「${dashboard.canvas_name || dashboard.title}」`, submitLabel: '移动看板',
+    eyebrow: 'NAVIGATION / MOVE', title: `移动「${dashboard.canvas_name}」`, submitLabel: '移动看板',
     body: `<label class="nav-dialog__field"><span>目标目录</span><select name="parent_id">${folderOptions(dashboard.parent_id)}</select></label><p class="nav-dialog__note">移动会把目录重命名为“目录##看板”；看板内容不会改变。</p>`,
     onSubmit: async (data) => {
       await request(`/api/navigation/dashboards/${encodeURIComponent(dashboardId)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({parent_id:data.get('parent_id') || null})});
@@ -1359,7 +1499,6 @@ function openMoveDialog(dashboardId) {
 }
 
 function openDeleteDialog(folderId) {
-  if (!state.payload.capabilities?.navigation_management) return openServerRestartDialog();
   const folder = state.payload.folders.find((item) => item.id === folderId);
   showNavDialog({
     eyebrow: 'NAVIGATION / TRASH', title: `把「${folder.title}」移到回收站？`, submitLabel: '移到回收站', danger: true,
@@ -1372,10 +1511,9 @@ function openDeleteDialog(folderId) {
 }
 
 function openTrashDashboardDialog(dashboardId) {
-  if (!state.payload.capabilities?.navigation_management) return openServerRestartDialog();
   const dashboard = state.payload.dashboards.find((item) => item.id === dashboardId);
   showNavDialog({
-    eyebrow: 'NAVIGATION / TRASH', title: `把「${dashboard.canvas_name || dashboard.title}」移到回收站？`, submitLabel: '移到回收站', danger: true,
+    eyebrow: 'NAVIGATION / TRASH', title: `把「${dashboard.canvas_name}」移到回收站？`, submitLabel: '移到回收站', danger: true,
     body: '<p class="nav-dialog__note">目录会加上 __TRASH__## 前缀并隐藏；看板文件和数据不会删除。</p>',
     onSubmit: async () => {
       await request(`/api/navigation/dashboards/${encodeURIComponent(dashboardId)}`, {method:'DELETE'});
@@ -1394,14 +1532,6 @@ async function restoreTrashItem(trashId) {
       body: `<p class="nav-dialog__note">${escapeHtml(error.message)}</p>`, onSubmit: async () => {},
     });
   }
-}
-
-function openServerRestartDialog() {
-  showNavDialog({
-    eyebrow: 'SERVER / RESTART REQUIRED', title: '需要重启 Server', submitLabel: '知道了',
-    body: '<p class="nav-dialog__note">页面资源已经更新，但当前 Python 进程仍是旧版本。请在终端按 Ctrl+C，再重新运行 dataviz serve。</p>',
-    onSubmit: async () => {},
-  });
 }
 
 async function boot() {
@@ -1450,7 +1580,7 @@ $('#parameter-form').addEventListener('change', () => {
   setQueryState();
 });
 $('#dashboard-selection-form').addEventListener('input', () => {
-  if (activeRuntime()) activeRuntime().dashboardSelectionValues = formValues($('#dashboard-selection-form'));
+  if (activeRuntime()) activeRuntime().dashboardSelectionValues = dashboardSelectionValues();
   saveTabUiState();
   updateDashboardSelectionSummary();
   scheduleViewSelections();
@@ -1483,7 +1613,7 @@ $('#compute-parameter-form').addEventListener('input', onComputeDraft);
 $('#compute-parameter-form').addEventListener('change', onComputeDraft);
 $('#compute-apply').addEventListener('click', applyComputeParameters);
 $('#dashboard-selection-form').addEventListener('change', () => {
-  if (activeRuntime()) activeRuntime().dashboardSelectionValues = formValues($('#dashboard-selection-form'));
+  if (activeRuntime()) activeRuntime().dashboardSelectionValues = dashboardSelectionValues();
   saveTabUiState();
   updateDashboardSelectionSummary();
   scheduleViewSelections();
@@ -1492,7 +1622,11 @@ document.addEventListener('click', (event) => {
   if (!event.target.closest('#nav-context-menu')) hideNavMenu();
 });
 window.addEventListener('message', (event) => {
-  if (event.origin !== window.location.origin) return;
+  if (!isCurrentCanvasMessage(event)) return;
+  if (event.data?.type === 'dataviz:canvas-ready') {
+    syncCanvasInteraction();
+    return;
+  }
   if (event.data?.type === 'dataviz:canvas-interaction') {
     closeHeaderPopovers();
     return;
@@ -1505,6 +1639,10 @@ window.addEventListener('message', (event) => {
     setFormValues($('#compute-parameter-form'), runtime.draftComputeParameters);
     setComputeState();
     saveTabUiState();
+    return;
+  }
+  if (event.data?.type === 'dataviz:selection-options-changed') {
+    syncDashboardSelectionOptions(event.data.controls || []);
     return;
   }
   if (event.data?.type === 'dataviz:selections-changed') {

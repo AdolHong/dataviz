@@ -4,7 +4,7 @@
 
 Dataviz 同时维护四类版本：
 
-- Python package：当前 `workspace-dataviz 0.1.4`。
+- Python package：当前 `workspace-dataviz 0.2.0`。
 - 文件 DSL：Workspace v1、Dashboard v2、Presentation v1、Source v1、Dataset/Interactive Transform v1。
 - 浏览器协议：`dataviz/runtime/v2`。
 - Component Registry：当前 `3.0.0`。
@@ -37,7 +37,7 @@ Component Registry 只在公开组件契约变化时升级；单个 Package 可�
 
 1. Python 3.11、3.12、3.13、3.14 运行 unit/contract tests。
 2. Chromium、Firefox、WebKit 运行真实 Runtime 测试，包括 Query/Interaction isolation、三 Runtime、Overlay、Selection、Renderer 和 HTML Export。
-3. `dataviz components --check` 通过。
+3. `dataviz components --check` 的 Package 元数据/资产/测试声明检查通过；组件行为由前两项 pytest 与浏览器 E2E 执行。
 4. 四个代表性 Workspace 通过 `validate`，并至少执行一个 Query/Report smoke。
 5. wheel、sdist 和 pip-installable ZIP 分别进入干净 venv，运行 `version`、`schemas`、`components --check`、`init`、`validate` 和 `report`。
 6. 文档只描述当前代码；计划能力必须留在 `plan.md`。
@@ -55,13 +55,13 @@ python scripts/build_release_zip.py --output-dir /tmp/dataviz-release
 
 建议把产物写入临时目录先做安装 smoke，确认后再生成正式 `dist/`。
 
-发行 ZIP 使用固定时间戳和排序，并生成 `.zip.sha256`。wheel、sdist 和 ZIP 不得包含：
+发行 ZIP 使用固定时间戳和排序，完整构建并校验 CRC/文件清单后，才以可回滚事务发布 ZIP 与 `.zip.sha256`。wheel、sdist 和 ZIP 不得包含：
 
 - `.venv/`
 - `build/`
 - `__pycache__/`、pytest/工具缓存
 - Workspace `.dataviz/` Run/Cache
-- `adapters.local.yaml`、环境变量或其他凭证
+- `auth/adapters.local.yaml`、环境变量或其他凭证
 
 ## 版本号
 

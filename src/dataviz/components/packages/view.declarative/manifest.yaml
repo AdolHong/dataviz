@@ -2,8 +2,11 @@ schema: dataviz/component-package/v1
 package: view.declarative
 version: 1.0.0
 category: view
-purpose: Declarative View descriptors and Renderer adapters supplied by the Canvas Runtime.
-dependencies: [runtime.overlay]
+purpose: Declarative View descriptors, Renderer adapters and lifecycle state boundaries.
+implementation:
+  mode: package
+  sources: []
+dependencies: [data.pipeline, runtime.overlay]
 components:
   - {id: view.metric, purpose: Single scalar or aggregated KPI, status: stable}
   - {id: view.line, purpose: Trend or ordered series, status: stable}
@@ -19,4 +22,5 @@ components:
   - {id: view.image, purpose: Image or generated visual, status: stable}
   - {id: view.custom, purpose: Registered custom Renderer host, status: stable}
   - {id: view.echarts-category, purpose: ECharts category legend interaction contract, status: stable}
+  - {id: view.state, purpose: Semantic View lifecycle states and scoped failure boundaries, status: stable}
 runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

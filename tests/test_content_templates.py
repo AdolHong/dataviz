@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import shutil
 
+import pytest
 import yaml
 
 from dataviz.content_templates import (
@@ -24,6 +25,12 @@ from dataviz.workspace.models import (
 
 ROOT = Path(__file__).resolve().parents[1]
 MINIMAL = ROOT / "examples" / "minimal-workspace"
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _isolate_repository_workspaces(isolated_workspace):
+    global MINIMAL
+    MINIMAL = isolated_workspace(MINIMAL)
 
 
 def test_parameter_content_templates_format_human_facing_values():
@@ -90,6 +97,7 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
                     "title": "{{ selections.section.night_analysis.dow }}明细",
                     "description": "统计{{ selections.section.night_analysis.dow }}的数据",
                     "template": "table",
+                    "input": "source:hourly/main",
                 }
             ],
         }

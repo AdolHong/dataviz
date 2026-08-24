@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import tempfile
+import threading
 import uuid
 import zipfile
 from pathlib import Path
@@ -30,6 +31,7 @@ from dataviz.execution.interactive import (
     InteractionExecutor,
     resolve_compute_parameters,
 )
+from dataviz.execution.fingerprint import ensure_query_run_compatible
 from dataviz.execution.outputs import normalize_outputs
 from dataviz.execution.plan import reachable_output_references
 from dataviz.execution.references import parse_output_reference
@@ -82,13 +84,14 @@ class DashboardPlacementRequest(BaseModel):
 
 def create_app(workspace_path: str | Path) -> FastAPI:
     workspace = load_workspace(workspace_path)
+    workspace_root = workspace.root
     manager = RunManager(workspace)
-    renderer = CanvasRenderer(workspace)
-    navigation_editor = NavigationEditor(workspace.root)
+    navigation_editor = NavigationEditor(workspace_root)
     app = FastAPI(title=f"Dataviz · {workspace.definition.title}")
     app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
     app.state.workspace = workspace
     app.state.manager = manager
+    workspace_refresh_lock = threading.RLock()
     app.mount("/static", StaticFiles(directory=PACKAGE_ROOT / "static"), name="static")
 
     @app.middleware("http")
@@ -103,29 +106,25 @@ def create_app(workspace_path: str | Path) -> FastAPI:
             response.headers["Cache-Control"] = "no-store"
         return response
 
-    def refresh_workspace() -> None:
-        """Rebuild the in-memory catalog from the filesystem source of truth."""
-        fresh = load_workspace(workspace.root)
-        workspace.definition_path = fresh.definition_path
-        workspace.definition = fresh.definition
-        workspace.dashboards = fresh.dashboards
-        workspace.catalog = fresh.catalog
-        workspace.load_diagnostics = fresh.load_diagnostics
-        workspace.navigation = fresh.navigation
-        workspace.trash = fresh.trash
-        workspace.readme = fresh.readme
+    def current_workspace():
+        """Return one complete Workspace snapshot, never a partially refreshed object."""
+        with workspace_refresh_lock:
+            return workspace
+
+    def refresh_workspace():
+        """Atomically publish a freshly loaded filesystem snapshot."""
+        nonlocal workspace
+        with workspace_refresh_lock:
+            fresh = load_workspace(workspace_root)
+            workspace = fresh
+            app.state.workspace = fresh
+            manager.install_workspace_snapshot(fresh)
+            return fresh
 
     def dashboard_from_disk(dashboard_id: str):
-        """Resolve a dashboard, rescanning after an external rename/delete."""
-        try:
-            dashboard = workspace.dashboard(dashboard_id)
-        except WorkspaceError:
-            refresh_workspace()
-            return workspace.dashboard(dashboard_id)
-        if dashboard.definition_path.is_file():
-            return dashboard
-        refresh_workspace()
-        return workspace.dashboard(dashboard_id)
+        """Resolve the latest on-disk Dashboard definition for development."""
+        snapshot = refresh_workspace()
+        return snapshot, snapshot.dashboard(dashboard_id)
 
     def checked_session(value: str) -> str:
         if not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", value or ""):
@@ -148,11 +147,9 @@ def create_app(workspace_path: str | Path) -> FastAPI:
     def artifact_file_response(
         run_id: str, artifact: ArtifactDescriptor
     ) -> FileResponse:
-        path = ArtifactStore(workspace.root, run_id).resolve(artifact)
-        if path is None:
-            raise HTTPException(404, "Artifact file not found")
+        path = ArtifactStore(workspace_root, run_id).resolve(artifact)
         try:
-            path.relative_to(workspace.root.resolve())
+            path.relative_to(workspace_root)
         except ValueError as error:
             raise HTTPException(404, "Artifact file not found") from error
         if not path.is_file():
@@ -176,10 +173,13 @@ def create_app(workspace_path: str | Path) -> FastAPI:
 
     @app.get("/runtime/pyodide/{asset_path:path}")
     def pyodide_runtime_asset(asset_path: str):
-        configured = workspace.definition.runtime.pyodide_bundle_path
+        snapshot = current_workspace()
+        configured = snapshot.definition.runtime.pyodide_bundle_path
         if not configured:
             raise HTTPException(404, "Workspace has no bundled Pyodide Runtime")
-        root = (workspace.root / configured).resolve()
+        root = (workspace_root / configured).resolve()
+        if not root.is_relative_to(workspace_root):
+            raise HTTPException(404, "Pyodide bundle is outside the Workspace")
         target = (root / asset_path).resolve()
         try:
             target.relative_to(root)
@@ -228,10 +228,10 @@ def create_app(workspace_path: str | Path) -> FastAPI:
         # Dashboard directory names are the navigation labels. Users and AI may
         # copy, rename or remove them without going through this server, so the
         # filesystem must be rescanned before publishing the tree.
-        refresh_workspace()
-        diagnostics = [item.as_dict() for item in validate_workspace(workspace)]
+        snapshot = refresh_workspace()
+        diagnostics = [item.as_dict() for item in validate_workspace(snapshot)]
         dashboards = []
-        for entry in workspace.catalog:
+        for entry in snapshot.catalog:
             dashboard = entry.dashboard
             base = {
                 "id": entry.id,
@@ -317,7 +317,7 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                     "presentation": {
                         "active": dashboard.presentation is not None,
                         "file": (
-                            str(dashboard.presentation_path.relative_to(workspace.root))
+                            str(dashboard.presentation_path.relative_to(workspace_root))
                             if dashboard.presentation_path
                             else None
                         ),
@@ -383,14 +383,9 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                 }
             )
         return {
-            "workspace": workspace.definition.model_dump(mode="json", by_alias=True),
-            "capabilities": {
-                "navigation_management": True,
-                "physical_navigation": True,
-                "dashboard_path_separator": "##",
-            },
-            "folders": _folder_summary(workspace.navigation),
-            "trash": [item.model_dump(mode="json") for item in workspace.trash],
+            "workspace": snapshot.definition.model_dump(mode="json", by_alias=True),
+            "folders": _folder_summary(snapshot.navigation),
+            "trash": [item.model_dump(mode="json") for item in snapshot.trash],
             "dashboards": dashboards,
             "diagnostics": diagnostics,
         }
@@ -428,7 +423,7 @@ def create_app(workspace_path: str | Path) -> FastAPI:
     @app.patch("/api/navigation/dashboards/{dashboard_id}")
     def place_navigation_dashboard(dashboard_id: str, request: DashboardPlacementRequest):
         try:
-            entry = workspace.catalog_entry(dashboard_id)
+            entry = refresh_workspace().catalog_entry(dashboard_id)
         except WorkspaceError as error:
             raise HTTPException(404, error.message) from error
         return apply_navigation_change(lambda: navigation_editor.place_dashboard(entry, request.parent_id))
@@ -436,7 +431,7 @@ def create_app(workspace_path: str | Path) -> FastAPI:
     @app.delete("/api/navigation/dashboards/{dashboard_id}")
     def trash_navigation_dashboard(dashboard_id: str):
         try:
-            entry = workspace.catalog_entry(dashboard_id)
+            entry = refresh_workspace().catalog_entry(dashboard_id)
         except WorkspaceError as error:
             raise HTTPException(404, error.message) from error
         return apply_navigation_change(
@@ -450,15 +445,19 @@ def create_app(workspace_path: str | Path) -> FastAPI:
     @app.post("/api/dashboards/{dashboard_id}/runs")
     def start_run(dashboard_id: str, request: RunRequest):
         try:
-            dashboard_from_disk(dashboard_id)
+            snapshot, _ = dashboard_from_disk(dashboard_id)
         except WorkspaceError as error:
             raise HTTPException(409, error.message) from error
-        record = manager.start(
-            dashboard_id,
-            request.query_parameters,
-            session_id=checked_session(request.session_id),
-            refresh=request.refresh,
-        )
+        try:
+            record = manager.start(
+                dashboard_id,
+                request.query_parameters,
+                session_id=checked_session(request.session_id),
+                refresh=request.refresh,
+                _workspace=snapshot,
+            )
+        except DatavizError as error:
+            raise HTTPException(422, error.as_dict()) from error
         return {"run_id": record.run_id, "status": record.status}
 
     @app.get("/api/runs/{run_id}")
@@ -470,6 +469,7 @@ def create_app(workspace_path: str | Path) -> FastAPI:
             "run_id": run_id,
             "dashboard_id": record.dashboard_id,
             "status": record.status,
+            "server_interactive_inputs": record.server_interactive_inputs,
             "snapshot": record.snapshot.model_dump(mode="json", by_alias=True) if record.snapshot else None,
             "result": record.result.model_dump(mode="json", by_alias=True) if record.result else None,
             "error": record.error,
@@ -493,6 +493,7 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                     "run_id": record.run_id,
                     "dashboard_id": record.dashboard_id,
                     "status": record.status,
+                    "server_interactive_inputs": record.server_interactive_inputs,
                     "query_parameters": (
                         record.snapshot.query_parameters
                         if record.snapshot
@@ -538,6 +539,7 @@ def create_app(workspace_path: str | Path) -> FastAPI:
     @app.post("/api/runs/{run_id}/interactions")
     def start_interaction(run_id: str, request: InteractionRequest):
         session_id = checked_session(request.session_id)
+        snapshot = refresh_workspace()
         try:
             record = manager.start_interaction(
                 run_id,
@@ -547,6 +549,7 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                 compute_parameters=request.compute_parameters,
                 selections=request.selections,
                 refresh=request.refresh,
+                _workspace=snapshot,
             )
         except ValueError as error:
             raise HTTPException(409, str(error)) from error
@@ -589,13 +592,19 @@ def create_app(workspace_path: str | Path) -> FastAPI:
 
     @app.delete("/api/interactions/{interaction_id}")
     def cancel_interaction(interaction_id: str, session_id: str):
-        record = manager.get_interaction(
+        record = manager.cancel_interaction(
             interaction_id, checked_session(session_id)
         )
         if not record:
             raise HTTPException(404, "Interaction not found")
-        record.cancel_event.set()
-        return {"interaction_id": interaction_id, "status": "cancelled"}
+        return {
+            "interaction_id": interaction_id,
+            "status": (
+                "cancelling"
+                if record.status in {"queued", "loading"}
+                else record.status
+            ),
+        }
 
     @app.get("/api/interactions/{interaction_id}/artifacts/{artifact_id}")
     def get_interaction_artifact(
@@ -630,8 +639,8 @@ def create_app(workspace_path: str | Path) -> FastAPI:
         artifact = record.result.outputs.get(canonical)
         if artifact is None:
             raise HTTPException(404, "Interactive Output is not ready")
-        store = ArtifactStore(workspace.root, record.run_id)
-        runtime = workspace.definition.runtime
+        store = ArtifactStore(workspace_root, record.run_id)
+        runtime = current_workspace().definition.runtime
         if artifact.kind == "table":
             row_count = int(artifact.metadata.get("row_count", 0))
             if row_count > runtime.max_embedded_rows:
@@ -728,8 +737,8 @@ def create_app(workspace_path: str | Path) -> FastAPI:
         artifact = snapshot.outputs.get(canonical)
         if artifact is None:
             raise HTTPException(404, "Output is not ready")
-        store = ArtifactStore(workspace.root, run_id)
-        runtime = workspace.definition.runtime
+        store = ArtifactStore(workspace_root, run_id)
+        runtime = current_workspace().definition.runtime
         if artifact.kind == "table":
             row_count = int(artifact.metadata.get("row_count", 0))
             if row_count > runtime.max_embedded_rows:
@@ -818,12 +827,17 @@ def create_app(workspace_path: str | Path) -> FastAPI:
         return record.result if record and record.result else None
 
     @app.get("/api/dashboards/{dashboard_id}/canvas", response_class=HTMLResponse)
-    def dashboard_canvas(dashboard_id: str, session_id: str, run_id: str | None = None):
+    def dashboard_canvas(
+        dashboard_id: str,
+        session_id: str,
+        run_id: str | None = None,
+        frame_id: str | None = None,
+    ):
         try:
-            dashboard = dashboard_from_disk(dashboard_id)
+            snapshot, dashboard = dashboard_from_disk(dashboard_id)
         except WorkspaceError:
             try:
-                entry = workspace.catalog_entry(dashboard_id)
+                entry = current_workspace().catalog_entry(dashboard_id)
             except WorkspaceError as error:
                 raise HTTPException(404, error.message) from error
             title = _escape_html(entry.canvas_name)
@@ -834,7 +848,7 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                 f"<p style='font:12px monospace;color:#d95f35'>{entry.status.upper()}</p>"
                 f"<h1>{title}</h1><p>{message}</p><code>{path}</code>"
                 "<p style='margin-top:28px;color:#68716c'>其他看板仍可正常使用。修复该看板目录后刷新页面即可。</p>"
-                "<script>['pointerdown','click'].forEach(type=>document.addEventListener(type,()=>parent.postMessage({type:'dataviz:canvas-interaction'},location.origin),true))</script>"
+                f"{_canvas_interaction_bridge(dashboard_id, run_id, frame_id)}"
                 "</body></html>"
             )
         checked = checked_session(session_id)
@@ -843,7 +857,15 @@ def create_app(workspace_path: str | Path) -> FastAPI:
             raise HTTPException(404, "Run not found in this browser-tab session")
         if record and record.dashboard_id != dashboard_id:
             raise HTTPException(409, "Run belongs to another dashboard")
-        result = record.snapshot if record else None
+        if record:
+            with record.condition:
+                result = record.snapshot
+                query_snapshot_available = bool(record.snapshot or record.result)
+                query_complete = record.result is not None
+        else:
+            result = None
+            query_snapshot_available = False
+            query_complete = False
         if not result and not record:
             try:
                 waiting_content = interpolate_dashboard_content(
@@ -858,19 +880,23 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                 "<html><body style='font-family:serif;padding:48px;background:#f3f0e7;color:#17211d'>"
                 "<p style='font:12px monospace;color:#e2592a'>CANVAS WAITING</p>"
                 f"<h1>{_escape_html(waiting_title)}</h1><p>设置参数并运行后，结果将在这里出现。</p>"
-                "<script>['pointerdown','click'].forEach(type=>document.addEventListener(type,()=>parent.postMessage({type:'dataviz:canvas-interaction'},location.origin),true))</script>"
+                f"{_canvas_interaction_bridge(dashboard_id, run_id, frame_id)}"
                 "</body></html>"
             )
         if result is None:
             result = RunResult(
                 run_id=record.run_id,
                 status="loading",
-                workspace=workspace.definition.id,
+                workspace=snapshot.definition.id,
                 dashboard=dashboard_id,
+                query_scope=record.query_scope,
+                query_targets=list(record.query_targets),
+                query_nodes=list(record.query_nodes),
+                query_contract_hash=record.query_contract_hash,
                 query_parameters=record.requested_parameters,
             )
         live = None
-        if record and record.result is None:
+        if record and not query_complete:
             live = {
                 "run_id": record.run_id,
                 "session_id": checked,
@@ -884,20 +910,37 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                 "start_url": f"/api/runs/{record.run_id}/interactions",
                 "status_url": "/api/interactions/{interaction_id}",
                 "outputs_url": "/api/interactions/{interaction_id}/outputs",
+                "query_snapshot_available": query_snapshot_available,
+                "query_complete": query_complete,
             }
-            if record and record.result is not None
+            if record
             else None
         )
-        return HTMLResponse(
-            renderer.render(
+        try:
+            content = CanvasRenderer(snapshot).render(
                 dashboard,
                 result,
                 asset_mode="server",
                 live=live,
                 interaction=interaction,
                 session_id=checked,
+                frame_id=frame_id,
             )
-        )
+        except DatavizError as error:
+            payload = error.as_dict()
+            if payload.get("code") != "query_run_contract_changed":
+                raise HTTPException(422, payload) from error
+            return HTMLResponse(
+                _canvas_contract_changed_page(
+                    dashboard.canvas_name,
+                    payload.get("message", str(error)),
+                    dashboard_id,
+                    run_id,
+                    frame_id,
+                ),
+                status_code=409,
+            )
+        return HTMLResponse(content)
 
     @app.post("/api/dashboards/{dashboard_id}/report")
     def download_report(
@@ -905,13 +948,17 @@ def create_app(workspace_path: str | Path) -> FastAPI:
         request: ReportRequest,
     ):
         try:
-            dashboard = dashboard_from_disk(dashboard_id)
+            snapshot, dashboard = dashboard_from_disk(dashboard_id)
         except WorkspaceError as error:
             raise HTTPException(404, error.message) from error
         checked = checked_session(request.session_id)
         result = resolve_result(dashboard_id, request.run_id, checked)
         if not result:
             raise HTTPException(409, "Dashboard has no completed run")
+        try:
+            ensure_query_run_compatible(dashboard, result)
+        except DatavizError as error:
+            raise HTTPException(409, error.as_dict()) from error
         try:
             resolved_selections, _ = resolve_selection_values(
                 dashboard.definition, request.selections
@@ -931,9 +978,10 @@ def create_app(workspace_path: str | Path) -> FastAPI:
             == "snapshot"
         }
         interaction_executor = InteractionExecutor(
-            workspace,
-            cache=manager.executor_for(checked).cache,
+            snapshot,
+            cache=manager.executor_for(checked, workspace=snapshot).cache,
         )
+        renderer = CanvasRenderer(snapshot)
         for transform_id in interactive_ids:
             transform = dashboard.interactive_transforms[transform_id][1]
             if transform.runtime != "server-python" or transform.export.mode != "snapshot":
@@ -985,17 +1033,17 @@ def create_app(workspace_path: str | Path) -> FastAPI:
             default=str,
             separators=(",", ":"),
         ).encode("utf-8")
-        if len(encoded_snapshots) > workspace.definition.runtime.max_embedded_bytes:
+        if len(encoded_snapshots) > snapshot.definition.runtime.max_embedded_bytes:
             raise HTTPException(
                 413,
                 {
                     "code": "snapshot_payload_too_large",
                     "message": "Browser snapshot exceeds the configured report byte limit",
                     "bytes": len(encoded_snapshots),
-                    "limit": workspace.definition.runtime.max_embedded_bytes,
+                    "limit": snapshot.definition.runtime.max_embedded_bytes,
                 },
             )
-        snapshot_store = ArtifactStore(workspace.root, result.run_id)
+        snapshot_store = ArtifactStore(workspace_root, result.run_id)
         snapshot_nonce = uuid.uuid4().hex[:12]
         for transform_id in sorted(browser_snapshot_ids):
             definition = dashboard.interactive_transforms[transform_id][1]
@@ -1042,7 +1090,7 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                 if (
                     descriptor.kind == "table"
                     and int(descriptor.metadata.get("row_count", 0))
-                    > workspace.definition.runtime.max_embedded_rows
+                    > snapshot.definition.runtime.max_embedded_rows
                 ):
                     raise HTTPException(
                         413,
@@ -1055,21 +1103,27 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                 derived_outputs[f"interactive:{transform_id}/{name}"] = descriptor
         if renderer._browser_python_export_assets(dashboard) == "bundle":
             temporary = Path(tempfile.mkdtemp(prefix="dataviz-report-"))
-            report_name = f"{dashboard_id}-{result.run_id}.html"
-            report_path = renderer.write_report(
-                dashboard,
-                result,
-                temporary / report_name,
-                compute_parameters=resolved_compute,
-                selections=resolved_selections,
-                derived_outputs=derived_outputs,
-                snapshot_interactions=snapshot_interactions,
-            )
-            archive = temporary / f"{dashboard_id}-{result.run_id}.zip"
-            with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
-                for path in sorted(temporary.rglob("*")):
-                    if path.is_file() and path != archive:
-                        bundle.write(path, path.relative_to(temporary))
+            try:
+                report_name = f"{dashboard_id}-{result.run_id}.html"
+                renderer.write_report(
+                    dashboard,
+                    result,
+                    temporary / report_name,
+                    compute_parameters=resolved_compute,
+                    selections=resolved_selections,
+                    derived_outputs=derived_outputs,
+                    snapshot_interactions=snapshot_interactions,
+                )
+                archive = temporary / f"{dashboard_id}-{result.run_id}.zip"
+                with zipfile.ZipFile(
+                    archive, "w", compression=zipfile.ZIP_DEFLATED
+                ) as bundle:
+                    for path in sorted(temporary.rglob("*")):
+                        if path.is_file() and path != archive:
+                            bundle.write(path, path.relative_to(temporary))
+            except BaseException:
+                shutil.rmtree(temporary, ignore_errors=True)
+                raise
             return FileResponse(
                 archive,
                 media_type="application/zip",
@@ -1095,6 +1149,45 @@ def _escape_html(value: str) -> str:
     import html
 
     return html.escape(value, quote=True)
+
+
+def _canvas_interaction_bridge(
+    dashboard_id: str,
+    run_id: str | None,
+    frame_id: str | None,
+) -> str:
+    identity = json.dumps(
+        {
+            "dashboard_id": dashboard_id,
+            "run_id": run_id,
+            "frame_id": frame_id,
+        },
+        ensure_ascii=False,
+    ).replace("</", "<\\/")
+    return (
+        "<script>const datavizFrameIdentity="
+        f"{identity};"
+        "['pointerdown','click'].forEach(type=>document.addEventListener(type,()=>"
+        "parent.postMessage({type:'dataviz:canvas-interaction',...datavizFrameIdentity},"
+        "location.origin),true))</script>"
+    )
+
+
+def _canvas_contract_changed_page(
+    canvas_name: str,
+    message: str,
+    dashboard_id: str,
+    run_id: str | None,
+    frame_id: str | None,
+) -> str:
+    return (
+        "<html><body style='font-family:system-ui;padding:56px;background:#f3f0e7;color:#17211d'>"
+        "<p style='font:12px monospace;color:#d95f35'>QUERY RUN OUTDATED</p>"
+        f"<h1>{_escape_html(canvas_name)}</h1><p>{_escape_html(message)}</p>"
+        "<p>看板的数据逻辑已改变。请点击 Run query 生成与当前定义一致的新数据。</p>"
+        f"{_canvas_interaction_bridge(dashboard_id, run_id, frame_id)}"
+        "</body></html>"
+    )
 
 
 def _folder_summary(

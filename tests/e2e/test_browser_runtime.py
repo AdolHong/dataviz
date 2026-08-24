@@ -94,6 +94,104 @@ def _copy_workspace(source: Path, destination: Path) -> Path:
     return destination
 
 
+def _build_scale_workspace(root: Path, *, rows: int = 150_000) -> Path:
+    dashboard = root / "dashboards" / "scale"
+    transforms = dashboard / "transforms"
+    sources = dashboard / "sources"
+    auth = root / "auth"
+    transforms.mkdir(parents=True)
+    sources.mkdir()
+    auth.mkdir()
+    (root / "workspace.yaml").write_text(
+        """schema: dataviz/workspace/v1
+kind: workspace
+id: scale-runtime
+title: Scale Runtime
+folders: []
+runtime:
+  browser_table_transport: arrow
+  arrow_min_rows: 1
+  max_embedded_rows: 200000
+  max_embedded_bytes: 50000000
+""",
+        encoding="utf-8",
+    )
+    (auth / "adapters.yaml").write_text(
+        """adapters:
+  warehouse:
+    type: duckdb
+    database: ':memory:'
+""",
+        encoding="utf-8",
+    )
+    (dashboard / "dashboard.yaml").write_text(
+        """schema: dataviz/dashboard/v2
+kind: dashboard
+id: scale
+title: Scale Runtime
+adapters: {warehouse: warehouse}
+sources:
+  - id: rows
+    type: sql
+    adapter: warehouse
+    code: sources/rows.sql
+    outputs: {main: {kind: table}}
+interactive_transforms:
+  - transforms/peak.yaml
+views:
+  - id: source-maximum
+    title: Source maximum
+    input: source:rows/main
+    template: metric
+    value: value
+    aggregate: max
+  - id: worker-maximum
+    title: Worker maximum
+    input: interactive:peak/main
+    template: metric
+    value: peak
+    aggregate: max
+sections:
+  - id: results
+    title: Scale results
+    views: [source-maximum, worker-maximum]
+""",
+        encoding="utf-8",
+    )
+    (sources / "rows.sql").write_text(
+        f"select i % 10 as bucket, i as value from range(1, {rows + 1}) as data(i)\n",
+        encoding="utf-8",
+    )
+    (transforms / "peak.yaml").write_text(
+        """schema: dataviz/interactive-transform/v1
+kind: interactive_transform
+id: peak
+runtime: browser-js
+code: peak.js
+inputs: {rows: source:rows/main}
+trigger: auto
+debounce_ms: 0
+export: {mode: interactive}
+outputs:
+  main:
+    kind: table
+    schema: [{name: bucket}, {name: peak}]
+timeout_seconds: 10
+""",
+        encoding="utf-8",
+    )
+    (transforms / "peak.js").write_text(
+        """function transform(context) {
+  return {main: context.table('rows').groupBy('bucket').aggregate({
+    peak: {field: 'value', op: 'max'},
+  }).rows()};
+}
+""",
+        encoding="utf-8",
+    )
+    return root
+
+
 @contextmanager
 def _running_static_server(directory: Path):
     class QuietHandler(SimpleHTTPRequestHandler):
@@ -116,7 +214,7 @@ def _running_static_server(directory: Path):
 
 def _build_interactive_runtime_workspace(root: Path) -> Path:
     dashboard = root / "dashboards" / "runtime-matrix"
-    (dashboard / "data").mkdir(parents=True)
+    (dashboard / "sources").mkdir(parents=True)
     (dashboard / "transforms").mkdir()
     (root / "pyodide").mkdir()
     (root / "workspace.yaml").write_text(
@@ -137,25 +235,84 @@ id: runtime-matrix
 title: Interactive Runtime Matrix
 compute_parameters:
   - {id: factor, label: Factor, type: number, default: 2}
+dashboard_selections:
+  - id: name
+    field: name
+    type: multi_select
+    default: [alpha, beta]
+    choices:
+      - {label: Alpha, value: alpha}
+      - {label: Beta, value: beta}
 sources:
   - id: raw
-    type: file
-    path: data/rows.csv
-    format: csv
+    type: python
+    code: sources/raw.py
+    timeout_seconds: 10
     outputs: {main: {kind: table}}
+    cache: {mode: none}
+  - id: unrelated-slow
+    type: python
+    code: sources/slow.py
+    timeout_seconds: 30
+    outputs: {main: {kind: table}}
+    cache: {mode: none}
+  - id: unrelated-pulse
+    type: python
+    code: sources/pulse.py
+    timeout_seconds: 10
+    outputs: {main: {kind: table}}
+    cache: {mode: none}
 interactive_transforms:
   - transforms/server.yaml
   - transforms/browser.yaml
 views:
   - {id: server-table, title: Server Python, template: table, input: interactive:server/main}
   - {id: browser-table, title: Browser Python, template: table, input: interactive:browser/main}
+  - {id: slow-table, title: Unrelated slow branch, template: table, input: source:unrelated-slow/main}
+  - {id: pulse-table, title: Unrelated pulse branch, template: table, input: source:unrelated-pulse/main}
 sections:
   - {id: results, title: Runtime results, template: split, views: [server-table, browser-table]}
+  - {id: slow-result, title: Slow result, template: split, views: [slow-table, pulse-table]}
 """,
         encoding="utf-8",
     )
-    (dashboard / "data" / "rows.csv").write_text(
-        "name,value\nalpha,1\nbeta,2\n", encoding="utf-8"
+    (dashboard / "sources" / "raw.py").write_text(
+        """import time
+
+
+def load(context):
+    time.sleep(0.2)
+    return [{"name": "alpha", "value": 1}, {"name": "beta", "value": 2}]
+""",
+        encoding="utf-8",
+    )
+    (dashboard / "sources" / "slow.py").write_text(
+        """import time
+
+
+def load(context):
+    # The test releases this unrelated branch only after both fast Interactive
+    # branches are visible. A filesystem gate proves progressive publication
+    # deterministically across browsers without relying on arbitrary sleeps.
+    release = context.dashboard_root / "release-slow"
+    deadline = time.monotonic() + 25
+    while not release.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return [{"branch": "unrelated", "value": 1}]
+""",
+        encoding="utf-8",
+    )
+    (dashboard / "sources" / "pulse.py").write_text(
+        """import time
+
+
+def load(context):
+    # Publish while the Browser Interactive branch is active. This unrelated
+    # Output must not cancel or restart that computation.
+    time.sleep(0.45)
+    return [{"branch": "pulse", "value": 1}]
+""",
+        encoding="utf-8",
     )
     (dashboard / "transforms" / "server.yaml").write_text(
         """schema: dataviz/interactive-transform/v1
@@ -237,6 +394,7 @@ cache: {mode: none}
     async loadPackage() {},
     async runPythonAsync(source) {
       if (!source.includes('await _dataviz_execute')) return undefined;
+      await new Promise(resolve => setTimeout(resolve, 700));
       const payload = JSON.parse(values.get('__dv_payload'));
       const input = payload.inputs.rows;
       const rows = input?.__datavizColumnarTable
@@ -254,6 +412,10 @@ cache: {mode: none}
     )
     for name in ("pyodide.asm.mjs", "pyodide.asm.wasm", "python_stdlib.zip"):
         (root / "pyodide" / name).write_bytes(b"offline contract fixture")
+    (root / "pyodide" / "package.json").write_text(
+        json.dumps({"name": "pyodide", "version": "314.0.4"}),
+        encoding="utf-8",
+    )
     (root / "pyodide" / "pyodide-lock.json").write_text(
         json.dumps({"info": {"python": "3.14.0"}, "packages": {}}),
         encoding="utf-8",
@@ -366,6 +528,62 @@ def test_committed_parameter_content_and_stale_selection_export(
         download.save_as(report_path)
         report = report_path.read_text(encoding="utf-8")
         assert '<p class="dv-subtitle">当前取数下限：150000</p>' in report
+
+
+@pytest.mark.e2e
+def test_canvas_messages_are_bound_to_the_current_frame_instance(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(MINIMAL, tmp_path / "frame-message-workspace")
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        expect(frame.locator(".dv-canvas")).to_be_visible(timeout=20_000)
+
+        # A same-origin sibling iframe must not be able to mutate the active
+        # Dashboard state, even when it copies the visible frame identity.
+        page.evaluate(
+            """async () => {
+              const active = document.querySelector('#canvas-frame');
+              const rogue = document.createElement('iframe');
+              rogue.hidden = true;
+              rogue.src = '/';
+              document.body.append(rogue);
+              await new Promise(resolve => rogue.addEventListener('load', resolve, {once:true}));
+              const payload = {
+                type:'dataviz:selections-changed',
+                dashboard_id:active.dataset.dashboardId,
+                run_id:active.dataset.runId,
+                frame_id:active.dataset.frameId,
+                selections:{'view:rogue/value':['wrong-source']},
+              };
+              rogue.contentWindow.eval(`parent.postMessage(${JSON.stringify(payload)}, location.origin)`);
+            }"""
+        )
+
+        # A late message from the current WindowProxy but an older frame token
+        # is rejected as well.
+        frame.locator("body").evaluate(
+            """() => parent.postMessage({
+              type:'dataviz:selections-changed',
+              dashboard_id:window.dataviz.dashboard_id,
+              run_id:window.dataviz.run_id,
+              frame_id:'frame_stale',
+              selections:{'view:rogue/value':['wrong-generation']},
+            }, location.origin)"""
+        )
+        page.wait_for_timeout(150)
+        rogue_value = page.evaluate(
+            """() => {
+              const sessionId = sessionStorage.getItem('dataviz.tab-session.v2');
+              const saved = JSON.parse(
+                sessionStorage.getItem(`dataviz.tab-ui.v2.${sessionId}`)
+              );
+              return saved.dashboards['sales-overview'].canvasSelections?.['view:rogue/value'];
+            }"""
+        )
+        assert rogue_value is None
 
 
 @pytest.mark.e2e
@@ -571,6 +789,24 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         detail = frame.locator('[data-view-id="detail-table"]')
         expect(detail).to_have_attribute("data-view-status", "ready", timeout=20_000)
 
+        owner_contract = frame.locator("body").evaluate(
+            """() => ({
+              runtime: window.datavizRuntime.protocol,
+              data: window.datavizRuntime.dataPipeline?.protocol,
+              view: window.datavizRuntime.viewAdapter?.protocol,
+              section: window.datavizRuntime.sectionAdapter?.protocol,
+              presentation: window.datavizRuntime.presentationAdapter?.protocol,
+              packages: [...(window.datavizComponents?.adapters?.keys() || [])],
+            })"""
+        )
+        assert {
+            owner_contract[key]
+            for key in ("runtime", "data", "view", "section", "presentation")
+        } == {"dataviz/runtime/v2"}
+        assert {
+            "data.pipeline", "view.declarative", "section.declarative", "presentation.shell"
+        } <= set(owner_contract["packages"])
+
         header = page.locator("#dashboard-selections-control")
         header.locator("summary").click()
         checkbox = header.locator('[data-selector-template="checkbox-group"]')
@@ -614,7 +850,30 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
 
         story_index = frame.locator(".gallery-story-index")
         expect(story_index).to_be_visible()
-        expect(story_index.locator("summary")).to_contain_text("23 runtime specimens")
+        expect(story_index.locator("summary")).to_contain_text("29 runtime specimens")
+
+        expected_states = {
+            "ready", "loading", "stale", "empty", "error", "cancelled", "unavailable"
+        }
+        for family in ("selector", "compute", "view", "section"):
+            matrix = frame.locator(f"#story-{family}-state-matrix")
+            expect(matrix).to_be_visible()
+            expect(matrix.locator(".gallery-state-card")).to_have_count(7)
+            observed = set(
+                matrix.locator(".gallery-state-card").evaluate_all(
+                    "cards => cards.map(card => card.dataset.componentStatus)"
+                )
+            )
+            assert observed == expected_states
+            expect(
+                matrix.locator('.gallery-state-card[data-gallery-status="loading"]')
+            ).to_have_attribute("aria-busy", "true")
+            expect(
+                matrix.locator('.gallery-state-card[data-gallery-status="error"]')
+            ).to_have_attribute("aria-invalid", "true")
+            expect(
+                matrix.locator('.gallery-state-card[data-gallery-status="unavailable"]')
+            ).to_have_attribute("aria-disabled", "true")
 
         selections = detail.locator('.dv-context-selections[data-selection-origin="view"]')
         selections.locator("summary").click()
@@ -650,9 +909,12 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         assert tree.locator("select").evaluate(
             "select => select.selectedOptions.length > 0"
         )
-        tree_summary = tree.locator(".dv-choice-summary__tag").all_text_contents()
-        assert tree_summary
-        assert all(" / " not in label for label in tree_summary)
+        tree_summary = tree.locator("[data-selector-summary]")
+        expect(tree_summary).to_have_text(re.compile(r"\S"))
+        # Selecting the only available parent is canonically "all available";
+        # otherwise checked_strategy=parent emits compact parent tags. Both
+        # summaries must avoid leaking full leaf paths into the trigger.
+        assert " / " not in tree_summary.inner_text()
         tree.locator("footer button", has_text="Clear").click()
         assert tree.locator("select").evaluate(
             "select => select.selectedOptions.length"
@@ -707,9 +969,9 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         assert cascader.locator("select").evaluate(
             "select => select.selectedOptions.length > 0"
         )
-        summary_labels = cascader.locator(".dv-choice-summary__tag").all_text_contents()
-        assert summary_labels
-        assert all(" / " not in label for label in summary_labels)
+        cascader_summary = cascader.locator("[data-selector-summary]")
+        expect(cascader_summary).to_have_text(re.compile(r"\S"))
+        assert " / " not in cascader_summary.inner_text()
         cascader.locator(".dv-choice-search").press("Escape")
 
         date_range = selections.locator('[data-selector-template="date-range"]')
@@ -737,32 +999,17 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         )
         expect(detail).not_to_contain_text("No rows match the current selections")
 
-        # Build a 1,000-option Story fixture against the public package API.
-        frame.locator("body").evaluate(
-            """() => {
-              const host = document.createElement('div');
-              host.id = 'virtual-contract-host';
-              host.className = 'dv-selector';
-              host.dataset.selectorTemplate = 'select';
-              host.dataset.searchMode = 'always';
-              host.dataset.virtualMode = 'always';
-              host.dataset.searchPlaceholder = 'Search 1000 options';
-              host.innerHTML = '<select id="virtual-contract" multiple data-selection-input="virtual">'
-                + Array.from({length:1000}, (_, index) => {
-                    const value = String(index + 1).padStart(4, '0');
-                    return `<option value="${value}">Item ${value}</option>`;
-                  }).join('')
-                + '</select><div data-selector-mount></div>';
-              document.body.append(host);
-              window.datavizComponents.hydrate(host);
-            }"""
-        )
-        virtual = frame.locator("#virtual-contract-host")
+        # The Gallery owns three real scale Stories. The 1,000-option Story uses
+        # a canonical native select while keeping the enhanced row DOM bounded.
+        expect(frame.locator("#story-selector-scale-10 select option")).to_have_count(10)
+        expect(frame.locator("#story-selector-scale-100 select option")).to_have_count(100)
+        expect(frame.locator("#story-selector-scale-1000 select option")).to_have_count(1000)
+        virtual = frame.locator("#story-selector-scale-1000 .dv-selector")
         virtual.locator("[data-selector-trigger]").click()
         expect(virtual.locator("[data-selector-panel]")).to_be_visible()
         rendered = virtual.locator(".dv-select-rows .dv-choice-option").count()
         assert 1 <= rendered < 40
-        virtual.locator(".dv-choice-search").fill("Item 1000")
+        virtual.locator(".dv-choice-search").fill("Store 1000")
         expect(virtual.locator(".dv-select-panel footer small")).to_contain_text("1 matching")
         assert virtual.locator(".dv-select-rows .dv-choice-option").count() == 1
         virtual.locator(".dv-choice-search").press("ArrowDown")
@@ -815,6 +1062,44 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
 
 
 @pytest.mark.e2e
+def test_server_header_hydrates_dataset_driven_dashboard_selection_options(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(MINIMAL, tmp_path / "dynamic-dashboard-selection")
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    definition["dashboard_selections"][0].pop("choices")
+    definition["dashboard_selections"][0]["default"] = ["华东"]
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        _run_and_wait(page)
+        header = page.locator("#dashboard-selections-control")
+        header.locator("summary").click()
+        selector = header.locator(
+            'select[name="dashboard:sales-overview/region"]'
+        )
+        expect(selector).to_have_attribute("data-value-encoding", "string")
+        expect(selector.locator("option")).to_have_count(3, timeout=20_000)
+        assert selector.evaluate(
+            "select => [...select.options].map(option => option.value).sort()"
+        ) == ["华东", "华北", "华南"]
+        assert selector.evaluate(
+            "select => [...select.selectedOptions].map(option => option.value)"
+        ) == ["华东"]
+
+        selector.select_option(["华南"], force=True)
+        frame = page.frame_locator("#canvas-frame")
+        expect(frame.locator('[data-view-id="total-revenue"]')).to_contain_text(
+            "449,000", timeout=10_000
+        )
+
+
+@pytest.mark.e2e
 def test_selection_cascade_popovers_view_isolation_and_table_wheel(
     page: Page, tmp_path: Path
 ):
@@ -851,7 +1136,7 @@ def test_selection_cascade_popovers_view_isolation_and_table_wheel(
         ) == ["福建"]
         province_action.click()
         expect(province_action).to_have_text("反选")
-        frame.locator("body").click(position={"x": 8, "y": 8})
+        frame.locator('[data-view-id="map-bars"] .dv-view-body').click()
         expect(header).not_to_have_attribute("open", "")
 
         section_popover = frame.locator(
@@ -1089,11 +1374,17 @@ def test_browser_js_interactive_worker_cancellation_timeout_and_serializable_err
         assert metrics["worker"]["completed"] >= 1
         assert metrics["leakedEntrypoint"] == "undefined"
 
-        delay = page.locator('input[name="dashboard:worker-runtime/delay_ms"]')
+        delay = page.locator('input[name="delay_ms"]')
         delay.evaluate(
-            "input => { input.value = '180'; input.dispatchEvent(new Event('change', {bubbles:true})); }"
+            "input => { input.value = '750'; input.dispatchEvent(new Event('change', {bubbles:true})); }"
         )
-        page.wait_for_timeout(100)
+        page.wait_for_function(
+            """() => {
+              const runtime = document.querySelector('#canvas-frame').contentWindow.datavizRuntime;
+              return runtime.activeTransforms.size === 1;
+            }""",
+            timeout=10_000,
+        )
         delay.evaluate(
             "input => { input.value = '1'; input.dispatchEvent(new Event('change', {bubbles:true})); }"
         )
@@ -1108,7 +1399,7 @@ def test_browser_js_interactive_worker_cancellation_timeout_and_serializable_err
         expect(table).to_have_attribute("data-view-status", "ready")
 
         delay.evaluate(
-            "input => { input.value = '500'; input.dispatchEvent(new Event('change', {bubbles:true})); }"
+            "input => { input.value = '1500'; input.dispatchEvent(new Event('change', {bubbles:true})); }"
         )
         expect(table).to_have_attribute("data-view-status", "error", timeout=10_000)
         error = frame.locator("body").evaluate(
@@ -1129,7 +1420,20 @@ def test_server_and_browser_python_share_output_contract_and_export_runtime(
     workspace = _build_interactive_runtime_workspace(tmp_path / "runtime-matrix")
     with _running_server(workspace) as base_url:
         _open_dashboard(page, base_url, "runtime-matrix")
-        _run_and_wait(page)
+        page.locator("#run-button").click()
+        page.wait_for_function(
+            """() => {
+              const frame = document.querySelector('#canvas-frame');
+              return frame?.dataset.runId
+                && frame.contentWindow?.datavizRuntime
+                && frame.contentWindow.dataviz.interaction
+                && document.querySelector('#query-diagnostics-label')?.textContent === 'Loading';
+            }""",
+            timeout=20_000,
+        )
+        progressive_frame_id = page.locator("#canvas-frame").get_attribute(
+            "data-frame-id"
+        )
         frame = page.frame_locator("#canvas-frame")
         server_table = frame.locator('[data-view-id="server-table"]')
         browser_table = frame.locator('[data-view-id="browser-table"]')
@@ -1137,14 +1441,48 @@ def test_server_and_browser_python_share_output_contract_and_export_runtime(
         expect(browser_table).to_have_attribute("data-view-status", "ready", timeout=20_000)
         expect(server_table).to_contain_text("104")
         expect(browser_table).to_contain_text("4")
+        assert frame.locator("body").evaluate(
+            """() => ({
+              started:window.datavizRuntime.metrics.interactiveTransforms.started,
+              completed:window.datavizRuntime.metrics.interactiveTransforms.completed,
+              cancelled:window.datavizRuntime.metrics.interactiveTransforms.cancelled,
+            })"""
+        ) == {"started": 1, "completed": 1, "cancelled": 0}
+        # The Server and Browser Interactive branches must publish before the
+        # unrelated slow Query branch completes.
+        expect(page.locator("#query-diagnostics-label")).to_have_text("Loading")
+        (workspace / "dashboards" / "runtime-matrix" / "release-slow").write_text(
+            "release\n", encoding="utf-8"
+        )
+        expect(page.locator("#query-diagnostics-label")).to_have_text(
+            "Ready", timeout=30_000
+        )
+        assert page.locator("#canvas-frame").get_attribute(
+            "data-frame-id"
+        ) == progressive_frame_id
         original_run = page.locator("#canvas-frame").get_attribute("data-run-id")
+
+        completed_before_selection = frame.locator("body").evaluate(
+            "() => window.datavizRuntime.metrics.interactiveTransforms.completed"
+        )
+        frame.locator("body").evaluate(
+            """async () => {
+              window.dataviz.selections['dashboard:runtime-matrix/name'] = ['alpha'];
+              await window.dataviz.applySelections();
+            }"""
+        )
+        expect(server_table).to_contain_text("alpha")
+        expect(server_table).not_to_contain_text("beta")
+        assert frame.locator("body").evaluate(
+            "() => window.datavizRuntime.metrics.interactiveTransforms.completed"
+        ) == completed_before_selection
 
         page.locator("#compute-parameters-control summary").click()
         factor = page.locator('#compute-parameter-form input[name="factor"]')
         factor.fill("3")
         factor.dispatch_event("change")
-        expect(server_table).to_contain_text("106", timeout=20_000)
-        expect(browser_table).to_contain_text("6", timeout=20_000)
+        expect(server_table).to_contain_text("103", timeout=20_000)
+        expect(browser_table).to_contain_text("3", timeout=20_000)
         assert page.locator("#canvas-frame").get_attribute("data-run-id") == original_run
         runtime_state = frame.locator("body").evaluate(
             """() => ({
@@ -1174,8 +1512,8 @@ def test_server_and_browser_python_share_output_contract_and_export_runtime(
         exported_browser = page.locator('[data-view-id="browser-table"]')
         expect(exported_server).to_have_attribute("data-view-status", "ready", timeout=20_000)
         expect(exported_browser).to_have_attribute("data-view-status", "ready", timeout=20_000)
-        expect(exported_server).to_contain_text("106")
-        expect(exported_browser).to_contain_text("6")
+        expect(exported_server).to_contain_text("103")
+        expect(exported_browser).to_contain_text("3")
         assert page.locator("body").evaluate(
             "() => window.datavizRuntime.metrics.interactiveTransforms.completed"
         ) >= 1
@@ -1277,3 +1615,95 @@ def test_progressive_failure_and_consecutive_run_are_isolated(
         assert first_run_id and second_run_id and first_run_id != second_run_id
         expect(slow).to_have_attribute("data-view-status", "ready", timeout=15_000)
         expect(slow).to_contain_text(re.compile("slow-second"))
+
+
+@pytest.mark.e2e
+def test_large_aggregations_do_not_cross_the_javascript_argument_limit(
+    page: Page, tmp_path: Path
+):
+    workspace = _build_scale_workspace(tmp_path / "scale")
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "scale")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        source = frame.locator('[data-view-id="source-maximum"]')
+        worker = frame.locator('[data-view-id="worker-maximum"]')
+        expect(source).to_have_attribute("data-view-status", "ready", timeout=30_000)
+        expect(worker).to_have_attribute("data-view-status", "ready", timeout=30_000)
+        expect(source).to_contain_text("150,000")
+        expect(worker).to_contain_text("150,000")
+
+        # Custom Canvas authors receive the same safe aggregation primitive.
+        custom_peak = frame.locator("body").evaluate(
+            """() => window.dataviz.data.frame(
+              Array.from({length:150000}, (_, index) => ({bucket:0, value:index + 1}))
+            ).groupBy('bucket').aggregate({
+              peak:{field:'value', op:'max'},
+            }).rows()[0].peak"""
+        )
+        assert custom_peak == 150_000
+        runtime_metrics = frame.locator("body").evaluate(
+            """() => ({
+              arrowRows:window.datavizRuntime.metrics.transports.arrowRows,
+              arrowBytes:window.datavizRuntime.metrics.transports.arrowBytes,
+              rendererFailures:window.datavizRuntime.metrics.renderers.failed,
+            })"""
+        )
+        assert runtime_metrics["arrowRows"] == 150_000
+        assert runtime_metrics["arrowBytes"] > 0
+        assert runtime_metrics["rendererFailures"] == 0
+
+        # A renderer with no descriptor is a terminal empty state, not an
+        # infinite "rendering" state.
+        frame.locator("body").evaluate(
+            "() => window.dataviz.renderView('source-maximum', () => null)"
+        )
+        expect(source).to_have_attribute("data-view-status", "empty")
+        expect(source).to_contain_text("No data")
+
+
+@pytest.mark.e2e
+def test_cancelled_query_branch_reaches_a_terminal_view_state(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(PROGRESSIVE, tmp_path / "cancelled-progressive")
+    slow_code = workspace / "dashboards" / "progressive" / "sources" / "slow.py"
+    slow_code.write_text(
+        "import time\n\ndef load(context):\n    time.sleep(10)\n    return [{'branch': 'late', 'value': 2}]\n",
+        encoding="utf-8",
+    )
+
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "progressive")
+        page.locator("#run-button").click()
+        frame = page.frame_locator("#canvas-frame")
+        fast = frame.locator('[data-view-id="fast-view"]')
+        slow = frame.locator('[data-view-id="slow-view"]')
+        expect(fast).to_have_attribute("data-view-status", "ready", timeout=15_000)
+        expect(slow).to_have_attribute("data-view-status", "loading")
+
+        cancelled_run_id = page.locator("#canvas-frame").get_attribute("data-run-id")
+        session_id = page.evaluate(
+            "() => sessionStorage.getItem('dataviz.tab-session.v2')"
+        )
+        assert cancelled_run_id and session_id
+        expect(page.locator("#run-button")).to_contain_text("Cancel query")
+        page.locator("#run-button").click()
+        expect(page.locator("#run-message")).to_contain_text(
+            "Query cancelled", timeout=20_000
+        )
+        # The shell restores the previously committed Dataset (none in this
+        # test). The cancelled Run remains independently inspectable and must
+        # render a terminal branch state instead of returning HTTP 500.
+        page.goto(
+            f"{base_url}/api/dashboards/progressive/canvas"
+            f"?session_id={session_id}&run_id={cancelled_run_id}",
+            wait_until="domcontentloaded",
+        )
+        cancelled_slow = page.locator('[data-view-id="slow-view"]')
+        cancelled_fast = page.locator('[data-view-id="fast-view"]')
+        expect(cancelled_slow).to_have_attribute(
+            "data-view-status", "cancelled", timeout=20_000
+        )
+        expect(cancelled_slow).to_contain_text("Computation cancelled")
+        expect(cancelled_fast).to_have_attribute("data-view-status", "ready")

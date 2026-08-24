@@ -2,7 +2,10 @@ schema: dataviz/component-package/v1
 package: data.pipeline
 version: 1.0.0
 category: data
-purpose: Named Output and transform contracts between data acquisition and presentation.
+purpose: Named Output, tabular data helpers and Interactive Runtime adapters.
+implementation:
+  mode: package
+  sources: []
 dependencies: []
 components:
   - {id: output.named, purpose: Stable typed addressable output from a Source or Transform, status: stable}
@@ -10,4 +13,5 @@ components:
   - {id: interactive-transform.browser-js, purpose: Interaction-stage JavaScript transformation producing Derived Outputs, status: stable}
   - {id: interactive-transform.browser-python, purpose: Interaction-stage Pyodide transformation producing portable Derived Outputs, status: stable}
   - {id: interactive-transform.server-python, purpose: Interaction-stage server Python computation against one immutable Query Run, status: stable}
+  - {id: compute.control, purpose: Draft and committed Compute Parameter state for Interactive Transforms, status: stable}
 runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

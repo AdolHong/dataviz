@@ -1,5 +1,24 @@
 const DATAVIZ_INTERACTIVE_WORKER_PROTOCOL = 'dataviz/interactive-worker/v1';
 
+const datavizNumericAggregate = (items, operation = 'sum', select = value => value) => {
+  let count = 0;
+  let sum = 0;
+  let minimum = Infinity;
+  let maximum = -Infinity;
+  for (const item of items) {
+    const value = Number(select(item) ?? 0);
+    count += 1;
+    sum += value;
+    if (value < minimum) minimum = value;
+    if (value > maximum) maximum = value;
+  }
+  if (operation === 'count') return count;
+  if (operation === 'mean') return sum / Math.max(count, 1);
+  if (operation === 'min') return minimum;
+  if (operation === 'max') return maximum;
+  return sum;
+};
+
 class DatavizFrame {
   constructor(rows = []) {
     this._rows = Array.isArray(rows) ? rows : null;
@@ -71,12 +90,11 @@ class DatavizGroupedFrame {
       const result = Object.fromEntries(this._fields.map((field, index) => [field, keys[index]]));
       Object.entries(spec).forEach(([output, rule]) => {
         const definition = typeof rule === 'string' ? {field:output, op:rule} : rule;
-        const numbers = values.map(row => Number(row[definition.field] ?? 0));
-        if (definition.op === 'count') result[output] = values.length;
-        else if (definition.op === 'mean') result[output] = numbers.reduce((a, b) => a + b, 0) / Math.max(numbers.length, 1);
-        else if (definition.op === 'min') result[output] = Math.min(...numbers);
-        else if (definition.op === 'max') result[output] = Math.max(...numbers);
-        else result[output] = numbers.reduce((a, b) => a + b, 0);
+        result[output] = datavizNumericAggregate(
+          values,
+          definition.op,
+          row => row[definition.field],
+        );
       });
       return result;
     }));

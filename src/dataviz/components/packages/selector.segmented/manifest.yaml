@@ -3,6 +3,7 @@ package: selector.segmented
 version: 1.0.0
 category: selector
 purpose: Visible single selection for a very small option set, with segmented and radio presentations.
+implementation: {mode: package, sources: []}
 dependencies: [runtime.selector]
 components:
   - id: selector.segmented

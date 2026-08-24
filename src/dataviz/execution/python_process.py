@@ -14,6 +14,19 @@ from dataviz.errors import DatavizError, ExecutionFailure
 from dataviz.execution.context import ExecutionContext
 from dataviz.execution.imports import load_entrypoint
 from dataviz.execution.outputs import OutputBundle, normalize_outputs
+from dataviz.redaction import adapter_secret_values, redact_text, redact_value
+
+
+def _terminate_process(process: multiprocessing.Process) -> None:
+    """Stop a Python worker and escalate if graceful termination is ignored."""
+    if not process.is_alive():
+        process.join(timeout=0.1)
+        return
+    process.terminate()
+    process.join(timeout=1)
+    if process.is_alive() and hasattr(process, "kill"):
+        process.kill()
+        process.join(timeout=1)
 
 
 def _run_python_node(
@@ -123,8 +136,16 @@ def execute_python_node(
     cancel_event: Any | None = None,
     progress_callback: Callable[[float | None, str], None] | None = None,
     log_callback: Callable[[dict[str, Any]], None] | None = None,
+    redaction_values: tuple[str, ...] = (),
 ) -> OutputBundle:
     """Execute trusted workspace Python in an isolated process with a hard timeout."""
+    secrets = tuple(
+        sorted(
+            {*adapter_secret_values(context.adapter), *redaction_values},
+            key=len,
+            reverse=True,
+        )
+    )
     process_context = multiprocessing.get_context("spawn")
     parent, child = process_context.Pipe(duplex=False)
     process = process_context.Process(
@@ -149,36 +170,67 @@ def execute_python_node(
         },
         name=f"dataviz-{node_id.replace(':', '-')}",
     )
-    process.start()
-    child.close()
     timeout = definition.timeout_seconds
     deadline = time.monotonic() + timeout if timeout else None
     payload: dict[str, Any] | None = None
+    process_started = False
     try:
+        try:
+            process.start()
+            process_started = True
+        except Exception as exc:
+            raise ExecutionFailure(
+                f"Python {node_kind} process could not start",
+                file=definition_path,
+                details={
+                    "code": "python_process_start_failed",
+                    "node_id": node_id,
+                    "remote_type": type(exc).__name__,
+                },
+            ) from exc
+        finally:
+            child.close()
+
         while payload is None:
             if parent.poll(0.05):
-                candidate = parent.recv()
+                try:
+                    candidate = parent.recv()
+                except EOFError:
+                    candidate = None
+                if candidate is None:
+                    if not process.is_alive():
+                        raise ExecutionFailure(
+                            f"Python {node_kind} process exited without a result",
+                            file=definition_path,
+                            details={
+                                "code": "python_process_exited",
+                                "exit_code": process.exitcode,
+                                "node_id": node_id,
+                            },
+                        )
+                    continue
                 if candidate.get("event") == "progress":
                     if progress_callback:
-                        progress_callback(candidate.get("value"), candidate.get("message", ""))
+                        progress_callback(
+                            candidate.get("value"),
+                            redact_text(candidate.get("message", ""), secrets),
+                        )
                     continue
                 if candidate.get("event") == "log":
                     if log_callback:
-                        log_callback(candidate.get("record", {}))
+                        log_callback(redact_value(candidate.get("record", {}), secrets))
                     continue
                 payload = candidate
                 break
             if cancel_event is not None and cancel_event.is_set():
-                process.terminate()
-                process.join(timeout=1)
+                _terminate_process(process)
                 raise ExecutionFailure(
                     f"Python {node_kind} was cancelled",
                     file=definition_path,
                     details={"code": "cancelled", "node_id": node_id},
                 )
             if deadline is not None and time.monotonic() >= deadline:
-                process.terminate()
-                process.join(timeout=1)
+                _terminate_process(process)
                 raise ExecutionFailure(
                     f"Python {node_kind} exceeded {timeout:g} seconds",
                     file=definition_path,
@@ -200,14 +252,16 @@ def execute_python_node(
                 )
     finally:
         parent.close()
-        if process.is_alive():
-            process.join(timeout=1)
-        if process.is_alive():
-            process.terminate()
-            process.join(timeout=1)
+        if process_started:
+            # A successful child has already published complete Artifacts, but it
+            # still needs a brief chance to run context/module cleanup and close
+            # its pipe. Timeout and cancellation paths terminate it earlier.
+            if payload is not None:
+                process.join(timeout=1)
+            _terminate_process(process)
 
     if not payload["ok"]:
-        remote = payload["error"]
+        remote = redact_value(payload["error"], secrets)
         details = dict(remote.get("details") or {})
         details.update(
             {

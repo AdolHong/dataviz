@@ -23,7 +23,7 @@ dataviz authoring prepare default-dashboard /tmp/trial-001-html \
   --approach standalone-html --trial-id trial-001
 ```
 
-每个目录包含 `TASK.md`、`trial.json`、`assessment.json` 和固定输入数据，不包含完成代码。`trial.json` 固定任务契约、各输入文件和聚合 SHA-256；命令拒绝覆盖非空目录。准备后可以先运行 `dataviz authoring verify DIRECTORY --format json`，此时输入完整性应通过，而尚未执行的质量门禁自然是 `quality_passed: false`。
+每个目录包含 `TASK.md`、`trial.json`、`assessment.json` 和固定输入数据，不包含完成代码。两边共享同一任务、验收与数据；`TASK.md` 只在必要的 approach 约束上不同。`trial.json` 固定任务契约、approach prompt、各输入文件和聚合 SHA-256；任何一项被改写都会使完整性失败。命令拒绝覆盖非空目录。准备后可以先运行 `dataviz authoring verify DIRECTORY --format json`，此时输入完整性应通过，而尚未执行的质量门禁自然是 `quality_passed: false`。
 
 ## 2. 成对试验
 
@@ -45,6 +45,8 @@ dataviz authoring start MEASUREMENT_WORKSPACE \
 ```
 
 Standalone HTML 方案使用对应的 prepared directory，并保持完全相同的 task contract、fixture digest、`trial-id`、`model` 和 `tool`。
+
+`start` 返回机器可读的 `next_steps`；benchmark 的 finish 命令会自动带回必需的 `--trial-dir`，路径包含空格时也可直接由 shell 使用。
 
 遇到文档、Schema、组件或 Runtime friction 时追加记录：
 
@@ -81,7 +83,7 @@ dataviz authoring finish MEASUREMENT_WORKSPACE SESSION_ID \
   --docs-used selections
 ```
 
-`finish` 会再次校验同一个 trial 的输入和 assessment。输入被改动、任一验收项未通过，或 start/finish 的契约哈希不一致时，不能记录 `outcome=success`。`elapsed_seconds` 由 CLI 自动计算。Token 只接受 AI 客户端提供的真实值；拿不到时省略，保持 `unmeasured`，不能按字符、字节或文件大小推算。
+`finish` 会再次校验同一个 trial 的 TASK prompt、输入和 assessment。输入被改动、任一验收项未通过，或 start/finish 的契约/prompt 哈希不一致时，不能记录 `outcome=success`。`elapsed_seconds` 由 CLI 自动计算。Token 只接受 AI 客户端提供的真实值；拿不到时省略，保持 `unmeasured`，不能按字符、字节或文件大小推算。
 
 ## 3. 比较结果
 

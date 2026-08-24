@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 import time
 from pathlib import Path
@@ -7,9 +8,9 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from dataviz.artifacts import ArtifactStore
+from dataviz.artifacts import ArtifactDescriptor, ArtifactStore
 from dataviz.execution import Executor
-from dataviz.execution.outputs import write_output
+from dataviz.execution.outputs import normalize_outputs, write_output
 from dataviz.errors import ExecutionFailure
 from dataviz.workspace import load_workspace, validate_workspace
 from dataviz.workspace.models import ColumnDefinition, OutputDefinition
@@ -161,6 +162,70 @@ def transform(context):
     assert (workspace.root / node.log.path).is_file()
 
 
+def test_dataset_transform_logs_and_tracebacks_redact_all_workspace_credentials(
+    tmp_path: Path,
+    monkeypatch,
+):
+    code = """def transform(context):
+    context.progress(0.2, "loading direct-secret")
+    context.log("using direct-user and direct-secret", token="token-secret")
+    raise RuntimeError("failed with direct-user, direct-secret and token-secret")
+"""
+    root = build_workspace(tmp_path / "workspace", code)
+    auth = root / "auth"
+    auth.mkdir()
+    (auth / "adapters.local.yaml").write_text(
+        """adapters:
+  private-api:
+    type: python
+    username: direct-user
+    password: direct-secret
+    secrets:
+      api_token: DATAVIZ_TEST_DATASET_TOKEN
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DATAVIZ_TEST_DATASET_TOKEN", "token-secret")
+    workspace = load_workspace(root)
+    events = []
+
+    result = Executor(workspace).run(
+        "transform-contract",
+        refresh=True,
+        observer=events.append,
+    )
+
+    serialized = result.model_dump_json()
+    assert result.status == "partial"
+    for secret in ("direct-user", "direct-secret", "token-secret"):
+        assert secret not in serialized
+    assert "[REDACTED]" in serialized
+    log = result.nodes["dataset:metrics"].log
+    assert log is not None
+    log_value = ArtifactStore(root, result.run_id).read_value(log)
+    for secret in ("direct-user", "direct-secret", "token-secret"):
+        assert secret not in json.dumps(log_value)
+        assert all(secret not in event.model_dump_json() for event in events)
+
+
+def test_python_transform_abrupt_process_exit_is_structured(tmp_path: Path):
+    code = """import os
+
+def transform(context):
+    os._exit(7)
+"""
+    workspace = load_workspace(build_workspace(tmp_path / "workspace", code))
+
+    result = Executor(workspace).run("transform-contract", refresh=True)
+    node = result.nodes["dataset:metrics"]
+
+    assert result.status == "partial"
+    assert node.status == "error"
+    assert node.error["details"]["code"] == "python_process_exited"
+    assert node.error["details"]["exit_code"] == 7
+    assert node.log is not None
+
+
 def test_code_dependency_hash_invalidates_transform_cache_and_isolates_imports(tmp_path: Path):
     code = """from helper import FACTOR
 
@@ -236,6 +301,30 @@ def test_named_output_kinds_are_strict_and_machine_diagnosable(tmp_path: Path):
     assert node.error["details"]["expected"] == "scalar"
 
 
+def test_named_output_bundle_rolls_back_partial_and_replaced_artifacts(
+    tmp_path: Path,
+):
+    store = ArtifactStore(tmp_path, "run_bundle")
+    previous = write_output(store, "dataset:metrics", "first", 7)
+
+    with pytest.raises(ExecutionFailure, match="Output second must be a JSON scalar"):
+        normalize_outputs(
+            {"first": 9, "second": [1, 2]},
+            store=store,
+            node_id="dataset:metrics",
+            declared={
+                "first": OutputDefinition(kind="scalar"),
+                "second": OutputDefinition(kind="scalar"),
+            },
+            named=True,
+        )
+
+    assert store.read_value(previous) == 7
+    assert sorted(path.name for path in store.artifact_root.iterdir()) == [
+        Path(previous.path).name
+    ]
+
+
 def test_existing_artifact_cannot_bypass_output_kind_or_schema_contract(tmp_path: Path):
     store = ArtifactStore(tmp_path, "run_contract")
     scalar = store.write_scalar("scalar", 7)
@@ -272,6 +361,107 @@ def test_existing_artifact_cannot_bypass_output_kind_or_schema_contract(tmp_path
         )
     assert schema_error.value.details["code"] == "output_schema_mismatch"
     assert schema_error.value.details["missing"] == ["expected"]
+
+    other_store = ArtifactStore(tmp_path, "run_other")
+    foreign = other_store.write_scalar("foreign", 9)
+    with pytest.raises(ExecutionFailure) as ownership_error:
+        write_output(store, "dataset:result", "main", foreign)
+    assert ownership_error.value.details == {
+        "code": "output_artifact_run_mismatch",
+        "output": "main",
+        "artifact_id": "foreign",
+    }
+
+
+@pytest.mark.parametrize(
+    ("definition", "message"),
+    [
+        ({"kind": "table", "format": "csv"}, "stored as format=parquet"),
+        ({"kind": "scalar", "mime_type": "text/plain"}, "application/json"),
+        ({"kind": "object", "schema": [{"name": "ignored"}]}, "only valid for kind=table"),
+        ({"kind": "html", "format": "markdown"}, "stored as format=html"),
+        ({"kind": "text", "format": "json"}, "supports format text, plain, or markdown"),
+        (
+            {"kind": "table", "schema": [{"name": "value"}, {"name": "value"}]},
+            "duplicate columns: value",
+        ),
+    ],
+)
+def test_output_definition_rejects_storage_metadata_the_runtime_would_ignore(
+    definition: dict[str, object],
+    message: str,
+):
+    with pytest.raises(ValueError, match=message):
+        OutputDefinition.model_validate(definition)
+
+
+def test_artifact_names_are_collision_safe_and_paths_stay_in_managed_storage(
+    tmp_path: Path,
+):
+    store = ArtifactStore(tmp_path, "run_contract")
+    first = write_output(store, "source:a__b", "main", 1)
+    second = write_output(store, "source:a", "b", 2)
+
+    assert first.artifact_id != second.artifact_id
+    assert first.path != second.path
+    assert store.read_value(first) == 1
+    assert store.read_value(second) == 2
+
+    outside = tmp_path.parent / "outside.json"
+    outside.write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="managed .dataviz storage"):
+        ArtifactDescriptor(
+            artifact_id="escaped",
+            kind="object",
+            format="json",
+            path=str(outside),
+            content_hash="0" * 64,
+        )
+    # Storage keeps the same defense when a descriptor bypasses normal model
+    # validation (for example, untrusted persisted metadata).
+    escaped = ArtifactDescriptor.model_construct(
+        artifact_id="escaped",
+        kind="object",
+        format="json",
+        path=str(outside),
+        content_hash="0" * 64,
+    )
+    with pytest.raises(ValueError, match="managed Dataviz storage"):
+        store.resolve(escaped)
+    with pytest.raises(ValueError, match="Invalid Artifact id"):
+        store.write_scalar("../escaped", 1)
+    with pytest.raises(ValueError, match="Invalid Run id"):
+        ArtifactStore(tmp_path, "../escaped")
+
+
+def test_artifact_files_are_hashed_and_copied_without_whole_file_reads(
+    tmp_path: Path,
+    monkeypatch,
+):
+    store = ArtifactStore(tmp_path, "run_streaming")
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"streamed-file-payload")
+
+    def reject_read_bytes(_path):
+        raise AssertionError(
+            "Artifact persistence must not buffer whole files with Path.read_bytes"
+        )
+
+    monkeypatch.setattr(Path, "read_bytes", reject_read_bytes)
+    table = store.write_table("table", pd.DataFrame({"value": [1, 2, 3]}))
+    copied = store.write_file(
+        "binary",
+        source,
+        kind="file",
+        format="bin",
+        suffix="bin",
+        mime_type="application/octet-stream",
+    )
+
+    store.verify_owned(table)
+    store.verify_owned(copied)
+    materialized = ArtifactStore(tmp_path, "run_materialized").materialize(copied)
+    assert materialized.content_hash == copied.content_hash
 
 
 def test_declared_python_dependency_is_validated_before_execution(tmp_path: Path):

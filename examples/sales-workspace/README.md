@@ -1,11 +1,11 @@
-# Field Notes
+# Sales Workspace
 
 这个 workspace 用于验证：
 
-- File、SQL、Python 三类数据源
+- File、SQL 两类 Source 与 Python Dataset Transform
 - 浏览器端 Plotly、ECharts 和表格 View
 - 节点级执行状态
-- dashboard 独立 HTML/CSS/JS 画布
+- 可选的 Dashboard 自定义 HTML/CSS Canvas
 - CLI HTML 报告
 
 运行：

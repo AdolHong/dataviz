@@ -3,6 +3,7 @@ package: selector.cascader
 version: 1.0.0
 category: selector
 purpose: Browse and multi-select complete paths across associated hierarchy levels.
+implementation: {mode: package, sources: []}
 dependencies: [runtime.selector]
 components:
   - id: selector.cascader

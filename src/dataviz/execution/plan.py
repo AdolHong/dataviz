@@ -27,7 +27,13 @@ class ExecutionPlan:
 
 
 def _target_node_id(value: str) -> str:
-    return parse_output_reference(value).node_id
+    raw = value.strip()
+    if "/" not in raw:
+        # A Query target addresses a node execution, not one individual output.
+        # Reuse the canonical reference validator while accepting the documented
+        # source:<id> / dataset:<id> shorthand.
+        return parse_output_reference(f"{raw}/main").node_id
+    return parse_output_reference(raw).node_id
 
 
 def reachable_output_references(
@@ -82,6 +88,40 @@ def reachable_output_references(
         ordered.extend(ready)
         remaining.difference_update(ready)
     return base_references, ordered
+
+
+def server_interactive_base_references(dashboard: LoadedDashboard) -> set[str]:
+    """Return Base Outputs that must remain server-readable for reachable interactions.
+
+    Query Run Artifacts are already persisted below ``.dataviz/runs``. This
+    classification makes the retention reason explicit: a browser-only branch
+    needs a transport, while a reachable server-python branch needs the same
+    immutable Base Output for every later interaction generation.
+    """
+    _, reachable_interactive = reachable_output_references(dashboard)
+    reachable = set(reachable_interactive)
+    required: set[str] = set()
+    visited: set[str] = set()
+
+    def include_inputs(identifier: str) -> None:
+        if identifier in visited:
+            return
+        visited.add(identifier)
+        definition = dashboard.interactive_transforms[identifier][1]
+        for value in definition.inputs.values():
+            reference = parse_output_reference(value)
+            if reference.node_id.startswith("interactive:"):
+                dependency = reference.node_id.split(":", 1)[1]
+                if dependency in reachable:
+                    include_inputs(dependency)
+            else:
+                required.add(reference.canonical)
+
+    for identifier in reachable_interactive:
+        definition = dashboard.interactive_transforms[identifier][1]
+        if definition.runtime == "server-python":
+            include_inputs(identifier)
+    return required
 
 
 def compile_plan(

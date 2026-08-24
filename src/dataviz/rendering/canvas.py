@@ -4,12 +4,15 @@ import base64
 import gzip
 import html
 import json
+import mimetypes
+import os
 import shutil
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlparse
 
 from jinja2 import Environment, StrictUndefined
 from markupsafe import Markup
@@ -24,6 +27,8 @@ from dataviz.content_templates import (
 from dataviz.errors import ExecutionFailure
 from dataviz.execution.plan import reachable_output_references
 from dataviz.execution.results import RunResult
+from dataviz.execution.fingerprint import ensure_query_run_compatible
+from dataviz.filesystem import atomic_write_bytes, atomic_write_text
 from dataviz.templates import COMPONENT_REGISTRY_VERSION, RUNTIME_PROTOCOL_SCHEMA
 from dataviz.workspace.models import DashboardDefinition, DeclarativeViewDefinition
 from dataviz.workspace.selections import (
@@ -37,34 +42,253 @@ from dataviz.workspace.selector_templates import resolve_selector_presentation
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 
 
+def _scrub_portable_paths(value: Any, workspace_root: Path) -> Any:
+    """Remove machine-specific absolute roots from a shareable report payload."""
+    if isinstance(value, str):
+        replacements = (
+            (str(workspace_root.resolve()), "<workspace>"),
+            (str(PACKAGE_ROOT.resolve()), "<dataviz>"),
+            (str(Path.home().resolve()), "~"),
+        )
+        result = value
+        for source, replacement in sorted(
+            replacements,
+            key=lambda item: len(item[0]),
+            reverse=True,
+        ):
+            if source and source != "/":
+                result = result.replace(source, replacement)
+        return result
+    if isinstance(value, dict):
+        return {
+            key: _scrub_portable_paths(item, workspace_root)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_scrub_portable_paths(item, workspace_root) for item in value]
+    return value
+
+
+def _portable_failure(value: dict[str, Any], workspace_root: Path) -> dict[str, Any]:
+    """Keep actionable failure evidence without exporting local tracebacks or logs."""
+    omitted = any(key in value for key in ("traceback", "log"))
+    portable = {
+        key: item
+        for key, item in value.items()
+        if key not in {"traceback", "log"}
+    }
+    if isinstance(portable.get("details"), dict):
+        details = dict(portable["details"])
+        nested_omitted = any(key in details for key in ("traceback", "log"))
+        for key in ("traceback", "log"):
+            details.pop(key, None)
+        portable["details"] = details
+        omitted = omitted or nested_omitted
+    if omitted:
+        portable["debug_details_omitted"] = True
+    return _scrub_portable_paths(portable, workspace_root)
+
+
+def _portable_run_result(result: RunResult, workspace_root: Path) -> dict[str, Any]:
+    payload = result.model_dump(mode="json", by_alias=True)
+    for node in payload.get("nodes", {}).values():
+        if not isinstance(node, dict):
+            continue
+        node.pop("log", None)
+        if isinstance(node.get("error"), dict):
+            node["error"] = _portable_failure(node["error"], workspace_root)
+    return _scrub_portable_paths(payload, workspace_root)
+
+
+def _replace_directory(staging: Path, target: Path) -> Path | None:
+    """Stage a directory replacement and retain the previous value for rollback."""
+    backup = target.parent / f".{target.name}.{uuid.uuid4().hex}.backup"
+    had_target = target.exists()
+    if had_target:
+        os.replace(target, backup)
+    try:
+        os.replace(staging, target)
+    except BaseException:
+        if had_target and backup.exists():
+            os.replace(backup, target)
+        raise
+    return backup if had_target else None
+
+
+def _rollback_directory(target: Path, backup: Path | None) -> None:
+    if target.exists():
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+    if backup is not None and backup.exists():
+        os.replace(backup, target)
+
+
+def _discard_backup(backup: Path | None) -> None:
+    if backup is None or not backup.exists():
+        return
+    if backup.is_dir():
+        shutil.rmtree(backup)
+    else:
+        backup.unlink()
+
+
 class CanvasRenderer:
     def __init__(self, workspace: LoadedWorkspace):
         self.workspace = workspace
+
+    def _workspace_runtime_asset(
+        self,
+        configured: str,
+        *,
+        field: str,
+        directory: bool = False,
+    ) -> Path:
+        root = self.workspace.root.resolve()
+        path = (root / configured).resolve()
+        if not path.is_relative_to(root):
+            raise ExecutionFailure(
+                f"Local Runtime asset must stay inside the Workspace: {configured}",
+                file=self.workspace.definition_path,
+                details={
+                    "code": "runtime_asset_outside_workspace",
+                    "field": field,
+                    "asset": configured,
+                },
+            )
+        exists = path.is_dir() if directory else path.is_file()
+        if not exists:
+            expected = "directory" if directory else "file"
+            raise ExecutionFailure(
+                f"Configured Runtime {expected} does not exist: {configured}",
+                file=path,
+                details={
+                    "code": "runtime_asset_missing",
+                    "field": field,
+                    "asset": configured,
+                },
+            )
+        return path
+
+    def _runtime_asset_usage(
+        self,
+        dashboard: LoadedDashboard,
+        outputs: dict[str, Any],
+        *,
+        live: dict[str, str] | None,
+        asset_mode: str,
+        snapshot_interactions: set[str],
+        pyodide_index_url: str | None = None,
+    ) -> dict[str, Any]:
+        """Resolve the exact built-in browser assets needed by one report."""
+        declarative_views = dashboard.definition.views
+        chart_views = [
+            view
+            for view in declarative_views
+            if view.template
+            in {"line", "bar", "stacked-bar", "pie", "scatter", "heatmap", "radar"}
+        ]
+        formats = {artifact.format for artifact in outputs.values()}
+        needs_plotly = (
+            "plotly-json" in formats
+            or "plotly" in dashboard.definition.canvas.client_libraries
+            or any(view.engine == "plotly" for view in chart_views)
+        )
+        needs_echarts = (
+            "echarts-json" in formats
+            or "echarts" in dashboard.definition.canvas.client_libraries
+            or any(view.engine == "echarts" for view in chart_views)
+        )
+        needs_perspective = (
+            "perspective" in dashboard.definition.canvas.client_libraries
+            or any(view.template == "perspective" for view in declarative_views)
+        )
+        runtime = self.workspace.definition.runtime
+        _, reachable_interactive_ids = self._reachable_outputs(dashboard)
+        interactive_table_outputs = any(
+            output.kind == "table"
+            for transform_id in reachable_interactive_ids
+            for output in dashboard.interactive_transforms[transform_id][1].outputs.values()
+        )
+        needs_arrow = (
+            runtime.browser_table_transport != "json"
+            and (
+                live is not None
+                or interactive_table_outputs
+                or any(
+                    artifact.kind == "table"
+                    and (
+                        runtime.browser_table_transport == "arrow"
+                        or int(artifact.metadata.get("row_count", 0))
+                        >= runtime.arrow_min_rows
+                    )
+                    for artifact in outputs.values()
+                )
+            )
+        )
+        active_browser_interactions = self._active_browser_interactions(
+            dashboard,
+            asset_mode=asset_mode,
+            snapshot_interactions=snapshot_interactions,
+        )
+        needs_pyodide = any(
+            dashboard.interactive_transforms[identifier][1].runtime
+            == "browser-python"
+            for identifier in active_browser_interactions
+        )
+
+        network_dependencies: list[dict[str, str]] = []
+
+        def add_remote(library: str, source: str) -> None:
+            if urlparse(source).scheme in {"http", "https"}:
+                network_dependencies.append({"library": library, "source": source})
+
+        if needs_echarts:
+            add_remote("echarts", runtime.echarts_js)
+        if needs_arrow:
+            add_remote("apache-arrow", runtime.arrow_js)
+        if needs_perspective:
+            add_remote(
+                "perspective",
+                "https://cdn.jsdelivr.net/npm/@perspective-dev/",
+            )
+        if needs_pyodide:
+            add_remote(
+                "pyodide",
+                pyodide_index_url or self._pyodide_index_url(dashboard, asset_mode),
+            )
+        for view in declarative_views:
+            if view.template == "image" and view.url:
+                add_remote(f"view-image:{view.id}", view.url)
+        return {
+            "plotly": needs_plotly,
+            "echarts": needs_echarts,
+            "arrow": needs_arrow,
+            "perspective": needs_perspective,
+            "pyodide": needs_pyodide,
+            "active_browser_interactions": active_browser_interactions,
+            "network_dependencies": network_dependencies,
+        }
 
     def render(
         self,
         dashboard: LoadedDashboard,
         result: RunResult,
         *,
-        chart_mode: str = "interactive",
-        image_format: str = "svg",
         asset_mode: str = "server",
         title: str | None = None,
         live: dict[str, str] | None = None,
-        interaction: dict[str, str] | None = None,
+        interaction: dict[str, Any] | None = None,
         session_id: str | None = None,
         compute_parameters: dict[str, Any] | None = None,
         selections: dict[str, Any] | None = None,
         derived_outputs: dict[str, Any] | None = None,
         snapshot_interactions: set[str] | None = None,
         pyodide_index_url: str | None = None,
+        frame_id: str | None = None,
     ) -> str:
-        if chart_mode not in {"interactive", "static"}:
-            raise ExecutionFailure("chart_mode must be interactive or static")
-        if chart_mode == "static" and dashboard.definition.views:
-            raise ExecutionFailure(
-                "Static rendering is not implemented for declarative Views; use --chart-mode interactive"
-            )
+        ensure_query_run_compatible(dashboard, result)
         compute_values = {
             item.id: (compute_parameters or {}).get(item.id, item.default)
             for item in dashboard.definition.compute_parameters
@@ -80,6 +304,7 @@ class CanvasRenderer:
             compute_parameters=compute_values,
             selections=selection_values,
             outputs=merged_outputs,
+            nodes=result.nodes,
         )
         try:
             content_bindings = build_content_bindings(
@@ -174,8 +399,8 @@ class CanvasRenderer:
         base_style = ""
         if canvas.use_default_style:
             base_style = (PACKAGE_ROOT / "server" / "static" / "canvas.css").read_text(encoding="utf-8")
-        style_paths = ([canvas.style] if canvas.style else []) + list(canvas.styles)
-        script_paths = ([canvas.script] if canvas.script else []) + list(canvas.scripts)
+        style_paths = list(canvas.styles)
+        script_paths = list(canvas.scripts)
         custom_style = "\n".join(
             path.read_text(encoding="utf-8")
             for relative in style_paths
@@ -186,60 +411,25 @@ class CanvasRenderer:
             for relative in script_paths
             if (path := dashboard.root / relative).is_file()
         )
-        chart_views = [
-            view
-            for view in declarative_views.values()
-            if view.template in {"line", "bar", "stacked-bar", "pie", "scatter", "heatmap", "radar"}
-        ]
-        needs_plotly = (
-            "plotly-json" in self._formats(render_state)
-            or "plotly" in canvas.client_libraries
-            or any(view.engine == "plotly" for view in chart_views)
+        asset_usage = self._runtime_asset_usage(
+            dashboard,
+            merged_outputs,
+            live=live,
+            asset_mode=asset_mode,
+            snapshot_interactions=snapshot_interactions or set(),
+            pyodide_index_url=pyodide_index_url,
         )
-        needs_echarts = (
-            "echarts-json" in self._formats(render_state)
-            or "echarts" in canvas.client_libraries
-            or any(view.engine == "echarts" for view in chart_views)
-        )
-        needs_perspective = (
-            "perspective" in canvas.client_libraries
-            or any(view.template == "perspective" for view in declarative_views.values())
-        )
-        transport_runtime = self.workspace.definition.runtime
-        _, reachable_interactive_ids = self._reachable_outputs(dashboard)
-        interactive_table_outputs = any(
-            output.kind == "table"
-            for transform_id in reachable_interactive_ids
-            for output in dashboard.interactive_transforms[transform_id][1].outputs.values()
-        )
-        needs_arrow = (
-            chart_mode == "interactive"
-            and transport_runtime.browser_table_transport != "json"
-            and (
-                live is not None
-                or interactive_table_outputs
-                or any(
-                    artifact.kind == "table"
-                    and (
-                        transport_runtime.browser_table_transport == "arrow"
-                        or int(artifact.metadata.get("row_count", 0))
-                        >= transport_runtime.arrow_min_rows
-                    )
-                    for artifact in merged_outputs.values()
-                )
-            )
-        )
-        plotly_script = self._plotly_script(asset_mode) if needs_plotly and chart_mode == "interactive" else ""
+        needs_plotly = asset_usage["plotly"]
+        needs_echarts = asset_usage["echarts"]
+        needs_arrow = asset_usage["arrow"]
+        needs_perspective = asset_usage["perspective"]
+        plotly_script = self._plotly_script(asset_mode) if needs_plotly else ""
         echarts_script = self._echarts_script(asset_mode) if needs_echarts else ""
         arrow_script = self._arrow_script() if needs_arrow else ""
-        perspective_script = self._perspective_script() if needs_perspective and chart_mode == "interactive" else ""
+        perspective_script = self._perspective_script() if needs_perspective else ""
         runtime = self._runtime_script()
         frozen_interactions = snapshot_interactions or set()
-        active_browser_interactions = self._active_browser_interactions(
-            dashboard,
-            asset_mode=asset_mode,
-            snapshot_interactions=frozen_interactions,
-        )
+        active_browser_interactions = asset_usage["active_browser_interactions"]
         worker_source = self._interactive_worker_sources(
             dashboard,
             active_ids=active_browser_interactions,
@@ -249,20 +439,27 @@ class CanvasRenderer:
             asset_mode=asset_mode,
             snapshot_interactions=frozen_interactions,
         )
-        declarative_script = self._declarative_script(dashboard)
-        view_specs, repeat_specs = self._declarative_manifest(content_definition)
+        view_specs, repeat_specs = self._declarative_manifest(
+            dashboard, content_definition
+        )
         document_title = title or content_definition.title
         portable = (
             asset_mode in {"inline", "server"}
-            and chart_mode == "interactive"
-            and (bool(merged_outputs) or live is not None)
+            and (
+                bool(merged_outputs)
+                or live is not None
+                or render_state.status in {"partial", "error", "cancelled"}
+            )
         )
         portable_bundle = (
             self._portable_bundle(
                 dashboard,
                 render_state,
                 store,
-                allow_missing=live is not None,
+                allow_missing=(
+                    live is not None
+                    or render_state.status in {"partial", "error", "cancelled"}
+                ),
                 asset_mode=asset_mode,
                 session_id=session_id,
                 snapshot_interactions=snapshot_interactions or set(),
@@ -285,6 +482,8 @@ class CanvasRenderer:
                 "component_registry_version": COMPONENT_REGISTRY_VERSION,
             },
             "run_id": result.run_id,
+            "dashboard_id": dashboard.definition.id,
+            "frame_id": frame_id,
             "status": result.status,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "query_parameters": result.query_parameters,
@@ -323,6 +522,7 @@ class CanvasRenderer:
                     else {}
                 ),
             },
+            "network_dependencies": asset_usage["network_dependencies"],
         }
         meta_json = json.dumps(meta, ensure_ascii=False, default=str).replace("</", "<\\/")
         return f"""<!doctype html>
@@ -331,7 +531,7 @@ class CanvasRenderer:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{html.escape(document_title)}</title>
-  <style>{functional_style}\n{component_style}\n{base_style}\n{custom_style}</style>
+  <style>{functional_style}\n{base_style}\n{component_style}\n{custom_style}</style>
   {plotly_script}
   {echarts_script}
   {arrow_script}
@@ -347,7 +547,6 @@ class CanvasRenderer:
   {component_scripts}
   <script>{runtime}</script>
   <script>{interactive_transform_script}</script>
-  <script>{declarative_script}</script>
   <script>{custom_script}</script>
   <script>if (window.dataviz.portable) {{ window.dataviz.applySelections().catch(error => console.error('[dataviz:init]', error)); window.datavizRuntime.hydrateOutputTransports(); }} if (window.dataviz.live) window.dataviz.connectLive?.();</script>
 </body>
@@ -451,9 +650,32 @@ class CanvasRenderer:
         )
 
     def _declarative_manifest(
-        self, definition: DashboardDefinition
+        self,
+        dashboard: LoadedDashboard,
+        definition: DashboardDefinition,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         view_specs = [item.model_dump(mode="json") for item in definition.views]
+        for view in view_specs:
+            if view["template"] != "image" or not view.get("url"):
+                continue
+            parsed = urlparse(view["url"])
+            if parsed.scheme or parsed.netloc:
+                continue
+            path = (dashboard.root / unquote(parsed.path)).resolve()
+            if not path.is_relative_to(dashboard.root) or not path.is_file():
+                # Loader/preflight owns the user-facing diagnostic. Keep this
+                # defensive branch from publishing an unsafe or broken URL.
+                raise ExecutionFailure(
+                    f"Image View asset is unavailable: {view['url']}",
+                    details={
+                        "code": "view_image_asset_unavailable",
+                        "view": view["id"],
+                        "url": view["url"],
+                    },
+                )
+            mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+            payload = base64.b64encode(path.read_bytes()).decode("ascii")
+            view["url"] = f"data:{mime_type};base64,{payload}"
         repeat_specs: list[dict[str, Any]] = []
         for section in definition.sections:
             if not section.repeat:
@@ -469,12 +691,6 @@ class CanvasRenderer:
             )
         return view_specs, repeat_specs
 
-    def _declarative_script(self, dashboard: LoadedDashboard) -> str:
-        if not dashboard.definition.views:
-            return ""
-        return (PACKAGE_ROOT / "server" / "static" / "declarative-runtime.js").read_text(
-            encoding="utf-8"
-        )
     def _active_browser_interactions(
         self,
         dashboard: LoadedDashboard,
@@ -635,6 +851,7 @@ class CanvasRenderer:
         outputs: dict[str, Any] = {}
         output_transports: dict[str, Any] = {}
         output_kinds: dict[str, str] = {}
+        output_errors: dict[str, Any] = {}
         reachable, _ = self._reachable_outputs(dashboard)
         for transform_id in snapshot_interactions or set():
             definition = dashboard.interactive_transforms[transform_id][1]
@@ -650,7 +867,21 @@ class CanvasRenderer:
             artifact = result.outputs.get(reference)
             if artifact is None:
                 if allow_missing:
-                    pending_outputs.append(reference)
+                    node_id = reference.rsplit("/", 1)[0]
+                    node = result.nodes.get(node_id)
+                    if node and node.status in {"error", "cancelled", "unavailable"}:
+                        failure = dict(node.error or {})
+                        failure.setdefault("code", node.status)
+                        failure.setdefault(
+                            "message",
+                            f"{node_id} ended with status {node.status}",
+                        )
+                        output_errors[reference] = _portable_failure(
+                            failure,
+                            self.workspace.root,
+                        )
+                    else:
+                        pending_outputs.append(reference)
                     continue
                 raise ExecutionFailure(f"Report input is unavailable: {reference}")
             if artifact.kind == "table":
@@ -731,7 +962,7 @@ class CanvasRenderer:
             "outputs": outputs,
             "output_transports": output_transports,
             "output_kinds": output_kinds,
-            "output_errors": {},
+            "output_errors": output_errors,
             "pending_outputs": pending_outputs,
             "view_inputs": {
                 view.id: view.input_refs
@@ -810,9 +1041,9 @@ class CanvasRenderer:
                 f'{"<small>Fixed snapshot</small>" if frozen else ""}</label>'
             )
         groups = []
-        group_titles = {"dashboard": ("03", "Dashboard selections", "All views")}
+        group_titles = {"dashboard": ("03", "Dashboard selections")}
         for origin, values in rendered.items():
-            number, title, description = group_titles[origin]
+            number, title = group_titles[origin]
             groups.append(
                 f'<details class="dv-runtime-control" data-runtime-popover data-selection-origin="{origin}" '
                 'data-overlay-floating="true" data-overlay-width="560">'
@@ -1088,8 +1319,6 @@ class CanvasRenderer:
         result: RunResult,
         output: Path,
         *,
-        chart_mode: str = "interactive",
-        image_format: str = "svg",
         compute_parameters: dict[str, Any] | None = None,
         selections: dict[str, Any] | None = None,
         derived_outputs: dict[str, Any] | None = None,
@@ -1098,16 +1327,44 @@ class CanvasRenderer:
         output.parent.mkdir(parents=True, exist_ok=True)
         pyodide_index_url = None
         asset_manifest: dict[str, Any] = {}
+        staged_asset_root: Path | None = None
+        asset_root: Path | None = None
+        asset_backup: Path | None = None
+        assets_published = False
+        manifest = output.with_suffix(output.suffix + ".manifest.json")
+        previous_manifest = manifest.read_bytes() if manifest.is_file() else None
+        manifest_published = False
         if self._browser_python_export_assets(dashboard) == "bundle":
             configured = self.workspace.definition.runtime.pyodide_bundle_path
             if not configured:
                 raise ExecutionFailure(
                     "browser-python bundle export requires runtime.pyodide_bundle_path"
                 )
-            source = (self.workspace.root / configured).resolve()
+            source = self._workspace_runtime_asset(
+                configured,
+                field="runtime.pyodide_bundle_path",
+                directory=True,
+            )
+            symlinks = sorted(
+                path.relative_to(source).as_posix()
+                for path in source.rglob("*")
+                if path.is_symlink()
+            )
+            if symlinks:
+                raise ExecutionFailure(
+                    "Pyodide bundle cannot contain symbolic links",
+                    details={
+                        "code": "pyodide_bundle_symlink_unsupported",
+                        "field": "runtime.pyodide_bundle_path",
+                        "symlinks": symlinks,
+                    },
+                )
             asset_root = output.parent / f"{output.stem}.assets"
-            target = asset_root / "pyodide"
-            shutil.copytree(source, target, dirs_exist_ok=True)
+            staged_asset_root = output.parent / (
+                f".{asset_root.name}.{uuid.uuid4().hex}.tmp"
+            )
+            target = staged_asset_root / "pyodide"
+            shutil.copytree(source, target)
             pyodide_index_url = f"./{quote(asset_root.name)}/pyodide/"
             asset_manifest = {
                 "pyodide": {
@@ -1116,29 +1373,31 @@ class CanvasRenderer:
                     "version": self.workspace.definition.runtime.pyodide_version,
                 }
             }
-        output.write_text(
-            self.render(
+        runtime_assets = self._runtime_asset_usage(
+            dashboard,
+            {**result.outputs, **(derived_outputs or {})},
+            live=None,
+            asset_mode="inline",
+            snapshot_interactions=snapshot_interactions or set(),
+            pyodide_index_url=pyodide_index_url,
+        )
+        try:
+            rendered = self.render(
                 dashboard,
                 result,
-                chart_mode=chart_mode,
-                image_format=image_format,
                 asset_mode="inline",
                 compute_parameters=compute_parameters,
                 selections=selections,
                 derived_outputs=derived_outputs,
                 snapshot_interactions=snapshot_interactions,
                 pyodide_index_url=pyodide_index_url,
-            ),
-            encoding="utf-8",
-        )
-        manifest = output.with_suffix(output.suffix + ".manifest.json")
-        manifest.write_text(
-            json.dumps(
+            )
+            manifest_content = json.dumps(
                 {
                     "schema": "dataviz/report-manifest/v2",
                     "runtime": RUNTIME_PROTOCOL_SCHEMA,
                     "dashboard": dashboard.definition.id,
-                    "query_run": result.model_dump(mode="json", by_alias=True),
+                    "query_run": _portable_run_result(result, self.workspace.root),
                     "state": {
                         "query_parameters": result.query_parameters,
                         "compute_parameters": compute_parameters or {},
@@ -1150,13 +1409,41 @@ class CanvasRenderer:
                     },
                     "snapshot_interactions": sorted(snapshot_interactions or set()),
                     "assets": asset_manifest,
+                    "network_dependencies": runtime_assets["network_dependencies"],
+                    "portable_without_network": not runtime_assets[
+                        "network_dependencies"
+                    ],
+                    # Arbitrary Canvas/Presentation code can make its own
+                    # requests and is intentionally outside static analysis.
+                    "portability_scope": "declared-runtime-and-view-assets",
                 },
                 ensure_ascii=False,
                 indent=2,
                 default=str,
-            ),
-            encoding="utf-8",
-        )
+            )
+            if staged_asset_root is not None and asset_root is not None:
+                asset_backup = _replace_directory(staged_asset_root, asset_root)
+                staged_asset_root = None
+                assets_published = True
+            atomic_write_text(manifest, manifest_content)
+            manifest_published = True
+            # Publish HTML last: once it is visible, its manifest and bundled
+            # runtime assets are already complete.
+            atomic_write_text(output, rendered)
+        except BaseException:
+            if manifest_published:
+                if previous_manifest is None:
+                    manifest.unlink(missing_ok=True)
+                else:
+                    atomic_write_bytes(manifest, previous_manifest)
+            if assets_published and asset_root is not None:
+                _rollback_directory(asset_root, asset_backup)
+                asset_backup = None
+            raise
+        finally:
+            if staged_asset_root is not None and staged_asset_root.exists():
+                shutil.rmtree(staged_asset_root)
+            _discard_backup(asset_backup)
         return output
 
     def _default_body(
@@ -1276,9 +1563,6 @@ class CanvasRenderer:
 </div>
 """
 
-    def _formats(self, result: RunResult) -> set[str]:
-        return {artifact.format for artifact in result.outputs.values()}
-
     def _plotly_script(self, asset_mode: str) -> str:
         if asset_mode == "server":
             return '<script src="/runtime/plotly.js"></script>'
@@ -1290,14 +1574,15 @@ class CanvasRenderer:
         source = self.workspace.definition.runtime.echarts_js
         if source.startswith("http://") or source.startswith("https://"):
             return f'<script src="{html.escape(source)}"></script>'
-        path = (self.workspace.root / source).resolve()
-        if not path.exists():
-            raise ExecutionFailure("Configured ECharts JavaScript does not exist", file=path)
+        path = self._workspace_runtime_asset(
+            source,
+            field="runtime.echarts_js",
+        )
         return f"<script>{path.read_text(encoding='utf-8')}</script>"
 
     def _perspective_script(self) -> str:
         version = html.escape(self.workspace.definition.runtime.perspective_version, quote=True)
-        base = f"https://cdn.jsdelivr.net/npm/@perspective-dev"
+        base = "https://cdn.jsdelivr.net/npm/@perspective-dev"
         return f"""
 <link rel="stylesheet" href="{base}/viewer@{version}/dist/css/themes.css">
 <script>
@@ -1316,9 +1601,10 @@ window.datavizPerspectiveReady = (async () => {{
         if source.startswith("http://") or source.startswith("https://"):
             tag = f'<script src="{html.escape(source, quote=True)}"></script>'
         else:
-            path = (self.workspace.root / source).resolve()
-            if not path.exists():
-                raise ExecutionFailure("Configured Apache Arrow JavaScript does not exist", file=path)
+            path = self._workspace_runtime_asset(
+                source,
+                field="runtime.arrow_js",
+            )
             tag = f"<script>{path.read_text(encoding='utf-8')}</script>"
         return (
             f"{tag}\n<script>window.datavizArrowReady = Promise.resolve("

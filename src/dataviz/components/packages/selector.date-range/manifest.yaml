@@ -3,6 +3,7 @@ package: selector.date-range
 version: 1.0.0
 category: selector
 purpose: Select an inclusive start and end date while preserving one canonical value.
+implementation: {mode: package, sources: []}
 dependencies: [runtime.selector]
 components:
   - id: selector.date-range

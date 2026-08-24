@@ -10,3 +10,4 @@ tests:
   - {id: section.band.flow, component: section.band, kind: layout, assertions: [responsive]}
   - {id: section.small-multiples.scale, component: section.small-multiples, kind: performance, assertions: [lazy-mount, bounded-dom, load-more]}
   - {id: section.selection-gallery.scale, component: section.selection-gallery, kind: performance, assertions: [search, selected-only, lazy-mount]}
+  - {id: section.state.matrix, component: section.state, kind: browser, assertions: [ready, loading, stale, empty, error, cancelled, unavailable, derived-child-state]}

@@ -101,6 +101,6 @@ layout:
   gap: 18
 canvas:
   template: canvas/template.html
-  style: canvas/style.css
+  styles: [canvas/style.css]
   use_default_style: true
   client_libraries: [plotly, echarts]

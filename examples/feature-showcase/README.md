@@ -9,4 +9,4 @@ adapters:
   warehouse: demo-duckdb
 ```
 
-改成同事 Workspace 中的 Adapter 名，例如 `team-starrocks`。账号密码只放在 Workspace 的 `auth/adapters.local.yaml` 或环境变量中。
+改成同事 Workspace 中的 Adapter 名，例如 `team-starrocks`。非敏感定义放在 `auth/adapters.yaml`，账号密码只放在 `auth/adapters.local.yaml` 或环境变量中。

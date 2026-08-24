@@ -10,6 +10,7 @@ import yaml
 
 from dataviz.authoring_log import authoring_prompt
 from dataviz.errors import ValidationFailure
+from dataviz.identifiers import is_stable_id, stable_id_help
 from dataviz.execution.plan import compile_plan
 from dataviz.execution.references import parse_output_reference
 from dataviz.templates import (
@@ -125,9 +126,11 @@ def _source_payload(workspace: LoadedWorkspace, path: Path, definition: Any) -> 
         "file": _relative(path, workspace.root),
         # File datasets are intentionally not copied into AI context. Their path and
         # byte size are enough to locate them; query/Python code remains reviewable.
-        "code": _code_content(path, definition.code),
-        "data_file": _data_file_metadata(path, definition.path),
-        "code_dependencies": _dependency_content(path, definition.code_dependencies),
+        "code": _code_content(path, getattr(definition, "code", None)),
+        "data_file": _data_file_metadata(path, getattr(definition, "path", None)),
+        "code_dependencies": _dependency_content(
+            path, getattr(definition, "code_dependencies", [])
+        ),
     }
 
 
@@ -160,7 +163,7 @@ def _presentation_assets(
         paths.update(dashboard.presentation.assets.css)
         paths.update(dashboard.presentation.assets.js)
     canvas = dashboard.definition.canvas
-    paths.update(value for value in [canvas.template, canvas.style, canvas.script] if value)
+    paths.update(value for value in [canvas.template] if value)
     paths.update(canvas.styles)
     paths.update(canvas.scripts)
     result: dict[str, dict[str, Any]] = {}
@@ -394,7 +397,9 @@ def build_context_payload(
     relevant_params = {
         parameter
         for identifier in source_ids
-        for parameter in dashboard.sources[identifier][1].query_params
+        for parameter in getattr(
+            dashboard.sources[identifier][1], "query_params", []
+        )
     }
     relevant_params.update(
         parameter
@@ -669,14 +674,35 @@ def _yaml(value: Any) -> str:
     return yaml.safe_dump(value, allow_unicode=True, sort_keys=False).rstrip() + "\n"
 
 
+def scaffold_recipes() -> tuple[str, ...]:
+    """Return every recipe accepted by the current generator."""
+    selectors = sorted(
+        identifier
+        for identifier in component_catalog()
+        if identifier.startswith("selector.")
+    )
+    return (
+        "dashboard",
+        "source.file",
+        "source.sql",
+        "source.python",
+        "dataset-transform.server-python",
+        "interactive-transform.browser-js",
+        "interactive-transform.browser-python",
+        "interactive-transform.server-python",
+        "renderer.custom",
+        *(f"view.{value}" for value in VIEW_TEMPLATES),
+        *(f"section.{value}" for value in SECTION_TEMPLATES),
+        *selectors,
+    )
+
+
 def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
     """Return a copyable, deterministic recipe without mutating a Workspace."""
     recipe = name.strip()
     item_id = identifier.strip()
-    if not item_id:
-        raise ValidationFailure("Scaffold id cannot be empty")
-    if item_id in {".", ".."} or any(value in item_id for value in ("/", "\\", "\0")):
-        raise ValidationFailure("Scaffold id cannot contain path separators")
+    if not is_stable_id(item_id):
+        raise ValidationFailure(stable_id_help("Scaffold id"))
 
     if recipe == "dashboard":
         files = {
@@ -774,11 +800,13 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                     "compute_params": [],
                     "selections": [],
                     "trigger": "apply",
-                    "export": {
-                        "mode": "interactive"
-                        if runtime != "server-python"
-                        else "snapshot"
-                    },
+                    "export": (
+                        {"mode": "interactive", "assets": "cdn"}
+                        if runtime == "browser-python"
+                        else {"mode": "interactive"}
+                        if runtime == "browser-js"
+                        else {"mode": "snapshot"}
+                    ),
                     "outputs": {"main": {"kind": "table"}},
                 }
             ),
@@ -809,13 +837,27 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
             "series": "series_field",
             "url": "assets/image.svg",
             "renderer": "team.renderer",
+            "text": "Write the analytical narrative here.",
         }
         for field in VIEW_TEMPLATES[template].get("fields", []):
             if field == "columns":
                 definition[field] = ["value_field"]
             else:
                 definition[field] = placeholders.get(field, f"{field}_value")
+        if template == "radar":
+            definition["engine"] = "echarts"
+        if template == "markdown":
+            definition["text"] = placeholders["text"]
         files = {"dashboard.view.snippet.yaml": _yaml([definition])}
+        if template == "image":
+            files["assets/image.svg"] = (
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 420">'
+                '<rect width="800" height="420" fill="#17211d"/>'
+                '<circle cx="640" cy="110" r="74" fill="#69dca5"/>'
+                '<path d="M0 360L250 150L440 300L800 70V420H0Z" fill="#e2592a"/>'
+                '<text x="42" y="76" fill="#fffdf6" font-family="sans-serif" '
+                'font-size="38">IMAGE VIEW</text></svg>\n'
+            )
     elif recipe.startswith("section."):
         template = recipe.split(".", 1)[1]
         if template not in SECTION_TEMPLATES:
@@ -832,6 +874,17 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                 "by": ["entity_id"],
                 "title": "{entity_id}",
             }
+        if template == "selection-gallery":
+            definition["selections"] = [
+                {
+                    "id": "groups",
+                    "field": "entity_id",
+                    "type": "multi_select",
+                    "label": "Groups",
+                    "default": [],
+                }
+            ]
+            definition["repeat"]["selection"] = "groups"
         files = {"dashboard.section.snippet.yaml": _yaml([definition])}
     elif recipe.startswith("selector."):
         template = recipe.split(".", 1)[1]
@@ -936,27 +989,9 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
             ),
         }
     else:
-        available = [
-            "dashboard",
-            "source.file",
-            "source.sql",
-            "source.python",
-            "dataset-transform.server-python",
-            "interactive-transform.browser-js",
-            "interactive-transform.browser-python",
-            "interactive-transform.server-python",
-            "renderer.custom",
-            *(f"view.{value}" for value in VIEW_TEMPLATES),
-            *(f"section.{value}" for value in SECTION_TEMPLATES),
-            "selector.select",
-            "selector.segmented",
-            "selector.checkbox-group",
-            "selector.cascader",
-            "selector.date-range",
-            "selector.tree-select",
-        ]
         raise ValidationFailure(
-            f"Unknown scaffold recipe: {recipe}", details={"available": available}
+            f"Unknown scaffold recipe: {recipe}",
+            details={"available": list(scaffold_recipes())},
         )
 
     return {

@@ -1,0 +1,1427 @@
+{
+  "schema": "dataviz/runtime-scale-matrix/v1",
+  "created_at": "2026-08-24T09:06:42.916231+00:00",
+  "workspace": "benchmarks/scale-workspace",
+  "browser": "chromium",
+  "repeat": 3,
+  "sizes": [
+    10000,
+    100000,
+    1000000
+  ],
+  "runs": [
+    {
+      "row_count": 10000,
+      "result": {
+        "schema": "dataviz/browser-runtime-benchmark/v3",
+        "environment": {
+          "dataviz": "0.3.2",
+          "python": "3.12.8",
+          "platform": "macOS-26.5.2-arm64-arm-64bit",
+          "machine": "arm64",
+          "logical_cpus": 10,
+          "browser": "chromium"
+        },
+        "query": {
+          "parameters": {
+            "row_count": 10000
+          },
+          "duration_ms": 616.56,
+          "process_max_rss_bytes_before": 150454272,
+          "process_max_rss_bytes_after": 165478400,
+          "process_max_rss_increase_bytes": 15024128,
+          "rss_scope": "Peak RSS for the benchmark CLI process; native allocations are included."
+        },
+        "report": {
+          "build_ms": 23.21,
+          "html_bytes": 5176623
+        },
+        "browser": {
+          "name": "chromium",
+          "repeat": 3,
+          "timeout_seconds": 180.0,
+          "total_ms": 2788.14,
+          "page_ready_ms": {
+            "minimum": 465.1,
+            "median": 474.35,
+            "maximum": 1355.57
+          },
+          "peak_js_heap_bytes": 20966438,
+          "maximum_retained_delta_bytes": 314203,
+          "peak_process_tree_rss_bytes": 632963072,
+          "peak_process_tree_increase_bytes": 204832768,
+          "maximum_process_tree_retained_delta_bytes": 155369472,
+          "final_process_tree_retained_delta_bytes": 1720320,
+          "post_warmup_process_tree_growth_bytes": 29245440,
+          "iterations": [
+            {
+              "iteration": 1,
+              "page_ready_ms": 1355.57,
+              "console_errors": [],
+              "memory": {
+                "supported": true,
+                "sample_count": 50,
+                "peak_js_heap_bytes": 20119650,
+                "settled_js_heap_bytes": 20120054,
+                "active_post_gc_js_heap_bytes": 15748754,
+                "baseline_js_heap_bytes": 536617,
+                "released_js_heap_bytes": 850820,
+                "retained_delta_bytes": 314203,
+                "scope": "Chromium main-renderer JavaScript heap; excludes native Arrow, GPU and operating-system process memory."
+              },
+              "browser_process_memory": {
+                "supported": true,
+                "sample_count": 43,
+                "baseline_rss_bytes": 399425536,
+                "peak_rss_bytes": 604258304,
+                "released_rss_bytes": 554795008,
+                "retained_delta_bytes": 155369472,
+                "scope": "Playwright driver plus descendant browser-process RSS; includes workers, native Arrow, GPU helpers and browser overhead."
+              },
+              "runtime": {
+                "interactiveTransforms": {
+                  "started": 1,
+                  "completed": 1,
+                  "cancelled": 0,
+                  "timedOut": 0,
+                  "failed": 0,
+                  "cacheHits": 0
+                },
+                "transports": {
+                  "started": 1,
+                  "completed": 1,
+                  "failed": 0,
+                  "arrowRows": 10000,
+                  "arrowBytes": 241024,
+                  "totalMs": 17.299999952316284
+                },
+                "renderers": {
+                  "mounts": 3,
+                  "updates": 0,
+                  "empty": 0,
+                  "failed": 0,
+                  "totalMs": 63.60000014305115
+                },
+                "perspective": {
+                  "created": 0,
+                  "updated": 0,
+                  "flushed": 0,
+                  "disposed": 0,
+                  "failed": 0
+                },
+                "repeat": {
+                  "cards": 0,
+                  "mounted": 0,
+                  "maxMounted": 0,
+                  "disposed": 0,
+                  "searches": 0
+                }
+              },
+              "outputs": {
+                "inline": 2,
+                "transports": 1
+              },
+              "repeat_sections": [],
+              "view_states": {
+                "ready": 3
+              },
+              "navigation": {
+                "name": "file:///var/folders/cg/cg8dlzwn3353jh5hw27nxvhw0000gn/T/dataviz-runtime-benchmark-n3ai2vh1/benchmark.html",
+                "entryType": "navigation",
+                "startTime": 0,
+                "duration": 1311.7000000476837,
+                "navigationId": 8292,
+                "initiatorType": "navigation",
+                "deliveryType": "",
+                "nextHopProtocol": "",
+                "renderBlockingStatus": "non-blocking",
+                "contentType": "text/html",
+                "contentEncoding": "",
+                "workerStart": 0,
+                "workerRouterEvaluationStart": 0,
+                "workerCacheLookupStart": 0,
+                "workerMatchedSourceType": "",
+                "workerFinalSourceType": "",
+                "redirectStart": 0,
+                "redirectEnd": 0,
+                "fetchStart": 0,
+                "domainLookupStart": 0,
+                "domainLookupEnd": 0,
+                "connectStart": 0,
+                "secureConnectionStart": 0,
+                "connectEnd": 0,
+                "requestStart": 0,
+                "responseStart": 0,
+                "firstInterimResponseStart": 0,
+                "finalResponseHeadersStart": 0,
+                "responseEnd": 12.600000143051147,
+                "transferSize": 5176923,
+                "encodedBodySize": 5176623,
+                "decodedBodySize": 5176623,
+                "responseStatus": 200,
+                "serverTiming": [],
+                "unloadEventStart": 0,
+                "unloadEventEnd": 0,
+                "domInteractive": 1311.5,
+                "domContentLoadedEventStart": 1311.5,
+                "domContentLoadedEventEnd": 1311.6000001430511,
+                "domComplete": 1311.6000001430511,
+                "loadEventStart": 1311.7000000476837,
+                "loadEventEnd": 1311.7000000476837,
+                "type": "navigate",
+                "redirectCount": 0,
+                "activationStart": 0,
+                "criticalCHRestart": 0,
+                "notRestoredReasons": null,
+                "confidence": {
+                  "randomizedTriggerRate": 0.4994798,
+                  "value": "low"
+                }
+              }
+            },
+            {
+              "iteration": 2,
+              "page_ready_ms": 474.35,
+              "console_errors": [],
+              "memory": {
+                "supported": true,
+                "sample_count": 4,
+                "peak_js_heap_bytes": 20966438,
+                "settled_js_heap_bytes": 18128932,
+                "active_post_gc_js_heap_bytes": 15780902,
+                "baseline_js_heap_bytes": 850820,
+                "released_js_heap_bytes": 850772,
+                "retained_delta_bytes": -48,
+                "scope": "Chromium main-renderer JavaScript heap; excludes native Arrow, GPU and operating-system process memory."
+              },
+              "browser_process_memory": {
+                "supported": true,
+                "sample_count": 16,
+                "baseline_rss_bytes": 554516480,
+                "peak_rss_bytes": 632963072,
+                "released_rss_bytes": 582336512,
+                "retained_delta_bytes": 27820032,
+                "scope": "Playwright driver plus descendant browser-process RSS; includes workers, native Arrow, GPU helpers and browser overhead."
+              },
+              "runtime": {
+                "interactiveTransforms": {
+                  "started": 1,
+                  "completed": 1,
+                  "cancelled": 0,
+                  "timedOut": 0,
+                  "failed": 0,
+                  "cacheHits": 0
+                },
+                "transports": {
+                  "started": 1,
+                  "completed": 1,
+                  "failed": 0,
+                  "arrowRows": 10000,
+                  "arrowBytes": 241024,
+                  "totalMs": 3.9000000953674316
+                },
+                "renderers": {
+                  "mounts": 3,
+                  "updates": 0,
+                  "empty": 0,
+                  "failed": 0,
+                  "totalMs": 54.60000014305115
+                },
+                "perspective": {
+                  "created": 0,
+                  "updated": 0,
+                  "flushed": 0,
+                  "disposed": 0,
+                  "failed": 0
+                },
+                "repeat": {
+                  "cards": 0,
+                  "mounted": 0,
+                  "maxMounted": 0,
+                  "disposed": 0,
+                  "searches": 0
+                }
+              },
+              "outputs": {
+                "inline": 2,
+                "transports": 1
+              },
+              "repeat_sections": [],
+              "view_states": {
+                "ready": 3
+              },
+              "navigation": {
+                "name": "file:///var/folders/cg/cg8dlzwn3353jh5hw27nxvhw0000gn/T/dataviz-runtime-benchmark-n3ai2vh1/benchmark.html",
+                "entryType": "navigation",
+                "startTime": 0,
+                "duration": 428.2999999523163,
+                "navigationId": 5960,
+                "initiatorType": "navigation",
+                "deliveryType": "",
+                "nextHopProtocol": "",
+                "renderBlockingStatus": "non-blocking",
+                "contentType": "text/html",
+                "contentEncoding": "",
+                "workerStart": 0,
+                "workerRouterEvaluationStart": 0,
+                "workerCacheLookupStart": 0,
+                "workerMatchedSourceType": "",
+                "workerFinalSourceType": "",
+                "redirectStart": 0,
+                "redirectEnd": 0,
+                "fetchStart": 0.20000004768371582,
+                "domainLookupStart": 0.20000004768371582,
+                "domainLookupEnd": 0.20000004768371582,
+                "connectStart": 0.20000004768371582,
+                "secureConnectionStart": 0,
+                "connectEnd": 0.20000004768371582,
+                "requestStart": 0.20000004768371582,
+                "responseStart": 0.20000004768371582,
+                "firstInterimResponseStart": 0,
+                "finalResponseHeadersStart": 0,
+                "responseEnd": 10.099999904632568,
+                "transferSize": 5176923,
+                "encodedBodySize": 5176623,
+                "decodedBodySize": 5176623,
+                "responseStatus": 200,
+                "serverTiming": [],
+                "unloadEventStart": 0,
+                "unloadEventEnd": 0,
+                "domInteractive": 428.09999990463257,
+                "domContentLoadedEventStart": 428.09999990463257,
+                "domContentLoadedEventEnd": 428.2000000476837,
+                "domComplete": 428.2000000476837,
+                "loadEventStart": 428.2999999523163,
+                "loadEventEnd": 428.2999999523163,
+                "type": "navigate",
+                "redirectCount": 0,
+                "activationStart": 0,
+                "criticalCHRestart": 0,
+                "notRestoredReasons": null,
+                "confidence": {
+                  "randomizedTriggerRate": 0.4994798,
+                  "value": "low"
+                }
+              }
+            },
+            {
+              "iteration": 3,
+              "page_ready_ms": 465.1,
+              "console_errors": [],
+              "memory": {
+                "supported": true,
+                "sample_count": 5,
+                "peak_js_heap_bytes": 20965286,
+                "settled_js_heap_bytes": 20965690,
+                "active_post_gc_js_heap_bytes": 15780870,
+                "baseline_js_heap_bytes": 850772,
+                "released_js_heap_bytes": 850772,
+                "retained_delta_bytes": 0,
+                "scope": "Chromium main-renderer JavaScript heap; excludes native Arrow, GPU and operating-system process memory."
+              },
+              "browser_process_memory": {
+                "supported": true,
+                "sample_count": 17,
+                "baseline_rss_bytes": 582320128,
+                "peak_rss_bytes": 631750656,
+                "released_rss_bytes": 584040448,
+                "retained_delta_bytes": 1720320,
+                "scope": "Playwright driver plus descendant browser-process RSS; includes workers, native Arrow, GPU helpers and browser overhead."
+              },
+              "runtime": {
+                "interactiveTransforms": {
+                  "started": 1,
+                  "completed": 1,
+                  "cancelled": 0,
+                  "timedOut": 0,
+                  "failed": 0,
+                  "cacheHits": 0
+                },
+                "transports": {
+                  "started": 1,
+                  "completed": 1,
+                  "failed": 0,
+                  "arrowRows": 10000,
+                  "arrowBytes": 241024,
+                  "totalMs": 4.5
+                },
+                "renderers": {
+                  "mounts": 3,
+                  "updates": 0,
+                  "empty": 0,
+                  "failed": 0,
+                  "totalMs": 57.19999980926514
+                },
+                "perspective": {
+                  "created": 0,
+                  "updated": 0,
+                  "flushed": 0,
+                  "disposed": 0,
+                  "failed": 0
+                },
+                "repeat": {
+                  "cards": 0,
+                  "mounted": 0,
+                  "maxMounted": 0,
+                  "disposed": 0,
+                  "searches": 0
+                }
+              },
+              "outputs": {
+                "inline": 2,
+                "transports": 1
+              },
+              "repeat_sections": [],
+              "view_states": {
+                "ready": 3
+              },
+              "navigation": {
+                "name": "file:///var/folders/cg/cg8dlzwn3353jh5hw27nxvhw0000gn/T/dataviz-runtime-benchmark-n3ai2vh1/benchmark.html",
+                "entryType": "navigation",
+                "startTime": 0,
+                "duration": 428.5,
+                "navigationId": 4836,
+                "initiatorType": "navigation",
+                "deliveryType": "",
+                "nextHopProtocol": "",
+                "renderBlockingStatus": "non-blocking",
+                "contentType": "text/html",
+                "contentEncoding": "",
+                "workerStart": 0,
+                "workerRouterEvaluationStart": 0,
+                "workerCacheLookupStart": 0,
+                "workerMatchedSourceType": "",
+                "workerFinalSourceType": "",
+                "redirectStart": 0,
+                "redirectEnd": 0,
+                "fetchStart": 0.10000014305114746,
+                "domainLookupStart": 0.10000014305114746,
+                "domainLookupEnd": 0.10000014305114746,
+                "connectStart": 0.10000014305114746,
+                "secureConnectionStart": 0,
+                "connectEnd": 0.10000014305114746,
+                "requestStart": 0.10000014305114746,
+                "responseStart": 0.10000014305114746,
+                "firstInterimResponseStart": 0,
+                "finalResponseHeadersStart": 0,
+                "responseEnd": 10.100000143051147,
+                "transferSize": 5176923,
+                "encodedBodySize": 5176623,
+                "decodedBodySize": 5176623,
+                "responseStatus": 200,
+                "serverTiming": [],
+                "unloadEventStart": 0,
+                "unloadEventEnd": 0,
+                "domInteractive": 428.2999999523163,
+                "domContentLoadedEventStart": 428.2999999523163,
+                "domContentLoadedEventEnd": 428.40000009536743,
+                "domComplete": 428.40000009536743,
+                "loadEventStart": 428.5,
+                "loadEventEnd": 428.5,
+                "type": "navigate",
+                "redirectCount": 0,
+                "activationStart": 0,
+                "criticalCHRestart": 0,
+                "notRestoredReasons": null,
+                "confidence": {
+                  "randomizedTriggerRate": 0.4994798,
+                  "value": "high"
+                }
+              }
+            }
+          ]
+        },
+        "runtime": {
+          "interactiveTransforms": {
+            "started": 1,
+            "completed": 1,
+            "cancelled": 0,
+            "timedOut": 0,
+            "failed": 0,
+            "cacheHits": 0
+          },
+          "transports": {
+            "started": 1,
+            "completed": 1,
+            "failed": 0,
+            "arrowRows": 10000,
+            "arrowBytes": 241024,
+            "totalMs": 4.5
+          },
+          "renderers": {
+            "mounts": 3,
+            "updates": 0,
+            "empty": 0,
+            "failed": 0,
+            "totalMs": 57.19999980926514
+          },
+          "perspective": {
+            "created": 0,
+            "updated": 0,
+            "flushed": 0,
+            "disposed": 0,
+            "failed": 0
+          },
+          "repeat": {
+            "cards": 0,
+            "mounted": 0,
+            "maxMounted": 0,
+            "disposed": 0,
+            "searches": 0
+          }
+        },
+        "outputs": {
+          "inline": 2,
+          "transports": 1
+        },
+        "repeat_sections": [],
+        "view_states": {
+          "ready": 3
+        },
+        "console_errors": []
+      }
+    },
+    {
+      "row_count": 100000,
+      "result": {
+        "schema": "dataviz/browser-runtime-benchmark/v3",
+        "environment": {
+          "dataviz": "0.3.2",
+          "python": "3.12.8",
+          "platform": "macOS-26.5.2-arm64-arm-64bit",
+          "machine": "arm64",
+          "logical_cpus": 10,
+          "browser": "chromium"
+        },
+        "query": {
+          "parameters": {
+            "row_count": 100000
+          },
+          "duration_ms": 580.32,
+          "process_max_rss_bytes_before": 145719296,
+          "process_max_rss_bytes_after": 173539328,
+          "process_max_rss_increase_bytes": 27820032,
+          "rss_scope": "Peak RSS for the benchmark CLI process; native allocations are included."
+        },
+        "report": {
+          "build_ms": 65.95,
+          "html_bytes": 5377314
+        },
+        "browser": {
+          "name": "chromium",
+          "repeat": 3,
+          "timeout_seconds": 180.0,
+          "total_ms": 2605.91,
+          "page_ready_ms": {
+            "minimum": 502.64,
+            "median": 503.78,
+            "maximum": 1121.54
+          },
+          "peak_js_heap_bytes": 30231958,
+          "maximum_retained_delta_bytes": 314251,
+          "peak_process_tree_rss_bytes": 649101312,
+          "peak_process_tree_increase_bytes": 215089152,
+          "maximum_process_tree_retained_delta_bytes": 161251328,
+          "final_process_tree_retained_delta_bytes": 6782976,
+          "post_warmup_process_tree_growth_bytes": 32505856,
+          "iterations": [
+            {
+              "iteration": 1,
+              "page_ready_ms": 1121.54,
+              "console_errors": [],
+              "memory": {
+                "supported": true,
+                "sample_count": 38,
+                "peak_js_heap_bytes": 30231958,
+                "settled_js_heap_bytes": 30232362,
+                "active_post_gc_js_heap_bytes": 19484354,
+                "baseline_js_heap_bytes": 536617,
+                "released_js_heap_bytes": 850868,
+                "retained_delta_bytes": 314251,
+                "scope": "Chromium main-renderer JavaScript heap; excludes native Arrow, GPU and operating-system process memory."
+              },
+              "browser_process_memory": {
+                "supported": true,
+                "sample_count": 34,
+                "baseline_rss_bytes": 399769600,
+                "peak_rss_bytes": 614858752,
+                "released_rss_bytes": 561020928,
+                "retained_delta_bytes": 161251328,
+                "scope": "Playwright driver plus descendant browser-process RSS; includes workers, native Arrow, GPU helpers and browser overhead."
+              },
+              "runtime": {
+                "interactiveTransforms": {
+                  "started": 1,
+                  "completed": 1,
+                  "cancelled": 0,
+                  "timedOut": 0,
+                  "failed": 0,
+                  "cacheHits": 0
+                },
+                "transports": {
+                  "started": 1,
+                  "completed": 1,
+                  "failed": 0,
+                  "arrowRows": 100000,
+                  "arrowBytes": 2401024,
+                  "totalMs": 22.90000009536743
+                },
+                "renderers": {
+                  "mounts": 3,
+                  "updates": 0,
+                  "empty": 0,
+                  "failed": 0,
+                  "totalMs": 62.700000286102295
+                },
+                "perspective": {
+                  "created": 0,
+                  "updated": 0,
+                  "flushed": 0,
+                  "disposed": 0,
+                  "failed": 0
+                },
+                "repeat": {
+                  "cards": 0,
+                  "mounted": 0,
+                  "maxMounted": 0,
+                  "disposed": 0,
+                  "searches": 0
+                }
+              },
+              "outputs": {
+                "inline": 2,
+                "transports": 1
+              },
+              "repeat_sections": [],
+              "view_states": {
+                "ready": 3
+              },
+              "navigation": {
+                "name": "file:///var/folders/cg/cg8dlzwn3353jh5hw27nxvhw0000gn/T/dataviz-runtime-benchmark-0ezbyw04/benchmark.html",
+                "entryType": "navigation",
+                "startTime": 0,
+                "duration": 1057.2999999523163,
+                "navigationId": 9209,
+                "initiatorType": "navigation",
+                "deliveryType": "",
+                "nextHopProtocol": "",
+                "renderBlockingStatus": "non-blocking",
+                "contentType": "text/html",
+                "contentEncoding": "",
+                "workerStart": 0,
+                "workerRouterEvaluationStart": 0,
+                "workerCacheLookupStart": 0,
+                "workerMatchedSourceType": "",
+                "workerFinalSourceType": "",
+                "redirectStart": 0,
+                "redirectEnd": 0,
+                "fetchStart": 2.200000047683716,
+                "domainLookupStart": 2.200000047683716,
+                "domainLookupEnd": 2.200000047683716,
+                "connectStart": 2.200000047683716,
+                "secureConnectionStart": 0,
+                "connectEnd": 2.200000047683716,
+                "requestStart": 2.200000047683716,
+                "responseStart": 2.200000047683716,
+                "firstInterimResponseStart": 0,
+                "finalResponseHeadersStart": 0,
+                "responseEnd": 14.5,
+                "transferSize": 5377614,
+                "encodedBodySize": 5377314,
+                "decodedBodySize": 5377314,
+                "responseStatus": 200,
+                "serverTiming": [],
+                "unloadEventStart": 0,
+                "unloadEventEnd": 0,
+                "domInteractive": 1057,
+                "domContentLoadedEventStart": 1057,
+                "domContentLoadedEventEnd": 1057.2000000476837,
+                "domComplete": 1057.2000000476837,
+                "loadEventStart": 1057.2999999523163,
+                "loadEventEnd": 1057.2999999523163,
+                "type": "navigate",
+                "redirectCount": 0,
+                "activationStart": 0,
+                "criticalCHRestart": 0,
+                "notRestoredReasons": null,
+                "confidence": {
+                  "randomizedTriggerRate": 0.4994798,
+                  "value": "high"
+                }
+              }
+            },
+            {
+              "iteration": 2,
+              "page_ready_ms": 503.78,
+              "console_errors": [],
+              "memory": {
+                "supported": true,
+                "sample_count": 6,
+                "peak_js_heap_bytes": 29835970,
+                "settled_js_heap_bytes": 26266702,
+                "active_post_gc_js_heap_bytes": 19540862,
+                "baseline_js_heap_bytes": 850868,
+                "released_js_heap_bytes": 850844,
+                "retained_delta_bytes": -24,
+                "scope": "Chromium main-renderer JavaScript heap; excludes native Arrow, GPU and operating-system process memory."
+              },
+              "browser_process_memory": {
+                "supported": true,
+                "sample_count": 17,
+                "baseline_rss_bytes": 560152576,
+                "peak_rss_bytes": 641990656,
+                "released_rss_bytes": 587857920,
+                "retained_delta_bytes": 27705344,
+                "scope": "Playwright driver plus descendant browser-process RSS; includes workers, native Arrow, GPU helpers and browser overhead."
+              },
+              "runtime": {
+                "interactiveTransforms": {
+                  "started": 1,
+                  "completed": 1,
+                  "cancelled": 0,
+                  "timedOut": 0,
+                  "failed": 0,
+                  "cacheHits": 0
+                },
+                "transports": {
+                  "started": 1,
+                  "completed": 1,
+                  "failed": 0,
+                  "arrowRows": 100000,
+                  "arrowBytes": 2401024,
+                  "totalMs": 9.700000047683716
+                },
+                "renderers": {
+                  "mounts": 3,
+                  "updates": 0,
+                  "empty": 0,
+                  "failed": 0,
+                  "totalMs": 55.19999957084656
+                },
+                "perspective": {
+                  "created": 0,
+                  "updated": 0,
+                  "flushed": 0,
+                  "disposed": 0,
+                  "failed": 0
+                },
+                "repeat": {
+                  "cards": 0,
+                  "mounted": 0,
+                  "maxMounted": 0,
+                  "disposed": 0,
+                  "searches": 0
+                }
+              },
+              "outputs": {
+                "inline": 2,
+                "transports": 1
+              },
+              "repeat_sections": [],
+              "view_states": {
+                "ready": 3
+              },
+              "navigation": {
+                "name": "file:///var/folders/cg/cg8dlzwn3353jh5hw27nxvhw0000gn/T/dataviz-runtime-benchmark-0ezbyw04/benchmark.html",
+                "entryType": "navigation",
+                "startTime": 0,
+                "duration": 442.2000000476837,
+                "navigationId": 5528,
+                "initiatorType": "navigation",
+                "deliveryType": "",
+                "nextHopProtocol": "",
+                "renderBlockingStatus": "non-blocking",
+                "contentType": "text/html",
+                "contentEncoding": "",
+                "workerStart": 0,
+                "workerRouterEvaluationStart": 0,
+                "workerCacheLookupStart": 0,
+                "workerMatchedSourceType": "",
+                "workerFinalSourceType": "",
+                "redirectStart": 0,
+                "redirectEnd": 0,
+                "fetchStart": 0.10000014305114746,
+                "domainLookupStart": 0.10000014305114746,
+                "domainLookupEnd": 0.10000014305114746,
+                "connectStart": 0.10000014305114746,
+                "secureConnectionStart": 0,
+                "connectEnd": 0.10000014305114746,
+                "requestStart": 0.10000014305114746,
+                "responseStart": 0.10000014305114746,
+                "firstInterimResponseStart": 0,
+                "finalResponseHeadersStart": 0,
+                "responseEnd": 12.200000047683716,
+                "transferSize": 5377614,
+                "encodedBodySize": 5377314,
+                "decodedBodySize": 5377314,
+                "responseStatus": 200,
+                "serverTiming": [],
+                "unloadEventStart": 0,
+                "unloadEventEnd": 0,
+                "domInteractive": 442.10000014305115,
+                "domContentLoadedEventStart": 442.10000014305115,
+                "domContentLoadedEventEnd": 442.10000014305115,
+                "domComplete": 442.10000014305115,
+                "loadEventStart": 442.2000000476837,
+                "loadEventEnd": 442.2000000476837,
+                "type": "navigate",
+                "redirectCount": 0,
+                "activationStart": 0,
+                "criticalCHRestart": 0,
+                "notRestoredReasons": null,
+                "confidence": {
+                  "randomizedTriggerRate": 0.4994798,
+                  "value": "high"
+                }
+              }
+            },
+            {
+              "iteration": 3,
+              "page_ready_ms": 502.64,
+              "console_errors": [],
+              "memory": {
+                "supported": true,
+                "sample_count": 5,
+                "peak_js_heap_bytes": 29763890,
+                "settled_js_heap_bytes": 29764294,
+                "active_post_gc_js_heap_bytes": 19540854,
+                "baseline_js_heap_bytes": 850844,
+                "released_js_heap_bytes": 850880,
+                "retained_delta_bytes": 36,
+                "scope": "Chromium main-renderer JavaScript heap; excludes native Arrow, GPU and operating-system process memory."
+              },
+              "browser_process_memory": {
+                "supported": true,
+                "sample_count": 17,
+                "baseline_rss_bytes": 586743808,
+                "peak_rss_bytes": 649101312,
+                "released_rss_bytes": 593526784,
+                "retained_delta_bytes": 6782976,
+                "scope": "Playwright driver plus descendant browser-process RSS; includes workers, native Arrow, GPU helpers and browser overhead."
+              },
+              "runtime": {
+                "interactiveTransforms": {
+                  "started": 1,
+                  "completed": 1,
+                  "cancelled": 0,
+                  "timedOut": 0,
+                  "failed": 0,
+                  "cacheHits": 0
+                },
+                "transports": {
+                  "started": 1,
+                  "completed": 1,
+                  "failed": 0,
+                  "arrowRows": 100000,
+                  "arrowBytes": 2401024,
+                  "totalMs": 10.5
+                },
+                "renderers": {
+                  "mounts": 3,
+                  "updates": 0,
+                  "empty": 0,
+                  "failed": 0,
+                  "totalMs": 55.5
+                },
+                "perspective": {
+                  "created": 0,
+                  "updated": 0,
+                  "flushed": 0,
+                  "disposed": 0,
+                  "failed": 0
+                },
+                "repeat": {
+                  "cards": 0,
+                  "mounted": 0,
+                  "maxMounted": 0,
+                  "disposed": 0,
+                  "searches": 0
+                }
+              },
+              "outputs": {
+                "inline": 2,
+                "transports": 1
+              },
+              "repeat_sections": [],
+              "view_states": {
+                "ready": 3
+              },
+              "navigation": {
+                "name": "file:///var/folders/cg/cg8dlzwn3353jh5hw27nxvhw0000gn/T/dataviz-runtime-benchmark-0ezbyw04/benchmark.html",
+                "entryType": "navigation",
+                "startTime": 0,
+                "duration": 446.2999999523163,
+                "navigationId": 1483,
+                "initiatorType": "navigation",
+                "deliveryType": "",
+                "nextHopProtocol": "",
+                "renderBlockingStatus": "non-blocking",
+                "contentType": "text/html",
+                "contentEncoding": "",
+                "workerStart": 0,
+                "workerRouterEvaluationStart": 0,
+                "workerCacheLookupStart": 0,
+                "workerMatchedSourceType": "",
+                "workerFinalSourceType": "",
+                "redirectStart": 0,
+                "redirectEnd": 0,
+                "fetchStart": 0.10000014305114746,
+                "domainLookupStart": 0.10000014305114746,
+                "domainLookupEnd": 0.10000014305114746,
+                "connectStart": 0.10000014305114746,
+                "secureConnectionStart": 0,
+                "connectEnd": 0.10000014305114746,
+                "requestStart": 0.10000014305114746,
+                "responseStart": 0.10000014305114746,
+                "firstInterimResponseStart": 0,
+                "finalResponseHeadersStart": 0,
+                "responseEnd": 12,
+                "transferSize": 5377614,
+                "encodedBodySize": 5377314,
+                "decodedBodySize": 5377314,
+                "responseStatus": 200,
+                "serverTiming": [],
+                "unloadEventStart": 0,
+                "unloadEventEnd": 0,
+                "domInteractive": 446.10000014305115,
+                "domContentLoadedEventStart": 446.10000014305115,
+                "domContentLoadedEventEnd": 446.10000014305115,
+                "domComplete": 446.10000014305115,
+                "loadEventStart": 446.2999999523163,
+                "loadEventEnd": 446.2999999523163,
+                "type": "navigate",
+                "redirectCount": 0,
+                "activationStart": 0,
+                "criticalCHRestart": 0,
+                "notRestoredReasons": null,
+                "confidence": {
+                  "randomizedTriggerRate": 0.4994798,
+                  "value": "high"
+                }
+              }
+            }
+          ]
+        },
+        "runtime": {
+          "interactiveTransforms": {
+            "started": 1,
+            "completed": 1,
+            "cancelled": 0,
+            "timedOut": 0,
+            "failed": 0,
+            "cacheHits": 0
+          },
+          "transports": {
+            "started": 1,
+            "completed": 1,
+            "failed": 0,
+            "arrowRows": 100000,
+            "arrowBytes": 2401024,
+            "totalMs": 10.5
+          },
+          "renderers": {
+            "mounts": 3,
+            "updates": 0,
+            "empty": 0,
+            "failed": 0,
+            "totalMs": 55.5
+          },
+          "perspective": {
+            "created": 0,
+            "updated": 0,
+            "flushed": 0,
+            "disposed": 0,
+            "failed": 0
+          },
+          "repeat": {
+            "cards": 0,
+            "mounted": 0,
+            "maxMounted": 0,
+            "disposed": 0,
+            "searches": 0
+          }
+        },
+        "outputs": {
+          "inline": 2,
+          "transports": 1
+        },
+        "repeat_sections": [],
+        "view_states": {
+          "ready": 3
+        },
+        "console_errors": []
+      }
+    },
+    {
+      "row_count": 1000000,
+      "result": {
+        "schema": "dataviz/browser-runtime-benchmark/v3",
+        "environment": {
+          "dataviz": "0.3.2",
+          "python": "3.12.8",
+          "platform": "macOS-26.5.2-arm64-arm-64bit",
+          "machine": "arm64",
+          "logical_cpus": 10,
+          "browser": "chromium"
+        },
+        "query": {
+          "parameters": {
+            "row_count": 1000000
+          },
+          "duration_ms": 692.26,
+          "process_max_rss_bytes_before": 145883136,
+          "process_max_rss_bytes_after": 253542400,
+          "process_max_rss_increase_bytes": 107659264,
+          "rss_scope": "Peak RSS for the benchmark CLI process; native allocations are included."
+        },
+        "report": {
+          "build_ms": 443.8,
+          "html_bytes": 7395157
+        },
+        "browser": {
+          "name": "chromium",
+          "repeat": 3,
+          "timeout_seconds": 180.0,
+          "total_ms": 3471.96,
+          "page_ready_ms": {
+            "minimum": 784.31,
+            "median": 804.3,
+            "maximum": 1364.84
+          },
+          "peak_js_heap_bytes": 94394664,
+          "maximum_retained_delta_bytes": 314183,
+          "peak_process_tree_rss_bytes": 842219520,
+          "peak_process_tree_increase_bytes": 395083776,
+          "maximum_process_tree_retained_delta_bytes": 222494720,
+          "final_process_tree_retained_delta_bytes": 3964928,
+          "post_warmup_process_tree_growth_bytes": 29212672,
+          "iterations": [
+            {
+              "iteration": 1,
+              "page_ready_ms": 1364.84,
+              "console_errors": [],
+              "memory": {
+                "supported": true,
+                "sample_count": 41,
+                "peak_js_heap_bytes": 86230095,
+                "settled_js_heap_bytes": 86230499,
+                "active_post_gc_js_heap_bytes": 59133622,
+                "baseline_js_heap_bytes": 536617,
+                "released_js_heap_bytes": 850800,
+                "retained_delta_bytes": 314183,
+                "scope": "Chromium main-renderer JavaScript heap; excludes native Arrow, GPU and operating-system process memory."
+              },
+              "browser_process_memory": {
+                "supported": true,
+                "sample_count": 42,
+                "baseline_rss_bytes": 399802368,
+                "peak_rss_bytes": 794886144,
+                "released_rss_bytes": 622297088,
+                "retained_delta_bytes": 222494720,
+                "scope": "Playwright driver plus descendant browser-process RSS; includes workers, native Arrow, GPU helpers and browser overhead."
+              },
+              "runtime": {
+                "interactiveTransforms": {
+                  "started": 1,
+                  "completed": 1,
+                  "cancelled": 0,
+                  "timedOut": 0,
+                  "failed": 0,
+                  "cacheHits": 0
+                },
+                "transports": {
+                  "started": 1,
+                  "completed": 1,
+                  "failed": 0,
+                  "arrowRows": 1000000,
+                  "arrowBytes": 24002704,
+                  "totalMs": 81
+                },
+                "renderers": {
+                  "mounts": 3,
+                  "updates": 0,
+                  "empty": 0,
+                  "failed": 0,
+                  "totalMs": 74.59999966621399
+                },
+                "perspective": {
+                  "created": 0,
+                  "updated": 0,
+                  "flushed": 0,
+                  "disposed": 0,
+                  "failed": 0
+                },
+                "repeat": {
+                  "cards": 0,
+                  "mounted": 0,
+                  "maxMounted": 0,
+                  "disposed": 0,
+                  "searches": 0
+                }
+              },
+              "outputs": {
+                "inline": 2,
+                "transports": 1
+              },
+              "repeat_sections": [],
+              "view_states": {
+                "ready": 3
+              },
+              "navigation": {
+                "name": "file:///var/folders/cg/cg8dlzwn3353jh5hw27nxvhw0000gn/T/dataviz-runtime-benchmark-l5me7ngr/benchmark.html",
+                "entryType": "navigation",
+                "startTime": 0,
+                "duration": 1062.3999998569489,
+                "navigationId": 2617,
+                "initiatorType": "navigation",
+                "deliveryType": "",
+                "nextHopProtocol": "",
+                "renderBlockingStatus": "non-blocking",
+                "contentType": "text/html",
+                "contentEncoding": "",
+                "workerStart": 0,
+                "workerRouterEvaluationStart": 0,
+                "workerCacheLookupStart": 0,
+                "workerMatchedSourceType": "",
+                "workerFinalSourceType": "",
+                "redirectStart": 0,
+                "redirectEnd": 0,
+                "fetchStart": 0.09999990463256836,
+                "domainLookupStart": 0.09999990463256836,
+                "domainLookupEnd": 0.09999990463256836,
+                "connectStart": 0.09999990463256836,
+                "secureConnectionStart": 0,
+                "connectEnd": 0.09999990463256836,
+                "requestStart": 0.09999990463256836,
+                "responseStart": 0.09999990463256836,
+                "firstInterimResponseStart": 0,
+                "finalResponseHeadersStart": 0,
+                "responseEnd": 402.2999999523163,
+                "transferSize": 7395457,
+                "encodedBodySize": 7395157,
+                "decodedBodySize": 7395157,
+                "responseStatus": 200,
+                "serverTiming": [],
+                "unloadEventStart": 0,
+                "unloadEventEnd": 0,
+                "domInteractive": 1062.0999999046326,
+                "domContentLoadedEventStart": 1062.0999999046326,
+                "domContentLoadedEventEnd": 1062.1999998092651,
+                "domComplete": 1062.1999998092651,
+                "loadEventStart": 1062.3999998569489,
+                "loadEventEnd": 1062.3999998569489,
+                "type": "navigate",
+                "redirectCount": 0,
+                "activationStart": 0,
+                "criticalCHRestart": 0,
+                "notRestoredReasons": null,
+                "confidence": {
+                  "randomizedTriggerRate": 0.4994798,
+                  "value": "high"
+                }
+              }
+            },
+            {
+              "iteration": 2,
+              "page_ready_ms": 784.31,
+              "console_errors": [],
+              "memory": {
+                "supported": true,
+                "sample_count": 12,
+                "peak_js_heap_bytes": 85272841,
+                "settled_js_heap_bytes": 85273245,
+                "active_post_gc_js_heap_bytes": 59190914,
+                "baseline_js_heap_bytes": 850872,
+                "released_js_heap_bytes": 850944,
+                "retained_delta_bytes": 72,
+                "scope": "Chromium main-renderer JavaScript heap; excludes native Arrow, GPU and operating-system process memory."
+              },
+              "browser_process_memory": {
+                "supported": true,
+                "sample_count": 25,
+                "baseline_rss_bytes": 621297664,
+                "peak_rss_bytes": 826130432,
+                "released_rss_bytes": 648871936,
+                "retained_delta_bytes": 27574272,
+                "scope": "Playwright driver plus descendant browser-process RSS; includes workers, native Arrow, GPU helpers and browser overhead."
+              },
+              "runtime": {
+                "interactiveTransforms": {
+                  "started": 1,
+                  "completed": 1,
+                  "cancelled": 0,
+                  "timedOut": 0,
+                  "failed": 0,
+                  "cacheHits": 0
+                },
+                "transports": {
+                  "started": 1,
+                  "completed": 1,
+                  "failed": 0,
+                  "arrowRows": 1000000,
+                  "arrowBytes": 24002704,
+                  "totalMs": 77.90000009536743
+                },
+                "renderers": {
+                  "mounts": 3,
+                  "updates": 0,
+                  "empty": 0,
+                  "failed": 0,
+                  "totalMs": 56.700000286102295
+                },
+                "perspective": {
+                  "created": 0,
+                  "updated": 0,
+                  "flushed": 0,
+                  "disposed": 0,
+                  "failed": 0
+                },
+                "repeat": {
+                  "cards": 0,
+                  "mounted": 0,
+                  "maxMounted": 0,
+                  "disposed": 0,
+                  "searches": 0
+                }
+              },
+              "outputs": {
+                "inline": 2,
+                "transports": 1
+              },
+              "repeat_sections": [],
+              "view_states": {
+                "ready": 3
+              },
+              "navigation": {
+                "name": "file:///var/folders/cg/cg8dlzwn3353jh5hw27nxvhw0000gn/T/dataviz-runtime-benchmark-l5me7ngr/benchmark.html",
+                "entryType": "navigation",
+                "startTime": 0,
+                "duration": 491.59999990463257,
+                "navigationId": 485,
+                "initiatorType": "navigation",
+                "deliveryType": "",
+                "nextHopProtocol": "",
+                "renderBlockingStatus": "non-blocking",
+                "contentType": "text/html",
+                "contentEncoding": "",
+                "workerStart": 0,
+                "workerRouterEvaluationStart": 0,
+                "workerCacheLookupStart": 0,
+                "workerMatchedSourceType": "",
+                "workerFinalSourceType": "",
+                "redirectStart": 0,
+                "redirectEnd": 0,
+                "fetchStart": 4.200000047683716,
+                "domainLookupStart": 4.200000047683716,
+                "domainLookupEnd": 4.200000047683716,
+                "connectStart": 4.200000047683716,
+                "secureConnectionStart": 0,
+                "connectEnd": 4.200000047683716,
+                "requestStart": 4.200000047683716,
+                "responseStart": 4.200000047683716,
+                "firstInterimResponseStart": 0,
+                "finalResponseHeadersStart": 0,
+                "responseEnd": 412.5,
+                "transferSize": 7395457,
+                "encodedBodySize": 7395157,
+                "decodedBodySize": 7395157,
+                "responseStatus": 200,
+                "serverTiming": [],
+                "unloadEventStart": 0,
+                "unloadEventEnd": 0,
+                "domInteractive": 491.39999985694885,
+                "domContentLoadedEventStart": 491.39999985694885,
+                "domContentLoadedEventEnd": 491.5,
+                "domComplete": 491.5,
+                "loadEventStart": 491.59999990463257,
+                "loadEventEnd": 491.59999990463257,
+                "type": "navigate",
+                "redirectCount": 0,
+                "activationStart": 0,
+                "criticalCHRestart": 0,
+                "notRestoredReasons": null,
+                "confidence": {
+                  "randomizedTriggerRate": 0.4994798,
+                  "value": "high"
+                }
+              }
+            },
+            {
+              "iteration": 3,
+              "page_ready_ms": 804.3,
+              "console_errors": [],
+              "memory": {
+                "supported": true,
+                "sample_count": 13,
+                "peak_js_heap_bytes": 94394664,
+                "settled_js_heap_bytes": 94395068,
+                "active_post_gc_js_heap_bytes": 59190926,
+                "baseline_js_heap_bytes": 851016,
+                "released_js_heap_bytes": 850980,
+                "retained_delta_bytes": -36,
+                "scope": "Chromium main-renderer JavaScript heap; excludes native Arrow, GPU and operating-system process memory."
+              },
+              "browser_process_memory": {
+                "supported": true,
+                "sample_count": 26,
+                "baseline_rss_bytes": 647544832,
+                "peak_rss_bytes": 842219520,
+                "released_rss_bytes": 651509760,
+                "retained_delta_bytes": 3964928,
+                "scope": "Playwright driver plus descendant browser-process RSS; includes workers, native Arrow, GPU helpers and browser overhead."
+              },
+              "runtime": {
+                "interactiveTransforms": {
+                  "started": 1,
+                  "completed": 1,
+                  "cancelled": 0,
+                  "timedOut": 0,
+                  "failed": 0,
+                  "cacheHits": 0
+                },
+                "transports": {
+                  "started": 1,
+                  "completed": 1,
+                  "failed": 0,
+                  "arrowRows": 1000000,
+                  "arrowBytes": 24002704,
+                  "totalMs": 73.39999985694885
+                },
+                "renderers": {
+                  "mounts": 3,
+                  "updates": 0,
+                  "empty": 0,
+                  "failed": 0,
+                  "totalMs": 68.90000009536743
+                },
+                "perspective": {
+                  "created": 0,
+                  "updated": 0,
+                  "flushed": 0,
+                  "disposed": 0,
+                  "failed": 0
+                },
+                "repeat": {
+                  "cards": 0,
+                  "mounted": 0,
+                  "maxMounted": 0,
+                  "disposed": 0,
+                  "searches": 0
+                }
+              },
+              "outputs": {
+                "inline": 2,
+                "transports": 1
+              },
+              "repeat_sections": [],
+              "view_states": {
+                "ready": 3
+              },
+              "navigation": {
+                "name": "file:///var/folders/cg/cg8dlzwn3353jh5hw27nxvhw0000gn/T/dataviz-runtime-benchmark-l5me7ngr/benchmark.html",
+                "entryType": "navigation",
+                "startTime": 0,
+                "duration": 495.40000009536743,
+                "navigationId": 1289,
+                "initiatorType": "navigation",
+                "deliveryType": "",
+                "nextHopProtocol": "",
+                "renderBlockingStatus": "non-blocking",
+                "contentType": "text/html",
+                "contentEncoding": "",
+                "workerStart": 0,
+                "workerRouterEvaluationStart": 0,
+                "workerCacheLookupStart": 0,
+                "workerMatchedSourceType": "",
+                "workerFinalSourceType": "",
+                "redirectStart": 0,
+                "redirectEnd": 0,
+                "fetchStart": 0.10000014305114746,
+                "domainLookupStart": 0.10000014305114746,
+                "domainLookupEnd": 0.10000014305114746,
+                "connectStart": 0.10000014305114746,
+                "secureConnectionStart": 0,
+                "connectEnd": 0.10000014305114746,
+                "requestStart": 0.10000014305114746,
+                "responseStart": 0.10000014305114746,
+                "firstInterimResponseStart": 0,
+                "finalResponseHeadersStart": 0,
+                "responseEnd": 421,
+                "transferSize": 7395457,
+                "encodedBodySize": 7395157,
+                "decodedBodySize": 7395157,
+                "responseStatus": 200,
+                "serverTiming": [],
+                "unloadEventStart": 0,
+                "unloadEventEnd": 0,
+                "domInteractive": 495.10000014305115,
+                "domContentLoadedEventStart": 495.10000014305115,
+                "domContentLoadedEventEnd": 495.2000000476837,
+                "domComplete": 495.2000000476837,
+                "loadEventStart": 495.40000009536743,
+                "loadEventEnd": 495.40000009536743,
+                "type": "navigate",
+                "redirectCount": 0,
+                "activationStart": 0,
+                "criticalCHRestart": 0,
+                "notRestoredReasons": null,
+                "confidence": {
+                  "randomizedTriggerRate": 0.4994798,
+                  "value": "high"
+                }
+              }
+            }
+          ]
+        },
+        "runtime": {
+          "interactiveTransforms": {
+            "started": 1,
+            "completed": 1,
+            "cancelled": 0,
+            "timedOut": 0,
+            "failed": 0,
+            "cacheHits": 0
+          },
+          "transports": {
+            "started": 1,
+            "completed": 1,
+            "failed": 0,
+            "arrowRows": 1000000,
+            "arrowBytes": 24002704,
+            "totalMs": 73.39999985694885
+          },
+          "renderers": {
+            "mounts": 3,
+            "updates": 0,
+            "empty": 0,
+            "failed": 0,
+            "totalMs": 68.90000009536743
+          },
+          "perspective": {
+            "created": 0,
+            "updated": 0,
+            "flushed": 0,
+            "disposed": 0,
+            "failed": 0
+          },
+          "repeat": {
+            "cards": 0,
+            "mounted": 0,
+            "maxMounted": 0,
+            "disposed": 0,
+            "searches": 0
+          }
+        },
+        "outputs": {
+          "inline": 2,
+          "transports": 1
+        },
+        "repeat_sections": [],
+        "view_states": {
+          "ready": 3
+        },
+        "console_errors": []
+      }
+    }
+  ]
+}

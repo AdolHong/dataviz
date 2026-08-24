@@ -6,6 +6,7 @@ import re
 import shutil
 import tempfile
 import threading
+import time
 import uuid
 import zipfile
 from pathlib import Path
@@ -33,6 +34,12 @@ from dataviz.execution.outputs import normalize_outputs
 from dataviz.execution.plan import reachable_output_references
 from dataviz.execution.references import parse_output_reference
 from dataviz.rendering import CanvasRenderer
+from dataviz.server.hot_reload import (
+    WorkspaceChangeJournal,
+    WorkspaceFileWatcher,
+    WorkspaceSemanticSnapshot,
+    classify_workspace_change,
+)
 from dataviz.server.manager import RunManager
 from dataviz.workspace import load_workspace, validate_workspace
 from dataviz.workspace.controls import (
@@ -84,7 +91,7 @@ class DashboardPlacementRequest(BaseModel):
     parent_id: str | None = None
 
 
-def create_app(workspace_path: str | Path) -> FastAPI:
+def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
     workspace = load_workspace(workspace_path)
     workspace_root = workspace.root
     manager = RunManager(workspace)
@@ -94,6 +101,13 @@ def create_app(workspace_path: str | Path) -> FastAPI:
     app.state.workspace = workspace
     app.state.manager = manager
     workspace_refresh_lock = threading.RLock()
+    change_journal = WorkspaceChangeJournal()
+    reload_semantics = WorkspaceSemanticSnapshot.from_workspace(workspace)
+    allowed_reload_error_keys = {
+        json.dumps(item.as_dict(), ensure_ascii=False, sort_keys=True, default=str)
+        for item in validate_workspace(workspace)
+        if item.level == "error"
+    }
     app.mount("/static", StaticFiles(directory=PACKAGE_ROOT / "static"), name="static")
 
     @app.middleware("http")
@@ -113,19 +127,144 @@ def create_app(workspace_path: str | Path) -> FastAPI:
         with workspace_refresh_lock:
             return workspace
 
-    def refresh_workspace():
+    def refresh_workspace(*, preserve_on_error: bool = False):
         """Atomically publish a freshly loaded filesystem snapshot."""
         nonlocal workspace
         with workspace_refresh_lock:
-            fresh = load_workspace(workspace_root)
+            try:
+                fresh = load_workspace(workspace_root)
+            except WorkspaceError as error:
+                if not preserve_on_error:
+                    raise
+                diagnostic = error.as_dict()
+                latest = change_journal.latest
+                latest_diagnostics = list(latest.diagnostics if latest else ())
+                if (
+                    latest is None
+                    or latest.status != "invalid"
+                    or latest_diagnostics != [diagnostic]
+                ):
+                    change_journal.publish(
+                        status="invalid",
+                        diagnostics=[diagnostic],
+                        message=(
+                            "Workspace update could not be loaded. "
+                            "The previous Canvas remains active."
+                        ),
+                    )
+                return workspace
+            diagnostics = [item.as_dict() for item in validate_workspace(fresh)]
+            error_diagnostics = [
+                item for item in diagnostics if item.get("level") == "error"
+            ]
+            current_error_keys = {
+                json.dumps(item, ensure_ascii=False, sort_keys=True, default=str)
+                for item in error_diagnostics
+            }
+            blocking_errors = current_error_keys - allowed_reload_error_keys
+            if blocking_errors:
+                if preserve_on_error:
+                    latest = change_journal.latest
+                    latest_diagnostics = {
+                        json.dumps(item, ensure_ascii=False, sort_keys=True, default=str)
+                        for item in (latest.diagnostics if latest else ())
+                    }
+                    if latest is None or latest.status != "invalid" or latest_diagnostics != current_error_keys:
+                        change_journal.publish(
+                            status="invalid",
+                            diagnostics=error_diagnostics,
+                            message=(
+                                "Workspace update has validation errors. "
+                                "The previous Canvas remains active."
+                            ),
+                        )
+                    return workspace
+                # Execution endpoints may inspect/reject this complete candidate,
+                # but it is not installed as the Server's current snapshot.
+                return fresh
             workspace = fresh
             app.state.workspace = fresh
             manager.install_workspace_snapshot(fresh)
             return fresh
 
-    def dashboard_from_disk(dashboard_id: str):
+    def publish_workspace_change(changed_paths: set[str]) -> None:
+        """Load, validate and atomically publish one debounced filesystem edit."""
+        nonlocal workspace, reload_semantics
+        with workspace_refresh_lock:
+            try:
+                fresh = load_workspace(workspace_root)
+                diagnostics = [item.as_dict() for item in validate_workspace(fresh)]
+                current_semantics = WorkspaceSemanticSnapshot.from_workspace(fresh)
+            except WorkspaceError as error:
+                change_journal.publish(
+                    status="invalid",
+                    changed_paths=changed_paths,
+                    diagnostics=[error.as_dict()],
+                    message=(
+                        "Workspace update could not be loaded. "
+                        "The previous Canvas remains active."
+                    ),
+                )
+                return
+
+            impacts, navigation_changed = classify_workspace_change(
+                reload_semantics,
+                current_semantics,
+                changed_paths,
+            )
+            error_diagnostics = [
+                item for item in diagnostics if item.get("level") == "error"
+            ]
+            current_error_keys = {
+                json.dumps(item, ensure_ascii=False, sort_keys=True, default=str)
+                for item in error_diagnostics
+            }
+            blocking_errors = current_error_keys - allowed_reload_error_keys
+
+            if blocking_errors:
+                change_journal.publish(
+                    status="invalid",
+                    changes=impacts,
+                    navigation_changed=navigation_changed,
+                    changed_paths=changed_paths,
+                    diagnostics=error_diagnostics,
+                    message=(
+                        "Workspace update has validation errors. "
+                        "The current Canvas was not replaced."
+                    ),
+                )
+                return
+
+            # A complete snapshot is always published in one assignment. Active
+            # Runs retain the immutable snapshot they captured at start.
+            workspace = fresh
+            app.state.workspace = fresh
+            manager.install_workspace_snapshot(fresh)
+            reload_semantics = current_semantics
+            change_journal.publish(
+                status="ready",
+                changes=impacts,
+                navigation_changed=navigation_changed,
+                changed_paths=changed_paths,
+                message="Workspace changes loaded.",
+            )
+
+    workspace_watcher = WorkspaceFileWatcher(workspace_root, publish_workspace_change)
+    app.state.workspace_change_journal = change_journal
+    app.state.workspace_watcher = workspace_watcher
+    app.state.workspace_hot_reload_enabled = watch
+
+    if watch:
+        app.router.add_event_handler("startup", workspace_watcher.start)
+        app.router.add_event_handler("shutdown", workspace_watcher.stop)
+
+    def dashboard_from_disk(
+        dashboard_id: str,
+        *,
+        preserve_on_error: bool = False,
+    ):
         """Resolve the latest on-disk Dashboard definition for development."""
-        snapshot = refresh_workspace()
+        snapshot = refresh_workspace(preserve_on_error=preserve_on_error)
         return snapshot, snapshot.dashboard(dashboard_id)
 
     def checked_session(value: str) -> str:
@@ -230,7 +369,7 @@ def create_app(workspace_path: str | Path) -> FastAPI:
         # Dashboard directory names are the navigation labels. Users and AI may
         # copy, rename or remove them without going through this server, so the
         # filesystem must be rescanned before publishing the tree.
-        snapshot = refresh_workspace()
+        snapshot = refresh_workspace(preserve_on_error=True)
         diagnostics = [item.as_dict() for item in validate_workspace(snapshot)]
         dashboards = []
         for entry in snapshot.catalog:
@@ -391,7 +530,63 @@ def create_app(workspace_path: str | Path) -> FastAPI:
             "trash": [item.model_dump(mode="json") for item in snapshot.trash],
             "dashboards": dashboards,
             "diagnostics": diagnostics,
+            "hot_reload": {
+                "enabled": watch,
+                "revision": change_journal.revision,
+                "last_event": (
+                    change_journal.latest.as_dict()
+                    if change_journal.latest is not None
+                    else None
+                ),
+            },
         }
+
+    @app.get("/api/workspace/events")
+    async def workspace_events(
+        request: Request,
+        session_id: str,
+        after: int = Query(0, ge=0),
+    ):
+        checked_session(session_id)
+        try:
+            last_event_id = int(request.headers.get("last-event-id", "0"))
+        except ValueError:
+            last_event_id = 0
+        cursor = max(after, last_event_id)
+
+        async def stream():
+            nonlocal cursor
+            keepalive_at = time.monotonic()
+            while True:
+                if await request.is_disconnected():
+                    break
+                events = change_journal.after(cursor)
+                for event in events:
+                    cursor = event.revision
+                    payload = json.dumps(
+                        event.as_dict(),
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    yield (
+                        f"id: {event.revision}\n"
+                        "event: workspace_changed\n"
+                        f"data: {payload}\n\n"
+                    )
+                now = time.monotonic()
+                if now - keepalive_at >= 10:
+                    yield ": keepalive\n\n"
+                    keepalive_at = now
+                await asyncio.sleep(0.25)
+
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-store",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     def apply_navigation_change(action) -> dict[str, Any]:
         try:
@@ -447,6 +642,11 @@ def create_app(workspace_path: str | Path) -> FastAPI:
 
     @app.post("/api/dashboards/{dashboard_id}/runs")
     def start_run(dashboard_id: str, request: RunRequest):
+        # A user can save SQL and click Run before the polling loop reaches its
+        # debounce boundary. Publish that filesystem generation first so the
+        # returned revision describes the exact snapshot captured below.
+        if watch:
+            workspace_watcher.flush()
         try:
             snapshot, _ = dashboard_from_disk(dashboard_id)
         except WorkspaceError as error:
@@ -461,7 +661,11 @@ def create_app(workspace_path: str | Path) -> FastAPI:
             )
         except DatavizError as error:
             raise HTTPException(422, error.as_dict()) from error
-        return {"run_id": record.run_id, "status": record.status}
+        return {
+            "run_id": record.run_id,
+            "status": record.status,
+            "workspace_revision": change_journal.revision,
+        }
 
     @app.get("/api/runs/{run_id}")
     def get_run(run_id: str, session_id: str):
@@ -490,8 +694,23 @@ def create_app(workspace_path: str | Path) -> FastAPI:
     @app.get("/api/session/runs")
     def session_runs(session_id: str):
         records = manager.latest_for_session(checked_session(session_id))
-        return {
-            "runs": [
+        try:
+            snapshot = refresh_workspace(preserve_on_error=True)
+        except WorkspaceError:
+            snapshot = current_workspace()
+        payload = []
+        for record in records:
+            query_run = record.result or record.snapshot
+            query_outdated = False
+            if query_run is not None:
+                try:
+                    ensure_query_run_compatible(
+                        snapshot.dashboard(record.dashboard_id),
+                        query_run,
+                    )
+                except (DatavizError, WorkspaceError):
+                    query_outdated = True
+            payload.append(
                 {
                     "run_id": record.run_id,
                     "dashboard_id": record.dashboard_id,
@@ -504,13 +723,15 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                     ),
                     "nodes": {
                         node_id: node.status
-                        for node_id, node in (record.snapshot.nodes.items() if record.snapshot else [])
+                        for node_id, node in (
+                            record.snapshot.nodes.items() if record.snapshot else []
+                        )
                     },
                     "ready": record.result is not None,
+                    "query_outdated": query_outdated,
                 }
-                for record in records
-            ]
-        }
+            )
+        return {"runs": payload}
 
     @app.get("/api/runs/{run_id}/events")
     async def run_events(run_id: str, session_id: str):
@@ -837,7 +1058,10 @@ def create_app(workspace_path: str | Path) -> FastAPI:
         frame_id: str | None = None,
     ):
         try:
-            snapshot, dashboard = dashboard_from_disk(dashboard_id)
+            snapshot, dashboard = dashboard_from_disk(
+                dashboard_id,
+                preserve_on_error=True,
+            )
         except WorkspaceError:
             try:
                 entry = current_workspace().catalog_entry(dashboard_id)

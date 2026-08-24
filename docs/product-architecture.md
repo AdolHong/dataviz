@@ -14,6 +14,7 @@ Source                 dataviz/source/v1
 Dataset Transform      dataviz/dataset-transform/v1
 Interactive Transform  dataviz/interactive-transform/v1
 Browser Runtime        dataviz/runtime/v2
+Workspace Change       dataviz/workspace-change/v1
 Component Registry     3.0.0
 ```
 
@@ -129,7 +130,7 @@ Runtime 将 Selection-kind、Compute-kind 和 Output 视为三种独立 delta。
 
 大 Table 的传输可使用 Arrow IPC/columnar envelope；浏览器按需解码。部分通用 Selector 和 Renderer 首次消费时仍会物化 JavaScript 行对象，当前不承诺完整的浏览器列式查询引擎。
 
-声明式 View、browser-js Worker 和 Custom Canvas 的内置数值聚合使用线性 reducer，不通过 `Math.min(...rows)` / `Math.max(...rows)` 展开大数组。当前真实浏览器回归覆盖 150K 行；这解决参数上限崩溃，但不等于已经证明 1M 行的内存预算。
+声明式 View、browser-js Worker 和 Custom Canvas 的内置数值聚合使用线性 reducer，不通过 `Math.min(...rows)` / `Math.max(...rows)` 展开大数组。Worker/Data API 的 groupBy 还采用单遍流式聚合，每组只保留 key 与 count/sum/min/max。固定 10K/100K/1M 证据与测量边界见 [Runtime 性能基线](runtime-performance.md)；聚合链路通过不等于 1M 原始明细 View 已获支持预算。
 
 规模回归入口：
 
@@ -179,6 +180,8 @@ CLI 无浏览器上下文时不会替用户伪造 browser snapshot。需要当�
 - Dashboard 只引用自己声明的逻辑 Adapter reference，再由 Workspace 绑定到具体 Adapter；凭证留在 `auth/adapters.local.yaml` 或环境变量。
 
 Server 状态以浏览器 tab 的 `session_id` 为边界。不同 tab、Dashboard、用户、Query Run 和 Interaction generation 不共享草稿、取消信号或运行证据。内容寻址缓存可以复用相同输入的结果，但不会共享交互状态。
+
+开发态 Hot Reload 位于 `src/dataviz/server/hot_reload.py`：dependency-free watcher 只做 stat 扫描并忽略 `.dataviz`/虚拟环境/构建目录，debounce 后根据已解析声明和实际引用资产计算 Workspace semantic snapshot，把变化分成 navigation、canvas、analysis、query、server 或 invalid；无关临时文件不会重载 Canvas。`server/app.py` 原子发布完整快照并提供 Workspace SSE；Query 请求会先 flush 尚未发布的文件批次，并返回所捕获的 revision。`server/static/app.js` 保留 tab 状态、处理增量刷新并在真正晚于 Run 的 Query Contract 变化时进入 Outdated。活动 Run 始终继续使用启动快照，页面恢复时 `/api/session/runs` 会再次核验当前 Contract。
 
 `.dataviz/runs` 与 `.dataviz/cache` 是唯一运行数据根目录，Dashboard 文件夹和 Dashboard ZIP 不包含缓存。所有已发布 Query Output 在有界 Run 保留期内存在；其中 Server Interactive 输入会被显式标记和保护，而不是重复存储。活动 Interaction 消费的 Run 不能被清理。
 
@@ -230,7 +233,7 @@ dataviz authoring compare MEASUREMENT_WORKSPACE --format json
 - 这是可信单机执行环境，不是不可信代码沙箱，也不提供多租户 CPU/内存额度。
 - 通用服务端分页、按需 Record Batch 和完整浏览器列式执行尚未实现。
 - 13 个 Component Package 都已物理拥有 controller、adapter 和功能 CSS；共享 Runtime 仍较大，后续只按 Manifest、Output Store、Scheduler、Selection Binding 等主机职责继续拆分。
-- Gallery 已覆盖 Selector、Control、View、Section 七状态和真实 10/100/1,000 选项；Firefox/WebKit 的窄视口、弹层、滚动、键盘、ARIA、Perspective 恢复和重复 dispose 组合仍需扩展。
+- Gallery 已覆盖 Selector、Control、View、Section 七状态和真实 10/100/1,000 选项；Chromium/Firefox/WebKit 还覆盖窄视口、弹层、滚动、键盘、ARIA、Perspective 恢复和三轮 dispose 组合。
 - Token 节省是待真实任务评测的产品假设，不承诺固定数字。
 - 成对评测工具已经实现；真实重复 trial 与结果发布尚待积累。
 - 当前运行协调只支持一个 Dataviz Server 进程写一个 Workspace/报告目标；Runtime 并发上限变更需要重启。

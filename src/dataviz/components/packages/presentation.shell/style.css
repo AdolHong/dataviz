@@ -221,7 +221,7 @@
   [data-dv-control-panel] > .dv-runtime-popover > .dv-report-selection-group__fields,
   [data-dv-control-panel] > .dv-runtime-popover > .dv-runtime-query-values,
   [data-dv-control-panel] > .dv-runtime-popover > .dv-compute-fields {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) !important;
   }
   .dashboard-control-group > .parameter-form,
   .dashboard-control-group > .selection-form,

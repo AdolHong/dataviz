@@ -29,9 +29,14 @@
 
     <main class="workbench">
       <header class="topbar">
-        <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-controls="dashboard-sidebar" aria-expanded="true" title="收起导航栏">
-          <span aria-hidden="true">◫</span><small>Navigation</small>
-        </button>
+        <div class="topbar-leading">
+          <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-controls="dashboard-sidebar" aria-expanded="true" title="收起导航栏">
+            <span aria-hidden="true">◫</span><small>Navigation</small>
+          </button>
+          <button id="dashboard-reload" class="sidebar-toggle" type="button" title="重新读取当前 Workspace">
+            <span aria-hidden="true">↻</span><small>Reload</small>
+          </button>
+        </div>
         <div class="topbar-actions">
           <details id="query-parameters-control" class="header-control" data-header-popover data-dv-control-panel data-control-role="query" data-control-count="0" data-overlay-floating="true" data-overlay-width="520">
             <summary class="header-control__trigger">
@@ -78,6 +83,16 @@
           <button id="run-button" class="button button--run" disabled><span class="button-light"></span>Run query</button>
         </div>
       </header>
+
+      <section id="workspace-update" class="workspace-update" data-impact="canvas" role="status" aria-live="polite" hidden>
+        <span class="workspace-update__light" aria-hidden="true"></span>
+        <div class="workspace-update__copy">
+          <strong id="workspace-update-title">Dashboard updated</strong>
+          <small id="workspace-update-message">The latest files are active.</small>
+        </div>
+        <button id="workspace-update-action" class="workspace-update__action" type="button" hidden>Reload</button>
+        <button id="workspace-update-dismiss" class="workspace-update__dismiss" type="button" aria-label="Dismiss update message">×</button>
+      </section>
 
       <section class="canvas-panel">
         <iframe id="canvas-frame" title="Dashboard canvas"></iframe>

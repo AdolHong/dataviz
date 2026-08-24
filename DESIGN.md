@@ -2,7 +2,7 @@
 
 > 快速安装和当前可用命令见 [README](README.md)；后续工作见 [plan.md](plan.md)。安装版本真正接受的字段始终以 `dataviz schemas`、`dataviz docs` 和 `dataviz components` 为准。
 
-本文描述 Dataviz 当前已经落地的执行架构与必须长期保持的设计不变量。`0.3.1` 对应的严格契约是 `dataviz/dashboard/v3` 与 `dataviz/runtime/v2`；scoped Controls、Selection-before-Compute、两种 Transform 和三种 Interactive Runtime 已进入实现、CLI、Schema、示例与测试，不是兼容旧实验接口的抽象层。当前实现不保留 Dashboard v2 字段，使用者必须按 v3 重写未迁移的实验看板。
+本文描述 Dataviz 当前已经落地的执行架构与必须长期保持的设计不变量。`0.3.2` 对应的严格契约是 `dataviz/dashboard/v3` 与 `dataviz/runtime/v2`；scoped Controls、Selection-before-Compute、两种 Transform、三种 Interactive Runtime 与开发态 Workspace Hot Reload 已进入实现、CLI、示例与测试，不是兼容旧实验接口的抽象层。当前实现不保留 Dashboard v2 字段，使用者必须按 v3 重写未迁移的实验看板。
 
 Dataviz 是一个 workspace-first、AI-friendly 的数据看板工具。看板是普通文件，能够被 Git 管理、复制和审查；Server 面向人提供交互页面，CLI 面向 AI 与自动化提供校验、查询和 HTML 导出。
 
@@ -417,6 +417,23 @@ dataset:features + dashboard:sales-overview/seed (kind: compute)
 - Source、Dataset Transform 和 `server-python` Interactive Transform 默认也按 tab/session 隔离；Source/Dataset 缓存键同时包含 Dashboard 与节点 ID，只有显式的 `ttl/persistent + scope: workspace` 才能按内容哈希跨 tab 复用确定性结果。
 - Workspace cache 只复用 Artifact，不共享草稿、Selection、Run、generation、取消信号或运行证据。
 
+### 开发态 Workspace Hot Reload
+
+`dataviz serve` 默认监听 Workspace，但“文件变化”不等于“重新查询”。Server 将一批连续编辑合并为单调 revision，加载并验证完整新快照，再通过 SSE 把影响范围通知每个浏览器 tab：
+
+| 变化 | 影响状态 | 行为 |
+| --- | --- | --- |
+| title、description、Section/View、Presentation、CSS/Canvas 资源 | `canvas` | 重载 Canvas，保留当前 Run、Controls 和滚动位置 |
+| browser-js、browser-python、server-python Interactive Transform 或其 Control Contract | `analysis` | 使用已有 Base Output 重建并重算受影响交互分支，不查询 Source |
+| Query Parameter、Adapter、Source、Source 数据文件、Dataset Transform 或 Query 可达图 | `query` | 当前 Run 标记 `Outdated`；不自动执行查询，等待用户明确 Run query |
+| Dashboard 目录新增、移除、改名或逻辑目录变化 | `navigation` | 更新目录；未影响当前 Dashboard 时不重载 Canvas |
+| Workspace Runtime 或进程级配置 | `server` | 保留当前页面并明确提示重启，不伪装成已经热应用 |
+| 新配置无法加载或出现新的静态错误 | `invalid` | 保持当前 iframe，不把半写入状态发布给页面，展示诊断并等待下一次有效 revision |
+
+分类依据是已经解析的声明、依赖图和实际引用资产的语义签名，而不是简单地把 Dashboard 目录中的每个文件都视作页面依赖；编辑器临时文件不会无故重载 Canvas。活动 Query 始终持有启动时的不可变 Workspace 快照。若其运行期间 Query Contract 发生变化，该 Run 即使成功也只能作为历史证据，不能提交为当前结果。保存 Source 后立刻点击 Query 时，Server 会先同步尚在 debounce 窗口内的文件批次，并让 Run 返回它实际捕获的 Workspace revision。页面刷新或 tab 状态恢复时，Server 也会再次核验 Run 与当前 Query Contract，不能只依赖曾经收到过的浏览器事件。
+
+监听只覆盖 Workspace。修改 Dataviz 自身的 Python Server 源码或安装新 package 仍需要重新安装并重启进程；Workspace Runtime 中启动时创建的并发额度也需要重启。`--no-watch` 只关闭主动通知，请求时重新读取与 Header `Reload` 仍是兜底路径。
+
 ## 10. 数据执行与可审查性
 
 每个 Source、Dataset Transform 和 Interactive Transform 都必须有稳定状态、耗时、缓存来源、输入指纹、错误和运行证据。
@@ -509,10 +526,10 @@ AI 的默认工作应该是选择模板、绑定 Output、填写状态依赖和�
 仍属于后续优化，而不是隐藏的兼容工作：
 
 1. Arrow 已优化传输和浏览器 Interactive Transform 输入；通用 Selection 与部分 Renderer 首次消费大表时仍可能物化 JavaScript 行对象。
-2. 内置聚合已经避免把大数组 spread 到 `Math.min/Math.max`，并有 150K 行浏览器回归；固定 10K/100K/1M 内存与耗时证据仍未完成。
-3. Server 尚未提供通用服务端分页或按需 Record Batch。这应由真实 benchmark 触发，而不是提前扩张 DSL。
+2. 固定 10K/100K/1M Query → Arrow → browser-js → Renderer 基准已经记录进程树 RSS、页面耗时和三轮 dispose 回落；流式 groupBy 由该证据触发，而不是凭行数猜测优化。
+3. Server 尚未提供通用服务端分页或按需 Record Batch。现有 1M 聚合链路不足以证明需要扩张 DSL，也不能外推为 1M 原始 Table/Perspective 安全；二者都必须由各自基准触发。
 4. authoring 评测工具已实现，但尚未积累足够的重复真实 trial，不能声称固定 Token 节省比例。
-5. Firefox/WebKit 仍需扩展窄视口、弹层几何、滚动、键盘、ARIA、Perspective 恢复和重复 dispose 的组合矩阵。
+5. Chromium/Firefox/WebKit 已覆盖 390×520 弹层几何、内部滚动、键盘、ARIA、外部关闭，以及 Perspective 重复 dispose/reload/wheel 恢复；新增组件必须继续进入同一矩阵。
 6. 当前协调模型是单进程：`dataviz serve` 启动一个进程，Run、Navigation、Cache 与报告发布锁不提供跨进程互斥；多个进程不得同时写同一 Workspace/输出路径。Runtime 并发上限在启动时捕获，修改配置后需重启。
 7. Server 不提供账号体系或 HTTP 鉴权，默认只绑定回环地址；非回环 `--host` 必须显式使用 `--allow-remote`，访问控制由可信网络或外部代理承担。`session_id` 是 tab 状态命名空间，不是身份认证。
 

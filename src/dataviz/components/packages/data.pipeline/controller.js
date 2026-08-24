@@ -54,24 +54,41 @@
       this._numericAggregate = numericAggregate;
     }
     aggregate(spec) {
+      const rules = Object.entries(spec).map(([output, rule]) => {
+        const definition = typeof rule === 'string' ? {field: output, op: rule} : rule;
+        return {output, field: definition.field, operation: definition.op || 'sum'};
+      });
       const groups = new Map();
       this._rows.forEach(row => {
-        const key = JSON.stringify(this._fields.map(field => row[field]));
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(row);
+        const keys = this._fields.map(field => row[field]);
+        const signature = JSON.stringify(keys);
+        if (!groups.has(signature)) {
+          groups.set(signature, {
+            keys,
+            stats: rules.map(() => ({count:0, sum:0, minimum:Infinity, maximum:-Infinity})),
+          });
+        }
+        const group = groups.get(signature);
+        rules.forEach((rule, index) => {
+          const value = Number(row[rule.field] ?? 0);
+          const stats = group.stats[index];
+          stats.count += 1;
+          stats.sum += value;
+          if (value < stats.minimum) stats.minimum = value;
+          if (value > stats.maximum) stats.maximum = value;
+        });
       });
-      const rows = [...groups.entries()].map(([key, values]) => {
-        const keys = JSON.parse(key);
+      const rows = [...groups.values()].map(group => {
         const result = Object.fromEntries(
-          this._fields.map((field, index) => [field, keys[index]])
+          this._fields.map((field, index) => [field, group.keys[index]])
         );
-        Object.entries(spec).forEach(([output, rule]) => {
-          const definition = typeof rule === 'string' ? {field: output, op: rule} : rule;
-          result[output] = this._numericAggregate(
-            values,
-            definition.op,
-            row => row[definition.field],
-          );
+        rules.forEach((rule, index) => {
+          const stats = group.stats[index];
+          if (rule.operation === 'count') result[rule.output] = stats.count;
+          else if (rule.operation === 'mean') result[rule.output] = stats.sum / Math.max(stats.count, 1);
+          else if (rule.operation === 'min') result[rule.output] = stats.minimum;
+          else if (rule.operation === 'max') result[rule.output] = stats.maximum;
+          else result[rule.output] = stats.sum;
         });
         return result;
       });

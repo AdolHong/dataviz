@@ -1,0 +1,18 @@
+schema: dataviz/interactive-transform/v1
+kind: interactive_transform
+id: summarize
+runtime: browser-js
+code: summarize.js
+inputs: {rows: source:rows/main}
+trigger: auto
+debounce_ms: 0
+export: {mode: interactive}
+outputs:
+  main:
+    kind: table
+    schema:
+      - {name: bucket, dtype: int64}
+      - {name: count, dtype: int64}
+      - {name: total, dtype: number}
+      - {name: peak, dtype: int64}
+timeout_seconds: 120

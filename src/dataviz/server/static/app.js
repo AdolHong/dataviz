@@ -9,6 +9,10 @@ const state = {
   draggedNavigation: null,
   sidebarWidth: 220,
   sidebarCollapsed: false,
+  workspaceRevision: 0,
+  workspaceEventSource: null,
+  workspaceNoticeTimer: null,
+  hotReloadEnabled: false,
 };
 const $ = (selector) => document.querySelector(selector);
 
@@ -30,6 +34,12 @@ function runtimeFor(dashboardId) {
       queryLabel: 'Not run',
       message: 'Data pipeline is ready to run.',
       previousQueryState: null,
+      canvasScrollY: 0,
+      queryDefinitionStale: false,
+      pendingQueryRevision: null,
+      pendingRunOutdated: false,
+      queryRequestInFlight: false,
+      pendingQueryChangeRevision: 0,
     });
   }
   return state.dashboardStates.get(dashboardId);
@@ -101,6 +111,8 @@ function sameCanvasIdentity(left, right) {
 
 function loadCanvasFrame(dashboardId, runId = null) {
   const frame = $('#canvas-frame');
+  const runtime = runtimeFor(dashboardId);
+  const restoreScrollY = Number(runtime.canvasScrollY || 0);
   const frameId = `frame_${crypto.randomUUID().replaceAll('-', '')}`;
   frame.dataset.dashboardId = dashboardId;
   frame.dataset.runId = runId || '';
@@ -108,6 +120,14 @@ function loadCanvasFrame(dashboardId, runId = null) {
   frame.dataset.runtimeReady = 'false';
   const run = runId ? `&run_id=${encodeURIComponent(runId)}` : '';
   frame.src = `/api/dashboards/${encodeURIComponent(dashboardId)}/canvas?${sessionQuery()}${run}&frame_id=${encodeURIComponent(frameId)}`;
+  frame.addEventListener('load', () => {
+    if (!restoreScrollY || frame.dataset.dashboardId !== dashboardId) return;
+    const restore = () => {
+      try { frame.contentWindow.scrollTo({top:restoreScrollY, behavior:'instant'}); } catch (_) { /* same-origin frame may still be initializing */ }
+    };
+    restore();
+    window.setTimeout(restore, 180);
+  }, {once:true});
 }
 
 function postCanvasMessage(payload) {
@@ -632,6 +652,7 @@ function selectDashboard(id) {
     previous.queryParameterValues = queryParameters();
     previous.draftComputeParameters = computeParameters();
     previous.dashboardSelectionValues = dashboardSelectionValues();
+    try { previous.canvasScrollY = $('#canvas-frame').contentWindow.scrollY || 0; } catch (_) { previous.canvasScrollY = 0; }
     saveTabUiState();
   }
   closeHeaderPopovers();
@@ -681,7 +702,7 @@ function selectDashboard(id) {
   setQueryState();
   setSelectionsEnabled(Boolean(runtime.runId));
   setComputeState();
-  loadCanvasFrame(id, runtime.runId);
+  loadCanvasFrame(id, runtime.pendingRunId || runtime.runId);
   $('#run-button').disabled = !runnable;
   $('#run-button').classList.toggle('is-cancelling', Boolean(runtime.pendingRunId));
   $('#run-button').lastChild.textContent = runtime.pendingRunId ? 'Cancel query' : 'Run query';
@@ -766,6 +787,9 @@ async function runDashboard() {
     return;
   }
   closeHeaderPopovers();
+  const requestedWorkspaceRevision = state.workspaceRevision;
+  runtime.queryRequestInFlight = true;
+  runtime.pendingQueryChangeRevision = 0;
   runtime.previousQueryState = {
     status:runtime.queryStatus,
     label:runtime.queryLabel,
@@ -784,7 +808,19 @@ async function runDashboard() {
         query_parameters: runtime.queryParameterValues,
       })
     });
+    const runWorkspaceRevision = Number(
+      response.workspace_revision ?? requestedWorkspaceRevision,
+    );
     runtime.pendingRunId = response.run_id;
+    runtime.pendingQueryRevision = runWorkspaceRevision;
+    runtime.pendingRunOutdated = runtime.pendingQueryChangeRevision > runWorkspaceRevision;
+    runtime.queryRequestInFlight = false;
+    runtime.pendingQueryChangeRevision = 0;
+    state.workspaceRevision = Math.max(state.workspaceRevision, runWorkspaceRevision);
+    if (!runtime.pendingRunOutdated) {
+      runtime.queryDefinitionStale = false;
+      if ($('#workspace-update').dataset.impact === 'query') hideWorkspaceUpdate();
+    }
     runtime.queryStatus = 'loading';
     runtime.queryLabel = 'Loading';
     runtime.message = 'Querying a new dataset…';
@@ -796,6 +832,8 @@ async function runDashboard() {
     }
     listen(response.run_id, dashboardId);
   } catch (error) {
+    runtime.queryRequestInFlight = false;
+    runtime.pendingQueryChangeRevision = 0;
     runtime.queryStatus = 'error';
     runtime.queryLabel = 'Failed';
     runtime.message = error.message;
@@ -857,12 +895,21 @@ async function finishRun(runId, dashboardId) {
   const status = record.result?.status || record.status;
   runtime.message = status === 'ready' ? 'Dataset query completed.' : `Query finished with status: ${status}`;
   runtime.pendingRunId = null;
-  const committed = record.result && ['ready', 'partial'].includes(status);
+  const outdated = runtime.pendingRunOutdated;
+  runtime.pendingRunOutdated = false;
+  runtime.pendingQueryRevision = null;
+  const committed = record.result && ['ready', 'partial'].includes(status) && !outdated;
   if (committed) {
     runtime.runId = runId;
     runtime.committedQueryParameters = record.result.query_parameters;
     runtime.queryStatus = ['ready', 'partial'].includes(status) ? status : 'error';
     runtime.queryLabel = status === 'ready' ? 'Ready' : status === 'partial' ? 'Partial' : 'Failed';
+    runtime.queryDefinitionStale = false;
+  } else if (outdated) {
+    runtime.queryDefinitionStale = true;
+    runtime.queryStatus = 'stale';
+    runtime.queryLabel = 'Outdated';
+    runtime.message = 'Query finished with an older Dashboard definition. Run query again.';
   } else {
     const previous = runtime.previousQueryState;
     runtime.queryStatus = previous?.status || (runtime.runId ? 'ready' : status);
@@ -883,6 +930,9 @@ async function finishRun(runId, dashboardId) {
     setSelectionsEnabled(Boolean(runtime.runId));
     setComputeState();
     setQueryState(committed ? null : runtime.message);
+    if (committed && $('#workspace-update').dataset.impact === 'query') {
+      hideWorkspaceUpdate();
+    }
     if (committed) {
       const frame = $('#canvas-frame');
       if (frame.dataset.runId !== runId || frame.dataset.dashboardId !== dashboardId) {
@@ -995,13 +1045,18 @@ function pendingParametersMatchDataset() {
 
 function setQueryState(message = null) {
   const node = $('#query-state');
+  const runtime = activeRuntime();
   if (state.dashboard && !state.dashboard.runnable) {
     node.dataset.stale = 'true';
     node.textContent = state.dashboard.message || 'Dashboard unavailable.';
     $('#query-control-meta').textContent = state.dashboard.status;
     return;
   }
-  if (message) {
+  if (runtime?.queryDefinitionStale) {
+    node.dataset.stale = 'true';
+    node.textContent = message || 'Dashboard query definition changed. Run query again to apply it.';
+    $('#query-control-meta').textContent = 'Outdated';
+  } else if (message) {
     node.dataset.stale = state.runId ? 'true' : 'false';
     node.textContent = message;
     $('#query-control-meta').textContent = 'Check values';
@@ -1445,15 +1500,223 @@ function renderTrash() {
   $('#nav-trash-list').replaceChildren(...list);
 }
 
-async function refreshNavigation(preferredPath = state.dashboard?.path) {
+async function refreshNavigation(preferredPath = state.dashboard?.path, {reloadCanvas = true} = {}) {
+  const activeId = state.dashboard?.id || null;
   state.payload = await request('/api/workspace');
+  state.workspaceRevision = Math.max(
+    state.workspaceRevision,
+    Number(state.payload.hot_reload?.revision || 0),
+  );
+  state.hotReloadEnabled = Boolean(state.payload.hot_reload?.enabled);
   $('#workspace-title').textContent = 'Dashboards';
   $('#workspace-title').title = state.payload.workspace.title;
-  renderNavigation();
   const preferred = state.payload.dashboards.find((item) => item.path === preferredPath);
   const remembered = state.payload.dashboards.find((item) => item.id === state.preferredDashboardId);
   const fallback = state.payload.dashboards.find((item) => item.runnable) || state.payload.dashboards[0];
-  if (preferred || remembered || fallback) selectDashboard((preferred || remembered || fallback).id);
+  const selected = preferred || remembered || fallback;
+  if (!selected) {
+    state.dashboard = null;
+    renderNavigation();
+    return null;
+  }
+  if (!reloadCanvas && activeId && selected.id === activeId) {
+    state.dashboard = selected;
+    renderNavigation();
+    document.querySelectorAll('.nav-button').forEach(
+      (node) => node.classList.toggle('active', node.dataset.id === selected.id),
+    );
+    return selected;
+  }
+  renderNavigation();
+  selectDashboard(selected.id);
+  return selected;
+}
+
+function hideWorkspaceUpdate() {
+  window.clearTimeout(state.workspaceNoticeTimer);
+  state.workspaceNoticeTimer = null;
+  $('#workspace-update').hidden = true;
+}
+
+function showWorkspaceUpdate({impact, title, message, action = null, transient = false}) {
+  const notice = $('#workspace-update');
+  const button = $('#workspace-update-action');
+  window.clearTimeout(state.workspaceNoticeTimer);
+  notice.dataset.impact = impact;
+  $('#workspace-update-title').textContent = title;
+  $('#workspace-update-message').textContent = message;
+  button.hidden = !action;
+  button.dataset.action = action || '';
+  button.textContent = action === 'query' ? 'Run query' : 'Reload';
+  notice.hidden = false;
+  if (transient) {
+    state.workspaceNoticeTimer = window.setTimeout(hideWorkspaceUpdate, 4200);
+  }
+}
+
+function markAnalysisStale(runtime) {
+  for (const nodeId of Object.keys(runtime.nodeStatuses)) {
+    if (nodeId.startsWith('interactive:')) runtime.nodeStatuses[nodeId] = 'stale';
+  }
+}
+
+async function handleWorkspaceChange(change) {
+  const revision = Number(change.revision || 0);
+  if (revision <= state.workspaceRevision) return;
+  state.workspaceRevision = revision;
+  if (change.status === 'invalid') {
+    const first = change.diagnostics?.[0];
+    showWorkspaceUpdate({
+      impact:'invalid',
+      title:'Dashboard update has errors',
+      message:first?.message || change.message || 'The previous Canvas remains active.',
+      action:'reload',
+    });
+    return;
+  }
+
+  const activeId = state.dashboard?.id;
+  const activeChange = (change.changes || []).find((item) => item.dashboard_id === activeId);
+  const currentPath = state.dashboard?.path || null;
+  if (!activeChange) {
+    if (change.navigation_changed) await refreshNavigation(currentPath, {reloadCanvas:false});
+    if ($('#workspace-update').dataset.impact === 'invalid') {
+      showWorkspaceUpdate({
+        impact:'canvas',
+        title:'Dashboard definition restored',
+        message:'The Workspace is valid again; the last valid Canvas remained active.',
+        transient:true,
+      });
+    }
+    return;
+  }
+
+  if (activeChange.impact === 'server') {
+    await refreshNavigation(currentPath, {reloadCanvas:false});
+    showWorkspaceUpdate({
+      impact:'server',
+      title:'Server settings changed',
+      message:'Restart dataviz serve to apply Workspace Runtime or process-level settings.',
+    });
+    return;
+  }
+
+  const runtime = activeRuntime();
+  if (activeChange.impact === 'query' && runtime) {
+    if (runtime.queryRequestInFlight || runtime.pendingRunId) {
+      runtime.pendingQueryChangeRevision = Math.max(
+        runtime.pendingQueryChangeRevision,
+        revision,
+      );
+    }
+    if (
+      runtime.pendingRunId
+      && Number(runtime.pendingQueryRevision || 0) < revision
+    ) {
+      runtime.pendingRunOutdated = true;
+    }
+    runtime.queryDefinitionStale = true;
+    runtime.queryStatus = runtime.runId ? 'stale' : 'idle';
+    runtime.queryLabel = runtime.runId ? 'Outdated' : 'Not run';
+    runtime.message = runtime.runId
+      ? 'Query definition changed. Run query again before trusting this dashboard.'
+      : 'Query definition changed. Run query to create the dataset.';
+  } else if (activeChange.impact === 'analysis' && runtime) {
+    markAnalysisStale(runtime);
+    runtime.message = 'Interactive analysis changed and is recomputing from the existing dataset.';
+  }
+
+  await refreshNavigation(currentPath, {reloadCanvas:true});
+  if (activeChange.impact === 'query') {
+    const coveredByPendingRun = Boolean(
+      runtime?.pendingRunId
+      && Number(runtime.pendingQueryRevision || 0) >= revision
+      && !runtime.pendingRunOutdated
+    );
+    if (coveredByPendingRun) {
+      runtime.queryDefinitionStale = false;
+      runtime.queryStatus = 'loading';
+      runtime.queryLabel = 'Loading';
+      runtime.message = 'Querying the updated Dashboard definition…';
+      setQueryState();
+      hideWorkspaceUpdate();
+      return;
+    }
+    setQueryState('Dashboard query definition changed. Run query again to apply it.');
+    showWorkspaceUpdate({
+      impact:'query',
+      title:'Query definition changed',
+      message:'Existing Source Outputs are retained as history, but cannot be used as current results.',
+      action:'query',
+    });
+  } else if (activeChange.impact === 'analysis') {
+    showWorkspaceUpdate({
+      impact:'analysis',
+      title:'Analysis reloaded',
+      message:'Interactive branches are recomputing from the existing Source Outputs.',
+      transient:true,
+    });
+  } else {
+    showWorkspaceUpdate({
+      impact:'canvas',
+      title:'Canvas reloaded',
+      message:'Presentation changes are active; the current Query Run and Controls were preserved.',
+      transient:true,
+    });
+  }
+}
+
+function listenWorkspaceChanges() {
+  state.workspaceEventSource?.close();
+  state.workspaceEventSource = null;
+  if (!state.hotReloadEnabled) return;
+  const source = new EventSource(
+    `/api/workspace/events?${sessionQuery()}&after=${encodeURIComponent(state.workspaceRevision)}`,
+  );
+  state.workspaceEventSource = source;
+  source.addEventListener('workspace_changed', (message) => {
+    let change;
+    try { change = JSON.parse(message.data); } catch (_) { return; }
+    handleWorkspaceChange(change).catch((error) => {
+      showWorkspaceUpdate({
+        impact:'invalid',
+        title:'Hot reload failed',
+        message:error.message,
+        action:'reload',
+      });
+    });
+  });
+}
+
+async function reloadDashboardFromDisk() {
+  const path = state.dashboard?.path || null;
+  try {
+    await refreshNavigation(path, {reloadCanvas:true});
+    const latest = state.payload?.hot_reload?.last_event;
+    if (latest?.status === 'invalid') {
+      const first = latest.diagnostics?.[0];
+      showWorkspaceUpdate({
+        impact:'invalid',
+        title:'Dashboard update has errors',
+        message:first?.message || latest.message || 'The previous valid Canvas remains active.',
+        action:'reload',
+      });
+      return;
+    }
+    showWorkspaceUpdate({
+      impact:'canvas',
+      title:'Dashboard reloaded',
+      message:'Workspace files were read from disk. Query compatibility is checked by the Canvas.',
+      transient:true,
+    });
+  } catch (error) {
+    showWorkspaceUpdate({
+      impact:'invalid',
+      title:'Dashboard reload failed',
+      message:error.message,
+      action:'reload',
+    });
+  }
 }
 
 function hideNavMenu() { $('#nav-context-menu').hidden = true; }
@@ -1597,13 +1860,21 @@ async function boot() {
     runtime.committedQueryParameters = record.query_parameters;
     if (!runtime.queryParameterValues) runtime.queryParameterValues = record.query_parameters;
     runtime.nodeStatuses = record.nodes || {};
+    runtime.queryDefinitionStale = Boolean(record.query_outdated);
     if (record.ready) {
       runtime.runId = record.run_id;
-      runtime.queryStatus = ['ready', 'partial'].includes(record.status) ? record.status : 'error';
-      runtime.queryLabel = record.status === 'ready' ? 'Ready' : record.status === 'partial' ? 'Partial' : 'Failed';
-      runtime.message = record.status === 'ready' ? 'Dataset query completed.' : `Query finished with status: ${record.status}`;
+      runtime.queryStatus = record.query_outdated
+        ? 'stale'
+        : ['ready', 'partial'].includes(record.status) ? record.status : 'error';
+      runtime.queryLabel = record.query_outdated
+        ? 'Outdated'
+        : record.status === 'ready' ? 'Ready' : record.status === 'partial' ? 'Partial' : 'Failed';
+      runtime.message = record.query_outdated
+        ? 'Dashboard query definition changed. Run query again.'
+        : record.status === 'ready' ? 'Dataset query completed.' : `Query finished with status: ${record.status}`;
     } else if (['queued', 'loading'].includes(record.status)) {
       runtime.pendingRunId = record.run_id;
+      runtime.pendingRunOutdated = Boolean(record.query_outdated);
       runtime.queryStatus = 'loading';
       runtime.queryLabel = 'Loading';
       runtime.message = 'Querying a new dataset…';
@@ -1611,10 +1882,25 @@ async function boot() {
     }
   }
   await refreshNavigation(null);
+  if (activeRuntime()?.queryDefinitionStale) {
+    showWorkspaceUpdate({
+      impact:'query',
+      title:'Query definition changed',
+      message:'This tab remembers an older Query Run. Run query again to use the current Dashboard.',
+      action:'query',
+    });
+  }
+  listenWorkspaceChanges();
 }
 
 $('#run-button').addEventListener('click', runDashboard);
 $('#download-button').addEventListener('click', downloadReport);
+$('#dashboard-reload').addEventListener('click', reloadDashboardFromDisk);
+$('#workspace-update-dismiss').addEventListener('click', hideWorkspaceUpdate);
+$('#workspace-update-action').addEventListener('click', () => {
+  if ($('#workspace-update-action').dataset.action === 'query') runDashboard();
+  else reloadDashboardFromDisk();
+});
 $('#parameter-form').addEventListener('input', () => setQueryState());
 $('#parameter-form').addEventListener('input', () => {
   if (activeRuntime()) activeRuntime().queryParameterValues = queryParameters();

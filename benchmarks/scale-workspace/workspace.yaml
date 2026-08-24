@@ -1,0 +1,12 @@
+schema: dataviz/workspace/v1
+kind: workspace
+id: runtime-scale-benchmark
+title: Runtime Scale Benchmark
+description: Fixed Query to Arrow to Browser Interactive to Renderer benchmark fixture.
+runtime:
+  browser_table_transport: arrow
+  arrow_min_rows: 1
+  arrow_chunk_bytes: 1048576
+  max_embedded_rows: 1100000
+  max_embedded_bytes: 268435456
+folders: []

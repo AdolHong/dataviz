@@ -31,6 +31,9 @@ class DatavizFrame {
       Object.entries(this._columnar.columns || {}).map(([name, values]) => [name, values[index]])
     );
   }
+  _value(index, name) {
+    return this._columnar ? this._columnar.columns?.[name]?.[index] : this._rows[index]?.[name];
+  }
   map(callback) { return Array.from({length:this.length}, (_, index) => callback(this._row(index), index, this)); }
   [Symbol.iterator]() {
     let index = 0;
@@ -73,28 +76,47 @@ class DatavizFrame {
     }));
   }
   limit(count) { return new DatavizFrame(this.rows().slice(0, count)); }
-  groupBy(...fields) { return new DatavizGroupedFrame(this.rows(), fields.flat()); }
+  groupBy(...fields) { return new DatavizGroupedFrame(this, fields.flat()); }
 }
 
 class DatavizGroupedFrame {
-  constructor(rows, fields) { this._rows = rows; this._fields = fields; }
+  constructor(frame, fields) { this._frame = frame; this._fields = fields; }
   aggregate(spec) {
-    const groups = new Map();
-    this._rows.forEach(row => {
-      const key = JSON.stringify(this._fields.map(field => row[field]));
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(row);
+    const rules = Object.entries(spec).map(([output, rule]) => {
+      const definition = typeof rule === 'string' ? {field:output, op:rule} : rule;
+      return {output, field:definition.field, operation:definition.op || 'sum'};
     });
-    return new DatavizFrame([...groups.entries()].map(([key, values]) => {
-      const keys = JSON.parse(key);
-      const result = Object.fromEntries(this._fields.map((field, index) => [field, keys[index]]));
-      Object.entries(spec).forEach(([output, rule]) => {
-        const definition = typeof rule === 'string' ? {field:output, op:rule} : rule;
-        result[output] = datavizNumericAggregate(
-          values,
-          definition.op,
-          row => row[definition.field],
-        );
+    const groups = new Map();
+    for (let index = 0; index < this._frame.length; index += 1) {
+      const keys = this._fields.map(field => this._frame._value(index, field));
+      const signature = JSON.stringify(keys);
+      if (!groups.has(signature)) {
+        groups.set(signature, {
+          keys,
+          stats:rules.map(() => ({count:0, sum:0, minimum:Infinity, maximum:-Infinity})),
+        });
+      }
+      const group = groups.get(signature);
+      rules.forEach((rule, ruleIndex) => {
+        const value = Number(this._frame._value(index, rule.field) ?? 0);
+        const stats = group.stats[ruleIndex];
+        stats.count += 1;
+        stats.sum += value;
+        if (value < stats.minimum) stats.minimum = value;
+        if (value > stats.maximum) stats.maximum = value;
+      });
+    }
+    return new DatavizFrame([...groups.values()].map(group => {
+      const result = Object.fromEntries(
+        this._fields.map((field, index) => [field, group.keys[index]])
+      );
+      rules.forEach((rule, index) => {
+        const stats = group.stats[index];
+        if (rule.operation === 'count') result[rule.output] = stats.count;
+        else if (rule.operation === 'mean') result[rule.output] = stats.sum / Math.max(stats.count, 1);
+        else if (rule.operation === 'min') result[rule.output] = stats.minimum;
+        else if (rule.operation === 'max') result[rule.output] = stats.maximum;
+        else result[rule.output] = stats.sum;
       });
       return result;
     }));

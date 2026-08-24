@@ -70,6 +70,8 @@ uv run --no-editable dataviz serve myworkspace --port 8080
 
 Server 不提供账号体系或 HTTP 鉴权，默认只监听本机回环地址。只有已经放在可信网络边界后时，才可显式使用 `--host 0.0.0.0 --allow-remote`；`session_id` 只隔离浏览器 tab 状态，不是访问凭证。
 
+`dataviz serve` 默认监听 Workspace 文件并热更新已经打开的页面。Title、Presentation、CSS 和 View 改动只重载 Canvas；Browser/Server Interactive Transform 改动会基于当前 Base Output 重算；SQL、Source、Dataset Transform、Adapter 或 Query Parameter 改动只把当前结果标记为 `Query outdated`，不会自动执行昂贵查询。连续保存会先防抖并合并为一个 revision，配置无效时保留当前 Canvas 并展示诊断；Workspace Runtime 等进程级配置则明确提示重启。必要时可点击 Header 的 `Reload`，或用 `--no-watch` 关闭监听。
+
 这个源码流程故意使用 non-editable 安装，避免部分 macOS/Python 组合跳过带 `UF_HIDDEN` 标记的 editable `.pth`。修改 Dataviz 自身的 `src/` 后需要重新执行上面的 `uv sync ... --reinstall-package`；只修改 Workspace/Dashboard 不需要重装。若出现 `ModuleNotFoundError: dataviz`，也执行同一条命令修复入口。
 
 ```bash
@@ -80,7 +82,7 @@ uv sync --python 3.12 --extra dev --no-editable \
 从发行 ZIP 安装时：
 
 ```bash
-python -m pip install ./workspace-dataviz-0.3.1.zip
+python -m pip install ./workspace-dataviz-0.3.2.zip
 dataviz version
 dataviz serve /path/to/workspace --port 8080
 ```
@@ -102,10 +104,11 @@ dataviz compute myworkspace sales-overview simulation \
   --run-id run_xxx \
   --compute-param dashboard:sales-overview/seed=42 --format json
 dataviz report myworkspace sales-overview --output report.html
-dataviz benchmark myworkspace sales-overview --browser-runtime --format json
+dataviz benchmark myworkspace sales-overview --browser-runtime \
+  --browser chromium --repeat 3 --query-param row_count=100000 --format json
 ```
 
-`benchmark --browser-runtime` 会在 Chromium 中等待页面达到稳定状态，并分别报告 Query、HTML 构建、页面就绪、Arrow 传输、Renderer 生命周期和 View 终态；它用于规模回归，不代替真实 AI Token 成对评测。
+`benchmark --browser-runtime` 可选择 Chromium、Firefox 或 WebKit，重复装载并释放页面，分别报告 Query、HTML 构建、页面就绪、Arrow、Renderer、View 终态和可用内存口径。固定 10K/100K/1M 方法与结果见 [Runtime 性能基线](docs/runtime-performance.md)；它用于规模回归，不代替真实 AI Token 成对评测。
 
 HTML 固定 Query Parameter。`browser-js` 可以直接保留交互；`browser-python` 可使用 Pyodide CDN，或把本地 Pyodide 作为 `HTML + assets` 文件包/ZIP 一起分发。`server-python` 在导出的 HTML 中不能重新运行，只能固化为 snapshot 或明确显示 unavailable。没有活动的 `browser-python` 分支时，报告不会携带或加载 Pyodide。
 
@@ -200,6 +203,7 @@ controls:
 - [代码实现索引](docs/product-architecture.md)
 - [版本与发布流程](docs/versioning-and-release.md)
 - [AI 开发效率评测协议](docs/authoring-evaluation.md)
+- [Runtime 性能基线](docs/runtime-performance.md)
 - [变更记录](CHANGELOG.md)
 
 项目尚未添加正式 `LICENSE` 文件；在许可证补齐前，公开可见不等于已经授予再分发或商用权利。

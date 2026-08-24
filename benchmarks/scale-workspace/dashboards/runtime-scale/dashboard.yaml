@@ -1,0 +1,53 @@
+schema: dataviz/dashboard/v3
+kind: dashboard
+id: runtime-scale
+title: "Runtime scale · {{ parameters.row_count }} rows"
+description: Fixed scale fixture; do not replace its data path with hand-authored snapshots.
+adapters: {warehouse: benchmark-duckdb}
+query_parameters:
+  - id: row_count
+    label: Row count
+    type: number
+    default: 10000
+    min: 1
+    max: 1000000
+sources:
+  - id: rows
+    type: sql
+    adapter: warehouse
+    code: sources/rows.sql
+    query_params: [row_count]
+    cache: {mode: none}
+    outputs:
+      main:
+        kind: table
+        schema:
+          - {name: bucket, dtype: int64}
+          - {name: row_id, dtype: int64}
+          - {name: measure, dtype: int64}
+interactive_transforms:
+  - transforms/summarize.yaml
+views:
+  - id: peak
+    title: Maximum row id
+    input: interactive:summarize/main
+    template: metric
+    value: peak
+    aggregate: max
+  - id: summary-chart
+    title: Bucket totals
+    input: interactive:summarize/main
+    template: line
+    x: bucket
+    y: total
+    aggregate: none
+  - id: summary-table
+    title: Browser Interactive output
+    input: interactive:summarize/main
+    template: table
+    columns: [bucket, count, total, peak]
+sections:
+  - id: result
+    title: Query → Arrow → Browser Interactive → Renderer
+    template: grid
+    views: [peak, summary-chart, summary-table]

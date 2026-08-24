@@ -560,6 +560,9 @@ def test_authoring_benchmark_is_deterministic_and_does_not_guess_tokens():
     help_result = CliRunner().invoke(app, ["benchmark", "--help"])
     assert help_result.exit_code == 0
     assert "--browser-runtime" in help_result.stdout
+    assert "--browser" in help_result.stdout
+    assert "--repeat" in help_result.stdout
+    assert "--query-param" in help_result.stdout
     assert "--timeout-seconds" in help_result.stdout
 
     docs_result = CliRunner().invoke(
@@ -567,7 +570,7 @@ def test_authoring_benchmark_is_deterministic_and_does_not_guess_tokens():
     )
     assert docs_result.exit_code == 0
     docs = json.loads(docs_result.stdout)
-    assert docs["runtime_benchmark"]["schema"] == "dataviz/browser-runtime-benchmark/v2"
+    assert docs["runtime_benchmark"]["schema"] == "dataviz/browser-runtime-benchmark/v3"
     assert any("--browser-runtime" in command for command in docs["commands"])
 
 

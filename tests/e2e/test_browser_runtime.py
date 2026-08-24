@@ -46,7 +46,7 @@ def _running_server(workspace: Path):
             host="127.0.0.1",
             port=port,
             log_level="warning",
-            lifespan="off",
+            lifespan="on",
         )
     )
     thread = threading.Thread(target=server.run, daemon=True)
@@ -439,6 +439,51 @@ def _run_and_wait(page: Page, expected: str = "Ready") -> None:
         expected,
         timeout=30_000,
     )
+
+
+@pytest.mark.e2e
+def test_workspace_hot_reload_preserves_run_and_marks_query_contract_outdated(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(MINIMAL, tmp_path / "hot-reload-workspace")
+    dashboard = workspace / "dashboards" / "sales-overview"
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        _run_and_wait(page)
+        frame = page.locator("#canvas-frame")
+        run_id = frame.get_attribute("data-run-id")
+        frame_id = frame.get_attribute("data-frame-id")
+
+        css = dashboard / "assets" / "presentation.css"
+        css.write_text(
+            css.read_text(encoding="utf-8") + "\n/* e2e hot canvas */\n",
+            encoding="utf-8",
+        )
+        expect(page.locator("#workspace-update-title")).to_have_text(
+            "Canvas reloaded", timeout=10_000
+        )
+        expect(frame).not_to_have_attribute("data-frame-id", frame_id, timeout=10_000)
+        assert frame.get_attribute("data-run-id") == run_id
+
+        sql = dashboard / "sources" / "sales.sql"
+        sql.write_text(
+            sql.read_text(encoding="utf-8") + "\n-- e2e query contract\n",
+            encoding="utf-8",
+        )
+        expect(page.locator("#workspace-update-title")).to_have_text(
+            "Query definition changed", timeout=10_000
+        )
+        expect(page.locator("#query-diagnostics-label")).to_have_text("Outdated")
+        expect(page.frame_locator("#canvas-frame").locator("body")).to_contain_text(
+            "QUERY RUN OUTDATED", timeout=10_000
+        )
+        assert frame.get_attribute("data-run-id") == run_id
+
+        page.locator("#workspace-update-action").click()
+        expect(page.locator("#query-diagnostics-label")).to_have_text(
+            "Ready", timeout=30_000
+        )
+        expect(page.locator("#workspace-update")).to_be_hidden()
 
 
 @pytest.mark.e2e
@@ -1120,6 +1165,7 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(
         panel = control.locator(".header-control__popover")
         form = control.locator("#parameter-form")
         expect(panel).to_be_visible()
+        expect(panel).to_have_attribute("data-overlay-placement", re.compile("top|bottom"))
 
         geometry = panel.evaluate(
             """panel => {
@@ -1162,6 +1208,129 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(
         assert selector_geometry["left"] >= 11
         assert selector_geometry["right"] <= selector_geometry["width"] - 11
         assert selector_geometry["bottom"] <= selector_geometry["height"] - 11
+
+
+@pytest.mark.e2e
+def test_cross_browser_narrow_control_overlay_keyboard_scroll_and_aria(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(MINIMAL, tmp_path / "narrow-control-matrix")
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    definition["query_parameters"].extend(
+        {
+            "id": f"scenario_{index:02d}",
+            "type": "number",
+            "label": f"Scenario {index:02d}",
+            "default": index,
+        }
+        for index in range(1, 16)
+    )
+    definition["query_parameters"].append(
+        {
+            "id": "model_list",
+            "type": "multi_select",
+            "label": "Model list",
+            "default": ["model-01"],
+            "choices": [
+                {"label": f"Model {index:02d}", "value": f"model-{index:02d}"}
+                for index in range(1, 31)
+            ],
+        }
+    )
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    presentation_path = workspace / "dashboards" / "sales-overview" / "presentation.yaml"
+    presentation = yaml.safe_load(presentation_path.read_text(encoding="utf-8"))
+    presentation["controls"] = {
+        "query": {
+            "template": "grid",
+            "width": "wide",
+            "columns": 3,
+            "density": "compact",
+        }
+    }
+    presentation_path.write_text(
+        yaml.safe_dump(presentation, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    page.set_viewport_size({"width": 390, "height": 520})
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        control = page.locator("#query-parameters-control")
+        control.locator("summary").click()
+        panel = control.locator(".header-control__popover")
+        form = control.locator("#parameter-form")
+        expect(panel).to_be_visible()
+        expect(panel).to_have_attribute("data-overlay-placement", re.compile("top|bottom"))
+
+        geometry = panel.evaluate(
+            """panel => {
+              const form = panel.querySelector('#parameter-form');
+              const rect = panel.getBoundingClientRect();
+              return {
+                left:rect.left, top:rect.top, right:rect.right, bottom:rect.bottom,
+                viewport:[innerWidth, innerHeight],
+                columns:getComputedStyle(form).gridTemplateColumns.split(' ').length,
+                formClientHeight:form.clientHeight,
+                formScrollHeight:form.scrollHeight,
+                formOverflow:getComputedStyle(form).overflowY,
+              };
+            }"""
+        )
+        assert geometry["left"] >= 8, geometry
+        assert geometry["top"] >= 8, geometry
+        assert geometry["right"] <= geometry["viewport"][0] - 8, geometry
+        assert geometry["bottom"] <= geometry["viewport"][1] - 8, json.dumps(geometry)
+        assert geometry["columns"] == 1, geometry
+        assert geometry["formScrollHeight"] > geometry["formClientHeight"], geometry
+        assert geometry["formOverflow"] == "auto", geometry
+
+        form.evaluate("form => { form.scrollTop = form.scrollHeight; }")
+        model_field = form.locator(".field", has=page.locator("#input-model_list"))
+        trigger = model_field.locator("[data-selector-trigger]")
+        expect(trigger).to_be_visible()
+        trigger.click()
+        selector_panel = model_field.locator("[data-selector-panel]")
+        expect(selector_panel).to_be_visible()
+        selector_geometry = selector_panel.evaluate(
+            """panel => {
+              const rect = panel.getBoundingClientRect();
+              return {
+                left:rect.left, top:rect.top, right:rect.right, bottom:rect.bottom,
+                viewport:[innerWidth, innerHeight],
+                background:getComputedStyle(panel).backgroundColor,
+              };
+            }"""
+        )
+        assert selector_geometry["left"] >= 8, selector_geometry
+        assert selector_geometry["top"] >= 8, selector_geometry
+        assert selector_geometry["right"] <= selector_geometry["viewport"][0] - 8, selector_geometry
+        assert selector_geometry["bottom"] <= selector_geometry["viewport"][1] - 8, selector_geometry
+        assert selector_geometry["background"] not in {"transparent", "rgba(0, 0, 0, 0)"}
+        assert trigger.evaluate(
+            """trigger => {
+              const controlled = document.getElementById(trigger.getAttribute('aria-controls'));
+              return trigger.getAttribute('aria-expanded') === 'true'
+                && trigger.getAttribute('aria-haspopup') === 'listbox'
+                && Boolean(controlled?.querySelector('[role="listbox"]'));
+            }"""
+        )
+
+        search = model_field.locator(".dv-choice-search")
+        search.fill("Model 30")
+        search.press("ArrowDown")
+        model_field.locator('[role="listbox"]').press("Enter")
+        expect(model_field.locator("select")).to_have_values(["model-01", "model-30"])
+        search.press("Escape")
+        expect(selector_panel).to_be_hidden()
+        assert trigger.evaluate("trigger => document.activeElement === trigger")
+        page.mouse.click(2, 510)
+        expect(control).not_to_have_attribute("open", "")
+        page.locator("#run-button").click()
 
 
 @pytest.mark.e2e
@@ -1512,6 +1681,55 @@ def test_perspective_fills_view_uses_opaque_settings_and_releases_page_wheel(
             }"""
         )
         assert disposed >= 1
+
+
+@pytest.mark.e2e
+def test_cross_browser_perspective_repeated_dispose_and_restore(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(MINIMAL, tmp_path / "perspective-restore-matrix")
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        _run_and_wait(page)
+        for _cycle in range(3):
+            page.wait_for_timeout(300)
+            frame = page.frame_locator("#canvas-frame")
+            perspective = frame.locator('[data-view-id="sales-perspective"]')
+            expect(perspective).to_have_attribute("data-view-status", "ready", timeout=30_000)
+            viewer = perspective.locator("perspective-viewer")
+            expect(viewer).to_be_visible(timeout=30_000)
+            scroll_after = viewer.evaluate(
+                """viewer => {
+                  window.scrollTo(0, 0);
+                  viewer.dispatchEvent(new WheelEvent('wheel', {
+                    deltaY:500, bubbles:true, cancelable:true, composed:true,
+                  }));
+                  return window.scrollY;
+                }"""
+            )
+            assert scroll_after > 0
+            frame_id = page.locator("#canvas-frame").get_attribute("data-frame-id")
+            disposed = frame.locator("body").evaluate(
+                """async () => {
+                  const runtime = window.datavizRuntime;
+                  runtime.dispose();
+                  const deadline = performance.now() + 5000;
+                  while (
+                    runtime.metrics.perspective.disposed < runtime.metrics.perspective.created
+                    && performance.now() < deadline
+                  ) await new Promise(resolve => setTimeout(resolve, 20));
+                  return structuredClone(runtime.metrics.perspective);
+                }"""
+            )
+            assert disposed["created"] >= 1
+            assert disposed["disposed"] == disposed["created"]
+            page.locator("#dashboard-reload").click()
+            page.wait_for_function(
+                "previous => document.querySelector('#canvas-frame')?.dataset.frameId !== previous",
+                arg=frame_id,
+                timeout=15_000,
+            )
+        expect(page.locator("#query-diagnostics-label")).to_have_text("Ready")
 
 
 @pytest.mark.e2e

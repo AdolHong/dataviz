@@ -4,9 +4,10 @@
 
 Dataviz 同时维护四类版本：
 
-- Python package：当前 `workspace-dataviz 0.3.1`。
+- Python package：当前 `workspace-dataviz 0.3.2`。
 - 文件 DSL：Workspace v1、Dashboard v3、Presentation v1、Source v1、Dataset/Interactive Transform v1。
 - 浏览器协议：`dataviz/runtime/v2`。
+- Server 热更新协议：`dataviz/workspace-change/v1`。
 - Component Registry：当前 `3.0.0`。
 
 它们不会因为 package 发布补丁版本而机械同步升级。安装环境的权威清单来自：

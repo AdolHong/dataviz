@@ -2,6 +2,36 @@
 
 Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本化。这里记录使用者可观察到的变化；字段细节以 `dataviz schemas` 和 `dataviz components` 为准。
 
+## 0.3.2 — 2026-08-24
+
+### Added
+
+- `dataviz serve` 默认监听 Workspace 文件；跨平台 watcher 会忽略 `.dataviz`、虚拟环境和构建缓存，并把编辑器的连续写入防抖合并为单调 revision。
+- 新增 tab 校验的 Workspace SSE 事件和 `dataviz/workspace-change/v1` 协议，按 `navigation / canvas / analysis / query / server / invalid` 说明影响范围。
+- Server Header 新增显式 `Reload` 与更新状态条；可用 `--no-watch` 关闭主动监听，但请求时重读仍保留。
+- `benchmark --browser-runtime` 升级为 v3：支持 Query Parameter override、Chromium/Firefox/WebKit、重复 load/dispose，以及 CLI 峰值 RSS、浏览器进程树 RSS 和可用 JS heap 口径；仓库增加固定 10K/100K/1M fixture、运行脚本和原始结果。
+
+### Runtime
+
+- Presentation、View、CSS/Canvas 改动自动重载 iframe，并保留当前 Query Run、scoped Controls 与 Canvas 滚动位置。
+- Interactive Transform 或其 Control Contract 改动复用当前不可变 Base Output 并重建交互分支；不会回退为重新查询 Source。
+- SQL、Source 数据文件、Dataset Transform、Adapter、Query Parameter 或 Query 可达图变化只把当前结果标记为 `Outdated`，用户明确点击 Run query 后才执行昂贵查询。
+- Workspace Runtime/进程级配置进入独立 `server` 状态并提示重启，不伪装成已经动态应用。
+- browser-js Worker 与公开 Data API 的 `groupBy().aggregate()` 改为单遍流式聚合，每组只保留 key 与 count/sum/min/max，不再为大 Arrow 输入物化并长期持有全部分组行。
+
+### Correctness
+
+- 新配置无法加载或引入新的静态错误时不发布候选 Workspace，当前 Canvas 保持可用并显示结构化诊断；下一次有效 revision 会从最后的完整快照恢复。
+- 活动 Query 固定使用启动快照；如果运行期间 Query Contract 变化，该 Run 即使成功也不会提交为当前结果。
+- 热更新按已解析声明和实际引用资产计算语义签名；Dashboard 目录中的无关临时文件不再重载 Canvas。保存 Source 后立刻点击 Query 时，Server 会先发布该文件 revision，并让 Run 返回它实际捕获的 revision，避免把基于新定义运行的结果误判为 Outdated。
+- 页面刷新和 tab Run 恢复会在 Server 再次核验当前 Query Contract，不能因为错过浏览器热更新事件而把旧数据显示为 Ready。
+
+### Verification
+
+- 新增 watcher 分类、无效写入恢复、`--no-watch` fallback、旧 Run 恢复和真实 Chromium 热更新回归；浏览器测试 Server 现在启用真实 lifespan，确保 watcher 启停也进入契约测试。
+- Chromium、Firefox、WebKit 新增 390×520 Query Control 几何/单列/内部滚动/键盘/ARIA/外部关闭，以及 Perspective 三轮 dispose/reload/wheel 恢复矩阵；窄屏固定列数现在由 `presentation.shell` 强制降为一列。
+- 1M 固定聚合链路的页面就绪中位数由约 1043 ms 降至 804 ms，浏览器进程树峰值增量由约 496 MB 降至 395 MB；该证据不外推为 1M 原始明细 View 预算。
+
 ## 0.3.1 — 2026-08-24
 
 ### Fixed

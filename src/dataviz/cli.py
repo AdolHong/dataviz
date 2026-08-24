@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import json
 import ipaddress
+import os
+import platform
 import shlex
 import shutil
+import statistics
+import sys
+import threading
 import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -131,8 +136,11 @@ def _browser_runtime_benchmark(
     dashboard,
     *,
     timeout_seconds: float,
+    query_parameters: dict[str, Any] | None = None,
+    browser_name: str = "chromium",
+    repeat: int = 1,
 ) -> dict[str, Any]:
-    """Run the exported Runtime in Chromium and return observable scale metrics."""
+    """Run an exported Runtime repeatedly and return observable scale metrics."""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as error:
@@ -140,9 +148,35 @@ def _browser_runtime_benchmark(
             "--browser-runtime requires the dev extra: uv sync --extra dev"
         ) from error
 
+    if browser_name not in {"chromium", "firefox", "webkit"}:
+        raise typer.BadParameter("--browser must be chromium, firefox, or webkit")
+
+    def process_max_rss_bytes() -> int | None:
+        try:
+            import resource
+
+            value = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+        except (ImportError, OSError, ValueError):
+            return None
+        # macOS reports bytes; Linux and the BSDs report KiB.
+        return value if sys.platform == "darwin" else value * 1024
+
+    def duration_summary(values: list[float]) -> dict[str, float]:
+        return {
+            "minimum": round(min(values), 2),
+            "median": round(statistics.median(values), 2),
+            "maximum": round(max(values), 2),
+        }
+
+    query_rss_before = process_max_rss_bytes()
     query_started = time.perf_counter()
-    result = Executor(workspace).run(dashboard.definition.id, refresh=True)
+    result = Executor(workspace).run(
+        dashboard.definition.id,
+        query_parameters=query_parameters,
+        refresh=True,
+    )
     query_ms = (time.perf_counter() - query_started) * 1000
+    query_rss_after = process_max_rss_bytes()
     if result.status not in {"ready", "partial"}:
         raise RuntimeError(f"Runtime benchmark query ended with {result.status}")
 
@@ -154,15 +188,45 @@ def _browser_runtime_benchmark(
             Path(directory) / "benchmark.html",
         )
         report_ms = (time.perf_counter() - report_started) * 1000
+        report_bytes = report.stat().st_size
         browser_started = time.perf_counter()
         with sync_playwright() as playwright:
             try:
-                browser = playwright.chromium.launch(headless=True)
+                browser_type = getattr(playwright, browser_name)
+                launch_options: dict[str, Any] = {"headless": True}
+                if browser_name == "chromium":
+                    launch_options["args"] = ["--enable-precise-memory-info"]
+                browser = browser_type.launch(**launch_options)
             except Exception as error:
                 raise typer.BadParameter(
-                    "Chromium is unavailable; run: uv run --no-editable playwright install chromium"
+                    f"{browser_name} is unavailable; run: "
+                    f"uv run --no-editable playwright install {browser_name}"
                 ) from error
-            page = browser.new_page(viewport={"width": 1440, "height": 900})
+            context = browser.new_context(viewport={"width": 1440, "height": 900})
+            page = context.new_page()
+            page.add_init_script(
+                """(() => {
+                  const state = {
+                    supported: Boolean(performance.memory),
+                    samples: [],
+                    timer: null,
+                  };
+                  state.sample = () => {
+                    if (!performance.memory) return null;
+                    const value = Number(performance.memory.usedJSHeapSize || 0);
+                    state.samples.push(value);
+                    return value;
+                  };
+                  state.stop = () => {
+                    clearInterval(state.timer);
+                    state.sample();
+                  };
+                  state.sample();
+                  state.timer = setInterval(state.sample, 20);
+                  window.addEventListener('pagehide', state.stop, {once:true});
+                  window.__datavizBenchmarkMemory = state;
+                })();"""
+            )
             console_errors: list[str] = []
             page.on(
                 "console",
@@ -170,67 +234,285 @@ def _browser_runtime_benchmark(
                 if message.type == "error"
                 else None,
             )
-            page_started = time.perf_counter()
-            page.goto(report.as_uri(), wait_until="domcontentloaded")
-            page.wait_for_function(
-                """() => {
-                  const portable = window.dataviz?.portable;
-                  const transports = Object.keys(portable?.output_transports || {});
-                  const hydrated = transports.every(reference =>
-                    Object.prototype.hasOwnProperty.call(portable.outputs, reference));
-                  const repeats = [...document.querySelectorAll('.dv-repeat')];
-                  const repeatReady = repeats.every(host => host.dataset.repeatCount !== undefined);
-                  const views = [...document.querySelectorAll('.dv-view')].filter(root =>
-                    !root.classList.contains('dv-repeat-card')
-                    || root.dataset.repeatMounted === 'true'
-                  );
-                  const terminal = new Set([
-                    'ready', 'empty', 'stale', 'error', 'cancelled', 'unavailable',
-                  ]);
-                  const viewsSettled = views.every(root => terminal.has(root.dataset.viewStatus));
-                  return window.datavizRuntime
-                    && hydrated
-                    && repeatReady
-                    && viewsSettled
-                    && window.datavizRuntime.activeTransforms.size === 0;
-                }""",
-                timeout=timeout_seconds * 1000,
-            )
-            page_ready_ms = (time.perf_counter() - page_started) * 1000
-            metrics = page.evaluate(
-                """() => ({
-                  runtime: window.datavizRuntime.metrics,
-                  outputs: {
-                    inline: Object.keys(window.dataviz.portable?.outputs || {}).length,
-                    transports: Object.keys(window.dataviz.portable?.output_transports || {}).length,
-                  },
-                  repeat_sections: [...document.querySelectorAll('.dv-repeat')].map(host => ({
-                    section: host.dataset.repeatSection,
-                    groups: Number(host.dataset.repeatCount || 0),
-                    filtered_groups: Number(host.dataset.repeatFilteredCount || 0),
-                    rendered_cards: Number(host.dataset.repeatRenderedCards || 0),
-                    build_ms: Number(host.dataset.repeatBuildMs || 0),
-                    reconcile_ms: Number(host.dataset.repeatReconcileMs || 0),
-                  })),
-                  view_states: [...document.querySelectorAll('.dv-view')].reduce((counts, root) => {
-                    const status = root.dataset.viewStatus || 'unknown';
-                    counts[status] = (counts[status] || 0) + 1;
-                    return counts;
-                  }, {}),
-                  navigation: performance.getEntriesByType('navigation')[0]?.toJSON?.() || {},
-                })"""
-            )
+            process_rss_samples: list[int] = []
+            process_rss_stop = threading.Event()
+            process_rss_thread: threading.Thread | None = None
+            process_rss_now = None
+            process_rss_scope = "Process-tree RSS sampling is unavailable."
+            try:
+                import psutil
+
+                driver = browser._impl_obj._connection._transport._proc
+                driver_process = psutil.Process(driver.pid)
+
+                def process_tree_rss() -> int:
+                    processes = [driver_process, *driver_process.children(recursive=True)]
+                    total = 0
+                    for process in processes:
+                        try:
+                            total += int(process.memory_info().rss)
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            continue
+                    return total
+
+                def sample_process_tree() -> None:
+                    while not process_rss_stop.wait(0.02):
+                        process_rss_samples.append(process_tree_rss())
+
+                process_rss_now = process_tree_rss
+                process_rss_scope = (
+                    "Playwright driver plus descendant browser-process RSS; includes workers, "
+                    "native Arrow, GPU helpers and browser overhead."
+                )
+                process_rss_samples.append(process_tree_rss())
+                process_rss_thread = threading.Thread(
+                    target=sample_process_tree,
+                    name="dataviz-browser-rss",
+                    daemon=True,
+                )
+                process_rss_thread.start()
+            except (ImportError, AttributeError, OSError):
+                pass
+            cdp = None
+            if browser_name == "chromium":
+                cdp = context.new_cdp_session(page)
+                cdp.send("HeapProfiler.enable")
+
+            def collect_garbage() -> None:
+                if cdp is not None:
+                    cdp.send("HeapProfiler.collectGarbage")
+
+            iterations: list[dict[str, Any]] = []
+            for index in range(repeat):
+                page.goto("about:blank", wait_until="domcontentloaded")
+                collect_garbage()
+                rss_sample_offset = len(process_rss_samples)
+                baseline_process_rss = process_rss_now() if process_rss_now else None
+                baseline_heap = page.evaluate(
+                    "() => Number(performance.memory?.usedJSHeapSize || 0) || null"
+                )
+                error_offset = len(console_errors)
+                page_started = time.perf_counter()
+                page.goto(report.as_uri(), wait_until="domcontentloaded")
+                page.wait_for_function(
+                    """() => {
+                      const portable = window.dataviz?.portable;
+                      const transports = Object.keys(portable?.output_transports || {});
+                      const hydrated = transports.every(reference =>
+                        Object.prototype.hasOwnProperty.call(portable.outputs, reference));
+                      const repeats = [...document.querySelectorAll('.dv-repeat')];
+                      const repeatReady = repeats.every(host => host.dataset.repeatCount !== undefined);
+                      const views = [...document.querySelectorAll('.dv-view')].filter(root =>
+                        !root.classList.contains('dv-repeat-card')
+                        || root.dataset.repeatMounted === 'true'
+                      );
+                      const terminal = new Set([
+                        'ready', 'empty', 'stale', 'error', 'cancelled', 'unavailable',
+                      ]);
+                      const viewsSettled = views.every(root => terminal.has(root.dataset.viewStatus));
+                      return window.datavizRuntime
+                        && hydrated
+                        && repeatReady
+                        && viewsSettled
+                        && window.datavizRuntime.activeTransforms.size === 0;
+                    }""",
+                    timeout=timeout_seconds * 1000,
+                )
+                page_ready_ms = (time.perf_counter() - page_started) * 1000
+                memory = page.evaluate(
+                    """() => {
+                      const state = window.__datavizBenchmarkMemory;
+                      state?.stop?.();
+                      const samples = state?.samples || [];
+                      return {
+                        supported:Boolean(state?.supported),
+                        sample_count:samples.length,
+                        peak_js_heap_bytes:samples.length ? Math.max(...samples) : null,
+                        settled_js_heap_bytes:Number(performance.memory?.usedJSHeapSize || 0) || null,
+                      };
+                    }"""
+                )
+                collect_garbage()
+                memory["active_post_gc_js_heap_bytes"] = page.evaluate(
+                    "() => Number(performance.memory?.usedJSHeapSize || 0) || null"
+                )
+                metrics = page.evaluate(
+                    """() => ({
+                      runtime: structuredClone(window.datavizRuntime.metrics),
+                      outputs: {
+                        inline: Object.keys(window.dataviz.portable?.outputs || {}).length,
+                        transports: Object.keys(window.dataviz.portable?.output_transports || {}).length,
+                      },
+                      repeat_sections: [...document.querySelectorAll('.dv-repeat')].map(host => ({
+                        section: host.dataset.repeatSection,
+                        groups: Number(host.dataset.repeatCount || 0),
+                        filtered_groups: Number(host.dataset.repeatFilteredCount || 0),
+                        rendered_cards: Number(host.dataset.repeatRenderedCards || 0),
+                        build_ms: Number(host.dataset.repeatBuildMs || 0),
+                        reconcile_ms: Number(host.dataset.repeatReconcileMs || 0),
+                      })),
+                      view_states: [...document.querySelectorAll('.dv-view')].reduce((counts, root) => {
+                        const status = root.dataset.viewStatus || 'unknown';
+                        counts[status] = (counts[status] || 0) + 1;
+                        return counts;
+                      }, {}),
+                      navigation: performance.getEntriesByType('navigation')[0]?.toJSON?.() || {},
+                    })"""
+                )
+                page.evaluate("() => window.datavizRuntime.dispose()")
+                created = int(metrics["runtime"]["perspective"]["created"])
+                if created:
+                    page.wait_for_function(
+                        "count => window.datavizRuntime.metrics.perspective.disposed >= count",
+                        arg=created,
+                        timeout=min(timeout_seconds, 10) * 1000,
+                    )
+                page.goto("about:blank", wait_until="domcontentloaded")
+                collect_garbage()
+                released_heap = page.evaluate(
+                    "() => Number(performance.memory?.usedJSHeapSize || 0) || null"
+                )
+                memory.update(
+                    {
+                        "baseline_js_heap_bytes": baseline_heap,
+                        "released_js_heap_bytes": released_heap,
+                        "retained_delta_bytes": (
+                            released_heap - baseline_heap
+                            if released_heap is not None and baseline_heap is not None
+                            else None
+                        ),
+                        "scope": (
+                            "Chromium main-renderer JavaScript heap; excludes native Arrow, "
+                            "GPU and operating-system process memory."
+                            if memory["supported"]
+                            else "This browser does not expose performance.memory."
+                        ),
+                    }
+                )
+                process_samples = process_rss_samples[rss_sample_offset:]
+                current_process_rss = process_rss_now() if process_rss_now else None
+                if current_process_rss is not None:
+                    process_samples = [*process_samples, current_process_rss]
+                process_memory = {
+                    "supported": process_rss_now is not None,
+                    "sample_count": len(process_samples),
+                    "baseline_rss_bytes": baseline_process_rss,
+                    "peak_rss_bytes": max(process_samples) if process_samples else None,
+                    "released_rss_bytes": current_process_rss,
+                    "retained_delta_bytes": (
+                        current_process_rss - baseline_process_rss
+                        if current_process_rss is not None and baseline_process_rss is not None
+                        else None
+                    ),
+                    "scope": process_rss_scope,
+                }
+                iterations.append(
+                    {
+                        "iteration": index + 1,
+                        "page_ready_ms": round(page_ready_ms, 2),
+                        "console_errors": console_errors[error_offset:],
+                        "memory": memory,
+                        "browser_process_memory": process_memory,
+                        **metrics,
+                    }
+                )
+            process_rss_stop.set()
+            if process_rss_thread is not None:
+                process_rss_thread.join(timeout=1)
+            context.close()
             browser.close()
         browser_ms = (time.perf_counter() - browser_started) * 1000
+    page_ready_values = [item["page_ready_ms"] for item in iterations]
+    heap_peaks = [
+        item["memory"]["peak_js_heap_bytes"]
+        for item in iterations
+        if item["memory"]["peak_js_heap_bytes"] is not None
+    ]
+    retained = [
+        item["memory"]["retained_delta_bytes"]
+        for item in iterations
+        if item["memory"]["retained_delta_bytes"] is not None
+    ]
+    process_peaks = [
+        item["browser_process_memory"]["peak_rss_bytes"]
+        for item in iterations
+        if item["browser_process_memory"]["peak_rss_bytes"] is not None
+    ]
+    process_retained = [
+        item["browser_process_memory"]["retained_delta_bytes"]
+        for item in iterations
+        if item["browser_process_memory"]["retained_delta_bytes"] is not None
+    ]
+    process_peak_increases = [
+        item["browser_process_memory"]["peak_rss_bytes"]
+        - item["browser_process_memory"]["baseline_rss_bytes"]
+        for item in iterations
+        if item["browser_process_memory"]["peak_rss_bytes"] is not None
+        and item["browser_process_memory"]["baseline_rss_bytes"] is not None
+    ]
+    released_process_rss = [
+        item["browser_process_memory"]["released_rss_bytes"]
+        for item in iterations
+        if item["browser_process_memory"]["released_rss_bytes"] is not None
+    ]
+    last = iterations[-1]
     return {
-        "schema": "dataviz/browser-runtime-benchmark/v2",
-        "query_ms": round(query_ms, 2),
-        "report_build_ms": round(report_ms, 2),
-        "page_ready_ms": round(page_ready_ms, 2),
-        "browser_total_ms": round(browser_ms, 2),
-        "timeout_seconds": timeout_seconds,
+        "schema": "dataviz/browser-runtime-benchmark/v3",
+        "environment": {
+            "dataviz": __version__,
+            "python": platform.python_version(),
+            "platform": platform.platform(),
+            "machine": platform.machine(),
+            "logical_cpus": os.cpu_count(),
+            "browser": browser_name,
+        },
+        "query": {
+            "parameters": result.query_parameters,
+            "duration_ms": round(query_ms, 2),
+            "process_max_rss_bytes_before": query_rss_before,
+            "process_max_rss_bytes_after": query_rss_after,
+            "process_max_rss_increase_bytes": (
+                max(0, query_rss_after - query_rss_before)
+                if query_rss_after is not None and query_rss_before is not None
+                else None
+            ),
+            "rss_scope": "Peak RSS for the benchmark CLI process; native allocations are included.",
+        },
+        "report": {
+            "build_ms": round(report_ms, 2),
+            "html_bytes": report_bytes,
+        },
+        "browser": {
+            "name": browser_name,
+            "repeat": repeat,
+            "timeout_seconds": timeout_seconds,
+            "total_ms": round(browser_ms, 2),
+            "page_ready_ms": duration_summary(page_ready_values),
+            "peak_js_heap_bytes": max(heap_peaks) if heap_peaks else None,
+            "maximum_retained_delta_bytes": max(retained) if retained else None,
+            "peak_process_tree_rss_bytes": max(process_peaks) if process_peaks else None,
+            "peak_process_tree_increase_bytes": (
+                max(process_peak_increases) if process_peak_increases else None
+            ),
+            "maximum_process_tree_retained_delta_bytes": (
+                max(process_retained) if process_retained else None
+            ),
+            "final_process_tree_retained_delta_bytes": (
+                process_retained[-1] if process_retained else None
+            ),
+            "post_warmup_process_tree_growth_bytes": (
+                released_process_rss[-1] - released_process_rss[0]
+                if len(released_process_rss) > 1
+                else None
+            ),
+            "iterations": iterations,
+        },
+        # Last-iteration projections keep common evidence easy to inspect.
+        "runtime": last["runtime"],
+        "outputs": last["outputs"],
+        "repeat_sections": last["repeat_sections"],
+        "view_states": last["view_states"],
         "console_errors": console_errors,
-        **metrics,
     }
 
 
@@ -608,6 +890,7 @@ def version(output_format: str = typer.Option("json", "--format", help="json or 
         "dsl": CURRENT_SCHEMAS,
         "component_registry": template_catalog()["component_registry_version"],
         "runtime_protocol": template_catalog()["runtime_protocol"],
+        "workspace_change_protocol": "dataviz/workspace-change/v1",
     }
     if output_format == "json":
         print_json(payload)
@@ -1135,6 +1418,11 @@ def gallery(
         "--allow-remote",
         help="Acknowledge that this unauthenticated Server will accept remote connections",
     ),
+    watch: bool = typer.Option(
+        True,
+        "--watch/--no-watch",
+        help="Watch Workspace files and hot-reload open dashboards",
+    ),
 ) -> None:
     """Open the runtime-native Section, View, Selector and Renderer Gallery."""
     if output is None:
@@ -1158,7 +1446,7 @@ def gallery(
                 return
             import uvicorn
 
-            uvicorn.run(create_app(gallery_root), host=host, port=port)
+            uvicorn.run(create_app(gallery_root, watch=watch), host=host, port=port)
     except Exception as exc:
         handle_error(exc)
 
@@ -1315,7 +1603,24 @@ def benchmark(
     browser_runtime: bool = typer.Option(
         False,
         "--browser-runtime",
-        help="Also execute the exported page in Chromium and measure Runtime/Repeat scale",
+        help="Also execute the exported page in a real browser and measure Runtime scale",
+    ),
+    query_param: list[str] | None = typer.Option(
+        None,
+        "--query-param",
+        help="Query Parameter override as name=value; repeat for multiple values",
+    ),
+    browser: str = typer.Option(
+        "chromium",
+        "--browser",
+        help="Browser Runtime engine: chromium, firefox, or webkit",
+    ),
+    repeat: int = typer.Option(
+        1,
+        "--repeat",
+        min=1,
+        max=20,
+        help="Reload and dispose the same exported page this many times",
     ),
     timeout_seconds: float = typer.Option(
         30.0,
@@ -1337,6 +1642,9 @@ def benchmark(
                 loaded,
                 loaded.dashboard(dashboard),
                 timeout_seconds=timeout_seconds,
+                query_parameters=parse_params(query_param),
+                browser_name=browser,
+                repeat=repeat,
             )
         if output_format == "json":
             print_json(payload)
@@ -1362,9 +1670,10 @@ def benchmark(
             transport = runtime["runtime"].get("transports", {})
             renderers = runtime["runtime"].get("renderers", {})
             typer.echo(
-                f"- Browser Runtime: query {runtime['query_ms']} ms; "
-                f"report {runtime['report_build_ms']} ms; "
-                f"page ready {runtime['page_ready_ms']} ms"
+                f"- Browser Runtime ({runtime['browser']['name']}): "
+                f"query {runtime['query']['duration_ms']} ms; "
+                f"report {runtime['report']['build_ms']} ms; "
+                f"page ready median {runtime['browser']['page_ready_ms']['median']} ms"
             )
             typer.echo(
                 f"- Arrow: {transport.get('arrowRows', 0)} rows / "
@@ -1374,6 +1683,18 @@ def benchmark(
             typer.echo(
                 f"- Repeat Sections: {len(runtime['repeat_sections'])}; "
                 f"max groups: {max((item['groups'] for item in runtime['repeat_sections']), default=0)}"
+            )
+            typer.echo(
+                f"- Peak Chromium JS heap: "
+                f"{runtime['browser']['peak_js_heap_bytes'] or 'unavailable'} bytes; "
+                f"max retained delta: "
+                f"{runtime['browser']['maximum_retained_delta_bytes'] or 'unavailable'} bytes"
+            )
+            typer.echo(
+                f"- Browser process-tree peak increase: "
+                f"{runtime['browser']['peak_process_tree_increase_bytes'] or 'unavailable'} bytes; "
+                f"final retained delta: "
+                f"{runtime['browser']['final_process_tree_retained_delta_bytes'] or 0} bytes"
             )
         typer.echo(
             "\nToken counts and AI retry quality are intentionally left for model-specific evals.\n"
@@ -1825,12 +2146,17 @@ def serve(
         "--allow-remote",
         help="Acknowledge that this unauthenticated Server will accept remote connections",
     ),
+    watch: bool = typer.Option(
+        True,
+        "--watch/--no-watch",
+        help="Watch Workspace files and hot-reload open dashboards",
+    ),
 ) -> None:
     """Start the human-facing interactive dashboard server."""
     _require_remote_bind_opt_in(host, allow_remote=allow_remote)
     import uvicorn
 
-    application = create_app(workspace)
+    application = create_app(workspace, watch=watch)
     uvicorn.run(application, host=host, port=port)
 
 

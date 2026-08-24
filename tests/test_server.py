@@ -285,6 +285,11 @@ def test_existing_run_allows_presentation_edits_but_rejects_query_logic_drift(
     assert "Run query" in stale_canvas.text
     assert stale_report.status_code == 409
     assert stale_report.json()["detail"]["code"] == "query_run_contract_changed"
+    remembered = client.get(
+        "/api/session/runs", params={"session_id": SESSION_A}
+    ).json()["runs"]
+    assert remembered[0]["run_id"] == run_id
+    assert remembered[0]["query_outdated"] is True
 
 
 def test_server_run_and_canvas():

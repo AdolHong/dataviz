@@ -1,0 +1,4 @@
+adapters:
+  benchmark-duckdb:
+    type: duckdb
+    database: ':memory:'

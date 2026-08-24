@@ -10,11 +10,11 @@
 | --- | --- | --- |
 | P0 数据执行架构 | 已完成 | Query DAG、Interactive DAG、Named Output、三种 Interactive Runtime、状态隔离、导出边界和严格验证已形成一套当前契约。 |
 | P1 Component Package | 当前范围已完成 | Registry v3 已覆盖常用 View、Section、Selector、Renderer、Repeat 和 Presentation 组件；继续扩张必须由真实场景触发。 |
-| P1 AI 开发效率评测 | 工具已完成，真实试验待进行 | 成对任务、输入完整性、逐项验收和真实 Token 记录均已实现，但不能用仓库测试伪造真实 AI 使用结论。 |
-| P2 规模与浏览器矩阵 | 进行中 | 已有 Arrow、局部更新、150K 行回归、七状态 Gallery、真实 10/100/1,000 Selector Story 和三浏览器契约套件；仍缺固定 10K/100K/1M 数据，以及 Firefox/WebKit 的扩展组合矩阵。 |
+| P1 AI 开发效率评测 | 工具已完成，真实试验暂缓 | 成对任务、输入完整性、逐项验收和真实 Token 记录均已实现；试验方案尚未决定，不用仓库测试伪造结论。 |
+| P2 规模与浏览器矩阵 | 当前范围已完成 | 固定 10K/100K/1M 基准、流式 groupBy 优化，以及 Chromium/Firefox/WebKit 的窄屏与 Perspective 恢复组合矩阵均已有可复现证据。 |
 | 开源发布 | 进行中 | 构建与安装门禁已具备；许可证尚未决定。 |
 
-当前基线：Package `0.3.1`、Python 3.11–3.14、Dashboard `dataviz/dashboard/v3`、Browser Runtime `dataviz/runtime/v2`、Component Registry `3.0.0`。项目尚未投入生产，因此只接受当前严格契约，不保留旧字段 alias、自动迁移或第二套 Runtime。
+当前基线：Package `0.3.2`、Python 3.11–3.14、Dashboard `dataviz/dashboard/v3`、Browser Runtime `dataviz/runtime/v2`、Component Registry `3.0.0`。项目尚未投入生产，因此只接受当前严格契约，不保留旧字段 alias、自动迁移或第二套 Runtime。
 
 ## 已完成的核心能力
 
@@ -67,12 +67,14 @@
 - [x] 同一 wheel 已在 Python 3.11、3.12、3.13、3.14 完成干净安装与 CLI/报告冒烟；完整 Python 测试矩阵由 CI 持续执行。
 - [x] `0.3.1` 修复动态 Selection 启动环：option domain 只来自 Base Output，首次水合、Control reconciliation、View 渲染与 Interactive 调度有唯一顺序；`canvas-ready` 只在首次 canonical state 提交后发布，父页面不再用早到的 tab 状态覆盖初始化中的用户操作。
 - [x] Browser Interactive 七状态通过 frame identity 回传 `Pipeline`；Base View 不再因其他动态 Selector 或 Interactive 分支而停在 `Waiting for dataset`，Server 与独立 HTML 均有回归。
+- [x] `0.3.2` 增加 Workspace 文件监听、debounced revision、SSE 通知和 `canvas / analysis / query` 影响分类；Presentation 自动重载，Interactive 基于现有 Base Output 重算，Query Contract 变化只进入 Outdated 并要求显式查询。
+- [x] 热更新保留 tab 的 Run、Control 与 Canvas 滚动位置；无效中间写入不替换当前 iframe，Header 提供诊断和显式 Reload。分类只跟踪实际声明/引用资产；保存 Source 后立即 Query 会先同步 revision。页面重开及查询运行途中发生定义变化时，也会重新核验 Query Contract，旧快照不能被误标为当前结果。
 
 ## 下一步优先级
 
 ### P1：验证 AI 开发效率
 
-这是当前最高优先级的产品证据工作，不需要继续扩张 DSL。
+评测工具已经完成，但真实成对试验按产品决定暂缓；这不阻塞 Runtime 工程工作，也不允许预设 Token 节省结论。
 
 - [ ] 使用相同模型、客户端、权限和时间预算，对五类固定任务执行多次 Dataviz / standalone HTML 随机顺序成对试验。
 - [ ] 发布原始 JSONL、环境说明、逐项验收证据、真实 input/output Token、首次成功率、修正轮次和耗时。
@@ -85,14 +87,14 @@
 - [x] Arrow 传输记录行数、字节和耗时；Renderer 记录 mount/update/empty/failure/耗时。
 - [x] `benchmark --browser-runtime` 等待传输、Interactive Transform、Repeat reconciliation 和已挂载 View 进入稳定状态，并分别记录 Query、报告生成和页面就绪时间。
 - [x] 150K 行真实浏览器回归覆盖声明式 Metric、browser-js Worker 与 Custom Canvas 聚合。
-- [ ] 固定并持续运行 10K、100K、1M 行 Query → Arrow → Interactive → Renderer 基准，记录峰值内存和重复运行回落。
-- [ ] 根据证据决定是否实现服务端分页、按需 Record Batch、浏览器列式 Selection 或更严格的大输入降级；不预先扩张 DSL。
+- [x] 固定并运行 10K、100K、1M 行 Query → Arrow → Interactive → Renderer 基准，记录 CLI 峰值 RSS、浏览器进程树 RSS、页面耗时和三轮 dispose 回落；原始结果见 `benchmarks/results/`。
+- [x] 依据 1M 证据把 Worker/Data API 的 groupBy 改为单遍流式聚合：页面就绪中位数约降低 23%，浏览器峰值增量约降低 20%。当前不实现通用服务端分页或 Record Batch DSL；原始明细 View 另行基准触发。
 
 ### P2：浏览器可靠性
 
 - [x] Chromium 覆盖独立分支渐进发布、失败隔离、取消后终态、空 View、大数据 Arrow 和局部重绘。
 - [x] 当前完整 E2E 契约套件在 Chromium、Firefox、WebKit 通过，覆盖渐进 Query/Interactive 分支、Selection 级联、局部更新、Perspective 与 HTML Export。
-- [ ] 扩展 Firefox/WebKit 的窄视口、弹层几何、滚动、键盘、ARIA、Perspective 恢复和重复 dispose 矩阵。
+- [x] Chromium、Firefox、WebKit 均通过 390×520 Query 托盘边界、单列响应式、内部滚动、Select 键盘/ARIA/外部点击，以及 Perspective 三轮 dispose/reload/wheel 恢复矩阵。
 - [x] Selector、Control、View、Section 七状态矩阵和 Select 10/100/1,000 真实选项 Story 已进入 Gallery 与 Chromium 契约测试。
 
 ### P2：内部归属与可维护性
@@ -107,6 +109,7 @@
 
 - [x] 完成 `0.3.0` 本地发行门禁：wheel、sdist、pip ZIP 构建，并分别在干净 Python 3.12 环境完成 `version → schemas → components → init → validate → report` 冒烟。
 - [x] 完成 `0.3.1` 本地发行门禁：三种归档构建、内容审计，并分别在干净 Python 3.12 环境完成安装与 CLI/报告冒烟。
+- [x] 完成 `0.3.2` 本地发行门禁：全量 Python 与 Chromium Runtime 回归、三种归档内容审计，并分别在干净 Python 3.12 环境完成安装与 `version → schemas → components → init → validate → report` 冒烟。
 - [ ] 维护者决定许可证并添加正式 `LICENSE`；许可证未定不阻塞开发，但阻塞正式对外授权。
 - [ ] 添加 `CONTRIBUTING.md`，说明安装、validate/test、Runtime/Component 变更和 PR 验收。
 - [ ] 正式 GitHub Release 发布 wheel、sdist、pip ZIP、SHA-256 和远端 CI 记录。

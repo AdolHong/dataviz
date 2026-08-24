@@ -8,7 +8,7 @@
 
 ```text
 Workspace              dataviz/workspace/v1
-Dashboard              dataviz/dashboard/v2
+Dashboard              dataviz/dashboard/v3
 Presentation           dataviz/presentation/v1
 Source                 dataviz/source/v1
 Dataset Transform      dataviz/dataset-transform/v1
@@ -25,6 +25,7 @@ Component Registry     3.0.0
 - Workspace 加载与跨文件校验：`src/dataviz/workspace/loader.py`
 - 机器可读 Schema：`src/dataviz/schema_docs.py`
 - CLI 内置手册：`src/dataviz/documentation.py`
+- Selection option-domain 编译：`src/dataviz/workspace/selection_domains.py`
 
 ## 2. Query DAG
 
@@ -39,7 +40,7 @@ Query Parameter → Source → Dataset Transform → Base Named Output
 - Artifact 与 Named Output：`src/dataviz/artifacts/`、`src/dataviz/execution/outputs.py`
 - 缓存：`src/dataviz/execution/cache.py`
 
-Query Run 固化 Query Parameter 和 Base Output。Selection/Compute Parameter 不进入这张 DAG。节点按依赖闭包并发，Output 完成后立即发布；无关分支不互相等待。
+Query Run 固化 Query Parameter 和 Base Output。scoped Controls 不进入这张 DAG。节点按依赖闭包并发，Output 完成后立即发布；无关分支不互相等待。
 
 File、SQL、Python 是 Source 的三种入口。SQL 默认单次超时 120 秒，明确超时后立即额外重试一次；Source 可以覆盖 `timeout_seconds` 与 `timeout_retries`。SQL 面板保存参数化 statement、Resolved SQL、bound parameters、Adapter、耗时、重试和 hash 证据，但不公开凭证。
 
@@ -48,7 +49,7 @@ Python Source 与 Dataset Transform 使用 fresh spawn 子进程，支持硬 tim
 ## 3. Interactive DAG
 
 ```text
-Base/Derived Output + committed Query snapshot + Selection + Compute Parameter
+Base/Derived Output + committed Query snapshot + scoped Control deltas
                                       ↓
                            Interactive Transform
                                       ↓
@@ -56,7 +57,9 @@ Base/Derived Output + committed Query snapshot + Selection + Compute Parameter
 ```
 
 - 服务端计划与执行：`src/dataviz/execution/interactive.py`
+- Server Selection 输入裁剪：`src/dataviz/execution/selection_filter.py`
 - Browser 控制器：`src/dataviz/server/static/canvas-runtime.js`
+- Browser Selection/Compute 边界：`src/dataviz/components/packages/data.pipeline/`
 - browser-js Worker：`src/dataviz/server/static/interactive-js-worker.js`
 - browser-python Worker：`src/dataviz/server/static/interactive-python-worker.mjs`
 - Server Run/generation 隔离：`src/dataviz/server/manager.py`
@@ -81,7 +84,9 @@ Interaction endpoint 从 Query Run 建立时就属于该 Run，不以整次 Quer
 
 `execution.plan.server_interactive_base_references()` 在 Query 建立时分类可达 `server-python` 分支所需的 Base Output，并通过 Run API 暴露 `server_interactive_inputs`。数据只保存一份：所有 Query Artifact 位于 Workspace `.dataviz/runs/<run-id>/artifacts/`，不进入 Dashboard；RunManager 用 `tab session + dashboard + run` 控制访问，Interactive Executor 再按 canonical Output reference 读取。Source/Dataset 的 NodeCache key 包含 Dashboard 与节点 ID，默认 tab namespace 位于 `.dataviz/cache/tabs/<session-hash>/`。因此页面刷新可以恢复同一 Run，跨 tab 访问被拒绝，交互执行也没有 Source Runner 回退路径。
 
-`trigger` 支持 `apply`、`auto` 和 `manual`。Compute Control 区分 draft/committed；内容绑定和 provenance 只描述真正产生当前结果的 committed state。
+`trigger` 支持 `apply`、`auto` 和 `manual`。Interactive Transform 用 `selection_inputs` / `compute_inputs` 把代码局部 alias 映射到 canonical Control key。`data.pipeline` 在 Runtime Adapter 边界先把 Selection include 契约应用到所有具有相应字段的表输入，然后才调用 browser-js/browser-python Compute；server-python 在 `ExecutionContext.table/input` 边界做同样的裁剪。Compute Control 区分 draft/committed，内容绑定和 provenance 只描述真正产生当前结果的 committed state。
+
+动态 Select 的 option domain 不从派生 View Output 建立。`workspace.selection_domains` 会把每个 Selection 沿消费 View 的 Interactive 输入追溯到 Base Output；显式 `options_from` 也只能引用 `source:` / `dataset:` 表格 Output，并作为 Query reachability root。Canvas 首次启动按 `hydrate Base → reconcile Controls → render → run Interactive` 执行，避免必填空 `<select>` 抹掉 canonical default 并阻断整页。`dataviz:canvas-ready` 只在这一初始化事务完成后发布；Server Shell 再按当前 frame identity 恢复 tab-local Control state，避免 iframe load、Query ready 与用户输入之间形成竞态。
 
 ## 4. Output、状态和证据
 
@@ -108,17 +113,19 @@ not_run → queued → loading → ready | empty | error | cancelled | unavailab
 
 Server 与 HTML 共享 `dataviz/runtime/v2` Manifest、Named Output Store 和 Runtime Event。`canvas-runtime.js` 是共享 Runtime 主机；`data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 分别物理拥有数据 Adapter、Renderer lifecycle、Section/Repeat 和 Presentation state，借 `dataviz:runtime-ready` 装配到主机，不在 Runtime 文件内保留第二份实现。
 
+Server Header 中的 `Pipeline` 面板同时展示 Query 节点与 Interactive Transform。Query 状态来自 Run SSE；Browser Interactive 状态通过当前 iframe 的 `dataviz:interactive-status` 消息回传，并同时校验 dashboard/run/frame identity，避免跨 Dashboard 或旧 frame 污染状态。
+
 Runtime 根据显式依赖建立反向索引：
 
 - Query Output 就绪时只启动刚满足依赖的 Interactive Transform 和 View。
-- Selection 只筛选字段适用且位于其作用域内的 View。
-- View Selection 不重绘兄弟 View。
-- Compute Parameter 只失效声明消费它的 Interactive Transform 下游。
+- Selection-kind Control 只筛选字段适用且位于其作用域内的 View。
+- View Control 不重绘兄弟 View。
+- Compute-kind Control 只失效声明消费它的 Interactive Transform 下游。
 - 新 Run 可以显示 stale 旧结果，但不会把两个 Run 的 Output 静默混合。
 
 父页面与 Canvas 的消息同时校验 origin、source、`dashboard_id`、`run_id` 和 `frame_id`。Canvas ready 后主动握手；Query 到达终态时父页面只更新 Interaction endpoint，不重新加载 iframe。
 
-Runtime 将 Selection、Compute Parameter 和 Output 视为三种独立 delta。调用方必须显式传递“全部变化”“部分变化”或“没有变化”，不能用省略参数混淆语义。缺失 Derived Output 只负责首次启动分支；若分支已经 active，无关 Output 发布不会取消或重复启动它。Output signature 未变化时也不会继续传播或重绘。
+Runtime 将 Selection-kind、Compute-kind 和 Output 视为三种独立 delta。统一的 Controls authoring/UI 入口不会合并这些调度语义。调用方必须显式传递“全部变化”“部分变化”或“没有变化”，不能用省略参数混淆语义。缺失 Derived Output 只负责首次启动分支；若分支已经 active，无关 Output 发布不会取消或重复启动它。Output signature 未变化时也不会继续传播或重绘。
 
 大 Table 的传输可使用 Arrow IPC/columnar envelope；浏览器按需解码。部分通用 Selector 和 Renderer 首次消费时仍会物化 JavaScript 行对象，当前不承诺完整的浏览器列式查询引擎。
 
@@ -185,6 +192,8 @@ Server 状态以浏览器 tab 的 `session_id` 为边界。不同 tab、Dashboar
 
 Component Registry v3 从 `src/dataviz/components/packages/` 扫描 Package。每个 Package 声明 owner、Schema、controller、adapter、功能 CSS、Story 和测试声明。`components --check` 只校验这些元数据、资产与声明，pytest/浏览器 E2E 才执行行为。13 个 Package 均为 package-owned；声明式 View/Section、Data Pipeline 与 Presentation 已迁入各自 owner，`declarative-runtime.js` 与 Runtime 中的重复实现已经删除。
 
+`presentation.shell` 还拥有 `control-panel.adaptive`：Server Header 与导出报告共享视口边界、响应式列和内部滚动规则。每个 Dashboard 只在 Presentation 中选择控制托盘的模板、宽度、列数和密度，Shell/Runtime 继续统一拥有值、校验、级联和执行状态。
+
 ## 9. 静态校验与 AI 开发入口
 
 `dataviz validate` 不查询数据，覆盖：
@@ -221,7 +230,7 @@ dataviz authoring compare MEASUREMENT_WORKSPACE --format json
 - 这是可信单机执行环境，不是不可信代码沙箱，也不提供多租户 CPU/内存额度。
 - 通用服务端分页、按需 Record Batch 和完整浏览器列式执行尚未实现。
 - 13 个 Component Package 都已物理拥有 controller、adapter 和功能 CSS；共享 Runtime 仍较大，后续只按 Manifest、Output Store、Scheduler、Selection Binding 等主机职责继续拆分。
-- Gallery 已覆盖 Selector、Compute、View、Section 七状态和真实 10/100/1,000 选项；Firefox/WebKit 的窄视口、弹层、滚动、键盘、ARIA、Perspective 恢复和重复 dispose 组合仍需扩展。
+- Gallery 已覆盖 Selector、Control、View、Section 七状态和真实 10/100/1,000 选项；Firefox/WebKit 的窄视口、弹层、滚动、键盘、ARIA、Perspective 恢复和重复 dispose 组合仍需扩展。
 - Token 节省是待真实任务评测的产品假设，不承诺固定数字。
 - 成对评测工具已经实现；真实重复 trial 与结果发布尚待积累。
 - 当前运行协调只支持一个 Dataviz Server 进程写一个 Workspace/报告目标；Runtime 并发上限变更需要重启。

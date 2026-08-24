@@ -59,8 +59,174 @@
 [data-component-status="cancelled"] { --dv-component-state: #a86718; }
 [data-component-status="unavailable"] { --dv-component-state: #66716b; }
 [data-component-state-label] { color: var(--dv-component-state, var(--dv-green, #1c7a55)); }
+
+/* Shared Query and scoped Control trays. */
+[data-dv-control-panel] > .header-control__popover,
+[data-dv-control-panel] > .dv-runtime-popover {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: calc(100dvh - 24px);
+  overflow: hidden;
+}
+[data-dv-control-panel] > .header-control__popover > .parameter-form,
+[data-dv-control-panel] > .header-control__popover > .selection-form,
+[data-dv-control-panel] > .header-control__popover > .dashboard-control-groups,
+[data-dv-control-panel] > .dv-runtime-popover > .dv-runtime-control-groups,
+[data-dv-control-panel] > .dv-runtime-popover > .dv-report-selection-group__fields,
+[data-dv-control-panel] > .dv-runtime-popover > .dv-runtime-query-values,
+[data-dv-control-panel] > .dv-runtime-popover > .dv-compute-fields {
+  min-width: 0;
+  min-height: 0;
+  padding: 2px 6px 2px 2px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.dashboard-control-groups,
+.dv-runtime-control-groups {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+.dashboard-control-group,
+.dv-runtime-control-group,
+.dv-context-controls__group {
+  min-width: 0;
+  padding: 12px;
+  background: color-mix(in srgb, var(--dv-panel, #fffdf6) 76%, var(--dv-paper, #f3f0e7));
+  border: 1px solid var(--dv-line, #d5d0c2);
+  border-left: 3px solid var(--dv-green, #1c7a55);
+}
+.dashboard-control-group[data-control-kind="compute"],
+.dv-runtime-control-group[data-control-kind="compute"],
+.dv-context-controls__group[data-control-kind="compute"] {
+  border-left-color: var(--dv-accent, #e2592a);
+}
+.dashboard-control-group > header,
+.dv-runtime-control-group > header,
+.dv-context-controls__group > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-bottom: 10px;
+}
+.dashboard-control-group > header > span,
+.dv-runtime-control-group > header > span,
+.dv-context-controls__group > header > span {
+  flex: 0 0 auto;
+  padding: 3px 5px;
+  color: var(--dv-green, #1c7a55);
+  background: color-mix(in srgb, var(--dv-green, #1c7a55) 10%, transparent);
+  font: 600 8px "DM Mono", monospace;
+  letter-spacing: .1em;
+}
+[data-control-kind="compute"] > header > span {
+  color: var(--dv-accent, #e2592a);
+  background: color-mix(in srgb, var(--dv-accent, #e2592a) 10%, transparent);
+}
+.dashboard-control-group > header strong,
+.dashboard-control-group > header small,
+.dv-runtime-control-group > header strong,
+.dv-runtime-control-group > header small {
+  display: block;
+}
+.dashboard-control-group > header strong,
+.dv-runtime-control-group > header strong,
+.dv-context-controls__group > header strong {
+  font-size: 11px;
+}
+.dashboard-control-group > header small,
+.dv-runtime-control-group > header small {
+  margin-top: 2px;
+  color: #758079;
+  font: 8px "DM Mono", monospace;
+}
+.dashboard-control-group > .parameter-form,
+.dashboard-control-group > .selection-form,
+.dv-runtime-control-group > .dv-report-selection-group__fields,
+.dv-runtime-control-group > .dv-compute-fields,
+.dv-context-controls__group > div {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+  gap: 10px;
+}
+[data-dv-control-panel][data-control-template="stack"] .dashboard-control-group > .parameter-form,
+[data-dv-control-panel][data-control-template="stack"] .dashboard-control-group > .selection-form,
+[data-dv-control-panel][data-control-template="stack"] .dv-runtime-control-group > .dv-report-selection-group__fields,
+[data-dv-control-panel][data-control-template="stack"] .dv-runtime-control-group > .dv-compute-fields {
+  grid-template-columns: minmax(0, 1fr);
+}
+[data-dv-control-panel]:not([data-control-columns="auto"]) .dashboard-control-group > .parameter-form,
+[data-dv-control-panel]:not([data-control-columns="auto"]) .dashboard-control-group > .selection-form,
+[data-dv-control-panel]:not([data-control-columns="auto"]) .dv-runtime-control-group > .dv-report-selection-group__fields,
+[data-dv-control-panel]:not([data-control-columns="auto"]) .dv-runtime-control-group > .dv-compute-fields {
+  grid-template-columns: repeat(var(--dv-control-columns, 1), minmax(0, 1fr));
+}
+[data-dv-control-panel][data-control-template="grid"] > .header-control__popover > .parameter-form,
+[data-dv-control-panel][data-control-template="grid"] > .header-control__popover > .selection-form,
+[data-dv-control-panel][data-control-template="grid"] > .dv-runtime-popover > .dv-report-selection-group__fields,
+[data-dv-control-panel][data-control-template="grid"] > .dv-runtime-popover > .dv-runtime-query-values,
+[data-dv-control-panel][data-control-template="grid"] > .dv-runtime-popover > .dv-compute-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+  align-content: start;
+  gap: 12px;
+}
+[data-dv-control-panel][data-control-template="stack"] > .header-control__popover > .parameter-form,
+[data-dv-control-panel][data-control-template="stack"] > .header-control__popover > .selection-form,
+[data-dv-control-panel][data-control-template="stack"] > .dv-runtime-popover > .dv-report-selection-group__fields,
+[data-dv-control-panel][data-control-template="stack"] > .dv-runtime-popover > .dv-runtime-query-values,
+[data-dv-control-panel][data-control-template="stack"] > .dv-runtime-popover > .dv-compute-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 10px;
+}
+[data-dv-control-panel][data-control-columns="1"] { --dv-control-columns: 1; }
+[data-dv-control-panel][data-control-columns="2"] { --dv-control-columns: 2; }
+[data-dv-control-panel][data-control-columns="3"] { --dv-control-columns: 3; }
+[data-dv-control-panel][data-control-columns="4"] { --dv-control-columns: 4; }
+[data-dv-control-panel]:not([data-control-columns="auto"]) > .header-control__popover > .parameter-form,
+[data-dv-control-panel]:not([data-control-columns="auto"]) > .header-control__popover > .selection-form,
+[data-dv-control-panel]:not([data-control-columns="auto"]) > .dv-runtime-popover > .dv-report-selection-group__fields,
+[data-dv-control-panel]:not([data-control-columns="auto"]) > .dv-runtime-popover > .dv-runtime-query-values,
+[data-dv-control-panel]:not([data-control-columns="auto"]) > .dv-runtime-popover > .dv-compute-fields {
+  grid-template-columns: repeat(var(--dv-control-columns, 1), minmax(0, 1fr));
+}
+[data-dv-control-panel] > .header-control__popover > .query-state,
+[data-dv-control-panel] > .header-control__popover > .compute-actions {
+  margin-top: 12px;
+}
+[data-dv-control-panel][data-control-density="compact"] > .header-control__popover {
+  padding: 13px;
+}
+[data-dv-control-panel][data-control-density="compact"] > .header-control__popover .section-heading {
+  margin-bottom: 10px;
+}
+[data-dv-control-panel][data-control-density="compact"] > .header-control__popover .field {
+  gap: 4px;
+}
+[data-dv-control-panel][data-control-density="compact"] > .header-control__popover .field input,
+[data-dv-control-panel][data-control-density="compact"] > .header-control__popover .field select,
+[data-dv-control-panel][data-control-density="compact"] > .header-control__popover .dv-selector > [data-selector-mount] > button {
+  height: 32px;
+  min-height: 32px;
+}
 @media (max-width: 800px) {
   .dv-canvas { padding: 20px; }
   .dv-report-header--compact { display: block; }
   .dv-report-header--compact h1 { font-size: 38px; }
+  [data-dv-control-panel] > .header-control__popover > .parameter-form,
+  [data-dv-control-panel] > .header-control__popover > .selection-form,
+  [data-dv-control-panel] > .dv-runtime-popover > .dv-report-selection-group__fields,
+  [data-dv-control-panel] > .dv-runtime-popover > .dv-runtime-query-values,
+  [data-dv-control-panel] > .dv-runtime-popover > .dv-compute-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .dashboard-control-group > .parameter-form,
+  .dashboard-control-group > .selection-form,
+  .dv-runtime-control-group > .dv-report-selection-group__fields,
+  .dv-runtime-control-group > .dv-compute-fields {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
 }

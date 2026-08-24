@@ -12,7 +12,7 @@ from dataviz.view_contracts import VIEW_TEMPLATE_CONTRACTS
 from dataviz.workspace.models import (
     AdapterDefinition,
     CacheDefinition,
-    ComputeParameterDefinition,
+    ComputeControlDefinition,
     DashboardDefinition,
     DatasetTransformDefinition,
     DeclarativeViewDefinition,
@@ -25,15 +25,16 @@ from dataviz.workspace.models import (
     QueryParameterDefinition,
     RepeatDefinition,
     RuntimeDefinition,
+    ScopedControlDefinition,
     SectionDefinition,
-    SelectionDefinition,
+    SelectionControlDefinition,
     SOURCE_DEFINITION_ADAPTER,
     ThemeDefinition,
     WorkspaceDefinition,
 )
 
 
-SCHEMA_CATALOG_VERSION = "dataviz/schema-catalog/v2"
+SCHEMA_CATALOG_VERSION = "dataviz/schema-catalog/v3"
 SchemaProvider = type[BaseModel] | TypeAdapter
 
 
@@ -49,8 +50,9 @@ SCHEMA_MODELS: OrderedDict[str, SchemaProvider] = OrderedDict(
         ("interactive-export", InteractiveExportDefinition),
         ("adapter", AdapterDefinition),
         ("query-parameter", QueryParameterDefinition),
-        ("compute-parameter", ComputeParameterDefinition),
-        ("selection", SelectionDefinition),
+        ("scoped-control", TypeAdapter(ScopedControlDefinition)),
+        ("compute-control", ComputeControlDefinition),
+        ("selection-control", SelectionControlDefinition),
         ("section", SectionDefinition),
         ("repeat", RepeatDefinition),
         ("view", DeclarativeViewDefinition),
@@ -65,7 +67,7 @@ SCHEMA_MODELS: OrderedDict[str, SchemaProvider] = OrderedDict(
 
 CURRENT_SCHEMAS = {
     "workspace": "dataviz/workspace/v1",
-    "dashboard": "dataviz/dashboard/v2",
+    "dashboard": "dataviz/dashboard/v3",
     "presentation": "dataviz/presentation/v1",
     "source": "dataviz/source/v1",
     "dataset_transform": "dataviz/dataset-transform/v1",

@@ -28,7 +28,7 @@ function runtimeFor(dashboardId) {
       canvasSelections: {},
       queryStatus: 'idle',
       queryLabel: 'Not run',
-      message: 'Sources are ready to run.',
+      message: 'Data pipeline is ready to run.',
       previousQueryState: null,
     });
   }
@@ -105,6 +105,7 @@ function loadCanvasFrame(dashboardId, runId = null) {
   frame.dataset.dashboardId = dashboardId;
   frame.dataset.runId = runId || '';
   frame.dataset.frameId = frameId;
+  frame.dataset.runtimeReady = 'false';
   const run = runId ? `&run_id=${encodeURIComponent(runId)}` : '';
   frame.src = `/api/dashboards/${encodeURIComponent(dashboardId)}/canvas?${sessionQuery()}${run}&frame_id=${encodeURIComponent(frameId)}`;
 }
@@ -509,6 +510,32 @@ function selectionField(control) {
   return wrapper;
 }
 
+function dashboardControls(kind = null) {
+  return (state.dashboard?.controls || []).filter(
+    control => control.origin === 'dashboard' && (kind == null || control.kind === kind),
+  );
+}
+
+function computeField(control) {
+  const wrapper = field(control.definition, control.key);
+  wrapper.dataset.computeParameter = control.key;
+  wrapper.dataset.computeTrigger = control.trigger || 'apply';
+  wrapper.dataset.controlKind = 'compute';
+  return wrapper;
+}
+
+function applyDashboardControlPresentation(dashboard) {
+  const shell = window.datavizComponents?.presentationShell;
+  if (!shell?.applyControlPanel) return;
+  const controls = dashboard.presentation?.controls || {};
+  shell.applyControlPanel($('#query-parameters-control'), controls.query, {
+    role:'query', count:dashboard.query_parameters.length,
+  });
+  shell.applyControlPanel($('#dashboard-controls-control'), controls.dashboard, {
+    role:'dashboard', count:dashboardControls().length,
+  });
+}
+
 function dashboardSelectionValues() {
   const form = $('#dashboard-selection-form');
   const values = formValues(form);
@@ -531,7 +558,9 @@ function syncDashboardSelectionOptions(controls = []) {
     if (!control.observed) continue;
     const input = form.elements.namedItem(control.key);
     if (!(input instanceof HTMLSelectElement)) continue;
-    const definition = state.dashboard?.selections.find(item => item.key === control.key)?.definition;
+    const definition = state.dashboard?.controls.find(
+      item => item.kind === 'selection' && item.key === control.key,
+    )?.definition;
     const options = control.options || [];
     const signature = JSON.stringify(options);
     if (input.dataset.runtimeOptionsSignature === signature) continue;
@@ -564,6 +593,12 @@ function syncDashboardSelectionOptions(controls = []) {
       if (item.keywords?.length) option.dataset.keywords = item.keywords.join(' ');
       nodes.push(option);
     }
+    if (definition?.required && !nodes.some(option => option.selected && !option.disabled)) {
+      const fallback = nodes.find(
+        option => option.dataset.emptyOption !== 'true' && !option.disabled,
+      );
+      if (fallback) fallback.selected = true;
+    }
     input.replaceChildren(...nodes);
     input.dataset.runtimeOptionsSignature = signature;
     input._syncChoiceControl?.();
@@ -574,7 +609,7 @@ function syncDashboardSelectionOptions(controls = []) {
   if (!synchronized) return;
   const runtime = activeRuntime();
   if (runtime) runtime.dashboardSelectionValues = formValues(form);
-  updateDashboardSelectionSummary();
+  updateDashboardControlSummary();
   saveTabUiState();
   if (changed) scheduleViewSelections();
 }
@@ -606,25 +641,22 @@ function selectDashboard(id) {
   document.querySelectorAll('.nav-button').forEach((node) => node.classList.toggle('active', node.dataset.id === id));
   const runnable = Boolean(state.dashboard.runnable);
   $('#parameter-form').replaceChildren(...state.dashboard.query_parameters.map((item) => field(item)));
-  $('#compute-parameter-form').replaceChildren(
-    ...state.dashboard.compute_parameters.map((item) => {
-      const control = field(item);
-      control.dataset.computeParameter = item.id;
-      control.dataset.computeTrigger = item.trigger || 'manual';
-      return control;
-    }),
-  );
+  const dataControls = dashboardControls('selection');
+  const logicControls = dashboardControls('compute');
+  $('#compute-parameter-form').replaceChildren(...logicControls.map(computeField));
   const hasAnalysisActions = (state.dashboard.nodes || []).some(
     (node) => node.type === 'interactive_transform' && node.trigger !== 'auto',
   );
-  $('#compute-parameters-control').dataset.empty = String(
-    state.dashboard.compute_parameters.length === 0 && !hasAnalysisActions,
+  $('#dashboard-controls-control').dataset.empty = String(
+    dataControls.length === 0 && logicControls.length === 0 && !hasAnalysisActions,
   );
-  const dashboardControls = state.dashboard.selections.filter((item) => item.origin === 'dashboard');
-  $('#dashboard-selection-form').replaceChildren(...dashboardControls.map(selectionField));
+  $('#dashboard-selection-group').hidden = dataControls.length === 0;
+  $('#dashboard-compute-group').hidden = logicControls.length === 0;
+  $('#dashboard-selection-form').replaceChildren(...dataControls.map(selectionField));
+  applyDashboardControlPresentation(state.dashboard);
   if (runtime.dashboardSelectionValues == null) {
     runtime.dashboardSelectionValues = Object.fromEntries(
-      dashboardControls.map(control => [control.key, structuredClone(control.definition.default)]),
+      dataControls.map(control => [control.key, structuredClone(control.definition.default)]),
     );
   }
   window.datavizComponents?.hydrate(document);
@@ -637,7 +669,7 @@ function selectDashboard(id) {
     runtime.draftComputeParameters || runtime.committedComputeParameters || {},
   );
   setFormValues($('#dashboard-selection-form'), runtime.dashboardSelectionValues || {});
-  updateDashboardSelectionSummary();
+  updateDashboardControlSummary();
   $('#node-list').replaceChildren(...state.dashboard.nodes.map(nodeRow));
   document.querySelectorAll('.node').forEach((node) => {
     node.dataset.status = runtime.nodeStatuses[node.dataset.nodeId] || 'not_run';
@@ -682,7 +714,11 @@ function computeParameters() {
 
 function selections() {
   const values = Object.assign({}, state.canvasSelections, dashboardSelectionValues());
-  const validKeys = new Set((state.dashboard?.selections || []).map((selection) => selection.key));
+  const validKeys = new Set(
+    (state.dashboard?.controls || [])
+      .filter(control => control.kind === 'selection')
+      .map(control => control.key),
+  );
   return Object.fromEntries(Object.entries(values).filter(([key]) => validKeys.has(key)));
 }
 
@@ -880,7 +916,9 @@ function changedComputeParameters() {
   const runtime = activeRuntime();
   if (!runtime) return [];
   const committed = runtime.committedComputeParameters || Object.fromEntries(
-    (state.dashboard?.compute_parameters || []).map((item) => [item.id, item.default]),
+    dashboardControls('compute').map(
+      control => [control.key, structuredClone(control.definition.default)],
+    ),
   );
   const draft = computeParameters();
   const keys = new Set([...Object.keys(committed), ...Object.keys(draft)]);
@@ -890,7 +928,7 @@ function changedComputeParameters() {
 }
 
 function setComputeState() {
-  const definitions = state.dashboard?.compute_parameters || [];
+  const definitions = dashboardControls('compute');
   const runtime = activeRuntime();
   const changed = changedComputeParameters();
   const actionable = (state.dashboard?.nodes || []).some(
@@ -898,11 +936,7 @@ function setComputeState() {
   );
   const enabled = Boolean(runtime?.runId) && (definitions.length > 0 || actionable);
   setComputeEnabled(Boolean(runtime?.runId) && definitions.length > 0);
-  $('#compute-control-meta').textContent = definitions.length
-    ? changed.length
-      ? `${changed.length} draft change${changed.length === 1 ? '' : 's'}`
-      : `${definitions.length} parameter${definitions.length === 1 ? '' : 's'}`
-    : actionable ? 'Run on demand' : 'None';
+  $('#dashboard-compute-actions').hidden = definitions.length === 0 && !actionable;
   const status = $('#compute-state');
   status.dataset.stale = String(changed.length > 0);
   status.textContent = !runtime?.runId
@@ -911,30 +945,38 @@ function setComputeState() {
     ? `${changed.length} value${changed.length === 1 ? '' : 's'} not applied.`
     : actionable ? 'Ready to run on demand.' : 'Results are current.';
   $('#compute-apply').disabled = !enabled;
+  updateDashboardControlSummary();
 }
 
-function sendCompute(values, {commit = false, apply = false, manualTargets = []} = {}) {
-  if (!state.runId) return;
+function sendCompute(
+  values,
+  {commit = false, apply = false, manualTargets = [], controlKeys = null} = {},
+) {
+  if (!state.runId && !state.pendingRunId) return;
   postCanvasMessage({
     type: 'dataviz:set-compute',
     compute_parameters: values,
     commit,
     apply,
     manual_targets: manualTargets,
+    control_keys: controlKeys,
   });
 }
 
-function applyComputeParameters() {
+function applyDashboardControls() {
   const runtime = activeRuntime();
   if (!runtime?.runId) return;
   runtime.draftComputeParameters = computeParameters();
+  const controlKeys = dashboardControls().map(control => control.key);
   const manualTargets = (state.dashboard?.nodes || [])
     .filter((node) => node.type === 'interactive_transform' && node.trigger === 'manual')
     .map((node) => node.local_id);
+  applyViewSelections();
   sendCompute(runtime.draftComputeParameters, {
     commit: true,
     apply: true,
     manualTargets,
+    controlKeys,
   });
 }
 
@@ -978,9 +1020,14 @@ function setQueryState(message = null) {
   }
 }
 
-function updateDashboardSelectionSummary() {
-  const count = state.dashboard?.selections.filter((control) => control.origin === 'dashboard').length || 0;
-  $('#dashboard-control-meta').textContent = count ? `${count} selector${count === 1 ? '' : 's'}` : 'None';
+function updateDashboardControlSummary() {
+  const dataCount = dashboardControls('selection').length;
+  const logicCount = dashboardControls('compute').length;
+  const changed = changedComputeParameters().length;
+  const summary = [];
+  if (dataCount) summary.push(`${dataCount} data`);
+  if (logicCount) summary.push(changed ? `${changed} logic changed` : `${logicCount} logic`);
+  $('#dashboard-control-meta').textContent = summary.join(' · ') || 'None';
 }
 
 function closeHeaderPopovers(except = null) {
@@ -1200,7 +1247,14 @@ async function showNodeInspector(node) {
   try {
     const record = await request(`/api/runs/${encodeURIComponent(runId)}?${sessionQuery()}`);
     const run = record.result || record.snapshot;
-    const runNode = run?.nodes?.[node.id] || null;
+    let runNode = run?.nodes?.[node.id] || null;
+    if (node.type === 'interactive_transform' && runtime?.nodeStatuses[node.id]) {
+      runNode = {
+        ...(runNode || {}),
+        status:runtime.nodeStatuses[node.id],
+        error:runtime.nodeErrors[node.id] || runNode?.error || null,
+      };
+    }
     if (dialog.dataset.requestId !== requestId) return;
     renderNodeInspector(node, record, runNode);
     await appendNodeLog(runId, runNode, requestId);
@@ -1561,14 +1615,6 @@ async function boot() {
 
 $('#run-button').addEventListener('click', runDashboard);
 $('#download-button').addEventListener('click', downloadReport);
-$('#canvas-frame').addEventListener('load', () => {
-  applyViewSelections();
-  const runtime = activeRuntime();
-  if (runtime) {
-    const values = runtime.committedComputeParameters || runtime.draftComputeParameters || computeParameters();
-    sendCompute(values, {commit: true});
-  }
-});
 $('#parameter-form').addEventListener('input', () => setQueryState());
 $('#parameter-form').addEventListener('input', () => {
   if (activeRuntime()) activeRuntime().queryParameterValues = queryParameters();
@@ -1582,7 +1628,7 @@ $('#parameter-form').addEventListener('change', () => {
 $('#dashboard-selection-form').addEventListener('input', () => {
   if (activeRuntime()) activeRuntime().dashboardSelectionValues = dashboardSelectionValues();
   saveTabUiState();
-  updateDashboardSelectionSummary();
+  updateDashboardControlSummary();
   scheduleViewSelections();
 });
 const onComputeDraft = (event) => {
@@ -1595,8 +1641,8 @@ const onComputeDraft = (event) => {
   const control = event.target.closest('[data-compute-parameter]');
   if (control?.dataset.computeTrigger !== 'auto') return;
   window.clearTimeout(state.computeTimer);
-  const definition = state.dashboard.compute_parameters.find(
-    (item) => item.id === control.dataset.computeParameter,
+  const definition = dashboardControls('compute').find(
+    item => item.key === control.dataset.computeParameter,
   );
   const consumers = (state.dashboard.nodes || []).filter(
     (node) => node.type === 'interactive_transform'
@@ -1611,11 +1657,11 @@ const onComputeDraft = (event) => {
 };
 $('#compute-parameter-form').addEventListener('input', onComputeDraft);
 $('#compute-parameter-form').addEventListener('change', onComputeDraft);
-$('#compute-apply').addEventListener('click', applyComputeParameters);
+$('#compute-apply').addEventListener('click', applyDashboardControls);
 $('#dashboard-selection-form').addEventListener('change', () => {
   if (activeRuntime()) activeRuntime().dashboardSelectionValues = dashboardSelectionValues();
   saveTabUiState();
-  updateDashboardSelectionSummary();
+  updateDashboardControlSummary();
   scheduleViewSelections();
 });
 document.addEventListener('click', (event) => {
@@ -1624,11 +1670,46 @@ document.addEventListener('click', (event) => {
 window.addEventListener('message', (event) => {
   if (!isCurrentCanvasMessage(event)) return;
   if (event.data?.type === 'dataviz:canvas-ready') {
+    const runtime = activeRuntime();
+    const frame = $('#canvas-frame');
+    if (!runtime) return;
+    // Fresh Canvas defaults seed an empty tab state; remembered tab-local state
+    // wins on reload. selections() applies the current v3 contract allow-list
+    // before anything is sent back to the iframe.
+    runtime.canvasSelections = {
+      ...(event.data.selections || {}),
+      ...(runtime.canvasSelections || {}),
+    };
+    frame.dataset.runtimeReady = 'true';
+    saveTabUiState();
+    applyViewSelections();
+    const values = runtime.committedComputeParameters
+      || runtime.draftComputeParameters
+      || computeParameters();
+    sendCompute(values, {commit:true});
     syncCanvasInteraction();
     return;
   }
   if (event.data?.type === 'dataviz:canvas-interaction') {
     closeHeaderPopovers();
+    return;
+  }
+  if (event.data?.type === 'dataviz:interactive-status') {
+    const runtime = activeRuntime();
+    const nodeId = String(event.data.node_id || '');
+    const allowed = new Set([
+      'not_run', 'queued', 'loading', 'ready', 'stale', 'error', 'cancelled', 'unavailable',
+    ]);
+    if (!runtime || !nodeId.startsWith('interactive:') || !allowed.has(event.data.status)) return;
+    runtime.nodeStatuses[nodeId] = event.data.status;
+    if (event.data.error) runtime.nodeErrors[nodeId] = event.data.error;
+    else if (event.data.status === 'ready') delete runtime.nodeErrors[nodeId];
+    const node = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);
+    if (node) node.dataset.status = event.data.status;
+    if (event.data.message && ['error', 'cancelled', 'unavailable'].includes(event.data.status)) {
+      runtime.message = `${nodeId.replace(':', ' · ')} — ${event.data.message}`;
+      $('#run-message').textContent = runtime.message;
+    }
     return;
   }
   if (event.data?.type === 'dataviz:compute-changed') {

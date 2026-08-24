@@ -20,7 +20,7 @@ _CHECKS = (
     ("adapter-bindings", "Adapter bindings and source compatibility"),
     ("sql-contracts", "SQL files and named parameter contracts"),
     ("data-graph", "Source, Dataset/Interactive Transform, Output and View references"),
-    ("content-contracts", "Content interpolation and Selection contracts"),
+    ("content-contracts", "Content interpolation and scoped Control contracts"),
     ("presentation-assets", "Presentation, Renderer and local assets"),
     ("runtime-dependencies", "Runtime, code and package dependencies"),
 )
@@ -85,17 +85,23 @@ def _hint_for(item: Diagnostic) -> str:
         return "Fix the View field name or declare it in the main table Output schema; dynamic Outputs may omit schema only when static field checking is impossible."
     if code == "selection_field_unknown":
         return "Fix the Selection path/binding field or declare it in the selected View input table schema."
+    if code.startswith("selection_option_domain_"):
+        return (
+            "Use static `choices`, or set `options_from` to a table Base Named Output "
+            "such as `source:sales/main`. Interactive Outputs are not valid option "
+            "domains because they may depend on this Selection."
+        )
     if code == "file_reader_dependency_unavailable":
         return "Install the Excel reader extra with `pip install 'workspace-dataviz[excel]'`, then rerun validate."
     if code.startswith("adapter_") or field == "adapter":
         return "Bind the Dashboard Adapter reference to a Workspace Adapter and define credentials only in `auth/adapters.local.yaml` or environment variables."
     if code.startswith("content_"):
         return (
-            "Use `{{ parameters.<id> }}`, `{{ compute.<id> }}`, or a scoped Selection reference: "
-            "`{{ selections.dashboard.<id> }}`, "
-            "`{{ selections.section.<section-id>.<id> }}`, or "
-            "`{{ selections.view.<view-id>.<id> }}`. Arbitrary expressions and "
-            "cross-scope Selection dependencies are not supported."
+            "Use `{{ parameters.<id> }}` or a scoped Control reference: "
+            "`{{ controls.dashboard.<id> }}`, "
+            "`{{ controls.section.<section-id>.<id> }}`, or "
+            "`{{ controls.view.<view-id>.<id> }}`. Arbitrary expressions and "
+            "cross-scope Control dependencies are not supported."
         )
     if code.startswith("presentation_"):
         return "Fix the referenced id or asset in `presentation.yaml`; delete the override to fall back to the default Renderer."
@@ -117,7 +123,7 @@ def _hint_for(item: Diagnostic) -> str:
     if code in {"dataset_cycle", "interactive_cycle"}:
         return "Break the reported dependency cycle; every input must point to an earlier explicit Named Output."
     if code == "compute_trigger_ambiguous":
-        return "Use one trigger policy for every Interactive Transform that consumes this Compute Parameter."
+        return "Use one trigger policy for every Interactive Transform that consumes this Compute Control."
     if field.startswith(("inputs", "views", "sections")) or "reference" in item.message.lower():
         return "Use `dataviz context <workspace> <dashboard-id> --format json` to inspect valid node and Output ids."
     if "python_dependencies" in field:

@@ -12,15 +12,15 @@ Dataviz 是一套 **workspace-first、AI-friendly** 的 Python 看板工具。
 ## 核心模型
 
 ```text
-Query Parameter
-       ↓
-Adapter → Source → Dataset Transform（可选）
-                              ↓
-                       Base Named Output
-                              ↓
-Selection + Compute Parameter
-                              ↓
-                   Interactive Transform（可选）
+Query Parameter → Adapter → Source → Dataset Transform（可选）
+                                      ↓
+                               Base Named Output
+                                      ↓
+                 scoped Controls（Dashboard / Section / View）
+                    ├─ kind: selection → 选择数据
+                    └─ kind: compute   → 改变计算逻辑
+                                      ↓
+                           Interactive Transform（可选）
                     ├─ server-python
                     ├─ browser-python
                     └─ browser-js
@@ -31,15 +31,19 @@ Selection + Compute Parameter
 ```
 
 - Query Parameter 决定取什么数据，提交后创建新的 Query Run。
-- Selection 只表达“包含哪些已有样本”，不重新取数。
-- Compute Parameter 决定如何计算已有数据，只重算声明依赖它的交互分支。
+- Control 是 Query 后唯一的交互入口，并且可以声明在 Dashboard、Section 或 View。
+- `kind: selection` 只表达“包含哪些已有样本”，不重新取数。
+- `kind: compute` 决定如何计算已选数据，只重算声明依赖它的交互分支。
+- Interactive Transform 一旦通过 `selection_inputs` 声明依赖，Runtime 会先对其表输入应用 include Selection，再把已选样本交给 Compute 逻辑；业务代码不应再手写一遍相同筛选。
 - 三种 Interactive Runtime 使用相同 Named Output 契约；图、表和文本统一由 JavaScript Renderer 呈现。
+
+Select 型 Selection 可以写静态 `choices`，也可以从数据生成选项。动态选项不会从“当前 View 已筛选后的 Derived Output”反推，否则会形成“先有 Selection 还是先运行 Transform”的循环；Runtime 会追溯该 View 的不可变 Base Output，复杂或多输入场景可显式写 `options_from: source:<id>/<output>`。`dataviz validate` 会提前拒绝未知、非表格、Interactive Output 或无法提供字段的 option domain。
 
 Query Run 的可达 Base Output 会写入 Workspace 的 `.dataviz/runs/<run-id>/artifacts/`，不会写进 Dashboard 文件夹。Runtime 会额外标记被 `server-python` Interactive Transform 消费的 canonical Output；后续交互按 `browser tab session + dashboard + query run + output reference` 读取同一份不可变快照，刷新当前 tab 可以继续使用，其他 tab 或用户不能访问，也不会暗中重新执行 Source。Run 与缓存受 Workspace 保留策略统一清理，因此分享 Dashboard ZIP 不会夹带运行数据。
 
 简单逻辑默认按 `browser-js → browser-python → server-python` 选择：前两者可让导出报告继续交互，后者适合原生 Python 包、大模型、运筹求解和大规模计算。这个顺序强调可移植性和启动成本，不是绝对性能排名。
 
-当前契约是 `dataviz/dashboard/v2` 与 `dataviz/runtime/v2`。项目处于 `0.x` 阶段，不兼容更早的实验性 Dashboard/Transform 字段，也不在 Runtime 中保留迁移分支。
+当前契约是 `dataviz/dashboard/v3` 与 `dataviz/runtime/v2`。项目处于 `0.x` 阶段，不兼容更早的实验性 Dashboard/Transform 字段，也不在 Runtime 中保留迁移分支。
 
 ## 快速开始
 
@@ -76,7 +80,7 @@ uv sync --python 3.12 --extra dev --no-editable \
 从发行 ZIP 安装时：
 
 ```bash
-python -m pip install ./workspace-dataviz-0.2.0.zip
+python -m pip install ./workspace-dataviz-0.3.1.zip
 dataviz version
 dataviz serve /path/to/workspace --port 8080
 ```
@@ -95,7 +99,8 @@ dataviz validate myworkspace --dashboard sales-overview --format json
 dataviz query myworkspace sales-overview --source sales --format json
 dataviz output myworkspace sales-overview source:sales/main
 dataviz compute myworkspace sales-overview simulation \
-  --run-id run_xxx --compute-param seed=42 --format json
+  --run-id run_xxx \
+  --compute-param dashboard:sales-overview/seed=42 --format json
 dataviz report myworkspace sales-overview --output report.html
 dataviz benchmark myworkspace sales-overview --browser-runtime --format json
 ```
@@ -130,7 +135,7 @@ dataviz gallery --output component-gallery.html
 dataviz context myworkspace sales-overview --focus view:revenue --format json
 ```
 
-Component Registry 的 13 个 Package 都物理拥有自己的 controller、Runtime Adapter、功能 CSS、Story 与测试声明。内置 Gallery 还提供 Selector、Compute、View、Section 的 `ready / loading / stale / empty / error / cancelled / unavailable` 状态矩阵，以及真实 10、100、1,000 选项的 Select Story；AI 可以先复用这些已验证组件，再决定是否写局部 CSS/JS。
+Component Registry 的 13 个 Package 都物理拥有自己的 controller、Runtime Adapter、功能 CSS、Story 与测试声明。内置 Gallery 还提供 Selector、Control、View、Section 的 `ready / loading / stale / empty / error / cancelled / unavailable` 状态矩阵，以及真实 10、100、1,000 选项的 Select Story；AI 可以先复用这些已验证组件，再决定是否写局部 CSS/JS。
 
 项目也内置了 Dataviz 与 standalone HTML 的成对 AI 开发评测协议；它只记录客户端提供的真实 Token，不按文本大小估算：
 
@@ -171,6 +176,16 @@ myworkspace/
 ```
 
 Dashboard 文件夹末级名称就是导航显示名；`##` 表达逻辑目录，`__TRASH__##` 表示回收站。`dashboard.id` 是 CLI/DAG 使用的稳定机器 ID，使用可跨 Windows/Linux/macOS 的 ASCII 字母、数字、点、下划线和连字符；中文等展示内容放在文件夹名、`title`、`subtitle` 和 `description`。
+
+页面只有两个一级入口：`Parameters` 负责重新查询，`Controls` 负责 Query 后的选择与计算。Controls 在同一托盘内按 DATA（selection）和 LOGIC（compute）分组；参数多时自动分栏，面板过高时在内部滚动，不会击穿屏幕。各 Dashboard 可在可选的 `presentation.yaml` 中只改视觉编排，而不复制交互逻辑：
+
+```yaml
+controls:
+  query: {template: grid, width: wide, columns: 3, density: compact}
+  dashboard: {template: grid, width: regular, columns: 2}
+```
+
+`template` 支持 `auto | stack | grid`，`columns` 支持 1–4；Section/View 还可通过各自 Presentation 条目的 `controls` 覆盖局部托盘。值、校验、级联、tab 状态和 Query/Interactive 执行仍由共享 Runtime 管理；导出 HTML 中 Query 变为固定快照，Controls 继续可交互。
 
 `auth/adapters.yaml` 保存可提交的非敏感连接定义，`auth/adapters.local.yaml` 以同名 Adapter 覆盖本地凭证且必须被 Git 忽略。只有这两个位置会被加载，避免根目录旧文件或“示例文件”意外覆盖实际配置。Dashboard 只引用 Workspace Adapter 的逻辑名称，不保存账号密码。内置数据入口包括本地文件、DuckDB、MySQL、StarRocks 和可信 Python Source。
 

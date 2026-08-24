@@ -31,11 +31,14 @@ from dataviz.execution.fingerprint import ensure_query_run_compatible
 from dataviz.filesystem import atomic_write_bytes, atomic_write_text
 from dataviz.templates import COMPONENT_REGISTRY_VERSION, RUNTIME_PROTOCOL_SCHEMA
 from dataviz.workspace.models import DashboardDefinition, DeclarativeViewDefinition
-from dataviz.workspace.selections import (
-    compile_selection_contract,
+from dataviz.workspace.controls import (
+    compile_control_contract,
+    resolve_compute_values,
     resolve_selection_values,
+    scoped_control_registry,
 )
 from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace
+from dataviz.workspace.selection_domains import selection_option_domain_references
 from dataviz.workspace.selector_templates import resolve_selector_presentation
 
 
@@ -289,11 +292,11 @@ class CanvasRenderer:
         frame_id: str | None = None,
     ) -> str:
         ensure_query_run_compatible(dashboard, result)
-        compute_values = {
-            item.id: (compute_parameters or {}).get(item.id, item.default)
-            for item in dashboard.definition.compute_parameters
-        }
-        selection_values, _ = resolve_selection_values(
+        compute_values = resolve_compute_values(
+            dashboard.definition,
+            compute_parameters,
+        )
+        selection_values = resolve_selection_values(
             dashboard.definition, selections
         )
         merged_outputs = {**result.outputs, **(derived_outputs or {})}
@@ -305,6 +308,7 @@ class CanvasRenderer:
             selections=selection_values,
             outputs=merged_outputs,
             nodes=result.nodes,
+            snapshot_interactions=set(snapshot_interactions or set()),
         )
         try:
             content_bindings = build_content_bindings(
@@ -372,8 +376,8 @@ class CanvasRenderer:
                 selections=selection_values,
                 run=result,
                 view=lambda value: Markup(view(value)),
-                section_selections=lambda value: Markup(
-                    self._context_selection_controls(dashboard, render_state, "section", value)
+                section_controls=lambda value: Markup(
+                    self._context_controls(dashboard, render_state, "section", value)
                 ),
                 content=content,
                 views=view_html,
@@ -489,8 +493,11 @@ class CanvasRenderer:
             "query_parameters": result.query_parameters,
             "compute_parameters": compute_values,
             "compute_definitions": {
-                item.id: item.model_dump(mode="json")
-                for item in dashboard.definition.compute_parameters
+                item.key: item.definition.model_dump(mode="json")
+                for item in scoped_control_registry(
+                    dashboard.definition,
+                    kind="compute",
+                ).values()
             },
             "draft_compute_parameters": dict(compute_values),
             "selections": selection_values,
@@ -548,7 +555,7 @@ class CanvasRenderer:
   <script>{runtime}</script>
   <script>{interactive_transform_script}</script>
   <script>{custom_script}</script>
-  <script>if (window.dataviz.portable) {{ window.dataviz.applySelections().catch(error => console.error('[dataviz:init]', error)); window.datavizRuntime.hydrateOutputTransports(); }} if (window.dataviz.live) window.dataviz.connectLive?.();</script>
+  <script>if (window.dataviz.portable) {{ window.datavizRuntime.initializePortable().then(() => window.dataviz.live && window.dataviz.connectLive?.()).catch(error => console.error('[dataviz:init]', error)); }} else if (window.dataviz.live) window.dataviz.connectLive?.();</script>
 </body>
 </html>"""
 
@@ -565,7 +572,7 @@ class CanvasRenderer:
         title = (declarative.title or declarative.id) if declarative else view_id
         description = (declarative.description or "") if declarative else ""
         status = declarative.template if declarative else "browser"
-        controls = self._context_selection_controls(dashboard, result, "view", view_id)
+        controls = self._context_controls(dashboard, result, "view", view_id)
         binding_fields = binding_fields or set()
         title_field = f"views.{view_id}.title"
         title_binding = (
@@ -595,17 +602,32 @@ class CanvasRenderer:
             '</article>'
         )
 
-    def _context_selection_controls(
+    def _control_consumers(
+        self,
+        dashboard: LoadedDashboard,
+    ) -> dict[str, list[SimpleNamespace]]:
+        consumers: dict[str, list[SimpleNamespace]] = {}
+        for transform_id, (_, transform) in dashboard.interactive_transforms.items():
+            for control_key in {
+                *transform.selection_inputs.values(),
+                *transform.compute_inputs.values(),
+            }:
+                consumers.setdefault(control_key, []).append(
+                    SimpleNamespace(id=transform_id, definition=transform)
+                )
+        return consumers
+
+    def _context_controls(
         self,
         dashboard: LoadedDashboard,
         result: RunResult,
         origin: str,
         owner_id: str,
     ) -> str:
-        contract = compile_selection_contract(dashboard.definition)
+        contract = compile_control_contract(dashboard.definition)
         controls = {}
-        for selections in contract.values():
-            for item in selections:
+        for effective_controls in contract.values():
+            for item in effective_controls:
                 if item.origin == origin and item.owner_id == owner_id:
                     controls.setdefault(item.key, item)
         if not controls:
@@ -615,24 +637,91 @@ class CanvasRenderer:
             section = next((item for item in dashboard.definition.sections if item.id == owner_id), None)
             if section and section.views:
                 selector_view_id = section.views[0]
-        fields = []
+        consumers_by_control = self._control_consumers(dashboard)
+        selection_fields = []
+        compute_fields = []
+        manual_targets: set[str] = set()
+        actionable = False
         for key, item in controls.items():
             definition = item.definition
-            value = result.selections.get(key, definition.default)
-            fields.append(
-                f'<label class="dv-context-selection" data-selection-key="{html.escape(key)}" '
-                f'data-selection-type="{html.escape(definition.type)}" '
-                f'data-selection-path="{str(bool(definition.path_fields)).lower()}">'
-                f'<span>{html.escape(definition.label or definition.id)}</span>'
-                f'{self._portable_field(key, definition, value, self._selector_presentation(dashboard, key, definition), selector_view_id)}</label>'
+            consumers = consumers_by_control.get(key, [])
+            actionable = actionable or any(
+                item.definition.trigger in {"apply", "manual"}
+                for item in consumers
+            )
+            manual_targets.update(
+                item.id
+                for item in consumers
+                if item.definition.trigger == "manual"
+            )
+            if item.kind == "selection":
+                value = result.selections.get(key, definition.default)
+                selection_fields.append(
+                    f'<label class="dv-context-selection" data-selection-key="{html.escape(key)}" '
+                    f'data-selection-type="{html.escape(definition.type)}" '
+                    f'data-selection-path="{str(bool(definition.path_fields)).lower()}">'
+                    f'<span>{html.escape(definition.label or definition.id)}</span>'
+                    f'{self._portable_field(key, definition, value, self._selector_presentation(dashboard, key, definition), selector_view_id)}</label>'
+                )
+                continue
+            triggers = {consumer.definition.trigger for consumer in consumers}
+            trigger = next(iter(triggers), "manual")
+            frozen = any(
+                consumer.id in set(getattr(result, "snapshot_interactions", set()))
+                for consumer in consumers
+            )
+            compute_fields.append(
+                self._compute_control_html(
+                    key,
+                    definition,
+                    result.compute_parameters.get(key, definition.default),
+                    trigger=trigger,
+                    frozen=frozen,
+                )
             )
         scope = "Section" if origin == "section" else "View"
+        groups = []
+        if selection_fields:
+            groups.append(
+                '<section class="dv-context-controls__group" data-control-kind="selection">'
+                '<header><span>DATA</span><strong>Data selection</strong></header>'
+                f'<div>{"".join(selection_fields)}</div></section>'
+            )
+        if compute_fields:
+            groups.append(
+                '<section class="dv-context-controls__group" data-control-kind="compute">'
+                '<header><span>LOGIC</span><strong>Calculation settings</strong></header>'
+                f'<div>{"".join(compute_fields)}</div></section>'
+            )
+        footer = ""
+        if actionable:
+            targets = html.escape(
+                json.dumps(sorted(manual_targets), ensure_ascii=False),
+                quote=True,
+            )
+            control_keys = html.escape(
+                json.dumps(sorted(controls), ensure_ascii=False),
+                quote=True,
+            )
+            footer = (
+                '<footer class="dv-context-controls__footer">'
+                '<span data-compute-dirty-label>Results are current</span>'
+                f'<button type="button" data-compute-apply data-control-keys="{control_keys}" '
+                f'data-analysis-always="true" data-manual-targets="{targets}">Run analysis</button>'
+                '</footer>'
+            )
+        panel_attributes = self._control_panel_attributes(
+            dashboard,
+            origin,
+            len(controls),
+            owner_id,
+        )
         return (
-            f'<details class="dv-context-selections" data-selection-origin="{html.escape(origin)}" '
-            'data-overlay-floating="true" data-overlay-width="440">'
-            f'<summary><span class="dv-context-selections__mark">{scope[0]}</span>'
-            f'<strong>{scope} selection</strong><small>{len(fields)}</small><i>⌄</i></summary>'
-            f'<div class="dv-context-selections__panel">{"".join(fields)}</div></details>'
+            f'<details class="dv-context-controls" data-control-origin="{html.escape(origin)}" '
+            f'data-overlay-floating="true" {panel_attributes}>'
+            '<summary><span class="dv-context-controls__mark">C</span>'
+            f'<strong>{scope} controls</strong><small>{len(controls)}</small><i>⌄</i></summary>'
+            f'<div class="dv-context-controls__panel">{"".join(groups)}{footer}</div></details>'
         )
 
     def _theme_style(self, dashboard: LoadedDashboard) -> str:
@@ -723,6 +812,10 @@ class CanvasRenderer:
     ) -> str:
         registrations = []
         _, interactive_ids = self._reachable_outputs(dashboard)
+        selection_registry = scoped_control_registry(
+            dashboard.definition,
+            kind="selection",
+        )
         for transform_id in interactive_ids:
             transform_path, definition = dashboard.interactive_transforms[transform_id]
             code = "null"
@@ -743,8 +836,13 @@ class CanvasRenderer:
                     self._browser_dependency_sources(transform_path, definition),
                     ensure_ascii=False,
                 ).replace("</", "<\\/")
+            spec_payload = definition.model_dump(mode="json", by_alias=True)
+            spec_payload["selection_contract"] = {
+                alias: selection_registry[key].as_dict()
+                for alias, key in definition.selection_inputs.items()
+            }
             spec = json.dumps(
-                definition.model_dump(mode="json", by_alias=True),
+                spec_payload,
                 ensure_ascii=False,
                 default=str,
             ).replace("</", "<\\/")
@@ -957,7 +1055,7 @@ class CanvasRenderer:
                     "references": sorted(reachable),
                 },
             )
-        contract = compile_selection_contract(dashboard.definition)
+        contract = compile_control_contract(dashboard.definition)
         return {
             "outputs": outputs,
             "output_transports": output_transports,
@@ -968,11 +1066,65 @@ class CanvasRenderer:
                 view.id: view.input_refs
                 for view in dashboard.definition.views
             },
+            "selection_option_domains": selection_option_domain_references(dashboard),
             "selection_contract": {
-                view_id: [item.as_dict() for item in selections]
-                for view_id, selections in contract.items()
+                view_id: [
+                    item.as_dict()
+                    for item in controls
+                    if item.kind == "selection"
+                ]
+                for view_id, controls in contract.items()
             },
         }
+
+    def _control_panel_attributes(
+        self,
+        dashboard: LoadedDashboard,
+        role: str,
+        count: int,
+        owner_id: str | None = None,
+    ) -> str:
+        presentation = dashboard.presentation
+        config = None
+        if presentation is not None:
+            if role in {"query", "dashboard"}:
+                config = getattr(presentation.controls, role)
+            elif role == "section" and owner_id is not None:
+                section = presentation.sections.get(owner_id)
+                config = section.controls if section is not None else None
+            elif role == "view" and owner_id is not None:
+                view = presentation.views.get(owner_id)
+                config = view.controls if view is not None else None
+        requested_template = config.template if config is not None else "auto"
+        template = (
+            "stack"
+            if requested_template == "auto" and count <= 1
+            else "grid"
+            if requested_template == "auto"
+            else requested_template
+        )
+        width_name = config.width if config is not None else "auto"
+        widths = {"compact": 460, "regular": 680, "wide": 880}
+        if width_name in widths:
+            width = widths[width_name]
+        elif template == "stack" or count <= 1:
+            width = 560 if role == "dashboard" else 480
+        elif count <= 4:
+            width = 680
+        else:
+            width = 880
+        columns = 1 if template == "stack" else (config.columns if config else None) or "auto"
+        density = config.density if config is not None else "comfortable"
+        return (
+            'data-dv-control-panel '
+            f'data-control-role="{html.escape(role, quote=True)}" '
+            f'data-control-count="{count}" '
+            f'data-control-template="{html.escape(template, quote=True)}" '
+            f'data-control-columns="{columns}" '
+            f'data-control-density="{html.escape(density, quote=True)}" '
+            f'data-control-width="{html.escape(width_name, quote=True)}" '
+            f'data-overlay-width="{width}"'
+        )
 
     def _portable_controls(
         self,
@@ -981,127 +1133,172 @@ class CanvasRenderer:
         *,
         snapshot_interactions: set[str],
     ) -> str:
-        contract = compile_selection_contract(dashboard.definition)
+        contract = compile_control_contract(dashboard.definition)
         controls: dict[str, dict[str, Any]] = {}
-        for view_id, selections in contract.items():
-            for item in selections:
+        for view_id, effective_controls in contract.items():
+            for item in effective_controls:
                 control = controls.setdefault(
                     item.key,
-                    {"selection": item, "views": []},
+                    {"control": item, "views": []},
                 )
                 control["views"].append(view_id)
 
-        rendered: dict[str, list[str]] = {"dashboard": []}
+        consumers_by_control = self._control_consumers(dashboard)
+        selection_items: list[str] = []
+        compute_items: list[str] = []
+        dashboard_control_keys: list[str] = []
         for key, control in controls.items():
-            item = control["selection"]
+            item = control["control"]
             if item.origin != "dashboard":
                 continue
+            dashboard_control_keys.append(key)
             definition = item.definition
-            value = result.selections.get(key, definition.default)
-            scope = "All views"
-            field = self._portable_field(
-                key, definition, value, self._selector_presentation(dashboard, key, definition)
+            if item.kind == "selection":
+                value = result.selections.get(key, definition.default)
+                field = self._portable_field(
+                    key,
+                    definition,
+                    value,
+                    self._selector_presentation(dashboard, key, definition),
+                )
+                selection_items.append(
+                    f'<div class="dv-report-selection" data-selection-key="{html.escape(key)}" '
+                    f'data-selection-type="{html.escape(definition.type)}">'
+                    '<div class="dv-report-selection__scope"><span>Data selection</span>'
+                    f'<small>{len(control["views"])} view{"s" if len(control["views"]) != 1 else ""}</small></div>'
+                    f'<strong>{html.escape(definition.label or definition.id)}</strong>{field}</div>'
+                )
+                continue
+            consumers = consumers_by_control.get(key, [])
+            triggers = {consumer.definition.trigger for consumer in consumers}
+            trigger = next(iter(triggers), "manual")
+            frozen = any(
+                consumer.id in snapshot_interactions
+                for consumer in consumers
             )
-            rendered[item.origin].append(
-                f'<div class="dv-report-selection" data-selection-key="{html.escape(key)}" '
-                f'data-selection-type="{html.escape(definition.type)}">'
-                f'<div class="dv-report-selection__scope"><span>{html.escape(scope)}</span>'
-                f'<small>{len(control["views"])} view{"s" if len(control["views"]) != 1 else ""}</small></div>'
-                f'<strong>{html.escape(definition.label or definition.id)}</strong>{field}</div>'
+            compute_items.append(
+                self._compute_control_html(
+                    key,
+                    definition,
+                    result.compute_parameters.get(key, definition.default),
+                    trigger=trigger,
+                    frozen=frozen,
+                )
             )
         query_items = "".join(
             f'<div class="dv-query-value"><span>{html.escape(item.label or item.id)}</span>'
             f'<strong>{html.escape(json.dumps(result.query_parameters.get(item.id), ensure_ascii=False, default=str))}</strong></div>'
             for item in dashboard.definition.query_parameters
         ) or '<div class="dv-query-value"><span>Query parameters</span><strong>None</strong></div>'
-        compute_consumers: dict[str, list[Any]] = {
-            item.id: [] for item in dashboard.definition.compute_parameters
-        }
-        for transform_id, (_, transform) in dashboard.interactive_transforms.items():
-            for parameter_id in transform.compute_params:
-                compute_consumers.setdefault(parameter_id, []).append(
-                    SimpleNamespace(id=transform_id, definition=transform)
-                )
-        compute_items = []
-        for definition in dashboard.definition.compute_parameters:
-            consumers = compute_consumers.get(definition.id, [])
-            triggers = {item.definition.trigger for item in consumers}
-            trigger = next(iter(triggers), "apply")
-            frozen = any(item.id in snapshot_interactions for item in consumers)
-            field = self._compute_field(
-                definition,
-                result.compute_parameters.get(definition.id, definition.default),
-                trigger=trigger,
-                disabled=frozen,
-            )
-            compute_items.append(
-                f'<label class="dv-compute-control" data-compute-key="{html.escape(definition.id)}" '
-                f'data-compute-trigger="{html.escape(trigger)}" data-compute-frozen="{str(frozen).lower()}">'
-                f'<span>{html.escape(definition.label or definition.id)}</span>{field}'
-                f'{"<small>Fixed snapshot</small>" if frozen else ""}</label>'
-            )
-        groups = []
-        group_titles = {"dashboard": ("03", "Dashboard selections")}
-        for origin, values in rendered.items():
-            number, title = group_titles[origin]
-            groups.append(
-                f'<details class="dv-runtime-control" data-runtime-popover data-selection-origin="{origin}" '
-                'data-overlay-floating="true" data-overlay-width="560">'
-                f'<summary><span>{number}</span><div><strong>Selections</strong><small>{len(values)} selector{"" if len(values) == 1 else "s"}</small></div><i>⌄</i></summary>'
-                f'<div class="dv-runtime-popover"><header><span>{number}</span><div><strong>{title}</strong><small>Browser-only · redraws embedded views</small></div></header>'
-                f'<div class="dv-report-selection-group__fields">{"".join(values) if values else "<em>None</em>"}</div></div></details>'
-            )
         actionable = [
             transform_id
             for transform_id, (_, transform) in dashboard.interactive_transforms.items()
             if transform.trigger in {"apply", "manual"}
             and transform_id not in snapshot_interactions
+            and (
+                not transform.selection_inputs
+                and not transform.compute_inputs
+                or any(
+                    key in dashboard_control_keys
+                    for key in {
+                        *transform.selection_inputs.values(),
+                        *transform.compute_inputs.values(),
+                    }
+                )
+            )
         ]
         manual_targets = [
             transform_id
             for transform_id in actionable
             if dashboard.interactive_transforms[transform_id][1].trigger == "manual"
         ]
+        query_panel_attributes = self._control_panel_attributes(
+            dashboard, "query", len(dashboard.definition.query_parameters)
+        )
+        control_panel_attributes = self._control_panel_attributes(
+            dashboard,
+            "dashboard",
+            len(dashboard_control_keys),
+        )
+        selection_group = (
+            '<section class="dv-runtime-control-group" data-control-kind="selection">'
+            '<header><span>DATA</span><div><strong>Data selection</strong><small>Choose included rows</small></div></header>'
+            f'<div class="dv-report-selection-group__fields">{"".join(selection_items)}</div></section>'
+            if selection_items
+            else ""
+        )
+        compute_group = (
+            '<section class="dv-runtime-control-group" data-control-kind="compute">'
+            '<header><span>LOGIC</span><div><strong>Calculation settings</strong><small>Recompute selected data</small></div></header>'
+            f'<div class="dv-compute-fields">{"".join(compute_items)}</div></section>'
+            if compute_items
+            else ""
+        )
+        control_block = ""
+        if dashboard_control_keys or actionable:
+            encoded_targets = html.escape(
+                json.dumps(manual_targets, ensure_ascii=False),
+                quote=True,
+            )
+            encoded_keys = html.escape(
+                json.dumps(dashboard_control_keys, ensure_ascii=False),
+                quote=True,
+            )
+            footer = (
+                '<footer><span data-compute-dirty-label>Results are current</span>'
+                f'<button type="button" data-compute-apply data-control-keys="{encoded_keys}" '
+                f'data-analysis-always="{str(bool(actionable)).lower()}" '
+                f'data-manual-targets="{encoded_targets}">Run analysis</button></footer>'
+                if compute_items or actionable
+                else ""
+            )
+            control_block = (
+                f'<details class="dv-runtime-control" data-runtime-popover data-control-origin="dashboard" '
+                f'data-overlay-floating="true" {control_panel_attributes}>'
+                '<summary><span>02</span><div><strong>Controls</strong>'
+                f'<small>{len(dashboard_control_keys)} control{"" if len(dashboard_control_keys) == 1 else "s"}</small>'
+                '</div><i>⌄</i></summary><div class="dv-runtime-popover dv-runtime-popover--controls">'
+                '<header><span>02</span><div><strong>Dashboard controls</strong>'
+                '<small>Selection → calculation → rendering</small></div></header>'
+                f'<div class="dv-runtime-control-groups">{selection_group}{compute_group}</div>{footer}'
+                '</div></details>'
+            )
         return (
             '<header class="dv-runtime-header" aria-label="Report controls">'
             '<div class="dv-runtime-brand"><span>PORTABLE ANALYSIS</span><strong>Dataset fixed. Views live.</strong></div>'
             '<nav class="dv-runtime-actions" aria-label="Dataset and analysis controls">'
-            '<details class="dv-runtime-control" data-runtime-popover data-overlay-floating="true" data-overlay-width="440">'
+            f'<details class="dv-runtime-control" data-runtime-popover data-overlay-floating="true" {query_panel_attributes}>'
             '<summary><span>01</span><div><strong>Parameters</strong><small>Fixed snapshot</small></div><i>⌄</i></summary>'
             f'<div class="dv-runtime-popover dv-runtime-popover--query"><header><span>01</span><div><strong>Query snapshot</strong><small>Values embedded in this HTML</small></div></header><div class="dv-runtime-query-values">{query_items}</div></div></details>'
-            f'{self._compute_controls_block(compute_items, bool(actionable), manual_targets)}'
-            f'{"".join(groups)}</nav></header>'
+            f'{control_block}</nav></header>'
         )
 
-    def _compute_controls_block(
+    def _compute_control_html(
         self,
-        items: list[str],
-        actionable: bool = False,
-        manual_targets: list[str] | None = None,
+        key: str,
+        definition,
+        value: Any,
+        *,
+        trigger: str,
+        frozen: bool,
     ) -> str:
-        if not items and not actionable:
-            return ""
-        fields = "".join(items) if items else "<em>No Compute Parameters. Run the declared analysis branch on demand.</em>"
-        encoded_targets = html.escape(
-            json.dumps(manual_targets or [], ensure_ascii=False), quote=True
+        field = self._compute_field(
+            key,
+            definition,
+            value,
+            trigger=trigger,
+            disabled=frozen,
         )
         return (
-            '<details class="dv-runtime-control" data-runtime-popover '
-            'data-overlay-floating="true" data-overlay-width="520">'
-            '<summary><span>02</span><div><strong>Compute</strong>'
-            f'<small>{len(items)} parameter{"" if len(items) == 1 else "s"}</small>'
-            '</div><i>⌄</i></summary><div class="dv-runtime-popover dv-runtime-popover--compute">'
-            '<header><span>02</span><div><strong>Analysis controls</strong>'
-            '<small>Draft values do not replace results until their trigger runs</small></div></header>'
-            f'<div class="dv-compute-fields">{fields}</div>'
-            '<footer><span data-compute-dirty-label>Results are current</span>'
-            f'<button type="button" data-compute-apply data-analysis-always="{str(actionable).lower()}" '
-            f'data-manual-targets="{encoded_targets}">Run analysis</button></footer>'
-            '</div></details>'
+            f'<label class="dv-compute-control" data-compute-key="{html.escape(key)}" '
+            f'data-compute-trigger="{html.escape(trigger)}" data-compute-frozen="{str(frozen).lower()}">'
+            f'<span>{html.escape(definition.label or definition.id)}</span>{field}'
+            f'{"<small>Fixed snapshot</small>" if frozen else ""}</label>'
         )
 
     def _compute_field(
         self,
+        key: str,
         definition,
         value: Any,
         *,
@@ -1109,7 +1306,7 @@ class CanvasRenderer:
         disabled: bool,
     ) -> str:
         attrs = (
-            f' data-compute-input="{html.escape(definition.id, quote=True)}"'
+            f' data-compute-input="{html.escape(key, quote=True)}"'
             f' data-compute-type="{html.escape(definition.type)}"'
             f' data-compute-trigger="{html.escape(trigger)}"'
             + (" disabled" if disabled else "")
@@ -1144,7 +1341,7 @@ class CanvasRenderer:
             values = [*values, "", ""]
             disabled_attr = " disabled" if disabled else ""
             return (
-                f'<span class="dv-compute-range" data-compute-input="{html.escape(definition.id, quote=True)}" '
+                f'<span class="dv-compute-range" data-compute-input="{html.escape(key, quote=True)}" '
                 f'data-compute-type="date_range" data-compute-trigger="{html.escape(trigger)}">'
                 f'<input type="date" data-compute-range="start" value="{html.escape(str(values[0]), quote=True)}"{disabled_attr}>'
                 '<i>—</i>'
@@ -1494,7 +1691,7 @@ class CanvasRenderer:
         for section in definition.sections:
             view_ids = list(section.views)
             assigned.update(view_ids)
-            section_selection = self._context_selection_controls(dashboard, run_state, "section", section.id)
+            section_selection = self._context_controls(dashboard, run_state, "section", section.id)
             title_field = f"sections.{section.id}.title"
             description_field = f"sections.{section.id}.description"
             title_binding = (

@@ -9,3 +9,4 @@ tests:
   - {id: theme.editorial.tokens, component: theme.editorial, kind: visual, assertions: [contrast, token-overrides]}
   - {id: theme.terminal.tokens, component: theme.terminal, kind: visual, assertions: [contrast, token-overrides]}
   - {id: theme.business.tokens, component: theme.business, kind: visual, assertions: [contrast, token-overrides]}
+  - {id: control-panel.adaptive.contract, component: control-panel.adaptive, kind: interaction, assertions: [viewport-bound, responsive-grid, internal-scroll, shared-state-owner]}

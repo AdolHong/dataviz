@@ -125,7 +125,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v2
+        """schema: dataviz/dashboard/v3
 kind: dashboard
 id: scale
 title: Scale Runtime
@@ -229,14 +229,14 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v2
+        """schema: dataviz/dashboard/v3
 kind: dashboard
 id: runtime-matrix
 title: Interactive Runtime Matrix
-compute_parameters:
-  - {id: factor, label: Factor, type: number, default: 2}
-dashboard_selections:
+controls:
+  - {id: factor, kind: compute, label: Factor, type: number, default: 2}
   - id: name
+    kind: selection
     field: name
     type: multi_select
     default: [alpha, beta]
@@ -321,7 +321,8 @@ id: server
 runtime: server-python
 code: server.py
 inputs: {rows: source:raw/main}
-compute_params: [factor]
+compute_inputs:
+  factor: dashboard:runtime-matrix/factor
 trigger: auto
 debounce_ms: 0
 export: {mode: snapshot}
@@ -349,7 +350,8 @@ id: browser
 runtime: browser-python
 code: browser.py
 inputs: {rows: source:raw/main}
-compute_params: [factor]
+compute_inputs:
+  factor: dashboard:runtime-matrix/factor
 trigger: auto
 debounce_ms: 0
 export: {mode: interactive, assets: bundle}
@@ -594,10 +596,11 @@ def test_section_selection_updates_bound_title_without_redrawing_siblings(
     dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
     definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
     trend = next(item for item in definition["sections"] if item["id"] == "trend")
-    trend["title"] = "{{ selections.section.trend.focus_region }}趋势与结构"
-    trend["selections"] = [
+    trend["title"] = "{{ controls.section.trend.focus_region }}趋势与结构"
+    trend["controls"] = [
         {
             "id": "focus_region",
+            "kind": "selection",
             "field": "region",
             "type": "single_select",
             "default": "华东",
@@ -611,7 +614,7 @@ def test_section_selection_updates_bound_title_without_redrawing_siblings(
         item for item in definition["views"] if item["id"] == "region-comparison"
     )
     comparison["description"] = (
-        "当前分析：{{ selections.section.trend.focus_region }}"
+        "当前分析：{{ controls.section.trend.focus_region }}"
     )
     dashboard_path.write_text(
         yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
@@ -807,7 +810,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
             "data.pipeline", "view.declarative", "section.declarative", "presentation.shell"
         } <= set(owner_contract["packages"])
 
-        header = page.locator("#dashboard-selections-control")
+        header = page.locator("#dashboard-controls-control")
         header.locator("summary").click()
         checkbox = header.locator('[data-selector-template="checkbox-group"]')
         expect(checkbox).to_be_visible()
@@ -875,7 +878,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
                 matrix.locator('.gallery-state-card[data-gallery-status="unavailable"]')
             ).to_have_attribute("aria-disabled", "true")
 
-        selections = detail.locator('.dv-context-selections[data-selection-origin="view"]')
+        selections = detail.locator('.dv-context-controls[data-control-origin="view"]')
         selections.locator("summary").click()
         expect(selections).to_have_attribute("open", "")
         tree = selections.locator('[data-selector-template="tree-select"]')
@@ -1062,14 +1065,114 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
 
 
 @pytest.mark.e2e
+def test_query_control_tray_is_responsive_bounded_and_selector_safe(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(MINIMAL, tmp_path / "adaptive-control-tray")
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    definition["query_parameters"].extend(
+        {
+            "id": f"scenario_{index:02d}",
+            "type": "number",
+            "label": f"Scenario {index:02d}",
+            "default": index,
+        }
+        for index in range(1, 24)
+    )
+    definition["query_parameters"].append(
+        {
+            "id": "model_list",
+            "type": "multi_select",
+            "label": "Model list",
+            "default": ["model-01"],
+            "choices": [
+                {"label": f"Model {index:02d}", "value": f"model-{index:02d}"}
+                for index in range(1, 13)
+            ],
+        }
+    )
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    presentation_path = workspace / "dashboards" / "sales-overview" / "presentation.yaml"
+    presentation = yaml.safe_load(presentation_path.read_text(encoding="utf-8"))
+    presentation["controls"] = {
+        "query": {
+            "template": "grid",
+            "width": "wide",
+            "columns": 3,
+            "density": "compact",
+        }
+    }
+    presentation_path.write_text(
+        yaml.safe_dump(presentation, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    page.set_viewport_size({"width": 900, "height": 360})
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        control = page.locator("#query-parameters-control")
+        control.locator("summary").click()
+        page.wait_for_timeout(50)
+        panel = control.locator(".header-control__popover")
+        form = control.locator("#parameter-form")
+        expect(panel).to_be_visible()
+
+        geometry = panel.evaluate(
+            """panel => {
+              const form = panel.querySelector('#parameter-form');
+              const rect = panel.getBoundingClientRect();
+              return {
+                viewportHeight: innerHeight,
+                top: rect.top,
+                bottom: rect.bottom,
+                columns: getComputedStyle(form).gridTemplateColumns.split(' ').length,
+                formClientHeight: form.clientHeight,
+                formScrollHeight: form.scrollHeight,
+                panelOverflow: getComputedStyle(panel).overflow,
+                formOverflow: getComputedStyle(form).overflow,
+              };
+            }"""
+        )
+        assert geometry["top"] >= 11, geometry
+        assert geometry["bottom"] <= geometry["viewportHeight"] - 11, geometry
+        assert geometry["columns"] == 3
+        assert geometry["panelOverflow"] == "hidden"
+        assert geometry["formOverflow"] == "auto"
+        assert geometry["formScrollHeight"] > geometry["formClientHeight"]
+
+        form.evaluate("form => { form.scrollTop = form.scrollHeight; }")
+        model_field = form.locator(".field", has=page.locator("#input-model_list"))
+        trigger = model_field.locator("[data-selector-trigger]")
+        expect(trigger).to_be_visible()
+        trigger.click()
+        selector_panel = model_field.locator("[data-selector-panel]")
+        expect(selector_panel).to_be_visible()
+        selector_geometry = selector_panel.evaluate(
+            """panel => {
+              const rect = panel.getBoundingClientRect();
+              return {top:rect.top, right:rect.right, bottom:rect.bottom, left:rect.left,
+                width:innerWidth, height:innerHeight};
+            }"""
+        )
+        assert selector_geometry["top"] >= 11
+        assert selector_geometry["left"] >= 11
+        assert selector_geometry["right"] <= selector_geometry["width"] - 11
+        assert selector_geometry["bottom"] <= selector_geometry["height"] - 11
+
+
+@pytest.mark.e2e
 def test_server_header_hydrates_dataset_driven_dashboard_selection_options(
     page: Page, tmp_path: Path
 ):
     workspace = _copy_workspace(MINIMAL, tmp_path / "dynamic-dashboard-selection")
     dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
     definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
-    definition["dashboard_selections"][0].pop("choices")
-    definition["dashboard_selections"][0]["default"] = ["华东"]
+    definition["controls"][0].pop("choices")
+    definition["controls"][0]["default"] = ["华东"]
     dashboard_path.write_text(
         yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
@@ -1078,7 +1181,7 @@ def test_server_header_hydrates_dataset_driven_dashboard_selection_options(
     with _running_server(workspace) as base_url:
         _open_dashboard(page, base_url, "sales-overview")
         _run_and_wait(page)
-        header = page.locator("#dashboard-selections-control")
+        header = page.locator("#dashboard-controls-control")
         header.locator("summary").click()
         selector = header.locator(
             'select[name="dashboard:sales-overview/region"]'
@@ -1100,6 +1203,64 @@ def test_server_header_hydrates_dataset_driven_dashboard_selection_options(
 
 
 @pytest.mark.e2e
+def test_unified_dashboard_controls_drive_browser_named_output(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(SHOWCASE, tmp_path / "showcase-controls")
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "chart-gallery")
+        control = page.locator("#dashboard-controls-control")
+        expect(control.locator("#dashboard-control-meta")).to_have_text(
+            "1 data · 1 logic"
+        )
+        control.locator("summary").click()
+        expect(
+            control.locator('.dashboard-control-group[data-control-kind="selection"]')
+        ).to_be_visible()
+        expect(
+            control.locator('.dashboard-control-group[data-control-kind="compute"]')
+        ).to_be_visible()
+
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        radial = frame.locator('[data-view-id="radial"]')
+        expect(radial).to_have_attribute("data-view-status", "ready", timeout=15_000)
+
+        province = page.locator(
+            'select[name="dashboard:chart-gallery/province"]'
+        )
+        province.select_option(["广东"], force=True)
+        page.wait_for_function(
+            """() => {
+              const frame = document.querySelector('#canvas-frame').contentWindow;
+              const output = frame.dataviz.portable.outputs['interactive:latest-metrics/main'];
+              return Array.isArray(output) && output.length > 0
+                && output.every(row => row.province === '广东');
+            }""",
+            timeout=15_000,
+        )
+
+        control.locator("summary").click()
+        city_count = page.locator(
+            'input[name="dashboard:chart-gallery/radar_city_count"]'
+        )
+        city_count.fill("1")
+        page.wait_for_function(
+            """() => {
+              const frame = document.querySelector('#canvas-frame').contentWindow;
+              const output = frame.dataviz.portable.outputs['interactive:latest-metrics/main'];
+              return frame.dataviz.compute_parameters['dashboard:chart-gallery/radar_city_count'] === 1
+                && Array.isArray(output) && output.length === 1
+                && output[0].province === '广东';
+            }""",
+            timeout=15_000,
+        )
+        expect(radial).to_have_attribute("data-view-status", "ready")
+        page.locator("#query-diagnostics > summary").click()
+        expect(control).not_to_have_attribute("open", "")
+
+
+@pytest.mark.e2e
 def test_selection_cascade_popovers_view_isolation_and_table_wheel(
     page: Page, tmp_path: Path
 ):
@@ -1113,7 +1274,7 @@ def test_selection_cascade_popovers_view_isolation_and_table_wheel(
         ).to_be_visible(timeout=15_000)
 
         # Header and Canvas-owned popovers both close when focus moves elsewhere.
-        header = page.locator("#dashboard-selections-control")
+        header = page.locator("#dashboard-controls-control")
         header.locator("summary").click()
         expect(header).to_have_attribute("open", "")
         province = header.locator('[data-selector-template="checkbox-group"]')
@@ -1140,7 +1301,7 @@ def test_selection_cascade_popovers_view_isolation_and_table_wheel(
         expect(header).not_to_have_attribute("open", "")
 
         section_popover = frame.locator(
-            '.dv-context-selections[data-selection-origin="section"]'
+            '.dv-context-controls[data-control-origin="section"]'
         )
         section_popover.locator("summary").click()
         expect(section_popover).to_have_attribute("open", "")
@@ -1178,7 +1339,7 @@ def test_selection_cascade_popovers_view_isolation_and_table_wheel(
             ) === JSON.stringify(['深圳', '厦门'])"""
         )
         view_popover = frame.locator(
-            '[data-view-id="city-detail"] .dv-context-selections[data-selection-origin="view"]'
+            '[data-view-id="city-detail"] .dv-context-controls[data-control-origin="view"]'
         )
         view_popover.locator("summary").click()
         cascader = view_popover.locator('[data-selector-template="cascader"]')
@@ -1226,7 +1387,7 @@ def test_selection_cascade_popovers_view_isolation_and_table_wheel(
             }"""
         )
 
-        # Instrument the public Runtime boundary: a View Selection may redraw
+        # Instrument the public Runtime boundary: a View-scoped Selection Control may redraw
         # city-detail, but must not touch the sibling map-bars renderer.
         frame.locator("body").evaluate(
             """() => {
@@ -1354,6 +1515,76 @@ def test_perspective_fills_view_uses_opaque_settings_and_releases_page_wheel(
 
 
 @pytest.mark.e2e
+def test_required_dynamic_view_selection_bootstraps_from_base_output_and_exports(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(WORKER, tmp_path / "dynamic-view-domain")
+    dashboard_path = workspace / "dashboards" / "worker-runtime" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    definition["views"][0]["controls"] = [
+        {
+            "id": "focus_name",
+            "kind": "selection",
+            "type": "single_select",
+            "field": "name",
+            "default": "alpha",
+            "required": True,
+        }
+    ]
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    transform_path = workspace / "dashboards" / "worker-runtime" / "transforms" / "scaled.yaml"
+    transform = yaml.safe_load(transform_path.read_text(encoding="utf-8"))
+    transform["selection_inputs"] = {
+        "focus_name": "view:scaled-table/focus_name",
+    }
+    transform_path.write_text(
+        yaml.safe_dump(transform, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    console_errors: list[str] = []
+    page.on(
+        "console",
+        lambda message: console_errors.append(message.text)
+        if message.type == "error"
+        else None,
+    )
+    report_path = tmp_path / "dynamic-view-domain.html"
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "worker-runtime")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        table = frame.locator('[data-view-id="scaled-table"]')
+        expect(table).to_have_attribute("data-view-status", "ready", timeout=15_000)
+        expect(table.locator("tbody")).to_contain_text("alpha")
+        expect(table.locator("tbody")).not_to_contain_text("beta")
+        selector = frame.locator(
+            'select[data-selection-input="view:scaled-table/focus_name"]'
+        )
+        expect(selector.locator("option")).to_have_count(3)
+        assert selector.input_value() == "alpha"
+        expect(page.locator('[data-node-id="interactive:scaled"]')).to_have_attribute(
+            "data-status", "ready", timeout=10_000
+        )
+        assert not [message for message in console_errors if "[dataviz:init]" in message]
+
+        with page.expect_download(timeout=20_000) as download_info:
+            page.locator("#download-button").click()
+        download_info.value.save_as(report_path)
+
+    with _running_static_server(report_path.parent) as report_url:
+        page.goto(f"{report_url}/{report_path.name}", wait_until="domcontentloaded")
+        exported = page.locator('[data-view-id="scaled-table"]')
+        expect(exported).to_have_attribute("data-view-status", "ready", timeout=15_000)
+        expect(exported.locator("tbody")).to_contain_text("alpha")
+        expect(exported).not_to_contain_text("Waiting for")
+        assert not [message for message in console_errors if "[dataviz:init]" in message]
+
+
+@pytest.mark.e2e
 def test_browser_js_interactive_worker_cancellation_timeout_and_serializable_error(
     page: Page, tmp_path: Path
 ):
@@ -1374,7 +1605,9 @@ def test_browser_js_interactive_worker_cancellation_timeout_and_serializable_err
         assert metrics["worker"]["completed"] >= 1
         assert metrics["leakedEntrypoint"] == "undefined"
 
-        delay = page.locator('input[name="delay_ms"]')
+        delay = page.locator(
+            'input[name="dashboard:worker-runtime/delay_ms"]'
+        )
         delay.evaluate(
             "input => { input.value = '750'; input.dispatchEvent(new Event('change', {bubbles:true})); }"
         )
@@ -1477,8 +1710,10 @@ def test_server_and_browser_python_share_output_contract_and_export_runtime(
             "() => window.datavizRuntime.metrics.interactiveTransforms.completed"
         ) == completed_before_selection
 
-        page.locator("#compute-parameters-control summary").click()
-        factor = page.locator('#compute-parameter-form input[name="factor"]')
+        page.locator("#dashboard-controls-control summary").click()
+        factor = page.locator(
+            '#compute-parameter-form input[name="dashboard:runtime-matrix/factor"]'
+        )
         factor.fill("3")
         factor.dispatch_event("change")
         expect(server_table).to_contain_text("103", timeout=20_000)
@@ -1486,7 +1721,7 @@ def test_server_and_browser_python_share_output_contract_and_export_runtime(
         assert page.locator("#canvas-frame").get_attribute("data-run-id") == original_run
         runtime_state = frame.locator("body").evaluate(
             """() => ({
-              committed:window.dataviz.compute_parameters.factor,
+              committed:window.dataviz.compute_parameters['dashboard:runtime-matrix/factor'],
               browserWorkers:window.datavizRuntime.metrics.interactiveTransforms.completed,
               active:window.datavizRuntime.activeTransforms.size,
             })"""

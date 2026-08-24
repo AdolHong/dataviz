@@ -403,6 +403,8 @@ const datavizRuntime = window.datavizRuntime = {
   transformGenerations: new Map(),
   workerUrls: new Map(),
   interactionCache: new Map(),
+  initializing: false,
+  initializationPromise: null,
   interactiveAdapters: Object.create(null),
   metrics: {
     interactiveTransforms: {started:0, completed:0, cancelled:0, timedOut:0, failed:0, cacheHits:0},
@@ -439,8 +441,8 @@ const datavizRuntime = window.datavizRuntime = {
     const computeKeys = new Set();
     snapshotIds.forEach(id => {
       const spec = this.transforms.get(id)?.spec;
-      (spec?.selections || []).forEach(key => selectionKeys.add(key));
-      (spec?.compute_params || []).forEach(key => computeKeys.add(key));
+      Object.values(spec?.selection_inputs || {}).forEach(key => selectionKeys.add(key));
+      Object.values(spec?.compute_inputs || {}).forEach(key => computeKeys.add(key));
     });
     selectionKeys.forEach(key => {
       document.querySelectorAll(`[data-selection-key="${CSS.escape(key)}"]`).forEach(control => {
@@ -573,8 +575,8 @@ const datavizRuntime = window.datavizRuntime = {
         context:{
           inputs:inputValues,
           query_params:Object.fromEntries((item.spec.query_params || []).map(key => [key, window.dataviz.query_parameters?.[key]])),
-          compute_params:Object.fromEntries((item.spec.compute_params || []).map(key => [key, window.dataviz.compute_parameters?.[key]])),
-          selections:Object.fromEntries((item.spec.selections || []).map(key => [key, window.dataviz.selections?.[key]])),
+          compute_params:Object.fromEntries(Object.entries(item.spec.compute_inputs || {}).map(([alias, key]) => [alias, window.dataviz.compute_parameters?.[key]])),
+          selections:Object.fromEntries(Object.entries(item.spec.selection_inputs || {}).map(([alias, key]) => [alias, window.dataviz.selections?.[key]])),
         },
         python_dependencies:item.spec.python_dependencies || [],
         // Module Workers created from a Blob cannot resolve root-relative or
@@ -696,8 +698,8 @@ const datavizRuntime = window.datavizRuntime = {
         Object.entries(inputValues).map(([name, value]) => [name, datavizValueSignature(value)])
       ),
       query_params:Object.fromEntries((item.spec.query_params || []).map(key => [key, window.dataviz.query_parameters?.[key]])),
-      compute_params:Object.fromEntries((item.spec.compute_params || []).map(key => [key, window.dataviz.compute_parameters?.[key]])),
-      selections:Object.fromEntries((item.spec.selections || []).map(key => [key, window.dataviz.selections?.[key]])),
+      compute_params:Object.fromEntries(Object.entries(item.spec.compute_inputs || {}).map(([alias, key]) => [alias, window.dataviz.compute_parameters?.[key]])),
+      selections:Object.fromEntries(Object.entries(item.spec.selection_inputs || {}).map(([alias, key]) => [alias, window.dataviz.selections?.[key]])),
     });
   },
   async executeTransform(id, item, inputValues, generation) {
@@ -722,6 +724,7 @@ const datavizRuntime = window.datavizRuntime = {
         this.viewAdapter?.setStatus(root, 'stale', 'run analysis');
       }
     });
+    this.publishTransformStatus(id, 'stale', {message:'Inputs changed; run analysis'});
   },
   markTransformLoading(id, message = 'running analysis') {
     document.querySelectorAll('.dv-view').forEach(root => {
@@ -731,6 +734,7 @@ const datavizRuntime = window.datavizRuntime = {
         this.viewAdapter?.setStatus(root, 'loading', message);
       }
     });
+    this.publishTransformStatus(id, 'loading', {message});
   },
   markTransformReady(id) {
     document.querySelectorAll('.dv-view').forEach(root => {
@@ -741,6 +745,20 @@ const datavizRuntime = window.datavizRuntime = {
         const renderer = this.viewAdapter?.states.get(viewId)?.type || 'ready';
         this.viewAdapter?.setStatus(root, 'ready', renderer);
       }
+    });
+    this.publishTransformStatus(id, 'ready');
+  },
+  publishTransformStatus(id, status, details = {}) {
+    datavizPostToParent({
+      type:'dataviz:interactive-status',
+      node_id:`interactive:${id}`,
+      transform_id:id,
+      status,
+      message:details.message || null,
+      error:details.error ? {
+        code:details.error.code || details.error.details?.code || 'interactive_transform_error',
+        message:details.error.message || String(details.error),
+      } : null,
     });
   },
   async runTransforms(changedSelectionKeys = [], seedChangedOutputs = [], options = {}) {
@@ -806,13 +824,14 @@ const datavizRuntime = window.datavizRuntime = {
         const upstreamChanged = Object.values(references).some(reference => changedOutputs.has(reference));
         const upstreamStale = Object.values(references).some(reference => staleOutputs.has(reference));
         const selectionChanged = changedSelections == null
-          || (spec.selections || []).some(key => changedSelections.has(key));
+          || Object.values(spec.selection_inputs || {}).some(key => changedSelections.has(key));
         const computeChanged = changedCompute == null
-          || (spec.compute_params || []).some(key => changedCompute.has(key));
+          || Object.values(spec.compute_inputs || {}).some(key => changedCompute.has(key));
         const missingOutput = requiredOutputReferences.some(reference =>
           !Object.prototype.hasOwnProperty.call(outputs, reference)
         );
-        const relevant = upstreamChanged || upstreamStale || selectionChanged || computeChanged;
+        const relevant = upstreamChanged || upstreamStale || selectionChanged || computeChanged
+          || manualClosure.has(id);
         if (!relevant && !missingOutput) return;
         // Missing Derived Output starts a branch once. An unrelated Source may
         // publish while that branch is still running; it must not supersede the
@@ -842,6 +861,7 @@ const datavizRuntime = window.datavizRuntime = {
             localChanged.add(reference);
           });
           renderOutputDelta(localChanged);
+          this.publishTransformStatus(id, 'unavailable', {message:error.message, error});
           return;
         }
         const shouldExecute = manualClosure.has(id)
@@ -875,7 +895,10 @@ const datavizRuntime = window.datavizRuntime = {
           const missingInput = Object.values(references).find(reference =>
             !Object.prototype.hasOwnProperty.call(outputs, reference)
           );
-          if (missingInput) return;
+          if (missingInput) {
+            this.publishTransformStatus(id, 'queued', {message:`Waiting for ${missingInput}`});
+            return;
+          }
           // The interaction endpoint belongs to the Query Run, not to its final
           // status. Wait only until an immutable Query snapshot exists; then a
           // ready branch can compute while unrelated Query branches continue.
@@ -941,11 +964,18 @@ const datavizRuntime = window.datavizRuntime = {
             }
           });
           this.transformErrors.delete(id);
-          if (localChanged.size) renderOutputDelta(localChanged);
-          else this.markTransformReady(id);
+          if (localChanged.size) {
+            renderOutputDelta(localChanged);
+            this.publishTransformStatus(id, 'ready');
+          } else {
+            this.markTransformReady(id);
+          }
         } catch (error) {
-          if (error?.name === 'AbortError' || error?.code === 'interactive_transform_cancelled') return;
           if (this.transformRequests.get(id) !== request) return;
+          if (error?.name === 'AbortError' || error?.code === 'interactive_transform_cancelled') {
+            this.publishTransformStatus(id, 'cancelled', {message:error.message, error});
+            return;
+          }
           this.metrics.interactiveTransforms.failed += 1;
           this.transformErrors.set(id, error);
           const localChanged = new Set();
@@ -957,6 +987,7 @@ const datavizRuntime = window.datavizRuntime = {
             localChanged.add(reference);
           });
           renderOutputDelta(localChanged);
+          this.publishTransformStatus(id, 'error', {message:error.message, error});
           console.error(`[dataviz:interactive-transform:${id}]`, error);
         }
       })();
@@ -1047,7 +1078,7 @@ const datavizRuntime = window.datavizRuntime = {
       changed.add(reference);
     });
     Object.assign(window.dataviz.portable.output_kinds, bundle.output_kinds || {});
-    if (!changed.size) return changed;
+    if (!changed.size || this.initializing) return changed;
     refreshCascadingSelections();
     const affectedViewIds = this.affectedViews([], changed);
     this.renderViews({initial:false, changedSelectionKeys:[], affectedViewIds});
@@ -1084,12 +1115,14 @@ const datavizRuntime = window.datavizRuntime = {
       this.outputErrors.set(reference, error || new Error(`Output failed: ${reference}`));
       changed.add(reference);
     });
+    if (this.initializing) return changed;
     const affectedViewIds = this.affectedViews([], changed);
     this.renderViews({initial:false, changedSelectionKeys:[], affectedViewIds});
     const changedOutputs = await this.runTransforms([], changed, {changedComputeKeys: []});
     window.dispatchEvent(new CustomEvent('dataviz:outputschange', {
       detail:{changed:[...changedOutputs], failed:[...changed]},
     }));
+    return changedOutputs;
   },
   registerOutputTransport(reference, descriptor) {
     const canonical = canonicalOutputReference(reference);
@@ -1137,6 +1170,29 @@ const datavizRuntime = window.datavizRuntime = {
     const references = Object.keys(window.dataviz.portable?.output_transports || {});
     return Promise.allSettled(references.map(reference => this.hydrateOutput(reference)));
   },
+  initializePortable() {
+    if (this.initializationPromise) return this.initializationPromise;
+    this.initializationPromise = (async () => {
+      // Establish the immutable Base Output snapshot before reconciling dynamic
+      // Selection domains. Hydration may publish Arrow tables, but no View or
+      // Interactive branch is allowed to observe a half-initialized Control state.
+      this.initializing = true;
+      try {
+        await this.hydrateOutputTransports();
+      } finally {
+        this.initializing = false;
+      }
+      await window.dataviz.applySelections();
+      // Canvas ready is a lifecycle contract, not a script-load notification.
+      // The parent may restore tab-local Controls only after Base Outputs,
+      // dynamic option domains and the first canonical Selection snapshot agree.
+      datavizPostToParent({
+        type:'dataviz:canvas-ready',
+        selections:structuredClone(window.dataviz.selections || {}),
+      });
+    })();
+    return this.initializationPromise;
+  },
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
@@ -1178,6 +1234,9 @@ const datavizRowsForView = viewId => Object.values(
 ).flatMap(reference => {
   return datavizTableRows(window.dataviz.portable?.outputs?.[canonicalOutputReference(reference)]);
 });
+const datavizSelectionDomainReferences = item => (
+  window.dataviz.portable?.selection_option_domains?.[item?.key] || []
+).map(canonicalOutputReference);
 const datavizSelectionAffectsView = (viewId, item) => {
   const rows = datavizRowsForView(viewId);
   // Empty or not-yet-loaded outputs are handled conservatively. Once a table
@@ -1235,7 +1294,8 @@ if (window.datavizComponents?.selectors) {
     }
     const contract = window.dataviz.portable?.selection_contract?.[viewId] || [];
     const otherSelections = contract.filter(item => item.key !== selectionKey);
-    const rows = Object.values(window.dataviz.portable?.view_inputs?.[viewId] || {}).flatMap(reference =>
+    const item = contract.find(candidate => candidate.key === selectionKey);
+    const rows = datavizSelectionDomainReferences(item).flatMap(reference =>
       datavizTableRows(window.dataviz.portable?.outputs?.[canonicalOutputReference(reference)])
     ).filter(row => otherSelections.every(item =>
       datavizSelectionMatches(row, item, window.dataviz.selections[item.key])
@@ -1266,7 +1326,7 @@ const datavizAvailableSelectionOptions = targets => {
   const values = new Map();
   let observedSource = false;
   targets.forEach(({viewId, item: target}) => {
-    const outputRefs = Object.values(window.dataviz.portable?.view_inputs?.[viewId] || {});
+    const outputRefs = datavizSelectionDomainReferences(target);
     const upstream = (window.dataviz.portable?.selection_contract?.[viewId] || []).filter(candidate =>
       (datavizSelectionRank[candidate.origin] ?? 99) < targetRank
     );
@@ -1330,86 +1390,95 @@ const refreshCascadingSelections = () => {
       if (!targets.length || targetRank !== rank) return;
       const input = control.querySelector('select');
       if (!input) return;
-      if (control.querySelector('[data-selector-template="cascader"], [data-selector-template="tree-select"]')) {
+      const definition = targets[0]?.item?.definition || {};
+      if (definition.type === 'boolean') {
+        control.dataset.optionDomainState = 'static';
         syncPortableChoices(control);
         return;
       }
-      if (targets[0]?.item?.definition?.cascade === false && targets[0]?.item?.definition?.choices?.length) return;
-      const available = new Set();
-      let observedSource = false;
-      targets.forEach(({viewId, item}) => {
-        const outputRefs = Object.values(window.dataviz.portable?.view_inputs?.[viewId] || {});
-        const upstream = (window.dataviz.portable?.selection_contract?.[viewId] || []).filter(candidate =>
-          (datavizSelectionRank[candidate.origin] ?? 99) < targetRank
-        );
-        outputRefs.forEach(reference => {
-          const canonical = canonicalOutputReference(reference);
-          const rows = datavizTableRows(window.dataviz.portable?.outputs?.[canonical]);
-          if (rows.some(row => datavizSelectionCanApply(row, item))) {
-            observedSource = true;
-          }
-          rows.forEach(row => {
-            const included = upstream.every(candidate =>
-              datavizSelectionMatches(row, candidate, window.dataviz.selections[candidate.key])
-            );
-            if (!included) return;
-            const field = item.binding?.field || item.id;
-            if (row[field] != null) available.add(String(row[field]));
-          });
-        });
-      });
-      if (!observedSource) return;
-      if (!(targets[0]?.item?.definition?.choices || []).length) {
-        const currentValue = window.dataviz.selections[control.dataset.selectionKey];
-        const selected = new Set([
-          ...Array.from(input.selectedOptions).map(option => String(option.value)),
-          ...(Array.isArray(currentValue) ? currentValue.map(String) : []),
-        ]);
-        const options = [...available].sort((a, b) => a.localeCompare(b)).map(value => {
-          const option = document.createElement('option');
-          option.value = value;
-          option.textContent = value;
-          option.selected = selected.has(value);
-          return option;
-        });
-        if (!input.multiple && control.querySelector('[data-empty-means-all="true"]')) {
-          const empty = document.createElement('option');
-          empty.value = '';
-          empty.hidden = true;
-          empty.dataset.emptyOption = 'true';
-          empty.selected = currentValue == null || currentValue === '';
-          options.unshift(empty);
-        }
-        input.replaceChildren(...options);
+      const availability = datavizAvailableSelectionOptions(targets);
+      if (control.querySelector('[data-selector-template="cascader"], [data-selector-template="tree-select"]')) {
+        control.dataset.optionDomainState = availability.observed ? 'ready' : 'pending';
+        syncPortableChoices(control);
+        return;
       }
-      Array.from(input.options).forEach(option => {
-        if (option.dataset.emptyOption === 'true') {
-          option.disabled = false;
-          return;
-        }
-        const enabled = available.has(String(option.value));
-        option.disabled = !enabled;
-        if (!enabled) option.selected = false;
+      if (definition.cascade === false && definition.choices?.length) {
+        control.dataset.optionDomainState = 'static';
+        syncPortableChoices(control);
+        return;
+      }
+      if (!availability.observed) {
+        control.dataset.optionDomainState = 'pending';
+        syncPortableChoices(control);
+        return;
+      }
+      control.dataset.optionDomainState = 'ready';
+      const typed = availability.options.some(option => typeof option.value !== 'string');
+      input.dataset.valueEncoding = typed ? 'json' : 'string';
+      const currentValue = window.dataviz.selections[control.dataset.selectionKey];
+      const currentValues = input.multiple
+        ? (Array.isArray(currentValue) ? currentValue : [])
+        : [currentValue];
+      const selected = new Set(
+        currentValues
+          .filter(value => !datavizIsEmptyControlValue(value))
+          .map(datavizValueSignature)
+      );
+      const options = [];
+      if (!input.multiple && control.querySelector('[data-empty-means-all="true"]')) {
+        const empty = document.createElement('option');
+        empty.value = '';
+        empty.hidden = true;
+        empty.dataset.emptyOption = 'true';
+        empty.selected = datavizIsEmptyControlValue(currentValue);
+        options.push(empty);
+      }
+      availability.options.forEach(item => {
+        const option = document.createElement('option');
+        option.value = datavizEncodeControlValue(input, item.value, {
+          path:control.dataset.selectionPath === 'true',
+        });
+        option.textContent = item.label ?? String(item.value);
+        option.disabled = item.available === false;
+        option.selected = !option.disabled && selected.has(datavizValueSignature(item.value));
+        if (item.group) option.dataset.group = item.group;
+        if (item.description) option.dataset.description = item.description;
+        if (item.keywords?.length) option.dataset.keywords = item.keywords.join(' ');
+        options.push(option);
       });
-      control.dataset.cascadeAvailable = String(available.size);
+      if (definition.required && !options.some(option => option.selected && !option.disabled)) {
+        const fallback = options.find(option => option.dataset.emptyOption !== 'true' && !option.disabled);
+        if (fallback) fallback.selected = true;
+      }
+      input.replaceChildren(...options);
+      control.dataset.cascadeAvailable = String(
+        availability.options.filter(option => option.available !== false).length
+      );
       syncPortableChoices(control);
     });
     // Commit each scope before deriving the next one. A Dashboard change can
     // invalidate Section values, which must be visible to View selectors in
     // this same interaction rather than one event later.
-    readSelectionInputs();
+    readSelectionInputs({maxRank:rank});
   });
   publishDashboardSelectionOptions(occurrences);
 };
-const readSelectionInputs = () => {
+const readSelectionInputs = ({maxRank = null} = {}) => {
   document.querySelectorAll('[data-selection-key]').forEach(control => {
     const key = control.dataset.selectionKey;
     const type = control.dataset.selectionType;
     const input = control.querySelector('[data-selection-input]');
     if (!input) return;
-    const definition = Object.values(window.dataviz.portable?.selection_contract || {})
+    const item = Object.values(window.dataviz.portable?.selection_contract || {})
       .flat()
-      .find(item => item.key === key)?.definition || {type};
+      .find(candidate => candidate.key === key);
+    if (maxRank != null && (datavizSelectionRank[item?.origin] ?? 99) > maxRank) return;
+    const definition = item?.definition || {type};
+    if (
+      input.tagName === 'SELECT'
+      && control.dataset.optionDomainState === 'pending'
+      && Object.prototype.hasOwnProperty.call(window.dataviz.selections, key)
+    ) return;
     const decode = raw => datavizDecodeControlValue(input, raw, {
       path:control.dataset.selectionPath === 'true',
     });
@@ -1483,7 +1552,7 @@ const datavizContentPathValue = value => {
 };
 const datavizFormatContentReference = reference => {
   const definition = reference.definition || {};
-  const isCompute = reference.origin === 'compute';
+  const isCompute = reference.kind === 'compute';
   const control = isCompute
     ? document.querySelector(`[data-compute-key="${CSS.escape(reference.key)}"]`)
     : datavizContentControl(reference.key);
@@ -1607,10 +1676,21 @@ const syncComputeDirtyState = () => {
     window.dataviz.draft_compute_parameters || {},
   );
   document.querySelectorAll('[data-compute-dirty-label]').forEach(node => {
-    node.textContent = changed.length ? `${changed.length} draft change${changed.length === 1 ? '' : 's'}` : 'Results are current';
+    const button = node.parentElement?.querySelector('[data-compute-apply]');
+    const scopeKeys = new Set(JSON.parse(button?.dataset.controlKeys || '[]'));
+    const localChanged = scopeKeys.size
+      ? changed.filter(key => scopeKeys.has(key))
+      : changed;
+    node.textContent = localChanged.length
+      ? `${localChanged.length} draft change${localChanged.length === 1 ? '' : 's'}`
+      : 'Results are current';
   });
   document.querySelectorAll('[data-compute-apply]').forEach(button => {
-    button.disabled = changed.length === 0 && button.dataset.analysisAlways !== 'true';
+    const scopeKeys = new Set(JSON.parse(button.dataset.controlKeys || '[]'));
+    const localChanged = scopeKeys.size
+      ? changed.filter(key => scopeKeys.has(key))
+      : changed;
+    button.disabled = localChanged.length === 0 && button.dataset.analysisAlways !== 'true';
   });
   return changed;
 };
@@ -1654,9 +1734,55 @@ window.dataviz.applyCompute = async (options = {}) => {
   syncComputeDirtyState();
   await renderComputeResult(changed, options);
 };
+window.dataviz.applyControls = async (options = {}) => {
+  const requestedKeys = options.keys || [];
+  const draft = readComputeInputs();
+  const computeKeys = requestedKeys.filter(key => Object.prototype.hasOwnProperty.call(draft, key));
+  const selectionKeys = requestedKeys.filter(key => Object.prototype.hasOwnProperty.call(window.dataviz.selections || {}, key));
+  const changedComputeKeys = computeKeys.filter(key => (
+    datavizValueSignature(window.dataviz.compute_parameters?.[key])
+    !== datavizValueSignature(draft[key])
+  ));
+  const committed = {...(window.dataviz.compute_parameters || {})};
+  changedComputeKeys.forEach(key => { committed[key] = structuredClone(draft[key]); });
+  window.dataviz.compute_parameters = committed;
+  syncComputeDirtyState();
+  const contentAffected = syncDatavizContentBindings(changedComputeKeys);
+  if (contentAffected.size) {
+    datavizRuntime.renderViews({
+      initial:false,
+      changedSelectionKeys:[],
+      changedComputeKeys,
+      affectedViewIds:[...contentAffected],
+    });
+  }
+  const changedOutputs = await datavizRuntime.runTransforms(selectionKeys, [], {
+    changedComputeKeys,
+    apply:true,
+    manualTargets:options.manualTargets || [],
+  });
+  window.dispatchEvent(new CustomEvent('dataviz:computechange', {
+    detail:{
+      compute_parameters:window.dataviz.compute_parameters,
+      changed:changedComputeKeys,
+      outputs:[...changedOutputs],
+    },
+  }));
+  if (window.parent !== window) {
+    datavizPostToParent({
+      type:'dataviz:compute-changed',
+      compute_parameters:window.dataviz.compute_parameters,
+      draft_compute_parameters:window.dataviz.draft_compute_parameters,
+    });
+  }
+};
 window.dataviz.applySelections = async () => {
   const previous = window.dataviz.appliedSelections || null;
-  readSelectionInputs();
+  // On first paint the canonical values come from the validated Query/report
+  // snapshot. Dynamic <select> elements are intentionally empty until their
+  // immutable option domains are available, so reading the DOM first would erase
+  // a valid required default and abort every unrelated View.
+  if (previous != null) readSelectionInputs();
   refreshCascadingSelections();
   readSelectionInputs();
   const changedSelectionKeys = datavizChangedSelectionKeys(previous, window.dataviz.selections);
@@ -1845,8 +1971,11 @@ window.addEventListener('message', event => {
     const values = event.data.compute_parameters || {};
     setComputeInputs(values);
     if (event.data.commit) {
-      window.dataviz.applyCompute({
-        keys:Object.keys(values),
+      const apply = event.data.control_keys == null
+        ? window.dataviz.applyCompute
+        : window.dataviz.applyControls;
+      apply({
+        keys:event.data.control_keys || Object.keys(values),
         apply:event.data.apply !== false,
         manualTargets:event.data.manual_targets || [],
       }).catch(error => console.error('[dataviz:compute]', error));
@@ -1872,12 +2001,33 @@ window.addEventListener('message', event => {
     }
   }
 });
-let datavizSelectionTimer;
+let datavizSelectionScheduled = false;
+let datavizSelectionQueue = Promise.resolve();
 const scheduleDatavizSelection = () => {
-  clearTimeout(datavizSelectionTimer);
-  datavizSelectionTimer = setTimeout(() => window.dataviz.applySelections().catch(error => {
+  // Capture the user's native control value before asynchronous initialization
+  // or option-domain reconciliation can rebuild the underlying <select>.
+  try {
+    readSelectionInputs();
+  } catch (error) {
     console.error('[dataviz:selections]', error);
-  }), 70);
+    return;
+  }
+  if (datavizSelectionScheduled) return;
+  datavizSelectionScheduled = true;
+  queueMicrotask(() => {
+    datavizSelectionScheduled = false;
+    // A native select emits both input and change for one user action. Coalesce
+    // that event pair in the current task, then serialize any later actions
+    // behind the in-flight Interactive branch. Selection is an immediate data
+    // contract; it must not depend on a browser timer being scheduled promptly.
+    const initialization = datavizRuntime.initializationPromise || Promise.resolve();
+    datavizSelectionQueue = Promise.all([
+      datavizSelectionQueue.catch(() => undefined),
+      initialization.catch(() => undefined),
+    ])
+      .then(() => window.dataviz.applySelections())
+      .catch(error => console.error('[dataviz:selections]', error));
+  });
 };
 const datavizEscape = value => String(value ?? '')
   .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
@@ -1898,7 +2048,7 @@ document.querySelectorAll('[data-compute-input]').forEach(input => {
     if (trigger !== 'auto' || !key || !changed.includes(key)) return;
     clearTimeout(datavizComputeTimer);
     const consumers = [...datavizRuntime.transforms.values()]
-      .filter(item => item.spec.trigger === 'auto' && (item.spec.compute_params || []).includes(key));
+      .filter(item => item.spec.trigger === 'auto' && Object.values(item.spec.compute_inputs || {}).includes(key));
     const delay = Math.max(0, ...consumers.map(item => Number(item.spec.debounce_ms || 0)));
     datavizComputeTimer = setTimeout(() => window.dataviz.applyCompute({keys:[key]}).catch(error => {
       console.error('[dataviz:compute:auto]', error);
@@ -1908,8 +2058,9 @@ document.querySelectorAll('[data-compute-input]').forEach(input => {
   input.addEventListener('change', onDraft);
 });
 document.querySelectorAll('[data-compute-apply]').forEach(button => {
-  button.addEventListener('click', () => window.dataviz.applyCompute({
+  button.addEventListener('click', () => window.dataviz.applyControls({
     apply:true,
+    keys:JSON.parse(button.dataset.controlKeys || '[]'),
     manualTargets:JSON.parse(button.dataset.manualTargets || '[]'),
   }).catch(error => {
     console.error('[dataviz:compute:apply]', error);
@@ -1922,7 +2073,6 @@ document.addEventListener('pointerdown', () => {
   }
 }, {capture: true});
 window.addEventListener('pagehide', () => datavizRuntime.dispose(), {once:true});
-datavizPostToParent({type: 'dataviz:canvas-ready'});
 Object.entries(window.dataviz.portable?.outputs || {}).forEach(([reference, value]) => {
   datavizRuntime.outputSignatures.set(
     canonicalOutputReference(reference),
@@ -1946,6 +2096,8 @@ window.datavizRuntimeServices = Object.freeze({
   tableRows:datavizTableRows,
   numericAggregate:datavizNumericAggregate,
   workerValue:datavizWorkerValue,
+  selectionCanApply:datavizSelectionCanApply,
+  selectionMatches:datavizSelectionMatches,
   runtimeError:datavizRuntimeError,
   escape:datavizEscape,
   decodeSpec:node => JSON.parse(new TextDecoder().decode(Uint8Array.from(

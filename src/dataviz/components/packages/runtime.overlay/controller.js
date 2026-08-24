@@ -154,7 +154,7 @@
   }
 
   function hydrate(scope = document) {
-    const selector = '[data-dv-overlay], [data-header-popover], [data-runtime-popover], .dv-context-selections';
+    const selector = '[data-dv-overlay], [data-header-popover], [data-runtime-popover], .dv-context-controls';
     const nodes = scope.matches?.(selector) ? [scope] : [];
     nodes.push(...scope.querySelectorAll?.(selector) || []);
     nodes.forEach(node => registerDetails(node));

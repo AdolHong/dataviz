@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v2
+schema: dataviz/dashboard/v3
 kind: dashboard
 id: sales-overview
 title: 销售概览
@@ -23,8 +23,9 @@ sources:
     query_params: [min_query_revenue]
     outputs: {main: {kind: table}}
 
-dashboard_selections:
+controls:
   - id: region
+    kind: selection
     field: region
     type: multi_select
     label: 区域

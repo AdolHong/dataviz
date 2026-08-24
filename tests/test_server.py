@@ -57,6 +57,12 @@ def test_server_exposes_active_presentation_contract():
     assert dashboard["presentation"]["active"] is True
     assert dashboard["presentation"]["file"].endswith("presentation.yaml")
     assert dashboard["presentation"]["diagnostics"] == []
+    assert dashboard["presentation"]["controls"]["query"] == {
+        "template": "auto",
+        "width": "auto",
+        "columns": None,
+        "density": "comfortable",
+    }
     assert not [item for item in summary["diagnostics"] if item["level"] == "error"]
 
 
@@ -288,10 +294,13 @@ def test_server_run_and_canvas():
     assert summary["dashboards"][0]["id"] == "sales"
     assert summary["dashboards"][0]["canvas_name"] == "sales"
     assert summary["dashboards"][0]["query_parameters"][0]["id"] == "target_factor"
-    assert {item["origin"] for item in summary["dashboards"][0]["selections"]} == {
+    assert {item["origin"] for item in summary["dashboards"][0]["controls"]} == {
         "dashboard",
         "section",
         "view",
+    }
+    assert {item["kind"] for item in summary["dashboards"][0]["controls"]} == {
+        "selection"
     }
     started = client.post(
         "/api/dashboards/sales/runs",
@@ -680,7 +689,7 @@ def test_fast_dag_branch_publishes_output_before_slow_branch_finishes(
         encoding="utf-8",
     )
     (dashboard_root / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v2
+        """schema: dataviz/dashboard/v3
 kind: dashboard
 id: progressive
 title: Progressive branches
@@ -1088,7 +1097,7 @@ def test_query_cancel_is_tab_scoped_and_same_dashboard_run_supersedes(tmp_path: 
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v2
+        """schema: dataviz/dashboard/v3
 kind: dashboard
 id: slow
 title: Slow

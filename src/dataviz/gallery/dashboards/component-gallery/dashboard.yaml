@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v2
+schema: dataviz/dashboard/v3
 kind: dashboard
 id: component-gallery
 title: Component Gallery
@@ -14,8 +14,9 @@ sources:
     format: csv
     outputs: {main: {kind: table}}
 
-dashboard_selections:
+controls:
   - id: region
+    kind: selection
     field: region
     type: multi_select
     label: Region tags
@@ -41,8 +42,9 @@ views:
     input: source:gallery-data/main
     columns: [date, month, region, category, product, province, city, district, store_id, revenue, orders]
     limit: 100
-    selections:
+    controls:
       - id: product
+        kind: selection
         field: product
         type: multi_select
         label: Search products
@@ -52,6 +54,7 @@ views:
           - {label: Comet, value: Comet, group: New, description: Growth line}
           - {label: Delta, value: Delta, group: New, description: Growth line}
       - id: category-focus
+        kind: selection
         field: category
         type: single_select
         label: Category focus
@@ -60,21 +63,25 @@ views:
           - {label: Hardware, value: Hardware}
           - {label: Software, value: Software}
       - id: location
+        kind: selection
         field: district
         path_fields: [province, city, district]
         type: multi_select
         label: Province / city / district
       - id: location-tree
+        kind: selection
         field: district
         path_fields: [province, city, district]
         type: multi_select
         label: Location tree
       - id: date-window
+        kind: selection
         field: date
         type: date_range
         label: Date window
         default: ["2026-01-01", "2026-03-01"]
       - id: store-virtual
+        kind: selection
         field: store_id
         type: multi_select
         label: Virtualized stores
@@ -106,10 +113,11 @@ sections:
 
   - id: trends
     title: Cartesian and composition
-    description: Section Selection demonstrates a compact selection control.
+    description: A Section-scoped Selection Control demonstrates the compact selector template.
     template: grid
-    selections:
+    controls:
       - id: category
+        kind: selection
         field: category
         type: multi_select
         label: Category select
@@ -151,8 +159,9 @@ sections:
     description: Search first, then create only selected repeated Views.
     template: selection-gallery
     columns: 2
-    selections:
+    controls:
       - id: stores
+        kind: selection
         field: store_id
         type: multi_select
         label: Stores

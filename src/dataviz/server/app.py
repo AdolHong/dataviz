@@ -27,10 +27,7 @@ from dataviz.content_templates import (
 )
 from dataviz.errors import DatavizError, WorkspaceError
 from dataviz.execution.results import RunResult
-from dataviz.execution.interactive import (
-    InteractionExecutor,
-    resolve_compute_parameters,
-)
+from dataviz.execution.interactive import InteractionExecutor
 from dataviz.execution.fingerprint import ensure_query_run_compatible
 from dataviz.execution.outputs import normalize_outputs
 from dataviz.execution.plan import reachable_output_references
@@ -38,9 +35,14 @@ from dataviz.execution.references import parse_output_reference
 from dataviz.rendering import CanvasRenderer
 from dataviz.server.manager import RunManager
 from dataviz.workspace import load_workspace, validate_workspace
-from dataviz.workspace.selections import compile_selection_contract, resolve_selection_values
+from dataviz.workspace.controls import (
+    compile_control_contract,
+    resolve_compute_values,
+    resolve_selection_values,
+)
 from dataviz.workspace.selector_templates import resolve_selector_presentation
 from dataviz.workspace.navigation import NavigationEditor
+from dataviz.workspace.models import PresentationControlsDefinition
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -251,28 +253,43 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                         **base,
                         "description": "",
                         "query_parameters": [],
-                        "compute_parameters": [],
-                        "selections": [],
-                        "selection_contract": {},
+                        "controls": [],
+                        "control_contract": {},
                         "nodes": [],
                         "views": [],
                     }
                 )
                 continue
-            selection_contract = compile_selection_contract(dashboard.definition)
+            control_contract = compile_control_contract(dashboard.definition)
             section_titles = {item.id: item.title for item in dashboard.definition.sections}
             view_titles = {
                 view_id: view.title or view_id
                 for view_id, view in dashboard.views.items()
             }
-            selection_controls = {}
-            for view_id, effective in selection_contract.items():
+            scoped_controls = {}
+            for view_id, effective in control_contract.items():
                 for item in effective:
-                    control = selection_controls.setdefault(
+                    consumers = [
+                        transform_id
+                        for transform_id, (_, transform) in dashboard.interactive_transforms.items()
+                        if item.key
+                        in {
+                            *transform.selection_inputs.values(),
+                            *transform.compute_inputs.values(),
+                        }
+                    ]
+                    triggers = sorted(
+                        {
+                            dashboard.interactive_transforms[transform_id][1].trigger
+                            for transform_id in consumers
+                        }
+                    )
+                    control = scoped_controls.setdefault(
                         item.key,
                         {
                             "key": item.key,
                             "id": item.id,
+                            "kind": item.kind,
                             "origin": item.origin,
                             "owner_id": item.owner_id,
                             "owner_title": (
@@ -283,31 +300,17 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                                 else view_titles.get(item.owner_id, item.owner_id)
                             ),
                             "definition": item.definition.model_dump(mode="json"),
-                            "presentation": _selector_presentation(dashboard, item.key, item.definition),
+                            "presentation": (
+                                _selector_presentation(dashboard, item.key, item.definition)
+                                if item.kind == "selection"
+                                else None
+                            ),
+                            "consumers": consumers,
+                            "trigger": triggers[0] if triggers else "manual",
                             "affected_views": [],
                         },
                     )
                     control["affected_views"].append(view_id)
-            compute_controls = []
-            for parameter in dashboard.definition.compute_parameters:
-                consumers = [
-                    transform_id
-                    for transform_id, (_, transform) in dashboard.interactive_transforms.items()
-                    if parameter.id in transform.compute_params
-                ]
-                triggers = sorted(
-                    {
-                        dashboard.interactive_transforms[transform_id][1].trigger
-                        for transform_id in consumers
-                    }
-                )
-                compute_controls.append(
-                    {
-                        **parameter.model_dump(mode="json"),
-                        "consumers": consumers,
-                        "trigger": triggers[0] if triggers else "manual",
-                    }
-                )
             dashboards.append(
                 {
                     **base,
@@ -324,13 +327,13 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                         "diagnostics": [
                             item.as_dict() for item in (dashboard.presentation_diagnostics or [])
                         ],
+                        "controls": _controls_presentation(dashboard),
                     },
                     "query_parameters": [item.model_dump(mode="json") for item in dashboard.definition.query_parameters],
-                    "compute_parameters": compute_controls,
-                    "selections": list(selection_controls.values()),
-                    "selection_contract": {
+                    "controls": list(scoped_controls.values()),
+                    "control_contract": {
                         view_id: [item.as_dict() for item in effective]
-                        for view_id, effective in selection_contract.items()
+                        for view_id, effective in control_contract.items()
                     },
                     "nodes": [
                         {
@@ -363,8 +366,8 @@ def create_app(workspace_path: str | Path) -> FastAPI:
                             "trigger": transform.trigger,
                             "debounce_ms": transform.debounce_ms,
                             "query_params": list(transform.query_params),
-                            "compute_params": list(transform.compute_params),
-                            "selections": list(transform.selections),
+                            "compute_inputs": dict(transform.compute_inputs),
+                            "selection_inputs": dict(transform.selection_inputs),
                             "export": transform.export.model_dump(mode="json"),
                         }
                         for transform_id, (_, transform) in dashboard.interactive_transforms.items()
@@ -844,7 +847,7 @@ def create_app(workspace_path: str | Path) -> FastAPI:
             message = _escape_html(entry.message or "Dashboard is unavailable")
             path = _escape_html(entry.relative_path)
             return HTMLResponse(
-                "<html><body style='font-family:system-ui;padding:56px;background:#f3f0e7;color:#17211d'>"
+                "<!doctype html><html><body style='font-family:system-ui;padding:56px;background:#f3f0e7;color:#17211d'>"
                 f"<p style='font:12px monospace;color:#d95f35'>{entry.status.upper()}</p>"
                 f"<h1>{title}</h1><p>{message}</p><code>{path}</code>"
                 "<p style='margin-top:28px;color:#68716c'>其他看板仍可正常使用。修复该看板目录后刷新页面即可。</p>"
@@ -877,7 +880,7 @@ def create_app(workspace_path: str | Path) -> FastAPI:
             except ValueError:
                 waiting_title = dashboard.canvas_name
             return HTMLResponse(
-                "<html><body style='font-family:serif;padding:48px;background:#f3f0e7;color:#17211d'>"
+                "<!doctype html><html><body style='font-family:serif;padding:48px;background:#f3f0e7;color:#17211d'>"
                 "<p style='font:12px monospace;color:#e2592a'>CANVAS WAITING</p>"
                 f"<h1>{_escape_html(waiting_title)}</h1><p>设置参数并运行后，结果将在这里出现。</p>"
                 f"{_canvas_interaction_bridge(dashboard_id, run_id, frame_id)}"
@@ -960,11 +963,12 @@ def create_app(workspace_path: str | Path) -> FastAPI:
         except DatavizError as error:
             raise HTTPException(409, error.as_dict()) from error
         try:
-            resolved_selections, _ = resolve_selection_values(
+            resolved_selections = resolve_selection_values(
                 dashboard.definition, request.selections
             )
-            resolved_compute = resolve_compute_parameters(
-                dashboard, request.compute_parameters
+            resolved_compute = resolve_compute_values(
+                dashboard.definition,
+                request.compute_parameters,
             )
         except Exception as error:
             raise HTTPException(422, f"Invalid report state: {error}") from error
@@ -1181,7 +1185,7 @@ def _canvas_contract_changed_page(
     frame_id: str | None,
 ) -> str:
     return (
-        "<html><body style='font-family:system-ui;padding:56px;background:#f3f0e7;color:#17211d'>"
+        "<!doctype html><html><body style='font-family:system-ui;padding:56px;background:#f3f0e7;color:#17211d'>"
         "<p style='font:12px monospace;color:#d95f35'>QUERY RUN OUTDATED</p>"
         f"<h1>{_escape_html(canvas_name)}</h1><p>{_escape_html(message)}</p>"
         "<p>看板的数据逻辑已改变。请点击 Run query 生成与当前定义一致的新数据。</p>"
@@ -1214,3 +1218,12 @@ def _folder_summary(
 def _selector_presentation(dashboard, key: str, definition) -> dict[str, Any]:
     selector = dashboard.presentation.selectors.get(key) if dashboard.presentation else None
     return resolve_selector_presentation(definition, selector)
+
+
+def _controls_presentation(dashboard) -> dict[str, Any]:
+    controls = (
+        dashboard.presentation.controls
+        if dashboard.presentation is not None
+        else PresentationControlsDefinition()
+    )
+    return controls.model_dump(mode="json")

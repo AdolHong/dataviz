@@ -110,7 +110,7 @@ AUTHORING_TASKS: dict[str, dict[str, Any]] = {
         "title": "Three scopes and path cascade",
         "purpose": "Measure whether Selection scope and cascade contracts prevent retries.",
         "brief": (
-            "Build province Dashboard Selection, city Section Selection and a province/city/"
+            "Build a province Dashboard Selection Control, a city Section Selection Control and a province/city/"
             "district View cascader. Upstream changes must reconcile invalid downstream values."
         ),
         "acceptance": [
@@ -124,7 +124,7 @@ AUTHORING_TASKS: dict[str, dict[str, Any]] = {
             },
             {
                 "id": "view-isolation",
-                "criterion": "A View Selection does not redraw an unrelated sibling View.",
+                "criterion": "A View-scoped Selection Control does not redraw an unrelated sibling View.",
             },
             {
                 "id": "overlay-export-parity",
@@ -164,7 +164,7 @@ AUTHORING_TASKS: dict[str, dict[str, Any]] = {
         "title": "Interactive Runtime matrix",
         "purpose": "Measure Runtime/export choices without conflating them with data loading.",
         "brief": (
-            "From one immutable Base Output, implement a Compute Parameter consumed by browser-js, "
+            "From one immutable Base Output, implement a Compute Control consumed by browser-js, "
             "browser-python and server-python branches. Show their Derived Outputs side by side."
         ),
         "acceptance": [

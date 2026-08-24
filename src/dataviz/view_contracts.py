@@ -97,7 +97,7 @@ VIEW_COMMON_FIELDS = {
     "title",
     "description",
     "template",
-    "selections",
+    "controls",
     "selection_bindings",
 }
 

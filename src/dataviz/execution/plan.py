@@ -7,6 +7,7 @@ from typing import Any
 from dataviz.errors import ValidationFailure
 from dataviz.execution.references import OutputReference, parse_output_reference
 from dataviz.workspace.loader import LoadedDashboard
+from dataviz.workspace.selection_domains import explicit_selection_option_references
 
 
 @dataclass(slots=True)
@@ -56,6 +57,7 @@ def reachable_output_references(
         for section in dashboard.definition.sections
         if section.repeat and section.repeat.input
     )
+    pending.extend(explicit_selection_option_references(dashboard))
     base_references: set[str] = set()
     interactive_ids: set[str] = set()
 

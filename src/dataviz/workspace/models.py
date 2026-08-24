@@ -136,24 +136,51 @@ class QueryParameterDefinition(_ValueControlDefinition):
         return self
 
 
-class ComputeParameterDefinition(_ValueControlDefinition):
-    """State used only by Interactive Transforms after a Query Run exists."""
+class ComputeControlDefinition(_ValueControlDefinition):
+    """Scoped state used by Interactive Transforms after a Query Run exists."""
+
+    kind: Literal["compute"]
 
     @model_validator(mode="after")
     def validate_static_choices(self):
         if self.type in {"single_select", "multi_select"} and not self.choices:
             raise ValueError(
-                "Compute Parameter select controls require explicit choices"
+                "Compute controls with select input types require explicit choices"
             )
         return self
 
 
-class SelectionDefinition(_ValueControlDefinition):
-    """A browser-side selection applied after sources have been loaded."""
+class SelectionControlDefinition(_ValueControlDefinition):
+    """A scoped include-only data selection applied after Query completes."""
+
+    kind: Literal["selection"]
 
     field: str | None = None
     path_fields: list[str] = Field(default_factory=list, min_length=0)
     cascade: bool = True
+    options_from: str | None = Field(
+        default=None,
+        description=(
+            "Optional Base Named Output used as this Selection's option domain. "
+            "When omitted, Dataviz traces each consuming View through Interactive "
+            "Transforms to its immutable Base Outputs. Interactive Outputs are not "
+            "valid option domains because they may depend on the Selection itself."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_option_domain_contract(self):
+        if self.options_from and self.type not in {"single_select", "multi_select"}:
+            raise ValueError(
+                "selection.options_from is only valid for single_select or multi_select"
+            )
+        return self
+
+
+ScopedControlDefinition = Annotated[
+    SelectionControlDefinition | ComputeControlDefinition,
+    Field(discriminator="kind"),
+]
 
 
 class SelectionBindingDefinition(Model):
@@ -208,7 +235,7 @@ class SectionDefinition(Model):
     ] = "stack"
     columns: int | None = Field(None, ge=1, le=24)
     css_class: str = ""
-    selections: list[SelectionDefinition] = Field(default_factory=list)
+    controls: list[ScopedControlDefinition] = Field(default_factory=list)
     views: list[StableId] = Field(default_factory=list)
     repeat: RepeatDefinition | None = None
 
@@ -267,6 +294,7 @@ class PresentationSectionDefinition(Model):
     ] | None = None
     columns: int | None = Field(None, ge=1, le=24)
     css_class: str = ""
+    controls: PresentationControlPanelDefinition | None = None
 
 
 class PresentationViewDefinition(Model):
@@ -277,6 +305,7 @@ class PresentationViewDefinition(Model):
     engine: Literal["plotly", "echarts"] | None = None
     options: dict[str, Any] = Field(default_factory=dict)
     config: dict[str, Any] = Field(default_factory=dict)
+    controls: PresentationControlPanelDefinition | None = None
 
 
 class DateRangePresetDefinition(Model):
@@ -339,6 +368,30 @@ class PresentationCanvasDefinition(Model):
     client_libraries: list[Literal["plotly", "echarts", "perspective"]] = Field(default_factory=list)
 
 
+class PresentationControlPanelDefinition(Model):
+    """Visual layout for one shared Dashboard control tray.
+
+    The panel may change density and composition, but it never owns parameter,
+    Selection, cascade, validation or execution state.
+    """
+
+    template: Literal["auto", "stack", "grid"] = "auto"
+    width: Literal["auto", "compact", "regular", "wide"] = "auto"
+    columns: int | None = Field(None, ge=1, le=4)
+    density: Literal["compact", "comfortable"] = "comfortable"
+
+    @model_validator(mode="after")
+    def validate_stack_columns(self):
+        if self.template == "stack" and self.columns not in {None, 1}:
+            raise ValueError("stack control panels may only use columns: 1")
+        return self
+
+
+class PresentationControlsDefinition(Model):
+    query: PresentationControlPanelDefinition = Field(default_factory=PresentationControlPanelDefinition)
+    dashboard: PresentationControlPanelDefinition = Field(default_factory=PresentationControlPanelDefinition)
+
+
 class PresentationDefinition(Model):
     schema_: Literal["dataviz/presentation/v1"] = Field(alias="schema")
     kind: Literal["presentation"] = "presentation"
@@ -348,6 +401,7 @@ class PresentationDefinition(Model):
     sections: dict[StableId, PresentationSectionDefinition] = Field(default_factory=dict)
     views: dict[StableId, PresentationViewDefinition] = Field(default_factory=dict)
     selectors: dict[str, PresentationSelectorDefinition] = Field(default_factory=dict)
+    controls: PresentationControlsDefinition = Field(default_factory=PresentationControlsDefinition)
     assets: PresentationAssetsDefinition = Field(default_factory=PresentationAssetsDefinition)
     canvas: PresentationCanvasDefinition = Field(default_factory=PresentationCanvasDefinition)
 
@@ -391,7 +445,7 @@ class DeclarativeViewDefinition(Model):
     url: str | None = None
     options: dict[str, Any] = Field(default_factory=dict)
     config: dict[str, Any] = Field(default_factory=dict)
-    selections: list[SelectionDefinition] = Field(default_factory=list)
+    controls: list[ScopedControlDefinition] = Field(default_factory=list)
     selection_bindings: dict[str, str | SelectionBindingDefinition] = Field(default_factory=dict)
 
     @property
@@ -412,7 +466,7 @@ class DeclarativeViewDefinition(Model):
 
 
 class DashboardDefinition(Model):
-    schema_: Literal["dataviz/dashboard/v2"] = Field(alias="schema")
+    schema_: Literal["dataviz/dashboard/v3"] = Field(alias="schema")
     kind: Literal["dashboard"] = "dashboard"
     id: StableId
     title: str = ""
@@ -422,8 +476,7 @@ class DashboardDefinition(Model):
     assumptions: list[str] = Field(default_factory=list)
     adapters: dict[StableId, StableId] = Field(default_factory=dict)
     query_parameters: list[QueryParameterDefinition] = Field(default_factory=list)
-    compute_parameters: list[ComputeParameterDefinition] = Field(default_factory=list)
-    dashboard_selections: list[SelectionDefinition] = Field(default_factory=list)
+    controls: list[ScopedControlDefinition] = Field(default_factory=list)
     sections: list[SectionDefinition] = Field(default_factory=list)
     sources: list[str | dict[str, Any]] = Field(default_factory=list)
     dataset_transforms: list[str | dict[str, Any]] = Field(default_factory=list)
@@ -642,8 +695,8 @@ class InteractiveTransformDefinition(Model):
     inputs: dict[StableId, str] = Field(default_factory=dict)
     input_schemas: dict[StableId, list[ColumnDefinition]] = Field(default_factory=dict)
     query_params: list[StableId] = Field(default_factory=list)
-    compute_params: list[StableId] = Field(default_factory=list)
-    selections: list[str] = Field(default_factory=list)
+    selection_inputs: dict[StableId, str] = Field(default_factory=dict)
+    compute_inputs: dict[StableId, str] = Field(default_factory=dict)
     trigger: Literal["apply", "auto", "manual"] = "apply"
     debounce_ms: int = Field(300, ge=0, le=10_000)
     export: InteractiveExportDefinition

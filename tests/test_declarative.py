@@ -17,11 +17,12 @@ from dataviz.rendering import CanvasRenderer, template_catalog
 from dataviz.workspace import load_workspace, validate_workspace
 from dataviz.workspace.models import (
     DashboardDefinition,
+    InteractiveTransformDefinition,
     PresentationDefinition,
-    SelectionDefinition,
+    SelectionControlDefinition,
     WorkspaceDefinition,
 )
-from dataviz.workspace.selections import compile_selection_contract
+from dataviz.workspace.controls import compile_control_contract
 from dataviz.workspace.selector_templates import resolve_selector_presentation
 from typer.testing import CliRunner
 
@@ -150,11 +151,11 @@ def test_cli_docs_provide_onboarding_chart_recipes_and_error_recovery():
     assert "最近一次 Run query" in (
         interpolation_docs["content_interpolation"]["lifecycle"]["query_parameter"]
     )
-    assert interpolation_docs["content_interpolation"]["selection_syntax"]["section"] == (
-        "{{ selections.section.<section-id>.<selection-id> }}"
+    assert interpolation_docs["content_interpolation"]["control_syntax"]["section"] == (
+        "{{ controls.section.<section-id>.<control-id> }}"
     )
     assert "即时更新" in (
-        interpolation_docs["content_interpolation"]["lifecycle"]["selection"]
+        interpolation_docs["content_interpolation"]["lifecycle"]["selection_control"]
     )
     runtime_docs = CliRunner().invoke(app, ["docs", "runtime-limits", "--format", "json"])
     assert runtime_docs.exit_code == 0
@@ -401,6 +402,18 @@ def test_selector_presentation_templates_are_visual_only():
                     "css_class": "product-picker",
                 },
             },
+            "controls": {
+                "query": {
+                    "template": "grid",
+                    "width": "wide",
+                    "columns": 3,
+                    "density": "compact",
+                },
+                "dashboard": {
+                    "template": "stack",
+                    "width": "regular",
+                },
+            },
         }
     )
 
@@ -413,24 +426,44 @@ def test_selector_presentation_templates_are_visual_only():
     assert product.invert_label == "Invert values"
     assert product.show_unavailable is False
     assert product.css_class == "product-picker"
+    assert presentation.controls.query.template == "grid"
+    assert presentation.controls.query.columns == 3
+    assert presentation.controls.query.density == "compact"
+    assert presentation.controls.dashboard.template == "stack"
+
+    with pytest.raises(ValidationError):
+        PresentationDefinition.model_validate(
+            {
+                "schema": "dataviz/presentation/v1",
+                "dashboard": "sales-overview",
+                "controls": {"query": {"template": "stack", "columns": 2}},
+            }
+        )
 
 
 def test_selector_auto_resolution_is_deterministic_and_unknown_names_are_rejected():
     choices = [{"label": str(index), "value": index} for index in range(9)]
     assert resolve_selector_presentation(
-        SelectionDefinition(id="status", type="single_select", choices=choices[:4])
+        SelectionControlDefinition(
+            id="status", kind="selection", type="single_select", choices=choices[:4]
+        )
     )["template"] == "segmented"
     assert resolve_selector_presentation(
-        SelectionDefinition(id="region", type="multi_select", choices=choices[:8])
+        SelectionControlDefinition(
+            id="region", kind="selection", type="multi_select", choices=choices[:8]
+        )
     )["template"] == "checkbox-group"
     flat = resolve_selector_presentation(
-        SelectionDefinition(id="store", type="multi_select", choices=choices)
+        SelectionControlDefinition(
+            id="store", kind="selection", type="multi_select", choices=choices
+        )
     )
     assert flat["template"] == "select"
     assert flat["virtual"] == "auto"
     assert resolve_selector_presentation(
-        SelectionDefinition(
+        SelectionControlDefinition(
             id="district",
+            kind="selection",
             type="multi_select",
             path_fields=["province", "city", "district"],
         )
@@ -448,7 +481,7 @@ def test_selector_auto_resolution_is_deterministic_and_unknown_names_are_rejecte
 def test_portable_selector_markup_supports_search_and_hidden_unavailable_options():
     workspace = load_workspace(WORKSPACE)
     dashboard = workspace.dashboard("sales-overview")
-    definition = dashboard.definition.dashboard_selections[0]
+    definition = dashboard.definition.controls[0]
     markup = CanvasRenderer(workspace)._portable_field(
         "dashboard:sales-overview/region",
         definition,
@@ -472,8 +505,9 @@ def test_portable_selector_markup_supports_search_and_hidden_unavailable_options
 
 def test_portable_cascader_declares_data_driven_path_levels():
     workspace = load_workspace(WORKSPACE)
-    definition = SelectionDefinition(
+    definition = SelectionControlDefinition(
         id="district",
+        kind="selection",
         label="District",
         type="multi_select",
         path_fields=["province", "city", "district"],
@@ -504,7 +538,7 @@ def test_showcase_view_selection_uses_data_driven_cascader():
     report = CanvasRenderer(workspace).render(dashboard, result)
 
     detail = dashboard.views["city-detail"]
-    district = next(item for item in detail.selections if item.id == "district")
+    district = next(item for item in detail.controls if item.id == "district")
     assert district.path_fields == ["province", "city", "district"]
     assert 'data-selector-template="cascader"' in report
     assert 'data-cascader-view="city-detail"' in report
@@ -637,9 +671,9 @@ views:
     ]
 
 
-def test_declarative_selection_contract_uses_field_binding():
+def test_declarative_control_contract_uses_field_binding():
     dashboard = load_workspace(WORKSPACE).dashboard("sales-overview")
-    contract = compile_selection_contract(dashboard.definition)
+    contract = compile_control_contract(dashboard.definition)
 
     assert set(contract) == set(dashboard.views)
     assert all(selections[0].binding.field == "region" for selections in contract.values())
@@ -662,22 +696,44 @@ def test_declarative_renderer_limits_selection_redraw_to_affected_views():
     "removed_fragment",
     [
         {"dashboard_filters": [{"id": "region"}]},
+        {"dashboard_selections": [{"id": "region"}]},
+        {"compute_parameters": [{"id": "seed"}]},
         {"sections": [{"id": "main", "title": "Main", "filters": []}]},
+        {"sections": [{"id": "main", "title": "Main", "selections": []}]},
         {"canvas": {"client_filters": True}},
         {"canvas": {"style": "canvas/style.css"}},
         {"canvas": {"script": "canvas/script.js"}},
         {"layout": {"items": [{"widget": "detail"}]}},
         {"views": [{"id": "detail", "template": "table", "source": "sales"}]},
+        {"views": [{"id": "detail", "template": "table", "selections": []}]},
     ],
 )
 def test_removed_schema_fields_are_rejected(removed_fragment):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v2",
+                "schema": "dataviz/dashboard/v3",
                 "kind": "dashboard",
                 "id": "strict",
                 **removed_fragment,
+            }
+        )
+    assert any(error["type"] == "extra_forbidden" for error in failure.value.errors())
+
+
+@pytest.mark.parametrize("removed_field", ["compute_params", "selections"])
+def test_interactive_transform_rejects_old_unscoped_input_maps(removed_field):
+    with pytest.raises(ValidationError) as failure:
+        InteractiveTransformDefinition.model_validate(
+            {
+                "schema": "dataviz/interactive-transform/v1",
+                "kind": "interactive_transform",
+                "id": "strict",
+                "runtime": "browser-js",
+                "code": "transform.js",
+                "export": {"mode": "interactive"},
+                "outputs": {"main": {"kind": "table"}},
+                removed_field: {"value": "dashboard:strict/value"},
             }
         )
     assert any(error["type"] == "extra_forbidden" for error in failure.value.errors())
@@ -717,7 +773,7 @@ def test_layout_and_view_bounds_are_enforced(fragment, location):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v2",
+                "schema": "dataviz/dashboard/v3",
                 "kind": "dashboard",
                 "id": "strict",
                 **fragment,
@@ -728,8 +784,8 @@ def test_layout_and_view_bounds_are_enforced(fragment, location):
 
 def test_selection_contract_is_include_only():
     with pytest.raises(ValidationError):
-        SelectionDefinition.model_validate(
-            {"id": "region", "type": "multi_select", "mode": "exclude"}
+        SelectionControlDefinition.model_validate(
+            {"id": "region", "kind": "selection", "type": "multi_select", "mode": "exclude"}
         )
 
 

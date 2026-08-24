@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from dataviz.artifacts import ArtifactDescriptor, ArtifactStore
 from dataviz.errors import ExecutionFailure
+from dataviz.execution.selection_filter import apply_selection_filters
 
 
 @dataclass(slots=True)
@@ -20,6 +21,7 @@ class ExecutionContext:
     selections: dict[str, Any]
     inputs: dict[str, ArtifactDescriptor]
     store: ArtifactStore
+    selection_filters: tuple[dict[str, Any], ...] = ()
     adapter: dict[str, Any] | None = None
     _progress_callback: Callable[[float | None, str], None] | None = None
     _log_callback: Callable[[dict[str, Any]], None] | None = None
@@ -28,11 +30,16 @@ class ExecutionContext:
         descriptor = self.inputs[name]
         if descriptor.kind != "table":
             raise ExecutionFailure(f"Input {name} is {descriptor.kind}, not table")
-        return self.store.read_table(descriptor)
+        return apply_selection_filters(
+            self.store.read_table(descriptor),
+            self.selection_filters,
+        )
 
     def input(self, name: str) -> Any:
         """Read one explicitly named Source/Transform input."""
         descriptor = self.inputs[name]
+        if descriptor.kind == "table":
+            return self.table(name)
         return self.store.read_value(descriptor)
 
     def artifact(self, name: str) -> ArtifactDescriptor:

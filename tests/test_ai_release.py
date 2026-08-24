@@ -134,7 +134,7 @@ def test_generated_schema_cli_uses_strict_installed_models():
 
 def test_dsl_schema_versions_are_literals_not_descriptive_strings():
     assert DashboardDefinition.model_validate(
-        {"schema": "dataviz/dashboard/v2", "kind": "dashboard", "id": "current"}
+        {"schema": "dataviz/dashboard/v3", "kind": "dashboard", "id": "current"}
     ).id == "current"
     with pytest.raises(ValidationError):
         DashboardDefinition.model_validate(
@@ -166,7 +166,7 @@ def test_machine_identifiers_are_portable_and_unambiguous(identifier: str):
     with pytest.raises(ValidationError):
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v2",
+                "schema": "dataviz/dashboard/v3",
                 "kind": "dashboard",
                 "id": identifier,
             }
@@ -188,7 +188,7 @@ def test_old_dashboard_is_rejected_and_no_migration_command_is_exposed(tmp_path:
     entry = next(item for item in workspace.catalog if item.id == "hello")
     assert entry.status == "invalid"
     assert any(
-        "dataviz/dashboard/v2" in str(item.details)
+        "dataviz/dashboard/v3" in str(item.details)
         for item in workspace.load_diagnostics
         if item.code == "dashboard_invalid"
     )

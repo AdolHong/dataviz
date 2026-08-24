@@ -21,7 +21,7 @@ from dataviz.templates import (
     template_catalog,
 )
 from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace, validate_workspace
-from dataviz.workspace.selections import compile_selection_contract
+from dataviz.workspace.controls import compile_control_contract
 
 
 RUNTIME_CONTRACT = [
@@ -375,7 +375,7 @@ def build_context_payload(
             ],
         }
 
-    contract = compile_selection_contract(dashboard.definition)
+    contract = compile_control_contract(dashboard.definition)
     if parsed_focus is None:
         view_ids = set(dashboard.views)
         section_ids = {value.id for value in dashboard.definition.sections}
@@ -391,8 +391,14 @@ def build_context_payload(
         view_id: [value.as_dict() for value in contract.get(view_id, [])]
         for view_id in sorted(view_ids)
     }
+    control_keys = {
+        value["key"] for controls in effective_contract.values() for value in controls
+    }
     selection_keys = {
-        value["key"] for selections in effective_contract.values() for value in selections
+        value["key"]
+        for controls in effective_contract.values()
+        for value in controls
+        if value["kind"] == "selection"
     }
     relevant_params = {
         parameter
@@ -411,11 +417,14 @@ def build_context_payload(
         for identifier in interactive_ids
         for parameter in dashboard.interactive_transforms[identifier][1].query_params
     )
-    relevant_compute_params = {
-        parameter
+    control_keys.update(
+        key
         for identifier in interactive_ids
-        for parameter in dashboard.interactive_transforms[identifier][1].compute_params
-    }
+        for key in {
+            *dashboard.interactive_transforms[identifier][1].compute_inputs.values(),
+            *dashboard.interactive_transforms[identifier][1].selection_inputs.values(),
+        }
+    )
 
     if parsed_focus is None:
         logic_definition: dict[str, Any] = dashboard.logic_definition.model_dump(
@@ -455,15 +464,10 @@ def build_context_payload(
                 for value in dashboard.logic_definition.query_parameters
                 if value.id in relevant_params
             ],
-            "compute_parameters": [
+            "controls": [
                 value.model_dump(mode="json")
-                for value in dashboard.logic_definition.compute_parameters
-                if value.id in relevant_compute_params
-            ],
-            "dashboard_selections": [
-                value.model_dump(mode="json")
-                for value in dashboard.logic_definition.dashboard_selections
-                if f"dashboard:{dashboard.definition.id}/{value.id}" in selection_keys
+                for value in dashboard.logic_definition.controls
+                if f"dashboard:{dashboard.definition.id}/{value.id}" in control_keys
             ],
             "sections": [
                 logic_sections[value].model_dump(mode="json")
@@ -523,7 +527,7 @@ def build_context_payload(
         "templates": templates,
         "runtime_contract": RUNTIME_CONTRACT,
         "authoring_feedback": authoring_prompt(dashboard.definition.id),
-        "effective_selections": effective_contract,
+        "effective_controls": effective_contract,
         "sources": {
             key: _source_payload(workspace, *dashboard.sources[key])
             for key in sorted(source_ids)
@@ -658,7 +662,7 @@ def build_authoring_benchmark(
             "sections": len(dashboard.definition.sections),
             "views": len(dashboard.views),
             "selection_bindings": sum(
-                len(values) for values in compile_selection_contract(dashboard.definition).values()
+                len(values) for values in compile_control_contract(dashboard.definition).values()
             ),
         },
         "validation": {"valid": not errors, "errors": errors},
@@ -708,7 +712,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         files = {
             "dashboard.yaml": _yaml(
                 {
-                    "schema": "dataviz/dashboard/v2",
+                    "schema": "dataviz/dashboard/v3",
                     "kind": "dashboard",
                     "id": item_id,
                     "title": item_id.replace("-", " ").title(),
@@ -797,8 +801,8 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                     "runtime": runtime,
                     "code": f"{item_id}.{suffix}",
                     "inputs": {"data": "source:data/main"},
-                    "compute_params": [],
-                    "selections": [],
+                    "compute_inputs": {},
+                    "selection_inputs": {},
                     "trigger": "apply",
                     "export": (
                         {"mode": "interactive", "assets": "cdn"}
@@ -875,9 +879,10 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                 "title": "{entity_id}",
             }
         if template == "selection-gallery":
-            definition["selections"] = [
+            definition["controls"] = [
                 {
                     "id": "groups",
+                    "kind": "selection",
                     "field": "entity_id",
                     "type": "multi_select",
                     "label": "Groups",
@@ -900,6 +905,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         )
         selection = {
             "id": item_id,
+            "kind": "selection",
             "field": path_fields[-1] if path_fields else item_id,
             "type": selection_type,
             "label": item_id.replace("-", " ").title(),
@@ -919,7 +925,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                 {"label": "Beta", "value": "beta"},
             ]
         files = {
-            "dashboard.selection.snippet.yaml": _yaml([selection]),
+            "dashboard.control.snippet.yaml": _yaml([selection]),
             "presentation.selector.snippet.yaml": _yaml(
                 {"selectors": {f"view:view-id/{item_id}": {"template": template}}}
             ),

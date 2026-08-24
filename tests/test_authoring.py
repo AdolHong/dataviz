@@ -46,7 +46,7 @@ from dataviz.workspace.models import (
     PresentationDefinition,
     PresentationSelectorDefinition,
     SectionDefinition,
-    SelectionDefinition,
+    SelectionControlDefinition,
     SOURCE_DEFINITION_ADAPTER,
     ThemeDefinition,
 )
@@ -133,7 +133,7 @@ def test_machine_readable_component_examples_use_canonical_output_references():
 
 def test_machine_readable_documentation_examples_match_current_schemas():
     providers = {
-        "dataviz/dashboard/v2": DashboardDefinition,
+        "dataviz/dashboard/v3": DashboardDefinition,
         "dataviz/source/v1": SOURCE_DEFINITION_ADAPTER,
         "dataviz/dataset-transform/v1": DatasetTransformDefinition,
         "dataviz/interactive-transform/v1": InteractiveTransformDefinition,
@@ -212,9 +212,9 @@ def test_component_registry_reports_package_owned_implementations():
         "packages": 13,
         "package_implemented": 13,
         "bridge_implemented": 0,
-        "components": 50,
+        "components": 51,
         "stories": 29,
-        "test_declarations": 60,
+        "test_declarations": 61,
         "errors": [],
     }
     assert set(component_index()) == set(catalog)
@@ -261,7 +261,7 @@ def test_component_package_cli_check_and_new_selector_scaffolds():
     checkbox = CliRunner().invoke(
         app, ["scaffold", "selector.checkbox-group", "--id", "channel", "--format", "json"]
     )
-    docs = CliRunner().invoke(app, ["docs", "selections", "--format", "json"])
+    docs = CliRunner().invoke(app, ["docs", "controls", "--format", "json"])
     component = CliRunner().invoke(
         app, ["components", "selector.select", "--format", "json"]
     )
@@ -269,18 +269,18 @@ def test_component_package_cli_check_and_new_selector_scaffolds():
     assert check.exit_code == 0, check.stdout
     assert json.loads(check.stdout)["valid"] is True
     tree_files = json.loads(tree.stdout)["files"]
-    tree_selection = yaml.safe_load(tree_files["dashboard.selection.snippet.yaml"])[0]
+    tree_selection = yaml.safe_load(tree_files["dashboard.control.snippet.yaml"])[0]
     assert tree_selection["path_fields"] == ["province", "city", "district"]
-    date_selection = yaml.safe_load(json.loads(date.stdout)["files"]["dashboard.selection.snippet.yaml"])[0]
+    date_selection = yaml.safe_load(json.loads(date.stdout)["files"]["dashboard.control.snippet.yaml"])[0]
     assert date_selection["type"] == "date_range"
-    flat_selection = yaml.safe_load(json.loads(flat.stdout)["files"]["dashboard.selection.snippet.yaml"])[0]
+    flat_selection = yaml.safe_load(json.loads(flat.stdout)["files"]["dashboard.control.snippet.yaml"])[0]
     assert flat_selection["type"] == "multi_select"
     assert [item["value"] for item in flat_selection["choices"]] == ["alpha", "beta"]
     segmented_selection = yaml.safe_load(
-        json.loads(segmented.stdout)["files"]["dashboard.selection.snippet.yaml"]
+        json.loads(segmented.stdout)["files"]["dashboard.control.snippet.yaml"]
     )[0]
     checkbox_selection = yaml.safe_load(
-        json.loads(checkbox.stdout)["files"]["dashboard.selection.snippet.yaml"]
+        json.loads(checkbox.stdout)["files"]["dashboard.control.snippet.yaml"]
     )[0]
     assert segmented_selection["type"] == "single_select"
     assert segmented_selection["default"] == "alpha"
@@ -293,6 +293,10 @@ def test_component_package_cli_check_and_new_selector_scaffolds():
         "auto", "select", "segmented", "checkbox-group", "cascader", "tree-select", "date-range"
     }
     assert "auto/always/never" in docs_payload["selector_choice"]["select"]
+    documented_controls = yaml.safe_load(docs_payload["dashboard_example"])["controls"]
+    assert [item["kind"] for item in documented_controls] == ["selection", "compute"]
+    documented_inputs = yaml.safe_load(docs_payload["interactive_input_example"])
+    assert set(documented_inputs) == {"selection_inputs", "compute_inputs"}
     assert json.loads(component.stdout)["id"] == "selector.select"
 
 
@@ -326,8 +330,8 @@ def test_every_scaffold_recipe_matches_the_current_strict_models():
                 yaml.safe_load(files["dashboard.section.snippet.yaml"])[0]
             )
         elif recipe.startswith("selector."):
-            SelectionDefinition.model_validate(
-                yaml.safe_load(files["dashboard.selection.snippet.yaml"])[0]
+            SelectionControlDefinition.model_validate(
+                yaml.safe_load(files["dashboard.control.snippet.yaml"])[0]
             )
             selector = next(
                 iter(
@@ -347,7 +351,7 @@ def test_every_scaffold_recipe_matches_the_current_strict_models():
             "dashboard.section.snippet.yaml"
         ]
     )[0]
-    assert selection_gallery["selections"][0]["id"] == "groups"
+    assert selection_gallery["controls"][0]["id"] == "groups"
     assert selection_gallery["repeat"]["selection"] == "groups"
 
 
@@ -466,7 +470,7 @@ def test_focused_context_contains_only_the_view_dependency_closure():
     assert set(distribution["views"]) == {"distribution"}
     assert set(distribution["sources"]) == {"orders"}
     assert distribution["dataset_transforms"] == {}
-    assert set(distribution["effective_selections"]) == {"distribution"}
+    assert set(distribution["effective_controls"]) == {"distribution"}
     assert set(distribution["templates"]["views"]) == {"bar"}
 
     assert set(revenue["sources"]) == {"orders", "targets"}
@@ -581,7 +585,7 @@ def test_coordinate_layout_fields_are_strictly_rejected(layout):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v2",
+                "schema": "dataviz/dashboard/v3",
                 "kind": "dashboard",
                 "id": "strict",
                 "layout": layout,

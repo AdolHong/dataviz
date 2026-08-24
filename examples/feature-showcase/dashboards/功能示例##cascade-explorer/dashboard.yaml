@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v2
+schema: dataviz/dashboard/v3
 kind: dashboard
 id: cascade-explorer
 title: 级联选择器
@@ -6,8 +6,9 @@ description: 对照 SQL、Workspace 文件 Adapter 与看板内置 CSV，验证�
 adapters:
   warehouse: demo-duckdb
   uploads: shared-files
-dashboard_selections:
+controls:
   - id: province
+    kind: selection
     field: province
     type: multi_select
     label: 省份
@@ -36,13 +37,15 @@ views:
     template: table
     columns: [province, city, district, val]
     limit: 40
-    selections:
+    controls:
       - id: district
+        kind: selection
         type: multi_select
         label: 区县
         path_fields: [province, city, district]
         default: []
       - id: min_value
+        kind: selection
         field: val
         type: number
         label: 最低值
@@ -69,8 +72,9 @@ views:
 sections:
   - id: geography
     title: 地理级联
-    selections:
+    controls:
       - id: city
+        kind: selection
         field: city
         type: multi_select
         label: 城市

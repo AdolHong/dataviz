@@ -26,13 +26,16 @@ from dataviz.execution.python_process import execute_python_node
 from dataviz.execution.references import OutputReference, parse_output_reference
 from dataviz.execution.results import InteractionResult, NodeResult, RunResult
 from dataviz.redaction import redact_text, redact_value
-from dataviz.value_contract import ValueContractViolation, normalize_control_value
 from dataviz.workspace.loader import (
     LoadedDashboard,
     LoadedWorkspace,
     dashboard_validation_diagnostics,
 )
-from dataviz.workspace.selections import resolve_selection_values
+from dataviz.workspace.controls import (
+    resolve_compute_values,
+    resolve_selection_values,
+    scoped_control_registry,
+)
 
 
 InteractionObserver = Callable[[dict[str, Any]], None]
@@ -40,40 +43,6 @@ InteractionObserver = Callable[[dict[str, Any]], None]
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _coerce_value(definition, value: Any) -> Any:
-    try:
-        return normalize_control_value(definition, value)
-    except ValueContractViolation as error:
-        raise ExecutionFailure(
-            f"Invalid Compute Parameter {definition.id}: {error.message}",
-            details={
-                "code": f"compute_parameter_{error.code}",
-                "id": definition.id,
-                "reason": error.message,
-            },
-        ) from error
-
-
-def resolve_compute_parameters(
-    dashboard: LoadedDashboard, values: dict[str, Any] | None
-) -> dict[str, Any]:
-    """Resolve the Compute namespace without accepting Query Parameter keys."""
-    supplied = values or {}
-    definitions = {
-        item.id: item for item in dashboard.definition.compute_parameters
-    }
-    unknown = sorted(set(supplied) - set(definitions))
-    if unknown:
-        raise ExecutionFailure(
-            "Unknown Compute Parameters",
-            details={"code": "compute_parameter_unknown", "ids": unknown},
-        )
-    return {
-        identifier: _coerce_value(definition, supplied.get(identifier, definition.default))
-        for identifier, definition in definitions.items()
-    }
 
 
 @dataclass(slots=True)
@@ -302,8 +271,11 @@ class InteractionExecutor:
                 },
             )
         interaction_id = interaction_id or f"ix_{uuid.uuid4().hex[:16]}"
-        compute_values = resolve_compute_parameters(dashboard, compute_parameters)
-        selection_values, _ = resolve_selection_values(
+        compute_values = resolve_compute_values(
+            dashboard.definition,
+            compute_parameters,
+        )
+        selection_values = resolve_selection_values(
             dashboard.definition, selections
         )
         result = InteractionResult(
@@ -515,6 +487,18 @@ class InteractionExecutor:
                         },
                     )
                 inputs[name] = descriptor
+            selection_registry = scoped_control_registry(
+                dashboard.definition,
+                kind="selection",
+            )
+            selection_filters = tuple(
+                {
+                    **selection_registry[control_key].as_dict(),
+                    "alias": alias,
+                    "value": interaction.selections.get(control_key),
+                }
+                for alias, control_key in node.definition.selection_inputs.items()
+            )
             context = ExecutionContext(
                 workspace_root=self.workspace.root,
                 dashboard_root=dashboard.root,
@@ -524,13 +508,14 @@ class InteractionExecutor:
                     for key in node.definition.query_params
                 },
                 compute_params={
-                    key: interaction.compute_parameters.get(key)
-                    for key in node.definition.compute_params
+                    alias: interaction.compute_parameters.get(control_key)
+                    for alias, control_key in node.definition.compute_inputs.items()
                 },
                 selections={
-                    key: interaction.selections.get(key)
-                    for key in node.definition.selections
+                    alias: interaction.selections.get(control_key)
+                    for alias, control_key in node.definition.selection_inputs.items()
                 },
+                selection_filters=selection_filters,
                 inputs=inputs,
                 store=store,
                 adapter=None,

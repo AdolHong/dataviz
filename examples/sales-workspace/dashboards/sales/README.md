@@ -4,4 +4,4 @@
 
 `target_factor` 是取数参数，用于模拟 SQL 目标调整。
 
-`region` 是 Dashboard Selection；`min_revenue` 是经营脉搏 Section Selection；`min_orders` 只属于明细 View。Server 和导出 HTML 都在浏览器中把三者应用到已加载的数据集，不会重新查询数据源。
+`region` 是 Dashboard 作用域的 Selection Control；`min_revenue` 是经营脉搏 Section 的 Selection Control；`min_orders` 只属于明细 View。Server 和导出 HTML 都在浏览器中把三者应用到已加载的数据集，不会重新查询数据源。

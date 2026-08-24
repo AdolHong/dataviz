@@ -1,24 +1,24 @@
 /* Runtime-critical overlay geometry. Themes may override every visual token. */
 [data-overlay-panel][hidden], [data-selector-panel][hidden] { display: none !important; }
 [data-overlay-panel], [data-selector-panel] { z-index: var(--dv-overlay-z, 1000); box-sizing: border-box; overflow: auto; overscroll-behavior: contain; }
-.dv-context-selections, .dv-runtime-control, [data-header-popover], [data-runtime-popover] { position: relative; }
-.dv-context-selections > summary,
+.dv-context-controls, .dv-runtime-control, [data-header-popover], [data-runtime-popover] { position: relative; }
+.dv-context-controls > summary,
 .dv-runtime-control > summary,
 [data-header-popover] > summary,
 [data-runtime-popover] > summary { cursor: pointer; list-style: none; }
-.dv-context-selections > summary::-webkit-details-marker,
+.dv-context-controls > summary::-webkit-details-marker,
 .dv-runtime-control > summary::-webkit-details-marker,
 [data-header-popover] > summary::-webkit-details-marker,
 [data-runtime-popover] > summary::-webkit-details-marker { display: none; }
-.dv-context-selections__panel, .dv-runtime-popover {
+.dv-context-controls__panel, .dv-runtime-popover {
   position: absolute;
   z-index: 80;
   max-width: calc(100vw - 24px);
   top: calc(100% + 5px);
 }
-.dv-context-selections[data-selection-origin="view"] .dv-context-selections__panel { right: 0; left: auto; }
+.dv-context-controls[data-control-origin="view"] .dv-context-controls__panel { right: 0; left: auto; }
 [data-overlay-placement="top"]::before { transform: rotate(180deg); }
 [aria-expanded="true"] > i { transform: rotate(180deg); }
 @media (max-width: 800px) {
-  .dv-context-selections__panel, .dv-runtime-popover { max-width: calc(100vw - 24px); }
+  .dv-context-controls__panel, .dv-runtime-popover { max-width: calc(100vw - 24px); }
 }

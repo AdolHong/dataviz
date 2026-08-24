@@ -45,17 +45,17 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v2
+        """schema: dataviz/dashboard/v3
 kind: dashboard
 id: interactive
 title: Interactive contract
 query_parameters:
   - {id: batch, type: integer, default: 7}
-compute_parameters:
-  - {id: factor, type: integer, default: 2}
-  - {id: delay, type: number, default: 0}
-dashboard_selections:
+controls:
+  - {id: factor, kind: compute, type: integer, default: 2}
+  - {id: delay, kind: compute, type: number, default: 0}
   - id: region
+    kind: selection
     type: multi_select
     field: region
     choices:
@@ -89,8 +89,11 @@ code: summary.py
 inputs:
   rows: source:raw/main
 query_params: [batch]
-compute_params: [factor, delay]
-selections: [dashboard:interactive/region]
+compute_inputs:
+  factor: dashboard:interactive/factor
+  delay: dashboard:interactive/delay
+selection_inputs:
+  region: dashboard:interactive/region
 trigger: apply
 export: {{mode: snapshot}}
 outputs:
@@ -114,10 +117,10 @@ def transform(context):
     context.progress(0.1, "started")
     time.sleep(float(context.compute_params["delay"]))
     frame = context.table("rows").copy()
-    selected = context.selections["dashboard:interactive/region"]
+    selected = context.selections["region"]
     context.log("applying region selection", selected=selected)
     if selected:
-        frame = frame[frame["region"].isin(selected)]
+        assert frame["region"].tolist() == selected
     frame["value"] = frame["value"] * int(context.compute_params["factor"])
     frame["batch"] = int(context.query_params["batch"])
     context.progress(1.0, "complete")
@@ -150,14 +153,14 @@ def test_server_interactive_transform_has_isolated_context_named_outputs_and_cac
     first = executor.execute(
         run,
         "summary",
-        compute_parameters={"factor": 3, "delay": 0},
+        compute_parameters={"dashboard:interactive/factor": 3, "dashboard:interactive/delay": 0},
         selections={"dashboard:interactive/region": ["north"]},
         observer=events.append,
     )
     second = executor.execute(
         run,
         "summary",
-        compute_parameters={"factor": 3, "delay": 0},
+        compute_parameters={"dashboard:interactive/factor": 3, "dashboard:interactive/delay": 0},
         selections={"dashboard:interactive/region": ["north"]},
     )
 
@@ -165,7 +168,7 @@ def test_server_interactive_transform_has_isolated_context_named_outputs_and_cac
     frame = store.read_table(first.outputs["interactive:summary/main"])
     assert first.status == "ready"
     assert first.query_parameters == {"batch": 11}
-    assert first.compute_parameters == {"factor": 3, "delay": 0}
+    assert first.compute_parameters == {"dashboard:interactive/factor": 3, "dashboard:interactive/delay": 0}
     assert first.selections == {"dashboard:interactive/region": ["north"]}
     assert frame.to_dict(orient="records") == [
         {"region": "north", "value": 6, "batch": 11}
@@ -219,7 +222,7 @@ def test_server_interactive_inputs_are_classified_and_reuse_the_tab_run_snapshot
             session_id=SESSION_B,
             target="summary",
             generation=1,
-            compute_parameters={"factor": 4, "delay": 0},
+            compute_parameters={"dashboard:interactive/factor": 4, "dashboard:interactive/delay": 0},
             selections={"dashboard:interactive/region": ["north"]},
         )
 
@@ -228,7 +231,7 @@ def test_server_interactive_inputs_are_classified_and_reuse_the_tab_run_snapshot
         session_id=SESSION_A,
         target="summary",
         generation=1,
-        compute_parameters={"factor": 4, "delay": 0},
+        compute_parameters={"dashboard:interactive/factor": 4, "dashboard:interactive/delay": 0},
         selections={"dashboard:interactive/region": ["north"]},
     )
     wait_for(lambda: interaction.status in {"ready", "error", "cancelled"})
@@ -345,7 +348,7 @@ def test_server_interactive_timeout_and_cancel_are_process_hard_boundaries(
     timeout_result = InteractionExecutor(workspace).execute(
         run,
         "summary",
-        compute_parameters={"factor": 2, "delay": 2},
+        compute_parameters={"dashboard:interactive/factor": 2, "dashboard:interactive/delay": 2},
     )
     timeout_node = timeout_result.nodes["interactive:summary"]
     assert timeout_result.status == "error"
@@ -367,7 +370,7 @@ def test_server_interactive_timeout_and_cancel_are_process_hard_boundaries(
             InteractionExecutor(workspace).execute(
                 run,
                 "summary",
-                compute_parameters={"factor": 2, "delay": 5},
+                compute_parameters={"dashboard:interactive/factor": 2, "dashboard:interactive/delay": 5},
                 cancel_event=cancel_event,
                 observer=events.append,
             ),
@@ -396,7 +399,7 @@ def test_interaction_generations_are_isolated_by_tab_dashboard_and_query_run(
         session_id=SESSION_A,
         target="summary",
         generation=1,
-        compute_parameters={"factor": 2, "delay": 5},
+        compute_parameters={"dashboard:interactive/factor": 2, "dashboard:interactive/delay": 5},
         selections={"dashboard:interactive/region": ["north"]},
     )
     first_b = manager.start_interaction(
@@ -404,7 +407,7 @@ def test_interaction_generations_are_isolated_by_tab_dashboard_and_query_run(
         session_id=SESSION_B,
         target="summary",
         generation=1,
-        compute_parameters={"factor": 4, "delay": 0.2},
+        compute_parameters={"dashboard:interactive/factor": 4, "dashboard:interactive/delay": 0.2},
         selections={"dashboard:interactive/region": ["south"]},
     )
     wait_for(lambda: any(event["event"] == "node_progress" for event in first_a.events))
@@ -413,7 +416,7 @@ def test_interaction_generations_are_isolated_by_tab_dashboard_and_query_run(
         session_id=SESSION_A,
         target="summary",
         generation=2,
-        compute_parameters={"factor": 3, "delay": 0},
+        compute_parameters={"dashboard:interactive/factor": 3, "dashboard:interactive/delay": 0},
         selections={"dashboard:interactive/region": ["north"]},
     )
     wait_for(
@@ -453,7 +456,7 @@ def test_server_interactions_are_globally_bounded_on_one_machine(tmp_path: Path)
         session_id=SESSION_A,
         target="summary",
         generation=1,
-        compute_parameters={"factor": 2, "delay": 0.4},
+        compute_parameters={"dashboard:interactive/factor": 2, "dashboard:interactive/delay": 0.4},
         selections={"dashboard:interactive/region": ["north"]},
     )
     wait_for(lambda: first.status == "loading")
@@ -462,7 +465,7 @@ def test_server_interactions_are_globally_bounded_on_one_machine(tmp_path: Path)
         session_id=SESSION_B,
         target="summary",
         generation=1,
-        compute_parameters={"factor": 3, "delay": 0},
+        compute_parameters={"dashboard:interactive/factor": 3, "dashboard:interactive/delay": 0},
         selections={"dashboard:interactive/region": ["south"]},
     )
 
@@ -490,7 +493,7 @@ def test_queued_server_interaction_can_be_cancelled_before_slot_is_available(
             session_id=SESSION_A,
             target="summary",
             generation=1,
-            compute_parameters={"factor": 2, "delay": 0},
+            compute_parameters={"dashboard:interactive/factor": 2, "dashboard:interactive/delay": 0},
             selections={"dashboard:interactive/region": ["north"]},
         )
         manager.cancel_interaction(interaction.interaction_id, SESSION_A)
@@ -536,7 +539,7 @@ def test_server_rejects_interaction_when_query_contract_changed(
             "session_id": SESSION_A,
             "transform_id": "summary",
             "generation": 1,
-            "compute_parameters": {"factor": 2, "delay": 0},
+            "compute_parameters": {"dashboard:interactive/factor": 2, "dashboard:interactive/delay": 0},
             "selections": {},
         },
     )
@@ -581,8 +584,11 @@ id: downstream
 runtime: server-python
 code: downstream.py
 inputs: {rows: interactive:summary/main}
-compute_params: [factor, delay]
-selections: [dashboard:interactive/region]
+compute_inputs:
+  factor: dashboard:interactive/factor
+  delay: dashboard:interactive/delay
+selection_inputs:
+  region: dashboard:interactive/region
 trigger: apply
 export: {mode: snapshot}
 outputs: {total: {kind: scalar}}
@@ -607,7 +613,7 @@ cache: {mode: none}
         session_id=SESSION_A,
         target="summary",
         generation=1,
-        compute_parameters={"factor": 2, "delay": 0},
+        compute_parameters={"dashboard:interactive/factor": 2, "dashboard:interactive/delay": 0},
         selections={"dashboard:interactive/region": ["north"]},
     )
     wait_for(lambda: upstream.status == "ready")
@@ -616,7 +622,7 @@ cache: {mode: none}
         session_id=SESSION_A,
         target="downstream",
         generation=1,
-        compute_parameters={"factor": 2, "delay": 0},
+        compute_parameters={"dashboard:interactive/factor": 2, "dashboard:interactive/delay": 0},
         selections={"dashboard:interactive/region": ["north"]},
     )
     wait_for(lambda: downstream.status == "ready")
@@ -637,7 +643,7 @@ cache: {mode: none}
         session_id=SESSION_A,
         target="downstream",
         generation=2,
-        compute_parameters={"factor": 2, "delay": 0},
+        compute_parameters={"dashboard:interactive/factor": 2, "dashboard:interactive/delay": 0},
         selections={"dashboard:interactive/region": ["north"]},
     )
     wait_for(lambda: recovered.status == "ready")
@@ -673,7 +679,7 @@ def test_server_report_materializes_server_python_snapshot(tmp_path: Path):
         json={
             "session_id": SESSION_A,
             "run_id": run_id,
-            "compute_parameters": {"factor": 3, "delay": 0},
+            "compute_parameters": {"dashboard:interactive/factor": 3, "dashboard:interactive/delay": 0},
             "selections": {"dashboard:interactive/region": ["north"]},
         },
     )
@@ -694,7 +700,7 @@ def test_interaction_api_rejects_out_of_order_generation_without_cancelling_late
     request = {
         "session_id": SESSION_A,
         "transform_id": "summary",
-        "compute_parameters": {"factor": 3, "delay": 0.2},
+        "compute_parameters": {"dashboard:interactive/factor": 3, "dashboard:interactive/delay": 0.2},
         "selections": {"dashboard:interactive/region": ["north"]},
     }
 
@@ -757,7 +763,7 @@ def test_browser_snapshot_requires_current_canvas_outputs_and_embeds_them(
     state = {
         "session_id": SESSION_A,
         "run_id": run_id,
-        "compute_parameters": {"factor": 3, "delay": 0},
+        "compute_parameters": {"dashboard:interactive/factor": 3, "dashboard:interactive/delay": 0},
         "selections": {"dashboard:interactive/region": ["north"]},
     }
 

@@ -9,7 +9,10 @@ runtime: browser-js
 inputs:
   metrics: source:metrics/main
 query_params: []
-selections: []
+compute_inputs:
+  city_count: dashboard:chart-gallery/radar_city_count
+selection_inputs:
+  province: dashboard:chart-gallery/province
 trigger: auto
 export: {mode: interactive}
 outputs:

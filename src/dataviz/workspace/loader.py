@@ -17,8 +17,8 @@ from packaging.utils import canonicalize_name
 from pydantic import ValidationError
 
 from dataviz.content_templates import (
-    allowed_content_selections,
-    content_selection_contract,
+    allowed_content_controls,
+    content_control_contract,
     content_template_fields,
     inspect_content_template,
 )
@@ -48,7 +48,8 @@ from dataviz.workspace.naming import (
     folder_trash_id,
     normalize_logical_path,
 )
-from dataviz.workspace.selections import compile_selection_contract
+from dataviz.workspace.controls import compile_control_contract, scoped_control_registry
+from dataviz.workspace.selection_domains import selection_option_domain_references
 from dataviz.view_contracts import referenced_view_fields, validate_view_contract
 
 
@@ -469,8 +470,9 @@ def _apply_presentation(
 
     selection_keys = {
         item.key
-        for selections in compile_selection_contract(logic).values()
-        for item in selections
+        for controls in compile_control_contract(logic).values()
+        for item in controls
+        if item.kind == "selection"
     }
     for selector_key in presentation.selectors:
         if selector_key not in selection_keys:
@@ -1459,6 +1461,40 @@ def _interactive_ancestors(
     return result
 
 
+def _interactive_downstream_views(
+    dashboard: LoadedDashboard,
+    transform_id: str,
+) -> set[str]:
+    """Return every View reached through one Interactive Transform branch."""
+    views: set[str] = set()
+    pending = [transform_id]
+    visited: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current in visited:
+            continue
+        visited.add(current)
+        node_id = f"interactive:{current}"
+        for view in dashboard.definition.views:
+            for reference_value in view.input_refs.values():
+                try:
+                    reference = parse_output_reference(reference_value)
+                except Exception:
+                    continue
+                if reference.node_id == node_id:
+                    views.add(view.id)
+        for candidate_id, (_, candidate) in dashboard.interactive_transforms.items():
+            for reference_value in candidate.inputs.values():
+                try:
+                    reference = parse_output_reference(reference_value)
+                except Exception:
+                    continue
+                if reference.node_id == node_id:
+                    pending.append(candidate_id)
+                    break
+    return views
+
+
 def _reference_error(
     reference: str,
     *,
@@ -1609,24 +1645,42 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
         diagnostics.extend(dashboard.presentation_diagnostics or [])
         definition_path = str(dashboard.definition_path)
         parameter_ids = {item.id for item in dashboard.definition.query_parameters}
-        compute_parameter_ids = {
-            item.id for item in dashboard.definition.compute_parameters
+        control_registry = scoped_control_registry(dashboard.definition)
+        control_contract = compile_control_contract(dashboard.definition)
+        compute_control_keys = {
+            key for key, item in control_registry.items() if item.kind == "compute"
         }
-        selection_contract = content_selection_contract(dashboard.definition)
+        selection_control_keys = {
+            key for key, item in control_registry.items() if item.kind == "selection"
+        }
+        control_content_contract = content_control_contract(dashboard.definition)
         view_ids = set(dashboard.views)
 
-        duplicate_contracts = {
-            "query_parameters": _duplicates(
-                [item.id for item in dashboard.definition.query_parameters]
+        duplicate_contracts = [
+            (
+                "query_parameters",
+                _duplicates([item.id for item in dashboard.definition.query_parameters]),
             ),
-            "compute_parameters": _duplicates(
-                [item.id for item in dashboard.definition.compute_parameters]
+            (
+                "controls",
+                _duplicates([item.id for item in dashboard.definition.controls]),
             ),
-            "dashboard_selections": _duplicates(
-                [item.id for item in dashboard.definition.dashboard_selections]
+            *(
+                (
+                    f"sections.{section.id}.controls",
+                    _duplicates([item.id for item in section.controls]),
+                )
+                for section in dashboard.definition.sections
             ),
-        }
-        for field, duplicate_ids in duplicate_contracts.items():
+            *(
+                (
+                    f"views.{view.id}.controls",
+                    _duplicates([item.id for item in view.controls]),
+                )
+                for view in dashboard.definition.views
+            ),
+        ]
+        for field, duplicate_ids in duplicate_contracts:
             if duplicate_ids:
                 diagnostics.append(
                     Diagnostic(
@@ -1638,6 +1692,158 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         {"ids": duplicate_ids},
                     )
                 )
+
+        option_domain_contract_valid = True
+        for control_key, item in control_registry.items():
+            if item.kind != "selection" or not item.definition.options_from:
+                continue
+            reference = item.definition.options_from
+            message = _reference_error(
+                reference,
+                sources=dashboard.sources,
+                dataset_transforms=dashboard.dataset_transforms,
+                interactive_transforms=dashboard.interactive_transforms,
+                allow_interactive=False,
+            )
+            if message:
+                option_domain_contract_valid = False
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"Selection {control_key} options_from: {message}",
+                        definition_path,
+                        f"controls.{control_key}.options_from",
+                        "selection_option_domain_invalid",
+                        {"control": control_key, "reference": reference},
+                    )
+                )
+                continue
+            if _reference_kind(reference, dashboard) != "table":
+                option_domain_contract_valid = False
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"Selection {control_key} options_from must reference a table Output",
+                        definition_path,
+                        f"controls.{control_key}.options_from",
+                        "selection_option_domain_kind",
+                        {"control": control_key, "reference": reference},
+                    )
+                )
+                continue
+            output = _reference_output_definition(reference, dashboard)
+            if output is not None and output.schema_:
+                declared = {column.name for column in output.schema_}
+                required_fields = {
+                    field
+                    for effective_controls in control_contract.values()
+                    for effective in effective_controls
+                    if effective.key == control_key
+                    for field in (
+                        effective.definition.path_fields
+                        or [effective.binding.field or effective.id]
+                    )
+                } or set(
+                    item.definition.path_fields
+                    or [item.definition.field or item.id]
+                )
+                unknown = sorted(required_fields - declared)
+                if unknown:
+                    option_domain_contract_valid = False
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Selection {control_key} option domain does not declare fields: "
+                            + ", ".join(unknown),
+                            definition_path,
+                            f"controls.{control_key}.options_from",
+                            "selection_option_domain_field_unknown",
+                            {
+                                "control": control_key,
+                                "reference": reference,
+                                "unknown": unknown,
+                                "declared": sorted(declared),
+                            },
+                        )
+                    )
+
+        if option_domain_contract_valid:
+            try:
+                option_domains = selection_option_domain_references(dashboard)
+            except Exception as error:
+                option_domains = {}
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"Cannot compile Selection option domains: {error}",
+                        definition_path,
+                        "controls",
+                        "selection_option_domain_invalid",
+                    )
+                )
+            for control_key, item in control_registry.items():
+                definition = item.definition
+                dynamic_select = (
+                    item.kind == "selection"
+                    and definition.type in {"single_select", "multi_select"}
+                    and not definition.choices
+                )
+                references = option_domains.get(control_key, [])
+                if dynamic_select and not references:
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Dynamic Selection {control_key} has no Base Output option domain",
+                            definition_path,
+                            f"controls.{control_key}",
+                            "selection_option_domain_missing",
+                            {"control": control_key},
+                        )
+                    )
+                    continue
+                if not dynamic_select:
+                    continue
+                field_sets = [
+                    set(
+                        effective.definition.path_fields
+                        or [effective.binding.field or effective.id]
+                    )
+                    for effective_controls in control_contract.values()
+                    for effective in effective_controls
+                    if effective.key == control_key
+                ] or [set(definition.path_fields or [definition.field or definition.id])]
+                declared_domains: list[set[str]] = []
+                has_dynamic_schema = False
+                for reference in references:
+                    if _reference_kind(reference, dashboard) != "table":
+                        continue
+                    output = _reference_output_definition(reference, dashboard)
+                    if output is None or not output.schema_:
+                        has_dynamic_schema = True
+                        continue
+                    declared_domains.append({column.name for column in output.schema_})
+                if (
+                    not has_dynamic_schema
+                    and not all(
+                        any(fields <= declared for declared in declared_domains)
+                        for fields in field_sets
+                    )
+                ):
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Dynamic Selection {control_key} cannot derive its fields from any Base Output",
+                            definition_path,
+                            f"controls.{control_key}",
+                            "selection_option_domain_field_unknown",
+                            {
+                                "control": control_key,
+                                "references": references,
+                                "required_field_sets": [sorted(fields) for fields in field_sets],
+                                "declared_domains": [sorted(fields) for fields in declared_domains],
+                            },
+                        )
+                    )
 
         for field, value in content_template_fields(dashboard.definition):
             inspection = inspect_content_template(value)
@@ -1663,40 +1869,28 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         "content_parameter_unknown",
                     )
                 )
-            for parameter_id in sorted(
-                inspection.compute_parameters - compute_parameter_ids
-            ):
+            known_control_references = inspection.controls & set(control_content_contract)
+            for expression in sorted(inspection.controls - set(control_content_contract)):
                 diagnostics.append(
                     Diagnostic(
                         "error",
-                        f"Content references unknown Compute Parameter: {parameter_id}",
+                        f"Content references unknown Control: {expression}",
                         definition_path,
                         field,
-                        "content_compute_parameter_unknown",
-                    )
-                )
-            known_selection_references = inspection.selections & set(selection_contract)
-            for expression in sorted(inspection.selections - set(selection_contract)):
-                diagnostics.append(
-                    Diagnostic(
-                        "error",
-                        f"Content references unknown Selection: {expression}",
-                        definition_path,
-                        field,
-                        "content_selection_unknown",
+                        "content_control_unknown",
                     )
                 )
             for expression in sorted(
-                known_selection_references
-                - allowed_content_selections(dashboard.definition, field)
+                known_control_references
+                - allowed_content_controls(dashboard.definition, field)
             ):
                 diagnostics.append(
                     Diagnostic(
                         "error",
-                        f"Content references Selection outside its visible scope: {expression}",
+                        f"Content references Control outside its visible scope: {expression}",
                         definition_path,
                         field,
-                        "content_selection_out_of_scope",
+                        "content_control_out_of_scope",
                     )
                 )
 
@@ -2043,12 +2237,6 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         )
                     )
 
-        selection_contract = compile_selection_contract(dashboard.definition)
-        selection_keys = {
-            item.key
-            for selections in selection_contract.values()
-            for item in selections
-        }
         for transform_path, transform in dashboard.interactive_transforms.values():
             code_path = _code_path(transform_path, transform.code)
             if not _is_within(transform_path, dashboard.root):
@@ -2169,24 +2357,26 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             "query_params",
                         )
                     )
-            for parameter in transform.compute_params:
-                if parameter not in compute_parameter_ids:
+            for alias, control_key in transform.compute_inputs.items():
+                if control_key not in compute_control_keys:
                     diagnostics.append(
                         Diagnostic(
                             "error",
-                            f"Unknown Compute Parameter: {parameter}",
+                            f"Unknown Compute Control: {control_key}",
                             str(transform_path),
-                            "compute_params",
+                            f"compute_inputs.{alias}",
+                            "interactive_compute_control_unknown",
                         )
                     )
-            for selection in transform.selections:
-                if selection not in selection_keys:
+            for alias, control_key in transform.selection_inputs.items():
+                if control_key not in selection_control_keys:
                     diagnostics.append(
                         Diagnostic(
                             "error",
-                            f"Unknown canonical Selection key: {selection}",
+                            f"Unknown Selection Control: {control_key}",
                             str(transform_path),
-                            "selections",
+                            f"selection_inputs.{alias}",
+                            "interactive_selection_control_unknown",
                         )
                     )
             for name, reference in transform.inputs.items():
@@ -2262,6 +2452,36 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                 )
             )
 
+        control_views: dict[str, set[str]] = {}
+        for view_id, controls in control_contract.items():
+            for control in controls:
+                control_views.setdefault(control.key, set()).add(view_id)
+        for transform_id, (transform_path, transform) in dashboard.interactive_transforms.items():
+            downstream_views = _interactive_downstream_views(dashboard, transform_id)
+            for field_name, inputs in (
+                ("selection_inputs", transform.selection_inputs),
+                ("compute_inputs", transform.compute_inputs),
+            ):
+                for alias, control_key in inputs.items():
+                    outside_scope = sorted(
+                        downstream_views - control_views.get(control_key, set())
+                    )
+                    if outside_scope:
+                        diagnostics.append(
+                            Diagnostic(
+                                "error",
+                                f"Control {control_key} is outside downstream View scope: "
+                                + ", ".join(outside_scope),
+                                str(transform_path),
+                                f"{field_name}.{alias}",
+                                "interactive_control_out_of_scope",
+                                {
+                                    "control": control_key,
+                                    "views": outside_scope,
+                                },
+                            )
+                        )
+
         for transform_id, (transform_path, transform) in dashboard.interactive_transforms.items():
             ancestors = _interactive_ancestors(dashboard, transform_id)
             if transform.runtime == "server-python":
@@ -2289,7 +2509,10 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                     dependency = dashboard.interactive_transforms[ancestor][1]
                     stateful_snapshot = (
                         dependency.export.mode != "interactive"
-                        and bool(dependency.compute_params or dependency.selections)
+                        and bool(
+                            dependency.compute_inputs
+                            or dependency.selection_inputs
+                        )
                     )
                     unavailable = dependency.export.mode == "unavailable"
                     if stateful_snapshot or unavailable:
@@ -2344,26 +2567,26 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
             )
 
         trigger_consumers: dict[str, list[tuple[str, str]]] = {
-            parameter_id: [] for parameter_id in compute_parameter_ids
+            control_key: [] for control_key in compute_control_keys
         }
         for transform_id, (_, transform) in dashboard.interactive_transforms.items():
-            for parameter_id in transform.compute_params:
-                trigger_consumers.setdefault(parameter_id, []).append(
+            for control_key in transform.compute_inputs.values():
+                trigger_consumers.setdefault(control_key, []).append(
                     (transform_id, transform.trigger)
                 )
-        for parameter_id, consumers in trigger_consumers.items():
+        for control_key, consumers in trigger_consumers.items():
             triggers = {trigger for _, trigger in consumers}
             if len(triggers) > 1:
                 diagnostics.append(
                     Diagnostic(
                         "error",
-                        f"Compute Parameter {parameter_id} has consumers with incompatible "
+                        f"Compute Control {control_key} has consumers with incompatible "
                         f"triggers: {', '.join(sorted(triggers))}",
                         definition_path,
-                        "compute_parameters",
+                        "controls",
                         "compute_trigger_ambiguous",
                         {
-                            "parameter": parameter_id,
+                            "control": control_key,
                             "consumers": [
                                 {"transform": identifier, "trigger": trigger}
                                 for identifier, trigger in consumers
@@ -2447,7 +2670,8 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             )
                         selection_fields = {
                             field
-                            for item in selection_contract.get(view.id, [])
+                            for item in control_contract.get(view.id, [])
+                            if item.kind == "selection" and item.binding is not None
                             for field in (
                                 item.definition.path_fields
                                 or [item.binding.field or item.id]
@@ -2583,40 +2807,49 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             )
                         )
                 if section.template == "selection-gallery":
-                    selection_ids = {item.id for item in section.selections}
+                    selection_ids = {
+                        item.id
+                        for item in section.controls
+                        if item.kind == "selection"
+                    }
                     if not selection_ids:
                         diagnostics.append(
                             Diagnostic(
                                 "error",
-                                f"Section {section.id} selection-gallery requires a Section Selection",
+                                f"Section {section.id} selection-gallery requires a Section Control with kind=selection",
                                 definition_path,
-                                "sections.selections",
+                                "sections.controls",
                             )
                         )
                     elif section.repeat.selection and section.repeat.selection not in selection_ids:
                         diagnostics.append(
                             Diagnostic(
                                 "error",
-                                f"Section {section.id} repeat references unknown Section Selection",
+                                f"Section {section.id} repeat references an unknown Section Control with kind=selection",
                                 definition_path,
                                 "sections.repeat.selection",
                             )
                         )
 
-        for view_id, selections in selection_contract.items():
-            ids = [item.id for item in selections]
+        for view_id, controls in control_contract.items():
+            ids = [item.id for item in controls]
             duplicates = sorted({item for item in ids if ids.count(item) > 1})
             if duplicates:
                 diagnostics.append(
                     Diagnostic(
                         "error",
-                        f"Selection ids shadow each other for View {view_id}: {', '.join(duplicates)}",
+                        f"Control ids shadow each other for View {view_id}: {', '.join(duplicates)}",
                         definition_path,
-                        "selections",
+                        "controls",
                     )
                 )
             view = dashboard.views[view_id]
-            for selection_id in sorted(set(view.selection_bindings) - set(ids)):
+            selection_ids = {
+                item.id for item in controls if item.kind == "selection"
+            }
+            for selection_id in sorted(
+                set(view.selection_bindings) - selection_ids
+            ):
                 diagnostics.append(
                     Diagnostic(
                         "error",

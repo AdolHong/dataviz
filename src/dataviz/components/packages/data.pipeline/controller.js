@@ -79,6 +79,71 @@
     }
   }
 
+  function selectedWorkerInputs(item, inputs, services) {
+    const filters = Object.entries(item.spec.selection_contract || {}).map(
+      ([alias, contract]) => ({
+        alias,
+        contract,
+        value:global.dataviz.selections?.[contract.key],
+      })
+    );
+    const prepared = Object.fromEntries(
+      Object.entries(inputs).map(([name, value]) => [name, services.workerValue(value)])
+    );
+    if (!filters.length) return prepared;
+
+    const active = filters.filter(({value}) => !(
+      value == null
+      || value === ''
+      || (Array.isArray(value) && value.length === 0)
+    ));
+    if (!active.length) return prepared;
+
+    const filterRows = rows => {
+      if (!Array.isArray(rows) || !rows.some(row => row && typeof row === 'object' && !Array.isArray(row))) {
+        return rows;
+      }
+      return rows.filter(row => active.every(({contract, value}) => (
+        services.selectionMatches(row, contract, value)
+      )));
+    };
+    const filterColumnar = table => {
+      const columns = table?.columns || {};
+      const length = Number(table?.length || 0);
+      const applicable = active.filter(({contract}) => {
+        const definition = contract.definition || {};
+        const fields = (definition.path_fields || []).length
+          ? definition.path_fields
+          : [contract.binding?.field || definition.field || contract.id];
+        return fields.every(field => Object.prototype.hasOwnProperty.call(columns, field));
+      });
+      if (!applicable.length || !length) return table;
+      const indices = [];
+      for (let index = 0; index < length; index += 1) {
+        const row = Object.fromEntries(
+          Object.entries(columns).map(([name, values]) => [name, values[index]])
+        );
+        if (applicable.every(({contract, value}) => services.selectionMatches(row, contract, value))) {
+          indices.push(index);
+        }
+      }
+      return {
+        ...table,
+        length:indices.length,
+        columns:Object.fromEntries(
+          Object.entries(columns).map(([name, values]) => [
+            name,
+            indices.map(index => values[index]),
+          ])
+        ),
+      };
+    };
+    return Object.fromEntries(Object.entries(prepared).map(([name, value]) => {
+      if (value?.__datavizColumnarTable) return [name, filterColumnar(value)];
+      return [name, filterRows(value)];
+    }));
+  }
+
   function createInteractiveAdapters(runtime, services) {
     const workerValue = services.workerValue;
     const cancel = id => runtime.activeTransforms.get(id)?.cancel('Cancelled by Runtime Adapter');
@@ -87,9 +152,7 @@
         validate:item => {
           if (typeof item.source?.code !== 'string') throw new Error('browser-js code is missing');
         },
-        prepare:async (_item, inputs) => Object.fromEntries(
-          Object.entries(inputs).map(([name, value]) => [name, workerValue(value)])
-        ),
+        prepare:async (item, inputs) => selectedWorkerInputs(item, inputs, services),
         execute:(id, item, inputs) => runtime.executeBrowserRuntime(id, item, inputs),
         cancel,
         dispose:() => {},
@@ -98,9 +161,7 @@
         validate:item => {
           if (typeof item.source?.code !== 'string') throw new Error('browser-python code is missing');
         },
-        prepare:async (_item, inputs) => Object.fromEntries(
-          Object.entries(inputs).map(([name, value]) => [name, workerValue(value)])
-        ),
+        prepare:async (item, inputs) => selectedWorkerInputs(item, inputs, services),
         execute:(id, item, inputs) => runtime.executeBrowserRuntime(id, item, inputs),
         cancel,
         dispose:() => {},
@@ -135,6 +196,7 @@
     protocol:'dataviz/runtime/v2',
     createInteractiveAdapters,
     createDataApi,
+    selectedWorkerInputs,
   };
   root.descriptors = root.descriptors || new Map();
   root.descriptors.set('data.pipeline', {

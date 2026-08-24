@@ -10,7 +10,6 @@ from dataviz.execution import Executor, InteractionExecutor, InteractionResult, 
 from dataviz.execution.interactive import (
     compile_interactive_plan,
     normalize_interactive_target,
-    resolve_compute_parameters,
 )
 from dataviz.execution.fingerprint import (
     ensure_query_run_compatible,
@@ -21,7 +20,7 @@ from dataviz.execution.events import ExecutionEvent
 from dataviz.errors import DatavizError, ExecutionFailure
 from dataviz.maintenance import cleanup_workspace_storage
 from dataviz.workspace.loader import LoadedWorkspace
-from dataviz.workspace.selections import resolve_selection_values
+from dataviz.workspace.controls import resolve_compute_values, resolve_selection_values
 
 
 @dataclass
@@ -449,8 +448,11 @@ class RunManager:
         dashboard = executor.ensure_valid(query_run.dashboard)
         ensure_query_run_compatible(dashboard, query_run)
         compile_interactive_plan(dashboard, target_id)
-        resolved_compute = resolve_compute_parameters(dashboard, compute_parameters)
-        resolved_selections, _ = resolve_selection_values(
+        resolved_compute = resolve_compute_values(
+            dashboard.definition,
+            compute_parameters,
+        )
+        resolved_selections = resolve_selection_values(
             dashboard.definition,
             selections,
         )

@@ -1,11 +1,12 @@
-schema: dataviz/dashboard/v2
+schema: dataviz/dashboard/v3
 kind: dashboard
 id: chart-gallery
 title: 多图表陈列室
 description: 用同一份声明式数据契约展示浏览器端 Plotly 与 ECharts 图形语法。
 adapters: {warehouse: demo-duckdb}
-dashboard_selections:
+controls:
   - id: province
+    kind: selection
     field: province
     type: multi_select
     label: 省份
@@ -15,6 +16,14 @@ dashboard_selections:
       - {label: 湖南, value: 湖南}
       - {label: 福建, value: 福建}
       - {label: 浙江, value: 浙江}
+  - id: radar_city_count
+    kind: compute
+    type: integer
+    label: 雷达城市数
+    default: 5
+    min: 1
+    max: 10
+    step: 1
 sources: [sources/metrics.yaml]
 interactive_transforms: [transforms/latest-metrics.yaml]
 views:

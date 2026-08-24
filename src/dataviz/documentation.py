@@ -37,7 +37,7 @@ DOC_ALIASES = {
     "output": "outputs",
     "dataset-transform": "dataset-transforms",
     "interactive-transform": "interactive-transforms",
-    "compute": "compute-parameters",
+    "control": "controls",
     "renderer": "renderers",
     "chart": "charts",
     "view": "charts",
@@ -45,7 +45,6 @@ DOC_ALIASES = {
     "content": "dashboard",
     "interpolation": "dashboard",
     "title": "dashboard",
-    "selection": "selections",
     "layout": "presentation",
     "style": "presentation",
     "repeat": "repeated-views",
@@ -93,7 +92,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
         "rules": [
             "不要从自定义 HTML/CSS/JS 开始；先用默认 Renderer 证明数据契约。",
             "Adapter 只在 Workspace 定义；Dashboard 只写逻辑别名，不保存账号密码。",
-            "Query Parameter 创建新的 Query Run；Selection 不查询；Compute Parameter 只触发声明它的 Interactive Transform。",
+            "Query Parameter 创建新的 Query Run；Control 在取数后工作，并以 kind: selection 或 kind: compute 声明语义。",
             "所有 Output 引用必须写完整，例如 source:sales/main、dataset:model/trend、interactive:simulation/result。",
             "每次修改后运行 validate；未知字段、旧 schema 和不完整引用直接失败。",
         ],
@@ -108,14 +107,15 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
         "summary": "稳定主链分成不可变取数阶段与可重复交互计算阶段。",
         "contract": [
             "Adapter → Source → Dataset Transform（可选）→ Base Named Output",
-            "Base Named Output + Query Parameter 快照 + Selection + Compute Parameter",
+            "Base Named Output + Query Parameter 快照 + scoped Controls",
             "→ Interactive Transform（可选）→ Derived Named Output",
             "→ View Renderer → Presentation",
         ],
-        "state_namespaces": {
+        "state_contract": {
             "query_parameters": "提交后创建新 Query Run，只进入声明依赖它们的 Source/Dataset Transform。",
-            "selections": "include-only 浏览器状态；直接筛选 View，并可作为 Interactive Transform 输入。",
-            "compute_parameters": "不取数；提交后只重算声明依赖它们的 Interactive Transform。",
+            "controls": "Dashboard、Section、View 共用的交互入口；每项显式声明 kind。",
+            "selection_delta": "kind: selection；include-only，先选择数据，也可驱动 Interactive Transform。",
+            "compute_delta": "kind: compute；在已选数据上改变计算逻辑，不重新查询。",
         },
         "execution": {
             "query_dag": "Source 与 Dataset Transform；完成的独立分支立即发布 Base Output。",
@@ -149,13 +149,13 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
     },
     "dashboard": {
         "summary": "dashboard.yaml 是分析逻辑；presentation.yaml 是可删除的视觉覆盖。",
-        "schema": "dataviz/dashboard/v2",
+        "schema": "dataviz/dashboard/v3",
         "identity": {
             "folder": "导航显示名及 ## 目录位置；复制、重命名和打包时所见即所得。",
             "id": "CLI、DAG、API 与 Presentation 使用的稳定程序身份。",
             "title": "页面内容，可与文件夹名不同；为空时回退到文件夹末级名称。",
         },
-        "minimal_example": """schema: dataviz/dashboard/v2
+        "minimal_example": """schema: dataviz/dashboard/v3
 kind: dashboard
 id: sales-overview
 title: 销售概览
@@ -175,11 +175,10 @@ sections:
 """,
         "content_interpolation": {
             "parameter_syntax": "{{ parameters.<id> }}",
-            "compute_syntax": "{{ compute.<id> }}",
-            "selection_syntax": {
-                "dashboard": "{{ selections.dashboard.<selection-id> }}",
-                "section": "{{ selections.section.<section-id>.<selection-id> }}",
-                "view": "{{ selections.view.<view-id>.<selection-id> }}",
+            "control_syntax": {
+                "dashboard": "{{ controls.dashboard.<control-id> }}",
+                "section": "{{ controls.section.<section-id>.<control-id> }}",
+                "view": "{{ controls.view.<view-id>.<control-id> }}",
             },
             "fields": [
                 "dashboard title/subtitle/description/assumptions",
@@ -188,11 +187,11 @@ sections:
             ],
             "lifecycle": {
                 "query_parameter": "展示最近一次 Run query 已提交的值；草稿值不会伪装成当前结果。",
-                "compute_parameter": "展示产生当前 Derived Output 的已提交值。",
-                "selection": "浏览器 Selection 变化后即时更新可见文案与受影响 View。",
+                "compute_control": "展示产生当前 Derived Output 的已提交值。",
+                "selection_control": "Selection Control 变化后即时更新可见文案与受影响 View。",
             },
         },
-        "related": ["presentation", "selections", "compute-parameters"],
+        "related": ["presentation", "controls", "interactive-transforms"],
     },
     "adapters": {
         "summary": "连接配置属于 Workspace；可分享的 Dashboard 只引用逻辑 Adapter 名。",
@@ -258,13 +257,13 @@ timeout_seconds: 120
         "behavior": [
             "独立 spawn 子进程、硬超时、完整 traceback 与日志 Artifact。",
             "缓存覆盖代码、递归声明依赖、包版本、Query Parameter、上游 hash 与 Source Adapter 指纹。",
-            "Selection 和 Compute Parameter 不会执行 Query DAG。",
+            "任何 scoped Control 都不会执行 Query DAG。",
         ],
     },
     "interactive-transforms": {
-        "summary": "Interactive Transform 在不可变 Query Run 上按 Selection/Compute Parameter 重算 Derived Output。",
+        "summary": "Interactive Transform 在不可变 Query Run 上按 selection/compute Control delta 重算 Derived Output。",
         "schema": "dataviz/interactive-transform/v1",
-        "common_fields": ["runtime", "inputs", "query_params", "compute_params", "selections", "trigger", "export", "outputs"],
+        "common_fields": ["runtime", "inputs", "query_params", "compute_inputs", "selection_inputs", "trigger", "export", "outputs"],
         "runtimes": {
             "browser-js": "JavaScript Web Worker；Server 与 HTML 共用；支持 Promise、progress、timeout、cancel。",
             "browser-python": "Pyodide module Worker；支持纯 Python/Pyodide wheel；图表仍由 JS Renderer 绘制。",
@@ -298,7 +297,7 @@ timeout_seconds: 120
             "generation 采用最后写入获胜，旧任务不能覆盖新结果。",
             "server-python 可调用 context.progress 与 context.log；日志保存为结构化 Artifact。",
         ],
-        "related": ["html-export", "compute-parameters", "outputs"],
+        "related": ["html-export", "controls", "outputs"],
     },
     "html-export": {
         "summary": (
@@ -344,23 +343,37 @@ timeout_seconds: 120
         ],
         "related": ["interactive-transforms", "pipeline", "troubleshooting"],
     },
-    "compute-parameters": {
-        "summary": "Compute Parameter 控制取数后的复杂分析，不创建新 Query Run。",
-        "types": ["string", "number", "integer", "boolean", "date", "date_range", "single_select", "multi_select"],
-        "lifecycle": [
-            "draft：控件正在编辑但尚未产生当前结果。",
-            "committed：Interactive Transform 本次执行使用的值。",
-            "result state：内容绑定和 provenance 只描述真正产生当前 Output 的 committed 值。",
-        ],
-        "cli": "dataviz compute <workspace> <dashboard> <transform-id> --run-id <run> --compute-param seed=42",
-    },
-    "selections": {
-        "summary": "Selection 是 include-only 的浏览器样本选择，可直接筛选 View，也可驱动 Interactive Transform。",
+    "controls": {
+        "summary": "Control 是 Query 后唯一交互入口；kind: selection 选择数据，kind: compute 改变随后计算。",
         "scopes": {
-            "dashboard": "影响全部声明可见的 View。",
-            "section": "影响该 Section 的 View。",
-            "view": "只影响单个 View。",
+            "dashboard": "在 dashboard.controls 声明，影响全部可见 View。",
+            "section": "在 section.controls 声明，影响该 Section 的 View。",
+            "view": "在 view.controls 声明，只影响单个 View。",
         },
+        "kinds": {
+            "selection": "include-only；先从 Base/Derived Output 中选择样本，再渲染或进入计算。",
+            "compute": "在当前选择上改变模型、阈值、随机种子等逻辑；有 draft/committed 状态。",
+        },
+        "dashboard_example": """controls:
+  - id: region
+    kind: selection
+    type: multi_select
+    field: region
+    choices:
+      - {label: 华东, value: east}
+      - {label: 华南, value: south}
+  - id: simulations
+    kind: compute
+    type: integer
+    default: 100000
+    min: 1000
+    max: 1000000
+""",
+        "interactive_input_example": """compute_inputs:
+  simulations: dashboard:sales/simulations
+selection_inputs:
+  region: dashboard:sales/region
+""",
         "selector_choice": {
             "auto": "按类型、选项规模和 path_fields 确定组件。",
             "select": "大量平面选项；search/virtual 支持 auto/always/never。",
@@ -371,15 +384,29 @@ timeout_seconds: 120
             "date-range": "日期区间及 preset。",
         },
         "canonical_keys": [
-            "dashboard:<dashboard-id>/<selection-id>",
-            "section:<section-id>/<selection-id>",
-            "view:<view-id>/<selection-id>",
+            "dashboard:<dashboard-id>/<control-id>",
+            "section:<section-id>/<control-id>",
+            "view:<view-id>/<control-id>",
         ],
         "behavior": [
             "级联上游域改变时，会移除不可用的下游已选值。",
-            "直接 View Selection 不重绘无关 View。",
-            "导出 HTML 保留完整 Dataset；Selection 是初始状态，不是导出裁剪。",
+            "动态 Select 不写 choices 时，Runtime 从消费 View 背后的 Base Output 建立选项域；不会从依赖该 Selection 的 Derived Output 反推。",
+            "多输入或需要明确数据域时使用 options_from: source:<id>/<name> 或 dataset:<id>/<name>；Interactive Output 会被 validate 拒绝。",
+            "View Control 不重绘无关 View。",
+            "导出 HTML 保留完整 Dataset；Selection Control 是初始状态，不是导出裁剪。",
+            "Interactive Transform 用 selection_inputs / compute_inputs 把本地 alias 映射到 canonical Control key。",
+            "Runtime 先将 selection_inputs 应用于具有对应字段的表输入，再执行 Compute 逻辑；Transform 不应重复手写同一筛选。",
         ],
+        "dynamic_option_example": """controls:
+  - id: job_date
+    kind: selection
+    type: single_select
+    field: job_date
+    required: true
+    default: "2026-08-20"
+    options_from: source:forecast-series/main
+""",
+        "compute_cli": "dataviz compute <workspace> <dashboard> <transform-id> --run-id <run> --compute-param dashboard:<dashboard>/<id>=42",
     },
     "renderers": {
         "summary": "Renderer 只消费 Named Output 和 View descriptor，不执行业务取数。",
@@ -412,6 +439,23 @@ timeout_seconds: 120
     "presentation": {
         "summary": "可选 Presentation 按稳定 ID 覆盖布局、容器、Theme、Selector 和资源，不改变逻辑。",
         "file": "dashboard 文件夹中的 presentation.yaml；删除后退化为自上而下的默认布局。",
+        "control_panels": {
+            "default": "Query 与 Dashboard Controls 使用视口内自适应托盘；Controls 内按 DATA 与 LOGIC 分组。",
+            "path": "controls.<query|dashboard>；Section/View 可在各自 presentation 条目中设置 controls",
+            "options": {
+                "template": ["auto", "stack", "grid"],
+                "width": ["auto", "compact", "regular", "wide"],
+                "columns": "1–4；省略时按可用宽度自动换列",
+                "density": ["compact", "comfortable"],
+            },
+            "boundary": "这些字段只调整排版；值、校验、级联、tab 状态和执行仍由共享 Runtime 管理。导出 HTML 中 Query 为只读快照，Controls 保持交互。",
+            "example": {
+                "controls": {
+                    "query": {"template": "grid", "width": "wide", "columns": 3, "density": "compact"},
+                    "dashboard": {"template": "grid", "width": "regular", "columns": 2},
+                }
+            },
+        },
         "extension_path": ["默认模板", "模板参数", "Theme token", "局部 CSS class/options", "自定义 Renderer", "自定义 Canvas"],
         "non_goals": ["坐标/Mosaic 编辑器", "让 CSS 决定数据依赖", "在 Presentation 中保存密钥"],
     },
@@ -489,7 +533,7 @@ timeout_seconds: 120
         "coverage": [
             "schema、未知字段、重复 ID 和本地路径边界",
             "显式 Output 引用、缺失 Output、两个 DAG 的环和跨 Runtime 非法依赖",
-            "Query/Compute/Selection namespace 与 trigger 冲突",
+            "Query/Control namespace、Control kind、作用域可见性与 trigger 冲突",
             "Interactive export.mode、Pyodide 依赖和 bundle 资产",
             "SQL named parameter、Python 依赖和输入/输出 Schema",
             "View/Section/Presentation/Selector 引用",
@@ -507,7 +551,7 @@ timeout_seconds: 120
     "strict-schema": {
         "summary": "只接受当前 DSL；不提供 deprecated 层、字段别名、自动迁移或双协议 Runtime。",
         "current": {
-            "dashboard": "dataviz/dashboard/v2",
+            "dashboard": "dataviz/dashboard/v3",
             "runtime": "dataviz/runtime/v2",
             "dataset_transform": "dataviz/dataset-transform/v1",
             "interactive_transform": "dataviz/interactive-transform/v1",
@@ -524,7 +568,7 @@ timeout_seconds: 120
             "dataviz frontend-adapters --format json",
             "dataviz frontend-adapters web-component --output runtime-adapter.js",
         ],
-        "public": ["canonical Named Output", "Selection/Compute state", "node lifecycle", "Renderer lifecycle"],
+        "public": ["canonical Named Output", "Control selection/compute deltas", "node lifecycle", "Renderer lifecycle"],
     },
     "versioning-release": {
         "summary": "版本发布验证当前契约，不把旧 DSL 重新带回发行包。",

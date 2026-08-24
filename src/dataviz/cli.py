@@ -42,7 +42,7 @@ from dataviz.frontend_adapters import frontend_adapter_catalog, frontend_adapter
 from dataviz.filesystem import atomic_write_text, transactional_write_texts
 from dataviz.documentation import DOC_TOPICS, docs_catalog, resolve_doc_topic
 from dataviz.execution import Executor, InteractionExecutor
-from dataviz.execution.interactive import load_run_result, resolve_compute_parameters
+from dataviz.execution.interactive import load_run_result
 from dataviz.execution.plan import reachable_output_references
 from dataviz.execution.references import parse_output_reference
 from dataviz.maintenance import cleanup_workspace_storage
@@ -53,7 +53,7 @@ from dataviz.server import create_app
 from dataviz.templates import component_catalog
 from dataviz.validation import format_validation_text, validate_preflight
 from dataviz.workspace import load_workspace
-from dataviz.workspace.selections import resolve_selection_values
+from dataviz.workspace.controls import resolve_compute_values, resolve_selection_values
 
 
 app = typer.Typer(
@@ -282,13 +282,14 @@ Finish the returned session with `dataviz authoring finish`. Commit the generate
 `dataviz-authoring.jsonl` when its task text and notes contain no sensitive data;
 sharing that file gives the Dataviz author real retry, time and documentation-friction data.
 """,
-        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v2
+        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v3
 kind: dashboard
 id: hello
 title: Hello dashboard
 description: A minimal self-contained canvas
-dashboard_selections:
+controls:
   - id: category
+    kind: selection
     type: multi_select
     default: [A, B, C]
     choices:
@@ -1641,10 +1642,11 @@ def report(
             print_json(result)
             raise typer.Exit(1)
         loaded_dashboard = loaded.dashboard(dashboard)
-        compute_values = resolve_compute_parameters(
-            loaded_dashboard, parse_params(compute_param)
+        compute_values = resolve_compute_values(
+            loaded_dashboard.definition,
+            parse_params(compute_param),
         )
-        selection_values, _ = resolve_selection_values(
+        selection_values = resolve_selection_values(
             loaded_dashboard.definition, parse_params(selection)
         )
         _, interactive_ids = reachable_output_references(loaded_dashboard)

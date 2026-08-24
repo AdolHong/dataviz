@@ -19,7 +19,7 @@ from dataviz.workspace import load_workspace, validate_workspace
 from dataviz.workspace.models import (
     DashboardDefinition,
     QueryParameterDefinition,
-    SelectionDefinition,
+    SelectionControlDefinition,
 )
 
 
@@ -61,12 +61,13 @@ def test_parameter_content_templates_format_human_facing_values():
 def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v2",
+            "schema": "dataviz/dashboard/v3",
             "id": "hourly-sales",
             "title": "小时销售",
-            "dashboard_selections": [
+            "controls": [
                 {
                     "id": "region",
+                    "kind": "selection",
                     "type": "single_select",
                     "default": "south",
                     "choices": [{"label": "华南", "value": "south"}],
@@ -75,11 +76,12 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
             "sections": [
                 {
                     "id": "night_analysis",
-                    "title": "{{ selections.section.night_analysis.dow }}各小时销售分析",
-                    "description": "{{ selections.dashboard.region }}区域",
-                    "selections": [
+                    "title": "{{ controls.section.night_analysis.dow }}各小时销售分析",
+                    "description": "{{ controls.dashboard.region }}区域",
+                    "controls": [
                         {
                             "id": "dow",
+                            "kind": "selection",
                             "type": "single_select",
                             "default": 5,
                             "choices": [
@@ -94,8 +96,8 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
             "views": [
                 {
                     "id": "detail",
-                    "title": "{{ selections.section.night_analysis.dow }}明细",
-                    "description": "统计{{ selections.section.night_analysis.dow }}的数据",
+                    "title": "{{ controls.section.night_analysis.dow }}明细",
+                    "description": "统计{{ controls.section.night_analysis.dow }}的数据",
                     "template": "table",
                     "input": "source:hourly/main",
                 }
@@ -112,7 +114,7 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
     assert resolved.views[0].description == "统计周四的数据"
     binding = bindings["sections.night_analysis.title"]
     assert binding["template"] == (
-        "{{ selections.section.night_analysis.dow }}各小时销售分析"
+        "{{ controls.section.night_analysis.dow }}各小时销售分析"
     )
     assert binding["references"][0]["key"] == "section:night_analysis/dow"
     assert binding["target"] == {
@@ -120,9 +122,10 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
         "owner_id": "night_analysis",
         "property": "title",
     }
-    selection = SelectionDefinition.model_validate(
+    selection = SelectionControlDefinition.model_validate(
         {
             "id": "dow",
+            "kind": "selection",
             "type": "multi_select",
             "choices": [
                 {"label": "周四", "value": 4},
@@ -136,7 +139,7 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
 def test_interpolation_is_limited_to_declarative_content_fields():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v2",
+            "schema": "dataviz/dashboard/v3",
             "id": "hourly-sales",
             "title": "商品 {{ parameters.product_id }}",
             "subtitle": "{{ parameters.period }}",
@@ -207,7 +210,7 @@ def test_default_view_shell_renders_static_and_dynamic_descriptions(tmp_path: Pa
         item for item in definition["views"] if item["id"] == "region-comparison"
     )
     total["description"] = "汇总当前样本的收入。"
-    comparison["description"] = "当前区域：{{ selections.dashboard.region }}"
+    comparison["description"] = "当前区域：{{ controls.dashboard.region }}"
     dashboard_path.write_text(
         yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
@@ -237,10 +240,11 @@ def test_custom_canvas_content_helper_keeps_selection_binding(tmp_path: Path):
     dashboard_path = dashboard_root / "dashboard.yaml"
     definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
     trend = next(item for item in definition["sections"] if item["id"] == "trend")
-    trend["title"] = "{{ selections.section.trend.dow }}趋势"
-    trend["selections"] = [
+    trend["title"] = "{{ controls.section.trend.dow }}趋势"
+    trend["controls"] = [
         {
             "id": "dow",
+            "kind": "selection",
             "field": "region",
             "type": "single_select",
             "default": "华东",
@@ -277,16 +281,17 @@ def test_validate_rejects_unknown_and_executable_content_expressions(tmp_path: P
     definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
     definition["title"] = "{{ parameters.deleted_id }}"
     definition["subtitle"] = "{{ parameters.min_query_revenue + 1 }}"
-    definition["description"] = "{{ selections.section.trend.dow }}"
-    definition["sections"][1]["selections"] = [
+    definition["description"] = "{{ controls.section.trend.dow }}"
+    definition["sections"][1]["controls"] = [
         {
             "id": "dow",
+            "kind": "selection",
             "type": "single_select",
             "choices": [{"label": "周五", "value": 5}],
         }
     ]
     definition["views"][0]["description"] = (
-        "{{ selections.section.missing.dow }}"
+        "{{ controls.section.missing.dow }}"
     )
     dashboard_path.write_text(
         yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
@@ -297,5 +302,5 @@ def test_validate_rejects_unknown_and_executable_content_expressions(tmp_path: P
 
     assert any(item.code == "content_parameter_unknown" for item in diagnostics)
     assert any(item.code == "content_template_invalid" for item in diagnostics)
-    assert any(item.code == "content_selection_out_of_scope" for item in diagnostics)
-    assert any(item.code == "content_selection_unknown" for item in diagnostics)
+    assert any(item.code == "content_control_out_of_scope" for item in diagnostics)
+    assert any(item.code == "content_control_unknown" for item in diagnostics)

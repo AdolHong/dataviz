@@ -14,7 +14,7 @@ from dataviz.execution import Executor
 from dataviz.execution.fingerprint import ensure_query_run_compatible
 from dataviz.errors import ExecutionFailure, WorkspaceError
 from dataviz.rendering import CanvasRenderer
-from dataviz.workspace import compile_selection_contract, load_workspace, validate_workspace
+from dataviz.workspace import compile_control_contract, load_workspace, validate_workspace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -271,7 +271,7 @@ def test_default_run_executes_sources_and_dataset_transforms():
 def test_three_level_selections_are_browser_state_and_do_not_enter_query_run():
     workspace = load_workspace(WORKSPACE)
     dashboard = workspace.dashboard("sales")
-    contract = compile_selection_contract(dashboard.definition)
+    contract = compile_control_contract(dashboard.definition)
     assert [item.origin for item in contract["revenue"]] == ["dashboard", "section"]
     assert [item.origin for item in contract["detail"]] == ["dashboard", "view"]
 
@@ -322,11 +322,13 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert "Plotly" in report
     assert "PORTABLE ANALYSIS" in report
     assert "Query snapshot" in report
-    assert "Dashboard selections" in report
-    assert "Section selection" in report
-    assert "View selection" in report
-    assert 'data-selection-origin="section"' in report
-    assert 'data-selection-origin="view"' in report
+    assert "Dashboard controls" in report
+    assert "data-dv-control-panel" in report
+    assert 'data-control-role="dashboard"' in report
+    assert "Section controls" in report
+    assert "View controls" in report
+    assert 'data-control-origin="section"' in report
+    assert 'data-control-origin="view"' in report
     assert "data-selection-input=\"dashboard:sales/region\"" in report
     assert 'data-component-package="runtime.overlay"' in report
     assert "installDatavizOverlay" in report

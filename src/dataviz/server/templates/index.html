@@ -33,7 +33,7 @@
           <span aria-hidden="true">◫</span><small>Navigation</small>
         </button>
         <div class="topbar-actions">
-          <details id="query-parameters-control" class="header-control" data-header-popover data-overlay-floating="true" data-overlay-width="520">
+          <details id="query-parameters-control" class="header-control" data-header-popover data-dv-control-panel data-control-role="query" data-control-count="0" data-overlay-floating="true" data-overlay-width="520">
             <summary class="header-control__trigger">
               <span class="header-control__index">01</span>
               <span><strong>Parameters</strong><small id="query-control-meta">Not applied</small></span>
@@ -45,36 +45,34 @@
               <div id="query-state" class="query-state">No dataset loaded.</div>
             </div>
           </details>
-          <details id="compute-parameters-control" class="header-control" data-header-popover data-overlay-floating="true" data-overlay-width="560">
+          <details id="dashboard-controls-control" class="header-control" data-header-popover data-dv-control-panel data-control-role="dashboard" data-control-count="0" data-overlay-floating="true" data-overlay-width="760">
             <summary class="header-control__trigger">
-              <span class="header-control__index header-control__index--compute">02</span>
-              <span><strong>Analysis</strong><small id="compute-control-meta">None</small></span>
+              <span class="header-control__index header-control__index--controls">02</span>
+              <span><strong>Controls</strong><small id="dashboard-control-meta">None</small></span>
               <i>⌄</i>
             </summary>
-            <div class="header-control__popover header-control__popover--compute">
-              <div class="section-heading"><span>02</span><div><h3>Compute parameters</h3><p>Recompute declared analysis branches without querying data again.</p></div></div>
-              <form id="compute-parameter-form" class="parameter-form"></form>
-              <footer class="compute-actions"><span id="compute-state">Results are current.</span><button id="compute-apply" class="button button--run" type="button" disabled>Run analysis</button></footer>
-            </div>
-          </details>
-          <details id="dashboard-selections-control" class="header-control" data-header-popover data-overlay-floating="true" data-overlay-width="760">
-            <summary class="header-control__trigger">
-              <span class="header-control__index header-control__index--selection">03</span>
-              <span><strong>Selections</strong><small id="dashboard-control-meta">None</small></span>
-              <i>⌄</i>
-            </summary>
-            <div class="header-control__popover header-control__popover--selections">
-              <div class="section-heading"><span>03</span><div><h3>Dashboard selections</h3><p>Choose included rows and redraw all views without querying.</p></div></div>
-              <form id="dashboard-selection-form" class="selection-form"></form>
+            <div class="header-control__popover header-control__popover--controls">
+              <div class="section-heading"><span>02</span><div><h3>Dashboard controls</h3><p>Choose data, adjust calculation logic, then render the affected views.</p></div></div>
+              <div class="dashboard-control-groups">
+                <section id="dashboard-selection-group" class="dashboard-control-group" data-control-kind="selection">
+                  <header><span>DATA</span><div><strong>Data selection</strong><small>Choose included rows</small></div></header>
+                  <form id="dashboard-selection-form" class="selection-form"></form>
+                </section>
+                <section id="dashboard-compute-group" class="dashboard-control-group" data-control-kind="compute">
+                  <header><span>LOGIC</span><div><strong>Calculation settings</strong><small>Recompute selected data</small></div></header>
+                  <form id="compute-parameter-form" class="parameter-form"></form>
+                </section>
+              </div>
+              <footer id="dashboard-compute-actions" class="compute-actions"><span id="compute-state">Results are current.</span><button id="compute-apply" class="button button--run" type="button" disabled>Run analysis</button></footer>
             </div>
           </details>
           <button id="download-button" class="button button--ghost" disabled>Export HTML</button>
           <details id="query-diagnostics" class="query-diagnostics" data-status="idle" data-header-popover data-overlay-floating="true" data-overlay-width="620">
-            <summary class="button button--ghost"><span class="query-diagnostics__light"></span><span class="query-diagnostics__copy"><strong>Sources</strong><small id="query-diagnostics-label">Not run</small></span><span class="query-diagnostics__chevron">⌄</span></summary>
+            <summary class="button button--ghost"><span class="query-diagnostics__light"></span><span class="query-diagnostics__copy"><strong>Pipeline</strong><small id="query-diagnostics-label">Not run</small></span><span class="query-diagnostics__chevron">⌄</span></summary>
             <div class="query-diagnostics__popover">
-              <div class="section-heading"><span>↳</span><div><h3>Data sources</h3><p>Execution details for File, SQL and Python sources.</p></div></div>
+              <div class="section-heading"><span>↳</span><div><h3>Data pipeline</h3><p>Query nodes and browser/server Interactive Transform status.</p></div></div>
               <div id="node-list" class="node-list"></div>
-              <div id="run-message" class="run-message">Sources have not run.</div>
+              <div id="run-message" class="run-message">Data pipeline has not run.</div>
             </div>
           </details>
           <button id="run-button" class="button button--run" disabled><span class="button-light"></span>Run query</button>

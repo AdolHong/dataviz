@@ -153,6 +153,33 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
         "semantic_dom": [".dv-tree-select", ".dv-tree-panel", ".dv-tree-list", ".dv-tree-option"],
         "tokens": ["--dv-accent", "--dv-green", "--dv-ink", "--dv-line", "--dv-panel"],
     },
+    "control-panel.adaptive": {
+        "category": "presentation",
+        "purpose": "Keep Query Parameters and scoped Controls readable inside the viewport",
+        "use_when": "A Dashboard has enough controls to need a responsive grid or a bounded scrolling tray",
+        "presentation": {
+            "path": "controls.<query|dashboard>; sections.<id>.controls; views.<id>.controls",
+            "options": ["template", "width", "columns", "density"],
+            "templates": ["auto", "stack", "grid"],
+            "widths": ["auto", "compact", "regular", "wide"],
+        },
+        "behavior": {
+            "auto": "One control stacks; multiple controls use a responsive grid",
+            "viewport": "The tray never exceeds the viewport and scrolls its fields internally",
+            "ownership": "Presentation changes composition only; shared Runtime owns values, validation, cascade and execution",
+            "export": "Scoped Controls stay interactive in Server and exported HTML; Query is a fixed snapshot after export",
+        },
+        "semantic_dom": ["[data-dv-control-panel]", ".parameter-form", ".selection-form"],
+        "tokens": ["--dv-ink", "--dv-line", "--dv-panel"],
+        "example": {
+            "presentation.yaml": {
+                "controls": {
+                    "query": {"template": "grid", "width": "wide", "columns": 3, "density": "compact"},
+                    "dashboard": {"template": "grid", "width": "regular", "columns": 2},
+                }
+            }
+        },
+    },
     "view.table": {
         "category": "view",
         "purpose": "Themeable, readable detail table",
@@ -251,7 +278,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
         "use_when": "Users need searchable or hierarchical multi-selection before comparing entities",
         "logic": {
             "template": "selection-gallery",
-            "fields": ["selections", "views", "repeat.by", "repeat.selection"],
+            "fields": ["controls", "views", "repeat.by", "repeat.selection"],
             "selector_templates": ["select", "cascader", "tree-select"],
         },
         "behavior": {
@@ -512,9 +539,9 @@ def template_catalog() -> dict[str, Any]:
         "presentation": {
             "schema": "dataviz/presentation/v1",
             "optional": True,
-            "id_scopes": ["sections", "views"],
-            "visual_fields": ["theme", "layout", "sections", "views", "assets", "canvas"],
-            "protected_logic": ["adapters", "query_parameters", "compute_parameters", "sources", "dataset_transforms", "interactive_transforms", "dashboard_selections", "sections", "views"],
+            "id_scopes": ["sections", "views", "selectors"],
+            "visual_fields": ["theme", "layout", "sections", "views", "selectors", "controls", "assets", "canvas"],
+            "protected_logic": ["adapters", "query_parameters", "controls", "sources", "dataset_transforms", "interactive_transforms", "sections", "views"],
         },
         "selection_operators": ["auto", "equals", "in", "between", "contains", "gte", "lte", "gt", "lt"],
         "extension_path": [

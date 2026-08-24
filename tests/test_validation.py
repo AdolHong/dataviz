@@ -45,7 +45,7 @@ runtime:{runtime or ' {}'}
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v2
+        """schema: dataviz/dashboard/v3
 kind: dashboard
 id: browser-python
 title: Browser Python
@@ -157,6 +157,28 @@ def test_validate_detects_undeclared_and_unused_sql_parameters(tmp_path: Path):
     assert diagnostics["sql_parameter_unused"]["details"]["parameters"] == ["min_query_revenue"]
     assert diagnostics["sql_parameter_undeclared"]["category"] == "sql-contracts"
     assert "Source `query_params`" in diagnostics["sql_parameter_undeclared"]["hint"]
+
+
+def test_validate_rejects_unknown_selection_option_domain(tmp_path: Path):
+    workspace = _copy_workspace(tmp_path)
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    definition["controls"][0]["options_from"] = "source:missing/main"
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    report = validate_preflight(workspace, dashboard_id="sales-overview")
+    diagnostic = next(
+        item
+        for item in report["diagnostics"]
+        if item["code"] == "selection_option_domain_invalid"
+    )
+
+    assert report["status"] == "invalid"
+    assert "Unknown output node" in diagnostic["message"]
+    assert "options_from" in diagnostic["hint"]
 
 
 def test_validate_rejects_fields_outside_the_selected_source_variant(tmp_path: Path):
@@ -391,7 +413,7 @@ def test_validate_view_fields_against_declared_output_schema(tmp_path: Path):
     workspace = _copy_workspace(tmp_path)
     dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
     definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
-    definition["dashboard_selections"] = []
+    definition["controls"] = []
     definition["sources"][0]["outputs"]["main"]["schema"] = [
         {"name": "day"},
         {"name": "revenue"},
@@ -513,7 +535,7 @@ def test_validate_focus_excludes_another_broken_dashboard(tmp_path: Path):
     broken = workspace / "dashboards" / "broken"
     broken.mkdir()
     (broken / "dashboard.yaml").write_text(
-        "schema: dataviz/dashboard/v2\nkind: dashboard\nid: broken\nretired_field: true\n",
+        "schema: dataviz/dashboard/v3\nkind: dashboard\nid: broken\nretired_field: true\n",
         encoding="utf-8",
     )
 

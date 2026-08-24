@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v2
+schema: dataviz/dashboard/v3
 kind: dashboard
 id: sales
 title: 销售脉搏
@@ -15,8 +15,9 @@ query_parameters:
     type: number
     label: 目标系数
     default: 1.0
-dashboard_selections:
+controls:
   - id: region
+    kind: selection
     field: region
     type: multi_select
     label: 区域
@@ -74,8 +75,9 @@ views:
     template: table
     columns: [date, region, revenue, orders]
     limit: 100
-    selections:
+    controls:
       - id: min_orders
+        kind: selection
         field: orders
         type: number
         label: 最低订单数
@@ -86,8 +88,9 @@ views:
 sections:
   - id: pulse
     title: 经营脉搏
-    selections:
+    controls:
       - id: min_revenue
+        kind: selection
         field: revenue
         type: number
         label: 最低单期收入

@@ -1,10 +1,11 @@
-schema: dataviz/dashboard/v2
+schema: dataviz/dashboard/v3
 kind: dashboard
 id: worker-runtime
 title: Browser JS Interactive Worker
 
-compute_parameters:
+controls:
   - id: delay_ms
+    kind: compute
     label: Worker delay
     type: number
     default: 5

@@ -2,7 +2,7 @@
 
 > 快速安装和当前可用命令见 [README](README.md)；后续工作见 [plan.md](plan.md)。安装版本真正接受的字段始终以 `dataviz schemas`、`dataviz docs` 和 `dataviz components` 为准。
 
-本文描述 Dataviz 当前已经落地的执行架构与必须长期保持的设计不变量。当前严格契约是 `dataviz/dashboard/v2` 与 `dataviz/runtime/v2`；Dataset Transform、Interactive Transform、Compute Parameter 和三种 Interactive Runtime 已进入实现、CLI、Schema、示例与测试，不是兼容旧实验接口的抽象层。
+本文描述 Dataviz 当前已经落地的执行架构与必须长期保持的设计不变量。`0.3.1` 对应的严格契约是 `dataviz/dashboard/v3` 与 `dataviz/runtime/v2`；scoped Controls、Selection-before-Compute、两种 Transform 和三种 Interactive Runtime 已进入实现、CLI、Schema、示例与测试，不是兼容旧实验接口的抽象层。当前实现不保留 Dashboard v2 字段，使用者必须按 v3 重写未迁移的实验看板。
 
 Dataviz 是一个 workspace-first、AI-friendly 的数据看板工具。看板是普通文件，能够被 Git 管理、复制和审查；Server 面向人提供交互页面，CLI 面向 AI 与自动化提供校验、查询和 HTML 导出。
 
@@ -20,31 +20,22 @@ Dataviz 是一个 workspace-first、AI-friendly 的数据看板工具。看板�
 ```text
 查询阶段
 
-Query Parameter
-       │
-       ↓
-Workspace Adapter → Source → Dataset Transform（可选，Server）
-                                      ↓
-                              Base Named Output
-                                      │
-                     ┌────────────────┴───────────────┐
-                     │                                │
-                     ↓                                │
-                 View Renderer                        │
-                                                      │
-交互阶段                                              │
-                                                      │
-Selection ───────────────┐                            │
-                         ├→ Interactive Transform ←───┘
-Compute Parameter ───────┘   ├─ server-python
-                              ├─ browser-python
-                              └─ browser-js
-                                      ↓
-                              Derived Named Output
-                                      ↓
-                                View Renderer
-                                      ↓
-                                Presentation
+Query Parameter → Workspace Adapter → Source → Dataset Transform（可选，Server）
+                                                   ↓
+                                           Base Named Output
+                                                   ↓
+                            scoped Controls（Dashboard / Section / View）
+                               ├─ kind: selection → 选择数据
+                               └─ kind: compute   → 改变计算逻辑
+                                                   ↓
+                                        Interactive Transform（可选）
+                                         ├─ server-python
+                                         ├─ browser-python
+                                         └─ browser-js
+                                                   ↓
+                                           Derived Named Output
+                                                   ↓
+                                      View Renderer → Presentation
 ```
 
 这是一张 DAG，不要求每层都出现。最简单的看板仍然只有：
@@ -59,22 +50,24 @@ Source/main → View → 默认 Presentation
 - **Source**：从 File、SQL 或可信 Python 入口读取外部数据。
 - **Dataset Transform**：查询阶段在 Server 对 Source Output 做清洗、合并、特征加工和基础模型计算。
 - **Base Named Output**：一次 Query Run 确定后保持不变的基础结果。
-- **Interactive Transform**：不重新取数，只根据 Base Output、Selection 和 Compute Parameter 产生交互结果。
+- **Control**：Query 后的统一交互入口；由作用域和 `kind` 同时定义可见范围与数据/计算语义。
+- **Interactive Transform**：不重新取数，只根据 Base Output 与显式 Control 输入产生交互结果。
 - **Derived Named Output**：Interactive Transform 的标准命名结果。
 - **View Renderer**：把 Base/Derived Output 渲染为图、表、指标、文本或自定义组件。
 - **Presentation**：按稳定 ID 调整布局、容器、组件与样式，不改变分析语义。
 
 “Dataset”不是额外的隐式对象。表格 Dataset 是一种 Named Output；所有节点必须通过显式 Output 引用连接，Runtime 不暗中猜测数据来源或执行隐藏聚合。
 
-## 2. 三类状态
+## 2. 两个入口与两种 Control 语义
 
-Query Parameter、Selection 和 Compute Parameter 必须分开：
+用户和 AI 只面对两个一级入口：
 
-| 状态 | 语义 | 修改后发生什么 | 生命周期 | HTML 导出 |
+| 入口 | 声明位置 | 语义 | 修改后发生什么 | HTML 导出 |
 | --- | --- | --- | --- | --- |
-| Query Parameter | 决定取什么数据 | 新建 Query Run，重新执行 Source/Dataset Transform | 当前 tab、Dashboard 的已提交 Run | 固定为导出时已提交值 |
-| Selection | include 哪些已有样本 | 筛选 Base/Derived Output，并使声明依赖它的 Interactive Transform 失效 | 当前 tab、Dashboard | 保持可交互 |
-| Compute Parameter | 如何计算已有数据 | 只重算声明依赖它的 Interactive Transform | 当前 tab、Dashboard 的交互状态 | 取决于 Transform Runtime 和 export mode |
+| Query Parameter | `dashboard.query_parameters` | 决定取什么数据 | 新建 Query Run，重新执行 Source/Dataset Transform | 固定为导出时已提交值 |
+| Control | Dashboard/Section/View 的 `controls` | Query 后选择数据或改变计算 | 局部筛选、重绘或重算 Interactive Transform | 保持交互；能力取决于 Runtime/export mode |
+
+Control 不是无类型参数袋。每一项必须显式声明 `kind: selection | compute`；统一入口只消除重复的 authoring/UI 结构，不抹掉两者在 Runtime 中的不同 delta、提交周期和失效语义。
 
 ### Query Parameter
 
@@ -82,45 +75,78 @@ Query Parameter、Selection 和 Compute Parameter 必须分开：
 - 进入 Source/Dataset Transform 的执行上下文和缓存键。
 - 修改草稿但没有重新查询时，页面仍展示上一次 Run 的已提交值和结果。
 
-### Selection
+### Selection Control
 
-Selection 只有 include 语义，不承担任意表单参数职责。三个固定作用域是：
+`kind: selection` 只有 include 语义，不承担任意表单参数职责。三个固定作用域是：
 
 ```text
-Dashboard Selection → 所有绑定 View
-Section Selection   → 所属 Section 的绑定 View
-View Selection      → 单个 View
+Dashboard Control → 所有绑定 View
+Section Control   → 所属 Section 的绑定 View
+View Control      → 单个 View
 ```
 
-一个 View 的有效 Selection 由它可见的三个作用域合成，不支持任意 Group、多个归属或隐式同名联动。相同业务含义需要联动时使用同一个上游 Selection；不需要联动时使用不同稳定 ID。
+一个 View 的有效 Selection Control 由它可见的三个作用域合成，不支持任意 Group、多个归属或隐式同名联动。相同业务含义需要联动时使用同一个上游 Control；不需要联动时使用不同稳定 ID。
 
 Selection 有两种不同的级联：
 
-1. **作用域级联**：上游 Selection 改变可用数据域，下游组件立即重算选项并清除失效值。
-2. **组件内路径级联**：一个 Selection 用 `path_fields` 表达省/市/区、组织/团队等完整路径，由 Cascader 或 Tree Select 展示父级上下文。
+1. **作用域级联**：上游 Selection Control 改变可用数据域，下游组件立即重算选项并清除失效值。
+2. **组件内路径级联**：一个 Selection Control 用 `path_fields` 表达省/市/区、组织/团队等完整路径，由 Cascader 或 Tree Select 展示父级上下文。
 
 Canonical state 中空值表示没有 include 约束。交互上的“全选”显式选中当前可用项，从而允许继续反选或取消少量项；上游域变化后再做确定性 reconciliation。
 
-### Compute Parameter
+Select 型 Selection 的“选项域”和“被筛选 View 数据”是两个不同契约：
 
-随机种子、模拟次数、算法、风险系数、优化约束等不筛选数据，统一声明为 `compute_parameters`：
+- 静态枚举直接写 `choices`。
+- 动态枚举默认沿消费 View 的输入向上穿过 Interactive DAG，追溯到不可变 Base Named Output。
+- 多输入或需要消除歧义时，使用 `options_from: source:<id>/<name>` 或 `dataset:<id>/<name>` 显式指定。
+- `options_from` 只允许表格 Base Output，不允许 Interactive Output。后者可能依赖当前 Selection，会形成 `options → Selection → Interactive Transform → options` 的启动环。
+
+Runtime 的首次启动顺序固定为：
+
+```text
+hydrate Base Output → reconcile Selection option domains
+→ commit canonical Controls → render Base Views → start reachable Interactive branches
+```
+
+因此一个无关或直接消费 Base Output 的 View 不会再因为另一个必填动态 Selector 尚未生成 DOM option 而停在 `Waiting for dataset`。渐进 Query 尚未发布 option domain 时保留已验证 canonical 值；Base Output 到达后再做确定性 reconciliation。
+
+`canvas-ready` 是完成上述初始化后的生命周期事件，不是脚本加载通知。Server Shell 只有收到当前 dashboard/run/frame identity 的 ready 后，才把该 tab 记忆的 Control state 回灌 Canvas；Canvas 在初始化窗口内捕获到的用户输入先进入 canonical state，因此不会被迟到的默认值覆盖。
+
+对 Interactive Transform，Selection 不是一个需要业务代码自行解释的普通参数。Transform 通过 `selection_inputs` 声明依赖后，Runtime 必须在进入三种 Interactive Runtime 前，对每个具有相应字段契约的表输入应用 include 筛选；不含该字段的无关输入保持不变。因此统一顺序是：
+
+```text
+Base/Derived Output → Selection 选择样本 → Compute 逻辑 → Derived Output → Renderer
+```
+
+`context.table(name)` / `context.input(name)` / 浏览器的 `context.inputs` 看到的是已选样本；`context.selections` 仍保留局部 alias 与已提交值，供日志、标签或确定性分支使用。Transform 不应再手写同一层数据筛选；若某个值只选择算法/模型而不选择数据，它应声明为 `kind: compute`。
+
+### Compute Control
+
+随机种子、模拟次数、算法、风险系数、优化约束等不筛选数据，统一声明为 `kind: compute` Control。它们与 Selection Control 使用相同的作用域和容器：
 
 ```yaml
-compute_parameters:
+controls:
+  - id: region
+    kind: selection
+    type: multi_select
+    field: region
+
   - id: seed
+    kind: compute
     label: 随机种子
     type: number
     default: 42
 
   - id: simulations
+    kind: compute
     label: 模拟次数
     type: number
     default: 1000000
 ```
 
-- Compute Parameter 不进入 Source 或 Dataset Transform。
-- Interactive Transform 必须显式声明自己消费哪些 Compute Parameter。
-- Compute Parameter 的身份属于 Dashboard 逻辑；Presentation 可以把控件放在 Dashboard、Section 或 View 附近，但视觉位置不改变依赖关系。
+- Compute Control 不进入 Source 或 Dataset Transform。
+- Interactive Transform 必须通过 `compute_inputs` 把局部 alias 映射到 canonical Control key。
+- Compute Control 可以真实声明在 Dashboard、Section 或 View；作用域决定哪些 View 能依赖它，Presentation 只调整同一作用域控件的呈现。
 - 多个 View 共享同一个 Interactive Output 时，不复制参数或计算。
 
 ### 草稿、提交与触发
@@ -131,7 +157,7 @@ Interactive Transform 支持：
 - `trigger: auto`：提交前 debounce；新状态会取消或 supersede 旧计算。
 - `trigger: manual`：只由明确按钮或 CLI/API 调用。
 
-直接 Selection 筛选仍即时生效；只有依赖该 Selection 的重型 Interactive Transform 可以进入 stale 状态等待 Apply。页面标题、说明和运行证据引用的是产生当前结果的 **已提交值**，不能把未应用的草稿伪装成结果上下文。
+直接 Selection Control 筛选仍即时生效；只有依赖该 Control 的重型 Interactive Transform 可以进入 stale 状态等待 Apply。页面标题、说明和运行证据引用的是产生当前结果的 **已提交值**，不能把未应用的草稿伪装成结果上下文。
 
 ## 3. 两种 Transform
 
@@ -144,14 +170,14 @@ Interactive Transform 支持：
 - 执行位置固定为 Server Python。
 - 由 Query Parameter 和上游 Named Output 决定。
 - 适合多 Source 合并、数据清洗、特征构造、基础指标和一次 Run 内固定的复杂计算。
-- 执行完成后产生 Base Named Output；Selection 和 Compute Parameter 不得触发它。
+- 执行完成后产生 Base Named Output；任何 scoped Control 都不得触发它。
 
 ### Interactive Transform
 
 - 字段：`interactive_transforms`。
 - standalone schema：`dataviz/interactive-transform/v1`。
 - 只消费已经确定的 Base/Derived Named Output。
-- 可以显式消费已提交 Query Parameter 快照、Selection 和 Compute Parameter。
+- 可以显式消费已提交 Query Parameter 快照，以及 selection/compute Control。
 - 不访问 Adapter、不重新查询 Source。
 - 适合 Monte Carlo、模型推断、运筹优化、情景分析和交互聚合。
 
@@ -175,8 +201,11 @@ interactive_transforms:
     inputs:
       base: dataset:features/main
     query_params: [start_date, end_date]
-    compute_params: [seed, simulations]
-    selections: [dashboard:region]
+    compute_inputs:
+      seed: dashboard:sales-overview/seed
+      simulations: dashboard:sales-overview/simulations
+    selection_inputs:
+      region: dashboard:sales-overview/region
     trigger: apply
     export: {mode: snapshot}
     outputs:
@@ -184,7 +213,7 @@ interactive_transforms:
       distribution: {kind: table}
 ```
 
-运行上下文必须把三类状态分开：
+DSL 中的值是 canonical Control key，Transform 代码只看到作者显式选择的局部 alias。运行上下文继续把两类 delta 分开，以便调度器准确做局部失效：
 
 ```text
 context.query_params
@@ -192,6 +221,8 @@ context.compute_params
 context.selections
 context.inputs
 ```
+
+其中可读取的表输入已经按所声明的 `selection_inputs` 裁剪，之后才执行 `compute_inputs` 驱动的业务计算。浏览器 Runtime 直接从 `context.inputs` 读已选数据；Server Python 分析代码通过 `table()` 或 `input()` 读取，`context.inputs` / `context.artifact(name)` 中的 descriptor 只用于 provenance 与调试。
 
 Interactive Transform 的上下文不提供 Adapter。即使运行在 Server，也不能因为实现位置方便而偷偷重新取数。
 
@@ -219,7 +250,7 @@ browser-js → browser-python → server-python
 - Query 计划会显式分类所有被可达 `server-python` 分支消费的 Base Output；分类结果进入 Run 诊断，不能靠 Interactive 运行时临时猜测或重新取数。
 - Artifact 的物理位置是 Workspace `.dataviz/runs/<run-id>/artifacts/`，不在 Dashboard 文件夹；逻辑所有权是 `tab session + dashboard + run + canonical output reference`。刷新同一 tab 可恢复，跨 tab 请求必须拒绝。
 - 每次计算在独立 Python 进程执行，支持 timeout、cancel、traceback、progress 和结构化运行证据。
-- 缓存键至少包含上游 Output content hash、代码/依赖、已提交 Query Parameter、Selection 和 Compute Parameter。
+- 缓存键至少包含上游 Output content hash、代码/依赖、已提交 Query Parameter 与声明消费的 Control delta。
 - 新交互只取消当前 Dashboard 的目标分支，不干扰其他 Dashboard、tab 或用户。
 
 ### browser-python
@@ -267,7 +298,7 @@ unavailable  → 导出页明确展示该分支不可用
 - `browser-js`、`browser-python` 可以使用 `interactive`、`snapshot` 或 `unavailable`。
 - `server-python` 只能使用 `snapshot` 或 `unavailable`。
 - `server-python` 在交互 Server 中可以正常运行，但导出的 HTML 没有 Python Server；这是能力边界，不是导出器可以补齐的脚本。必须在导出时固化结果，或明确显示离线不可用。
-- `snapshot` 必须把影响结果的 Compute Parameter 和 Selection 以只读上下文展示，不能留下能修改但不会重算的假控件。
+- `snapshot` 必须把影响结果的 selection/compute Controls 以只读上下文展示，不能留下能修改但不会重算的假控件。
 - `unavailable` 必须显示原因和需要 Server 的能力，不能静默留白。
 - `browser-python` 的“支持 HTML”不等于自动得到单文件报告；Pyodide、WASM 和 wheel 必须由明确的 `cdn` 或 `bundle` asset policy 提供。
 
@@ -309,15 +340,16 @@ Adapter 只有两个权威位置：提交到 Git 的 `auth/adapters.yaml` 保存
 `dashboard.yaml` 是必需的逻辑文件，负责：
 
 - 稳定 ID 和业务内容；
-- Adapter、Query Parameter、Compute Parameter；
+- Adapter、Query Parameter 与 scoped Controls；
 - Source、Dataset Transform、Interactive Transform 与 Named Output；
-- Dashboard、Section、View Selection；
+- Dashboard、Section、View 的 Selection/Compute Control；
 - View 模板、字段编码、聚合与最小阅读顺序。
 
 `presentation.yaml` 是可选的稀疏覆盖，负责：
 
 - Theme、颜色、密度和 design token；
-- 语义 Layout、Section/View 容器和 Selector/Compute Control 模板；
+- 语义 Layout、Section/View 容器和 Selector/Control 模板；
+- Query 与 Dashboard/Section/View Controls 托盘的模板、宽度、列数与密度；
 - 不改变业务语义的 Renderer options/config；
 - 局部 CSS/JS 与 Canvas 资源。
 
@@ -333,21 +365,22 @@ Adapter 只有两个权威位置：提交到 Git 的 `auth/adapters.yaml` 保存
 
 默认布局是文档流。`grid`、`split`、`chart-and-table` 等只是语义模板，不是 Mosaic、拖拽坐标或固定画布协议。
 
+Header 只有 `Parameters` 与 `Controls` 两个入口。Controls 在同一托盘里按 DATA（selection）与 LOGIC（compute）分组；默认 `auto` 在单项时堆叠、多项时自适应分栏，最大高度受视口约束并在内部滚动。Dashboard 可在 `presentation.yaml` 的 `controls.query`、`controls.dashboard` 中调整一级托盘，Section/View 可在各自 Presentation 条目的 `controls` 中调整局部托盘。Presentation 不得重写值、kind、校验、级联、tab 隔离或执行事件；Query 在导出 HTML 中只是固定快照，scoped Controls 保持交互。
+
 ## 8. 内容绑定
 
 页面内容可以安全引用产生当前结果的已提交状态：
 
 ```text
 {{ parameters.<id> }}
-{{ compute.<id> }}
-{{ selections.dashboard.<id> }}
-{{ selections.section.<section-id>.<id> }}
-{{ selections.view.<view-id>.<id> }}
+{{ controls.dashboard.<id> }}
+{{ controls.section.<section-id>.<id> }}
+{{ controls.view.<view-id>.<id> }}
 ```
 
 - `parameters` 只在新 Query Run 提交后更新。
-- `compute` 只在对应 Interactive Transform 提交后更新。
-- Selection 在浏览器内即时更新；如果重型分支使用 `trigger: apply`，结果区域必须标记 stale，直到重新计算完成。
+- Compute Control 内容只在对应 Interactive Transform 提交后更新。
+- Selection Control 在浏览器内即时更新；如果重型分支使用 `trigger: apply`，结果区域必须标记 stale，直到重新计算完成。
 - 引用本身就是依赖声明；跨不可见作用域、未知 ID 和任意模板表达式由 `dataviz validate` 拒绝。
 
 ## 9. 渐进执行、局部失败与隔离
@@ -357,7 +390,7 @@ Query DAG 和 Interactive DAG 都按依赖闭包渐进执行。假设：
 ```text
 source1 + source2 → dataset:features → view1
 source3                             → view2
-dataset:features + compute:seed
+dataset:features + dashboard:sales-overview/seed (kind: compute)
                   → interactive:simulation → view3
 ```
 
@@ -373,11 +406,11 @@ dataset:features + compute:seed
 - Source/Dataset 节点缓存的逻辑键包含 Dashboard 和节点 ID，tab scope 再由不可逆 session namespace 隔离；`scope: workspace` 只允许显式选择的确定性内容缓存。
 - Server Interactive 只能读取所属 Query Run 的 Artifact。即使 Source 很慢、已经不可用或凭证变化，也不得在交互路径回退为重新查询；需要新数据时只能明确创建新的 Query Run。
 
-父页面和 Canvas 通过 `dashboard_id + run_id + frame_id` 握手。Query 最终完成时只同步 endpoint 状态，不重载 Canvas；已经挂载的 View、Selection 和 Worker 状态因此不会被整页替换。Selection、Compute Parameter 与 Output 发布都携带显式 delta：某类状态未变化必须表达为空集合，不能被解释成“全部变化”。一个无关 Output 在 Interactive Transform 运行期间发布，也不能仅因派生 Output 尚未产生而取消或重启该分支。
+父页面和 Canvas 通过 `dashboard_id + run_id + frame_id` 握手。Query 最终完成时只同步 endpoint 状态，不重载 Canvas；已经挂载的 View、Control 和 Worker 状态因此不会被整页替换。Selection delta、Compute delta 与 Output 发布都必须显式：某类状态未变化要表达为空集合，不能被解释成“全部变化”。一个无关 Output 在 Interactive Transform 运行期间发布，也不能仅因派生 Output 尚未产生而取消或重启该分支。
 
 浏览器状态以 tab 为边界：
 
-- 同一 tab 可以记住当前 Dashboard 的 Parameter、Compute Parameter 和 Selection 草稿/已提交值。
+- 同一 tab 可以记住当前 Dashboard 的 Query Parameter，以及 scoped Controls 的草稿/已提交值。
 - 不同 tab、浏览器和用户不共享交互状态、Run 或运行证据。
 - 一个 Dashboard 的查询或交互计算不会触发、中断另一个 Dashboard。
 - `sessionStorage` 与 Browser Runtime 的 `none/session` cache 只允许 tab scope。
@@ -405,7 +438,7 @@ Dataset Transform 与 `server-python` Interactive Transform 都是可信单机 P
 - View：Metric、Line、Bar、Stacked Bar、Pie、Scatter、Heatmap、Radar、普通 Table、Perspective、Markdown、Image、Custom。
 - Section：Single、Stack、Grid、Split、Hero Metrics、Chart and Table、Comparison、Band、Small Multiples、Selection Gallery。
 - Selector：Select、Segmented/Radio、Checkbox Group、Date Range、Cascader、Tree Select。
-- Compute Control：复用参数型输入组件，但拥有独立状态和 Apply/Run analysis 语义，不冒充 Selection。
+- Compute Control：复用参数型输入组件，但通过 `kind: compute` 保持独立 delta 和 Apply/Run analysis 语义。
 
 普通 Table 和 Perspective 是不同模板：前者便于自定义样式，后者提供排序、筛选、分组和透视。Small Multiples/Selection Gallery 从共享 Named Output 和一个 View 蓝图生成实例，不复制查询或计算。
 
@@ -415,14 +448,14 @@ Dataset Transform 与 `server-python` Interactive Transform 都是可信单机 P
 
 | Package | 唯一拥有的行为 |
 | --- | --- |
-| `data.pipeline` | Frame/Grouped Frame、Named Output 数据 API、三种 Interactive Runtime Adapter |
+| `data.pipeline` | Frame/Grouped Frame、Named Output 数据 API、Selection-before-Compute 输入边界、三种 Interactive Runtime Adapter |
 | `view.declarative` | View descriptor、内置 Renderer、Perspective/Table/Chart 生命周期与 View 状态边界 |
 | `section.declarative` | Section 编排、Repeat/Selection Gallery、懒挂载与 Section 聚合状态 |
 | `presentation.shell` | Theme/Layout shell 与七状态语义、ARIA 映射 |
 
 Package 内的 `test.yaml` 是机器可读验收声明，不是测试执行器；`dataviz components --check` 验证 Package 元数据、资产和声明，真实行为由 pytest 与浏览器 E2E 执行。当前 Registry 有 13 个 package-owned Package，不存在 bridge implementation。
 
-Gallery 是这些契约的可执行说明，而不是截图目录。Selector、Compute、View、Section 各自拥有 ready/loading/stale/empty/error/cancelled/unavailable 七状态矩阵；Select 另外提供真实含 10、100、1,000 个原生 option 的 Story，验证搜索、自动虚拟化、键盘和有界可视 DOM。
+Gallery 是这些契约的可执行说明，而不是截图目录。Selector、Control、View、Section 各自拥有 ready/loading/stale/empty/error/cancelled/unavailable 七状态矩阵；Select 另外提供真实含 10、100、1,000 个原生 option 的 Story，验证搜索、自动虚拟化、键盘和有界可视 DOM。
 
 公开浏览器边界是版本化 Runtime Manifest、Output Store 和稳定事件。Vanilla JS、Web Component 或未来 React/Vue Adapter 只能消费公开协议，不能依赖 Python Renderer 私有结构或默认 Runtime 内部函数。
 
@@ -436,7 +469,7 @@ Server 页面与导出 HTML 必须使用同一组件实现。
 
 ## 12. Server、CLI、HTML 与 AI
 
-- **Server** 面向人：提交 Query Parameter、使用 Selection、提交 Compute Parameter、运行 Interactive Transform、查看 Source/Transform 证据。
+- **Server** 面向人：提交 Query Parameter、操作 scoped Controls、运行 Interactive Transform、查看 Source/Transform 证据。
 - **CLI** 面向 AI/自动化：validate、query、run、compute、output、report、docs、schemas、components、context、scaffold 和 benchmark。
 - **HTML** 是一次 Query Run 的可移植快照：Query Parameter 固定；Browser Interactive Transform 可以继续执行；Server Interactive Transform 只能保留 snapshot 或 unavailable。
 
@@ -450,7 +483,7 @@ AI 的默认工作应该是选择模板、绑定 Output、填写状态依赖和�
 
 | 契约 | 版本 |
 | --- | --- |
-| Dashboard schema | `dataviz/dashboard/v2` |
+| Dashboard schema | `dataviz/dashboard/v3` |
 | Browser Runtime Manifest/Event | `dataviz/runtime/v2` |
 | Dataset Transform schema | `dataviz/dataset-transform/v1` |
 | Interactive Transform schema | `dataviz/interactive-transform/v1` |
@@ -458,7 +491,7 @@ AI 的默认工作应该是选择模板、绑定 Output、填写状态依赖和�
 
 已经实现：
 
-1. Query Parameter、Selection、Compute Parameter 使用独立 namespace、提交周期和失效路径。
+1. Query Parameter 与 scoped Controls 是两个一级入口；Control 统一作用域结构，同时按 selection/compute delta 保持不同提交周期和失效路径。
 2. Query DAG 与 Interactive DAG 分离；Base Output 对一次 Query Run 不可变，Derived Output 由 generation 隔离；快分支可在无关 Query 分支仍运行时进入 Server/Browser Interactive 计算。
 3. Dataset Transform 使用 `server-python`；Interactive Transform 支持 `server-python`、`browser-python` 和 `browser-js`。
 4. 三种 Interactive Runtime 只接收显式状态和 Named Output，不访问 View DOM；Interactive Runtime 不持有 Adapter。
@@ -470,6 +503,8 @@ AI 的默认工作应该是选择模板、绑定 Output、填写状态依赖和�
 10. `authoring prepare/verify/assess/start/finish/compare` 可以用固定任务、经过完整性校验的 approach prompt、输入完整性、逐项验收证据、真实客户端 Token、首次成功率、修正轮次和耗时对比 Dataviz 与 standalone HTML；缺失 Token 不做估算。
 11. `data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 已从 bridge 完整迁入物理 owner Package；Runtime v2 通过公开 ready event 装配且 dispose 幂等。
 12. Gallery 已覆盖四类组件的七状态矩阵，以及真实 10/100/1,000 选项 Select Story；Story 元数据、页面目标与 Chromium 行为测试使用同一 Package。
+13. `selection_inputs` 在 Server `ExecutionContext` 和 Browser `data.pipeline` 的公共输入边界先裁剪表数据，三种 Interactive Runtime 都保证 Selection 先于 Compute。
+14. 动态 Selection option domain 从 Base Output 建立；首次运行先 hydration/reconciliation，再渲染与调度 Interactive 分支。`canvas-ready` 只在首次 canonical state 提交后发布，Browser Interactive 状态通过 frame identity 约束的事件同步到 Server `Pipeline` 面板。
 
 仍属于后续优化，而不是隐藏的兼容工作：
 
@@ -490,7 +525,7 @@ Component Registry 独立版本化，只在公共组件契约变化时升级，�
 - 不以中心 Server 数据库保存页面和多人编辑状态；Git/文件夹是协作边界。
 - 不把网页可视化编辑器作为主要开发路径。
 - 不使用 Filter/exclude；Selection 只表达 include。
-- 不把随机种子、模拟次数、算法等 Compute Parameter 塞进 Selection。
+- 不把 Selection 与 Compute 的 Runtime 语义抹平成无类型参数；统一入口必须保留显式 `kind`。
 - 不支持任意 Filter Group 或一个 View 同时归属多个组。
 - 不恢复 Mosaic、Widget 坐标或拖拽画布协议。
 - 不让 browser-python/Pyodide 直接操作 DOM 或承担 View Renderer；它只产生 Named Output。

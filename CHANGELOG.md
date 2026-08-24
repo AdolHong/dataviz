@@ -2,6 +2,46 @@
 
 Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本化。这里记录使用者可观察到的变化；字段细节以 `dataviz schemas` 和 `dataviz components` 为准。
 
+## 0.3.1 — 2026-08-24
+
+### Fixed
+
+- 修复必填动态 View Selection 与其消费的 Browser Interactive Transform 之间的启动环。Selection option domain 现在默认追溯到不可变 Base Output，也可用 `options_from` 显式指定 `source:` / `dataset:` 表格 Output。
+- Canvas 首次运行改为 `Base Output hydration → Selection reconciliation → View render → Interactive scheduling`；一个 Selector 的 DOM option 尚未生成时，不再清除 canonical default 或阻断无关 Base View，导出 HTML 与 Server 使用同一顺序。
+- Browser Interactive Transform 的 queued/loading/ready/stale/error/cancelled/unavailable 状态会回传当前 frame 的 Server `Pipeline` 面板，不再在实际完成后保持灰色。
+- `canvas-ready` 现在只在 Base Output 水合与首次 canonical Control 提交完成后发布；父页面通过该握手恢复 tab-local 状态，不再与初始化并发并覆盖用户刚做出的 Selection。
+- Selection 事件在同一事件批次内立即合并提交，不再依赖延迟定时器；浮动 Control 面板的入场动画也不再越过运行时计算的视口安全边距。
+
+### Validation
+
+- `dataviz validate` 会拒绝未知、非表格、字段不匹配、无 Base domain 或引用 Interactive Output 的 `options_from`，避免在用户打开页面后才暴露循环或永久 pending。
+- 新增 Server 与独立 HTML 回归，覆盖 `required dynamic View Selection → browser-js → same View`、Base View hydration、父页面 Pipeline 状态同步和 Canvas 初始化握手；完整 Runtime 契约在 Chromium、Firefox、WebKit 通过。
+
+## 0.3.0 — 2026-08-24
+
+### Breaking contract
+
+- Dashboard 严格契约升级为 `dataviz/dashboard/v3`。Query 后只有 Dashboard/Section/View scoped `controls`，每项必须显式声明 `kind: selection | compute`。
+- 删除 v2 的 `dashboard_selections`、Section/View `selections`、Dashboard `compute_parameters`，以及 Interactive Transform 的旧 `selections` / `compute_params` 字段；不提供 alias、迁移分支或双协议 Runtime。
+- Interactive Transform 通过 `selection_inputs` / `compute_inputs` 把局部 alias 映射到 canonical scoped Control key，调度器仍保留两类独立 delta、提交周期和局部失效路径。
+
+### Changed
+
+- Server 与导出 HTML 只保留 `Parameters` 与 `Controls` 两个一级入口；Controls 在同一自适应托盘内按 DATA/LOGIC 分组，支持 Dashboard/Section/View 局部容器和 Presentation 稀疏视觉覆盖。
+- 内容绑定统一为 `{{ controls.dashboard.<id> }}`、`{{ controls.section.<section-id>.<id> }}` 和 `{{ controls.view.<view-id>.<id> }}`；Query 仍使用 `{{ parameters.<id> }}`。
+- Scaffold、CLI docs/schema/context、Gallery、仓库示例与 fixture 已全部迁移到 v3，旧字段由 `validate` 直接拒绝。
+
+### Runtime
+
+- `selection_inputs` 成为三种 Interactive Runtime 共享的数据边界：Runtime 先对具有对应字段契约的表输入应用 include Selection，再执行 Compute 逻辑。
+- Server Python 的 `context.table()` / `context.input()` 与 browser-js/browser-python 的 `context.inputs` 看到相同的已选样本；`context.selections` 仍可用于日志、标签和确定性分支。
+- `data.pipeline` 拥有 Browser Selection-before-Compute 边界，Server 使用同契约的 `ExecutionContext` 筛选；无关表输入保持不变。
+
+### Verification
+
+- 新增 Server 与 Browser 回归，证明 Selection 先裁剪样本、Compute 只在已选数据上运行，且无关 View 不重绘。
+- 全量 Python 测试、Browser Runtime E2E、Component Package 检查与仓库示例静态预检纳入发布验收。
+
 ## 0.2.0 — 2026-08-24
 
 ### Breaking architecture

@@ -162,8 +162,10 @@ def test_query_parameter_consumers_are_compiled_once():
     assert contract.query_parameter_consumers["target_factor"] == (
         "source:targets",
     )
-    assert contract.query_parameter_inputs["source:targets"] == ("target_factor",)
-    assert contract.query_parameter_inputs["source:orders"] == ()
+    assert contract.parameter_inputs["source:targets"] == {
+        "target_factor": {"parameter": "target_factor"}
+    }
+    assert contract.parameter_inputs["source:orders"] == {}
     target_factor = contract.query_parameters["target_factor"]
     assert target_factor.direct_query_nodes == ("source:targets",)
     assert target_factor.affected_query_nodes == (
@@ -184,8 +186,8 @@ def test_query_parameter_consumers_are_compiled_once():
         "target",
     )
     plan = compile_plan(dashboard)
-    assert plan.nodes["source:targets"].query_parameters == ("target_factor",)
-    assert plan.nodes["source:orders"].query_parameters == ()
+    assert set(plan.nodes["source:targets"].parameter_inputs) == {"target_factor"}
+    assert plan.nodes["source:orders"].parameter_inputs == {}
     assert contract.query_closure(["dataset:sales-metrics"]) == {
         "source:orders",
         "source:targets",
@@ -205,7 +207,7 @@ def test_dependency_contract_is_directly_inspectable_by_ai_and_humans():
 
     assert machine.exit_code == 0, machine.stdout
     assert machine.stdout.lstrip().startswith("{")
-    assert '"schema": "dataviz/dependency-contract/v1"' in machine.stdout
+    assert '"schema": "dataviz/dependency-contract/v2"' in machine.stdout
     assert human.exit_code == 0, human.stdout
     assert "Query DAG" in human.stdout
     assert "Query Parameters" in human.stdout
@@ -228,7 +230,7 @@ def test_dependency_contract_rejects_server_runtime_after_browser_runtime(
         encoding="utf-8",
     )
     (dashboard_root / "transforms" / "server.yaml").write_text(
-        """schema: dataviz/interactive-transform/v1
+        """schema: dataviz/interactive-transform/v2
 kind: interactive_transform
 id: server
 runtime: server-python

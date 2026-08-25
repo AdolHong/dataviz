@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v4
+schema: dataviz/dashboard/v5
 kind: dashboard
 id: component-gallery
 title: Component Gallery

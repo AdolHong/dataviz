@@ -10,6 +10,10 @@ from dataviz.content_templates import (
 )
 from dataviz.errors import ValidationFailure
 from dataviz.execution.references import parse_output_reference
+from dataviz.execution.parameters import (
+    query_input_contract,
+    query_input_parameter,
+)
 from dataviz.workspace.controls import (
     EffectiveControl,
     compile_control_contract,
@@ -21,7 +25,7 @@ if TYPE_CHECKING:
     from dataviz.workspace.loader import LoadedDashboard
 
 
-DEPENDENCY_CONTRACT_SCHEMA = "dataviz/dependency-contract/v1"
+DEPENDENCY_CONTRACT_SCHEMA = "dataviz/dependency-contract/v2"
 
 
 def _topological_order(
@@ -244,10 +248,10 @@ class ControlDependency:
 class DashboardDependencyContract:
     dashboard_id: str
     query_dependencies: dict[str, tuple[str, ...]]
-    query_inputs: dict[str, dict[str, str]]
+    data_inputs: dict[str, dict[str, str]]
     query_outputs: dict[str, tuple[str, ...]]
     query_order: tuple[str, ...]
-    query_parameter_inputs: dict[str, tuple[str, ...]]
+    parameter_inputs: dict[str, dict[str, dict[str, Any]]]
     query_parameter_consumers: dict[str, tuple[str, ...]]
     query_parameters: dict[str, QueryParameterDependency]
     query_node_downstream_views: dict[str, tuple[str, ...]]
@@ -258,7 +262,7 @@ class DashboardDependencyContract:
     interactive_inputs: dict[str, dict[str, str]]
     interactive_outputs: dict[str, tuple[str, ...]]
     interactive_runtimes: dict[str, str]
-    interactive_query_parameters: dict[str, tuple[str, ...]]
+    interactive_parameter_inputs: dict[str, dict[str, dict[str, Any]]]
     interactive_selection_inputs: dict[str, dict[str, str]]
     interactive_compute_inputs: dict[str, dict[str, str]]
     interactive_order: tuple[str, ...]
@@ -359,8 +363,8 @@ class DashboardDependencyContract:
                     identifier: list(self.interactive_outputs[identifier])
                     for identifier in self.reachable_interactive_order
                 },
-                "query_parameters": {
-                    identifier: list(self.interactive_query_parameters[identifier])
+                "parameter_inputs": {
+                    identifier: dict(self.interactive_parameter_inputs[identifier])
                     for identifier in self.reachable_interactive_order
                 },
                 "selection_inputs": {
@@ -417,15 +421,12 @@ class DashboardDependencyContract:
                 "dependencies": {
                     key: list(value) for key, value in self.query_dependencies.items()
                 },
-                "inputs": self.query_inputs,
+                "data_inputs": self.data_inputs,
                 "outputs": {
                     key: list(value) for key, value in self.query_outputs.items()
                 },
                 "order": list(self.query_order),
-                "parameter_inputs": {
-                    key: list(value)
-                    for key, value in self.query_parameter_inputs.items()
-                },
+                "parameter_inputs": self.parameter_inputs,
                 "parameter_consumers": {
                     key: list(value)
                     for key, value in self.query_parameter_consumers.items()
@@ -456,10 +457,7 @@ class DashboardDependencyContract:
                     for key, value in self.interactive_outputs.items()
                 },
                 "runtimes": dict(self.interactive_runtimes),
-                "query_parameters": {
-                    key: list(value)
-                    for key, value in self.interactive_query_parameters.items()
-                },
+                "parameter_inputs": self.interactive_parameter_inputs,
                 "selection_inputs": self.interactive_selection_inputs,
                 "compute_inputs": self.interactive_compute_inputs,
                 "order": list(self.interactive_order),
@@ -499,22 +497,22 @@ def compile_dashboard_dependencies(
     dashboard: LoadedDashboard,
 ) -> DashboardDependencyContract:
     query_dependencies: dict[str, set[str]] = {}
-    query_inputs: dict[str, dict[str, str]] = {}
+    data_inputs: dict[str, dict[str, str]] = {}
     query_outputs: dict[str, tuple[str, ...]] = {}
     for identifier, (_, definition) in dashboard.sources.items():
         node_id = f"source:{identifier}"
         query_dependencies[node_id] = set()
-        query_inputs[node_id] = {}
+        data_inputs[node_id] = {}
         query_outputs[node_id] = _declared_outputs("source", identifier, definition)
     for identifier, (_, definition) in dashboard.dataset_transforms.items():
         node_id = f"dataset:{identifier}"
-        query_inputs[node_id] = {
+        data_inputs[node_id] = {
             alias: parse_output_reference(reference).canonical
             for alias, reference in definition.inputs.items()
         }
         query_dependencies[node_id] = {
             parse_output_reference(reference).node_id
-            for reference in query_inputs[node_id].values()
+            for reference in data_inputs[node_id].values()
         }
         query_outputs[node_id] = _declared_outputs("dataset", identifier, definition)
     query_order = _topological_order(query_dependencies, label="Query DAG")
@@ -577,8 +575,11 @@ def compile_dashboard_dependencies(
         identifier: definition.runtime
         for identifier, (_, definition) in dashboard.interactive_transforms.items()
     }
-    interactive_query_parameters = {
-        identifier: tuple(definition.query_params)
+    interactive_parameter_inputs = {
+        identifier: {
+            alias: query_input_contract(binding)
+            for alias, binding in definition.query_inputs.items()
+        }
         for identifier, (_, definition) in dashboard.interactive_transforms.items()
     }
     interactive_selection_inputs = {
@@ -970,13 +971,19 @@ def compile_dashboard_dependencies(
                         },
                     )
 
-    query_parameter_inputs = {
+    parameter_inputs = {
         **{
-            f"source:{identifier}": tuple(getattr(definition, "query_params", []))
+            f"source:{identifier}": {
+                alias: query_input_contract(binding)
+                for alias, binding in getattr(definition, "query_inputs", {}).items()
+            }
             for identifier, (_, definition) in dashboard.sources.items()
         },
         **{
-            f"dataset:{identifier}": tuple(definition.query_params)
+            f"dataset:{identifier}": {
+                alias: query_input_contract(binding)
+                for alias, binding in definition.query_inputs.items()
+            }
             for identifier, (_, definition) in dashboard.dataset_transforms.items()
         },
     }
@@ -984,13 +991,16 @@ def compile_dashboard_dependencies(
         item.id: set() for item in dashboard.definition.query_parameters
     }
     for identifier, (_, definition) in dashboard.sources.items():
-        for key in getattr(definition, "query_params", []):
+        for binding in getattr(definition, "query_inputs", {}).values():
+            key = query_input_parameter(binding)
             query_parameter_consumers.setdefault(key, set()).add(f"source:{identifier}")
     for identifier, (_, definition) in dashboard.dataset_transforms.items():
-        for key in definition.query_params:
+        for binding in definition.query_inputs.values():
+            key = query_input_parameter(binding)
             query_parameter_consumers.setdefault(key, set()).add(f"dataset:{identifier}")
     for identifier, (_, definition) in dashboard.interactive_transforms.items():
-        for key in definition.query_params:
+        for binding in definition.query_inputs.values():
+            key = query_input_parameter(binding)
             query_parameter_consumers.setdefault(key, set()).add(f"interactive:{identifier}")
     for field, template in content_template_fields(dashboard.definition):
         for key in inspect_content_template(template).query_parameters:
@@ -1140,10 +1150,10 @@ def compile_dashboard_dependencies(
         query_dependencies={
             key: tuple(sorted(value)) for key, value in query_dependencies.items()
         },
-        query_inputs=query_inputs,
+        data_inputs=data_inputs,
         query_outputs=query_outputs,
         query_order=query_order,
-        query_parameter_inputs=query_parameter_inputs,
+        parameter_inputs=parameter_inputs,
         query_parameter_consumers={
             key: tuple(sorted(value))
             for key, value in query_parameter_consumers.items()
@@ -1160,7 +1170,7 @@ def compile_dashboard_dependencies(
         interactive_inputs=interactive_inputs,
         interactive_outputs=interactive_outputs,
         interactive_runtimes=interactive_runtimes,
-        interactive_query_parameters=interactive_query_parameters,
+        interactive_parameter_inputs=interactive_parameter_inputs,
         interactive_selection_inputs=interactive_selection_inputs,
         interactive_compute_inputs=interactive_compute_inputs,
         interactive_order=interactive_order,

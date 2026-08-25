@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v4
+schema: dataviz/dashboard/v5
 kind: dashboard
 id: runtime-scale
 title: "Runtime scale · {{ parameters.row_count }} rows"
@@ -16,7 +16,7 @@ sources:
     type: sql
     adapter: warehouse
     code: sources/rows.sql
-    query_params: [row_count]
+    query_inputs: {row_count: row_count}
     cache: {mode: none}
     outputs:
       main:

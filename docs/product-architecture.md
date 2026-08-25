@@ -8,13 +8,13 @@
 
 ```text
 Workspace              dataviz/workspace/v1
-Dashboard              dataviz/dashboard/v4
+Dashboard              dataviz/dashboard/v5
 Presentation           dataviz/presentation/v1
-Source                 dataviz/source/v1
-Dataset Transform      dataviz/dataset-transform/v1
-Interactive Transform  dataviz/interactive-transform/v1
-Dependency Contract    dataviz/dependency-contract/v1
-Browser Runtime        dataviz/runtime/v2
+Source                 dataviz/source/v2
+Dataset Transform      dataviz/dataset-transform/v2
+Interactive Transform  dataviz/interactive-transform/v2
+Dependency Contract    dataviz/dependency-contract/v2
+Browser Runtime        dataviz/runtime/v3
 Workspace Change       dataviz/workspace-change/v1
 Component Registry     4.0.0
 ```
@@ -32,7 +32,7 @@ Component Registry     4.0.0
 
 ## 2. 单一 Dependency Contract
 
-Dashboard 快照的 `dependency_contract` 属性以并发安全的首次初始化惰性编译并缓存唯一的 `dataviz/dependency-contract/v1`；热更新创建新快照和新契约。同一快照的所有消费者读取同一个对象。它同时拥有：
+Dashboard 快照的 `dependency_contract` 属性以并发安全的首次初始化惰性编译并缓存唯一的 `dataviz/dependency-contract/v2`；热更新创建新快照和新契约。同一快照的所有消费者读取同一个对象。它同时拥有：
 
 ```text
 Query Parameter → Query Node inputs/dependencies/outputs → downstream Views
@@ -66,12 +66,14 @@ Query Parameter → Source → Dataset Transform → Base Named Output
 
 - 编排：`src/dataviz/execution/plan.py`
 - 执行：`src/dataviz/execution/executor.py`
+- Query Parameter 解析与节点本地投影：`src/dataviz/execution/parameters.py`
+- Workspace 时区相对日期：`src/dataviz/relative_dates.py`
 - Source Runner：`src/dataviz/sources/`
 - Python 子进程：`src/dataviz/execution/python_process.py`
 - Artifact 与 Named Output：`src/dataviz/artifacts/`、`src/dataviz/execution/outputs.py`
 - 缓存：`src/dataviz/execution/cache.py`
 
-Query Run 固化 Query Parameter 和 Base Output。scoped Controls 不进入这张 DAG。节点按依赖闭包并发，Output 完成后立即发布；无关分支不互相等待。
+Query Run 固化 Query Parameter 和 Base Output。scoped Controls 不进入这张 DAG。每个 Query 节点以 `query_inputs` 声明自己可读的本地 alias；结构化绑定可把一个 `date_range` 投影为 `start`/`end` 两个标量。相对日期默认值先按 Workspace IANA 时区解析为具体 ISO 日期，再进入 Run、缓存和执行上下文。节点按依赖闭包并发，Output 完成后立即发布；无关分支不互相等待。
 
 File、SQL、Python 是 Source 的三种入口。SQL 默认单次超时 120 秒，明确超时后立即额外重试一次；Source 可以覆盖 `timeout_seconds` 与 `timeout_retries`。SQL 面板保存参数化 statement、Resolved SQL、bound parameters、Adapter、耗时、重试和 hash 证据，但不公开凭证。
 
@@ -142,7 +144,7 @@ not_run → queued → loading → ready | empty | error | cancelled | unavailab
 
 ## 6. Browser Runtime 与局部更新
 
-Server 与 HTML 共享 `dataviz/runtime/v2` Manifest、Named Output Store 和 Runtime Event。`canvas-runtime.js` 是共享 Runtime 主机；`data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 分别物理拥有数据 Adapter、Renderer lifecycle、Section/Repeat 和 Presentation state，借 `dataviz:runtime-ready` 装配到主机，不在 Runtime 文件内保留第二份实现。
+Server 与 HTML 共享 `dataviz/runtime/v3` Manifest、Named Output Store 和 Runtime Event。`canvas-runtime.js` 是共享 Runtime 主机；`data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 分别物理拥有数据 Adapter、Renderer lifecycle、Section/Repeat 和 Presentation state，借 `dataviz:runtime-ready` 装配到主机，不在 Runtime 文件内保留第二份实现。
 
 Server Header 中的 `Pipeline` 面板同时展示 Query 节点与 Interactive Transform。Query 状态来自 Run SSE；Browser Interactive 状态通过当前 iframe 的 `dataviz:interactive-status` 消息回传，并同时校验 dashboard/run/frame identity，避免跨 Dashboard 或旧 frame 污染状态。
 

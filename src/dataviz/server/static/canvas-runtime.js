@@ -1,7 +1,7 @@
 
-const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v2';
+const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v3';
 const DATAVIZ_INTERACTIVE_WORKER_PROTOCOL = 'dataviz/interactive-worker/v1';
-const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v1';
+const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v2';
 if (window.dataviz.protocol?.schema !== DATAVIZ_RUNTIME_PROTOCOL) {
   throw new Error(`Unsupported Dataviz Runtime protocol: ${window.dataviz.protocol?.schema || 'missing'}`);
 }
@@ -44,8 +44,31 @@ const datavizControlInputSignature = inputs => JSON.stringify(
       .sort(([left], [right]) => left.localeCompare(right))
   )
 );
+const datavizParameterBinding = binding => typeof binding === 'string'
+  ? {parameter:String(binding)}
+  : {
+      parameter:String(binding?.parameter || ''),
+      ...(binding?.part ? {part:String(binding.part)} : {}),
+    };
 const datavizParameterInputSignature = inputs => JSON.stringify(
-  [...(inputs || [])].map(String).sort()
+  Object.fromEntries(
+    Object.entries(inputs || {})
+      .map(([alias, binding]) => [alias, datavizParameterBinding(binding)])
+      .sort(([left], [right]) => left.localeCompare(right))
+  )
+);
+const datavizProjectParameterInputs = inputs => Object.fromEntries(
+  Object.entries(inputs || {}).map(([alias, rawBinding]) => {
+    const binding = datavizParameterBinding(rawBinding);
+    let value = window.dataviz.query_parameters?.[binding.parameter];
+    if (binding.part) {
+      if (!Array.isArray(value) || value.length !== 2) {
+        throw new Error(`Query input ${alias} cannot read ${binding.part} from ${binding.parameter}`);
+      }
+      value = value[binding.part === 'start' ? 0 : 1];
+    }
+    return [alias, value];
+  })
 );
 const datavizOutputContractSignature = (transformId, outputs) => JSON.stringify(
   Object.keys(outputs || {}).map(name => `interactive:${transformId}/${name}`).sort()
@@ -461,7 +484,7 @@ const validateInteractiveOutput = (transformId, name, value, definition = {}) =>
   }
 };
 const datavizRuntime = window.datavizRuntime = {
-  protocol: 'dataviz/runtime/v2',
+  protocol: 'dataviz/runtime/v3',
   transforms: new Map(),
   views: new Map(),
   renderers: new Map(),
@@ -509,7 +532,7 @@ const datavizRuntime = window.datavizRuntime = {
     if (datavizControlInputSignature(spec.compute_inputs) !== datavizControlInputSignature(interactiveContract.compute_inputs?.[spec.id])) {
       throw new Error(`Interactive Transform ${spec.id} Compute inputs differ from the compiled dependency contract`);
     }
-    if (datavizParameterInputSignature(spec.query_params) !== datavizParameterInputSignature(interactiveContract.query_parameters?.[spec.id])) {
+    if (datavizParameterInputSignature(spec.query_inputs) !== datavizParameterInputSignature(interactiveContract.parameter_inputs?.[spec.id])) {
       throw new Error(`Interactive Transform ${spec.id} Query Parameter inputs differ from the compiled dependency contract`);
     }
     if (datavizOutputContractSignature(spec.id, spec.outputs) !== JSON.stringify([...(interactiveContract.outputs?.[spec.id] || [])].sort())) {
@@ -589,8 +612,8 @@ const datavizRuntime = window.datavizRuntime = {
   transformComputeInputs(id) {
     return window.dataviz.dependency_contract?.interactive?.compute_inputs?.[id] || {};
   },
-  transformQueryParameters(id) {
-    return window.dataviz.dependency_contract?.interactive?.query_parameters?.[id] || [];
+  transformParameterInputs(id) {
+    return window.dataviz.dependency_contract?.interactive?.parameter_inputs?.[id] || {};
   },
   transformViews(id, mode = 'downstream') {
     return window.dataviz.dependency_contract?.interactive?.[
@@ -703,7 +726,7 @@ const datavizRuntime = window.datavizRuntime = {
         code_dependencies:item.source.dependencies || {},
         context:{
           inputs:inputValues,
-          query_params:Object.fromEntries(this.transformQueryParameters(id).map(key => [key, window.dataviz.query_parameters?.[key]])),
+          query_inputs:datavizProjectParameterInputs(this.transformParameterInputs(id)),
           compute_params:Object.fromEntries(Object.entries(this.transformComputeInputs(id)).map(([alias, key]) => [alias, window.dataviz.compute_parameters?.[key]])),
           selections:Object.fromEntries(Object.entries(this.transformSelectionInputs(id)).map(([alias, key]) => [alias, window.dataviz.selections?.[key]])),
         },
@@ -826,7 +849,7 @@ const datavizRuntime = window.datavizRuntime = {
       inputs:Object.fromEntries(
         Object.entries(inputValues).map(([name, value]) => [name, datavizValueSignature(value)])
       ),
-      query_params:Object.fromEntries(this.transformQueryParameters(id).map(key => [key, window.dataviz.query_parameters?.[key]])),
+      query_inputs:datavizProjectParameterInputs(this.transformParameterInputs(id)),
       compute_params:Object.fromEntries(Object.entries(this.transformComputeInputs(id)).map(([alias, key]) => [alias, window.dataviz.compute_parameters?.[key]])),
       selections:Object.fromEntries(Object.entries(this.transformSelectionInputs(id)).map(([alias, key]) => [alias, window.dataviz.selections?.[key]])),
     });
@@ -2167,6 +2190,9 @@ window.addEventListener('message', event => {
         request_id:requestId,
         ...datavizFrameIdentity(),
         ...snapshot,
+        selections:structuredClone(window.dataviz.selections || {}),
+        selection_intents:datavizSelectionIntentSnapshot(),
+        compute_parameters:structuredClone(window.dataviz.compute_parameters || {}),
       }, event.origin);
     } catch (error) {
       event.source?.postMessage({

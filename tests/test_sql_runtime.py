@@ -35,7 +35,7 @@ def _sql_workspace(
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v4
+        """schema: dataviz/dashboard/v5
 kind: dashboard
 id: sql-test
 title: SQL test
@@ -54,7 +54,7 @@ sections:
         f"timeout_retries: {timeout_retries}\n" if timeout_retries is not None else ""
     )
     (sources / "query.yaml").write_text(
-        f"""schema: dataviz/source/v1
+        f"""schema: dataviz/source/v2
 kind: source
 id: query
 type: sql
@@ -93,6 +93,64 @@ def test_sql_source_with_timeout_returns_table_and_cleans_temporary_file(tmp_pat
     assert query_evidence["timeout_seconds"] == 10
     assert "url" not in query_evidence
     assert not (root / ".dataviz" / "runs" / result.run_id / "tmp").exists()
+
+
+def test_date_range_query_parameter_projects_to_two_sql_inputs(tmp_path: Path):
+    root = _sql_workspace(
+        tmp_path / "workspace",
+        "select $start_date as start_date, $end_date as end_date",
+    )
+    dashboard_path = root / "dashboards" / "sql-test" / "dashboard.yaml"
+    dashboard = dashboard_path.read_text(encoding="utf-8").replace(
+        "title: SQL test\n",
+        """title: SQL test
+query_parameters:
+  - id: job_date_range
+    type: date_range
+    required: true
+    default:
+      mode: relative
+      anchor: today
+      start_offset: -3d
+      end_offset: -1d
+""",
+    )
+    dashboard_path.write_text(dashboard, encoding="utf-8")
+    source_path = root / "dashboards" / "sql-test" / "sources" / "query.yaml"
+    source = source_path.read_text(encoding="utf-8").replace(
+        "code: query.sql\n",
+        """code: query.sql
+query_inputs:
+  start_date: {parameter: job_date_range, part: start}
+  end_date: {parameter: job_date_range, part: end}
+""",
+    )
+    source_path.write_text(source, encoding="utf-8")
+    workspace = load_workspace(root)
+
+    result = Executor(workspace).run(
+        "sql-test",
+        query_parameters={"job_date_range": ["2026-08-17", "2026-08-23"]},
+        refresh=True,
+    )
+    artifact = result.nodes["source:query"].outputs["main"]
+    frame = ArtifactStore(root, result.run_id).read_table(artifact)
+    evidence = result.nodes["source:query"].diagnostics["query"]
+
+    assert frame.to_dict(orient="records") == [
+        {"start_date": "2026-08-17", "end_date": "2026-08-23"}
+    ]
+    assert result.query_parameters == {
+        "job_date_range": ["2026-08-17", "2026-08-23"]
+    }
+    assert evidence["parameters"] == {
+        "start_date": "2026-08-17",
+        "end_date": "2026-08-23",
+    }
+    assert evidence["input_bindings"] == {
+        "start_date": {"parameter": "job_date_range", "part": "start"},
+        "end_date": {"parameter": "job_date_range", "part": "end"},
+    }
 
 
 def test_sql_timeout_hard_cancels_only_its_node_and_is_structured(tmp_path: Path):
@@ -152,7 +210,7 @@ def test_sql_timeout_does_not_block_an_independent_fast_branch(tmp_path: Path):
     sources = dashboard / "sources"
     (sources / "fast.csv").write_text("label,value\nready,7\n", encoding="utf-8")
     (sources / "fast.yaml").write_text(
-        """schema: dataviz/source/v1
+        """schema: dataviz/source/v2
 kind: source
 id: fast
 type: file
@@ -164,7 +222,7 @@ cache: {mode: none}
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v4
+        """schema: dataviz/dashboard/v5
 kind: dashboard
 id: sql-test
 title: SQL test
@@ -293,7 +351,7 @@ def test_timeout_retries_is_rejected_by_the_file_source_schema(tmp_path: Path):
     sources = root / "dashboards" / "sql-test" / "sources"
     (sources / "query.csv").write_text("value\n1\n", encoding="utf-8")
     (sources / "query.yaml").write_text(
-        """schema: dataviz/source/v1
+        """schema: dataviz/source/v2
 kind: source
 id: query
 type: file

@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v4
+schema: dataviz/dashboard/v5
 kind: dashboard
 id: cascade-explorer
 title: 级联选择器

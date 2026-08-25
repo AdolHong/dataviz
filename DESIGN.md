@@ -2,7 +2,7 @@
 
 > 快速安装和当前可用命令见 [README](README.md)；后续工作见 [plan.md](plan.md)。安装版本真正接受的字段始终以 `dataviz schemas`、`dataviz docs` 和 `dataviz components` 为准。
 
-本文描述 Dataviz 当前已经落地的执行架构与必须长期保持的设计不变量。当前严格契约是 `dataviz/dashboard/v4`、`dataviz/dependency-contract/v1`、`dataviz/runtime/v2` 与 Component Registry `4.0.0`；scoped Controls、Selection-before-Compute、两种 Transform、三种 Interactive Runtime、独立 Data Entry Component 与开发态 Workspace Hot Reload 已进入实现、CLI、示例与测试，不是兼容旧实验接口的抽象层。当前实现不保留 Dashboard v3、顶层 `choices`、`options_from` 或旧 Selector 字段，使用者必须按当前契约重写未迁移的实验看板。
+本文描述 Dataviz 当前已经落地的执行架构与必须长期保持的设计不变量。当前严格契约是 `dataviz/dashboard/v5`、`dataviz/dependency-contract/v2`、`dataviz/runtime/v3` 与 Component Registry `4.0.0`；scoped Controls、Selection-before-Compute、两种 Transform、三种 Interactive Runtime、独立 Data Entry Component 与开发态 Workspace Hot Reload 已进入实现、CLI、示例与测试，不是兼容旧实验接口的抽象层。当前实现不保留 Dashboard v4、Source/Transform v1、`query_params` 或旧 Selector 字段，使用者必须按当前契约重写未迁移的实验看板。
 
 Dataviz 是一个 workspace-first、AI-friendly 的数据看板工具。看板是普通文件，能够被 Git 管理、复制和审查；Server 面向人提供交互页面，CLI 面向 AI 与自动化提供校验、查询和 HTML 导出。
 
@@ -60,7 +60,7 @@ Source/main → View → 默认 Presentation
 
 ### 单一 Dependency Contract
 
-每次 Workspace 载入或热更新都会创建新的不可变 Dashboard 快照；每个快照只编译一次版本化的 `dataviz/dependency-contract/v1`。同一快照内的执行、交互和渲染层共享同一个契约对象，不能重复编译或各自解释 DSL。它包含：
+每次 Workspace 载入或热更新都会创建新的不可变 Dashboard 快照；每个快照只编译一次版本化的 `dataviz/dependency-contract/v2`。同一快照内的执行、交互和渲染层共享同一个契约对象，不能重复编译或各自解释 DSL。它包含：
 
 - Query 节点的输入 alias、上游节点、Named Output、拓扑顺序、下游 View/option Control，以及每个节点允许读取的 Query Parameter；
 - 每个 Query Parameter 的直接消费者和最终受影响 Query 节点、Interactive 分支、option Control、内容字段与 View；
@@ -109,8 +109,40 @@ Control 不是无类型参数袋。每一项必须显式声明 `kind: selection 
 ### Query Parameter
 
 - 只在用户执行 **Run query** 后提交。
-- 进入 Source/Dataset Transform 的执行上下文和缓存键。
+- Dashboard 保存 canonical 值；Source/Dataset/Interactive Transform 必须用 `query_inputs` 映射到节点本地 alias。
+- 进入节点执行上下文和缓存键的是投影后的本地 `context.query_inputs`，未声明的全局参数不可读取。
 - 修改草稿但没有重新查询时，页面仍展示上一次 Run 的已提交值和结果。
+
+`query_inputs` 的 key 是节点本地名称，也是 SQL named placeholder 或 Python/Browser Context 的 key；value 是 canonical Query Parameter id。字符串是直接绑定的简写，结构化绑定可投影 `date_range`：
+
+```yaml
+query_parameters:
+  - id: job_date_range
+    type: date_range
+    required: true
+    default:
+      mode: relative
+      anchor: today
+      start_offset: -3d
+      end_offset: -1d
+
+sources:
+  - id: sales
+    type: sql
+    adapter: warehouse
+    code: sources/sales.sql
+    query_inputs:
+      warehouse_id: warehouse_id
+      start_date: {parameter: job_date_range, part: start}
+      end_date: {parameter: job_date_range, part: end}
+```
+
+```sql
+where warehouse_id = :warehouse_id
+  and job_date between :start_date and :end_date
+```
+
+相对日期不是自由格式字符串。当前严格语法只接受 `anchor: today` 与整数日偏移 `±Nd`/`0d`；单日期使用 `offset`，日期范围使用 `start_offset/end_offset`。`today` 按 `workspace.context.timezone` 求值，并在 tab 首次构建参数表单或 CLI Run 开始时解析为具体 ISO 日期。Query Run、缓存指纹、SQL 绑定和 HTML Export 保存的都是这个具体值；导出页不会在第二天重新解释“today”。Server 启动时不预计算，避免跨午夜后继续使用旧日期。
 
 ### Selection Control
 
@@ -206,7 +238,7 @@ Interactive Transform 支持：
 ### Dataset Transform
 
 - 字段：`dataset_transforms`。
-- standalone schema：`dataviz/dataset-transform/v1`。
+- standalone schema：`dataviz/dataset-transform/v2`。
 - 执行位置固定为 Server Python。
 - 由 Query Parameter 和上游 Named Output 决定。
 - 适合多 Source 合并、数据清洗、特征构造、基础指标和一次 Run 内固定的复杂计算。
@@ -215,7 +247,7 @@ Interactive Transform 支持：
 ### Interactive Transform
 
 - 字段：`interactive_transforms`。
-- standalone schema：`dataviz/interactive-transform/v1`。
+- standalone schema：`dataviz/interactive-transform/v2`。
 - 只消费已经确定的 Base/Derived Named Output。
 - 可以显式消费已提交 Query Parameter 快照，以及 selection/compute Control。
 - 不访问 Adapter、不重新查询 Source。
@@ -230,7 +262,9 @@ dataset_transforms:
     code: transforms/features.py
     inputs:
       orders: source:orders/main
-    query_params: [start_date, end_date]
+    query_inputs:
+      start_date: start_date
+      end_date: end_date
     outputs:
       main: {kind: table}
 
@@ -240,7 +274,9 @@ interactive_transforms:
     code: transforms/monte_carlo.py
     inputs:
       base: dataset:features/main
-    query_params: [start_date, end_date]
+    query_inputs:
+      start_date: start_date
+      end_date: end_date
     compute_inputs:
       seed: dashboard:sales-overview/seed
       simulations: dashboard:sales-overview/simulations
@@ -256,7 +292,7 @@ interactive_transforms:
 DSL 中的值是 canonical Control key，Transform 代码只看到作者显式选择的局部 alias。运行上下文继续把两类 delta 分开，以便调度器准确做局部失效：
 
 ```text
-context.query_params
+context.query_inputs
 context.compute_params
 context.selections
 context.inputs
@@ -552,11 +588,12 @@ AI 的默认工作应该是选择模板、绑定 Output、填写状态依赖和�
 
 | 契约 | 版本 |
 | --- | --- |
-| Dashboard schema | `dataviz/dashboard/v4` |
-| Dashboard Dependency Contract | `dataviz/dependency-contract/v1` |
-| Browser Runtime Manifest/Event | `dataviz/runtime/v2` |
-| Dataset Transform schema | `dataviz/dataset-transform/v1` |
-| Interactive Transform schema | `dataviz/interactive-transform/v1` |
+| Dashboard schema | `dataviz/dashboard/v5` |
+| Source schema | `dataviz/source/v2` |
+| Dashboard Dependency Contract | `dataviz/dependency-contract/v2` |
+| Browser Runtime Manifest/Event | `dataviz/runtime/v3` |
+| Dataset Transform schema | `dataviz/dataset-transform/v2` |
+| Interactive Transform schema | `dataviz/interactive-transform/v2` |
 | Component Registry | `4.0.0` |
 
 已经实现：
@@ -571,7 +608,7 @@ AI 的默认工作应该是选择模板、绑定 Output、填写状态依赖和�
 8. `validate`、`compute`、`docs`、`schemas`、`components`、`context` 和 Scaffold 使用同一当前契约。
 9. 同一 tab 的状态可恢复，不同 tab、Dashboard、用户、Query Run 与 Interaction generation 相互隔离；父页面/Canvas 消息还校验当前 frame identity。
 10. `authoring prepare/verify/assess/start/finish/compare` 可以用固定任务、经过完整性校验的 approach prompt、输入完整性、逐项验收证据、真实客户端 Token、首次成功率、修正轮次和耗时对比 Dataviz 与 standalone HTML；缺失 Token 不做估算。
-11. `data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 已从 bridge 完整迁入物理 owner Package；Runtime v2 通过公开 ready event 装配且 dispose 幂等。
+11. `data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 已从 bridge 完整迁入物理 owner Package；Runtime v3 通过公开 ready event 装配且 dispose 幂等。
 12. Gallery 已覆盖四类组件的七状态矩阵，以及真实 10/100/1,000 选项 Select Story；Story 元数据、页面目标与 Chromium 行为测试使用同一 Package。
 13. `selection_inputs` 在 Server `ExecutionContext` 和 Browser `data.pipeline` 的公共输入边界先裁剪表数据，三种 Interactive Runtime 都保证 Selection 先于 Compute。
 14. 动态 Selection option domain 从 Base Output 建立；首次运行先 hydration/reconciliation，再渲染与调度 Interactive 分支。`canvas-ready` 只在首次 canonical state 提交后发布，Browser Interactive 状态通过 frame identity 约束的事件同步到 Server `Pipeline` 面板。

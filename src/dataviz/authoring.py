@@ -360,9 +360,9 @@ def _dependency_context_payload(
         for key, values in query["dependencies"].items()
         if key in query_nodes
     }
-    query["inputs"] = {
+    query["data_inputs"] = {
         key: value
-        for key, value in query["inputs"].items()
+        for key, value in query["data_inputs"].items()
         if key in query_nodes
     }
     query["outputs"] = {
@@ -401,7 +401,7 @@ def _dependency_context_payload(
         "inputs",
         "outputs",
         "runtimes",
-        "query_parameters",
+        "parameter_inputs",
         "selection_inputs",
         "compute_inputs",
         "direct_views",
@@ -491,23 +491,23 @@ def build_context_payload(
         value["key"] for controls in effective_contract.values() for value in controls
     }
     relevant_params = {
-        parameter
+        binding["parameter"]
         for identifier in source_ids
-        for parameter in dependency_contract.query_parameter_inputs[
+        for binding in dependency_contract.parameter_inputs[
             f"source:{identifier}"
-        ]
+        ].values()
     }
     relevant_params.update(
-        parameter
+        binding["parameter"]
         for identifier in transform_ids
-        for parameter in dependency_contract.query_parameter_inputs[
+        for binding in dependency_contract.parameter_inputs[
             f"dataset:{identifier}"
-        ]
+        ].values()
     )
     relevant_params.update(
-        parameter
+        binding["parameter"]
         for identifier in interactive_ids
-        for parameter in dependency_contract.interactive_query_parameters[identifier]
+        for binding in dependency_contract.interactive_parameter_inputs[identifier].values()
     )
     control_keys.update(
         key
@@ -815,7 +815,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         files = {
             "dashboard.yaml": _yaml(
                 {
-                    "schema": "dataviz/dashboard/v4",
+                    "schema": "dataviz/dashboard/v5",
                     "kind": "dashboard",
                     "id": item_id,
                     "title": item_id.replace("-", " ").title(),
@@ -848,7 +848,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
     elif recipe in {"source.file", "source.sql", "source.python"}:
         source_type = recipe.split(".", 1)[1]
         definition: dict[str, Any] = {
-            "schema": "dataviz/source/v1",
+            "schema": "dataviz/source/v2",
             "kind": "source",
             "id": item_id,
             "type": source_type,
@@ -865,7 +865,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
             definition.update({"code": f"{item_id}.py", "entrypoint": "load"})
             files[f"{item_id}.py"] = (
                 "def load(context):\n"
-                "    # context.query_params and context.adapter are explicit inputs.\n"
+                "    # context.query_inputs and context.adapter are explicit inputs.\n"
                 "    return [{\"category\": \"A\", \"value\": 1}]\n"
             )
         files = {f"{item_id}.yaml": _yaml(definition), **files}
@@ -873,7 +873,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         files = {
             f"{item_id}.yaml": _yaml(
                 {
-                    "schema": "dataviz/dataset-transform/v1",
+                    "schema": "dataviz/dataset-transform/v2",
                     "kind": "dataset_transform",
                     "id": item_id,
                     "runtime": "server-python",
@@ -898,7 +898,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         files = {
             f"{item_id}.yaml": _yaml(
                 {
-                    "schema": "dataviz/interactive-transform/v1",
+                    "schema": "dataviz/interactive-transform/v2",
                     "kind": "interactive_transform",
                     "id": item_id,
                     "runtime": runtime,

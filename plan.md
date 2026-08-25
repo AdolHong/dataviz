@@ -12,15 +12,18 @@
 | P1 Component Package | 当前范围已完成 | Registry v4 已覆盖常用 Data Entry、View、Section、Renderer、Repeat 和 Presentation 组件；继续扩张必须由真实场景触发。 |
 | P1 AI 开发效率评测 | 工具已完成，真实试验暂缓 | 成对任务、输入完整性、逐项验收和真实 Token 记录均已实现；试验方案尚未决定，不用仓库测试伪造结论。 |
 | P2 规模与浏览器矩阵 | 当前范围已完成 | 固定 10K/100K/1M 基准、流式 groupBy 优化，以及 Chromium/Firefox/WebKit 的窄屏与 Perspective 恢复组合矩阵均已有可复现证据。 |
-| 开源发布 | 进行中 | 构建与安装门禁已具备；许可证尚未决定。 |
+| 开源发布 | 本地发行完成 | `0.6.0` 严格 Query Input 契约及三种归档已完成本地发行门禁；正式对外授权仍等待许可证决定。 |
 
-当前基线：Package `0.5.4`、Python 3.11–3.14、Dashboard `dataviz/dashboard/v4`、Browser Runtime `dataviz/runtime/v2`、Component Registry `4.0.0`。项目尚未投入生产，因此只接受当前严格契约，不保留旧字段 alias、自动迁移或第二套 Runtime。
+当前基线：Package `0.6.0`、Python 3.11–3.14、Dashboard `dataviz/dashboard/v5`、Source/Dataset/Interactive Transform `v2`、Dependency Contract `v2`、Browser Runtime `dataviz/runtime/v3`、Component Registry `4.0.0`。项目尚未投入生产，因此只接受当前严格契约，不保留旧字段 alias、自动迁移或第二套 Runtime。
 
 ## 已完成的核心能力
 
 ### 数据、计算与状态
 
-- [x] Dashboard v4 只有 Query Parameter 与 scoped Controls 两个入口；Control 在 Dashboard/Section/View 统一声明，并以 `kind: selection | compute` 保留不同 delta、提交周期和失效路径。
+- [x] Dashboard v5 只有 Query Parameter 与 scoped Controls 两个入口；Control 在 Dashboard/Section/View 统一声明，并以 `kind: selection | compute` 保留不同 delta、提交周期和失效路径。
+- [x] Source、Dataset Transform 与 Interactive Transform 统一使用 `query_inputs` 将 canonical Query Parameter 映射到节点本地 alias；删除节点级 `query_params`。SQL placeholder 与三种 Python/Browser Context 只能读取本节点声明的 alias。
+- [x] `date_range` 可通过 `{parameter, part: start|end}` 投影为两个标量；Dependency Contract、Planner、Server/Browser Runtime、缓存证据、Resolved SQL、CLI Context 和 HTML Export 使用同一映射。
+- [x] Query Parameter 的 `date`/`date_range` 支持基于 Workspace IANA 时区的严格相对默认值；Run 创建前解析为具体 ISO 日期并固化，Compute/Selection 不接受相对默认值。
 - [x] Select 候选域用严格的 `options.mode=static|infer` 区分封闭枚举与 Source 推导；`infer` 禁止值列表 `default`，多选初始状态由 `all_available`/`explicit` 意图驱动。
 - [x] `selection_inputs` 是 Runtime 数据边界而非普通参数；三种 Interactive Runtime 都先对字段契约匹配的表输入应用 include Selection，再进入 Compute 逻辑。
 - [x] Source/Dataset Transform 与 Interactive Transform 使用两个 DAG、显式 Named Output、Schema Contract、provenance 和分支级并发。
@@ -29,7 +32,7 @@
 - [x] 同一 tab 可恢复状态；不同 tab、Dashboard、用户、Run 和 Interaction generation 相互隔离。
 - [x] Query Run Artifact 统一保存在 Workspace `.dataviz/`；可达 Server Interactive 输入在计划阶段显式分类，按 tab + Dashboard + Run + canonical Output 复用且绝不重查 Source。
 - [x] SQL 默认 120 秒超时并立即额外重试一次；Dashboard 可覆盖 timeout/retry。
-- [x] `dataviz/dependency-contract/v1` 成为 Query、Interactive、Control、Output 与 View 关系的唯一编译结果；Planner、Loader、Server、Browser、Export、CLI 和 AI context 不再各自推导 DAG。
+- [x] `dataviz/dependency-contract/v2` 成为 Query、Interactive、Control、Output 与 View 关系的唯一编译结果；Planner、Loader、Server、Browser、Export、CLI 和 AI context 不再各自推导 DAG。
 - [x] 每个不可变 Dashboard load snapshot 以并发安全方式只编译并缓存一个 Dependency Contract；热更新创建新快照，并行首访也只返回同一个对象。
 - [x] Query Parameter 契约给出直接消费者及最终受影响 Query 节点、Interactive 分支、option Control、内容字段和 View；Query 节点同时给出下游 View/Control。
 - [x] Dependency Contract 以“可执行才存在”为不变量：环、未知 Output、browser → server-python 非法依赖和越界 Control consumer 在编译期拒绝；Loader 仅对无效图做 recovery diagnostics。
@@ -126,6 +129,7 @@
 - [x] 完成 `0.5.2` Overlay 修复发行门禁：完整 Python 契约套件、Chromium/Firefox/WebKit 桌面与窄屏浮层回归、三种归档内容审计，并分别在干净 Python 3.12 环境完成 `install → version → components → validate → dependencies → report`；最终 wheel 另行通过真实 Server/Chromium 几何冒烟。
 - [x] 完成 `0.5.3` Plotly 页面滚动修复发行门禁：默认 `scrollZoom=false` 与显式 opt-in 均通过 Chromium/Firefox/WebKit 真实滚轮回归；306 项 Python 契约测试、Component Package 检查、Feature Showcase strict validate，以及 wheel/sdist/pip ZIP 的干净安装与报告导出全部通过。
 - [x] 完成 `0.5.4` Custom Renderer Plotly 滚轮契约发行门禁：AI 文档、组件契约与 Scaffold 明确自定义 `newPlot`/`react` 默认使用 `scrollZoom=false`；336 项完整测试、四个代表性 Workspace strict validate，以及 wheel/sdist/pip ZIP 的干净安装与离线报告导出全部通过。
+- [x] 完成 `0.6.0` 断代发行门禁：312 项 Python 契约测试、Chromium/Firefox/WebKit 各 25 项回归、8 个 Workspace/11 个 Dashboard 严格 validate、wheel/sdist/pip ZIP 内容审计，以及三套独立 Python 3.12 干净安装的完整 CLI/报告冒烟全部通过。
 - [ ] 维护者决定许可证并添加正式 `LICENSE`；许可证未定不阻塞开发，但阻塞正式对外授权。
 - [ ] 添加 `CONTRIBUTING.md`，说明安装、validate/test、Runtime/Component 变更和 PR 验收。
 - [ ] 正式 GitHub Release 发布 wheel、sdist、pip ZIP、SHA-256 和远端 CI 记录。

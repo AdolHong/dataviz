@@ -72,9 +72,9 @@ def _hint_for(item: Diagnostic) -> str:
     if code == "dashboard_not_found":
         return "Run `dataviz list <workspace>` and use the stable Dashboard id shown there."
     if code == "sql_parameter_undeclared":
-        return "Declare every named SQL placeholder in Source `query_params`, and declare the same id in Dashboard `query_parameters`."
+        return "Declare every named SQL placeholder as a local Source `query_inputs` key, then bind it to a Dashboard `query_parameters` id."
     if code == "sql_parameter_unused":
-        return "Remove the unused Source `query_params` entry or reference it as a named placeholder in the SQL file."
+        return "Remove the unused Source `query_inputs` entry or reference its local alias as a named SQL placeholder."
     if code == "sql_file_unreadable":
         return "Save the SQL file as UTF-8 and verify that the current user can read it."
     if code == "source_asset_missing":
@@ -108,7 +108,7 @@ def _hint_for(item: Diagnostic) -> str:
     if "does not exist" in item.message:
         return "Fix the relative path or add the missing file, then run this preflight again."
     if "unknown query parameter" in item.message.lower():
-        return "Add the id to Dashboard `query_parameters`, or remove it from this node's `query_params`."
+        return "Bind this node's `query_inputs` entry to a declared Dashboard `query_parameters` id, or remove it."
     if code.startswith("pyodide_bundle_"):
         return (
             "Use the complete official Pyodide distribution at "

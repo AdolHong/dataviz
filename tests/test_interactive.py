@@ -44,7 +44,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v4
+        """schema: dataviz/dashboard/v5
 kind: dashboard
 id: interactive
 title: Interactive contract
@@ -82,14 +82,14 @@ sections:
         encoding="utf-8",
     )
     (dashboard / "transforms" / "summary.yaml").write_text(
-        f"""schema: dataviz/interactive-transform/v1
+        f"""schema: dataviz/interactive-transform/v2
 kind: interactive_transform
 id: summary
 runtime: server-python
 code: summary.py
 inputs:
   rows: source:raw/main
-query_params: [batch]
+query_inputs: {{batch: batch}}
 compute_inputs:
   factor: dashboard:interactive/factor
   delay: dashboard:interactive/delay
@@ -123,7 +123,7 @@ def transform(context):
     if selected:
         assert frame["region"].tolist() == selected
     frame["value"] = frame["value"] * int(context.compute_params["factor"])
-    frame["batch"] = int(context.query_params["batch"])
+    frame["batch"] = int(context.query_inputs["batch"])
     context.progress(1.0, "complete")
     return {"main": frame, "total": int(frame["value"].sum())}
 """,
@@ -581,7 +581,7 @@ def test_server_interactive_dependency_is_reused_once_per_generation_chain(
         encoding="utf-8",
     )
     (dashboard_root / "transforms" / "downstream.yaml").write_text(
-        """schema: dataviz/interactive-transform/v1
+        """schema: dataviz/interactive-transform/v2
 kind: interactive_transform
 id: downstream
 runtime: server-python

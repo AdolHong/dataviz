@@ -11,7 +11,7 @@
       shell.hydrate(canvas);
     }
     const adapter = {
-      protocol:'dataviz/runtime/v2',
+      protocol:'dataviz/runtime/v3',
       state:components.state,
       hydrate:shell.hydrate,
       dispose() {},

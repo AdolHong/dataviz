@@ -1,7 +1,7 @@
 (function installDatavizWebComponentAdapter(global) {
   'use strict';
 
-  const PROTOCOL = 'dataviz/runtime/v2';
+  const PROTOCOL = 'dataviz/runtime/v3';
   const canonical = reference => {
     const raw = String(reference || '').trim();
     if (!raw) throw new Error('Output reference cannot be empty');
@@ -48,14 +48,14 @@
     return String(actual ?? '') === String(value ?? '');
   };
 
-  class DatavizRuntimeV2Client {
+  class DatavizRuntimeV3Client {
     constructor(manifest) {
       if (manifest?.protocol?.schema !== PROTOCOL) {
         throw new Error(`Unsupported Dataviz Runtime protocol: ${manifest?.protocol?.schema || 'missing'}`);
       }
       this.manifest = manifest;
     }
-    static fromWindow() { return new DatavizRuntimeV2Client(global.dataviz); }
+    static fromWindow() { return new DatavizRuntimeV3Client(global.dataviz); }
     output(reference) {
       return this.manifest.portable?.outputs?.[canonical(reference)];
     }
@@ -93,7 +93,7 @@
     }
     render() {
       try {
-        const client = DatavizRuntimeV2Client.fromWindow();
+        const client = DatavizRuntimeV3Client.fromWindow();
         const view = this.getAttribute('view');
         const value = view
           ? client.viewRows(view, this.getAttribute('input') || 'main')
@@ -119,7 +119,7 @@
     }
   }
 
-  global.DatavizRuntimeV2Client = DatavizRuntimeV2Client;
+  global.DatavizRuntimeV3Client = DatavizRuntimeV3Client;
   if (!global.customElements.get('dataviz-output')) {
     global.customElements.define('dataviz-output', DatavizOutputElement);
   }

@@ -285,7 +285,7 @@ title: Adapter refresh
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v4
+        """schema: dataviz/dashboard/v5
 kind: dashboard
 id: adapter-refresh
 adapters: {data: files}
@@ -354,7 +354,7 @@ title: Adapter tests
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v4
+        """schema: dataviz/dashboard/v5
 kind: dashboard
 id: adapter-source
 title: Adapter source
@@ -366,7 +366,7 @@ views: []
         encoding="utf-8",
     )
     (sources / "api.yaml").write_text(
-        """schema: dataviz/source/v1
+        """schema: dataviz/source/v2
 kind: source
 id: api
 type: python

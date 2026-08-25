@@ -23,6 +23,7 @@ from dataviz.workspace.models import (
     PresentationDefinition,
     PresentationControlComponentDefinition,
     QueryParameterDefinition,
+    QueryInputProjectionDefinition,
     RepeatDefinition,
     RuntimeDefinition,
     ScopedControlDefinition,
@@ -34,7 +35,7 @@ from dataviz.workspace.models import (
 )
 
 
-SCHEMA_CATALOG_VERSION = "dataviz/schema-catalog/v4"
+SCHEMA_CATALOG_VERSION = "dataviz/schema-catalog/v5"
 SchemaProvider = type[BaseModel] | TypeAdapter
 
 
@@ -50,6 +51,7 @@ SCHEMA_MODELS: OrderedDict[str, SchemaProvider] = OrderedDict(
         ("interactive-export", InteractiveExportDefinition),
         ("adapter", AdapterDefinition),
         ("query-parameter", QueryParameterDefinition),
+        ("query-input", QueryInputProjectionDefinition),
         ("scoped-control", TypeAdapter(ScopedControlDefinition)),
         ("compute-control", ComputeControlDefinition),
         ("selection-control", SelectionControlDefinition),
@@ -67,12 +69,12 @@ SCHEMA_MODELS: OrderedDict[str, SchemaProvider] = OrderedDict(
 
 CURRENT_SCHEMAS = {
     "workspace": "dataviz/workspace/v1",
-    "dashboard": "dataviz/dashboard/v4",
+    "dashboard": "dataviz/dashboard/v5",
     "presentation": "dataviz/presentation/v1",
-    "source": "dataviz/source/v1",
-    "dataset_transform": "dataviz/dataset-transform/v1",
-    "interactive_transform": "dataviz/interactive-transform/v1",
-    "runtime": "dataviz/runtime/v2",
+    "source": "dataviz/source/v2",
+    "dataset_transform": "dataviz/dataset-transform/v2",
+    "interactive_transform": "dataviz/interactive-transform/v2",
+    "runtime": "dataviz/runtime/v3",
 }
 
 

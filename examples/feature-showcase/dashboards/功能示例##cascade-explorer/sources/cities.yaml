@@ -1,4 +1,4 @@
-schema: dataviz/source/v1
+schema: dataviz/source/v2
 kind: source
 id: cities
 name: 城市 SQL

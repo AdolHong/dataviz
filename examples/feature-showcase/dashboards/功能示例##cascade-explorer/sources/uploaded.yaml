@@ -1,4 +1,4 @@
-schema: dataviz/source/v1
+schema: dataviz/source/v2
 kind: source
 id: uploaded-file
 name: Workspace 文件 Adapter

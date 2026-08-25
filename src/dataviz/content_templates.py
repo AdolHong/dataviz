@@ -500,7 +500,3 @@ def interpolate_dashboard_content(
             "views": views,
         }
     )
-
-
-def default_parameter_values(definition: DashboardDefinition) -> dict[str, Any]:
-    return {item.id: item.default for item in definition.query_parameters}

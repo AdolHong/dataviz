@@ -18,7 +18,7 @@ class PlanNode:
     definition: Any
     dependencies: set[str]
     inputs: dict[str, OutputReference]
-    query_parameters: tuple[str, ...]
+    parameter_inputs: dict[str, Any]
 
 
 @dataclass(slots=True)
@@ -54,14 +54,14 @@ def compile_plan(
             definition=definition,
             dependencies=set(),
             inputs={},
-            query_parameters=dependency_contract.query_parameter_inputs[node_id],
+            parameter_inputs=dict(dependency_contract.parameter_inputs[node_id]),
         )
 
     for transform_id, (path, definition) in dashboard.dataset_transforms.items():
         node_id = f"dataset:{transform_id}"
         inputs = {
             name: parse_output_reference(reference)
-            for name, reference in dependency_contract.query_inputs[node_id].items()
+            for name, reference in dependency_contract.data_inputs[node_id].items()
         }
         nodes[node_id] = PlanNode(
             id=node_id,
@@ -71,7 +71,7 @@ def compile_plan(
             definition=definition,
             dependencies=set(dependency_contract.query_dependencies[node_id]),
             inputs=inputs,
-            query_parameters=dependency_contract.query_parameter_inputs[node_id],
+            parameter_inputs=dict(dependency_contract.parameter_inputs[node_id]),
         )
 
     requested_targets = targets

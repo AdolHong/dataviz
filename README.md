@@ -38,7 +38,7 @@ Query Parameter → Adapter → Source → Dataset Transform（可选）
 - Interactive Transform 一旦通过 `selection_inputs` 声明依赖，Runtime 会先对其表输入应用 include Selection，再把已选样本交给 Compute 逻辑；业务代码不应再手写一遍相同筛选。
 - 三种 Interactive Runtime 使用相同 Named Output 契约；图、表和文本统一由 JavaScript Renderer 呈现。
 
-每次载入或热更新后的 Dashboard 快照会以并发安全方式只编译一次 `dataviz/dependency-contract/v1`。Query Planner、Server、Browser Runtime、HTML Export 和 AI context 都消费同一个对象；浏览器注册配置只用于检查漂移，Transform 调度和 View 输入仍以契约为准，不会再次猜测拓扑或按 DOM 重建级联。契约会直接拒绝环、未知 Output、非法跨 Runtime 依赖和越界 Control consumer。可以在运行前直接检查：
+每次载入或热更新后的 Dashboard 快照会以并发安全方式只编译一次 `dataviz/dependency-contract/v2`。Query Planner、Server、Browser Runtime、HTML Export 和 AI context 都消费同一个对象；浏览器注册配置只用于检查漂移，Transform 调度和 View 输入仍以契约为准，不会再次猜测拓扑或按 DOM 重建级联。契约会直接拒绝环、未知 Output、非法跨 Runtime 依赖和越界 Control consumer。可以在运行前直接检查：
 
 ```bash
 dataviz dependencies myworkspace sales-overview
@@ -53,7 +53,51 @@ Query Run 的可达 Base Output 会写入 Workspace 的 `.dataviz/runs/<run-id>/
 
 简单逻辑默认按 `browser-js → browser-python → server-python` 选择：前两者可让导出报告继续交互，后者适合原生 Python 包、大模型、运筹求解和大规模计算。这个顺序强调可移植性和启动成本，不是绝对性能排名。
 
-当前契约是 `dataviz/dashboard/v4` 与 `dataviz/runtime/v2`。项目处于 `0.x` 阶段，不兼容更早的实验性 Dashboard/Transform 字段，也不在 Runtime 中保留迁移分支。
+当前契约是 `dataviz/dashboard/v5` 与 `dataviz/runtime/v3`。项目处于 `0.x` 阶段，不兼容更早的实验性 Dashboard/Transform 字段，也不在 Runtime 中保留迁移分支。
+
+## Query Parameter 与日期范围
+
+Query Parameter 在 Dashboard 中只定义一次 canonical 值；每个 SQL、Python Source、Dataset Transform 或 Interactive Transform 再通过 `query_inputs` 映射成自己的本地输入名。这样 RangePicker 可以保持一个 `[start, end]` 值，而 SQL 仍得到两个普通标量：
+
+```yaml
+# workspace.yaml
+context:
+  timezone: Asia/Shanghai
+
+# dashboard.yaml
+query_parameters:
+  - id: job_date_range
+    type: date_range
+    label: 日期范围
+    required: true
+    default:
+      mode: relative
+      anchor: today
+      start_offset: -3d
+      end_offset: -1d
+
+# sources/sales.yaml
+schema: dataviz/source/v2
+kind: source
+id: sales
+type: sql
+adapter: warehouse
+code: sales.sql
+query_inputs:
+  start_date: {parameter: job_date_range, part: start}
+  end_date: {parameter: job_date_range, part: end}
+outputs: {main: {kind: table}}
+```
+
+```sql
+select *
+from sales
+where job_date between :start_date and :end_date
+```
+
+`query_inputs` 的 key 是节点私有 alias，也是 SQL placeholder 或 `context.query_inputs` 的 key。字符串值可简写直接绑定，例如 `warehouse_id: warehouse_id`；`part: start | end` 只允许用于 `date_range`。
+
+相对日期只允许用于 Query Parameter 的 `date`/`date_range` 默认值。`today` 按 `workspace.context.timezone` 解析；页面首次载入或 CLI Run 创建时会转换为具体 ISO 日期，之后 Run、缓存和 HTML 都保存该具体值。不同浏览器 tab 各自初始化并记忆自己的值，不会在报告打开时重新计算“今天”。
 
 ## 快速开始
 
@@ -92,7 +136,7 @@ uv sync --python 3.12 --extra dev --no-editable \
 从发行 ZIP 安装时：
 
 ```bash
-python -m pip install ./ai-dataviz-0.5.4.zip
+python -m pip install ./ai-dataviz-0.6.0.zip
 dataviz version
 dataviz serve /path/to/workspace --port 8080
 ```

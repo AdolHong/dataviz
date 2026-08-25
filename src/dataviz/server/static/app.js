@@ -323,7 +323,12 @@ function collectCanvasSnapshot(expectedIdentity) {
       window.removeEventListener('message', receive);
       if (event.data.error) reject(new Error(event.data.error.message || 'Snapshot collection failed'));
       else if (event.data.missing?.length) reject(new Error(`Run analysis before export: ${event.data.missing.join(', ')}`));
-      else resolve(event.data.outputs || {});
+      else resolve({
+        outputs:event.data.outputs || {},
+        selections:event.data.selections || {},
+        selectionIntents:event.data.selection_intents || {},
+        computeParameters:event.data.compute_parameters || {},
+      });
     };
     window.addEventListener('message', receive);
     requestSnapshot();
@@ -336,8 +341,6 @@ async function downloadReport() {
   const dashboardId = state.dashboard.id;
   const runId = state.runId;
   const runtime = runtimeFor(dashboardId);
-  const selectionValues = selections();
-  const computeValues = runtime.committedComputeParameters || computeParameters();
   const button = $('#download-button');
   button.disabled = true;
   const previous = button.textContent;
@@ -346,7 +349,7 @@ async function downloadReport() {
     if (identity.dashboard_id !== dashboardId || identity.run_id !== runId) {
       throw new Error('The active Canvas is not synchronized with the selected Query Run');
     }
-    const snapshotOutputs = await collectCanvasSnapshot(identity);
+    const snapshot = await collectCanvasSnapshot(identity);
     if (!sameCanvasIdentity(canvasIdentity(), identity)) {
       throw new Error('The active Canvas changed while the report snapshot was being prepared');
     }
@@ -359,10 +362,13 @@ async function downloadReport() {
         body:JSON.stringify({
           session_id:state.sessionId,
           run_id:runId,
-          selections:selectionValues,
-          selection_intents:selectionIntents(),
-          compute_parameters:computeValues,
-          snapshot_outputs:snapshotOutputs,
+          // Canvas owns the canonical Section/View Controls and returns them in
+          // the same atomic snapshot as Derived Outputs. Reading the parent's
+          // asynchronous shadow before this handshake races on Firefox.
+          selections:snapshot.selections,
+          selection_intents:snapshot.selectionIntents,
+          compute_parameters:snapshot.computeParameters,
+          snapshot_outputs:snapshot.outputs,
         }),
       },
     );
@@ -414,6 +420,9 @@ function controlComponent(parameter, presentation = {}) {
 }
 
 function field(parameter, name = parameter.id, presentation = {}, behavior = {}) {
+  const defaultValue = Object.prototype.hasOwnProperty.call(parameter, 'resolved_default')
+    ? parameter.resolved_default
+    : parameter.default;
   const wrapper = document.createElement('div');
   wrapper.className = 'field';
   const label = document.createElement('label');
@@ -441,7 +450,7 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
       empty.value = '';
       empty.hidden = true;
       empty.dataset.emptyOption = 'true';
-      empty.selected = parameter.default == null || parameter.default === '';
+      empty.selected = defaultValue == null || defaultValue === '';
       input.append(empty);
     }
     for (const choice of choices) {
@@ -453,14 +462,14 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
       if (choice.keywords?.length) option.dataset.keywords = choice.keywords.join(' ');
       const hierarchicalSingle = parameter.type === 'single_select' && (parameter.path_fields || []).length;
       const defaults = parameter.type === 'multi_select'
-        ? (Array.isArray(parameter.default) ? parameter.default : [])
+        ? (Array.isArray(defaultValue) ? defaultValue : [])
         : hierarchicalSingle
-        ? [parameter.default]
-        : [parameter.default];
+        ? [defaultValue]
+        : [defaultValue];
       option.selected = defaults.map(value => typedChoices ? JSON.stringify(value) : String(value)).includes(option.value);
       input.append(option);
     }
-    if (!input.multiple && parameter.default == null) {
+    if (!input.multiple && defaultValue == null) {
       input.selectedIndex = -1;
     }
   } else {
@@ -476,9 +485,9 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
         ? 'date'
         : 'text';
     }
-    if (parameter.type === 'boolean') input.checked = Boolean(parameter.default);
-    else if (Array.isArray(parameter.default)) input.value = parameter.default.join(',');
-    else input.value = parameter.default ?? '';
+    if (parameter.type === 'boolean') input.checked = Boolean(defaultValue);
+    else if (Array.isArray(defaultValue)) input.value = defaultValue.join(',');
+    else input.value = defaultValue ?? '';
   }
   input.required = Boolean(parameter.required && parameter.type !== 'boolean');
   if (parameter.placeholder) input.placeholder = parameter.placeholder;
@@ -798,6 +807,12 @@ function selectDashboard(id) {
     $('#parameter-form'),
     runtime.queryParameterValues || runtime.committedQueryParameters || {},
   );
+  // Freeze resolved relative defaults as concrete tab-local values on first
+  // hydration. A full page reload in the same tab must restore these values
+  // instead of silently re-evaluating `today` from a newer Workspace payload.
+  if (runtime.queryParameterValues == null) {
+    runtime.queryParameterValues = queryParameters();
+  }
   setFormValues(
     $('#compute-parameter-form'),
     runtime.draftComputeParameters || runtime.committedComputeParameters || {},

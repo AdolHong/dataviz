@@ -16,7 +16,7 @@ class ExecutionContext:
     workspace_root: Path
     dashboard_root: Path
     run_id: str
-    query_params: dict[str, Any]
+    query_inputs: dict[str, Any]
     compute_params: dict[str, Any]
     selections: dict[str, Any]
     inputs: dict[str, ArtifactDescriptor]

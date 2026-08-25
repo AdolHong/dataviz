@@ -47,6 +47,9 @@ DOC_ALIASES = {
     "chart": "charts",
     "view": "charts",
     "source": "sources",
+    "parameter": "query-parameters",
+    "parameters": "query-parameters",
+    "query-parameter": "query-parameters",
     "content": "dashboard",
     "interpolation": "dashboard",
     "title": "dashboard",
@@ -88,7 +91,7 @@ DOC_ALIASES = {
 
 DOC_TOPICS: dict[str, dict[str, Any]] = {
     "quickstart": {
-        "summary": "从空环境到可验证 Dashboard 和 HTML 报告的最短 v2 路径。",
+        "summary": "从空环境到可验证 Dashboard 和 HTML 报告的最短 v5 路径。",
         "commands": [
             "dataviz version",
             "dataviz docs pipeline --format json",
@@ -134,7 +137,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
         },
         "execution": {
             "compiled_contract": (
-                "每个 Dashboard load snapshot 以并发安全方式只编译并缓存一份 dataviz/dependency-contract/v1；"
+                "每个 Dashboard load snapshot 以并发安全方式只编译并缓存一份 dataviz/dependency-contract/v2；"
                 "Query planner、Interactive executor、Canvas、Server API 与浏览器 Runtime 都消费同一个对象。"
             ),
             "query_dag": "Source 与 Dataset Transform；完成的独立分支立即发布 Base Output。",
@@ -154,7 +157,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "dataviz dependencies <workspace> <dashboard-id>",
             "dataviz dependencies <workspace> <dashboard-id> --format json",
         ],
-        "schema": "dataviz/dependency-contract/v1",
+        "schema": "dataviz/dependency-contract/v2",
         "graphs": {
             "query": (
                 "Query Parameter → Source/Dataset Transform → immutable Base Named Output；"
@@ -233,13 +236,13 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
     },
     "dashboard": {
         "summary": "dashboard.yaml 是分析逻辑；presentation.yaml 是可删除的视觉覆盖。",
-        "schema": "dataviz/dashboard/v4",
+        "schema": "dataviz/dashboard/v5",
         "identity": {
             "folder": "导航显示名及 ## 目录位置；复制、重命名和打包时所见即所得。",
             "id": "CLI、DAG、API 与 Presentation 使用的稳定程序身份。",
             "title": "页面内容，可与文件夹名不同；为空时回退到文件夹末级名称。",
         },
-        "minimal_example": """schema: dataviz/dashboard/v4
+        "minimal_example": """schema: dataviz/dashboard/v5
 kind: dashboard
 id: sales-overview
 title: 销售概览
@@ -277,6 +280,36 @@ sections:
         },
         "related": ["presentation", "controls", "interactive-transforms"],
     },
+    "query-parameters": {
+        "summary": "Query Parameter 创建不可变 Query Run；节点通过 query_inputs 使用本地别名和显式投影。",
+        "date_range": {
+            "definition": """- id: job_date_range
+  type: date_range
+  required: true
+  default:
+    mode: relative
+    anchor: today
+    start_offset: -3d
+    end_offset: -1d
+""",
+            "binding": """query_inputs:
+  start_date: {parameter: job_date_range, part: start}
+  end_date: {parameter: job_date_range, part: end}
+""",
+        },
+        "relative_defaults": [
+            "date 使用 offset；date_range 使用 start_offset/end_offset。",
+            "v0.6 只接受 anchor=today 与整数日偏移 ±Nd/0d。",
+            "today 按 workspace.context.timezone 计算，不使用 Server 操作系统时区。",
+            "Run 创建时固化为 ISO 日期；缓存、SQL、HTML Export 均使用固化值，不在导出文件中重新求值。",
+        ],
+        "query_inputs": [
+            "key 是节点本地别名，也是 SQL named placeholder 或 context.query_inputs 的 key。",
+            "字符串值是 {parameter: <id>} 的简写。",
+            "part=start/end 仅允许投影 date_range；validate 在查询前拒绝错误类型。",
+        ],
+        "related": ["sources", "dataset-transforms", "interactive-transforms"],
+    },
     "adapters": {
         "summary": "连接配置属于 Workspace；可分享的 Dashboard 只引用逻辑 Adapter 名。",
         "supported": ["duckdb", "mysql", "starrocks", "sqlalchemy", "file root", "Python Source adapter config"],
@@ -293,9 +326,9 @@ sections:
         "summary": "Source 是唯一外部取数入口，类型为 file、sql 或 python。",
         "required": ["schema", "kind", "id", "type", "outputs"],
         "examples": {
-            "file": "{schema: dataviz/source/v1, kind: source, id: sales, type: file, path: data/sales.csv, outputs: {main: {kind: table}}}",
-            "sql": "{schema: dataviz/source/v1, kind: source, id: sales, type: sql, adapter: warehouse, code: sales.sql, query_params: [start_date], outputs: {main: {kind: table}}}",
-            "python": "{schema: dataviz/source/v1, kind: source, id: api, type: python, code: api.py, outputs: {main: {kind: table}}}",
+            "file": "{schema: dataviz/source/v2, kind: source, id: sales, type: file, path: data/sales.csv, outputs: {main: {kind: table}}}",
+            "sql": "{schema: dataviz/source/v2, kind: source, id: sales, type: sql, adapter: warehouse, code: sales.sql, query_inputs: {start_date: start_date}, outputs: {main: {kind: table}}}",
+            "python": "{schema: dataviz/source/v2, kind: source, id: api, type: python, code: api.py, outputs: {main: {kind: table}}}",
         },
         "timeouts": "SQL/Python 默认 120 秒；SQL timeout_retries 默认 1，超时后立即使用新连接重试。",
         "debug": "Server 的 Sources 面板公开参数化 SQL、解析后 SQL、绑定参数、Adapter 类型、超时和重试证据。",
@@ -316,15 +349,15 @@ sections:
     },
     "dataset-transforms": {
         "summary": "Dataset Transform 在 Query DAG 中加工取数结果，并固化为 Base Output。",
-        "schema": "dataviz/dataset-transform/v1",
+        "schema": "dataviz/dataset-transform/v2",
         "runtime": "server-python",
-        "example": """schema: dataviz/dataset-transform/v1
+        "example": """schema: dataviz/dataset-transform/v2
 kind: dataset_transform
 id: features
 runtime: server-python
 code: features.py
 inputs: {sales: source:sales/main}
-query_params: [start_date]
+query_inputs: {start_date: start_date}
 outputs:
   rows: {kind: table}
   total: {kind: scalar}
@@ -332,7 +365,7 @@ timeout_seconds: 120
 """,
         "context": [
             "context.inputs / context.input(name) / context.table(name)",
-            "context.query_params",
+            "context.query_inputs",
             "context.compute_params={} / context.selections={}",
             "context.adapter=None",
             "context.progress(value, message)",
@@ -346,8 +379,8 @@ timeout_seconds: 120
     },
     "interactive-transforms": {
         "summary": "Interactive Transform 在不可变 Query Run 上按 selection/compute Control delta 重算 Derived Output。",
-        "schema": "dataviz/interactive-transform/v1",
-        "common_fields": ["runtime", "inputs", "query_params", "compute_inputs", "selection_inputs", "trigger", "export", "outputs"],
+        "schema": "dataviz/interactive-transform/v2",
+        "common_fields": ["runtime", "inputs", "query_inputs", "compute_inputs", "selection_inputs", "trigger", "export", "outputs"],
         "runtimes": {
             "browser-js": "JavaScript Web Worker；Server 与 HTML 共用；支持 Promise、progress、timeout、cancel。",
             "browser-python": "Pyodide module Worker；支持纯 Python/Pyodide wheel；图表仍由 JS Renderer 绘制。",
@@ -906,7 +939,7 @@ assets:
             "Query/Control namespace、Control kind、作用域可见性与 trigger 冲突",
             "Interactive export.mode、Pyodide 依赖和 bundle 资产",
             "SQL named parameter、Python 依赖和输入/输出 Schema",
-            "View/Section/Presentation/Selector 引用",
+            "View/Section/Presentation/Data Entry Control 引用",
         ],
         "json_contract": {
             "queries_executed": "固定为 0；静态验证不触发任何数据源。",
@@ -915,16 +948,18 @@ assets:
         },
         "sql_parameter_example": {
             "errors": ["sql_parameter_undeclared", "sql_parameter_unused"],
-            "fix": "同时更新 SQL placeholder、Source query_params 和 Dashboard query_parameters。",
+            "fix": "同时更新 SQL placeholder、Source query_inputs 本地别名和 Dashboard query_parameters 绑定。",
         },
     },
     "strict-schema": {
         "summary": "只接受当前 DSL；不提供 deprecated 层、字段别名、自动迁移或双协议 Runtime。",
         "current": {
-            "dashboard": "dataviz/dashboard/v4",
-            "runtime": "dataviz/runtime/v2",
-            "dataset_transform": "dataviz/dataset-transform/v1",
-            "interactive_transform": "dataviz/interactive-transform/v1",
+            "dashboard": "dataviz/dashboard/v5",
+            "source": "dataviz/source/v2",
+            "runtime": "dataviz/runtime/v3",
+            "dependency_contract": "dataviz/dependency-contract/v2",
+            "dataset_transform": "dataviz/dataset-transform/v2",
+            "interactive_transform": "dataviz/interactive-transform/v2",
         },
         "rules": [
             "未知字段 extra=forbid。",
@@ -933,7 +968,7 @@ assets:
         ],
     },
     "frontend-adapters": {
-        "summary": "前端实现只消费 dataviz/runtime/v2 Manifest/Event/Output，不读取 Python 内部对象。",
+        "summary": "前端实现只消费 dataviz/runtime/v3 Manifest/Event/Output，不读取 Python 内部对象。",
         "commands": [
             "dataviz frontend-adapters --format json",
             "dataviz frontend-adapters web-component --output runtime-adapter.js",

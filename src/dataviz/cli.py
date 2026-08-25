@@ -566,7 +566,7 @@ Finish the returned session with `dataviz authoring finish`. Commit the generate
 `dataviz-authoring.jsonl` when its task text and notes contain no sensitive data;
 sharing that file gives the Dataviz author real retry, time and documentation-friction data.
 """,
-        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v4
+        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v5
 kind: dashboard
 id: hello
 title: Hello dashboard
@@ -919,7 +919,7 @@ def frontend_adapters(
     ),
     output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
 ) -> None:
-    """Inspect frontend implementations that consume dataviz/runtime/v2."""
+    """Inspect frontend implementations that consume dataviz/runtime/v3."""
     if output_format not in {"markdown", "json"}:
         raise typer.BadParameter("--format must be markdown or json")
     catalog = frontend_adapter_catalog()
@@ -1545,10 +1545,12 @@ def dependencies_command(
             dependencies = ", ".join(contract.query_dependencies[node_id]) or "none"
             inputs = ", ".join(
                 f"{alias}={reference}"
-                for alias, reference in contract.query_inputs[node_id].items()
+                for alias, reference in contract.data_inputs[node_id].items()
             ) or "none"
             parameters = ", ".join(
-                contract.query_parameter_inputs[node_id]
+                f"{alias}←{binding['parameter']}"
+                + (f".{binding['part']}" if binding.get('part') else "")
+                for alias, binding in contract.parameter_inputs[node_id].items()
             ) or "none"
             views = ", ".join(
                 contract.query_node_downstream_views[node_id]

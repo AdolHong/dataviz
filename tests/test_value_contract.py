@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from datetime import datetime, timezone
 
 import pytest
 from pydantic import ValidationError
 
 from dataviz.errors import ExecutionFailure
 from dataviz.execution import resolve_query_parameters
+from dataviz.execution.parameters import project_query_inputs
 from dataviz.value_contract import normalize_control_value
 from dataviz.workspace.controls import (
     initial_selection_intents,
@@ -23,11 +25,101 @@ from dataviz.workspace.models import (
     InteractiveTransformDefinition,
     QueryParameterDefinition,
     SelectionControlDefinition,
+    SqlSourceDefinition,
 )
 
 
 def static_options(choices):
     return {"mode": "static", "choices": choices}
+
+
+def test_relative_date_defaults_resolve_once_in_workspace_timezone_and_project_parts():
+    definition = DashboardDefinition.model_validate(
+        {
+            "schema": "dataviz/dashboard/v5",
+            "id": "relative-dates",
+            "query_parameters": [
+                {
+                    "id": "job_date_range",
+                    "type": "date_range",
+                    "required": True,
+                    "default": {
+                        "mode": "relative",
+                        "anchor": "today",
+                        "start_offset": "-3d",
+                        "end_offset": "-1d",
+                    },
+                }
+            ],
+        }
+    )
+    dashboard = SimpleNamespace(definition=definition)
+    # 16:30 UTC is already the next calendar day in Asia/Shanghai.
+    values = resolve_query_parameters(
+        dashboard,
+        None,
+        timezone_name="Asia/Shanghai",
+        current_time=datetime(2026, 8, 24, 16, 30, tzinfo=timezone.utc),
+    )
+    source = SqlSourceDefinition.model_validate(
+        {
+            "schema": "dataviz/source/v2",
+            "id": "sales",
+            "type": "sql",
+            "adapter": "warehouse",
+            "code": "sales.sql",
+            "query_inputs": {
+                "start_date": {
+                    "parameter": "job_date_range",
+                    "part": "start",
+                },
+                "end_date": {
+                    "parameter": "job_date_range",
+                    "part": "end",
+                },
+            },
+            "outputs": {"main": {"kind": "table"}},
+        }
+    )
+
+    assert values == {"job_date_range": ["2026-08-22", "2026-08-24"]}
+    assert project_query_inputs(source.query_inputs, values) == {
+        "start_date": "2026-08-22",
+        "end_date": "2026-08-24",
+    }
+
+
+def test_relative_date_default_contract_rejects_ambiguous_or_reversed_expressions():
+    with pytest.raises(ValidationError, match="integer day offset"):
+        QueryParameterDefinition.model_validate(
+            {
+                "id": "date",
+                "type": "date",
+                "default": {"mode": "relative", "anchor": "today", "offset": "-1week"},
+            }
+        )
+    with pytest.raises(ValidationError, match="start_offset cannot be after"):
+        QueryParameterDefinition.model_validate(
+            {
+                "id": "dates",
+                "type": "date_range",
+                "default": {
+                    "mode": "relative",
+                    "anchor": "today",
+                    "start_offset": "+1d",
+                    "end_offset": "-1d",
+                },
+            }
+        )
+    with pytest.raises(ValidationError, match="only valid for Query Parameters"):
+        ComputeControlDefinition.model_validate(
+            {
+                "id": "date",
+                "kind": "compute",
+                "type": "date",
+                "default": {"mode": "relative", "anchor": "today", "offset": "-1d"},
+            }
+        )
 
 
 def test_control_defaults_are_validated_when_the_dsl_is_loaded():
@@ -96,7 +188,7 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
 
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v4",
+            "schema": "dataviz/dashboard/v5",
             "id": "option-intents",
             "controls": [
                 {
@@ -136,7 +228,7 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
 
     required_inferred = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v4",
+            "schema": "dataviz/dashboard/v5",
             "id": "required-inferred",
             "controls": [
                 {
@@ -346,7 +438,7 @@ def test_portable_numbers_and_dates_reject_browser_python_ambiguities():
 def test_query_compute_and_selection_resolvers_share_strict_contracts():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v4",
+            "schema": "dataviz/dashboard/v5",
             "id": "contract",
             "query_parameters": [{"id": "batch", "type": "integer", "default": 7}],
             "controls": [
@@ -378,7 +470,9 @@ def test_query_compute_and_selection_resolvers_share_strict_contracts():
     dashboard = SimpleNamespace(definition=definition)
 
     with pytest.raises(ExecutionFailure) as query_error:
-        resolve_query_parameters(dashboard, {"batch": 1.5})
+        resolve_query_parameters(
+            dashboard, {"batch": 1.5}, timezone_name="Asia/Shanghai"
+        )
     assert query_error.value.details["code"] == "query_parameter_invalid_type"
 
     with pytest.raises(ExecutionFailure) as compute_error:
@@ -425,7 +519,7 @@ def test_typed_choice_values_round_trip_to_the_declared_json_value():
 def test_browser_cache_is_tab_local_while_server_cache_can_be_workspace_scoped():
     with pytest.raises(ValidationError, match="Browser Runtime cache supports only"):
         InteractiveTransformDefinition(
-            schema="dataviz/interactive-transform/v1",
+            schema="dataviz/interactive-transform/v2",
             id="browser",
             runtime="browser-js",
             code="transform.js",
@@ -439,7 +533,7 @@ def test_browser_cache_is_tab_local_while_server_cache_can_be_workspace_scoped()
         )
 
     server = InteractiveTransformDefinition(
-        schema="dataviz/interactive-transform/v1",
+        schema="dataviz/interactive-transform/v2",
         id="server",
         runtime="server-python",
         code="transform.py",

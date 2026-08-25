@@ -141,10 +141,10 @@ def test_machine_readable_component_examples_use_canonical_output_references():
 
 def test_machine_readable_documentation_examples_match_current_schemas():
     providers = {
-        "dataviz/dashboard/v4": DashboardDefinition,
-        "dataviz/source/v1": SOURCE_DEFINITION_ADAPTER,
-        "dataviz/dataset-transform/v1": DatasetTransformDefinition,
-        "dataviz/interactive-transform/v1": InteractiveTransformDefinition,
+        "dataviz/dashboard/v5": DashboardDefinition,
+        "dataviz/source/v2": SOURCE_DEFINITION_ADAPTER,
+        "dataviz/dataset-transform/v2": DatasetTransformDefinition,
+        "dataviz/interactive-transform/v2": InteractiveTransformDefinition,
         "dataviz/presentation/v1": PresentationDefinition,
     }
     examples: list[tuple[str, dict[str, object]]] = []
@@ -628,7 +628,7 @@ def test_coordinate_layout_fields_are_strictly_rejected(layout):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v4",
+                "schema": "dataviz/dashboard/v5",
                 "kind": "dashboard",
                 "id": "strict",
                 "layout": layout,

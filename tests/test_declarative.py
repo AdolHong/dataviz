@@ -754,7 +754,7 @@ def test_dashboard_definition_assets_cannot_escape_dashboard_folder(tmp_path: Pa
     dashboard_root = root / "dashboards" / "sales-overview"
     outside = root / "outside-source.yaml"
     outside.write_text(
-        """schema: dataviz/source/v1
+        """schema: dataviz/source/v2
 kind: source
 id: outside
 type: file
@@ -855,7 +855,7 @@ def test_removed_schema_fields_are_rejected(removed_fragment):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v4",
+                "schema": "dataviz/dashboard/v5",
                 "kind": "dashboard",
                 "id": "strict",
                 **removed_fragment,
@@ -869,7 +869,7 @@ def test_interactive_transform_rejects_old_unscoped_input_maps(removed_field):
     with pytest.raises(ValidationError) as failure:
         InteractiveTransformDefinition.model_validate(
             {
-                "schema": "dataviz/interactive-transform/v1",
+                "schema": "dataviz/interactive-transform/v2",
                 "kind": "interactive_transform",
                 "id": "strict",
                 "runtime": "browser-js",
@@ -916,7 +916,7 @@ def test_layout_and_view_bounds_are_enforced(fragment, location):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v4",
+                "schema": "dataviz/dashboard/v5",
                 "kind": "dashboard",
                 "id": "strict",
                 **fragment,
@@ -960,7 +960,7 @@ def test_default_renderer_builds_templates_and_portable_report(tmp_path: Path):
     assert "Optional presentation-only polish" in report
     assert "min-height:420px" in report
     assert "global.dataviz?.view_specs" in report
-    assert '"schema": "dataviz/runtime/v2"' in report
+    assert '"schema": "dataviz/runtime/v3"' in report
     assert "runtime.registerView(view.id" in report
     assert "window.datavizClient" not in report
     assert '"source:sales/main": [' in report

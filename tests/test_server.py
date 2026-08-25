@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import time
 import shutil
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pyarrow as pa
@@ -64,6 +66,75 @@ def test_server_exposes_active_presentation_contract():
         "density": "comfortable",
     }
     assert not [item for item in summary["diagnostics"] if item["level"] == "error"]
+
+
+def test_workspace_api_resolves_relative_query_defaults_to_concrete_tab_values(
+    tmp_path: Path,
+):
+    root = tmp_path / "workspace"
+    shutil.copytree(MINIMAL_WORKSPACE, root)
+    dashboard_path = root / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    definition["query_parameters"].append(
+        {
+            "id": "job_date_range",
+            "type": "date_range",
+            "label": "Job date range",
+            "required": True,
+            "default": {
+                "mode": "relative",
+                "anchor": "today",
+                "start_offset": "-3d",
+                "end_offset": "-1d",
+            },
+        }
+    )
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    timezone = ZoneInfo("Asia/Shanghai")
+    before = datetime.now(timezone).date()
+
+    client = TestClient(create_app(root))
+    summary = client.get("/api/workspace").json()
+    after = datetime.now(timezone).date()
+    dashboard = next(
+        item for item in summary["dashboards"] if item["id"] == "sales-overview"
+    )
+    parameter = next(
+        item for item in dashboard["query_parameters"] if item["id"] == "job_date_range"
+    )
+    expected = {
+        tuple(
+            (anchor + timedelta(days=offset)).isoformat()
+            for offset in (-3, -1)
+        )
+        for anchor in {before, after}
+    }
+
+    assert tuple(parameter["resolved_default"]) in expected
+    assert parameter["default"] == {
+        "mode": "relative",
+        "anchor": "today",
+        "start_offset": "-3d",
+        "end_offset": "-1d",
+    }
+
+    started = client.post(
+        "/api/dashboards/sales-overview/runs",
+        json={"session_id": SESSION_A, "query_parameters": {"min_query_revenue": 0}},
+    ).json()
+    record = None
+    for _ in range(100):
+        record = client.get(
+            f"/api/runs/{started['run_id']}", params={"session_id": SESSION_A}
+        ).json()
+        if record["status"] in {"ready", "partial", "error"}:
+            break
+        time.sleep(0.05)
+    assert record and record["status"] == "ready", record
+    assert tuple(record["result"]["query_parameters"]["job_date_range"]) in expected
 
 
 def test_server_never_serves_a_pyodide_bundle_outside_the_workspace(tmp_path: Path):
@@ -720,7 +791,7 @@ def test_fast_dag_branch_publishes_output_before_slow_branch_finishes(
         encoding="utf-8",
     )
     (dashboard_root / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v4
+        """schema: dataviz/dashboard/v5
 kind: dashboard
 id: progressive
 title: Progressive branches
@@ -741,7 +812,7 @@ sections:
         encoding="utf-8",
     )
     (dashboard_root / "transforms" / "combine.yaml").write_text(
-        """schema: dataviz/dataset-transform/v1
+        """schema: dataviz/dataset-transform/v2
 kind: dataset_transform
 id: combine
 runtime: server-python
@@ -765,7 +836,7 @@ def transform(context):
         encoding="utf-8",
     )
     (dashboard_root / "transforms" / "fast-summary.yaml").write_text(
-        """schema: dataviz/interactive-transform/v1
+        """schema: dataviz/interactive-transform/v2
 kind: interactive_transform
 id: fast-summary
 runtime: server-python
@@ -1128,7 +1199,7 @@ def test_query_cancel_is_tab_scoped_and_same_dashboard_run_supersedes(tmp_path: 
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v4
+        """schema: dataviz/dashboard/v5
 kind: dashboard
 id: slow
 title: Slow
@@ -1143,12 +1214,12 @@ sections:
         encoding="utf-8",
     )
     (dashboard / "sources" / "slow.yaml").write_text(
-        """schema: dataviz/source/v1
+        """schema: dataviz/source/v2
 kind: source
 id: slow
 type: python
 code: slow.py
-query_params: [delay]
+query_inputs: {delay: delay}
 outputs: {main: {kind: table}}
 cache: {mode: none}
 """,
@@ -1159,8 +1230,8 @@ cache: {mode: none}
 import pandas as pd
 
 def load(context):
-    time.sleep(float(context.query_params["delay"]))
-    return {"main": pd.DataFrame([{"delay": context.query_params["delay"]}])}
+    time.sleep(float(context.query_inputs["delay"]))
+    return {"main": pd.DataFrame([{"delay": context.query_inputs["delay"]}])}
 """,
         encoding="utf-8",
     )

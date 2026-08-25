@@ -45,7 +45,7 @@ runtime:{runtime or ' {}'}
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v4
+        """schema: dataviz/dashboard/v5
 kind: dashboard
 id: browser-python
 title: Browser Python
@@ -66,7 +66,7 @@ sections:
     (dashboard / "data" / "rows.csv").write_text("value\n1\n", encoding="utf-8")
     dependency_yaml = json.dumps(dependency)
     (dashboard / "transforms" / "calculate.yaml").write_text(
-        f"""schema: dataviz/interactive-transform/v1
+        f"""schema: dataviz/interactive-transform/v2
 kind: interactive_transform
 id: calculate
 runtime: browser-python
@@ -156,7 +156,34 @@ def test_validate_detects_undeclared_and_unused_sql_parameters(tmp_path: Path):
     assert diagnostics["sql_parameter_undeclared"]["details"]["parameters"] == ["minimum"]
     assert diagnostics["sql_parameter_unused"]["details"]["parameters"] == ["min_query_revenue"]
     assert diagnostics["sql_parameter_undeclared"]["category"] == "sql-contracts"
-    assert "Source `query_params`" in diagnostics["sql_parameter_undeclared"]["hint"]
+    assert "Source `query_inputs`" in diagnostics["sql_parameter_undeclared"]["hint"]
+
+
+def test_validate_rejects_query_input_part_for_non_date_range(tmp_path: Path):
+    workspace = _copy_workspace(tmp_path)
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    definition["sources"][0]["query_inputs"] = {
+        "min_query_revenue": {
+            "parameter": "min_query_revenue",
+            "part": "start",
+        }
+    }
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    report = validate_preflight(workspace, dashboard_id="sales-overview")
+    diagnostic = next(
+        item
+        for item in report["diagnostics"]
+        if item["code"] == "query_input_part_invalid"
+    )
+
+    assert report["status"] == "invalid"
+    assert diagnostic["field"].endswith("query_inputs.min_query_revenue.part")
+    assert "not date_range" in diagnostic["message"]
 
 
 def test_validate_rejects_unknown_selection_option_domain(tmp_path: Path):
@@ -539,7 +566,7 @@ def test_validate_focus_excludes_another_broken_dashboard(tmp_path: Path):
     broken = workspace / "dashboards" / "broken"
     broken.mkdir()
     (broken / "dashboard.yaml").write_text(
-        "schema: dataviz/dashboard/v4\nkind: dashboard\nid: broken\nretired_field: true\n",
+        "schema: dataviz/dashboard/v5\nkind: dashboard\nid: broken\nretired_field: true\n",
         encoding="utf-8",
     )
 

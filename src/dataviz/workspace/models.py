@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from dataviz.identifiers import StableId
+from dataviz.relative_dates import is_relative_date_default
 from dataviz.value_contract import validate_control_definition
 from dataviz.view_contracts import validate_view_contract
 
@@ -19,6 +21,24 @@ class ContextDefinition(Model):
     language: str = "zh-CN"
     timezone: str = "Asia/Shanghai"
     currency: str | None = None
+
+    @model_validator(mode="after")
+    def validate_timezone(self):
+        try:
+            ZoneInfo(self.timezone)
+        except ZoneInfoNotFoundError as error:
+            raise ValueError(f"unknown IANA timezone: {self.timezone}") from error
+        return self
+
+
+class QueryInputProjectionDefinition(Model):
+    """Bind one node-local input name to a canonical Query Parameter value."""
+
+    parameter: StableId
+    part: Literal["start", "end"] | None = None
+
+
+QueryInputBindingDefinition = StableId | QueryInputProjectionDefinition
 
 
 class NavigationItem(Model):
@@ -180,6 +200,8 @@ class ComputeControlDefinition(_ValueControlDefinition):
 
     @model_validator(mode="after")
     def validate_static_choices(self):
+        if is_relative_date_default(self.default):
+            raise ValueError("relative defaults are only valid for Query Parameters")
         if self.type in {"single_select", "multi_select"} and not isinstance(
             self.options, StaticOptionDomainDefinition
         ):
@@ -200,6 +222,8 @@ class SelectionControlDefinition(_ValueControlDefinition):
 
     @model_validator(mode="after")
     def validate_option_domain_contract(self):
+        if is_relative_date_default(self.default):
+            raise ValueError("relative defaults are only valid for Query Parameters")
         if self.type in {"single_select", "multi_select"} and self.options is None:
             raise ValueError(
                 "Selection select controls require options.mode=static or options.mode=infer"
@@ -575,7 +599,7 @@ class DeclarativeViewDefinition(Model):
 
 
 class DashboardDefinition(Model):
-    schema_: Literal["dataviz/dashboard/v4"] = Field(alias="schema")
+    schema_: Literal["dataviz/dashboard/v5"] = Field(alias="schema")
     kind: Literal["dashboard"] = "dashboard"
     id: StableId
     title: str = ""
@@ -686,7 +710,7 @@ class CacheDefinition(Model):
 class _SourceDefinition(Model):
     """Fields shared by every strict Source variant."""
 
-    schema_: Literal["dataviz/source/v1"] = Field(alias="schema")
+    schema_: Literal["dataviz/source/v2"] = Field(alias="schema")
     kind: Literal["source"] = "source"
     id: StableId
     name: str | None = None
@@ -727,7 +751,7 @@ class SqlSourceDefinition(_SourceDefinition):
     type: Literal["sql"]
     code: str
     adapter: StableId
-    query_params: list[StableId] = Field(default_factory=list)
+    query_inputs: dict[StableId, QueryInputBindingDefinition] = Field(default_factory=dict)
     timeout_seconds: float = Field(120.0, gt=0)
     timeout_retries: int = Field(1, ge=0, le=5)
 
@@ -743,7 +767,7 @@ class PythonSourceDefinition(_SourceDefinition):
     code: str
     adapter: StableId | None = None
     entrypoint: str = "load"
-    query_params: list[StableId] = Field(default_factory=list)
+    query_inputs: dict[StableId, QueryInputBindingDefinition] = Field(default_factory=dict)
     code_dependencies: list[str] = Field(default_factory=list)
     python_dependencies: list[str] = Field(default_factory=list)
     timeout_seconds: float = Field(120.0, gt=0)
@@ -757,7 +781,7 @@ SOURCE_DEFINITION_ADAPTER = TypeAdapter(SourceDefinition)
 
 
 class DatasetTransformDefinition(Model):
-    schema_: Literal["dataviz/dataset-transform/v1"] = Field(alias="schema")
+    schema_: Literal["dataviz/dataset-transform/v2"] = Field(alias="schema")
     kind: Literal["dataset_transform"] = "dataset_transform"
     id: StableId
     name: str | None = None
@@ -767,7 +791,7 @@ class DatasetTransformDefinition(Model):
     entrypoint: str = "transform"
     inputs: dict[StableId, str] = Field(default_factory=dict)
     input_schemas: dict[StableId, list[ColumnDefinition]] = Field(default_factory=dict)
-    query_params: list[StableId] = Field(default_factory=list)
+    query_inputs: dict[StableId, QueryInputBindingDefinition] = Field(default_factory=dict)
     outputs: dict[StableId, OutputDefinition] = Field(min_length=1)
     code_dependencies: list[str] = Field(default_factory=list)
     python_dependencies: list[str] = Field(default_factory=list)
@@ -793,7 +817,7 @@ class InteractiveExportDefinition(Model):
 
 
 class InteractiveTransformDefinition(Model):
-    schema_: Literal["dataviz/interactive-transform/v1"] = Field(alias="schema")
+    schema_: Literal["dataviz/interactive-transform/v2"] = Field(alias="schema")
     kind: Literal["interactive_transform"] = "interactive_transform"
     id: StableId
     name: str | None = None
@@ -803,7 +827,7 @@ class InteractiveTransformDefinition(Model):
     entrypoint: str = "transform"
     inputs: dict[StableId, str] = Field(default_factory=dict)
     input_schemas: dict[StableId, list[ColumnDefinition]] = Field(default_factory=dict)
-    query_params: list[StableId] = Field(default_factory=list)
+    query_inputs: dict[StableId, QueryInputBindingDefinition] = Field(default_factory=dict)
     selection_inputs: dict[StableId, str] = Field(default_factory=dict)
     compute_inputs: dict[StableId, str] = Field(default_factory=dict)
     trigger: Literal["apply", "auto", "manual"] = "apply"

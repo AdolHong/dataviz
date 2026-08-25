@@ -237,7 +237,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
             "kind": "dataset_transform",
             "runtime": "server-python",
             "fields": ["id", "code", "inputs", "outputs"],
-            "optional": ["entrypoint", "query_params", "input_schemas", "code_dependencies", "python_dependencies", "timeout_seconds", "cache"],
+            "optional": ["entrypoint", "query_inputs", "input_schemas", "code_dependencies", "python_dependencies", "timeout_seconds", "cache"],
         },
         "behavior": {
             "isolation": "Fresh spawned process per execution",
@@ -253,7 +253,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
             "kind": "interactive_transform",
             "runtime": "browser-js",
             "fields": ["id", "runtime", "code", "inputs", "export", "outputs"],
-            "optional": ["entrypoint", "query_params", "compute_params", "selections", "trigger", "debounce_ms", "timeout_seconds", "cache"],
+            "optional": ["entrypoint", "query_inputs", "compute_inputs", "selection_inputs", "trigger", "debounce_ms", "timeout_seconds", "cache"],
         },
         "behavior": {
             "contract": "Pure serializable sync/async function returning a Named Output object",
@@ -269,7 +269,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
             "kind": "interactive_transform",
             "runtime": "browser-python",
             "fields": ["id", "runtime", "code", "inputs", "export", "outputs"],
-            "optional": ["entrypoint", "query_params", "compute_params", "selections", "python_dependencies", "code_dependencies", "trigger", "debounce_ms", "timeout_seconds", "cache"],
+            "optional": ["entrypoint", "query_inputs", "compute_inputs", "selection_inputs", "python_dependencies", "code_dependencies", "trigger", "debounce_ms", "timeout_seconds", "cache"],
         },
         "behavior": {
             "contract": "Python returns only serializable Named Outputs; JavaScript owns rendering",
@@ -285,7 +285,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
             "kind": "interactive_transform",
             "runtime": "server-python",
             "fields": ["id", "runtime", "code", "inputs", "export", "outputs"],
-            "optional": ["entrypoint", "query_params", "compute_params", "selections", "python_dependencies", "code_dependencies", "trigger", "debounce_ms", "timeout_seconds", "cache"],
+            "optional": ["entrypoint", "query_inputs", "compute_inputs", "selection_inputs", "python_dependencies", "code_dependencies", "trigger", "debounce_ms", "timeout_seconds", "cache"],
         },
         "behavior": {
             "adapter": "Unavailable by contract; Interactive Transform cannot query new data",
@@ -311,7 +311,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
 
 
 COMPONENT_REGISTRY_VERSION = "4.0.0"
-RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v2"
+RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v3"
 
 
 def _generated_component_templates() -> dict[str, dict[str, Any]]:

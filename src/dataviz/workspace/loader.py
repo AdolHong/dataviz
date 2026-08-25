@@ -26,6 +26,7 @@ from dataviz.content_templates import (
 from dataviz.errors import DatavizError, Diagnostic, WorkspaceError
 from dataviz.identifiers import fallback_stable_id
 from dataviz.execution.references import parse_output_reference
+from dataviz.execution.parameters import query_input_parameter
 from dataviz.execution.dependencies import (
     DashboardDependencyContract,
     compile_dashboard_dependencies,
@@ -127,7 +128,7 @@ def parse_source_definition(path: Path) -> SourceDefinition:
             "Schema header is required for a standalone definition",
             file=path,
             details={
-                "expected": "dataviz/source/v1",
+                "expected": "dataviz/source/v2",
                 "docs": "dataviz schemas source --full --format json",
             },
         )
@@ -292,7 +293,7 @@ def load_dashboard(path: Path) -> LoadedDashboard:
             source_path = definition_path
             try:
                 source = SOURCE_DEFINITION_ADAPTER.validate_python(
-                    {"schema": "dataviz/source/v1", **source_entry}
+                    {"schema": "dataviz/source/v2", **source_entry}
                 )
             except ValidationError as exc:
                 raise WorkspaceError(
@@ -328,7 +329,7 @@ def load_dashboard(path: Path) -> LoadedDashboard:
             transform_path = definition_path
             try:
                 transform = DatasetTransformDefinition.model_validate(
-                    {"schema": "dataviz/dataset-transform/v1", **transform_entry}
+                    {"schema": "dataviz/dataset-transform/v2", **transform_entry}
                 )
             except ValidationError as exc:
                 raise WorkspaceError(
@@ -360,7 +361,7 @@ def load_dashboard(path: Path) -> LoadedDashboard:
             transform_path = definition_path
             try:
                 transform = InteractiveTransformDefinition.model_validate(
-                    {"schema": "dataviz/interactive-transform/v1", **transform_entry}
+                    {"schema": "dataviz/interactive-transform/v2", **transform_entry}
                 )
             except ValidationError as exc:
                 raise WorkspaceError(
@@ -1635,7 +1636,10 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
     for dashboard in workspace.dashboards.values():
         diagnostics.extend(dashboard.presentation_diagnostics or [])
         definition_path = str(dashboard.definition_path)
-        parameter_ids = {item.id for item in dashboard.definition.query_parameters}
+        parameter_definitions = {
+            item.id: item for item in dashboard.definition.query_parameters
+        }
+        parameter_ids = set(parameter_definitions)
         control_registry = scoped_control_registry(dashboard.definition)
         control_contract = compile_control_contract(dashboard.definition)
         compute_control_keys = {
@@ -2012,16 +2016,30 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                                         "source_asset_missing",
                                     )
                                 )
-            for parameter in getattr(source, "query_params", []):
+            for alias, binding in getattr(source, "query_inputs", {}).items():
+                parameter = query_input_parameter(binding)
                 if parameter not in parameter_ids:
                     diagnostics.append(
                         Diagnostic(
                             "error",
                             f"Unknown query parameter: {parameter}",
                             str(source_path),
-                            "query_params",
+                            f"query_inputs.{alias}",
+                            "query_input_parameter_unknown",
                         )
+                    )
+                elif not isinstance(binding, str) and binding.part is not None and (
+                    parameter_definitions[parameter].type != "date_range"
+                ):
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Query input {alias} uses part={binding.part}, but {parameter} is not date_range",
+                            str(source_path),
+                            f"query_inputs.{alias}.part",
+                            "query_input_part_invalid",
                         )
+                    )
             if source.type == "file":
                 file_format = (
                     source.format
@@ -2091,7 +2109,7 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             )
                         )
                     else:
-                        declared = set(source.query_params)
+                        declared = set(source.query_inputs)
                         referenced = sql_parameter_names(sql)
                         undeclared = sorted(referenced - declared)
                         unused = sorted(declared - referenced)
@@ -2099,10 +2117,10 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             diagnostics.append(
                                 Diagnostic(
                                     "error",
-                                    "SQL uses named parameters not declared in Source query_params: "
+                                    "SQL uses named parameters not declared in Source query_inputs: "
                                     + ", ".join(undeclared),
                                     str(source_path),
-                                    "query_params",
+                                    "query_inputs",
                                     "sql_parameter_undeclared",
                                     {"parameters": undeclared, "sql_file": str(code_path)},
                                 )
@@ -2111,10 +2129,10 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             diagnostics.append(
                                 Diagnostic(
                                     "warning",
-                                    "Source query_params are not referenced by SQL: "
+                                    "Source query_inputs are not referenced by SQL: "
                                     + ", ".join(unused),
                                     str(source_path),
-                                    "query_params",
+                                    "query_inputs",
                                     "sql_parameter_unused",
                                     {"parameters": unused, "sql_file": str(code_path)},
                                 )
@@ -2213,14 +2231,28 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             "python_dependencies",
                         )
                     )
-            for parameter in transform.query_params:
+            for alias, binding in transform.query_inputs.items():
+                parameter = query_input_parameter(binding)
                 if parameter not in parameter_ids:
                     diagnostics.append(
                         Diagnostic(
                             "error",
                             f"Unknown query parameter: {parameter}",
                             str(transform_path),
-                            "query_params",
+                            f"query_inputs.{alias}",
+                            "query_input_parameter_unknown",
+                        )
+                    )
+                elif not isinstance(binding, str) and binding.part is not None and (
+                    parameter_definitions[parameter].type != "date_range"
+                ):
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Query input {alias} uses part={binding.part}, but {parameter} is not date_range",
+                            str(transform_path),
+                            f"query_inputs.{alias}.part",
+                            "query_input_part_invalid",
                         )
                     )
             for name, reference in transform.inputs.items():
@@ -2361,14 +2393,28 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                                 {"dependency": dependency},
                             )
                         )
-            for parameter in transform.query_params:
+            for alias, binding in transform.query_inputs.items():
+                parameter = query_input_parameter(binding)
                 if parameter not in parameter_ids:
                     diagnostics.append(
                         Diagnostic(
                             "error",
                             f"Unknown query parameter: {parameter}",
                             str(transform_path),
-                            "query_params",
+                            f"query_inputs.{alias}",
+                            "query_input_parameter_unknown",
+                        )
+                    )
+                elif not isinstance(binding, str) and binding.part is not None and (
+                    parameter_definitions[parameter].type != "date_range"
+                ):
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Query input {alias} uses part={binding.part}, but {parameter} is not date_range",
+                            str(transform_path),
+                            f"query_inputs.{alias}.part",
+                            "query_input_part_invalid",
                         )
                     )
             for alias, control_key in transform.compute_inputs.items():

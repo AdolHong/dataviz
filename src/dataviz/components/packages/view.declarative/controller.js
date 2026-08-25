@@ -351,7 +351,7 @@
   }
 
   root.viewDeclarative = {
-    protocol:'dataviz/runtime/v2',
+    protocol:'dataviz/runtime/v3',
     escape,
     numericAggregate,
     inputReferences,
@@ -363,7 +363,7 @@
   };
   root.descriptors = root.descriptors || new Map();
   root.descriptors.set('view.declarative', {
-    protocol:'dataviz/runtime/v2',
+    protocol:'dataviz/runtime/v3',
     owns:['descriptor-builders', 'renderer-lifecycle'],
   });
 })(window);

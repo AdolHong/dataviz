@@ -22,6 +22,7 @@ from dataviz.execution.context import ExecutionContext
 from dataviz.execution.fingerprint import ensure_query_run_compatible
 from dataviz.execution.node_support import hash_path, output_status, package_fingerprint
 from dataviz.execution.outputs import validate_table_schema
+from dataviz.execution.parameters import project_query_inputs
 from dataviz.execution.python_process import execute_python_node
 from dataviz.execution.references import OutputReference, parse_output_reference
 from dataviz.execution.results import InteractionResult, NodeResult, RunResult
@@ -53,7 +54,7 @@ class InteractivePlanNode:
     definition: Any
     inputs: dict[str, OutputReference]
     dependencies: set[str]
-    query_parameters: tuple[str, ...]
+    query_inputs: dict[str, Any]
     selection_inputs: dict[str, str]
     compute_inputs: dict[str, str]
 
@@ -94,7 +95,7 @@ def compile_interactive_plan(
                 f"interactive:{dependency}"
                 for dependency in contract.interactive_dependencies[identifier]
             },
-            query_parameters=contract.interactive_query_parameters[identifier],
+            query_inputs=dict(contract.interactive_parameter_inputs[identifier]),
             selection_inputs=dict(contract.interactive_selection_inputs[identifier]),
             compute_inputs=dict(contract.interactive_compute_inputs[identifier]),
         )
@@ -475,10 +476,9 @@ class InteractionExecutor:
                 workspace_root=self.workspace.root,
                 dashboard_root=dashboard.root,
                 run_id=run.run_id,
-                query_params={
-                    key: run.query_parameters.get(key)
-                    for key in node.query_parameters
-                },
+                query_inputs=project_query_inputs(
+                    node.query_inputs, run.query_parameters
+                ),
                 compute_params={
                     alias: interaction.compute_parameters.get(control_key)
                     for alias, control_key in node.compute_inputs.items()
@@ -508,7 +508,7 @@ class InteractionExecutor:
             evidence = {
                 "generation": interaction.generation,
                 "cache_key": cache_key,
-                "query_parameters": context.query_params,
+                "query_inputs": context.query_inputs,
                 "compute_parameters": context.compute_params,
                 "selections": context.selections,
                 "inputs": {
@@ -699,14 +699,14 @@ class InteractionExecutor:
             if path.exists():
                 files[f"dependency:{dependency}"] = hash_path(path)
         payload = {
-            "protocol": "dataviz/interactive-transform/v1",
+            "protocol": "dataviz/interactive-transform/v2",
             "definition": node.definition.model_dump(mode="json", by_alias=True),
             "files": files,
             "inputs": {
                 name: descriptor.content_hash
                 for name, descriptor in context.inputs.items()
             },
-            "query_parameters": context.query_params,
+            "query_inputs": context.query_inputs,
             "compute_parameters": context.compute_params,
             "selections": context.selections,
             "runtime": package_fingerprint(node.definition.python_dependencies),

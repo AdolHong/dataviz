@@ -37,7 +37,7 @@ title: Transform tests
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v4
+        """schema: dataviz/dashboard/v5
 kind: dashboard
 id: transform-contract
 title: Transform contract
@@ -48,7 +48,7 @@ views: []
         encoding="utf-8",
     )
     (dashboard / "sources" / "raw.yaml").write_text(
-        """schema: dataviz/source/v1
+        """schema: dataviz/source/v2
 kind: source
 id: raw
 type: file
@@ -75,7 +75,7 @@ outputs:
     schema_lines = output_schema or """    schema:
       - {name: key}
       - {name: doubled, dtype: int64}"""
-    transform_yaml = f"""schema: dataviz/dataset-transform/v1
+    transform_yaml = f"""schema: dataviz/dataset-transform/v2
 kind: dataset_transform
 id: metrics
 runtime: server-python

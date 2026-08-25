@@ -6,6 +6,11 @@ import re
 from datetime import date, datetime
 from typing import Any
 
+from dataviz.relative_dates import (
+    is_relative_date_default,
+    normalize_relative_date_default,
+)
+
 
 _DECIMAL_NUMBER = re.compile(
     r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$"
@@ -395,7 +400,11 @@ def validate_control_definition(definition: Any) -> Any:
     ]
     if len(suggestion_signatures) != len(set(suggestion_signatures)):
         raise ValueError("suggestion values must be unique")
-    if not is_empty_control_value(definition.default):
+    if is_relative_date_default(definition.default):
+        definition.default = normalize_relative_date_default(
+            definition.default, definition.type
+        )
+    elif not is_empty_control_value(definition.default):
         definition.default = normalize_control_value(
             definition, definition.default, enforce_required=False
         )

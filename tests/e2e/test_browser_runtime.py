@@ -9,14 +9,22 @@ import threading
 import time
 import zipfile
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 import uvicorn
 import yaml
-from playwright.sync_api import Browser, Page, expect, sync_playwright
+from playwright.sync_api import (
+    Browser,
+    Page,
+    TimeoutError as PlaywrightTimeoutError,
+    expect,
+    sync_playwright,
+)
 
 from dataviz.server import create_app
 from dataviz.cli import _copy_gallery_workspace
@@ -125,7 +133,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v4
+        """schema: dataviz/dashboard/v5
 kind: dashboard
 id: scale
 title: Scale Runtime
@@ -163,7 +171,7 @@ sections:
         encoding="utf-8",
     )
     (transforms / "peak.yaml").write_text(
-        """schema: dataviz/interactive-transform/v1
+        """schema: dataviz/interactive-transform/v2
 kind: interactive_transform
 id: peak
 runtime: browser-js
@@ -229,10 +237,12 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v4
+        """schema: dataviz/dashboard/v5
 kind: dashboard
 id: runtime-matrix
 title: Interactive Runtime Matrix
+query_parameters:
+  - {id: batch, type: integer, label: Batch, default: 3}
 controls:
   - {id: factor, kind: compute, label: Factor, type: number, default: 2}
   - id: name
@@ -317,12 +327,13 @@ def load(context):
         encoding="utf-8",
     )
     (dashboard / "transforms" / "server.yaml").write_text(
-        """schema: dataviz/interactive-transform/v1
+        """schema: dataviz/interactive-transform/v2
 kind: interactive_transform
 id: server
 runtime: server-python
 code: server.py
 inputs: {rows: source:raw/main}
+query_inputs: {batch: batch}
 compute_inputs:
   factor: dashboard:runtime-matrix/factor
 trigger: auto
@@ -338,6 +349,7 @@ cache: {mode: none}
     )
     (dashboard / "transforms" / "server.py").write_text(
         """def transform(context):
+    assert context.query_inputs["batch"] == 3
     frame = context.table("rows").copy()
     frame["value"] = frame["value"] * context.compute_params["factor"] + 100
     context.progress(0.5, "server midpoint")
@@ -346,12 +358,13 @@ cache: {mode: none}
         encoding="utf-8",
     )
     (dashboard / "transforms" / "browser.yaml").write_text(
-        """schema: dataviz/interactive-transform/v1
+        """schema: dataviz/interactive-transform/v2
 kind: interactive_transform
 id: browser
 runtime: browser-python
 code: browser.py
 inputs: {rows: source:raw/main}
+query_inputs: {batch: batch}
 compute_inputs:
   factor: dashboard:runtime-matrix/factor
 trigger: auto
@@ -367,6 +380,7 @@ cache: {mode: none}
     )
     (dashboard / "transforms" / "browser.py").write_text(
         """def transform(context):
+    assert context.query_inputs["batch"] == 3
     rows = context.inputs["rows"]
     if isinstance(rows, dict) and rows.get("__datavizColumnarTable"):
         columns = rows["columns"]
@@ -400,6 +414,7 @@ cache: {mode: none}
       if (!source.includes('await _dataviz_execute')) return undefined;
       await new Promise(resolve => setTimeout(resolve, 700));
       const payload = JSON.parse(values.get('__dv_payload'));
+      if (Number(payload.query_inputs.batch) !== 3) throw new Error('missing browser-python query input');
       const input = payload.inputs.rows;
       const rows = input?.__datavizColumnarTable
         ? Array.from({length:input.length}, (_, index) => Object.fromEntries(
@@ -833,11 +848,11 @@ def test_web_component_reference_adapter_consumes_runtime_v2_without_canvas_runt
     page: Page,
 ):
     manifest = {
-        "protocol": {"schema": "dataviz/runtime/v2", "component_registry_version": "3.0.0"},
+        "protocol": {"schema": "dataviz/runtime/v3", "component_registry_version": "3.0.0"},
         "selections": {"dashboard:probe/region": ["East"]},
         "view_specs": [{"id": "detail", "inputs": {"main": "source:data/main"}}],
         "dependency_contract": {
-            "schema": "dataviz/dependency-contract/v1",
+            "schema": "dataviz/dependency-contract/v2",
             "views": {
                 "detail": {
                     "inputs": {"main": "source:data/main"},
@@ -910,7 +925,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         assert {
             owner_contract[key]
             for key in ("runtime", "data", "view", "section", "presentation")
-        } == {"dataviz/runtime/v2"}
+        } == {"dataviz/runtime/v3"}
         assert {
             "data.pipeline", "view.declarative", "section.declarative", "presentation.shell"
         } <= set(owner_contract["packages"])
@@ -987,6 +1002,15 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         assert checkbox.locator("select").evaluate(
             "select => select.selectedOptions.length"
         ) == 0
+        # The remaining component specimens derive their inferred option domains
+        # from the selected Dataset. Restore the dashboard domain explicitly and
+        # synchronize on the compiled Control state; Chromium used to reach the
+        # following tree assertions before the queued empty-domain update, while
+        # Firefox exposed that accidental ordering dependency.
+        action.click()
+        assert checkbox.locator("select").evaluate(
+            "select => select.selectedOptions.length"
+        ) == 3
         page.keyboard.press("Escape")
         expect(header).not_to_have_attribute("open", "")
 
@@ -1021,6 +1045,9 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         selections.locator("summary").click()
         expect(selections).to_have_attribute("open", "")
         tree = selections.locator('[data-control-component="tree-select"]')
+        expect(tree.locator("xpath=ancestor::*[@data-selection-key][1]")).to_have_attribute(
+            "data-option-domain-state", "ready"
+        )
         tree.locator("[data-control-trigger]").click()
         panel = tree.locator("[data-control-panel]")
         expect(panel).to_be_visible()
@@ -1992,10 +2019,17 @@ def test_required_dynamic_view_selection_bootstraps_from_base_output_and_exports
     )
 
     console_errors: list[str] = []
+    report_responses: list[tuple[int, str]] = []
     page.on(
         "console",
         lambda message: console_errors.append(message.text)
         if message.type == "error"
+        else None,
+    )
+    page.on(
+        "response",
+        lambda response: report_responses.append((response.status, response.url))
+        if "/report" in response.url
         else None,
     )
     report_path = tmp_path / "dynamic-view-domain.html"
@@ -2018,8 +2052,31 @@ def test_required_dynamic_view_selection_bootstraps_from_base_output_and_exports
         )
         assert not [message for message in console_errors if "[dataviz:init]" in message]
 
-        with page.expect_download(timeout=20_000) as download_info:
-            page.locator("#download-button").click()
+        # A delayed parent shadow must never override the canonical Canvas
+        # state used for report export. Firefox made this race reproducible;
+        # inject it explicitly so every browser guards the protocol invariant.
+        frame.locator("body").evaluate(
+            """() => window.parent.postMessage({
+              type:'dataviz:selections-changed',
+              dashboard_id:window.dataviz.dashboard_id,
+              run_id:window.dataviz.run_id,
+              frame_id:window.dataviz.frame_id,
+              selections:{},
+              selection_intents:{},
+            }, window.location.origin)"""
+        )
+
+        try:
+            with page.expect_download(timeout=30_000) as download_info:
+                page.locator("#download-button").click()
+        except PlaywrightTimeoutError as error:
+            raise AssertionError(
+                {
+                    "run_message": page.locator("#run-message").inner_text(),
+                    "report_responses": report_responses,
+                    "console_errors": console_errors,
+                }
+            ) from error
         download_info.value.save_as(report_path)
 
     with _running_static_server(report_path.parent) as report_url:
@@ -2029,6 +2086,87 @@ def test_required_dynamic_view_selection_bootstraps_from_base_output_and_exports
         expect(exported.locator("tbody")).to_contain_text("alpha")
         expect(exported).not_to_contain_text("Waiting for")
         assert not [message for message in console_errors if "[dataviz:init]" in message]
+
+
+@pytest.mark.e2e
+def test_browser_query_inputs_project_date_range_parts(page: Page, tmp_path: Path):
+    workspace = _copy_workspace(WORKER, tmp_path / "query-input-parts")
+    dashboard_path = workspace / "dashboards" / "worker-runtime" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    definition["query_parameters"] = [
+        {
+            "id": "job_date_range",
+            "type": "date_range",
+            "label": "Job date range",
+            "required": True,
+            "default": {
+                "mode": "relative",
+                "anchor": "today",
+                "start_offset": "-3d",
+                "end_offset": "-1d",
+            },
+        }
+    ]
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    transform_root = workspace / "dashboards" / "worker-runtime" / "transforms"
+    transform_path = transform_root / "scaled.yaml"
+    transform = yaml.safe_load(transform_path.read_text(encoding="utf-8"))
+    transform["query_inputs"] = {
+        "start_date": {"parameter": "job_date_range", "part": "start"},
+        "end_date": {"parameter": "job_date_range", "part": "end"},
+    }
+    transform_path.write_text(
+        yaml.safe_dump(transform, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    (transform_root / "scaled.js").write_text(
+        """async function transform(context) {
+  return {
+    main: context.inputs.rows.map(row => ({
+      name: `${context.query_inputs.start_date}|${context.query_inputs.end_date}|${row.name}`,
+      value: Number(row.value) * 10,
+    })),
+  };
+}
+""",
+        encoding="utf-8",
+    )
+
+    timezone = ZoneInfo("Asia/Shanghai")
+    before = datetime.now(timezone).date()
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "worker-runtime")
+        after = datetime.now(timezone).date()
+        expected_ranges = {
+            (
+                (anchor - timedelta(days=3)).isoformat(),
+                (anchor - timedelta(days=1)).isoformat(),
+            )
+            for anchor in {before, after}
+        }
+        stored = page.evaluate(
+            """() => {
+              const key = Object.keys(sessionStorage).find(value => value.startsWith('dataviz.tab-ui.v2.'));
+              return JSON.parse(sessionStorage.getItem(key)).dashboards['worker-runtime'].queryParameterValues;
+            }"""
+        )
+        assert tuple(stored["job_date_range"]) in expected_ranges
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        table = frame.locator('[data-view-id="scaled-table"]')
+        expect(table).to_have_attribute("data-view-status", "ready", timeout=15_000)
+        table_text = table.inner_text()
+        assert any(f"{start}|{end}|alpha" in table_text for start, end in expected_ranges)
+        parameter_inputs = frame.locator("body").evaluate(
+            """() => window.dataviz.dependency_contract.interactive.parameter_inputs.scaled"""
+        )
+        assert parameter_inputs == {
+            "start_date": {"parameter": "job_date_range", "part": "start"},
+            "end_date": {"parameter": "job_date_range", "part": "end"},
+        }
 
 
 @pytest.mark.e2e

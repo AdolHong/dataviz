@@ -220,7 +220,7 @@
     }
 
     const adapter = {
-      protocol:'dataviz/runtime/v2',
+      protocol:'dataviz/runtime/v3',
       states,
       renderRepeated,
       updateSection,

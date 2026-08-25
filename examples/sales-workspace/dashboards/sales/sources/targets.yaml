@@ -1,4 +1,4 @@
-schema: dataviz/source/v1
+schema: dataviz/source/v2
 kind: source
 id: targets
 name: 区域目标
@@ -6,7 +6,7 @@ description: 内存 SQLite SQL 查询
 type: sql
 adapter: demo-sqlite
 code: targets.sql
-query_params: [target_factor]
+query_inputs: {target_factor: target_factor}
 outputs: {main: {kind: table}}
 cache:
   mode: session

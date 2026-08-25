@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v4
+schema: dataviz/dashboard/v5
 kind: dashboard
 id: sales-overview
 title: 销售概览
@@ -20,7 +20,7 @@ sources:
     type: sql
     adapter: warehouse
     code: sources/sales.sql
-    query_params: [min_query_revenue]
+    query_inputs: {min_query_revenue: min_query_revenue}
     outputs: {main: {kind: table}}
 
 controls:

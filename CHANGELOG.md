@@ -2,6 +2,31 @@
 
 Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本化。这里记录使用者可观察到的变化；字段细节以 `dataviz schemas` 和 `dataviz components` 为准。
 
+## 0.6.0 — 2026-08-25
+
+### Breaking Query Input contract
+
+- Dashboard 升级为 `dataviz/dashboard/v5`，Source、Dataset Transform 与 Interactive Transform 升级为 v2，Dependency Contract 升级为 v2，Browser Runtime 升级为 v3。
+- 删除所有执行节点的 `query_params`。SQL/Python Source、Dataset Transform 和三种 Interactive Transform 统一使用 `query_inputs`，把 Dashboard canonical Query Parameter 映射为节点私有 alias；未声明的全局参数不能从执行上下文读取。
+- Dependency Contract 明确区分节点间 `data_inputs` 与参数 `parameter_inputs`。Planner、Server/Browser Runtime、HTML Export、Resolved SQL 证据、缓存键和 AI Context 都消费同一个编译结果，不再各自猜测参数边。
+
+### Date range and relative defaults
+
+- `date_range` Query Parameter 可以通过 `{parameter: <id>, part: start|end}` 投影为两个标量，直接绑定 SQL 的两个 named placeholders，或进入 `context.query_inputs`。
+- Query Parameter 的 `date` 与 `date_range` 支持结构化相对默认值：`anchor: today` 加整数日偏移。`today` 严格按 `workspace.context.timezone` 解析，不依赖 Server 操作系统时区。
+- 相对表达式在页面初始化或 CLI Run 创建时转换为具体 ISO 日期；Query Run、tab 状态、缓存和导出 HTML 保存具体值，不会在报告打开时重新求值。Compute/Selection Control 不接受相对默认值。
+- `dataviz validate` 会在查询前拒绝未知 Query Parameter、错误的 `part` 类型、非法时区、偏移语法、反向日期范围和旧字段。
+
+### Tooling and migration
+
+- Schema Catalog、CLI docs/context/dependencies、Scaffold、示例 Workspace、Benchmark、测试 fixture 和设计文档整体迁移到当前严格契约，不提供兼容 alias 或自动迁移器。
+- 新增 Server 集成、真实 SQL 与 Browser JS Worker 回归，覆盖相对日期固化、`date_range` start/end 投影及节点本地 alias 隔离。
+
+### Verification
+
+- 312 项 Python 契约测试、Chromium/Firefox/WebKit 各 25 项真实浏览器回归、Ruff、20 个 Component Package（58 个组件、38 个 Story、70 个测试声明）全部通过。
+- 8 个 Workspace、11 个 Dashboard 通过严格 `validate`，合计 0 error、0 warning；wheel、sdist 与 pip ZIP 均通过内容审计和独立 Python 3.12 干净安装的 `version → schemas → components → init → validate → dependencies → report` 冒烟，报告离线可用且 0 warning。
+
 ## 0.5.4 — 2026-08-25
 
 ### Documentation and scaffolding

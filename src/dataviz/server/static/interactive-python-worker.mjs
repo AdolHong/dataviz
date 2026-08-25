@@ -33,7 +33,7 @@ from datetime import date, datetime
 class DatavizContext:
     def __init__(self, payload, request_id):
         self.inputs = payload.get("inputs", {})
-        self.query_params = payload.get("query_params", {})
+        self.query_inputs = payload.get("query_inputs", {})
         self.compute_params = payload.get("compute_params", {})
         self.selections = payload.get("selections", {})
         self._request_id = request_id

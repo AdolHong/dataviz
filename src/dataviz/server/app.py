@@ -23,7 +23,6 @@ from starlette.background import BackgroundTask
 from dataviz.artifacts import ArtifactDescriptor, ArtifactStore
 from dataviz.components import component_runtime_assets
 from dataviz.content_templates import (
-    default_parameter_values,
     interpolate_dashboard_content,
 )
 from dataviz.errors import DatavizError, WorkspaceError
@@ -31,6 +30,7 @@ from dataviz.execution.results import RunResult
 from dataviz.execution.interactive import InteractionExecutor
 from dataviz.execution.fingerprint import ensure_query_run_compatible
 from dataviz.execution.outputs import normalize_outputs
+from dataviz.execution.parameters import resolve_parameter_default
 from dataviz.execution.references import parse_output_reference
 from dataviz.rendering import CanvasRenderer
 from dataviz.server.hot_reload import (
@@ -501,6 +501,10 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                     "query_parameters": [
                         {
                             **item.model_dump(mode="json"),
+                            "resolved_default": resolve_parameter_default(
+                                item,
+                                timezone_name=snapshot.definition.context.timezone,
+                            ),
                             "key": f"query:{item.id}",
                             "presentation": _control_component_presentation(
                                 dashboard, f"query:{item.id}", item
@@ -548,7 +552,16 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                             "description": transform.description,
                             "trigger": transform.trigger,
                             "debounce_ms": transform.debounce_ms,
-                            "query_params": list(transform.query_params),
+                            "query_inputs": {
+                                alias: (
+                                    {"parameter": binding}
+                                    if isinstance(binding, str)
+                                    else binding.model_dump(
+                                        mode="json", exclude_none=True
+                                    )
+                                )
+                                for alias, binding in transform.query_inputs.items()
+                            },
                             "compute_inputs": dict(transform.compute_inputs),
                             "selection_inputs": dict(transform.selection_inputs),
                             "export": transform.export.model_dump(mode="json"),
@@ -1141,7 +1154,13 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             try:
                 waiting_content = interpolate_dashboard_content(
                     dashboard.definition,
-                    default_parameter_values(dashboard.definition),
+                    {
+                        item.id: resolve_parameter_default(
+                            item,
+                            timezone_name=snapshot.definition.context.timezone,
+                        )
+                        for item in dashboard.definition.query_parameters
+                    },
                     fallback_title=dashboard.canvas_name,
                 )
                 waiting_title = waiting_content.title

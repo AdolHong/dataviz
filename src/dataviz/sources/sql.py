@@ -331,10 +331,7 @@ class SqlSourceRunner:
         definition = request.definition
         code_path = (request.definition_path.parent / definition.code).resolve()
         query = code_path.read_text(encoding="utf-8")
-        parameters = {
-            name: request.context.query_params.get(name)
-            for name in definition.query_params
-        }
+        parameters = dict(request.context.query_inputs)
         adapter_reference = definition.adapter or ""
         adapter_name = request.adapter_bindings.get(
             adapter_reference, adapter_reference
@@ -373,6 +370,14 @@ class SqlSourceRunner:
                 "statement": statement,
                 "resolved_sql": resolve_sql_preview(statement, parameters),
                 "parameters": parameters,
+                "input_bindings": {
+                    alias: (
+                        {"parameter": binding}
+                        if isinstance(binding, str)
+                        else binding.model_dump(mode="json", exclude_none=True)
+                    )
+                    for alias, binding in definition.query_inputs.items()
+                },
                 "timeout_seconds": timeout_seconds,
                 "timeout_retries": timeout_retries,
                 "query_hash": hashlib.sha256(
@@ -389,10 +394,7 @@ class SqlSourceRunner:
         if not code_path.exists():
             raise SourceFailure("SQL file does not exist", file=code_path)
         query = code_path.read_text(encoding="utf-8")
-        parameters = {
-            name: request.context.query_params.get(name)
-            for name in definition.query_params
-        }
+        parameters = dict(request.context.query_inputs)
         adapter = request.adapters.runtime_config(adapter_name, request.adapter_bindings)
         timeout_seconds = definition.timeout_seconds
         timeout_retries = definition.timeout_retries

@@ -28,12 +28,12 @@ def frontend_adapter_catalog() -> dict[str, dict[str, Any]]:
             "protocol": RUNTIME_PROTOCOL_SCHEMA,
             "purpose": (
                 "Framework-independent reference client and <dataviz-output> element "
-                "that consume only the public runtime/v2 manifest."
+                "that consume only the public runtime/v3 manifest."
             ),
             "dependency": "none",
             "server_url": "/runtime/web-component-adapter.js",
             "public_api": [
-                "DatavizRuntimeV2Client",
+                "DatavizRuntimeV3Client",
                 "<dataviz-output output=\"source:data/main\" mode=\"table\">",
                 "<dataviz-output view=\"detail\" mode=\"count\">",
             ],

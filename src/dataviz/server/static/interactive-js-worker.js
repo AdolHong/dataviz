@@ -178,7 +178,7 @@ self.addEventListener('message', async event => {
     const output = await transform({
       inputs,
       input:name => inputs[name],
-      query_params:request.context?.query_params || {},
+      query_inputs:request.context?.query_inputs || {},
       compute_params:request.context?.compute_params || {},
       selections:request.context?.selections || {},
       table:name => inputs[name] instanceof DatavizFrame ? inputs[name] : new DatavizFrame(inputs[name]),

@@ -18,13 +18,16 @@ from dataviz.execution.events import EventObserver, ExecutionEvent
 from dataviz.execution.fingerprint import query_contract_fingerprint
 from dataviz.execution.node_support import hash_path, output_status, package_fingerprint
 from dataviz.execution.outputs import normalize_outputs, validate_table_schema
+from dataviz.execution.parameters import (
+    project_query_inputs,
+    resolve_query_parameter_values,
+)
 from dataviz.execution.plan import PlanNode, compile_plan
 from dataviz.execution.python_process import execute_python_node
 from dataviz.execution.results import NodeResult, RunResult
 from dataviz.redaction import redact_text, redact_value
 from dataviz.sources import SOURCE_RUNNERS
 from dataviz.sources.base import SourceRequest
-from dataviz.value_contract import ValueContractViolation, normalize_control_value
 from dataviz.workspace.loader import (
     LoadedDashboard,
     LoadedWorkspace,
@@ -71,31 +74,18 @@ def _write_python_log(
 
 
 def resolve_query_parameters(
-    dashboard: LoadedDashboard, values: dict[str, Any] | None
+    dashboard: LoadedDashboard,
+    values: dict[str, Any] | None,
+    *,
+    timezone_name: str,
+    current_time: datetime | None = None,
 ) -> dict[str, Any]:
-    provided = values or {}
-    definitions = {item.id: item for item in dashboard.definition.query_parameters}
-    unknown = sorted(set(provided) - set(definitions))
-    if unknown:
-        raise ExecutionFailure(
-            "Unknown Query Parameters",
-            details={"code": "query_parameter_unknown", "ids": unknown},
-        )
-    result: dict[str, Any] = {}
-    for definition in dashboard.definition.query_parameters:
-        value = provided.get(definition.id, definition.default)
-        try:
-            result[definition.id] = normalize_control_value(definition, value)
-        except ValueContractViolation as error:
-            raise ExecutionFailure(
-                f"Invalid Query Parameter {definition.id}: {error.message}",
-                details={
-                    "code": f"query_parameter_{error.code}",
-                    "id": definition.id,
-                    "reason": error.message,
-                },
-            ) from error
-    return result
+    return resolve_query_parameter_values(
+        dashboard.definition.query_parameters,
+        values,
+        timezone_name=timezone_name,
+        current_time=current_time,
+    )
 
 
 class Executor:
@@ -146,7 +136,11 @@ class Executor:
         if dashboard.definition.id != dashboard_id:
             raise ValueError("Prevalidated Dashboard does not match the requested id")
         workspace_definition = self.workspace.definition.model_copy(deep=True)
-        parameters = resolve_query_parameters(dashboard, query_parameters)
+        parameters = resolve_query_parameters(
+            dashboard,
+            query_parameters,
+            timezone_name=workspace_definition.context.timezone,
+        )
         # Adapter files are an editable Workspace boundary. Resolve one immutable
         # snapshot per Run instead of retaining the first values seen by a tab.
         # Keeping it local also prevents concurrent Dashboard Runs from replacing
@@ -720,9 +714,7 @@ class Executor:
             workspace_root=self.workspace.root,
             dashboard_root=dashboard.root,
             run_id=run_result.run_id,
-            query_params={
-                key: parameters.get(key) for key in node.query_parameters
-            },
+            query_inputs=project_query_inputs(node.parameter_inputs, parameters),
             compute_params={},
             selections={},
             inputs=inputs,
@@ -786,10 +778,7 @@ class Executor:
             "dashboard": dashboard.definition.id,
             "node": node.id,
             "definition": definition.model_dump(mode="json", by_alias=True),
-            "query_parameters": {
-                name: parameters.get(name)
-                for name in node.query_parameters
-            },
+            "query_inputs": project_query_inputs(node.parameter_inputs, parameters),
             "files": files,
             "upstream": upstream,
             "adapter": (

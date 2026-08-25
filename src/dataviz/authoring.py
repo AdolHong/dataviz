@@ -12,7 +12,6 @@ from dataviz.authoring_log import authoring_prompt
 from dataviz.errors import ValidationFailure
 from dataviz.identifiers import is_stable_id, stable_id_help
 from dataviz.execution.plan import compile_plan
-from dataviz.execution.references import parse_output_reference
 from dataviz.templates import (
     COMPONENT_REGISTRY_VERSION,
     SECTION_TEMPLATES,
@@ -21,7 +20,7 @@ from dataviz.templates import (
     template_catalog,
 )
 from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace, validate_workspace
-from dataviz.workspace.controls import compile_control_contract
+from dataviz.workspace.control_components import resolve_control_component
 
 
 RUNTIME_CONTRACT = [
@@ -61,7 +60,7 @@ def parse_context_focus(value: str | None) -> ContextFocus | None:
                     "source:sales",
                     "dataset:sales-model",
                     "interactive:visible-sales",
-                    "component:selector.cascader",
+                    "component:control.cascader",
                 ]
             },
         )
@@ -176,36 +175,8 @@ def _presentation_assets(
     return result
 
 
-def _declared_output_references(kind: str, identifier: str, definition: Any) -> list[str]:
-    names = list(definition.outputs)
-    return [f"{kind}:{identifier}/{name}" for name in names]
-
-
-def _interactive_and_base_closure(
-    dashboard: LoadedDashboard, references: list[str]
-) -> tuple[set[str], set[str]]:
-    pending = [parse_output_reference(reference).canonical for reference in references]
-    interactive_ids: set[str] = set()
-    base_references: set[str] = set()
-    while pending:
-        reference = parse_output_reference(pending.pop())
-        if reference.node_id.startswith("interactive:"):
-            transform_id = reference.node_id.split(":", 1)[1]
-            if transform_id in interactive_ids:
-                continue
-            if transform_id not in dashboard.interactive_transforms:
-                raise ValidationFailure(f"Unknown Interactive Transform: {transform_id}")
-            interactive_ids.add(transform_id)
-            pending.extend(
-                dashboard.interactive_transforms[transform_id][1].inputs.values()
-            )
-        else:
-            base_references.add(reference.canonical)
-    return interactive_ids, base_references
-
-
 def _focused_ids(
-    dashboard: LoadedDashboard, focus: ContextFocus
+    dashboard: LoadedDashboard, focus: ContextFocus, dependency_contract
 ) -> tuple[set[str], set[str], set[str], set[str], set[str]]:
     view_ids: set[str] = set()
     section_ids: set[str] = set()
@@ -225,8 +196,6 @@ def _focused_ids(
         view_ids.update(section.views)
         if section.repeat and section.repeat.view:
             view_ids.add(section.repeat.view)
-        if section.repeat and section.repeat.input:
-            references.append(section.repeat.input)
     elif focus.kind in {"source", "dataset", "interactive"}:
         collection = {
             "source": dashboard.sources,
@@ -235,21 +204,22 @@ def _focused_ids(
         }[focus.kind]
         if focus.identifier not in collection:
             raise ValidationFailure(f"Unknown {focus.kind.title()}: {focus.identifier}")
-        references.extend(
-            _declared_output_references(
-                focus.kind, focus.identifier, collection[focus.identifier][1]
-            )
+        outputs = (
+            dependency_contract.interactive_outputs[focus.identifier]
+            if focus.kind == "interactive"
+            else dependency_contract.query_outputs[
+                f"{focus.kind}:{focus.identifier}"
+            ]
         )
+        references.extend(outputs)
 
     for section in dashboard.definition.sections:
         if any(view_id in section.views for view_id in view_ids):
             section_ids.add(section.id)
     for view_id in view_ids:
-        references.extend(dashboard.views[view_id].input_refs.values())
+        references.extend(dependency_contract.view_inputs[view_id].values())
 
-    interactive_ids, base_references = _interactive_and_base_closure(
-        dashboard, references
-    )
+    interactive_ids, base_references = dependency_contract.output_closure(references)
     source_ids: set[str] = set()
     transform_ids: set[str] = set()
     if base_references:
@@ -264,7 +234,7 @@ def _focused_presentation(
     dashboard: LoadedDashboard,
     view_ids: set[str],
     section_ids: set[str],
-    selection_keys: set[str],
+    control_keys: set[str],
 ) -> dict[str, Any] | None:
     if dashboard.presentation is None:
         return None
@@ -279,10 +249,10 @@ def _focused_presentation(
         for key, definition in value["sections"].items()
         if key in section_ids
     }
-    value["selectors"] = {
+    value["control_components"] = {
         key: definition
-        for key, definition in value["selectors"].items()
-        if key in selection_keys
+        for key, definition in value["control_components"].items()
+        if key in control_keys
     }
     return value
 
@@ -291,7 +261,7 @@ def _focused_templates(
     dashboard: LoadedDashboard,
     view_ids: set[str],
     section_ids: set[str],
-    selection_keys: set[str],
+    control_keys: set[str],
     *,
     include_dataset_transform: bool,
     interactive_runtimes: set[str],
@@ -303,17 +273,25 @@ def _focused_templates(
         for section in dashboard.definition.sections
         if section.id in section_ids
     }
-    selector_templates = set()
-    if dashboard.presentation:
-        selector_templates.update(
-            definition.template
-            for key, definition in dashboard.presentation.selectors.items()
-            if key in selection_keys
-        )
-    selector_templates.discard("auto")
+    definitions = {
+        f"query:{item.id}": item for item in dashboard.definition.query_parameters
+    }
+    for effective in dashboard.dependency_contract.view_control_contract.values():
+        for item in effective:
+            definitions.setdefault(item.key, item.definition)
+    control_components = {
+        resolve_control_component(
+            definition,
+            dashboard.presentation.control_components.get(key)
+            if dashboard.presentation
+            else None,
+        )["component"]
+        for key, definition in definitions.items()
+        if key in control_keys
+    }
     component_ids = {f"view.{value}" for value in view_templates}
     component_ids.update(f"section.{value}" for value in section_templates)
-    component_ids.update(f"selector.{value}" for value in selector_templates)
+    component_ids.update(f"control.{value}" for value in control_components)
     component_ids.add(f"layout.{dashboard.definition.layout.template}")
     component_ids.add(f"theme.{dashboard.definition.theme.preset}")
     if any(dashboard.views[value].template == "custom" for value in view_ids):
@@ -350,6 +328,121 @@ def _focused_templates(
     }
 
 
+def _dependency_context_payload(
+    contract,
+    *,
+    focused: bool,
+    source_ids: set[str],
+    dataset_ids: set[str],
+    interactive_ids: set[str],
+    view_ids: set[str],
+    control_keys: set[str],
+) -> dict[str, Any]:
+    """Project the authoritative graph without making focused AI context global."""
+
+    payload = contract.as_dict()
+    if not focused:
+        return payload
+    query_nodes = {
+        *(f"source:{identifier}" for identifier in source_ids),
+        *(f"dataset:{identifier}" for identifier in dataset_ids),
+    }
+    producers = query_nodes | {
+        f"interactive:{identifier}" for identifier in interactive_ids
+    }
+
+    def selected_reference(reference: str) -> bool:
+        return reference.rsplit("/", 1)[0] in producers
+
+    query = payload["query"]
+    query["dependencies"] = {
+        key: [value for value in values if value in query_nodes]
+        for key, values in query["dependencies"].items()
+        if key in query_nodes
+    }
+    query["inputs"] = {
+        key: value
+        for key, value in query["inputs"].items()
+        if key in query_nodes
+    }
+    query["outputs"] = {
+        key: values
+        for key, values in query["outputs"].items()
+        if key in query_nodes
+    }
+    query["order"] = [value for value in query["order"] if value in query_nodes]
+    query["parameter_inputs"] = {
+        key: value
+        for key, value in query["parameter_inputs"].items()
+        if key in query_nodes
+    }
+    query["parameter_consumers"] = {
+        key: [
+            value
+            for value in values
+            if value in producers or value.startswith("content:")
+        ]
+        for key, values in query["parameter_consumers"].items()
+        if any(
+            value in producers or value.startswith("content:")
+            for value in values
+        )
+    }
+    query["presentation_roots"] = [
+        value for value in query["presentation_roots"] if selected_reference(value)
+    ]
+    query["base_output_roots"] = [
+        value for value in query["base_output_roots"] if selected_reference(value)
+    ]
+
+    interactive = payload["interactive"]
+    for field in (
+        "dependencies",
+        "inputs",
+        "outputs",
+        "runtimes",
+        "query_parameters",
+        "selection_inputs",
+        "compute_inputs",
+        "direct_views",
+        "downstream_views",
+    ):
+        interactive[field] = {
+            key: value
+            for key, value in interactive[field].items()
+            if key in interactive_ids
+        }
+    interactive["order"] = [
+        value for value in interactive["order"] if value in interactive_ids
+    ]
+    interactive["reachable_order"] = [
+        value for value in interactive["reachable_order"] if value in interactive_ids
+    ]
+    payload["views"] = {
+        key: value for key, value in payload["views"].items() if key in view_ids
+    }
+    payload["outputs"] = {
+        key: value
+        for key, value in payload["outputs"].items()
+        if selected_reference(key)
+        or any(view_id in view_ids for view_id in value["views"])
+    }
+    payload["selection_option_domains"] = {
+        key: value
+        for key, value in payload["selection_option_domains"].items()
+        if key in control_keys
+    }
+    payload["controls"] = {
+        key: value
+        for key, value in payload["controls"].items()
+        if key in control_keys
+    }
+    payload["control_order"] = [
+        key for key in payload["control_order"] if key in control_keys
+    ]
+    return payload
+
+
 def build_context_payload(
     workspace: LoadedWorkspace,
     dashboard: LoadedDashboard,
@@ -375,7 +468,8 @@ def build_context_payload(
             ],
         }
 
-    contract = compile_control_contract(dashboard.definition)
+    dependency_contract = dashboard.dependency_contract
+    contract = dependency_contract.view_control_contract
     if parsed_focus is None:
         view_ids = set(dashboard.views)
         section_ids = {value.id for value in dashboard.definition.sections}
@@ -384,7 +478,9 @@ def build_context_payload(
         interactive_ids = set(dashboard.interactive_transforms)
     else:
         view_ids, section_ids, source_ids, transform_ids, interactive_ids = _focused_ids(
-            dashboard, parsed_focus
+            dashboard,
+            parsed_focus,
+            dependency_contract,
         )
 
     effective_contract = {
@@ -394,37 +490,34 @@ def build_context_payload(
     control_keys = {
         value["key"] for controls in effective_contract.values() for value in controls
     }
-    selection_keys = {
-        value["key"]
-        for controls in effective_contract.values()
-        for value in controls
-        if value["kind"] == "selection"
-    }
     relevant_params = {
         parameter
         for identifier in source_ids
-        for parameter in getattr(
-            dashboard.sources[identifier][1], "query_params", []
-        )
+        for parameter in dependency_contract.query_parameter_inputs[
+            f"source:{identifier}"
+        ]
     }
     relevant_params.update(
         parameter
         for identifier in transform_ids
-        for parameter in dashboard.dataset_transforms[identifier][1].query_params
+        for parameter in dependency_contract.query_parameter_inputs[
+            f"dataset:{identifier}"
+        ]
     )
     relevant_params.update(
         parameter
         for identifier in interactive_ids
-        for parameter in dashboard.interactive_transforms[identifier][1].query_params
+        for parameter in dependency_contract.interactive_query_parameters[identifier]
     )
     control_keys.update(
         key
         for identifier in interactive_ids
         for key in {
-            *dashboard.interactive_transforms[identifier][1].compute_inputs.values(),
-            *dashboard.interactive_transforms[identifier][1].selection_inputs.values(),
+            *dependency_contract.interactive_compute_inputs[identifier].values(),
+            *dependency_contract.interactive_selection_inputs[identifier].values(),
         }
     )
+    control_keys.update(f"query:{parameter}" for parameter in relevant_params)
 
     if parsed_focus is None:
         logic_definition: dict[str, Any] = dashboard.logic_definition.model_dump(
@@ -489,13 +582,13 @@ def build_context_payload(
             ],
         }
         presentation = _focused_presentation(
-            dashboard, view_ids, section_ids, selection_keys
+            dashboard, view_ids, section_ids, control_keys
         )
         templates = _focused_templates(
             dashboard,
             view_ids,
             section_ids,
-            selection_keys,
+            control_keys,
             include_dataset_transform=bool(transform_ids),
             interactive_runtimes={
                 dashboard.interactive_transforms[value][1].runtime
@@ -528,6 +621,15 @@ def build_context_payload(
         "runtime_contract": RUNTIME_CONTRACT,
         "authoring_feedback": authoring_prompt(dashboard.definition.id),
         "effective_controls": effective_contract,
+        "dependency_contract": _dependency_context_payload(
+            dependency_contract,
+            focused=parsed_focus is not None,
+            source_ids=source_ids,
+            dataset_ids=transform_ids,
+            interactive_ids=interactive_ids,
+            view_ids=view_ids,
+            control_keys=control_keys,
+        ),
         "sources": {
             key: _source_payload(workspace, *dashboard.sources[key])
             for key in sorted(source_ids)
@@ -662,7 +764,8 @@ def build_authoring_benchmark(
             "sections": len(dashboard.definition.sections),
             "views": len(dashboard.views),
             "selection_bindings": sum(
-                len(values) for values in compile_control_contract(dashboard.definition).values()
+                len(values)
+                for values in dashboard.dependency_contract.view_control_contract.values()
             ),
         },
         "validation": {"valid": not errors, "errors": errors},
@@ -680,10 +783,10 @@ def _yaml(value: Any) -> str:
 
 def scaffold_recipes() -> tuple[str, ...]:
     """Return every recipe accepted by the current generator."""
-    selectors = sorted(
+    controls = sorted(
         identifier
         for identifier in component_catalog()
-        if identifier.startswith("selector.")
+        if identifier.startswith("control.")
     )
     return (
         "dashboard",
@@ -697,7 +800,7 @@ def scaffold_recipes() -> tuple[str, ...]:
         "renderer.custom",
         *(f"view.{value}" for value in VIEW_TEMPLATES),
         *(f"section.{value}" for value in SECTION_TEMPLATES),
-        *selectors,
+        *controls,
     )
 
 
@@ -712,7 +815,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         files = {
             "dashboard.yaml": _yaml(
                 {
-                    "schema": "dataviz/dashboard/v3",
+                    "schema": "dataviz/dashboard/v4",
                     "kind": "dashboard",
                     "id": item_id,
                     "title": item_id.replace("-", " ").title(),
@@ -856,10 +959,10 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         if template == "image":
             files["assets/image.svg"] = (
                 '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 420">'
-                '<rect width="800" height="420" fill="#17211d"/>'
-                '<circle cx="640" cy="110" r="74" fill="#69dca5"/>'
-                '<path d="M0 360L250 150L440 300L800 70V420H0Z" fill="#e2592a"/>'
-                '<text x="42" y="76" fill="#fffdf6" font-family="sans-serif" '
+                '<rect width="800" height="420" fill="#1a237e"/>'
+                '<circle cx="640" cy="110" r="74" fill="#26a69a"/>'
+                '<path d="M0 360L250 150L440 300L800 70V420H0Z" fill="#3949ab"/>'
+                '<text x="42" y="76" fill="#ffffff" font-family="sans-serif" '
                 'font-size="38">IMAGE VIEW</text></svg>\n'
             )
     elif recipe.startswith("section."):
@@ -886,48 +989,105 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                     "field": "entity_id",
                     "type": "multi_select",
                     "label": "Groups",
-                    "default": [],
+                    "options": {"mode": "infer", "initial": "empty"},
                 }
             ]
             definition["repeat"]["selection"] = "groups"
         files = {"dashboard.section.snippet.yaml": _yaml([definition])}
-    elif recipe.startswith("selector."):
-        template = recipe.split(".", 1)[1]
-        if f"selector.{template}" not in component_catalog():
-            raise ValidationFailure(f"Unknown Selector scaffold: {recipe}")
-        path_fields = ["province", "city", "district"] if template in {"cascader", "tree-select"} else []
-        selection_type = (
-            "date_range"
-            if template == "date-range"
-            else "single_select"
-            if template == "segmented"
-            else "multi_select"
-        )
-        selection = {
+    elif recipe.startswith("control."):
+        component = recipe.split(".", 1)[1]
+        if f"control.{component}" not in component_catalog():
+            raise ValidationFailure(f"Unknown Control scaffold: {recipe}")
+        label = item_id.replace("-", " ").title()
+        control: dict[str, Any] = {
             "id": item_id,
-            "kind": "selection",
-            "field": path_fields[-1] if path_fields else item_id,
-            "type": selection_type,
-            "label": item_id.replace("-", " ").title(),
-            "default": (
-                ["2026-01-01", "2026-01-31"]
-                if template == "date-range"
-                else "alpha"
-                if template == "segmented"
-                else []
-            ),
+            "kind": "compute",
+            "type": "string",
+            "label": label,
+            "default": "",
         }
-        if path_fields:
-            selection["path_fields"] = path_fields
-        elif template in {"select", "segmented", "checkbox-group"}:
-            selection["choices"] = [
-                {"label": "Alpha", "value": "alpha"},
-                {"label": "Beta", "value": "beta"},
-            ]
+        if component == "input":
+            control.update({"placeholder": "Enter text", "max_length": 120})
+        elif component == "auto-complete":
+            control.update(
+                {
+                    "placeholder": "Enter or choose a suggestion",
+                    "suggestions": [
+                        {"label": "Alpha", "value": "alpha"},
+                        {"label": "Beta", "value": "beta"},
+                    ],
+                }
+            )
+        elif component in {"input-number", "slider"}:
+            control.update({"type": "integer", "default": 50, "min": 0, "max": 100, "step": 5})
+        elif component in {"checkbox", "switch"}:
+            control.update({"type": "boolean", "default": False})
+        elif component == "date-picker":
+            control.update(
+                {
+                    "type": "date",
+                    "default": "2026-01-15",
+                    "min_date": "2026-01-01",
+                    "max_date": "2026-12-31",
+                }
+            )
+        elif component == "range-picker":
+            control.update(
+                {
+                    "type": "date_range",
+                    "default": ["2026-01-01", "2026-01-31"],
+                    "min_date": "2026-01-01",
+                    "max_date": "2026-12-31",
+                }
+            )
+        elif component == "radio-group":
+            control.update(
+                {
+                    "type": "single_select",
+                    "default": "alpha",
+                    "required": True,
+                    "options": {
+                        "mode": "static",
+                        "choices": [
+                            {"label": "Alpha", "value": "alpha"},
+                            {"label": "Beta", "value": "beta"},
+                        ],
+                    },
+                }
+            )
+        elif component in {"select", "checkbox-group"}:
+            control.update(
+                {
+                    "type": "multi_select",
+                    "default": ["alpha"],
+                    "options": {
+                        "mode": "static",
+                        "choices": [
+                            {"label": "Alpha", "value": "alpha"},
+                            {"label": "Beta", "value": "beta"},
+                        ],
+                    },
+                }
+            )
+        elif component in {"cascader", "tree-select"}:
+            control.pop("default")
+            control.update(
+                {
+                    "kind": "selection",
+                    "type": "multi_select",
+                    "field": "district",
+                    "path_fields": ["province", "city", "district"],
+                    "options": {"mode": "infer"},
+                }
+            )
         files = {
-            "dashboard.control.snippet.yaml": _yaml([selection]),
-            "presentation.selector.snippet.yaml": _yaml(
-                {"selectors": {f"view:view-id/{item_id}": {"template": template}}}
+            "dashboard.control.snippet.yaml": _yaml([control]),
+            "presentation.control-component.snippet.yaml": _yaml(
+                {
+                    "control_components": {
+                        f"view:view-id/{item_id}": {"component": component}
+                    }
+                }
             ),
         }
     elif recipe == "renderer.custom":
@@ -950,6 +1110,8 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                 ]
             ),
             f"assets/{item_id}.js": (
+                "// If this Custom Renderer uses Plotly.newPlot/react, pass scrollZoom:false\n"
+                "// so the Dashboard keeps wheel scrolling. Use true only on an explicit user request.\n"
                 f"window.datavizRuntime.registerRenderer({renderer_literal}, {{\n"
                 "  validate(descriptor) {},\n"
                 "  mount(context, descriptor) {\n"

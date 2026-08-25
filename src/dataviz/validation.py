@@ -87,12 +87,12 @@ def _hint_for(item: Diagnostic) -> str:
         return "Fix the Selection path/binding field or declare it in the selected View input table schema."
     if code.startswith("selection_option_domain_"):
         return (
-            "Use static `choices`, or set `options_from` to a table Base Named Output "
-            "such as `source:sales/main`. Interactive Outputs are not valid option "
-            "domains because they may depend on this Selection."
+            "Use `options: {mode: static, choices: [...]}` for a closed enum, or "
+            "`options: {mode: infer, source: source:sales/main}` for a data-derived "
+            "domain. Interactive Outputs are invalid because they may depend on this Selection."
         )
     if code == "file_reader_dependency_unavailable":
-        return "Install the Excel reader extra with `pip install 'workspace-dataviz[excel]'`, then rerun validate."
+        return "Install the Excel reader extra with `pip install 'ai-dataviz[excel]'`, then rerun validate."
     if code.startswith("adapter_") or field == "adapter":
         return "Bind the Dashboard Adapter reference to a Workspace Adapter and define credentials only in `auth/adapters.local.yaml` or environment variables."
     if code.startswith("content_"):

@@ -104,7 +104,7 @@ AUTHORING_TASKS: dict[str, dict[str, Any]] = {
                 "criterion": "No custom page HTML/CSS/JavaScript is required by the Dataviz variant.",
             },
         ],
-        "dataviz_focus": ["dashboard", "view.line", "view.table", "selector.select"],
+        "dataviz_focus": ["dashboard", "view.line", "view.table", "control.select"],
     },
     "three-level-selection": {
         "title": "Three scopes and path cascade",
@@ -131,7 +131,7 @@ AUTHORING_TASKS: dict[str, dict[str, Any]] = {
                 "criterion": "Outside click, Escape, search and exported HTML behavior are consistent.",
             },
         ],
-        "dataviz_focus": ["selections", "selector.cascader", "runtime.overlay"],
+        "dataviz_focus": ["selections", "control.cascader", "runtime.overlay"],
     },
     "dataset-multi-output": {
         "title": "Complex Dataset Transform with Named Outputs",

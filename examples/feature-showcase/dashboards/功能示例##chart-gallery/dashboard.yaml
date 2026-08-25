@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v3
+schema: dataviz/dashboard/v4
 kind: dashboard
 id: chart-gallery
 title: 多图表陈列室
@@ -11,11 +11,13 @@ controls:
     type: multi_select
     label: 省份
     default: [广东, 湖南, 福建, 浙江]
-    choices:
-      - {label: 广东, value: 广东}
-      - {label: 湖南, value: 湖南}
-      - {label: 福建, value: 福建}
-      - {label: 浙江, value: 浙江}
+    options:
+      mode: static
+      choices:
+        - {label: 广东, value: 广东}
+        - {label: 湖南, value: 湖南}
+        - {label: 福建, value: 福建}
+        - {label: 浙江, value: 浙江}
   - id: radar_city_count
     kind: compute
     type: integer

@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v3
+schema: dataviz/dashboard/v4
 kind: dashboard
 id: parameter-playground
 title: 参数试验场
@@ -14,10 +14,12 @@ controls:
     type: multi_select
     label: 分组
     default: [Alpha, Beta, Gamma]
-    choices:
-      - {label: Alpha, value: Alpha}
-      - {label: Beta, value: Beta}
-      - {label: Gamma, value: Gamma}
+    options:
+      mode: static
+      choices:
+        - {label: Alpha, value: Alpha}
+        - {label: Beta, value: Beta}
+        - {label: Gamma, value: Gamma}
 sources: [sources/parameterized.yaml]
 views:
   - id: parameter-line

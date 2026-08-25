@@ -31,7 +31,6 @@ from dataviz.execution.results import RunResult
 from dataviz.execution.interactive import InteractionExecutor
 from dataviz.execution.fingerprint import ensure_query_run_compatible
 from dataviz.execution.outputs import normalize_outputs
-from dataviz.execution.plan import reachable_output_references
 from dataviz.execution.references import parse_output_reference
 from dataviz.rendering import CanvasRenderer
 from dataviz.server.hot_reload import (
@@ -44,12 +43,13 @@ from dataviz.server.manager import RunManager
 from dataviz.workspace import load_workspace, validate_workspace
 from dataviz.workspace.controls import (
     compile_control_contract,
+    initial_selection_intent,
     resolve_compute_values,
     resolve_selection_values,
 )
-from dataviz.workspace.selector_templates import resolve_selector_presentation
+from dataviz.workspace.control_components import resolve_control_component
 from dataviz.workspace.navigation import NavigationEditor
-from dataviz.workspace.models import PresentationControlsDefinition
+from dataviz.workspace.models import PresentationControlPanelsDefinition
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -74,6 +74,9 @@ class ReportRequest(BaseModel):
     session_id: str = Field(min_length=8, max_length=128)
     run_id: str
     selections: dict[str, Any] = Field(default_factory=dict)
+    selection_intents: dict[
+        str, Literal["all_available", "explicit"]
+    ] = Field(default_factory=dict)
     compute_parameters: dict[str, Any] = Field(default_factory=dict)
     snapshot_outputs: dict[str, Any] = Field(default_factory=dict)
 
@@ -394,12 +397,28 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                         "query_parameters": [],
                         "controls": [],
                         "control_contract": {},
+                        "dependency_contract": None,
                         "nodes": [],
                         "views": [],
                     }
                 )
                 continue
-            control_contract = compile_control_contract(dashboard.definition)
+            try:
+                dependency_contract = dashboard.dependency_contract
+            except DatavizError:
+                # Invalid dashboards remain visible in Navigation; validate owns
+                # the detailed diagnostic and the previous valid Canvas stays live.
+                dependency_contract = None
+            control_contract = (
+                dependency_contract.view_control_contract
+                if dependency_contract is not None
+                else {
+                    key: tuple(value)
+                    for key, value in compile_control_contract(
+                        dashboard.definition
+                    ).items()
+                }
+            )
             section_titles = {item.id: item.title for item in dashboard.definition.sections}
             view_titles = {
                 view_id: view.title or view_id
@@ -408,15 +427,12 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             scoped_controls = {}
             for view_id, effective in control_contract.items():
                 for item in effective:
-                    consumers = [
-                        transform_id
-                        for transform_id, (_, transform) in dashboard.interactive_transforms.items()
-                        if item.key
-                        in {
-                            *transform.selection_inputs.values(),
-                            *transform.compute_inputs.values(),
-                        }
-                    ]
+                    dependency = (
+                        dependency_contract.controls.get(item.key)
+                        if dependency_contract is not None
+                        else None
+                    )
+                    consumers = list(dependency.transform_consumers) if dependency else []
                     triggers = sorted(
                         {
                             dashboard.interactive_transforms[transform_id][1].trigger
@@ -439,17 +455,31 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                                 else view_titles.get(item.owner_id, item.owner_id)
                             ),
                             "definition": item.definition.model_dump(mode="json"),
-                            "presentation": (
-                                _selector_presentation(dashboard, item.key, item.definition)
-                                if item.kind == "selection"
-                                else None
+                            "initial_intent": initial_selection_intent(item.definition),
+                            "presentation": _control_component_presentation(
+                                dashboard, item.key, item.definition
                             ),
                             "consumers": consumers,
                             "trigger": triggers[0] if triggers else "manual",
-                            "affected_views": [],
+                            "scope_views": (
+                                list(dependency.scope_views) if dependency else []
+                            ),
+                            "direct_views": (
+                                list(dependency.direct_views) if dependency else []
+                            ),
+                            "derived_views": (
+                                list(dependency.derived_views) if dependency else []
+                            ),
+                            "affected_views": (
+                                list(dependency.affected_views) if dependency else []
+                            ),
                         },
                     )
-                    control["affected_views"].append(view_id)
+                    if dependency is None:
+                        control["scope_views"].append(view_id)
+                        if item.kind == "selection":
+                            control["direct_views"].append(view_id)
+                            control["affected_views"].append(view_id)
             dashboards.append(
                 {
                     **base,
@@ -466,14 +496,28 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                         "diagnostics": [
                             item.as_dict() for item in (dashboard.presentation_diagnostics or [])
                         ],
-                        "controls": _controls_presentation(dashboard),
+                        "control_panels": _control_panels_presentation(dashboard),
                     },
-                    "query_parameters": [item.model_dump(mode="json") for item in dashboard.definition.query_parameters],
+                    "query_parameters": [
+                        {
+                            **item.model_dump(mode="json"),
+                            "key": f"query:{item.id}",
+                            "presentation": _control_component_presentation(
+                                dashboard, f"query:{item.id}", item
+                            ),
+                        }
+                        for item in dashboard.definition.query_parameters
+                    ],
                     "controls": list(scoped_controls.values()),
                     "control_contract": {
                         view_id: [item.as_dict() for item in effective]
                         for view_id, effective in control_contract.items()
                     },
+                    "dependency_contract": (
+                        dependency_contract.as_dict()
+                        if dependency_contract is not None
+                        else None
+                    ),
                     "nodes": [
                         {
                             "id": f"source:{source_id}",
@@ -1067,16 +1111,16 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 entry = current_workspace().catalog_entry(dashboard_id)
             except WorkspaceError as error:
                 raise HTTPException(404, error.message) from error
-            title = _escape_html(entry.canvas_name)
-            message = _escape_html(entry.message or "Dashboard is unavailable")
-            path = _escape_html(entry.relative_path)
             return HTMLResponse(
-                "<!doctype html><html><body style='font-family:system-ui;padding:56px;background:#f3f0e7;color:#17211d'>"
-                f"<p style='font:12px monospace;color:#d95f35'>{entry.status.upper()}</p>"
-                f"<h1>{title}</h1><p>{message}</p><code>{path}</code>"
-                "<p style='margin-top:28px;color:#68716c'>其他看板仍可正常使用。修复该看板目录后刷新页面即可。</p>"
-                f"{_canvas_interaction_bridge(dashboard_id, run_id, frame_id)}"
-                "</body></html>"
+                _canvas_state_page(
+                    label=entry.status.upper(),
+                    title=entry.canvas_name,
+                    message=entry.message or "Dashboard is unavailable",
+                    detail=entry.relative_path,
+                    note="其他看板仍可正常使用。修复该看板目录后刷新页面即可。",
+                    tone="danger",
+                    bridge=_canvas_interaction_bridge(dashboard_id, run_id, frame_id),
+                )
             )
         checked = checked_session(session_id)
         record = manager.get(run_id, checked) if run_id else manager.latest_for(checked, dashboard_id)
@@ -1104,11 +1148,13 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             except ValueError:
                 waiting_title = dashboard.canvas_name
             return HTMLResponse(
-                "<!doctype html><html><body style='font-family:serif;padding:48px;background:#f3f0e7;color:#17211d'>"
-                "<p style='font:12px monospace;color:#e2592a'>CANVAS WAITING</p>"
-                f"<h1>{_escape_html(waiting_title)}</h1><p>设置参数并运行后，结果将在这里出现。</p>"
-                f"{_canvas_interaction_bridge(dashboard_id, run_id, frame_id)}"
-                "</body></html>"
+                _canvas_state_page(
+                    label="Canvas waiting",
+                    title=waiting_title,
+                    message="设置参数并运行后，结果将在这里出现。",
+                    tone="indigo",
+                    bridge=_canvas_interaction_bridge(dashboard_id, run_id, frame_id),
+                )
             )
         if result is None:
             result = RunResult(
@@ -1196,9 +1242,19 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             )
         except Exception as error:
             raise HTTPException(422, f"Invalid report state: {error}") from error
+        valid_selection_keys = {
+            key
+            for key, dependency in dashboard.dependency_contract.controls.items()
+            if dependency.kind == "selection"
+        }
+        resolved_selection_intents = {
+            key: value
+            for key, value in request.selection_intents.items()
+            if key in valid_selection_keys
+        }
 
         derived_outputs = {}
-        _, interactive_ids = reachable_output_references(dashboard)
+        interactive_ids = dashboard.dependency_contract.reachable_interactive_order
         snapshot_interactions: set[str] = {
             transform_id
             for transform_id in interactive_ids
@@ -1339,6 +1395,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                     temporary / report_name,
                     compute_parameters=resolved_compute,
                     selections=resolved_selections,
+                    selection_intents=resolved_selection_intents,
                     derived_outputs=derived_outputs,
                     snapshot_interactions=snapshot_interactions,
                 )
@@ -1364,6 +1421,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             asset_mode="inline",
             compute_parameters=resolved_compute,
             selections=resolved_selections,
+            selection_intents=resolved_selection_intents,
             derived_outputs=derived_outputs,
             snapshot_interactions=snapshot_interactions,
         )
@@ -1401,6 +1459,53 @@ def _canvas_interaction_bridge(
     )
 
 
+def _canvas_state_page(
+    *,
+    label: str,
+    title: str,
+    message: str,
+    detail: str | None = None,
+    note: str | None = None,
+    tone: str = "indigo",
+    bridge: str = "",
+) -> str:
+    palettes = {
+        "indigo": ("#1a237e", "#283593", "#9fa8da", "#d9dcf3"),
+        "warning": ("#5f4300", "#8a6200", "#ffe082", "#fff3c4"),
+        "danger": ("#7f1d1d", "#a72c2c", "#ffcdd2", "#ffebee"),
+    }
+    start, end, label_color, copy_color = palettes.get(tone, palettes["indigo"])
+    detail_markup = (
+        "<code style='display:inline-block;margin-top:16px;padding:8px 10px;color:#202536;"
+        "background:#fff;border:1px solid #d9e0ec;border-radius:6px;"
+        "font:11px SFMono-Regular,Consolas,monospace'>"
+        f"{_escape_html(detail)}</code>"
+        if detail
+        else ""
+    )
+    note_markup = (
+        "<p style='max-width:64ch;margin:22px 0 0;color:#667085;font-size:13px;line-height:1.55'>"
+        f"{_escape_html(note)}</p>"
+        if note
+        else ""
+    )
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' "
+        "content='width=device-width,initial-scale=1'></head>"
+        "<body style='margin:0;padding:clamp(24px,4vw,64px);color:#202536;background:#f5f7fa;"
+        "font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,sans-serif'>"
+        "<main style='max-width:1180px;padding:clamp(26px,4vw,48px);color:#fff;"
+        f"background:linear-gradient(135deg,{start},{end});border-radius:12px;"
+        "box-shadow:0 10px 30px rgba(26,35,126,.16)'>"
+        f"<p style='margin:0;color:{label_color};font:700 10px SFMono-Regular,Consolas,monospace;"
+        f"letter-spacing:.12em;text-transform:uppercase'>{_escape_html(label)}</p>"
+        "<h1 style='margin:12px 0 8px;font-size:clamp(34px,5vw,58px);line-height:1.02'>"
+        f"{_escape_html(title)}</h1>"
+        f"<p style='max-width:64ch;margin:0;color:{copy_color};font-size:16px;line-height:1.55'>"
+        f"{_escape_html(message)}</p></main>{detail_markup}{note_markup}{bridge}</body></html>"
+    )
+
+
 def _canvas_contract_changed_page(
     canvas_name: str,
     message: str,
@@ -1408,13 +1513,13 @@ def _canvas_contract_changed_page(
     run_id: str | None,
     frame_id: str | None,
 ) -> str:
-    return (
-        "<!doctype html><html><body style='font-family:system-ui;padding:56px;background:#f3f0e7;color:#17211d'>"
-        "<p style='font:12px monospace;color:#d95f35'>QUERY RUN OUTDATED</p>"
-        f"<h1>{_escape_html(canvas_name)}</h1><p>{_escape_html(message)}</p>"
-        "<p>看板的数据逻辑已改变。请点击 Run query 生成与当前定义一致的新数据。</p>"
-        f"{_canvas_interaction_bridge(dashboard_id, run_id, frame_id)}"
-        "</body></html>"
+    return _canvas_state_page(
+        label="QUERY RUN OUTDATED",
+        title=canvas_name,
+        message=message,
+        note="看板的数据逻辑已改变。请点击 Run query 生成与当前定义一致的新数据。",
+        tone="warning",
+        bridge=_canvas_interaction_bridge(dashboard_id, run_id, frame_id),
     )
 
 
@@ -1439,15 +1544,21 @@ def _folder_summary(
     return result
 
 
-def _selector_presentation(dashboard, key: str, definition) -> dict[str, Any]:
-    selector = dashboard.presentation.selectors.get(key) if dashboard.presentation else None
-    return resolve_selector_presentation(definition, selector)
+def _control_component_presentation(
+    dashboard, key: str, definition
+) -> dict[str, Any]:
+    component = (
+        dashboard.presentation.control_components.get(key)
+        if dashboard.presentation
+        else None
+    )
+    return resolve_control_component(definition, component)
 
 
-def _controls_presentation(dashboard) -> dict[str, Any]:
+def _control_panels_presentation(dashboard) -> dict[str, Any]:
     controls = (
-        dashboard.presentation.controls
+        dashboard.presentation.control_panels
         if dashboard.presentation is not None
-        else PresentationControlsDefinition()
+        else PresentationControlPanelsDefinition()
     )
     return controls.model_dump(mode="json")

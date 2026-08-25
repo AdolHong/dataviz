@@ -1,0 +1,14 @@
+schema: dataviz/component-test/v1
+tests:
+  - id: runtime.control.native-contract
+    component: runtime.control
+    kind: contract
+    assertions: [native-control-is-source-of-truth, bubbling-change, rehydratable]
+  - id: runtime.control.state-matrix
+    component: runtime.control
+    kind: browser
+    assertions: [ready, loading, stale, empty, error, cancelled, unavailable, aria-state]
+  - id: runtime.control.dynamic-domain-intent
+    component: runtime.control
+    kind: browser
+    assertions: [all-available-expands-with-domain, explicit-selection-keeps-valid-intersection]

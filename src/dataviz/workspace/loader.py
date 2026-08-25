@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from datetime import datetime, timezone
 import hashlib
 import importlib.metadata
 import json
 from pathlib import Path
 import re
+from threading import Lock
 from typing import Any
 from urllib.parse import urlparse
 
@@ -22,15 +23,20 @@ from dataviz.content_templates import (
     content_template_fields,
     inspect_content_template,
 )
-from dataviz.errors import Diagnostic, WorkspaceError
+from dataviz.errors import DatavizError, Diagnostic, WorkspaceError
 from dataviz.identifiers import fallback_stable_id
 from dataviz.execution.references import parse_output_reference
+from dataviz.execution.dependencies import (
+    DashboardDependencyContract,
+    compile_dashboard_dependencies,
+)
 from dataviz.sql_contract import sql_parameter_names
 from dataviz.workspace.models import (
     DashboardDefinition,
     DatasetTransformDefinition,
     DeclarativeViewDefinition,
     InteractiveTransformDefinition,
+    InferredOptionDomainDefinition,
     NavigationItem,
     PresentationDefinition,
     SOURCE_DEFINITION_ADAPTER,
@@ -49,7 +55,7 @@ from dataviz.workspace.naming import (
     normalize_logical_path,
 )
 from dataviz.workspace.controls import compile_control_contract, scoped_control_registry
-from dataviz.workspace.selection_domains import selection_option_domain_references
+from dataviz.workspace.control_components import resolve_control_component
 from dataviz.view_contracts import referenced_view_fields, validate_view_contract
 
 
@@ -149,6 +155,32 @@ class LoadedDashboard:
     presentation: PresentationDefinition | None = None
     presentation_diagnostics: list[Diagnostic] | None = None
     readme: str = ""
+    _dependency_contract: DashboardDependencyContract | None = dataclass_field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+    _dependency_contract_lock: Lock = dataclass_field(
+        default_factory=Lock,
+        init=False,
+        repr=False,
+    )
+
+    @property
+    def dependency_contract(self) -> DashboardDependencyContract:
+        """Return the one compiled graph owned by this immutable load snapshot.
+
+        Workspace hot reload creates a new ``LoadedDashboard``. Every consumer
+        inside one snapshot therefore observes the exact same Query, Control,
+        Interactive and View dependency graph instead of independently deriving
+        relationships from the mutable DSL model.
+        """
+
+        if self._dependency_contract is None:
+            with self._dependency_contract_lock:
+                if self._dependency_contract is None:
+                    self._dependency_contract = compile_dashboard_dependencies(self)
+        return self._dependency_contract
 
     @property
     def canvas_name(self) -> str:
@@ -468,21 +500,36 @@ def _apply_presentation(
     if layout_update:
         effective.layout = effective.layout.model_copy(update=layout_update)
 
-    selection_keys = {
-        item.key
-        for controls in compile_control_contract(logic).values()
-        for item in controls
-        if item.kind == "selection"
+    control_definitions = {
+        f"query:{item.id}": item for item in logic.query_parameters
     }
-    for selector_key in presentation.selectors:
-        if selector_key not in selection_keys:
+    for controls in compile_control_contract(logic).values():
+        for item in controls:
+            control_definitions.setdefault(item.key, item.definition)
+    for control_key, component in presentation.control_components.items():
+        definition = control_definitions.get(control_key)
+        if definition is None:
             diagnostics.append(
                 Diagnostic(
                     "error",
-                    f"Presentation references unknown selector: {selector_key}",
+                    f"Presentation references unknown control: {control_key}",
                     str(presentation_path),
-                    f"selectors.{selector_key}",
-                    "presentation_unknown_selector",
+                    f"control_components.{control_key}",
+                    "presentation_unknown_control",
+                )
+            )
+            continue
+        try:
+            resolve_control_component(definition, component)
+        except ValueError as error:
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    str(error),
+                    str(presentation_path),
+                    f"control_components.{control_key}",
+                    "presentation_control_component_incompatible",
+                    {"control": control_key, "component": component.component},
                 )
             )
 
@@ -1439,62 +1486,6 @@ def _cycle_nodes(graph: dict[str, set[str]]) -> list[str]:
     return sorted(set(graph) - visited)
 
 
-def _interactive_ancestors(
-    dashboard: LoadedDashboard, transform_id: str
-) -> set[str]:
-    result: set[str] = set()
-    pending = [transform_id]
-    while pending:
-        current = pending.pop()
-        definition = dashboard.interactive_transforms[current][1]
-        for value in definition.inputs.values():
-            try:
-                reference = parse_output_reference(value)
-            except Exception:
-                continue
-            if not reference.node_id.startswith("interactive:"):
-                continue
-            dependency = reference.node_id.split(":", 1)[1]
-            if dependency in dashboard.interactive_transforms and dependency not in result:
-                result.add(dependency)
-                pending.append(dependency)
-    return result
-
-
-def _interactive_downstream_views(
-    dashboard: LoadedDashboard,
-    transform_id: str,
-) -> set[str]:
-    """Return every View reached through one Interactive Transform branch."""
-    views: set[str] = set()
-    pending = [transform_id]
-    visited: set[str] = set()
-    while pending:
-        current = pending.pop()
-        if current in visited:
-            continue
-        visited.add(current)
-        node_id = f"interactive:{current}"
-        for view in dashboard.definition.views:
-            for reference_value in view.input_refs.values():
-                try:
-                    reference = parse_output_reference(reference_value)
-                except Exception:
-                    continue
-                if reference.node_id == node_id:
-                    views.add(view.id)
-        for candidate_id, (_, candidate) in dashboard.interactive_transforms.items():
-            for reference_value in candidate.inputs.values():
-                try:
-                    reference = parse_output_reference(reference_value)
-                except Exception:
-                    continue
-                if reference.node_id == node_id:
-                    pending.append(candidate_id)
-                    break
-    return views
-
-
 def _reference_error(
     reference: str,
     *,
@@ -1654,6 +1645,7 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
             key for key, item in control_registry.items() if item.kind == "selection"
         }
         control_content_contract = content_control_contract(dashboard.definition)
+        dependency_contract = None
         view_ids = set(dashboard.views)
 
         duplicate_contracts = [
@@ -1695,9 +1687,14 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
 
         option_domain_contract_valid = True
         for control_key, item in control_registry.items():
-            if item.kind != "selection" or not item.definition.options_from:
+            options = item.definition.options
+            if (
+                item.kind != "selection"
+                or not isinstance(options, InferredOptionDomainDefinition)
+                or not options.source
+            ):
                 continue
-            reference = item.definition.options_from
+            reference = options.source
             message = _reference_error(
                 reference,
                 sources=dashboard.sources,
@@ -1710,9 +1707,9 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                 diagnostics.append(
                     Diagnostic(
                         "error",
-                        f"Selection {control_key} options_from: {message}",
+                        f"Selection {control_key} options.source: {message}",
                         definition_path,
-                        f"controls.{control_key}.options_from",
+                        f"controls.{control_key}.options.source",
                         "selection_option_domain_invalid",
                         {"control": control_key, "reference": reference},
                     )
@@ -1723,9 +1720,9 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                 diagnostics.append(
                     Diagnostic(
                         "error",
-                        f"Selection {control_key} options_from must reference a table Output",
+                        f"Selection {control_key} options.source must reference a table Output",
                         definition_path,
-                        f"controls.{control_key}.options_from",
+                        f"controls.{control_key}.options.source",
                         "selection_option_domain_kind",
                         {"control": control_key, "reference": reference},
                     )
@@ -1756,7 +1753,7 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             f"Selection {control_key} option domain does not declare fields: "
                             + ", ".join(unknown),
                             definition_path,
-                            f"controls.{control_key}.options_from",
+                            f"controls.{control_key}.options.source",
                             "selection_option_domain_field_unknown",
                             {
                                 "control": control_key,
@@ -1769,16 +1766,33 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
 
         if option_domain_contract_valid:
             try:
-                option_domains = selection_option_domain_references(dashboard)
+                dependency_contract = dashboard.dependency_contract
+                option_domains = {
+                    key: list(references)
+                    for key, references in dependency_contract.selection_option_domains.items()
+                }
+            except DatavizError as error:
+                option_domains = {}
+                payload = error.as_dict()
+                diagnostics.append(
+                    Diagnostic(
+                        "error",
+                        f"Cannot compile Dashboard Dependency Contract: {error.message}",
+                        definition_path,
+                        "dependencies",
+                        payload["code"],
+                        payload.get("details"),
+                    )
+                )
             except Exception as error:
                 option_domains = {}
                 diagnostics.append(
                     Diagnostic(
                         "error",
-                        f"Cannot compile Selection option domains: {error}",
+                        f"Cannot compile Dashboard Dependency Contract: {error}",
                         definition_path,
-                        "controls",
-                        "selection_option_domain_invalid",
+                        "dependencies",
+                        "dependency_contract_invalid",
                     )
                 )
             for control_key, item in control_registry.items():
@@ -1786,7 +1800,7 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                 dynamic_select = (
                     item.kind == "selection"
                     and definition.type in {"single_select", "multi_select"}
-                    and not definition.choices
+                    and isinstance(definition.options, InferredOptionDomainDefinition)
                 )
                 references = option_domains.get(control_key, [])
                 if dynamic_select and not references:
@@ -2030,7 +2044,7 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             {
                                 "format": file_format,
                                 "dependency": reader_dependency,
-                                "install": "pip install 'workspace-dataviz[excel]'",
+                                "install": "pip install 'ai-dataviz[excel]'",
                             },
                         )
                     )
@@ -2408,7 +2422,9 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         )
                     )
 
-        dataset_graph: dict[str, set[str]] = {
+        # Recovery-only diagnostics for a graph that could not be compiled. A
+        # valid Dashboard never builds a second runtime DAG here.
+        dataset_graph: dict[str, set[str]] = {} if dependency_contract else {
             transform_id: {
                 parsed.node_id.split(":", 1)[1]
                 for reference in transform.inputs.values()
@@ -2430,7 +2446,7 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                 )
             )
 
-        interactive_graph: dict[str, set[str]] = {
+        interactive_graph: dict[str, set[str]] = {} if dependency_contract else {
             transform_id: {
                 parsed.node_id.split(":", 1)[1]
                 for reference in transform.inputs.values()
@@ -2452,57 +2468,12 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                 )
             )
 
-        control_views: dict[str, set[str]] = {}
-        for view_id, controls in control_contract.items():
-            for control in controls:
-                control_views.setdefault(control.key, set()).add(view_id)
         for transform_id, (transform_path, transform) in dashboard.interactive_transforms.items():
-            downstream_views = _interactive_downstream_views(dashboard, transform_id)
-            for field_name, inputs in (
-                ("selection_inputs", transform.selection_inputs),
-                ("compute_inputs", transform.compute_inputs),
-            ):
-                for alias, control_key in inputs.items():
-                    outside_scope = sorted(
-                        downstream_views - control_views.get(control_key, set())
-                    )
-                    if outside_scope:
-                        diagnostics.append(
-                            Diagnostic(
-                                "error",
-                                f"Control {control_key} is outside downstream View scope: "
-                                + ", ".join(outside_scope),
-                                str(transform_path),
-                                f"{field_name}.{alias}",
-                                "interactive_control_out_of_scope",
-                                {
-                                    "control": control_key,
-                                    "views": outside_scope,
-                                },
-                            )
-                        )
-
-        for transform_id, (transform_path, transform) in dashboard.interactive_transforms.items():
-            ancestors = _interactive_ancestors(dashboard, transform_id)
-            if transform.runtime == "server-python":
-                browser_ancestors = sorted(
-                    ancestor
-                    for ancestor in ancestors
-                    if dashboard.interactive_transforms[ancestor][1].runtime
-                    in {"browser-js", "browser-python"}
-                )
-                if browser_ancestors:
-                    diagnostics.append(
-                        Diagnostic(
-                            "error",
-                            "server-python cannot depend on browser Runtime outputs: "
-                            + ", ".join(browser_ancestors),
-                            str(transform_path),
-                            "inputs",
-                            "server_interactive_depends_on_browser",
-                            {"dependency_chain": browser_ancestors},
-                        )
-                    )
+            ancestors = (
+                dependency_contract.interactive_ancestors(transform_id)
+                if dependency_contract is not None
+                else set()
+            )
             if transform.export.mode == "interactive":
                 invalid_ancestors = []
                 for ancestor in sorted(ancestors):

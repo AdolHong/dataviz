@@ -1,0 +1,8 @@
+.dv-input { display: flex; align-items: stretch; min-width: 0; color: var(--dv-ink, #202536); background: var(--dv-panel, #fff); border: 1px solid var(--dv-line, #d9e0ec); border-radius: 7px; }
+.dv-input:focus-within { border-color: var(--dv-accent, #3949ab); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dv-accent, #3949ab) 14%, transparent); }
+.dv-input__control { box-sizing: border-box; flex: 1 1 auto; width: 100%; min-width: 0; min-height: 2.5rem; padding: .55rem .7rem; color: inherit; background: transparent; border: 0; outline: 0; resize: vertical; }
+textarea.dv-input__control { max-height: calc(var(--dv-input-max-rows, 6) * 1.45em + 1.1rem); }
+.dv-input__prefix, .dv-input__suffix { display: inline-flex; align-items: center; padding: 0 .65rem; color: var(--dv-muted, #667085); background: color-mix(in srgb, var(--dv-soft, #eef2ff) 52%, transparent); }
+.dv-input__prefix { border-right: 1px solid var(--dv-line, #d9e0ec); }
+.dv-input__suffix { border-left: 1px solid var(--dv-line, #d9e0ec); }
+.dv-input__count { display: block; margin-top: .28rem; color: var(--dv-muted, #667085); text-align: right; font-variant-numeric: tabular-nums; }

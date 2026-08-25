@@ -3,8 +3,7 @@ kind: presentation
 dashboard: component-gallery
 
 theme:
-  preset: editorial
-  accent: "#d9572b"
+  preset: business
   density: comfortable
 
 layout:
@@ -12,48 +11,78 @@ layout:
   columns: 12
   gap: 16
 
-selectors:
+control_components:
   dashboard:component-gallery/region:
-    template: checkbox-group
-    variant: tags
+    component: checkbox-group
+  dashboard:component-gallery/analyst-note:
+    component: input
+    show_count: true
+  dashboard:component-gallery/scenario-name:
+    component: auto-complete
+    search_placeholder: Search scenarios…
+  dashboard:component-gallery/sample-size:
+    component: input-number
+  dashboard:component-gallery/include-returns:
+    component: checkbox
+  dashboard:component-gallery/live-preview:
+    component: switch
+    checked_label: Live
+    unchecked_label: Paused
+  dashboard:component-gallery/as-of-date:
+    component: date-picker
+  dashboard:component-gallery/confidence:
+    component: slider
+    show_input: true
+    marks:
+      - {value: 0, label: "0"}
+      - {value: 0.5, label: "0.5"}
+      - {value: 1, label: "1"}
   section:trends/category:
-    template: checkbox-group
+    component: checkbox-group
   view:detail-table/product:
-    template: select
+    component: select
     search: always
     search_placeholder: Search product names…
   view:detail-table/category-focus:
-    template: segmented
-    variant: radio
+    component: radio-group
+    option_type: button
+    button_style: solid
   view:detail-table/location:
-    template: cascader
+    component: cascader
     level_labels: [Province, City, District]
     search_placeholder: Search a complete path…
-    hierarchy_selection: cascade
-    checked_strategy: parent
+    selection_strategy: cascade
+    show_checked_strategy: parent
   view:detail-table/location-tree:
-    template: tree-select
+    component: tree-select
     level_labels: [Province, City, District]
     search_placeholder: Search the location tree…
-    hierarchy_selection: cascade
-    checked_strategy: parent
+    selection_strategy: cascade
+    show_checked_strategy: parent
   view:detail-table/date-window:
-    template: date-range
+    component: range-picker
     start_label: From
     end_label: Through
     presets:
       - {label: Q1 2026, start: "2026-01-01", end: "2026-03-31"}
       - {label: February, start: "2026-02-01", end: "2026-02-28"}
   view:detail-table/store-virtual:
-    template: select
+    component: select
     virtual: always
     search: always
     search_placeholder: Search a large store list…
     viewport_height: 228
   section:selected-stores/stores:
-    template: select
+    component: select
     search: always
     search_placeholder: Search stores…
+
+control_panels:
+  dashboard:
+    template: grid
+    width: wide
+    columns: 2
+    density: compact
 
 views:
   revenue-line: {span: 7, min_height: 380, container: chart}

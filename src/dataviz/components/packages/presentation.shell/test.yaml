@@ -8,5 +8,5 @@ tests:
   - {id: theme.plain.tokens, component: theme.plain, kind: visual, assertions: [contrast, token-overrides]}
   - {id: theme.editorial.tokens, component: theme.editorial, kind: visual, assertions: [contrast, token-overrides]}
   - {id: theme.terminal.tokens, component: theme.terminal, kind: visual, assertions: [contrast, token-overrides]}
-  - {id: theme.business.tokens, component: theme.business, kind: visual, assertions: [contrast, token-overrides]}
+  - {id: theme.business.tokens, component: theme.business, kind: visual, assertions: [default-preset, contrast, token-overrides, plotly-inheritance, echarts-inheritance, table-inheritance, perspective-surface]}
   - {id: control-panel.adaptive.contract, component: control-panel.adaptive, kind: interaction, assertions: [viewport-bound, responsive-grid, internal-scroll, shared-state-owner]}

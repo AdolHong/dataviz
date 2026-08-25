@@ -2,10 +2,131 @@
 
 Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本化。这里记录使用者可观察到的变化；字段细节以 `dataviz schemas` 和 `dataviz components` 为准。
 
+## 0.5.4 — 2026-08-25
+
+### Documentation and scaffolding
+
+- 明确 Custom Renderer 直接调用 `Plotly.newPlot` / `Plotly.react` 时不会继承声明式模板配置，必须默认传入 `scrollZoom: false`；AI 文档、组件契约与 Scaffold 仅在用户明确要求图内滚轮缩放时才允许设为 `true`。
+
+### Verification
+
+- 336 项 Python/真实浏览器 Runtime 测试、Ruff、Component Package 检查和四个代表性 Workspace strict validate 通过。
+- wheel、sdist 与 pip-installable ZIP 均在全新 Python 3.12 环境完成安装、版本/Schema/组件检查、Workspace 初始化、严格校验与无警告离线 HTML 报告导出。
+
+## 0.5.3 — 2026-08-25
+
+### Changed
+
+- Plotly 声明式模板默认关闭滚轮缩放，让图表区域内的滚轮继续滚动 Dashboard 页面；确有探索需求的 View 仍可通过 `config.scrollZoom: true` 显式开启。
+
+## 0.5.2 — 2026-08-25
+
+### Fixed
+
+- Overlay Runtime 使用浏览器 top layer 脱离 `filter` / `transform` containing block，并为不支持 top layer 的浏览器保留坐标补偿；修复 Header Controls、Pipeline 和 Selector 浮层向右溢出，以及原生 `details` 首帧闪到未定位位置的问题。
+- 无 Query Parameter 的 Dashboard 继续隐藏空参数区，但 Run 控件会明确显示 `No parameters`；有参数的 Dashboard 仍默认展开 Header 内联参数区并按 tab/Dashboard 记忆状态。
+
+### Verification
+
+- Chromium、Firefox、WebKit 覆盖桌面和窄视口浮层边界、内部滚动、键盘关闭及参数区可发现性；完整 Python 契约测试、Component Package 检查和 Feature Showcase strict validate 通过。
+
+## 0.5.1 — 2026-08-25
+
+### Dependency architecture
+
+- 新增 `dataviz/dependency-contract/v1`，一次编译 Query inputs/outputs/order、Interactive data/Query/Selection/Compute edges、Control scope/cascade/domain/impact、Named Output consumers 与 View inputs。
+- 每个不可变 Dashboard load snapshot 以并发安全方式只编译并缓存一个契约；Query Parameter 新增最终受影响 Query/Interactive/option Control/View 闭包，Query 节点新增下游 View 与 option Control 索引。
+- 契约编译直接拒绝环、未知 Output、browser Runtime → `server-python` 非法依赖和越界 Control consumer；Loader 的容错扫描只用于无效配置诊断，不再充当第二张运行时图。
+- Query Planner、Interactive Planner、Loader、Server Pipeline、Canvas Runtime、HTML manifest、Web Component Adapter、CLI 和 AI context 改为消费同一契约；删除浏览器按 DOM scope 重建 Control DAG 和 Portable Selection Contract 的重复所有权。
+- Query/Interactive 节点只能读取显式声明的参数；Browser Transform/View 注册会核对 data inputs、Control inputs、Query Parameter inputs 与 Output names，注册配置只承担 drift assertion，调度与 View 取数继续消费编译契约。
+- 新增 `dataviz dependencies WORKSPACE DASHBOARD [--format json]`，区分 Control scope、候选/已声明数据 View、runtime field check、Interactive consumer、派生 View、内容绑定和级联边。
+- static Select 在参与上游级联时也会绑定明确的 Base option domain；修复 static Section Control 永久停在 pending、导致内容绑定不更新的问题。
+- Overlay Runtime 改为按 visual/layout viewport 的最小边界和真实 border-box 几何定位，修复 Firefox 中浮层安全边距少 2px 的跨浏览器差异。
+
+### Server Header
+
+- `Run query` 与 Query Parameters 合并为一个 split control；主按钮执行查询，相邻箭头显式展开或收起参数区。
+- Query Parameters 默认展开并成为 Header 的内联第二行，参与正常文档流并把 Canvas 向下推；它不再注册到 Overlay Runtime，因此点击外部或按 `Esc` 不会意外收起。
+- 参数区的开合状态按浏览器 tab 与 Dashboard 保存；无 Query Parameter 的 Dashboard 自动退化为普通 Run 按钮，参数校验失败时会显式展开参数区。
+- Dashboard/Section/View Controls 与 Pipeline 继续作为临时浮层，由外部点击或 `Esc` 关闭；Query Parameters 与临时 Controls 的交互所有权不再混用。
+
+### Verification
+
+- 完整 Python 契约套件与 Chromium、Firefox、WebKit 全量 Runtime 回归通过；覆盖渐进分支、动态与静态级联、局部 View/内容更新、三种 Interactive Runtime、Perspective 和 HTML Export。
+- 新增并发首次访问测试，以及“注册后篡改原始 Transform/View inputs 仍只按 Contract 运行”的三浏览器回归，防止配置副本重新成为第二事实源。
+- 桌面与 390px 窄屏三浏览器回归覆盖 Header 文档流位移、内部滚动、状态恢复、子级 Select 几何，以及 `Esc` 只关闭临时 Controls。
+
+## 0.5.0 — 2026-08-25
+
+### Breaking Dashboard contract
+
+- Dashboard 严格契约升级为 `dataviz/dashboard/v4`。所有 Select 必须通过 `options.mode` 明确候选域来源；删除顶层 `choices`、`options_from` 和 Dashboard v3 解析分支，不提供兼容 alias。
+- `options.mode: static` 表示由 Dashboard 维护封闭 `options.choices`，可声明具体默认值；`options.mode: infer` 表示从不可变 Base Named Output 推导候选域，禁止复制会随数据漂移的 `default` 值列表。
+- infer 多选使用 `initial: auto | empty` 表达初始化行为，而不是伪装成业务默认值；`auto` 编译为 `all_available` 意图，Source 域扩大时会继续包含新成员，用户明确选择的子集仍保持 `explicit`。
+- Query Parameter 与 Compute Select 当前只接受 static 候选域；Selection Select 可使用 static 或 infer。动态 Selection 未指定 `options.source` 时由 Runtime 沿消费 View 追溯 Base Output，显式来源也只允许 `source:` / `dataset:` 表格 Output。
+
+### Tooling and migration
+
+- Scaffold、CLI Docs、Schema、Gallery、示例 Workspace、测试 fixture 与浏览器 Runtime 已整体迁移到 v4；`dataviz validate` 会在打开页面前拒绝 infer default、未知 option source、Interactive Output 和旧字段。
+- Cascade Gallery 不再手工维护城市和区县默认列表；深圳、佛山、厦门、泉州等候选项直接从 Source 推导。
+
+### Verification
+
+- Python contract/unit suite、Ruff、Component Package 检查和五个代表性 Workspace 静态预检通过；真实 Chrome 覆盖 option domain 首次水合、上游收缩/扩张、`all_available` 与 `explicit` 两种级联路径。
+
+## 0.4.1 — 2026-08-25
+
+### Fixed
+
+- 动态多选现在显式保存 `all_available` 与 `explicit` 两种用户意图。父级范围重新扩大时，原先选择全部可用项的下级会自动纳入新增项；用户明确选择的子集则只保留有效交集，不会被擅自扩大。
+- Select、Checkbox、Cascader 与 TreeSelect 统一使用 `runtime.control` 的选项域协调算法，避免各组件分别实现级联状态并产生语义漂移。
+- 多选意图会随浏览器 tab、Canvas iframe 和交互 HTML 导出持久化；Server 页面与导出报告保持一致。
+
+### Verification
+
+- 新增真实 Chromium 回归，覆盖“取消广东 → 重新选择广东 → 城市恢复三个 → View 恢复六行”及显式子集不扩大的路径。
+
+## 0.4.0 — 2026-08-24
+
+### Breaking component contract
+
+- Data Entry 升级为 Component Registry v4：13 个独立 `control.*` Package 覆盖 Input、InputNumber、AutoComplete、Checkbox、Switch、Radio.Group、Select、Checkbox.Group、Cascader、TreeSelect、DatePicker、RangePicker 与 Slider。Query Parameter、Selection 和 Compute 共用同一 Registry/Renderer。
+- 值语义、Dashboard/Section/View scope 与 UI Component 成为三个正交维度；`dashboard.yaml` 保存可验证逻辑，`presentation.yaml.control_components` 只选择交互表现。
+- RangePicker 使用一个触发器和一个浮层共同编辑开始/结束日期，支持双月、窄屏单月、范围预览、preset、键盘导航和视口安全定位。
+- Radio.Group 只展示真实单选项，不合成 `All` 或 `Clear`；Select/Checkbox.Group 的批量操作仅属于多选，并遵守 `required`、`clearable` 与 `max_selected`。
+- 删除实验期 `selector.*` Package、`runtime.selector`、`segmented`、`date-range` 和 Presentation `selectors/template` 接口，不提供兼容 alias。
+
+### AI authoring
+
+- 新增 `dataviz docs data-entry-components`、13 种 `dataviz scaffold control.*` 配方，以及每个 Package 对 Ant Design 语义采用/省略项的机器可读声明。
+- Component discovery、Scaffold 与 Validate 共享同一 Registry contract，使 AI 可以只读取当前控件的值类型、字段、示例和错误边界，而不必理解整个浏览器 Runtime。
+
+### Verification
+
+- 完整 Python、Chromium、Firefox、WebKit、Component Package 与真实 Gallery 视觉验收通过；新增 Data Entry 语义、交互与机器可读契约测试。
+
+## 0.3.3 — 2026-08-24
+
+### Presentation
+
+- 新建 Dashboard 默认使用现代靛蓝 `business` Theme：冷灰页面、白色卡片、低阴影与紧凑数据表；`plain`、`editorial`、`terminal` 仍是显式可选风格。
+- Server、导出 HTML、Data Entry Control、Plotly、ECharts、普通 Table 与 Perspective 统一消费 Theme token；Renderer 的显式 options/config 继续拥有更高优先级。
+- Gallery 增加四种 Theme 的同构预览，并把等待、失效与损坏 Canvas 的状态页统一到 Server 视觉体系。
+
+### Authoring
+
+- 新增内置 `dataviz docs design-language` 与人类可读视觉规范，向 AI 提供信息层级、语义 Token、组件规则、反例和样式验收清单。
+- `theme.business` 等 Theme Component contract 公开完整的 30 个稳定视觉 Token，方便 AI 优先做语义覆盖而不是重写组件结构。
+
+### Verification
+
+- 完整 Python、Chromium、Firefox、WebKit、Component Package 与真实 Gallery 视觉验收通过；新增视觉语言与 Theme Token 的机器可读契约测试。
+
 ## 0.3.2 — 2026-08-24
 
 ### Added
 
+- Python 发行包正式命名为 `ai-dataviz`；Python 模块与终端命令继续保持简洁的 `dataviz`。
 - `dataviz serve` 默认监听 Workspace 文件；跨平台 watcher 会忽略 `.dataviz`、虚拟环境和构建缓存，并把编辑器的连续写入防抖合并为单调 revision。
 - 新增 tab 校验的 Workspace SSE 事件和 `dataviz/workspace-change/v1` 协议，按 `navigation / canvas / analysis / query / server / invalid` 说明影响范围。
 - Server Header 新增显式 `Reload` 与更新状态条；可用 `--no-watch` 关闭主动监听，但请求时重读仍保留。
@@ -113,7 +234,7 @@ Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本
 - Run/Interaction 事件截断使用单调 offset，长时间轮询不会因保留窗口移动而漏掉后续事件。
 - snapshot 的可选 Output 不再被误判为缺失并触发重算。
 - Pyodide package catalog 对齐固定 Runtime；bundle 核对 `package.json` 版本，并按 Emscripten marker 校验核心文件、lockfile、`micropip`、传递 wheel 闭包与必需 SHA-256 后随 ZIP 分发。没有活动 browser-python 的报告不再携带 Python Worker、Pyodide URL 或 bundle 资产。
-- 源码 CLI 文档固定使用 non-editable `uv sync --reinstall-package workspace-dataviz`，规避部分 macOS/Python 组合忽略 hidden editable `.pth` 导致的 `ModuleNotFoundError`；发布 smoke 仍使用独立干净环境。
+- 源码 CLI 文档固定使用 non-editable `uv sync --reinstall-package ai-dataviz`，规避部分 macOS/Python 组合忽略 hidden editable `.pth` 导致的 `ModuleNotFoundError`；发布 smoke 仍使用独立干净环境。
 - 声明式 View、browser-js Worker 与 Custom Canvas 的数值聚合改为线性 reducer，大表 min/max 不再因展开数组超过 JavaScript 参数上限而崩溃。
 - Arrow Table 作为 Metric 输入时不再被误判成 scalar 并显示 `[object Object]`；没有 descriptor 的 View 进入明确的 `empty` 终态。
 - Live Canvas 处理 node/run cancelled；失败或取消的终态 Run 可重新打开并显示分支错误，不再因为缺失 Output 返回 500 或永久停在 rendering。

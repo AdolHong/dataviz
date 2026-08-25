@@ -118,7 +118,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          artifacts=("$RUNNER_TEMP"/dataviz-dist/*.whl "$RUNNER_TEMP"/dataviz-dist/*.tar.gz "$RUNNER_TEMP"/dataviz-dist/workspace-dataviz-*.zip)
+          artifacts=("$RUNNER_TEMP"/dataviz-dist/*.whl "$RUNNER_TEMP"/dataviz-dist/*.tar.gz "$RUNNER_TEMP"/dataviz-dist/ai-dataviz-*.zip)
           index=0
           for artifact in "${artifacts[@]}"; do
             index=$((index + 1))
@@ -136,7 +136,7 @@ jobs:
           done
       - uses: actions/upload-artifact@v4
         with:
-          name: workspace-dataviz-distributions
+          name: ai-dataviz-distributions
           path: |
             ${{ runner.temp }}/dataviz-dist/*.whl
             ${{ runner.temp }}/dataviz-dist/*.tar.gz

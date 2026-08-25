@@ -1,0 +1,23 @@
+schema: dataviz/component-package/v1
+package: control.checkbox
+version: 1.0.0
+category: data-entry
+purpose: Stage one independent boolean choice inside a form or control panel.
+implementation: {mode: package, sources: []}
+dependencies: [runtime.control]
+components:
+  - id: control.checkbox
+    purpose: Represent a boolean field whose value is committed with its surrounding workflow.
+    status: stable
+    alignment:
+      design_system: Ant Design
+      component: Checkbox
+      official: https://ant.design/components/checkbox/
+      adopted: [checked-state, disabled-state, native-checkbox-semantics]
+      omitted: [indeterminate-as-value, Checkbox.Group]
+    logic: {type: boolean, value_shape: boolean}
+    presentation: {component: checkbox, options: [css_class]}
+    behavior: {commit_semantics: surrounding-workflow, immediate_side_effect: false}
+    semantic_dom: [.dv-checkbox, .dv-checkbox__mark]
+    tokens: [--dv-accent, --dv-ink, --dv-line, --dv-panel]
+runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

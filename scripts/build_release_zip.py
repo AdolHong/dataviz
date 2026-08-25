@@ -110,7 +110,7 @@ def _publish_release_outputs(files: dict[Path, bytes]) -> None:
 
 def build_release_zip(output_directory: Path) -> Path:
     verify_release_version()
-    output = output_directory.resolve() / f"workspace-dataviz-{PROJECT['version']}.zip"
+    output = output_directory.resolve() / f"{PROJECT['name']}-{PROJECT['version']}.zip"
     output.parent.mkdir(parents=True, exist_ok=True)
     files = included_files()
     buffer = BytesIO()

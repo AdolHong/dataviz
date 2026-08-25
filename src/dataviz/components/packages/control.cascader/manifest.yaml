@@ -1,0 +1,33 @@
+schema: dataviz/component-package/v1
+package: control.cascader
+version: 3.0.0
+category: data-entry
+purpose: Browse and choose one or more complete paths across associated hierarchy levels.
+implementation: {mode: package, sources: []}
+dependencies: [runtime.control]
+components:
+  - id: control.cascader
+    purpose: Preserve parent context for leaf choices such as province, city and district.
+    status: stable
+    alignment:
+      design_system: Ant Design
+      component: Cascader
+      official: https://ant.design/components/cascader/
+      adopted: [single-and-multiple-mode, search-full-path, change-on-leaf, show-checked-strategy, branch-cascade]
+      omitted: [lazy-network-loading, custom-panel-render, hover-expand]
+    logic:
+      types: [single_select, multi_select]
+      fields: [path_fields]
+      value_shape: {single: [level-1, level-2, leaf], multiple: [[level-1, level-2, leaf]]}
+    presentation:
+      component: cascader
+      options: [level_labels, search, search_placeholder, path_separator, empty_text, selection_strategy, show_checked_strategy, max_tag_count, show_unavailable, clear_label, css_class]
+    behavior:
+      overlay: viewport-aware
+      navigation_state: independent from selection state
+      multi_branch_selection: true
+      branch_selection: optional_descendant_toggle
+      checked_summary: [child, parent, all]
+    semantic_dom: [.dv-cascader, .dv-control-panel, .dv-cascader-panel, .dv-cascader-columns, .dv-cascader-column, .dv-cascader-option]
+    tokens: [--dv-accent, --dv-green, --dv-ink, --dv-line, --dv-panel, --dv-overlay-surface]
+runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

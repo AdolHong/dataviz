@@ -6,7 +6,7 @@ purpose: Document-flow Section composition, state propagation and repeated View 
 implementation:
   mode: package
   sources: []
-dependencies: [runtime.selector, view.declarative]
+dependencies: [runtime.control, view.declarative]
 components:
   - {id: section.single, purpose: One full-width View, status: stable}
   - {id: section.stack, purpose: Full-width narrative sequence, status: stable}

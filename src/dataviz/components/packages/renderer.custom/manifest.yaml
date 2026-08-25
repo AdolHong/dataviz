@@ -1,6 +1,6 @@
 schema: dataviz/component-package/v1
 package: renderer.custom
-version: 1.0.0
+version: 1.1.0
 category: renderer
 purpose: Trusted custom View Renderer lifecycle, isolation and contract testing.
 implementation: {mode: package, sources: []}
@@ -12,5 +12,5 @@ components:
     logic:
       registration: window.datavizRuntime.registerRenderer(id, lifecycle)
       lifecycle: [validate, mount, update, dispose]
-    behavior: {failure_scope: view, async_lifecycle: supported, structured_error: true}
+    behavior: {failure_scope: view, async_lifecycle: supported, structured_error: true, plotly_scroll_zoom_default: false}
 runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

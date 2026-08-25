@@ -1,0 +1,10 @@
+schema: dataviz/component-test/v1
+tests:
+  - id: control.radio-group.single-state
+    component: control.radio-group
+    kind: browser
+    assertions: [only-declared-values, one-selected-value, no-all-option, no-clear-action, canonical-change-event]
+  - id: control.radio-group.keyboard
+    component: control.radio-group
+    kind: accessibility
+    assertions: [radiogroup-role, radio-role, roving-tabindex, arrow-key-selection, aria-checked]

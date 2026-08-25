@@ -1,4 +1,7 @@
 schema: dataviz/component-story/v1
 stories:
   - {id: layout.exploration.gallery, component: layout.exploration, title: Exploration layout, summary: Selection and analysis-led page, gallery: {dashboard: component-gallery, target: .dv-canvas, anchor: layout-exploration}}
-  - {id: theme.editorial.gallery, component: theme.editorial, title: Editorial theme, summary: Warm paper and ink tokens, gallery: {dashboard: component-gallery, target: .dv-theme--editorial, anchor: theme-editorial}}
+  - {id: theme.business.gallery, component: theme.business, title: Business theme, summary: Modern indigo analytical default, gallery: {dashboard: component-gallery, target: '.gallery-theme-card.dv-theme--business', anchor: theme-business}}
+  - {id: theme.plain.gallery, component: theme.plain, title: Plain theme, summary: Minimal neutral analysis style, gallery: {dashboard: component-gallery, target: '.gallery-theme-card.dv-theme--plain', anchor: theme-plain}}
+  - {id: theme.editorial.gallery, component: theme.editorial, title: Editorial theme, summary: Warm paper and ink tokens, gallery: {dashboard: component-gallery, target: '.gallery-theme-card.dv-theme--editorial', anchor: theme-editorial}}
+  - {id: theme.terminal.gallery, component: theme.terminal, title: Terminal theme, summary: Dark technical monitoring style, gallery: {dashboard: component-gallery, target: '.gallery-theme-card.dv-theme--terminal', anchor: theme-terminal}}

@@ -21,7 +21,7 @@ from dataviz.workspace.models import (
     InteractiveExportDefinition,
     InteractiveTransformDefinition,
     PresentationDefinition,
-    PresentationSelectorDefinition,
+    PresentationControlComponentDefinition,
     QueryParameterDefinition,
     RepeatDefinition,
     RuntimeDefinition,
@@ -34,7 +34,7 @@ from dataviz.workspace.models import (
 )
 
 
-SCHEMA_CATALOG_VERSION = "dataviz/schema-catalog/v3"
+SCHEMA_CATALOG_VERSION = "dataviz/schema-catalog/v4"
 SchemaProvider = type[BaseModel] | TypeAdapter
 
 
@@ -60,14 +60,14 @@ SCHEMA_MODELS: OrderedDict[str, SchemaProvider] = OrderedDict(
         ("cache", CacheDefinition),
         ("layout", LayoutDefinition),
         ("theme", ThemeDefinition),
-        ("selector-presentation", PresentationSelectorDefinition),
+        ("control-component-presentation", PresentationControlComponentDefinition),
     ]
 )
 
 
 CURRENT_SCHEMAS = {
     "workspace": "dataviz/workspace/v1",
-    "dashboard": "dataviz/dashboard/v3",
+    "dashboard": "dataviz/dashboard/v4",
     "presentation": "dataviz/presentation/v1",
     "source": "dataviz/source/v1",
     "dataset_transform": "dataviz/dataset-transform/v1",

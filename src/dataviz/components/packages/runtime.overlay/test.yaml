@@ -8,3 +8,7 @@ tests:
     component: runtime.overlay
     kind: interaction
     assertions: [floating-panel-above-later-sibling-controls]
+  - id: runtime.overlay.viewport
+    component: runtime.overlay
+    kind: geometry
+    assertions: [visual-viewport-bounded, escapes-filter-containing-block, no-unpositioned-frame]

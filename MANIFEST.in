@@ -9,7 +9,7 @@ graft src/dataviz
 
 # Build metadata and tests are development inputs, not runtime package content.
 prune src/dataviz/gallery/.dataviz
-prune src/workspace_dataviz.egg-info
+prune src/*.egg-info
 prune tests
 prune build
 prune dist

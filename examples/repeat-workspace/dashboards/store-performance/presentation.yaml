@@ -17,10 +17,9 @@ sections:
   all-stores:
     columns: 2
 
-selectors:
+control_components:
   section:selected-stores/stores:
-    template: cascader
+    component: cascader
     level_labels: [区域, 城市, 门店]
-    placeholder: 搜索或选择门店
     search_placeholder: 搜索区域 / 城市 / 门店…
     empty_text: 没有匹配的门店

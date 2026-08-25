@@ -47,8 +47,10 @@ from dataviz.frontend_adapters import frontend_adapter_catalog, frontend_adapter
 from dataviz.filesystem import atomic_write_text, transactional_write_texts
 from dataviz.documentation import DOC_TOPICS, docs_catalog, resolve_doc_topic
 from dataviz.execution import Executor, InteractionExecutor
+from dataviz.execution.dependencies import (
+    DEPENDENCY_CONTRACT_SCHEMA,
+)
 from dataviz.execution.interactive import load_run_result
-from dataviz.execution.plan import reachable_output_references
 from dataviz.execution.references import parse_output_reference
 from dataviz.maintenance import cleanup_workspace_storage
 from dataviz.rendering import CanvasRenderer, template_catalog
@@ -564,7 +566,7 @@ Finish the returned session with `dataviz authoring finish`. Commit the generate
 `dataviz-authoring.jsonl` when its task text and notes contain no sensitive data;
 sharing that file gives the Dataviz author real retry, time and documentation-friction data.
 """,
-        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v3
+        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v4
 kind: dashboard
 id: hello
 title: Hello dashboard
@@ -574,10 +576,12 @@ controls:
     kind: selection
     type: multi_select
     default: [A, B, C]
-    choices:
-      - {label: A, value: A}
-      - {label: B, value: B}
-      - {label: C, value: C}
+    options:
+      mode: static
+      choices:
+        - {label: A, value: A}
+        - {label: B, value: B}
+        - {label: C, value: C}
 sources:
   - id: data
     kind: source
@@ -602,7 +606,7 @@ sections:
 layout:
   template: overview
 theme:
-  preset: plain
+  preset: business
 """,
         "dashboards/hello/data/sample.csv": "category,value\nA,12\nB,19\nC,8\n",
     }
@@ -728,7 +732,10 @@ def _print_doc_topic(name: str, definition: dict[str, Any]) -> None:
 
 @app.command("docs")
 def documentation(
-    topic: str | None = typer.Argument(None, help="Topic, for example quickstart, charts, or troubleshooting"),
+    topic: str | None = typer.Argument(
+        None,
+        help="Topic, for example quickstart, design-language, charts, or troubleshooting",
+    ),
     search: str | None = typer.Option(None, "--search", help="Search all built-in documentation"),
     output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
 ) -> None:
@@ -758,6 +765,7 @@ def documentation(
         return
     typer.echo("# Dataviz CLI development manual\n")
     typer.echo("AI should begin with `dataviz docs quickstart`, then follow `dataviz docs workflow`.\n")
+    typer.echo("Before custom Presentation/CSS, read `dataviz docs design-language`.\n")
     if search:
         typer.echo(f"Search: `{search}`\n")
     for name, definition in catalog.items():
@@ -885,9 +893,10 @@ def version(output_format: str = typer.Option("json", "--format", help="json or 
     if output_format not in {"json", "text"}:
         raise typer.BadParameter("--format must be json or text")
     payload = {
-        "package": "workspace-dataviz",
+        "package": "ai-dataviz",
         "version": __version__,
         "dsl": CURRENT_SCHEMAS,
+        "dependency_contract": DEPENDENCY_CONTRACT_SCHEMA,
         "component_registry": template_catalog()["component_registry_version"],
         "runtime_protocol": template_catalog()["runtime_protocol"],
         "workspace_change_protocol": "dataviz/workspace-change/v1",
@@ -896,8 +905,9 @@ def version(output_format: str = typer.Option("json", "--format", help="json or 
         print_json(payload)
     else:
         typer.echo(
-            f"workspace-dataviz {__version__} · "
-            f"{payload['runtime_protocol']} · components {payload['component_registry']}"
+            f"ai-dataviz {__version__} · "
+            f"{payload['dependency_contract']} · {payload['runtime_protocol']} · "
+            f"components {payload['component_registry']}"
         )
 
 
@@ -1327,11 +1337,11 @@ def authoring_show(
 
 @app.command()
 def components(
-    name: str | None = typer.Argument(None, help="Component name, for example selector.cascader"),
+    name: str | None = typer.Argument(None, help="Component name, for example control.cascader"),
     category: str | None = typer.Option(
         None,
         "--category",
-        help="Filter by selector, view, section, layout, theme, renderer, runtime, data, or presentation",
+        help="Filter by data-entry, view, section, layout, theme, renderer, runtime, data, or presentation",
     ),
     output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
     check_packages: bool = typer.Option(
@@ -1424,7 +1434,7 @@ def gallery(
         help="Watch Workspace files and hot-reload open dashboards",
     ),
 ) -> None:
-    """Open the runtime-native Section, View, Selector and Renderer Gallery."""
+    """Open the runtime-native Data Entry, Section, View and Renderer Gallery."""
     if output is None:
         _require_remote_bind_opt_in(host, allow_remote=allow_remote)
     try:
@@ -1511,12 +1521,121 @@ def context(
         handle_error(exc)
 
 
+@app.command("dependencies")
+def dependencies_command(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    dashboard: str = typer.Argument(...),
+    output_format: str = typer.Option("text", "--format", help="text or json"),
+) -> None:
+    """Explain the compiled Query, Control, Interactive and View dependency graph."""
+    if output_format not in {"text", "json"}:
+        raise typer.BadParameter("--format must be text or json")
+    try:
+        loaded = load_workspace(workspace)
+        item = loaded.dashboard(dashboard)
+        contract = item.dependency_contract
+        payload = contract.as_dict()
+        if output_format == "json":
+            print_json(payload)
+            return
+        typer.echo(f"# Dashboard dependencies · {item.canvas_name}\n")
+        typer.echo("Initialization: Base Outputs → option domains → canonical Controls → Views → Interactive Transforms\n")
+        typer.echo("## Query DAG\n")
+        for node_id in contract.query_order:
+            dependencies = ", ".join(contract.query_dependencies[node_id]) or "none"
+            inputs = ", ".join(
+                f"{alias}={reference}"
+                for alias, reference in contract.query_inputs[node_id].items()
+            ) or "none"
+            parameters = ", ".join(
+                contract.query_parameter_inputs[node_id]
+            ) or "none"
+            views = ", ".join(
+                contract.query_node_downstream_views[node_id]
+            ) or "none"
+            option_controls = ", ".join(
+                contract.query_node_option_controls[node_id]
+            ) or "none"
+            typer.echo(
+                f"- `{node_id}` ← nodes: {dependencies}; inputs: {inputs}; "
+                f"Query Parameters: {parameters}; downstream Views: {views}; "
+                f"option Controls: {option_controls}"
+            )
+        typer.echo("\n## Query Parameters\n")
+        if not contract.query_parameters:
+            typer.echo("- none")
+        for key, dependency in contract.query_parameters.items():
+            query_nodes = ", ".join(dependency.affected_query_nodes) or "none"
+            interactive = ", ".join(
+                dependency.affected_interactive_transforms
+            ) or "none"
+            option_controls = ", ".join(
+                dependency.affected_option_controls
+            ) or "none"
+            views = ", ".join(dependency.affected_views) or "none"
+            typer.echo(
+                f"- `{key}` → Query nodes: {query_nodes}; "
+                f"Interactive Transforms: {interactive}; "
+                f"option Controls: {option_controls}; Views: {views}"
+            )
+        typer.echo("\n## Interactive DAG\n")
+        if not contract.reachable_interactive_order:
+            typer.echo("- none")
+        for transform_id in contract.reachable_interactive_order:
+            dependencies = ", ".join(
+                contract.interactive_dependencies[transform_id]
+            ) or "Base Outputs"
+            inputs = ", ".join(
+                f"{alias}={reference}"
+                for alias, reference in contract.interactive_inputs[
+                    transform_id
+                ].items()
+            ) or "none"
+            selections = ", ".join(
+                f"{alias}={key}"
+                for alias, key in contract.interactive_selection_inputs[
+                    transform_id
+                ].items()
+            ) or "none"
+            computes = ", ".join(
+                f"{alias}={key}"
+                for alias, key in contract.interactive_compute_inputs[
+                    transform_id
+                ].items()
+            ) or "none"
+            views = ", ".join(contract.transform_downstream_views[transform_id]) or "none"
+            typer.echo(
+                f"- `{transform_id}` ({contract.interactive_runtimes[transform_id]}) "
+                f"← nodes: {dependencies}; inputs: {inputs}; "
+                f"Selections: {selections}; Compute: {computes}; "
+                f"downstream Views: {views}"
+            )
+        typer.echo("\n## Controls\n")
+        if not contract.controls:
+            typer.echo("- none")
+        for key, dependency in contract.controls.items():
+            scope = ", ".join(dependency.scope_views) or "none"
+            direct = ", ".join(dependency.direct_views) or "none"
+            runtime_checked = ", ".join(dependency.runtime_checked_views) or "none"
+            transforms = ", ".join(dependency.transform_consumers) or "none"
+            derived = ", ".join(dependency.derived_views) or "none"
+            upstream = ", ".join(dependency.cascade_upstream) or "none"
+            typer.echo(
+                f"- `{key}` ({dependency.kind}) · scope: {scope}; "
+                f"direct data Views: {direct} (runtime field check: {runtime_checked}); "
+                f"cascade upstream: {upstream}; Transforms: {transforms}; "
+                f"derived Views: {derived}"
+            )
+    except Exception as exc:
+        handle_error(exc)
+
+
 @app.command()
 def scaffold(
     recipe: str | None = typer.Argument(
         None,
         help=(
-            "Recipe such as dashboard, view.line, selector.cascader, "
+            "Recipe such as dashboard, view.line, control.cascader, "
             "dataset-transform.server-python, or interactive-transform.browser-js"
         ),
     ),
@@ -1968,9 +2087,11 @@ def report(
             parse_params(compute_param),
         )
         selection_values = resolve_selection_values(
-            loaded_dashboard.definition, parse_params(selection)
+            loaded_dashboard.definition,
+            parse_params(selection),
+            phase="canvas-hydration",
         )
-        _, interactive_ids = reachable_output_references(loaded_dashboard)
+        interactive_ids = loaded_dashboard.dependency_contract.reachable_interactive_order
         derived_outputs = {}
         snapshot_interactions: set[str] = {
             transform_id

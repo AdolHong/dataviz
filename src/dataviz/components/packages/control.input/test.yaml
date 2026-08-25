@@ -1,0 +1,6 @@
+schema: dataviz/component-test/v1
+tests:
+  - id: control.input.contract
+    component: control.input
+    kind: browser
+    assertions: [native-string-source-of-truth, prefix-suffix-do-not-change-value, max-length-contract, multiline-resize, bubbling-input-change]

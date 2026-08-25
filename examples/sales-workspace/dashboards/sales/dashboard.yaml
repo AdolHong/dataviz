@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v3
+schema: dataviz/dashboard/v4
 kind: dashboard
 id: sales
 title: 销售脉搏
@@ -22,11 +22,13 @@ controls:
     type: multi_select
     label: 区域
     default: [North, South, East, West]
-    choices:
-      - {label: 北区, value: North}
-      - {label: 南区, value: South}
-      - {label: 东区, value: East}
-      - {label: 西区, value: West}
+    options:
+      mode: static
+      choices:
+        - {label: 北区, value: North}
+        - {label: 南区, value: South}
+        - {label: 东区, value: East}
+        - {label: 西区, value: West}
 sources:
   - sources/orders.yaml
   - sources/targets.yaml

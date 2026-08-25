@@ -24,9 +24,16 @@
     if (operation === 'max') return maximum;
     return sum;
   };
+  const inputReferences = (view, state) => (
+    state.dependency_contract?.views?.[view.id]?.inputs || {}
+  );
+  const mainInputReference = (view, state) => {
+    const references = inputReferences(view, state);
+    return references.main || Object.values(references)[0];
+  };
   const selectRows = (view, state) => {
-    const contract = state.portable?.selection_contract?.[view.id] || [];
-    const reference = view.input || view.inputs?.main;
+    const contract = state.dependency_contract?.views?.[view.id]?.selection_contract || [];
+    const reference = mainInputReference(view, state);
     return state.data.table(reference).rows().filter(row => contract.every(item => (
       state.selection.matches(row, item, state.selections[item.key])
     )));
@@ -248,7 +255,9 @@
     };
   };
   const build = (view, state, preparedRows = null) => {
-    const rawInput = view.input ? state.data.output(view.input) : undefined;
+    const references = inputReferences(view, state);
+    const rawInputReference = references.main || Object.values(references)[0];
+    const rawInput = rawInputReference ? state.data.output(rawInputReference) : undefined;
     if (view.template === 'markdown') {
       const content = view.text ?? rawInput ?? '';
       return {
@@ -311,9 +320,8 @@
     };
     if (view.template === 'custom') {
       const inputs = Object.fromEntries(
-        Object.entries(view.inputs || {}).map(([name, reference]) => [name, state.data.output(reference)])
+        Object.entries(references).map(([name, reference]) => [name, state.data.output(reference)])
       );
-      if (view.input) inputs.main ??= state.data.output(view.input);
       return {type:view.renderer, rows, inputs, view, options:view.options, config:view.config};
     }
     if (view.template === 'metric') {
@@ -346,6 +354,8 @@
     protocol:'dataviz/runtime/v2',
     escape,
     numericAggregate,
+    inputReferences,
+    mainInputReference,
     selectRows,
     prepareRows,
     build,

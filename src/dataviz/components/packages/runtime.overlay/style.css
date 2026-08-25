@@ -1,6 +1,7 @@
 /* Runtime-critical overlay geometry. Themes may override every visual token. */
-[data-overlay-panel][hidden], [data-selector-panel][hidden] { display: none !important; }
-[data-overlay-panel], [data-selector-panel] { z-index: var(--dv-overlay-z, 1000); box-sizing: border-box; overflow: auto; overscroll-behavior: contain; }
+[data-overlay-panel][hidden], [data-control-panel][hidden] { display: none !important; }
+[data-overlay-panel], [data-control-panel] { z-index: var(--dv-overlay-z, 1000); box-sizing: border-box; overflow: auto; overscroll-behavior: contain; }
+[data-dv-overlay-top-layer] { margin: 0; }
 .dv-context-controls, .dv-runtime-control, [data-header-popover], [data-runtime-popover] { position: relative; }
 .dv-context-controls > summary,
 .dv-runtime-control > summary,

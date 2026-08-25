@@ -1,6 +1,6 @@
 # Dataviz 实施计划
 
-更新时间：2026-08-24
+更新时间：2026-08-25
 
 稳定设计见 [DESIGN](DESIGN.md)，代码入口见 [当前实现索引](docs/product-architecture.md)，使用者入口见 [README](README.md)。本文件只保留当前结论和仍需完成的工作，不重复记录历史迁移过程。
 
@@ -8,19 +8,20 @@
 
 | 领域 | 状态 | 结论 |
 | --- | --- | --- |
-| P0 数据执行架构 | 已完成 | Query DAG、Interactive DAG、Named Output、三种 Interactive Runtime、状态隔离、导出边界和严格验证已形成一套当前契约。 |
-| P1 Component Package | 当前范围已完成 | Registry v3 已覆盖常用 View、Section、Selector、Renderer、Repeat 和 Presentation 组件；继续扩张必须由真实场景触发。 |
+| P0 数据执行架构 | 已完成 | Query DAG、Interactive DAG、Control/View 影响关系、Named Output、三种 Interactive Runtime、状态隔离和导出边界已统一为一份版本化 Dependency Contract。 |
+| P1 Component Package | 当前范围已完成 | Registry v4 已覆盖常用 Data Entry、View、Section、Renderer、Repeat 和 Presentation 组件；继续扩张必须由真实场景触发。 |
 | P1 AI 开发效率评测 | 工具已完成，真实试验暂缓 | 成对任务、输入完整性、逐项验收和真实 Token 记录均已实现；试验方案尚未决定，不用仓库测试伪造结论。 |
 | P2 规模与浏览器矩阵 | 当前范围已完成 | 固定 10K/100K/1M 基准、流式 groupBy 优化，以及 Chromium/Firefox/WebKit 的窄屏与 Perspective 恢复组合矩阵均已有可复现证据。 |
 | 开源发布 | 进行中 | 构建与安装门禁已具备；许可证尚未决定。 |
 
-当前基线：Package `0.3.2`、Python 3.11–3.14、Dashboard `dataviz/dashboard/v3`、Browser Runtime `dataviz/runtime/v2`、Component Registry `3.0.0`。项目尚未投入生产，因此只接受当前严格契约，不保留旧字段 alias、自动迁移或第二套 Runtime。
+当前基线：Package `0.5.4`、Python 3.11–3.14、Dashboard `dataviz/dashboard/v4`、Browser Runtime `dataviz/runtime/v2`、Component Registry `4.0.0`。项目尚未投入生产，因此只接受当前严格契约，不保留旧字段 alias、自动迁移或第二套 Runtime。
 
 ## 已完成的核心能力
 
 ### 数据、计算与状态
 
-- [x] Dashboard v3 只有 Query Parameter 与 scoped Controls 两个入口；Control 在 Dashboard/Section/View 统一声明，并以 `kind: selection | compute` 保留不同 delta、提交周期和失效路径。
+- [x] Dashboard v4 只有 Query Parameter 与 scoped Controls 两个入口；Control 在 Dashboard/Section/View 统一声明，并以 `kind: selection | compute` 保留不同 delta、提交周期和失效路径。
+- [x] Select 候选域用严格的 `options.mode=static|infer` 区分封闭枚举与 Source 推导；`infer` 禁止值列表 `default`，多选初始状态由 `all_available`/`explicit` 意图驱动。
 - [x] `selection_inputs` 是 Runtime 数据边界而非普通参数；三种 Interactive Runtime 都先对字段契约匹配的表输入应用 include Selection，再进入 Compute 逻辑。
 - [x] Source/Dataset Transform 与 Interactive Transform 使用两个 DAG、显式 Named Output、Schema Contract、provenance 和分支级并发。
 - [x] 独立分支完成后立即发布；局部失败、超时或取消不会等待或覆盖无关分支。
@@ -28,6 +29,13 @@
 - [x] 同一 tab 可恢复状态；不同 tab、Dashboard、用户、Run 和 Interaction generation 相互隔离。
 - [x] Query Run Artifact 统一保存在 Workspace `.dataviz/`；可达 Server Interactive 输入在计划阶段显式分类，按 tab + Dashboard + Run + canonical Output 复用且绝不重查 Source。
 - [x] SQL 默认 120 秒超时并立即额外重试一次；Dashboard 可覆盖 timeout/retry。
+- [x] `dataviz/dependency-contract/v1` 成为 Query、Interactive、Control、Output 与 View 关系的唯一编译结果；Planner、Loader、Server、Browser、Export、CLI 和 AI context 不再各自推导 DAG。
+- [x] 每个不可变 Dashboard load snapshot 以并发安全方式只编译并缓存一个 Dependency Contract；热更新创建新快照，并行首访也只返回同一个对象。
+- [x] Query Parameter 契约给出直接消费者及最终受影响 Query 节点、Interactive 分支、option Control、内容字段和 View；Query 节点同时给出下游 View/Control。
+- [x] Dependency Contract 以“可执行才存在”为不变量：环、未知 Output、browser → server-python 非法依赖和越界 Control consumer 在编译期拒绝；Loader 仅对无效图做 recovery diagnostics。
+- [x] Query/Interactive 节点只读取显式声明的 Query/Selection/Compute 参数；Browser Transform/View 注册会核对 data inputs、Control inputs、Query Parameter inputs 与 Output names，注册 payload 只作 drift assertion，调度与 View 取数仍由契约拥有。
+- [x] Control 契约显式区分 scope、级联上/下游、option domain、直接数据 View、runtime field check、Interactive consumer、派生 View与内容绑定；浏览器使用编译后的 `control_order`，不再按 DOM 层级重建级联。
+- [x] `dataviz dependencies WORKSPACE DASHBOARD [--format json]` 为人和 AI 输出同一份可审查依赖图；HTML manifest 同时保存完整契约作为运行证据。
 
 ### Runtime 与 HTML Export
 
@@ -40,11 +48,12 @@
 
 ### 模板、验证与 AI 入口
 
-- [x] Component Registry v3 提供物理 Package、机器可读 manifest、Story、测试声明、语义 DOM 和 CSS token；`components --check` 检查包结构，行为由 pytest/E2E 实际执行。
-- [x] 13 个 Component Package 全部为 package-owned；`data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 已迁出 Runtime bridge，删除 `declarative-runtime.js` 和重复实现。
-- [x] Select、Segmented、Checkbox Group、Date Range、Cascader、Tree Select 支持搜索、级联 reconciliation、全选/反选、弹层关闭及基础键盘行为。
+- [x] Component Registry v4 提供物理 Package、机器可读 manifest、Story、测试声明、语义 DOM 和 CSS token；`components --check` 检查包结构，行为由 pytest/E2E 实际执行。
+- [x] 20 个 Component Package 全部为 package-owned；`data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 已迁出 Runtime bridge，删除 `declarative-runtime.js` 和重复实现。
+- [x] 13 个独立 `control.*` Data Entry Package 对齐 Ant Design 的 Input、InputNumber、AutoComplete、Checkbox、Switch、Radio.Group、Select、Checkbox.Group、Cascader、TreeSelect、DatePicker、RangePicker 与 Slider；Query/Selection/Compute 共用 Registry 和 Renderer，单选不生成 All/Clear，多选批量操作受 required/clearable/max_selected 约束，RangePicker 使用单触发器范围日历。
 - [x] Query 与 Dashboard/Section/View Controls 使用 `control-panel.adaptive`：同一面板按 DATA/LOGIC 分组、默认响应式分栏、视口内滚动，并允许 Presentation 覆盖模板、宽度、列数和密度而不分叉状态逻辑。
-- [x] Gallery 提供 Selector、Control、View、Section 的七状态矩阵，以及实际包含 10、100、1,000 个原生选项的 Select Story；1,000 选项搜索覆盖全量且增强 DOM 有界。
+- [x] Server Header 将 `Run query` 与 Query Parameters 合并为 split control；参数区默认展开、参与文档流并按 tab/Dashboard 记忆，只有箭头可开合，外部点击与 `Esc` 仅关闭临时 Controls/诊断浮层。
+- [x] Gallery 提供 Control、View、Section 的七状态矩阵，以及实际包含 10、100、1,000 个原生选项的 Select Story；1,000 选项搜索覆盖全量且增强 DOM 有界。
 - [x] Table/Perspective、Plotly/ECharts、Repeat Small Multiples/Selection Gallery 和自定义 Renderer 都走统一 Runtime 边界。
 - [x] `validate` 是零查询静态门禁；`docs`、`schemas`、`components`、`context`、`scaffold` 为新 AI 会话提供当前契约。
 - [x] Sources 面板提供参数化 statement、Resolved SQL、bound parameters、Adapter、timeout/retry、hash、日志和结构化错误，不暴露凭证。
@@ -69,6 +78,8 @@
 - [x] Browser Interactive 七状态通过 frame identity 回传 `Pipeline`；Base View 不再因其他动态 Selector 或 Interactive 分支而停在 `Waiting for dataset`，Server 与独立 HTML 均有回归。
 - [x] `0.3.2` 增加 Workspace 文件监听、debounced revision、SSE 通知和 `canvas / analysis / query` 影响分类；Presentation 自动重载，Interactive 基于现有 Base Output 重算，Query Contract 变化只进入 Outdated 并要求显式查询。
 - [x] 热更新保留 tab 的 Run、Control 与 Canvas 滚动位置；无效中间写入不替换当前 iframe，Header 提供诊断和显式 Reload。分类只跟踪实际声明/引用资产；保存 Source 后立即 Query 会先同步 revision。页面重开及查询运行途中发生定义变化时，也会重新核验 Query Contract，旧快照不能被误标为当前结果。
+- [x] `0.4.0` 将 Data Entry 升级为 Registry v4：值语义、Control scope 与 UI component 三轴解耦；13 个 `control.*` Package 逐项对齐 Ant Design 组件边界，删除 `selector.*`、`segmented`、`date-range` 及 Presentation `selectors/template` 旧接口，不提供兼容 alias。
+- [x] Query Parameter、Selection 与 Compute 复用同一 Control Renderer；Gallery 与浏览器契约覆盖新文本、建议、数值、布尔、日期、范围、平面/层级单多选和 Slider 的真实水合、输入、键盘、浮层、状态与虚拟列表行为。
 
 ## 下一步优先级
 
@@ -94,14 +105,14 @@
 
 - [x] Chromium 覆盖独立分支渐进发布、失败隔离、取消后终态、空 View、大数据 Arrow 和局部重绘。
 - [x] 当前完整 E2E 契约套件在 Chromium、Firefox、WebKit 通过，覆盖渐进 Query/Interactive 分支、Selection 级联、局部更新、Perspective 与 HTML Export。
-- [x] Chromium、Firefox、WebKit 均通过 390×520 Query 托盘边界、单列响应式、内部滚动、Select 键盘/ARIA/外部点击，以及 Perspective 三轮 dispose/reload/wheel 恢复矩阵。
-- [x] Selector、Control、View、Section 七状态矩阵和 Select 10/100/1,000 真实选项 Story 已进入 Gallery 与 Chromium 契约测试。
+- [x] Chromium、Firefox、WebKit 均通过 390×520 Query Header 内联面板、显式开合、单列响应式、内部滚动、Select 键盘/ARIA，以及 Perspective 三轮 dispose/reload/wheel 恢复矩阵。
+- [x] Control、View、Section 七状态矩阵和 Select 10/100/1,000 真实选项 Story 已进入 Gallery 与 Chromium 契约测试。
 
 ### P2：内部归属与可维护性
 
 这些工作不改变当前 DSL，但会降低下一次替换前端框架或拆分 Runtime 的迁移成本。
 
-- [x] `view.declarative`、`section.declarative`、`data.pipeline` 和 `presentation.shell` 已迁入 owner Package；13 个 Package 均为 package-owned，Runtime 内没有同功能副本。
+- [x] `view.declarative`、`section.declarative`、`data.pipeline` 和 `presentation.shell` 已迁入 owner Package；20 个 Package 均为 package-owned，Runtime 内没有同功能副本。
 - [ ] 按 Runtime Manifest、Output Store、Interactive Scheduler、Selection Binding、Renderer Lifecycle 拆分大型 `canvas-runtime.js`，并通过构建步骤输出单一浏览器资产。
 - [ ] 按 parse/load、cross-file contract、asset validation、catalog/navigation 拆分大型 `workspace/loader.py`；稳定错误 code 和 CLI 输出不得随物理拆分漂移。
 
@@ -110,6 +121,11 @@
 - [x] 完成 `0.3.0` 本地发行门禁：wheel、sdist、pip ZIP 构建，并分别在干净 Python 3.12 环境完成 `version → schemas → components → init → validate → report` 冒烟。
 - [x] 完成 `0.3.1` 本地发行门禁：三种归档构建、内容审计，并分别在干净 Python 3.12 环境完成安装与 CLI/报告冒烟。
 - [x] 完成 `0.3.2` 本地发行门禁：全量 Python 与 Chromium Runtime 回归、三种归档内容审计，并分别在干净 Python 3.12 环境完成安装与 `version → schemas → components → init → validate → report` 冒烟。
+- [x] 完成 `0.4.0` 发行门禁：全量 Python/浏览器回归、wheel/sdist/pip ZIP 构建、内容审计与干净环境安装冒烟。
+- [x] 完成 `0.5.1` 依赖架构发行门禁：单一 Dependency Contract 残余审计、完整 Python 与 Chromium/Firefox/WebKit Runtime 回归、全部示例 Workspace strict validate，并分别从 wheel、sdist、pip ZIP 在干净 Python 3.12 环境完成 `install → version → components → validate → dependencies → report`。
+- [x] 完成 `0.5.2` Overlay 修复发行门禁：完整 Python 契约套件、Chromium/Firefox/WebKit 桌面与窄屏浮层回归、三种归档内容审计，并分别在干净 Python 3.12 环境完成 `install → version → components → validate → dependencies → report`；最终 wheel 另行通过真实 Server/Chromium 几何冒烟。
+- [x] 完成 `0.5.3` Plotly 页面滚动修复发行门禁：默认 `scrollZoom=false` 与显式 opt-in 均通过 Chromium/Firefox/WebKit 真实滚轮回归；306 项 Python 契约测试、Component Package 检查、Feature Showcase strict validate，以及 wheel/sdist/pip ZIP 的干净安装与报告导出全部通过。
+- [x] 完成 `0.5.4` Custom Renderer Plotly 滚轮契约发行门禁：AI 文档、组件契约与 Scaffold 明确自定义 `newPlot`/`react` 默认使用 `scrollZoom=false`；336 项完整测试、四个代表性 Workspace strict validate，以及 wheel/sdist/pip ZIP 的干净安装与离线报告导出全部通过。
 - [ ] 维护者决定许可证并添加正式 `LICENSE`；许可证未定不阻塞开发，但阻塞正式对外授权。
 - [ ] 添加 `CONTRIBUTING.md`，说明安装、validate/test、Runtime/Component 变更和 PR 验收。
 - [ ] 正式 GitHub Release 发布 wheel、sdist、pip ZIP、SHA-256 和远端 CI 记录。

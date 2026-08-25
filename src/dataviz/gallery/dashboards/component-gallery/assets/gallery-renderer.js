@@ -40,10 +40,10 @@ const galleryEscape = value => String(value ?? '')
 
 function galleryStateCopy(state, family) {
   const copy = {
-    selector: {
+    control: {
       ready:'Choose regions', loading:'Loading choices…', stale:'Choices changed upstream',
       empty:'No choices available', error:'Choices could not be loaded',
-      cancelled:'Choice lookup cancelled', unavailable:'Selector dependency missing',
+      cancelled:'Choice lookup cancelled', unavailable:'Control dependency missing',
     },
     compute: {
       ready:'Simulation ready', loading:'Running 100,000 trials…', stale:'Draft seed differs from result',
@@ -65,14 +65,14 @@ function galleryStateCopy(state, family) {
   return copy[family][state];
 }
 
-function gallerySelectorMarkup(state, index) {
+function galleryControlMarkup(state, index) {
   const disabled = state === 'unavailable' ? ' disabled' : '';
   const options = state === 'empty'
     ? ''
     : '<option value="east" selected>East</option><option value="south">South</option><option value="north">North</option>';
-  return `<div class="dv-selector gallery-state-selector" data-selector-template="select" data-gallery-state-lock="true">
-    <select id="gallery-selector-state-${index}" multiple data-selection-input="gallery-state-${index}"${disabled}>${options}</select>
-    <div data-selector-mount></div>
+  return `<div class="dv-control gallery-state-control" data-control-component="select" data-gallery-state-lock="true" data-clearable="true">
+    <select id="gallery-control-state-${index}" multiple data-control-input data-selection-input="gallery-state-${index}"${disabled}>${options}</select>
+    <div data-control-mount></div>
   </div>`;
 }
 
@@ -120,16 +120,16 @@ function galleryStateMatrix(family, title, description, render) {
   return section;
 }
 
-function galleryScaleSelector(count) {
+function galleryScaleControl(count) {
   const section = document.createElement('article');
-  section.id = `story-selector-scale-${count}`;
+  section.id = `story-control-scale-${count}`;
   section.className = 'gallery-scale-card';
   const searchMode = count >= 100 ? 'always' : 'auto';
   const virtualMode = count >= 1000 ? 'always' : 'auto';
   section.innerHTML = `<header><div><p>${String(count).padStart(4, '0')} / REAL OPTIONS</p><h3>${count.toLocaleString()} choices</h3></div><span>${count >= 1000 ? 'SEARCH + VIRTUAL' : count >= 100 ? 'SEARCH' : 'COMPACT'}</span></header>
-    <div class="dv-selector gallery-scale-selector" data-selector-template="select" data-search-mode="${searchMode}" data-virtual-mode="${virtualMode}" data-search-placeholder="Search all ${count.toLocaleString()} options…" data-viewport-height="228">
-      <select id="gallery-selector-scale-${count}" multiple data-selection-input="gallery-scale-${count}"></select>
-      <div data-selector-mount></div>
+    <div class="dv-control gallery-scale-control" data-control-component="select" data-search-mode="${searchMode}" data-virtual-mode="${virtualMode}" data-search-placeholder="Search all ${count.toLocaleString()} options…" data-viewport-height="228" data-clearable="true">
+      <select id="gallery-control-scale-${count}" multiple data-control-input data-selection-input="gallery-scale-${count}"></select>
+      <div data-control-mount></div>
     </div>
     <footer><span data-gallery-scale-metrics>Native ${count.toLocaleString()} · enhanced pending</span><i>${count >= 1000 ? 'bounded row DOM' : 'full option contract'}</i></footer>`;
   const select = section.querySelector('select');
@@ -146,24 +146,44 @@ function galleryScaleSelector(count) {
   return section;
 }
 
+function galleryThemeMatrix() {
+  const definitions = [
+    ['business', 'Business', 'Modern indigo default'],
+    ['plain', 'Plain', 'Minimal neutral analysis'],
+    ['editorial', 'Editorial', 'Warm narrative report'],
+    ['terminal', 'Terminal', 'Dark technical monitoring'],
+  ];
+  const section = document.createElement('section');
+  section.className = 'gallery-contract gallery-contract--themes';
+  section.innerHTML = `<header class="gallery-contract__header"><div><p>THEME CONTRACT / PRESENTATION.SHELL</p><h2>One semantic surface, four voices</h2></div><span>Every preset maps the same stable tokens into Canvas, controls, charts and tables.</span></header>
+    <div class="gallery-theme-grid">${definitions.map(([id, title, note]) => `<article class="gallery-theme-card dv-theme--${id}" data-theme-preview="${id}">
+      <header><span>${title}</span><small>${note}</small></header>
+      <strong>¥1,594,000</strong><p>Selected revenue</p>
+      <div><i></i><i></i><i></i><i></i></div>
+      <footer><span>Ready</span><button type="button">Inspect</button></footer>
+    </article>`).join('')}</div>`;
+  return section;
+}
+
 function buildGalleryContractLab() {
   const shell = document.querySelector('.dv-default-shell') || document.querySelector('.dv-canvas');
   if (!shell || document.querySelector('.gallery-contract-lab')) return;
   const lab = document.createElement('section');
   lab.className = 'gallery-contract-lab';
-  lab.innerHTML = `<header class="gallery-contract-lab__hero"><div><p>COMPONENT CONTRACT LAB / RUNTIME V2</p><h1>Every state.<br>Every scale.</h1></div><aside><strong>4 × 7</strong><span>semantic state specimens</span><strong>1,110</strong><span>real selector options</span></aside></header>`;
+  lab.innerHTML = `<header class="gallery-contract-lab__hero"><div><p>COMPONENT CONTRACT LAB / RUNTIME V2</p><h1>Every state.<br>Every scale.</h1></div><aside><strong>4 × 7</strong><span>semantic state specimens</span><strong>1,110</strong><span>real control options</span></aside></header>`;
   lab.append(
-    galleryStateMatrix('selector', 'Selector lifecycle', 'Canonical native controls remain the source of truth.', gallerySelectorMarkup),
+    galleryThemeMatrix(),
+    galleryStateMatrix('control', 'Control lifecycle', 'Canonical native controls remain the source of truth.', galleryControlMarkup),
     galleryStateMatrix('compute', 'Compute lifecycle', 'Draft, committed and derived-result states stay explicit.', galleryComputeMarkup),
     galleryStateMatrix('view', 'View lifecycle', 'Loading and failure are isolated to one renderer host.', galleryViewMarkup),
     galleryStateMatrix('section', 'Section lifecycle', 'A Section reports the aggregate state of its child Views.', gallerySectionMarkup),
   );
   const scale = document.createElement('section');
   scale.className = 'gallery-contract gallery-contract--scale';
-  scale.innerHTML = '<header class="gallery-contract__header"><div><p>SCALE CONTRACT / SELECTOR.SELECT</p><h2>One API, three real workloads</h2></div><span>No mock counts: every native option exists in this page.</span></header>';
+  scale.innerHTML = '<header class="gallery-contract__header"><div><p>SCALE CONTRACT / CONTROL.SELECT</p><h2>One API, three real workloads</h2></div><span>No mock counts: every native option exists in this page.</span></header>';
   const grid = document.createElement('div');
   grid.className = 'gallery-scale-grid';
-  [10, 100, 1000].forEach(count => grid.append(galleryScaleSelector(count)));
+  [10, 100, 1000].forEach(count => grid.append(galleryScaleControl(count)));
   scale.append(grid);
   lab.append(scale);
   shell.append(lab);
@@ -171,13 +191,13 @@ function buildGalleryContractLab() {
   galleryStates.forEach(state => {
     lab.querySelectorAll(`[data-gallery-status="${state.id}"]`).forEach(card => {
       window.datavizComponents?.state?.apply(card, state.id, {label:state.label});
-      const subject = card.querySelector('.dv-selector, .dv-compute-control, .dv-view, .dv-section');
+      const subject = card.querySelector('.dv-control, .dv-compute-control, .dv-view, .dv-section');
       if (subject) window.datavizComponents?.state?.apply(subject, state.id, {label:state.label});
     });
   });
   [10, 100, 1000].forEach(count => {
-    const host = lab.querySelector(`#story-selector-scale-${count}`);
-    const metrics = host?.querySelector('.dv-selector')?._datavizSelector?.metrics?.();
+    const host = lab.querySelector(`#story-control-scale-${count}`);
+    const metrics = host?.querySelector('.dv-control')?._datavizControl?.metrics?.();
     const output = host?.querySelector('[data-gallery-scale-metrics]');
     if (metrics && output) output.textContent = `Native ${metrics.total.toLocaleString()} · ${metrics.virtual ? `${metrics.rendered} rendered` : 'full rows'}`;
   });
@@ -227,24 +247,25 @@ if (stories.length) {
 
 const storyStyle = document.createElement('style');
 storyStyle.textContent = `
-.gallery-contract-lab{display:grid;gap:clamp(42px,6vw,84px);margin-top:clamp(64px,8vw,120px);padding-top:clamp(36px,5vw,72px);border-top:5px solid var(--dv-ink)}
-.gallery-contract-lab__hero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:40px;align-items:end;padding:clamp(24px,4vw,56px);color:#fffdf6;background:var(--dv-ink);box-shadow:12px 12px 0 var(--dv-accent)}
+.gallery-contract-lab{display:grid;gap:clamp(42px,6vw,84px);margin-top:clamp(64px,8vw,120px);padding-top:clamp(36px,5vw,72px);border-top:1px solid var(--dv-line)}
+.gallery-contract-lab__hero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:40px;align-items:end;padding:clamp(24px,4vw,56px);color:#fff;background:var(--dv-header-bg);border-radius:var(--dv-radius);box-shadow:0 12px 34px rgba(26,35,126,.18)}
 .gallery-contract-lab__hero p,.gallery-contract__header p,.gallery-scale-card header p{margin:0;color:var(--dv-green);font:600 10px "DM Mono",monospace;letter-spacing:.16em;text-transform:uppercase}
-.gallery-contract-lab__hero h1{margin:12px 0 0;font:600 clamp(54px,8vw,116px)/.79 "Newsreader",serif;letter-spacing:-.06em}
+.gallery-contract-lab__hero h1{margin:12px 0 0;font:720 clamp(46px,7vw,92px)/.9 var(--dv-font-sans);letter-spacing:-.055em}
 .gallery-contract-lab__hero aside{display:grid;grid-template-columns:auto auto;gap:7px 12px;align-items:baseline;padding:18px;border-left:1px solid #ffffff3b}
-.gallery-contract-lab__hero aside strong{color:var(--dv-green);font:600 26px "Newsreader",serif}.gallery-contract-lab__hero aside span{font:9px "DM Mono",monospace;letter-spacing:.08em;text-transform:uppercase}
+.gallery-contract-lab__hero aside strong{color:#b7ebd0;font:720 26px var(--dv-font-sans)}.gallery-contract-lab__hero aside span{font:9px var(--dv-font-mono);letter-spacing:.08em;text-transform:uppercase}
 .gallery-contract{scroll-margin-top:24px}.gallery-contract__header{display:grid;grid-template-columns:minmax(0,1fr) minmax(240px,38%);gap:24px;align-items:end;margin-bottom:18px;padding-bottom:14px;border-bottom:2px solid var(--dv-ink)}
-.gallery-contract__header h2{margin:5px 0 0;font:600 clamp(30px,3.4vw,50px)/1 "Newsreader",serif;letter-spacing:-.035em}.gallery-contract__header>span{color:#66716b;font-size:13px;line-height:1.45}
+.gallery-contract__header h2{margin:5px 0 0;color:var(--dv-accent-strong);font:720 clamp(30px,3.4vw,48px)/1 var(--dv-font-sans);letter-spacing:-.035em}.gallery-contract__header>span{color:var(--dv-muted);font-size:13px;line-height:1.45}
+.gallery-theme-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.gallery-theme-card{display:grid;gap:12px;min-width:0;padding:18px;color:var(--dv-ink);background:var(--dv-panel);border:1px solid var(--dv-line);border-radius:var(--dv-radius,12px);box-shadow:var(--dv-shadow)}.gallery-theme-card>header{display:grid;gap:3px;padding-bottom:11px;border-bottom:1px solid var(--dv-line)}.gallery-theme-card>header span{font-size:17px;font-weight:720}.gallery-theme-card>header small,.gallery-theme-card>p{color:var(--dv-muted);font:9px/1.45 var(--dv-font-mono);text-transform:uppercase}.gallery-theme-card>strong{color:var(--dv-accent-strong);font:720 31px/1 var(--dv-font-sans);letter-spacing:-.04em}.gallery-theme-card>p{margin:0}.gallery-theme-card>div{display:flex;align-items:end;gap:5px;height:48px;padding-top:8px;border-bottom:1px solid var(--dv-line)}.gallery-theme-card>div i{flex:1;background:var(--dv-accent);border-radius:3px 3px 0 0}.gallery-theme-card>div i:nth-child(1){height:38%}.gallery-theme-card>div i:nth-child(2){height:78%;background:var(--dv-chart-2,var(--dv-green))}.gallery-theme-card>div i:nth-child(3){height:52%;background:var(--dv-chart-3,var(--dv-accent))}.gallery-theme-card>div i:nth-child(4){height:92%;background:var(--dv-chart-4,var(--dv-green))}.gallery-theme-card>footer{display:flex;align-items:center;justify-content:space-between;gap:8px}.gallery-theme-card>footer span{color:var(--dv-green);font:700 9px var(--dv-font-mono);text-transform:uppercase}.gallery-theme-card>footer button{padding:6px 9px;color:var(--dv-accent-strong);background:var(--dv-soft);border:1px solid var(--dv-line);border-radius:5px;font-size:10px}
 .gallery-state-matrix{display:grid;grid-template-columns:repeat(7,minmax(180px,1fr));gap:9px;overflow-x:auto;padding:0 2px 18px;scroll-snap-type:x proximity}
-.gallery-state-card{display:flex;flex-direction:column;min-height:330px;background:color-mix(in srgb,var(--dv-panel) 96%,transparent);border:1px solid var(--dv-line);border-top:4px solid var(--dv-component-state,var(--dv-green));scroll-snap-align:start}
+.gallery-state-card{display:flex;flex-direction:column;min-height:330px;background:color-mix(in srgb,var(--dv-panel) 96%,transparent);border:1px solid var(--dv-line);border-top:4px solid var(--dv-component-state,var(--dv-green));border-radius:var(--dv-radius);box-shadow:var(--dv-shadow);overflow:hidden;scroll-snap-align:start}
 .gallery-state-card[data-gallery-status="loading"]{--dv-component-state:#3973ad}.gallery-state-card[data-gallery-status="empty"]{--dv-component-state:#87908b}.gallery-state-card[data-gallery-status="ready"]{--dv-component-state:var(--dv-green)}
-.gallery-state-card>header{display:grid;grid-template-columns:auto 1fr;gap:3px 8px;align-items:center;padding:12px;border-bottom:1px solid var(--dv-line)}.gallery-state-card>header>span{grid-row:1/3;color:#8a918d;font:9px "DM Mono",monospace}.gallery-state-card>header>strong{font:600 17px "Newsreader",serif}.gallery-state-card>header>i{color:var(--dv-component-state);font:8px "DM Mono",monospace;font-style:normal;letter-spacing:.1em;text-transform:uppercase}
+.gallery-state-card>header{display:grid;grid-template-columns:auto 1fr;gap:3px 8px;align-items:center;padding:12px;border-bottom:1px solid var(--dv-line)}.gallery-state-card>header>span{grid-row:1/3;color:var(--dv-muted);font:9px var(--dv-font-mono)}.gallery-state-card>header>strong{font:700 17px var(--dv-font-sans)}.gallery-state-card>header>i{color:var(--dv-component-state);font:8px var(--dv-font-mono);font-style:normal;letter-spacing:.1em;text-transform:uppercase}
 .gallery-state-card__specimen{flex:1;min-height:190px;padding:12px}.gallery-state-card>p{min-height:62px;margin:0;padding:11px 12px;color:#69716c;border-top:1px solid var(--dv-line);font:9px/1.5 "DM Mono",monospace}
-.gallery-state-selector .dv-choice-trigger{min-height:54px}.gallery-state-card[data-gallery-status="loading"] .gallery-state-card__specimen,.gallery-state-card[data-gallery-status="stale"] .gallery-state-card__specimen{opacity:.62}.gallery-state-card[data-gallery-status="unavailable"] .gallery-state-card__specimen{filter:grayscale(1);opacity:.52}
+.gallery-state-control .dv-choice-trigger{min-height:54px}.gallery-state-card[data-gallery-status="loading"] .gallery-state-card__specimen,.gallery-state-card[data-gallery-status="stale"] .gallery-state-card__specimen{opacity:.62}.gallery-state-card[data-gallery-status="unavailable"] .gallery-state-card__specimen{filter:grayscale(1);opacity:.52}
 .gallery-state-compute input{font-size:18px!important}.gallery-state-compute small{line-height:1.5}.gallery-state-view{min-height:190px;box-shadow:none}.gallery-state-view .dv-view-header{padding:9px}.gallery-state-view .dv-view-title{font-size:14px}.gallery-state-view .dv-view-description{font-size:9px}.gallery-state-view .dv-view-body{padding:10px}.gallery-state-view .dv-metric{min-height:100px}.gallery-state-view .dv-metric strong{font-size:38px}.gallery-state-view .dv-view-placeholder{min-height:100px;font-size:8px;line-height:1.5}
 .gallery-state-section{display:block}.gallery-state-section .dv-section__header{margin:0 0 8px}.gallery-state-section .dv-section__header h2{font-size:18px}.gallery-state-section .dv-section__body{display:grid;grid-template-columns:1fr 1fr;gap:6px}.gallery-mini-view{display:grid;gap:6px;min-height:76px;padding:9px;background:var(--dv-paper);border:1px solid var(--dv-line);font:8px "DM Mono",monospace;text-transform:uppercase}.gallery-mini-view i{width:18px;height:3px;background:var(--dv-component-state,var(--dv-green))}.gallery-mini-view strong{color:var(--dv-component-state,var(--dv-green))}.gallery-state-section__note{margin:8px 0 0;color:#68716c;font:9px/1.45 "DM Mono",monospace}
-.gallery-scale-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.gallery-scale-card{display:grid;grid-template-rows:auto auto 1fr;gap:18px;min-width:0;padding:20px;background:var(--dv-panel);border:1px solid var(--dv-line);box-shadow:5px 5px 0 color-mix(in srgb,var(--dv-ink) 14%,transparent)}.gallery-scale-card>header{display:flex;align-items:start;justify-content:space-between;gap:12px}.gallery-scale-card h3{margin:5px 0 0;font:600 28px "Newsreader",serif}.gallery-scale-card>header>span{padding:5px 7px;color:#fff;background:var(--dv-ink);font:8px "DM Mono",monospace;letter-spacing:.08em}.gallery-scale-card>footer{display:flex;justify-content:space-between;gap:10px;color:#69716c;font:8px "DM Mono",monospace;text-transform:uppercase}.gallery-scale-card>footer i{color:var(--dv-green);font-style:normal}.gallery-scale-selector{min-width:0}
-.gallery-story-index{position:fixed;z-index:900;right:18px;bottom:18px;width:min(360px,calc(100vw - 36px));font:11px "DM Mono",monospace}.gallery-story-index>summary{display:flex;align-items:center;gap:10px;padding:11px 13px;color:#fff;background:var(--dv-ink);border:1px solid var(--dv-ink);list-style:none;cursor:pointer;box-shadow:0 10px 30px #17211d24}.gallery-story-index>summary span{color:var(--dv-green);font-size:9px;letter-spacing:.12em}.gallery-story-index>summary strong{flex:1}.gallery-story-index>summary i{font-style:normal}.gallery-story-index__panel{display:grid;gap:12px;max-height:min(520px,70vh);padding:14px;background:var(--dv-panel);border:1px solid var(--dv-ink);box-shadow:0 18px 50px #17211d30;overflow:auto}.gallery-story-index__panel section{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}.gallery-story-index__panel section>strong{grid-column:1/-1;color:var(--dv-accent);font-size:9px;letter-spacing:.1em;text-transform:uppercase}.gallery-story-index__panel button{padding:7px 8px;color:var(--dv-ink);background:var(--dv-paper);border:1px solid var(--dv-line);text-align:left;cursor:pointer}.gallery-story-index__panel button:hover{border-color:var(--dv-ink);background:var(--dv-green)}
-@media(max-width:980px){.gallery-contract-lab__hero,.gallery-contract__header{grid-template-columns:1fr}.gallery-contract-lab__hero aside{border-top:1px solid #ffffff3b;border-left:0}.gallery-scale-grid{grid-template-columns:1fr}.gallery-state-matrix{grid-template-columns:repeat(7,minmax(230px,72vw))}}
+.gallery-scale-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.gallery-scale-card{display:grid;grid-template-rows:auto auto 1fr;gap:18px;min-width:0;padding:20px;background:var(--dv-panel);border:1px solid var(--dv-line);border-radius:var(--dv-radius);box-shadow:var(--dv-shadow)}.gallery-scale-card>header{display:flex;align-items:start;justify-content:space-between;gap:12px}.gallery-scale-card h3{margin:5px 0 0;font:700 28px var(--dv-font-sans)}.gallery-scale-card>header>span{padding:5px 7px;color:#fff;background:var(--dv-accent);border-radius:5px;font:8px var(--dv-font-mono);letter-spacing:.08em}.gallery-scale-card>footer{display:flex;justify-content:space-between;gap:10px;color:var(--dv-muted);font:8px var(--dv-font-mono);text-transform:uppercase}.gallery-scale-card>footer i{color:var(--dv-green);font-style:normal}.gallery-scale-control{min-width:0}
+.gallery-story-index{position:fixed;z-index:900;right:18px;bottom:18px;width:min(360px,calc(100vw - 36px));font:11px var(--dv-font-mono)}.gallery-story-index>summary{display:flex;align-items:center;gap:10px;padding:11px 13px;color:#fff;background:var(--dv-accent-strong);border:1px solid var(--dv-accent-strong);border-radius:8px;list-style:none;cursor:pointer;box-shadow:var(--dv-shadow-float)}.gallery-story-index>summary span{color:#b7ebd0;font-size:9px;letter-spacing:.12em}.gallery-story-index>summary strong{flex:1}.gallery-story-index>summary i{font-style:normal}.gallery-story-index__panel{display:grid;gap:12px;max-height:min(520px,70vh);padding:14px;background:var(--dv-panel);border:1px solid var(--dv-line);border-radius:var(--dv-radius);box-shadow:var(--dv-shadow-float);overflow:auto}.gallery-story-index__panel section{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}.gallery-story-index__panel section>strong{grid-column:1/-1;color:var(--dv-accent);font-size:9px;letter-spacing:.1em;text-transform:uppercase}.gallery-story-index__panel button{padding:7px 8px;color:var(--dv-ink);background:var(--dv-paper);border:1px solid var(--dv-line);border-radius:5px;text-align:left;cursor:pointer}.gallery-story-index__panel button:hover{color:var(--dv-accent-strong);border-color:var(--dv-accent);background:var(--dv-soft)}
+@media(max-width:1180px){.gallery-theme-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:980px){.gallery-contract-lab__hero,.gallery-contract__header{grid-template-columns:1fr}.gallery-contract-lab__hero aside{border-top:1px solid #ffffff3b;border-left:0}.gallery-scale-grid{grid-template-columns:1fr}.gallery-state-matrix{grid-template-columns:repeat(7,minmax(230px,72vw))}}@media(max-width:620px){.gallery-theme-grid{grid-template-columns:1fr}}
 `;
 document.head.append(storyStyle);

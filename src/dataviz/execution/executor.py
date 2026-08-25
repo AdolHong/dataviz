@@ -720,7 +720,9 @@ class Executor:
             workspace_root=self.workspace.root,
             dashboard_root=dashboard.root,
             run_id=run_result.run_id,
-            query_params=parameters,
+            query_params={
+                key: parameters.get(key) for key in node.query_parameters
+            },
             compute_params={},
             selections={},
             inputs=inputs,
@@ -786,7 +788,7 @@ class Executor:
             "definition": definition.model_dump(mode="json", by_alias=True),
             "query_parameters": {
                 name: parameters.get(name)
-                for name in getattr(definition, "query_params", [])
+                for name in node.query_parameters
             },
             "files": files,
             "upstream": upstream,

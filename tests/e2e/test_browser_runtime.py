@@ -125,7 +125,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v3
+        """schema: dataviz/dashboard/v4
 kind: dashboard
 id: scale
 title: Scale Runtime
@@ -229,7 +229,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v3
+        """schema: dataviz/dashboard/v4
 kind: dashboard
 id: runtime-matrix
 title: Interactive Runtime Matrix
@@ -240,9 +240,11 @@ controls:
     field: name
     type: multi_select
     default: [alpha, beta]
-    choices:
-      - {label: Alpha, value: alpha}
-      - {label: Beta, value: beta}
+    options:
+      mode: static
+      choices:
+        - {label: Alpha, value: alpha}
+        - {label: Beta, value: beta}
 sources:
   - id: raw
     type: python
@@ -442,6 +444,58 @@ def _run_and_wait(page: Page, expected: str = "Ready") -> None:
 
 
 @pytest.mark.e2e
+def test_header_overlays_stay_in_viewport_and_query_parameters_are_discoverable(
+    page: Page,
+):
+    page.set_viewport_size({"width": 1440, "height": 720})
+    with _running_server(SHOWCASE) as base_url:
+        _open_dashboard(page, base_url, "cascade-explorer")
+
+        # Dashboards without Query Parameters do not render an empty tray.  The
+        # Run control must say why its split-button toggle is absent.
+        expect(page.locator("#query-parameters-toggle")).to_be_hidden()
+        expect(page.locator("#query-parameters-control")).to_be_hidden()
+        expect(page.locator("#query-control-meta")).to_have_text("No parameters")
+
+        for trigger, panel_selector in (
+            (
+                "#dashboard-controls-control > summary",
+                ".header-control__popover--controls",
+            ),
+            ("#query-diagnostics > summary", ".query-diagnostics__popover"),
+        ):
+            page.locator(trigger).click()
+            panel = page.locator(panel_selector)
+            expect(panel).to_be_visible()
+            geometry = panel.evaluate(
+                """panel => {
+                  const rect = panel.getBoundingClientRect();
+                  return {
+                    left:rect.left, right:rect.right, top:rect.top, bottom:rect.bottom,
+                    viewport:[innerWidth, innerHeight],
+                    clientWidth:panel.clientWidth, scrollWidth:panel.scrollWidth,
+                  };
+                }"""
+            )
+            assert geometry["left"] >= 11, geometry
+            assert geometry["right"] <= geometry["viewport"][0] - 11, geometry
+            assert geometry["top"] >= 11, geometry
+            assert geometry["bottom"] <= geometry["viewport"][1] - 11, geometry
+            assert geometry["scrollWidth"] <= geometry["clientWidth"] + 1, geometry
+            page.locator(trigger).click()
+
+        page.locator(
+            '[data-nav-type="dashboard"][data-id="parameter-playground"]'
+        ).click()
+        expect(page.locator("#query-parameters-toggle")).to_be_visible()
+        expect(page.locator("#query-parameters-toggle")).to_have_attribute(
+            "aria-expanded", "true"
+        )
+        expect(page.locator("#query-parameters-panel")).to_be_visible()
+        expect(page.locator("#query-parameter-count")).to_contain_text("2 parameters")
+
+
+@pytest.mark.e2e
 def test_workspace_hot_reload_preserves_run_and_marks_query_contract_outdated(
     page: Page, tmp_path: Path
 ):
@@ -497,7 +551,6 @@ def test_committed_parameter_content_and_stale_selection_export(
         frame = page.frame_locator("#canvas-frame")
         expect(frame.locator(".dv-subtitle")).to_have_text("当前取数下限：0")
 
-        page.locator("#query-parameters-control summary").click()
         parameter = page.locator(
             '#parameter-form input[name="min_query_revenue"]'
         )
@@ -649,10 +702,13 @@ def test_section_selection_updates_bound_title_without_redrawing_siblings(
             "field": "region",
             "type": "single_select",
             "default": "华东",
-            "choices": [
-                {"label": "华东区域", "value": "华东"},
-                {"label": "华南区域", "value": "华南"},
-            ],
+            "options": {
+                "mode": "static",
+                "choices": [
+                    {"label": "华东区域", "value": "华东"},
+                    {"label": "华南区域", "value": "华南"},
+                ],
+            },
         }
     ]
     comparison = next(
@@ -726,7 +782,6 @@ def test_sources_inspector_exposes_resolved_and_parameterized_sql(
     workspace = _copy_workspace(MINIMAL, tmp_path / "source-evidence-workspace")
     with _running_server(workspace) as base_url:
         _open_dashboard(page, base_url, "sales-overview")
-        page.locator("#query-parameters-control summary").click()
         page.locator('#parameter-form input[name="min_query_revenue"]').fill("150000")
         _run_and_wait(page)
 
@@ -781,25 +836,30 @@ def test_web_component_reference_adapter_consumes_runtime_v2_without_canvas_runt
         "protocol": {"schema": "dataviz/runtime/v2", "component_registry_version": "3.0.0"},
         "selections": {"dashboard:probe/region": ["East"]},
         "view_specs": [{"id": "detail", "inputs": {"main": "source:data/main"}}],
+        "dependency_contract": {
+            "schema": "dataviz/dependency-contract/v1",
+            "views": {
+                "detail": {
+                    "inputs": {"main": "source:data/main"},
+                    "selection_contract": [
+                        {
+                            "key": "dashboard:probe/region",
+                            "id": "region",
+                            "origin": "dashboard",
+                            "owner_id": "probe",
+                            "definition": {"type": "multi_select", "path_fields": []},
+                            "binding": {"field": "region", "operator": "auto"},
+                        }
+                    ],
+                }
+            },
+        },
         "portable": {
             "outputs": {
                 "source:data/main": [
                     {"region": "East", "value": 1},
                     {"region": "West", "value": 2},
                     {"region": "West", "value": 3},
-                ]
-            },
-            "view_inputs": {"detail": {"main": "source:data/main"}},
-            "selection_contract": {
-                "detail": [
-                    {
-                        "key": "dashboard:probe/region",
-                        "id": "region",
-                        "origin": "dashboard",
-                        "owner_id": "probe",
-                        "definition": {"type": "multi_select", "path_fields": []},
-                        "binding": {"field": "region", "operator": "auto"},
-                    }
                 ]
             },
         },
@@ -857,7 +917,41 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
 
         header = page.locator("#dashboard-controls-control")
         header.locator("summary").click()
-        checkbox = header.locator('[data-selector-template="checkbox-group"]')
+
+        text_control = header.locator('[data-control-component="input"]')
+        expect(text_control.locator("input")).to_have_value("Review the selected cohort")
+        text_control.locator("input").fill("Review East cohort")
+        expect(text_control.locator(".dv-input__count")).to_contain_text("18 / 120")
+
+        auto_complete = header.locator('[data-control-component="auto-complete"]')
+        auto_input = auto_complete.locator("input")
+        auto_input.focus()
+        auto_input.fill("up")
+        expect(auto_complete.locator('[role="listbox"]')).to_be_visible()
+        auto_complete.get_by_role("option", name="Upside").click()
+        expect(auto_input).to_have_value("Upside")
+
+        input_number = header.locator('[data-control-component="input-number"]')
+        input_number.get_by_role("button", name="Increase value").click()
+        expect(input_number.locator('input[type="number"]')).to_have_value("60")
+
+        boolean_checkbox = header.locator('[data-control-component="checkbox"]')
+        boolean_checkbox.locator('input[type="checkbox"]').check()
+        expect(boolean_checkbox.locator('input[type="checkbox"]')).to_be_checked()
+
+        switch = header.locator('[data-control-component="switch"]')
+        switch.get_by_role("switch").click()
+        expect(switch.get_by_role("switch")).to_have_attribute("aria-checked", "false")
+
+        date_picker = header.locator('[data-control-component="date-picker"]')
+        date_picker.locator('input[type="date"]').fill("2026-03-02")
+        expect(date_picker.locator('input[type="date"]')).to_have_value("2026-03-02")
+
+        slider = header.locator('[data-control-component="slider"]')
+        slider.locator('input[type="range"]').fill("0.85")
+        expect(slider.locator(".dv-slider__input")).to_have_value("0.85")
+
+        checkbox = header.locator('[data-control-component="checkbox-group"]')
         expect(checkbox).to_be_visible()
         action = checkbox.locator(".dv-checkbox-group__action")
         expect(action).to_have_text("Invert")
@@ -898,12 +992,12 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
 
         story_index = frame.locator(".gallery-story-index")
         expect(story_index).to_be_visible()
-        expect(story_index.locator("summary")).to_contain_text("29 runtime specimens")
+        expect(story_index.locator("summary")).to_contain_text("38 runtime specimens")
 
         expected_states = {
             "ready", "loading", "stale", "empty", "error", "cancelled", "unavailable"
         }
-        for family in ("selector", "compute", "view", "section"):
+        for family in ("control", "compute", "view", "section"):
             matrix = frame.locator(f"#story-{family}-state-matrix")
             expect(matrix).to_be_visible()
             expect(matrix.locator(".gallery-state-card")).to_have_count(7)
@@ -926,9 +1020,9 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         selections = detail.locator('.dv-context-controls[data-control-origin="view"]')
         selections.locator("summary").click()
         expect(selections).to_have_attribute("open", "")
-        tree = selections.locator('[data-selector-template="tree-select"]')
-        tree.locator("[data-selector-trigger]").click()
-        panel = tree.locator("[data-selector-panel]")
+        tree = selections.locator('[data-control-component="tree-select"]')
+        tree.locator("[data-control-trigger]").click()
+        panel = tree.locator("[data-control-panel]")
         expect(panel).to_be_visible()
         geometry = panel.evaluate(
             """panel => {
@@ -948,19 +1042,19 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
 
         tree.locator(".dv-choice-search").press("Escape")
         expect(panel).to_be_hidden()
-        assert tree.locator("[data-selector-trigger]").evaluate(
+        assert tree.locator("[data-control-trigger]").evaluate(
             "trigger => document.activeElement === trigger"
         )
-        tree.locator("[data-selector-trigger]").click()
+        tree.locator("[data-control-trigger]").click()
         tree_branch = tree.locator(".dv-tree-branch__check").first
         tree_branch.click()
         assert tree.locator("select").evaluate(
             "select => select.selectedOptions.length > 0"
         )
-        tree_summary = tree.locator("[data-selector-summary]")
+        tree_summary = tree.locator("[data-control-summary]")
         expect(tree_summary).to_have_text(re.compile(r"\S"))
         # Selecting the only available parent is canonically "all available";
-        # otherwise checked_strategy=parent emits compact parent tags. Both
+        # otherwise show_checked_strategy=parent emits compact parent tags. Both
         # summaries must avoid leaking full leaf paths into the trigger.
         assert " / " not in tree_summary.inner_text()
         tree.locator("footer button", has_text="Clear").click()
@@ -969,21 +1063,21 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         ) == 0
         tree.locator(".dv-choice-search").press("Escape")
 
-        segmented = selections.locator('[data-selector-template="segmented"]')
-        segmented.locator("button", has_text="All").click()
-        expect(segmented.locator("select")).to_have_value("")
-        segmented.locator("button", has_text="Software").press("Enter")
-        expect(segmented.locator("select")).to_have_value("Software")
+        radio = selections.locator('[data-control-component="radio-group"]')
+        expect(radio.get_by_role("button", name="All", exact=True)).to_have_count(0)
+        expect(radio.get_by_role("button", name="Clear", exact=True)).to_have_count(0)
+        radio.locator("button", has_text="Software").press("Enter")
+        expect(radio.locator("select")).to_have_value("Software")
 
         grouped_select = selections.locator(
-            '[data-selection-key="view:detail-table/product"] [data-selector-template="select"]'
+            '[data-selection-key="view:detail-table/product"] [data-control-component="select"]'
         )
-        grouped_select.locator("[data-selector-trigger]").click()
+        grouped_select.locator("[data-control-trigger]").click()
         select_panel = grouped_select.locator(".dv-select-panel")
         expect(select_panel).to_be_visible()
         panel_surface = select_panel.evaluate(
             """panel => ({
-              sharedClass: panel.classList.contains('dv-selector-panel'),
+              sharedClass: panel.classList.contains('dv-control-panel'),
               background: getComputedStyle(panel).backgroundColor,
             })"""
         )
@@ -1009,30 +1103,43 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         ) == 0
         grouped_select.locator(".dv-choice-search").press("Escape")
 
-        cascader = selections.locator('[data-selector-template="cascader"]')
-        cascader.locator("[data-selector-trigger]").click()
+        cascader = selections.locator('[data-control-component="cascader"]')
+        cascader.locator("[data-control-trigger]").click()
         branch_check = cascader.locator(".dv-cascader-branch__check").first
         expect(branch_check).to_be_visible()
         branch_check.click()
         assert cascader.locator("select").evaluate(
             "select => select.selectedOptions.length > 0"
         )
-        cascader_summary = cascader.locator("[data-selector-summary]")
+        cascader_summary = cascader.locator("[data-control-summary]")
         expect(cascader_summary).to_have_text(re.compile(r"\S"))
         assert " / " not in cascader_summary.inner_text()
         cascader.locator(".dv-choice-search").press("Escape")
 
-        date_range = selections.locator('[data-selector-template="date-range"]')
-        expect(date_range.locator('input[type="date"]')).to_have_count(2)
-        assert date_range.locator('input[type="date"]').evaluate_all(
-            "inputs => inputs.every(input => input.labels.length === 1)"
-        )
-        date_range.locator("button", has_text="Q1 2026").click()
-        expect(date_range.locator("input[data-selection-input]")).to_have_value(
+        range_picker = selections.locator('[data-control-component="range-picker"]')
+        expect(range_picker.locator('[data-control-trigger]')).to_have_count(1)
+        expect(range_picker.locator('input[type="date"]')).to_have_count(0)
+        range_picker.locator('[data-control-trigger]').click()
+        date_panel = range_picker.locator('[data-control-panel]')
+        expect(date_panel).to_be_visible()
+        expect(date_panel).to_have_attribute("role", "dialog")
+        expect(date_panel.locator(".dv-date-range__month")).to_have_count(2)
+        range_picker.locator("button", has_text="Q1 2026").click()
+        expect(range_picker.locator("input[data-selection-input]")).to_have_value(
             "2026-01-01,2026-03-31"
         )
-        date_range.locator("button", has_text="Clear").click()
-        expect(date_range.locator("input[data-selection-input]")).to_have_value("")
+        expect(date_panel).to_be_hidden()
+        range_picker.locator('[data-control-trigger]').click()
+        date_panel.locator('[data-date="2026-01-10"]').click()
+        expect(date_panel).to_be_visible()
+        date_panel.locator('[data-date="2026-01-20"]').click()
+        expect(range_picker.locator("input[data-selection-input]")).to_have_value(
+            "2026-01-10,2026-01-20"
+        )
+        expect(date_panel).to_be_hidden()
+        range_picker.locator('[data-control-trigger]').click()
+        range_picker.locator("button", has_text="Clear").click()
+        expect(range_picker.locator("input[data-selection-input]")).to_have_value("")
         frame.locator("body").evaluate(
             """() => new Promise((resolve, reject) => {
               const deadline = performance.now() + 3000;
@@ -1049,12 +1156,12 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
 
         # The Gallery owns three real scale Stories. The 1,000-option Story uses
         # a canonical native select while keeping the enhanced row DOM bounded.
-        expect(frame.locator("#story-selector-scale-10 select option")).to_have_count(10)
-        expect(frame.locator("#story-selector-scale-100 select option")).to_have_count(100)
-        expect(frame.locator("#story-selector-scale-1000 select option")).to_have_count(1000)
-        virtual = frame.locator("#story-selector-scale-1000 .dv-selector")
-        virtual.locator("[data-selector-trigger]").click()
-        expect(virtual.locator("[data-selector-panel]")).to_be_visible()
+        expect(frame.locator("#story-control-scale-10 select option")).to_have_count(10)
+        expect(frame.locator("#story-control-scale-100 select option")).to_have_count(100)
+        expect(frame.locator("#story-control-scale-1000 select option")).to_have_count(1000)
+        virtual = frame.locator("#story-control-scale-1000 .dv-control")
+        virtual.locator("[data-control-trigger]").click()
+        expect(virtual.locator("[data-control-panel]")).to_be_visible()
         rendered = virtual.locator(".dv-select-rows .dv-choice-option").count()
         assert 1 <= rendered < 40
         virtual.locator(".dv-choice-search").fill("Store 1000")
@@ -1063,7 +1170,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         virtual.locator(".dv-choice-search").press("ArrowDown")
         virtual.locator(".dv-select-options").press("Enter")
         expect(virtual.locator("select")).to_have_values(["1000"])
-        assert virtual.locator("[data-selector-trigger]").evaluate(
+        assert virtual.locator("[data-control-trigger]").evaluate(
             """trigger => {
               const panel = document.getElementById(trigger.getAttribute('aria-controls'));
               return Boolean(trigger.getAttribute('aria-haspopup') === 'listbox'
@@ -1131,10 +1238,13 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(
             "type": "multi_select",
             "label": "Model list",
             "default": ["model-01"],
-            "choices": [
-                {"label": f"Model {index:02d}", "value": f"model-{index:02d}"}
-                for index in range(1, 13)
-            ],
+            "options": {
+                "mode": "static",
+                "choices": [
+                    {"label": f"Model {index:02d}", "value": f"model-{index:02d}"}
+                    for index in range(1, 13)
+                ],
+            },
         }
     )
     dashboard_path.write_text(
@@ -1143,7 +1253,7 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(
     )
     presentation_path = workspace / "dashboards" / "sales-overview" / "presentation.yaml"
     presentation = yaml.safe_load(presentation_path.read_text(encoding="utf-8"))
-    presentation["controls"] = {
+    presentation["control_panels"] = {
         "query": {
             "template": "grid",
             "width": "wide",
@@ -1160,21 +1270,22 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(
     with _running_server(workspace) as base_url:
         _open_dashboard(page, base_url, "sales-overview")
         control = page.locator("#query-parameters-control")
-        control.locator("summary").click()
-        page.wait_for_timeout(50)
+        toggle = page.locator("#query-parameters-toggle")
         panel = control.locator(".header-control__popover")
         form = control.locator("#parameter-form")
+        canvas = page.locator(".canvas-panel")
         expect(panel).to_be_visible()
-        expect(panel).to_have_attribute("data-overlay-placement", re.compile("top|bottom"))
+        expect(toggle).to_have_attribute("aria-expanded", "true")
+        expect(panel).not_to_have_attribute("data-overlay-placement", re.compile(".+"))
 
         geometry = panel.evaluate(
             """panel => {
               const form = panel.querySelector('#parameter-form');
               const rect = panel.getBoundingClientRect();
               return {
-                viewportHeight: innerHeight,
-                top: rect.top,
-                bottom: rect.bottom,
+                position:getComputedStyle(panel).position,
+                width:rect.width,
+                ownerWidth:panel.parentElement.getBoundingClientRect().width,
                 columns: getComputedStyle(form).gridTemplateColumns.split(' ').length,
                 formClientHeight: form.clientHeight,
                 formScrollHeight: form.scrollHeight,
@@ -1183,31 +1294,58 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(
               };
             }"""
         )
-        assert geometry["top"] >= 11, geometry
-        assert geometry["bottom"] <= geometry["viewportHeight"] - 11, geometry
+        assert geometry["position"] == "relative", geometry
+        assert abs(geometry["width"] - geometry["ownerWidth"]) <= 1, geometry
         assert geometry["columns"] == 3
         assert geometry["panelOverflow"] == "hidden"
         assert geometry["formOverflow"] == "auto"
         assert geometry["formScrollHeight"] > geometry["formClientHeight"]
 
+        expanded_canvas_top = canvas.bounding_box()["y"]
+        page.keyboard.press("Escape")
+        expect(panel).to_be_visible()
+        toggle.click()
+        expect(panel).to_be_hidden()
+        expect(toggle).to_have_attribute("aria-expanded", "false")
+        collapsed_canvas_top = canvas.bounding_box()["y"]
+        assert collapsed_canvas_top < expanded_canvas_top - 40
+        toggle.click()
+        expect(panel).to_be_visible()
+        expect(toggle).to_have_attribute("aria-expanded", "true")
+
         form.evaluate("form => { form.scrollTop = form.scrollHeight; }")
         model_field = form.locator(".field", has=page.locator("#input-model_list"))
-        trigger = model_field.locator("[data-selector-trigger]")
+        trigger = model_field.locator("[data-control-trigger]")
         expect(trigger).to_be_visible()
         trigger.click()
-        selector_panel = model_field.locator("[data-selector-panel]")
+        selector_panel = model_field.locator("[data-control-panel]")
         expect(selector_panel).to_be_visible()
         selector_geometry = selector_panel.evaluate(
             """panel => {
               const rect = panel.getBoundingClientRect();
+              const style = getComputedStyle(panel);
               return {top:rect.top, right:rect.right, bottom:rect.bottom, left:rect.left,
+                panelHeight:rect.height, maxHeight:style.maxHeight,
+                boxSizing:style.boxSizing,
+                clientHeight:document.documentElement.clientHeight,
+                visualHeight:visualViewport?.height || null,
                 width:innerWidth, height:innerHeight};
             }"""
         )
         assert selector_geometry["top"] >= 11
         assert selector_geometry["left"] >= 11
         assert selector_geometry["right"] <= selector_geometry["width"] - 11
-        assert selector_geometry["bottom"] <= selector_geometry["height"] - 11
+        assert selector_geometry["bottom"] <= selector_geometry["height"] - 11, selector_geometry
+
+        page.keyboard.press("Escape")
+        expect(selector_panel).to_be_hidden()
+        toggle.click()
+        expect(panel).to_be_hidden()
+        page.reload(wait_until="domcontentloaded")
+        expect(page.locator("#query-parameters-toggle")).to_have_attribute(
+            "aria-expanded", "false", timeout=10_000
+        )
+        expect(page.locator("#query-parameters-panel")).to_be_hidden()
 
 
 @pytest.mark.e2e
@@ -1232,10 +1370,13 @@ def test_cross_browser_narrow_control_overlay_keyboard_scroll_and_aria(
             "type": "multi_select",
             "label": "Model list",
             "default": ["model-01"],
-            "choices": [
-                {"label": f"Model {index:02d}", "value": f"model-{index:02d}"}
-                for index in range(1, 31)
-            ],
+            "options": {
+                "mode": "static",
+                "choices": [
+                    {"label": f"Model {index:02d}", "value": f"model-{index:02d}"}
+                    for index in range(1, 31)
+                ],
+            },
         }
     )
     dashboard_path.write_text(
@@ -1244,7 +1385,7 @@ def test_cross_browser_narrow_control_overlay_keyboard_scroll_and_aria(
     )
     presentation_path = workspace / "dashboards" / "sales-overview" / "presentation.yaml"
     presentation = yaml.safe_load(presentation_path.read_text(encoding="utf-8"))
-    presentation["controls"] = {
+    presentation["control_panels"] = {
         "query": {
             "template": "grid",
             "width": "wide",
@@ -1261,11 +1402,11 @@ def test_cross_browser_narrow_control_overlay_keyboard_scroll_and_aria(
     with _running_server(workspace) as base_url:
         _open_dashboard(page, base_url, "sales-overview")
         control = page.locator("#query-parameters-control")
-        control.locator("summary").click()
+        toggle = page.locator("#query-parameters-toggle")
         panel = control.locator(".header-control__popover")
         form = control.locator("#parameter-form")
         expect(panel).to_be_visible()
-        expect(panel).to_have_attribute("data-overlay-placement", re.compile("top|bottom"))
+        expect(toggle).to_have_attribute("aria-expanded", "true")
 
         geometry = panel.evaluate(
             """panel => {
@@ -1273,6 +1414,7 @@ def test_cross_browser_narrow_control_overlay_keyboard_scroll_and_aria(
               const rect = panel.getBoundingClientRect();
               return {
                 left:rect.left, top:rect.top, right:rect.right, bottom:rect.bottom,
+                height:rect.height,
                 viewport:[innerWidth, innerHeight],
                 columns:getComputedStyle(form).gridTemplateColumns.split(' ').length,
                 formClientHeight:form.clientHeight,
@@ -1284,17 +1426,17 @@ def test_cross_browser_narrow_control_overlay_keyboard_scroll_and_aria(
         assert geometry["left"] >= 8, geometry
         assert geometry["top"] >= 8, geometry
         assert geometry["right"] <= geometry["viewport"][0] - 8, geometry
-        assert geometry["bottom"] <= geometry["viewport"][1] - 8, json.dumps(geometry)
+        assert geometry["height"] <= geometry["viewport"][1] * 0.52 + 1, geometry
         assert geometry["columns"] == 1, geometry
         assert geometry["formScrollHeight"] > geometry["formClientHeight"], geometry
         assert geometry["formOverflow"] == "auto", geometry
 
         form.evaluate("form => { form.scrollTop = form.scrollHeight; }")
         model_field = form.locator(".field", has=page.locator("#input-model_list"))
-        trigger = model_field.locator("[data-selector-trigger]")
+        trigger = model_field.locator("[data-control-trigger]")
         expect(trigger).to_be_visible()
         trigger.click()
-        selector_panel = model_field.locator("[data-selector-panel]")
+        selector_panel = model_field.locator("[data-control-panel]")
         expect(selector_panel).to_be_visible()
         selector_geometry = selector_panel.evaluate(
             """panel => {
@@ -1329,7 +1471,12 @@ def test_cross_browser_narrow_control_overlay_keyboard_scroll_and_aria(
         expect(selector_panel).to_be_hidden()
         assert trigger.evaluate("trigger => document.activeElement === trigger")
         page.mouse.click(2, 510)
-        expect(control).not_to_have_attribute("open", "")
+        expect(panel).to_be_visible()
+        page.keyboard.press("Escape")
+        expect(panel).to_be_visible()
+        toggle.click()
+        expect(panel).to_be_hidden()
+        expect(toggle).to_have_attribute("aria-expanded", "false")
         page.locator("#run-button").click()
 
 
@@ -1340,8 +1487,8 @@ def test_server_header_hydrates_dataset_driven_dashboard_selection_options(
     workspace = _copy_workspace(MINIMAL, tmp_path / "dynamic-dashboard-selection")
     dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
     definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
-    definition["controls"][0].pop("choices")
-    definition["controls"][0]["default"] = ["华东"]
+    definition["controls"][0].pop("default")
+    definition["controls"][0]["options"] = {"mode": "infer"}
     dashboard_path.write_text(
         yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
@@ -1362,7 +1509,7 @@ def test_server_header_hydrates_dataset_driven_dashboard_selection_options(
         ) == ["华东", "华北", "华南"]
         assert selector.evaluate(
             "select => [...select.selectedOptions].map(option => option.value)"
-        ) == ["华东"]
+        ) == ["华东", "华北", "华南"]
 
         selector.select_option(["华南"], force=True)
         frame = page.frame_locator("#canvas-frame")
@@ -1446,7 +1593,7 @@ def test_selection_cascade_popovers_view_isolation_and_table_wheel(
         header = page.locator("#dashboard-controls-control")
         header.locator("summary").click()
         expect(header).to_have_attribute("open", "")
-        province = header.locator('[data-selector-template="checkbox-group"]')
+        province = header.locator('[data-control-component="checkbox-group"]')
         province_action = province.locator(".dv-checkbox-group__action")
         expect(province_action).to_have_text("反选")
         province_action.click()
@@ -1483,36 +1630,66 @@ def test_selection_cascade_popovers_view_isolation_and_table_wheel(
         city_select = frame.locator(
             'select[data-selection-input="section:geography/city"]'
         )
+        city_rows = frame.locator('[data-view-id="city-detail"] tbody tr')
         expect(city_select).to_have_count(1)
+        expect(city_select.locator("option:not([disabled])")).to_have_count(4)
+        assert set(city_select.evaluate(
+            "select => [...select.selectedOptions].map(option => option.value)"
+        )) == {"深圳", "佛山", "厦门", "泉州"}
+        expect(city_rows).to_have_count(7)
         dashboard_select.select_option(["福建"], force=True)
-        expect(city_select).to_have_values(["厦门"], timeout=5_000)
+        expect(city_select).to_have_values(["厦门", "泉州"], timeout=5_000)
+        expect(city_rows).to_have_count(3, timeout=5_000)
         enabled_cities = city_select.evaluate(
             "select => [...select.options].filter(option => !option.disabled).map(option => option.value)"
         )
-        assert enabled_cities == ["厦门"]
+        assert enabled_cities == ["厦门", "泉州"]
+        assert frame.locator("body").evaluate(
+            "() => window.dataviz.selection_intents['section:geography/city']"
+        ) == "all_available"
 
         dashboard_select.select_option(["广东", "福建"], force=True)
         page.wait_for_function(
+            """() => document.querySelector('#canvas-frame').contentWindow.document
+              .querySelector('select[data-selection-input="section:geography/city"]')
+              ?.selectedOptions.length === 4"""
+        )
+        assert set(city_select.evaluate(
+            "select => [...select.selectedOptions].map(option => option.value)"
+        )) == {"深圳", "佛山", "厦门", "泉州"}
+        expect(city_rows).to_have_count(7, timeout=5_000)
+
+        # Explicit subsets keep their identity even if an upstream contraction
+        # temporarily makes that subset equal to the complete available domain.
+        city_select.select_option(["厦门"], force=True)
+        expect(city_rows).to_have_count(2, timeout=5_000)
+        assert frame.locator("body").evaluate(
+            "() => window.dataviz.selection_intents['section:geography/city']"
+        ) == "explicit"
+        dashboard_select.select_option(["福建"], force=True)
+        expect(city_select).to_have_values(["厦门"], timeout=5_000)
+        dashboard_select.select_option(["广东", "福建"], force=True)
+        expect(city_select).to_have_values(["厦门"], timeout=5_000)
+        expect(city_rows).to_have_count(2, timeout=5_000)
+
+        city_select.select_option(["深圳", "厦门"], force=True)
+        page.wait_for_function(
             """() => {
-              const select = document.querySelector('#canvas-frame').contentWindow.document
-                .querySelector('select[data-selection-input="section:geography/city"]');
-              return select && [...select.options].filter(option => !option.disabled).length === 3;
+              const values = document.querySelector('#canvas-frame').contentWindow.dataviz
+                .selections['section:geography/city'];
+              return values.length === 2 && values.includes('深圳') && values.includes('厦门');
             }"""
         )
-        city_select.select_option(["深圳", "厦门"], force=True)
-        expect(city_select).to_have_values(["深圳", "厦门"])
-        page.wait_for_function(
-            """() => JSON.stringify(
-              document.querySelector('#canvas-frame').contentWindow.dataviz
-                .selections['section:geography/city']
-            ) === JSON.stringify(['深圳', '厦门'])"""
-        )
+        assert set(city_select.evaluate(
+            "select => [...select.selectedOptions].map(option => option.value)"
+        )) == {"深圳", "厦门"}
         view_popover = frame.locator(
             '[data-view-id="city-detail"] .dv-context-controls[data-control-origin="view"]'
         )
         view_popover.locator("summary").click()
-        cascader = view_popover.locator('[data-selector-template="cascader"]')
-        cascader.locator("[data-selector-trigger]").click()
+        cascader = view_popover.locator('[data-control-component="cascader"]')
+        cascader.locator("[data-control-trigger]").click()
+        cascader.locator("footer button", has_text="Clear").click()
         columns = cascader.locator(".dv-cascader-columns")
 
         columns.locator(".dv-cascader-column").nth(0).locator(
@@ -1593,6 +1770,57 @@ def test_selection_cascade_popovers_view_isolation_and_table_wheel(
             }"""
         )
         assert scroll_after > 0
+
+
+@pytest.mark.e2e
+def test_plotly_defaults_to_page_wheel_and_allows_explicit_scroll_zoom(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(MINIMAL, tmp_path / "plotly-wheel")
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    dashboard = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    explicit_view = next(
+        view for view in dashboard["views"] if view["id"] == "region-comparison"
+    )
+    explicit_view["config"] = {"scrollZoom": True}
+    dashboard_path.write_text(
+        yaml.safe_dump(dashboard, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        default_chart = frame.locator('[data-view-id="revenue-trend"] .dv-plotly')
+        explicit_chart = frame.locator('[data-view-id="region-comparison"] .dv-plotly')
+        expect(default_chart).to_be_visible(timeout=15_000)
+        expect(explicit_chart).to_be_visible(timeout=15_000)
+
+        assert default_chart.evaluate("node => node._context.scrollZoom") is False
+        assert explicit_chart.evaluate("node => node._context.scrollZoom") is True
+
+        default_chart.scroll_into_view_if_needed()
+        before = default_chart.evaluate(
+            """node => ({
+              scrollY:window.scrollY,
+              xRange:[...node._fullLayout.xaxis.range],
+            })"""
+        )
+        drag_layer = default_chart.locator(".nsewdrag")
+        box = drag_layer.bounding_box()
+        assert box is not None
+        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        page.mouse.wheel(0, 500)
+        page.wait_for_timeout(150)
+        after = default_chart.evaluate(
+            """node => ({
+              scrollY:window.scrollY,
+              xRange:[...node._fullLayout.xaxis.range],
+            })"""
+        )
+        assert after["scrollY"] > before["scrollY"]
+        assert after["xRange"] == before["xRange"]
 
 
 @pytest.mark.e2e
@@ -1745,8 +1973,8 @@ def test_required_dynamic_view_selection_bootstraps_from_base_output_and_exports
             "kind": "selection",
             "type": "single_select",
             "field": "name",
-            "default": "alpha",
             "required": True,
+            "options": {"mode": "infer"},
         }
     ]
     dashboard_path.write_text(
@@ -1782,7 +2010,8 @@ def test_required_dynamic_view_selection_bootstraps_from_base_output_and_exports
         selector = frame.locator(
             'select[data-selection-input="view:scaled-table/focus_name"]'
         )
-        expect(selector.locator("option")).to_have_count(3)
+        expect(selector.locator("option")).to_have_count(2)
+        expect(selector.locator('option[data-empty-option="true"]')).to_have_count(0)
         assert selector.input_value() == "alpha"
         expect(page.locator('[data-node-id="interactive:scaled"]')).to_have_attribute(
             "data-status", "ready", timeout=10_000
@@ -1826,6 +2055,33 @@ def test_browser_js_interactive_worker_cancellation_timeout_and_serializable_err
         delay = page.locator(
             'input[name="dashboard:worker-runtime/delay_ms"]'
         )
+        completed_before_drift = frame.locator("body").evaluate(
+            """() => {
+              const runtime = window.datavizRuntime;
+              // Registration payloads are drift assertions, not a second
+              // dependency source. Runtime scheduling and declarative View
+              // reads must continue to use the compiled contract.
+              runtime.transforms.get('scaled').spec.inputs.rows = 'source:invalid/main';
+              window.dataviz.view_specs.find(view => view.id === 'scaled-table').input = 'source:invalid/main';
+              return runtime.metrics.interactiveTransforms.completed;
+            }"""
+        )
+        delay.evaluate(
+            "input => { input.value = '6'; input.dispatchEvent(new Event('change', {bubbles:true})); }"
+        )
+        page.wait_for_function(
+            """completed => {
+              const frame = document.querySelector('#canvas-frame').contentWindow;
+              const output = frame.dataviz.portable.outputs['interactive:scaled/main'];
+              return frame.datavizRuntime.metrics.interactiveTransforms.completed > completed
+                && Array.isArray(output) && output.some(row => Number(row.value) === 20);
+            }""",
+            arg=completed_before_drift,
+            timeout=10_000,
+        )
+        expect(table).to_have_attribute("data-view-status", "ready")
+        expect(table).to_contain_text("20")
+
         delay.evaluate(
             "input => { input.value = '750'; input.dispatchEvent(new Event('change', {bubbles:true})); }"
         )

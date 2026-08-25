@@ -1,0 +1,6 @@
+schema: dataviz/component-test/v1
+tests:
+  - id: control.checkbox.contract
+    component: control.checkbox
+    kind: accessibility
+    assertions: [native-checkbox-source-of-truth, checked-state, disabled-state, keyboard-toggle, bubbling-change]

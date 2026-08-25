@@ -1,0 +1,22 @@
+schema: dataviz/component-package/v1
+package: control.input-number
+version: 1.0.0
+category: data-entry
+purpose: Enter a bounded integer or number without conflating numeric and text values.
+implementation: {mode: package, sources: []}
+dependencies: [runtime.control]
+components:
+  - id: control.input-number
+    purpose: Edit numeric values with optional step controls and visible bounds.
+    status: stable
+    alignment:
+      design_system: Ant Design
+      component: InputNumber
+      official: https://ant.design/components/input-number/
+      adopted: [min, max, step, keyboard, controls, prefix, suffix]
+      omitted: [custom-parser, string-mode, locale-decimal-separator]
+    logic: {types: [integer, number], fields: [min, max, step]}
+    presentation: {component: input-number, options: [number_controls, prefix, suffix, css_class]}
+    semantic_dom: [.dv-input-number, .dv-input-number__control, .dv-input-number__step]
+    tokens: [--dv-accent, --dv-ink, --dv-line, --dv-panel]
+runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

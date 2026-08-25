@@ -1,8 +1,14 @@
 
 const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v2';
 const DATAVIZ_INTERACTIVE_WORKER_PROTOCOL = 'dataviz/interactive-worker/v1';
+const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v1';
 if (window.dataviz.protocol?.schema !== DATAVIZ_RUNTIME_PROTOCOL) {
   throw new Error(`Unsupported Dataviz Runtime protocol: ${window.dataviz.protocol?.schema || 'missing'}`);
+}
+if (window.dataviz.dependency_contract?.schema !== DATAVIZ_DEPENDENCY_CONTRACT) {
+  throw new Error(
+    `Unsupported Dashboard dependency contract: ${window.dataviz.dependency_contract?.schema || 'missing'}`
+  );
 }
 const datavizFrameIdentity = () => ({
   dashboard_id:window.dataviz.dashboard_id || null,
@@ -24,6 +30,26 @@ const canonicalOutputReference = reference => {
   }
   return raw;
 };
+const datavizInputContractSignature = inputs => JSON.stringify(
+  Object.fromEntries(
+    Object.entries(inputs || {})
+      .map(([name, reference]) => [name, canonicalOutputReference(reference)])
+      .sort(([left], [right]) => left.localeCompare(right))
+  )
+);
+const datavizControlInputSignature = inputs => JSON.stringify(
+  Object.fromEntries(
+    Object.entries(inputs || {})
+      .map(([alias, key]) => [alias, String(key)])
+      .sort(([left], [right]) => left.localeCompare(right))
+  )
+);
+const datavizParameterInputSignature = inputs => JSON.stringify(
+  [...(inputs || [])].map(String).sort()
+);
+const datavizOutputContractSignature = (transformId, outputs) => JSON.stringify(
+  Object.keys(outputs || {}).map(name => `interactive:${transformId}/${name}`).sort()
+);
 const datavizValueSignature = value => {
   if (value?.__datavizArrowOutput) return `arrow:${value.descriptor?.content_hash || value.descriptor?.row_count || 'table'}`;
   try { return JSON.stringify(value); }
@@ -94,8 +120,13 @@ const datavizIsoDate = (value, label) => {
   return normalized;
 };
 const datavizDecimalNumberPattern = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+const datavizStaticChoices = definition => (
+  definition?.options?.mode === 'static'
+    ? (definition.options.choices || [])
+    : []
+);
 const datavizChoiceValue = (definition, value) => {
-  const choices = definition?.choices || [];
+  const choices = datavizStaticChoices(definition);
   if (!choices.length) return value;
   const signature = datavizValueSignature(value);
   const exact = choices.filter(choice => datavizValueSignature(choice.value) === signature);
@@ -122,6 +153,9 @@ const datavizNormalizeControlValue = (definition, value, {namespace = 'control',
     }
     if (type === 'string') {
       if (typeof value !== 'string') throw datavizContractError('invalid_type', 'Value must be a string');
+      if (definition.max_length != null && value.length > Number(definition.max_length)) {
+        throw datavizContractError('too_long', `Value cannot be longer than ${definition.max_length} characters`);
+      }
       return value;
     }
     if (['number', 'integer'].includes(type)) {
@@ -164,7 +198,16 @@ const datavizNormalizeControlValue = (definition, value, {namespace = 'control',
       }
       throw datavizContractError('invalid_type', 'Value must be a boolean');
     }
-    if (type === 'date') return datavizIsoDate(value, 'Value');
+    if (type === 'date') {
+      const normalized = datavizIsoDate(value, 'Value');
+      if (definition.min_date && normalized < definition.min_date) {
+        throw datavizContractError('before_minimum_date', `Value cannot be before ${definition.min_date}`);
+      }
+      if (definition.max_date && normalized > definition.max_date) {
+        throw datavizContractError('after_maximum_date', `Value cannot be after ${definition.max_date}`);
+      }
+      return normalized;
+    }
     if (type === 'date_range') {
       const range = typeof value === 'string' ? value.split(',', 2).map(item => item.trim()) : value;
       if (!Array.isArray(range) || range.length !== 2) {
@@ -173,12 +216,30 @@ const datavizNormalizeControlValue = (definition, value, {namespace = 'control',
       const start = range[0] ? datavizIsoDate(range[0], 'Date range start') : '';
       const end = range[1] ? datavizIsoDate(range[1], 'Date range end') : '';
       if (!start && !end) return [];
+      const allowEmpty = Array.isArray(definition.allow_empty) ? definition.allow_empty : [false, false];
+      if (!start && !allowEmpty[0]) throw datavizContractError('missing_range_start', 'Date range requires a start date');
+      if (!end && !allowEmpty[1]) throw datavizContractError('missing_range_end', 'Date range requires an end date');
       if (start && end && start > end) {
         throw datavizContractError('invalid_range', 'Date range start cannot be after end');
+      }
+      for (const [label, item] of [['start', start], ['end', end]]) {
+        if (item && definition.min_date && item < definition.min_date) {
+          throw datavizContractError('before_minimum_date', `Date range ${label} cannot be before ${definition.min_date}`);
+        }
+        if (item && definition.max_date && item > definition.max_date) {
+          throw datavizContractError('after_maximum_date', `Date range ${label} cannot be after ${definition.max_date}`);
+        }
       }
       return [start, end];
     }
     if (type === 'single_select') {
+      const pathFields = definition.path_fields || [];
+      if (pathFields.length) {
+        if (!Array.isArray(value) || value.length !== pathFields.length || value.some(item => item == null)) {
+          throw datavizContractError('invalid_path', `Single select hierarchy requires one ${pathFields.length}-level path`);
+        }
+        return [...value];
+      }
       if (Array.isArray(value) || (value && typeof value === 'object')) {
         throw datavizContractError('invalid_type', 'Single select requires one value');
       }
@@ -186,13 +247,24 @@ const datavizNormalizeControlValue = (definition, value, {namespace = 'control',
     }
     if (type === 'multi_select') {
       if (!Array.isArray(value)) throw datavizContractError('invalid_type', 'Multi select requires a list');
-      const normalized = value.map(item => datavizChoiceValue(definition, item));
+      const pathFields = definition.path_fields || [];
+      const normalized = pathFields.length
+        ? value.map(item => {
+            if (!Array.isArray(item) || item.length !== pathFields.length || item.some(child => child == null)) {
+              throw datavizContractError('invalid_path', `Multi select hierarchy values require ${pathFields.length}-level paths`);
+            }
+            return [...item];
+          })
+        : value.map(item => datavizChoiceValue(definition, item));
       const signatures = normalized.map(datavizValueSignature);
       if (new Set(signatures).size !== signatures.length) {
         throw datavizContractError('duplicate_value', 'Multi select values must be unique');
       }
       if (definition?.required && !normalized.length) {
         throw datavizContractError('required', 'At least one value is required');
+      }
+      if (definition?.max_selected != null && normalized.length > Number(definition.max_selected)) {
+        throw datavizContractError('too_many_values', `At most ${definition.max_selected} values may be selected`);
       }
       return normalized;
     }
@@ -423,12 +495,42 @@ const datavizRuntime = window.datavizRuntime = {
       throw new Error(`${spec.runtime} requires embedded code`);
     }
     if (this.transforms.has(spec.id)) throw new Error(`Duplicate Interactive Transform: ${spec.id}`);
+    if (!(spec.id in (window.dataviz.dependency_contract?.interactive?.dependencies || {}))) {
+      throw new Error(`Interactive Transform ${spec.id} is absent from the compiled dependency contract`);
+    }
+    const expectedInputs = window.dataviz.dependency_contract.interactive.inputs?.[spec.id] || {};
+    if (datavizInputContractSignature(spec.inputs) !== datavizInputContractSignature(expectedInputs)) {
+      throw new Error(`Interactive Transform ${spec.id} inputs differ from the compiled dependency contract`);
+    }
+    const interactiveContract = window.dataviz.dependency_contract.interactive;
+    if (datavizControlInputSignature(spec.selection_inputs) !== datavizControlInputSignature(interactiveContract.selection_inputs?.[spec.id])) {
+      throw new Error(`Interactive Transform ${spec.id} Selection inputs differ from the compiled dependency contract`);
+    }
+    if (datavizControlInputSignature(spec.compute_inputs) !== datavizControlInputSignature(interactiveContract.compute_inputs?.[spec.id])) {
+      throw new Error(`Interactive Transform ${spec.id} Compute inputs differ from the compiled dependency contract`);
+    }
+    if (datavizParameterInputSignature(spec.query_params) !== datavizParameterInputSignature(interactiveContract.query_parameters?.[spec.id])) {
+      throw new Error(`Interactive Transform ${spec.id} Query Parameter inputs differ from the compiled dependency contract`);
+    }
+    if (datavizOutputContractSignature(spec.id, spec.outputs) !== JSON.stringify([...(interactiveContract.outputs?.[spec.id] || [])].sort())) {
+      throw new Error(`Interactive Transform ${spec.id} outputs differ from the compiled dependency contract`);
+    }
     this.transforms.set(spec.id, {spec, source});
   },
   registerView(id, definition) {
     if (!id || typeof definition?.render !== 'function') throw new Error('View registration requires id and render');
     if (this.views.has(id)) throw new Error(`Duplicate View registration: ${id}`);
-    this.views.set(id, {inputs: definition.inputs || {}, render: definition.render});
+    if (!(id in (window.dataviz.dependency_contract?.views || {}))) {
+      throw new Error(`View ${id} is absent from the compiled dependency contract`);
+    }
+    const expectedInputs = window.dataviz.dependency_contract.views[id].inputs || {};
+    if (datavizInputContractSignature(definition.inputs) !== datavizInputContractSignature(expectedInputs)) {
+      throw new Error(`View ${id} inputs differ from the compiled dependency contract`);
+    }
+    // The declarative registration payload is only a drift assertion. Runtime
+    // scheduling must consume the immutable compiled contract so a View never
+    // has two competing dependency sources.
+    this.views.set(id, {inputs: {...expectedInputs}, render: definition.render});
   },
   registerRenderer(type, renderer) {
     if (!type || typeof renderer?.mount !== 'function') throw new Error('Renderer requires type and mount');
@@ -440,9 +542,8 @@ const datavizRuntime = window.datavizRuntime = {
     const selectionKeys = new Set();
     const computeKeys = new Set();
     snapshotIds.forEach(id => {
-      const spec = this.transforms.get(id)?.spec;
-      Object.values(spec?.selection_inputs || {}).forEach(key => selectionKeys.add(key));
-      Object.values(spec?.compute_inputs || {}).forEach(key => computeKeys.add(key));
+      Object.values(this.transformSelectionInputs(id)).forEach(key => selectionKeys.add(key));
+      Object.values(this.transformComputeInputs(id)).forEach(key => computeKeys.add(key));
     });
     selectionKeys.forEach(key => {
       document.querySelectorAll(`[data-selection-key="${CSS.escape(key)}"]`).forEach(control => {
@@ -459,19 +560,47 @@ const datavizRuntime = window.datavizRuntime = {
     });
   },
   transformOrder() {
-    const pending = new Map([...this.transforms].map(([id, item]) => [id, new Set(
-      Object.values(item.spec.inputs || {})
-        .map(canonicalOutputReference)
-        .filter(reference => reference.startsWith('interactive:'))
-        .map(reference => reference.slice('interactive:'.length).split('/')[0])
-    )]));
-    const order = [];
-    while (pending.size) {
-      const ready = [...pending].filter(([, dependencies]) => [...dependencies].every(value => !pending.has(value)));
-      if (!ready.length) throw new Error(`Interactive Transform cycle: ${[...pending.keys()].join(', ')}`);
-      ready.forEach(([id]) => { order.push(id); pending.delete(id); });
+    const order = [...(window.dataviz.dependency_contract?.interactive?.order || [])];
+    const registered = new Set(this.transforms.keys());
+    const missing = order.filter(id => !registered.has(id));
+    const unknown = [...registered].filter(id => !order.includes(id));
+    if (missing.length || unknown.length) {
+      throw new Error(
+        `Interactive registry differs from dependency contract; missing=${missing.join(',')} unknown=${unknown.join(',')}`
+      );
     }
     return order;
+  },
+  transformDependencies(id) {
+    const dependencies = window.dataviz.dependency_contract?.interactive?.dependencies?.[id];
+    if (!Array.isArray(dependencies)) throw new Error(`Interactive dependency contract is missing ${id}`);
+    return dependencies;
+  },
+  transformInputs(id) {
+    const inputs = window.dataviz.dependency_contract?.interactive?.inputs?.[id];
+    if (!inputs || typeof inputs !== 'object' || Array.isArray(inputs)) {
+      throw new Error(`Interactive input contract is missing ${id}`);
+    }
+    return inputs;
+  },
+  transformSelectionInputs(id) {
+    return window.dataviz.dependency_contract?.interactive?.selection_inputs?.[id] || {};
+  },
+  transformComputeInputs(id) {
+    return window.dataviz.dependency_contract?.interactive?.compute_inputs?.[id] || {};
+  },
+  transformQueryParameters(id) {
+    return window.dataviz.dependency_contract?.interactive?.query_parameters?.[id] || [];
+  },
+  transformViews(id, mode = 'downstream') {
+    return window.dataviz.dependency_contract?.interactive?.[
+      mode === 'direct' ? 'direct_views' : 'downstream_views'
+    ]?.[id] || [];
+  },
+  outputViews(reference) {
+    return window.dataviz.dependency_contract?.outputs?.[
+      canonicalOutputReference(reference)
+    ]?.views || [];
   },
   interactiveWorkerUrl(runtime) {
     if (this.workerUrls.has(runtime)) return this.workerUrls.get(runtime);
@@ -574,9 +703,9 @@ const datavizRuntime = window.datavizRuntime = {
         code_dependencies:item.source.dependencies || {},
         context:{
           inputs:inputValues,
-          query_params:Object.fromEntries((item.spec.query_params || []).map(key => [key, window.dataviz.query_parameters?.[key]])),
-          compute_params:Object.fromEntries(Object.entries(item.spec.compute_inputs || {}).map(([alias, key]) => [alias, window.dataviz.compute_parameters?.[key]])),
-          selections:Object.fromEntries(Object.entries(item.spec.selection_inputs || {}).map(([alias, key]) => [alias, window.dataviz.selections?.[key]])),
+          query_params:Object.fromEntries(this.transformQueryParameters(id).map(key => [key, window.dataviz.query_parameters?.[key]])),
+          compute_params:Object.fromEntries(Object.entries(this.transformComputeInputs(id)).map(([alias, key]) => [alias, window.dataviz.compute_parameters?.[key]])),
+          selections:Object.fromEntries(Object.entries(this.transformSelectionInputs(id)).map(([alias, key]) => [alias, window.dataviz.selections?.[key]])),
         },
         python_dependencies:item.spec.python_dependencies || [],
         // Module Workers created from a Blob cannot resolve root-relative or
@@ -697,9 +826,9 @@ const datavizRuntime = window.datavizRuntime = {
       inputs:Object.fromEntries(
         Object.entries(inputValues).map(([name, value]) => [name, datavizValueSignature(value)])
       ),
-      query_params:Object.fromEntries((item.spec.query_params || []).map(key => [key, window.dataviz.query_parameters?.[key]])),
-      compute_params:Object.fromEntries(Object.entries(item.spec.compute_inputs || {}).map(([alias, key]) => [alias, window.dataviz.compute_parameters?.[key]])),
-      selections:Object.fromEntries(Object.entries(item.spec.selection_inputs || {}).map(([alias, key]) => [alias, window.dataviz.selections?.[key]])),
+      query_params:Object.fromEntries(this.transformQueryParameters(id).map(key => [key, window.dataviz.query_parameters?.[key]])),
+      compute_params:Object.fromEntries(Object.entries(this.transformComputeInputs(id)).map(([alias, key]) => [alias, window.dataviz.compute_parameters?.[key]])),
+      selections:Object.fromEntries(Object.entries(this.transformSelectionInputs(id)).map(([alias, key]) => [alias, window.dataviz.selections?.[key]])),
     });
   },
   async executeTransform(id, item, inputValues, generation) {
@@ -717,34 +846,25 @@ const datavizRuntime = window.datavizRuntime = {
     return value;
   },
   markTransformStale(id) {
-    document.querySelectorAll('.dv-view').forEach(root => {
-      const view = this.views.get(root.dataset.viewId);
-      if (!view) return;
-      if (Object.values(view.inputs || {}).some(reference => canonicalOutputReference(reference).startsWith(`interactive:${id}/`))) {
-        this.viewAdapter?.setStatus(root, 'stale', 'run analysis');
-      }
+    this.transformViews(id).forEach(viewId => {
+      const root = this.viewAdapter?.node(viewId);
+      if (root) this.viewAdapter?.setStatus(root, 'stale', 'run analysis');
     });
     this.publishTransformStatus(id, 'stale', {message:'Inputs changed; run analysis'});
   },
   markTransformLoading(id, message = 'running analysis') {
-    document.querySelectorAll('.dv-view').forEach(root => {
-      const view = this.views.get(root.dataset.viewId);
-      if (!view) return;
-      if (Object.values(view.inputs || {}).some(reference => canonicalOutputReference(reference).startsWith(`interactive:${id}/`))) {
-        this.viewAdapter?.setStatus(root, 'loading', message);
-      }
+    this.transformViews(id).forEach(viewId => {
+      const root = this.viewAdapter?.node(viewId);
+      if (root) this.viewAdapter?.setStatus(root, 'loading', message);
     });
     this.publishTransformStatus(id, 'loading', {message});
   },
   markTransformReady(id) {
-    document.querySelectorAll('.dv-view').forEach(root => {
-      const viewId = root.dataset.viewId;
-      const view = this.views.get(viewId);
-      if (!view) return;
-      if (Object.values(view.inputs || {}).some(reference => canonicalOutputReference(reference).startsWith(`interactive:${id}/`))) {
-        const renderer = this.viewAdapter?.states.get(viewId)?.type || 'ready';
-        this.viewAdapter?.setStatus(root, 'ready', renderer);
-      }
+    this.transformViews(id, 'direct').forEach(viewId => {
+      const root = this.viewAdapter?.node(viewId);
+      if (!root) return;
+      const renderer = this.viewAdapter?.states.get(viewId)?.type || 'ready';
+      this.viewAdapter?.setStatus(root, 'ready', renderer);
     });
     this.publishTransformStatus(id, 'ready');
   },
@@ -774,10 +894,7 @@ const datavizRuntime = window.datavizRuntime = {
     const targetClosure = options.targets == null ? null : new Set(options.targets);
     if (targetClosure) {
       const addDependencies = id => {
-        Object.values(this.transforms.get(id)?.spec.inputs || {}).forEach(reference => {
-          const canonical = canonicalOutputReference(reference);
-          if (!canonical.startsWith('interactive:')) return;
-          const dependency = canonical.slice('interactive:'.length).split('/')[0];
+        this.transformDependencies(id).forEach(dependency => {
           if (targetClosure.has(dependency)) return;
           targetClosure.add(dependency);
           addDependencies(dependency);
@@ -789,12 +906,7 @@ const datavizRuntime = window.datavizRuntime = {
     for (let index = order.length - 1; index >= 0; index -= 1) {
       const id = order[index];
       if (!manualClosure.has(id)) continue;
-      Object.values(this.transforms.get(id)?.spec.inputs || {}).forEach(reference => {
-        const canonical = canonicalOutputReference(reference);
-        if (canonical.startsWith('interactive:')) {
-          manualClosure.add(canonical.slice('interactive:'.length).split('/')[0]);
-        }
-      });
+      this.transformDependencies(id).forEach(dependency => manualClosure.add(dependency));
     }
     const tasks = new Map();
     const renderOutputDelta = references => {
@@ -809,11 +921,12 @@ const datavizRuntime = window.datavizRuntime = {
       const item = this.transforms.get(id);
       const {spec} = item;
       const references = Object.fromEntries(
-        Object.entries(spec.inputs || {}).map(([name, reference]) => [name, canonicalOutputReference(reference)])
+        Object.entries(this.transformInputs(id)).map(([name, reference]) => [
+          name,
+          canonicalOutputReference(reference),
+        ])
       );
-      const dependencyIds = Object.values(references)
-        .filter(reference => reference.startsWith('interactive:'))
-        .map(reference => reference.slice('interactive:'.length).split('/')[0]);
+      const dependencyIds = this.transformDependencies(id);
       const task = (async () => {
         await Promise.all(dependencyIds.map(dependency => tasks.get(dependency)).filter(Boolean));
         const declared = Object.keys(spec.outputs || {});
@@ -824,9 +937,9 @@ const datavizRuntime = window.datavizRuntime = {
         const upstreamChanged = Object.values(references).some(reference => changedOutputs.has(reference));
         const upstreamStale = Object.values(references).some(reference => staleOutputs.has(reference));
         const selectionChanged = changedSelections == null
-          || Object.values(spec.selection_inputs || {}).some(key => changedSelections.has(key));
+          || Object.values(this.transformSelectionInputs(id)).some(key => changedSelections.has(key));
         const computeChanged = changedCompute == null
-          || Object.values(spec.compute_inputs || {}).some(key => changedCompute.has(key));
+          || Object.values(this.transformComputeInputs(id)).some(key => changedCompute.has(key));
         const missingOutput = requiredOutputReferences.some(reference =>
           !Object.prototype.hasOwnProperty.call(outputs, reference)
         );
@@ -1003,16 +1116,16 @@ const datavizRuntime = window.datavizRuntime = {
     if (changedSelectionKeys == null) return null;
     const changedSelections = new Set(changedSelectionKeys || []);
     const outputs = changedOutputs || new Set();
-    const affected = new Set(
-      Object.entries(window.dataviz.portable?.selection_contract || {})
-        .filter(([viewId, contract]) => contract.some(item => (
-          changedSelections.has(item.key) && datavizSelectionAffectsView(viewId, item)
-        )))
-        .map(([viewId]) => viewId)
-    );
-    this.views.forEach((definition, id) => {
-      if (Object.values(definition.inputs).some(reference => outputs.has(canonicalOutputReference(reference)))) affected.add(id);
+    const affected = new Set();
+    changedSelections.forEach(key => {
+      const dependency = window.dataviz.dependency_contract?.controls?.[key];
+      (dependency?.direct_views || []).forEach(viewId => {
+        const item = datavizViewSelectionContract(viewId)
+          .find(candidate => candidate.key === key);
+        if (item && datavizSelectionAffectsView(viewId, item)) affected.add(viewId);
+      });
     });
+    outputs.forEach(reference => this.outputViews(reference).forEach(viewId => affected.add(viewId)));
     return [...affected];
   },
   renderViews(context) {
@@ -1189,6 +1302,7 @@ const datavizRuntime = window.datavizRuntime = {
       datavizPostToParent({
         type:'dataviz:canvas-ready',
         selections:structuredClone(window.dataviz.selections || {}),
+        selection_intents:structuredClone(window.dataviz.selection_intents || {}),
       });
     })();
     return this.initializationPromise;
@@ -1219,7 +1333,6 @@ window.addEventListener('dataviz:interactionprogress', event => {
 });
 
 const DATAVIZ_OWNER_PACKAGE_RUNTIME = true;
-const datavizSelectionRank = {dashboard: 0, section: 1, view: 2};
 const datavizSelectionFields = item => {
   const pathFields = item.definition?.path_fields || [];
   return pathFields.length ? pathFields : [item.binding?.field || item.id];
@@ -1230,12 +1343,15 @@ const datavizSelectionCanApply = (row, item) => (
   && datavizSelectionFields(item).every(field => Object.prototype.hasOwnProperty.call(row, field))
 );
 const datavizRowsForView = viewId => Object.values(
-  window.dataviz.portable?.view_inputs?.[viewId] || {}
+  window.dataviz.dependency_contract?.views?.[viewId]?.inputs || {}
 ).flatMap(reference => {
   return datavizTableRows(window.dataviz.portable?.outputs?.[canonicalOutputReference(reference)]);
 });
+const datavizViewSelectionContract = viewId => (
+  window.dataviz.dependency_contract?.views?.[viewId]?.selection_contract || []
+);
 const datavizSelectionDomainReferences = item => (
-  window.dataviz.portable?.selection_option_domains?.[item?.key] || []
+  window.dataviz.dependency_contract?.controls?.[item?.key]?.option_domain_references || []
 ).map(canonicalOutputReference);
 const datavizSelectionAffectsView = (viewId, item) => {
   const rows = datavizRowsForView(viewId);
@@ -1278,21 +1394,83 @@ const datavizSelectionMatches = (row, item, value) => {
   else matched = String(actual ?? '') === String(value ?? '');
   return matched;
 };
+const datavizSelectionIntentState = () => {
+  if (!window.dataviz.selection_intents || typeof window.dataviz.selection_intents !== 'object') {
+    window.dataviz.selection_intents = {};
+  }
+  return window.dataviz.selection_intents;
+};
+const datavizSelectionIntentKey = input => (
+  input?.closest('[data-selection-key]')?.dataset.selectionKey || null
+);
+const datavizMergeSelectionIntents = values => {
+  const normalize = window.datavizComponents?.controls?.normalizeSelectionIntent;
+  if (!normalize || !values || typeof values !== 'object') return;
+  const state = datavizSelectionIntentState();
+  Object.entries(values).forEach(([key, value]) => {
+    const intent = normalize(value);
+    if (intent) state[key] = intent;
+  });
+};
+const datavizSelectionIntentSnapshot = () => {
+  const normalize = window.datavizComponents?.controls?.normalizeSelectionIntent;
+  const validKeys = new Set(
+    Array.from(document.querySelectorAll('[data-selection-key]'))
+      .map(control => control.dataset.selectionKey)
+      .filter(Boolean)
+  );
+  return Object.fromEntries(
+    Object.entries(datavizSelectionIntentState()).filter(
+      ([key, value]) => validKeys.has(key) && Boolean(normalize?.(value))
+    )
+  );
+};
+const datavizCaptureSelectionIntent = input => {
+  const key = datavizSelectionIntentKey(input);
+  const infer = window.datavizComponents?.controls?.inferSelectionIntent;
+  if (!key || !infer) return null;
+  const intent = infer(input);
+  if (intent) datavizSelectionIntentState()[key] = intent;
+  return intent;
+};
+const datavizReconcileSelectionOptionDomain = (
+  input,
+  nextOptions,
+  {selectedValues = [], required = input?.required === true} = {},
+) => {
+  const reconcile = window.datavizComponents?.controls?.reconcileOptionDomain;
+  if (!reconcile) {
+    input.replaceChildren(...Array.from(nextOptions || []));
+    return {intent:null, selectedValues:[]};
+  }
+  const key = datavizSelectionIntentKey(input);
+  const state = datavizSelectionIntentState();
+  const result = reconcile(input, nextOptions, {
+    selectedValues,
+    intent:key ? state[key] : null,
+    required,
+  });
+  if (key && result.intent) state[key] = result.intent;
+  return result;
+};
 window.dataviz.selection = {
   fields: datavizSelectionFields,
   canApply: datavizSelectionCanApply,
   matches: datavizSelectionMatches,
+  captureIntent: datavizCaptureSelectionIntent,
+  reconcileOptionDomain: datavizReconcileSelectionOptionDomain,
+  intentSnapshot: datavizSelectionIntentSnapshot,
 };
-if (window.datavizComponents?.selectors) {
-  window.datavizComponents.selectorPathOptions = ({selector, input, levels}) => {
-    const viewId = selector.dataset.cascaderView;
-    const selectionKey = selector.closest('[data-selection-key]')?.dataset.selectionKey;
+if (window.datavizComponents?.controls) {
+  window.datavizComponents.controlPathOptions = ({control, input, levels}) => {
+    const viewId = control.dataset.cascaderView;
+    const selectionKey = control.closest('[data-selection-key]')?.dataset.selectionKey;
     if (!viewId || !levels?.length) {
       return Array.from(input.options).map(option => {
         try { return JSON.parse(option.value); } catch (_error) { return [option.value]; }
       });
     }
-    const contract = window.dataviz.portable?.selection_contract?.[viewId] || [];
+    const contract = datavizViewSelectionContract(viewId);
     const otherSelections = contract.filter(item => item.key !== selectionKey);
     const item = contract.find(candidate => candidate.key === selectionKey);
     const rows = datavizSelectionDomainReferences(item).flatMap(reference =>
@@ -1311,7 +1489,8 @@ if (window.datavizComponents?.selectors) {
 }
 const datavizCascadeOccurrences = () => {
   const occurrences = new Map();
-  Object.entries(window.dataviz.portable?.selection_contract || {}).forEach(([viewId, contract]) => {
+  Object.entries(window.dataviz.dependency_contract?.views || {}).forEach(([viewId, dependency]) => {
+    const contract = dependency.selection_contract || [];
     contract.forEach(item => {
       if (!occurrences.has(item.key)) occurrences.set(item.key, []);
       occurrences.get(item.key).push({viewId, item});
@@ -1322,14 +1501,15 @@ const datavizCascadeOccurrences = () => {
 const datavizAvailableSelectionOptions = targets => {
   const item = targets[0]?.item;
   const definition = item?.definition || {};
-  const targetRank = datavizSelectionRank[item?.origin] ?? 99;
   const values = new Map();
   let observedSource = false;
   targets.forEach(({viewId, item: target}) => {
     const outputRefs = datavizSelectionDomainReferences(target);
-    const upstream = (window.dataviz.portable?.selection_contract?.[viewId] || []).filter(candidate =>
-      (datavizSelectionRank[candidate.origin] ?? 99) < targetRank
+    const upstreamKeys = new Set(
+      window.dataviz.dependency_contract?.controls?.[target.key]?.cascade_upstream || []
     );
+    const upstream = datavizViewSelectionContract(viewId)
+      .filter(candidate => upstreamKeys.has(candidate.key));
     outputRefs.forEach(reference => {
       const canonical = canonicalOutputReference(reference);
       const rows = datavizTableRows(window.dataviz.portable?.outputs?.[canonical]);
@@ -1352,7 +1532,7 @@ const datavizAvailableSelectionOptions = targets => {
       });
     });
   });
-  const staticChoices = definition.choices || [];
+  const staticChoices = datavizStaticChoices(definition);
   const options = staticChoices.length
     ? staticChoices.map(choice => ({
       value:choice.value,
@@ -1383,11 +1563,11 @@ const publishDashboardSelectionOptions = occurrences => {
 const refreshCascadingSelections = () => {
   const occurrences = datavizCascadeOccurrences();
   const controls = Array.from(document.querySelectorAll('[data-selection-key]'));
-  [0, 1, 2].forEach(rank => {
-    controls.forEach(control => {
-      const targets = occurrences.get(control.dataset.selectionKey) || [];
-      const targetRank = datavizSelectionRank[targets[0]?.item?.origin];
-      if (!targets.length || targetRank !== rank) return;
+  const order = window.dataviz.dependency_contract?.control_order || [];
+  order.forEach(key => {
+    const targets = occurrences.get(key) || [];
+    if (!targets.length || targets[0]?.item?.kind !== 'selection') return;
+    controls.filter(control => control.dataset.selectionKey === key).forEach(control => {
       const input = control.querySelector('select');
       if (!input) return;
       const definition = targets[0]?.item?.definition || {};
@@ -1397,12 +1577,12 @@ const refreshCascadingSelections = () => {
         return;
       }
       const availability = datavizAvailableSelectionOptions(targets);
-      if (control.querySelector('[data-selector-template="cascader"], [data-selector-template="tree-select"]')) {
+      if (control.querySelector('[data-control-component="cascader"], [data-control-component="tree-select"]')) {
         control.dataset.optionDomainState = availability.observed ? 'ready' : 'pending';
         syncPortableChoices(control);
         return;
       }
-      if (definition.cascade === false && definition.choices?.length) {
+      if (definition.cascade === false && datavizStaticChoices(definition).length) {
         control.dataset.optionDomainState = 'static';
         syncPortableChoices(control);
         return;
@@ -1419,18 +1599,17 @@ const refreshCascadingSelections = () => {
       const currentValues = input.multiple
         ? (Array.isArray(currentValue) ? currentValue : [])
         : [currentValue];
-      const selected = new Set(
-        currentValues
-          .filter(value => !datavizIsEmptyControlValue(value))
-          .map(datavizValueSignature)
-      );
+      const selectedValues = currentValues
+        .filter(value => !datavizIsEmptyControlValue(value))
+        .map(value => datavizEncodeControlValue(input, value, {
+          path:control.dataset.selectionPath === 'true',
+        }));
       const options = [];
       if (!input.multiple && control.querySelector('[data-empty-means-all="true"]')) {
         const empty = document.createElement('option');
         empty.value = '';
         empty.hidden = true;
         empty.dataset.emptyOption = 'true';
-        empty.selected = datavizIsEmptyControlValue(currentValue);
         options.push(empty);
       }
       availability.options.forEach(item => {
@@ -1440,39 +1619,36 @@ const refreshCascadingSelections = () => {
         });
         option.textContent = item.label ?? String(item.value);
         option.disabled = item.available === false;
-        option.selected = !option.disabled && selected.has(datavizValueSignature(item.value));
         if (item.group) option.dataset.group = item.group;
         if (item.description) option.dataset.description = item.description;
         if (item.keywords?.length) option.dataset.keywords = item.keywords.join(' ');
         options.push(option);
       });
-      if (definition.required && !options.some(option => option.selected && !option.disabled)) {
-        const fallback = options.find(option => option.dataset.emptyOption !== 'true' && !option.disabled);
-        if (fallback) fallback.selected = true;
-      }
-      input.replaceChildren(...options);
+      datavizReconcileSelectionOptionDomain(input, options, {
+        selectedValues,
+        required:Boolean(definition.required),
+      });
       control.dataset.cascadeAvailable = String(
         availability.options.filter(option => option.available !== false).length
       );
       syncPortableChoices(control);
     });
-    // Commit each scope before deriving the next one. A Dashboard change can
-    // invalidate Section values, which must be visible to View selectors in
-    // this same interaction rather than one event later.
-    readSelectionInputs({maxRank:rank});
+    // Commit each compiled Control before deriving its declared dependents.
+    // The browser does not rebuild scope/cascade edges from DOM order.
+    readSelectionInputs({keys:new Set([key])});
   });
   publishDashboardSelectionOptions(occurrences);
 };
-const readSelectionInputs = ({maxRank = null} = {}) => {
+const readSelectionInputs = ({keys = null} = {}) => {
   document.querySelectorAll('[data-selection-key]').forEach(control => {
     const key = control.dataset.selectionKey;
+    if (keys && !keys.has(key)) return;
     const type = control.dataset.selectionType;
     const input = control.querySelector('[data-selection-input]');
     if (!input) return;
-    const item = Object.values(window.dataviz.portable?.selection_contract || {})
-      .flat()
+    const item = Object.values(window.dataviz.dependency_contract?.views || {})
+      .flatMap(view => view.selection_contract || [])
       .find(candidate => candidate.key === key);
-    if (maxRank != null && (datavizSelectionRank[item?.origin] ?? 99) > maxRank) return;
     const definition = item?.definition || {type};
     if (
       input.tagName === 'SELECT'
@@ -1536,7 +1712,7 @@ const datavizContentChoiceLabel = (reference, value, control = null) => {
     })) === datavizValueSignature(value)
   ));
   if (option) return option.textContent?.trim() || String(value);
-  const choice = (reference.definition?.choices || []).find(candidate => (
+  const choice = datavizStaticChoices(reference.definition).find(candidate => (
     datavizValueSignature(candidate.value) === datavizValueSignature(value)
   ));
   return choice?.label ?? String(value);
@@ -1569,7 +1745,7 @@ const datavizFormatContentReference = reference => {
   if ((definition.path_fields || []).length) {
     const parsed = datavizContentPathValue(value);
     const paths = Array.isArray(parsed?.[0]) ? parsed : [parsed];
-    const separator = control?.querySelector('.dv-selector')?.dataset.pathSeparator || ' / ';
+    const separator = control?.querySelector('.dv-control')?.dataset.pathSeparator || ' / ';
     return paths
       .filter(path => Array.isArray(path))
       .map(path => path.map(String).join(separator))
@@ -1584,7 +1760,7 @@ const datavizFormatContentReference = reference => {
     const available = availableOptions.map(option => datavizDecodeControlValue(input, option.value, {
       path:control?.dataset?.selectionPath === 'true',
     }));
-    const choices = reference.definition?.choices || [];
+    const choices = datavizStaticChoices(reference.definition);
     const universe = available.length
       ? available
       : choices.map(choice => choice.value);
@@ -1640,10 +1816,9 @@ const readComputeInputs = () => {
     const definition = window.dataviz.compute_definitions?.[key] || {type};
     const decode = raw => datavizDecodeControlValue(input, raw);
     if (type === 'date_range') {
-      const range = [
-        input.querySelector('[data-compute-range="start"]')?.value || '',
-        input.querySelector('[data-compute-range="end"]')?.value || '',
-      ];
+      const range = input.value
+        ? input.value.split(',', 2).map(item => item.trim())
+        : [];
       values[key] = range.some(Boolean) ? range : [];
     } else if (type === 'boolean') values[key] = Boolean(input.checked);
     else if (type === 'multi_select') values[key] = Array.from(input.selectedOptions).map(option => decode(option.value));
@@ -1802,7 +1977,11 @@ window.dataviz.applySelections = async () => {
   }
   window.dispatchEvent(new CustomEvent('dataviz:selectionchange', {detail: window.dataviz.selections}));
   if (window.parent !== window) {
-    datavizPostToParent({type: 'dataviz:selections-changed', selections: window.dataviz.selections});
+    datavizPostToParent({
+      type:'dataviz:selections-changed',
+      selections:window.dataviz.selections,
+      selection_intents:datavizSelectionIntentSnapshot(),
+    });
   }
   await datavizRuntime.runTransforms(changedSelectionKeys, [], {
     changedComputeKeys: previous == null ? null : [],
@@ -1920,10 +2099,7 @@ const setComputeInputs = values => {
     const type = input.dataset.computeType;
     if (type === 'date_range') {
       const range = Array.isArray(value) ? value : String(value || '').split(',', 2);
-      const start = input.querySelector('[data-compute-range="start"]');
-      const end = input.querySelector('[data-compute-range="end"]');
-      if (start) start.value = range[0] || '';
-      if (end) end.value = range[1] || '';
+      input.value = range.some(Boolean) ? `${range[0] || ''},${range[1] || ''}` : '';
     } else if (type === 'boolean') input.checked = Boolean(value);
     else if (input.multiple) {
       const selected = new Set((value || []).map(item => datavizEncodeControlValue(input, item)));
@@ -1943,6 +2119,7 @@ window.addEventListener('message', event => {
   ) return;
   if (event.data?.type === 'dataviz:set-selections') {
     const values = event.data.selections || {};
+    datavizMergeSelectionIntents(event.data.selection_intents || {});
     Object.assign(window.dataviz.selections, values);
     setSelectionInputs(values);
     window.dataviz.applySelections().catch(error => console.error('[dataviz:selections]', error));
@@ -2003,10 +2180,11 @@ window.addEventListener('message', event => {
 });
 let datavizSelectionScheduled = false;
 let datavizSelectionQueue = Promise.resolve();
-const scheduleDatavizSelection = () => {
+const scheduleDatavizSelection = event => {
   // Capture the user's native control value before asynchronous initialization
   // or option-domain reconciliation can rebuild the underlying <select>.
   try {
+    datavizCaptureSelectionIntent(event?.currentTarget || event?.target);
     readSelectionInputs();
   } catch (error) {
     console.error('[dataviz:selections]', error);
@@ -2032,7 +2210,7 @@ const scheduleDatavizSelection = () => {
 const datavizEscape = value => String(value ?? '')
   .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
   .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
-const syncPortableChoices = control => control.querySelector('.dv-selector')?._syncSelector?.();
+const syncPortableChoices = control => control.querySelector('.dv-control')?._syncControl?.();
 window.datavizComponents?.hydrate(document);
 document.querySelectorAll('[data-selection-input]').forEach(input => {
   input.addEventListener('input', scheduleDatavizSelection);
@@ -2047,8 +2225,11 @@ document.querySelectorAll('[data-compute-input]').forEach(input => {
     const trigger = input.dataset.computeTrigger || input.closest('[data-compute-trigger]')?.dataset.computeTrigger;
     if (trigger !== 'auto' || !key || !changed.includes(key)) return;
     clearTimeout(datavizComputeTimer);
-    const consumers = [...datavizRuntime.transforms.values()]
-      .filter(item => item.spec.trigger === 'auto' && Object.values(item.spec.compute_inputs || {}).includes(key));
+    const consumers = (
+      window.dataviz.dependency_contract?.controls?.[key]?.transform_consumers || []
+    ).map(id => datavizRuntime.transforms.get(id)).filter(
+      item => item?.spec.trigger === 'auto'
+    );
     const delay = Math.max(0, ...consumers.map(item => Number(item.spec.debounce_ms || 0)));
     datavizComputeTimer = setTimeout(() => window.dataviz.applyCompute({keys:[key]}).catch(error => {
       console.error('[dataviz:compute:auto]', error);
@@ -2086,7 +2267,7 @@ Object.entries(window.dataviz.portable?.output_errors || {}).forEach(([reference
   );
 });
 window.dataviz.getViewSelections = viewId => {
-  const contract = window.dataviz.portable?.selection_contract?.[viewId] || [];
+  const contract = datavizViewSelectionContract(viewId);
   return Object.fromEntries(
     contract.map(item => [item.id, window.dataviz.selections[item.key]])
   );

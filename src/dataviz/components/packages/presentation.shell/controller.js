@@ -53,7 +53,8 @@
     owner.dataset.controlDensity = density;
     owner.dataset.controlWidth = widthName;
     owner.dataset.overlayWidth = String(width);
-    const panel = owner.querySelector(':scope > summary + *');
+    const panel = owner.querySelector(':scope > [data-control-panel-body]')
+      || owner.querySelector(':scope > summary + *');
     if (panel) panel.dataset.overlayWidth = String(width);
     const record = owner._datavizOverlayRecord;
     if (record) {

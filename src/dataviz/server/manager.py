@@ -15,7 +15,7 @@ from dataviz.execution.fingerprint import (
     ensure_query_run_compatible,
     query_contract_fingerprint,
 )
-from dataviz.execution.plan import compile_plan, server_interactive_base_references
+from dataviz.execution.plan import compile_plan
 from dataviz.execution.events import ExecutionEvent
 from dataviz.errors import DatavizError, ExecutionFailure
 from dataviz.maintenance import cleanup_workspace_storage
@@ -268,7 +268,7 @@ class RunManager:
             query_targets=sorted(plan.targets),
             query_nodes=sorted(plan.nodes),
             server_interactive_inputs=sorted(
-                server_interactive_base_references(dashboard)
+                dashboard.dependency_contract.server_interactive_base_references()
             ),
             query_contract_hash=query_contract_fingerprint(dashboard, plan.nodes),
         )

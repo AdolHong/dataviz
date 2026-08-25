@@ -58,6 +58,130 @@
         page.scrollTop += wheelEvent.deltaY * multiplier;
       }, {capture:true, passive:false});
     };
+    const chartTheme = root => {
+      const scope = root?.closest?.('.dv-canvas') || document.documentElement;
+      const style = getComputedStyle(scope);
+      const token = (name, fallback) => style.getPropertyValue(name).trim() || fallback;
+      const accent = token('--dv-accent', '#3949ab');
+      return {
+        ink:token('--dv-ink', '#202536'),
+        muted:token('--dv-muted', '#667085'),
+        line:token('--dv-line', '#d9e0ec'),
+        grid:token('--dv-chart-grid', '#e8edf5'),
+        panel:token('--dv-panel', '#ffffff'),
+        accent,
+        font:token('--dv-font-sans', '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'),
+        palette:[
+          accent,
+          ...Array.from({length:7}, (_, index) => token(
+            `--dv-chart-${index + 2}`,
+            ['#26a69a', '#f2a93b', '#e76f51', '#7e57c2', '#2f80ed', '#4caf50', '#e65b7a'][index],
+          )),
+        ],
+      };
+    };
+    const plotlyAxisTheme = (axis, theme) => {
+      const source = axis || {};
+      const title = typeof source.title === 'object' && source.title !== null
+        ? {...source.title, font:{color:theme.muted, ...(source.title.font || {})}}
+        : source.title;
+      return {
+        gridcolor:theme.grid,
+        zerolinecolor:theme.line,
+        linecolor:theme.line,
+        tickcolor:theme.line,
+        automargin:true,
+        ...source,
+        tickfont:{color:theme.muted, ...(source.tickfont || {})},
+        ...(title === undefined ? {} : {title}),
+      };
+    };
+    const plotlyTheme = (root, layout = {}) => {
+      const theme = chartTheme(root);
+      const hoverlabel = layout.hoverlabel || {};
+      const legend = layout.legend || {};
+      return {
+        paper_bgcolor:'transparent',
+        plot_bgcolor:'transparent',
+        colorway:theme.palette,
+        ...layout,
+        font:{family:theme.font, color:theme.ink, ...(layout.font || {})},
+        hoverlabel:{
+          bgcolor:theme.panel,
+          bordercolor:theme.line,
+          ...hoverlabel,
+          font:{family:theme.font, color:theme.ink, ...(hoverlabel.font || {})},
+        },
+        legend:{
+          ...legend,
+          font:{family:theme.font, color:theme.muted, ...(legend.font || {})},
+        },
+        xaxis:plotlyAxisTheme(layout.xaxis, theme),
+        yaxis:plotlyAxisTheme(layout.yaxis, theme),
+      };
+    };
+    const plotlyConfig = (config = {}) => ({
+      responsive:true,
+      displaylogo:false,
+      // A Dashboard is a scrolling document first.  Plotly must not consume a
+      // wheel gesture unless the author explicitly opts into chart zooming.
+      scrollZoom:false,
+      ...config,
+    });
+    const echartsAxisTheme = (axis, theme) => {
+      const source = axis || {};
+      const axisLine = source.axisLine || {};
+      const axisTick = source.axisTick || {};
+      const splitLine = source.splitLine || {};
+      return {
+        ...source,
+        axisLabel:{color:theme.muted, ...(source.axisLabel || {})},
+        nameTextStyle:{color:theme.muted, ...(source.nameTextStyle || {})},
+        axisLine:{...axisLine, lineStyle:{color:theme.line, ...(axisLine.lineStyle || {})}},
+        axisTick:{...axisTick, lineStyle:{color:theme.line, ...(axisTick.lineStyle || {})}},
+        splitLine:{...splitLine, lineStyle:{color:theme.grid, ...(splitLine.lineStyle || {})}},
+      };
+    };
+    const echartsAxisCollection = (axis, theme) => Array.isArray(axis)
+      ? axis.map(item => echartsAxisTheme(item, theme))
+      : echartsAxisTheme(axis, theme);
+    const echartsTheme = (root, options = {}) => {
+      const theme = chartTheme(root);
+      const legend = options.legend || {};
+      const tooltip = options.tooltip || {};
+      const radar = options.radar || {};
+      const visualMap = options.visualMap || {};
+      const result = {
+        backgroundColor:'transparent',
+        color:theme.palette,
+        ...options,
+        textStyle:{fontFamily:theme.font, color:theme.ink, ...(options.textStyle || {})},
+        legend:{
+          ...legend,
+          textStyle:{fontFamily:theme.font, color:theme.muted, ...(legend.textStyle || {})},
+        },
+        tooltip:{
+          backgroundColor:theme.panel,
+          borderColor:theme.line,
+          ...tooltip,
+          textStyle:{fontFamily:theme.font, color:theme.ink, ...(tooltip.textStyle || {})},
+        },
+      };
+      if (options.xAxis !== undefined) result.xAxis = echartsAxisCollection(options.xAxis, theme);
+      if (options.yAxis !== undefined) result.yAxis = echartsAxisCollection(options.yAxis, theme);
+      if (options.radar !== undefined) result.radar = {
+        ...radar,
+        axisName:{color:theme.muted, ...(radar.axisName || {})},
+        axisLine:{...radar.axisLine, lineStyle:{color:theme.line, ...(radar.axisLine?.lineStyle || {})}},
+        splitLine:{...radar.splitLine, lineStyle:{color:theme.grid, ...(radar.splitLine?.lineStyle || {})}},
+        splitArea:{...radar.splitArea, areaStyle:{color:['transparent'], ...(radar.splitArea?.areaStyle || {})}},
+      };
+      if (options.visualMap !== undefined) result.visualMap = {
+        ...visualMap,
+        textStyle:{color:theme.muted, ...(visualMap.textStyle || {})},
+      };
+      return result;
+    };
     const formatTableValue = (value, rule) => {
       if (value == null) return '';
       if (!rule) return String(value);
@@ -512,8 +636,8 @@
         global.Plotly.newPlot(
           chartNode,
           descriptor.data || [],
-          descriptor.layout || {},
-          {responsive:true, displaylogo:false, ...(descriptor.config || {})},
+          plotlyTheme(renderContext.root, descriptor.layout || {}),
+          plotlyConfig(descriptor.config),
         );
         return {node:chartNode};
       },
@@ -521,8 +645,8 @@
         global.Plotly.react(
           state.node,
           descriptor.data || [],
-          descriptor.layout || {},
-          {responsive:true, displaylogo:false, ...(descriptor.config || {})},
+          plotlyTheme(state.node.closest('.dv-view'), descriptor.layout || {}),
+          plotlyConfig(descriptor.config),
         );
         return state;
       },
@@ -535,7 +659,7 @@
         chartNode.className = 'dv-chart dv-echarts';
         renderContext.body.append(chartNode);
         const chart = global.echarts.init(chartNode);
-        chart.setOption(descriptor.options || {});
+        chart.setOption(echartsTheme(renderContext.root, descriptor.options || {}));
         bindEchartsLegend(chart, descriptor);
         const observer = new ResizeObserver(() => chart.resize());
         observer.observe(chartNode);
@@ -543,7 +667,10 @@
       },
       update(_renderContext, descriptor, state) {
         state.chart.off('legendselectchanged');
-        state.chart.setOption(descriptor.options || {}, {notMerge:true});
+        state.chart.setOption(
+          echartsTheme(state.node.closest('.dv-view'), descriptor.options || {}),
+          {notMerge:true},
+        );
         bindEchartsLegend(state.chart, descriptor);
         return state;
       },
@@ -625,8 +752,8 @@
       global.Plotly.newPlot(
         chartNode,
         spec.data || [],
-        spec.layout || {},
-        {responsive:true, displaylogo:false},
+        plotlyTheme(chartNode.closest('.dv-view'), spec.layout || {}),
+        plotlyConfig(spec.config),
       );
     });
     document.querySelectorAll('.dv-echarts[data-spec]').forEach(chartNode => {
@@ -635,7 +762,7 @@
         return;
       }
       const chart = global.echarts.init(chartNode);
-      chart.setOption(services.decodeSpec(chartNode));
+      chart.setOption(echartsTheme(chartNode.closest('.dv-view'), services.decodeSpec(chartNode)));
       new ResizeObserver(() => chart.resize()).observe(chartNode);
     });
     document.querySelectorAll('.dv-perspective-bootstrap').forEach((bootstrap, index) => {

@@ -97,11 +97,13 @@
   }
 
   function selectedWorkerInputs(item, inputs, services) {
-    const filters = Object.entries(item.spec.selection_contract || {}).map(
-      ([alias, contract]) => ({
+    const transformInputs = global.dataviz.dependency_contract
+      ?.interactive?.selection_inputs?.[item.spec.id] || {};
+    const filters = Object.entries(transformInputs).map(
+      ([alias, key]) => ({
         alias,
-        contract,
-        value:global.dataviz.selections?.[contract.key],
+        contract:global.dataviz.dependency_contract.controls[key],
+        value:global.dataviz.selections?.[key],
       })
     );
     const prepared = Object.fromEntries(

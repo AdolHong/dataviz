@@ -1,0 +1,7 @@
+schema: dataviz/component-story/v1
+stories:
+  - id: control.checkbox.boolean
+    component: control.checkbox
+    title: Independent boolean field
+    summary: Checkbox expresses a staged yes/no value; it is not a two-option Radio.Group.
+    gallery: {dashboard: component-gallery, target: "[data-control-component='checkbox']", anchor: control-checkbox}

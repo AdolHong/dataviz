@@ -39,10 +39,13 @@ def test_parameter_content_templates_format_human_facing_values():
         {
             "id": "stores",
             "type": "multi_select",
-            "choices": [
-                {"label": "上海仓", "value": 5740},
-                {"label": "杭州仓", "value": 5750},
-            ],
+            "options": {
+                "mode": "static",
+                "choices": [
+                    {"label": "上海仓", "value": 5740},
+                    {"label": "杭州仓", "value": 5750},
+                ],
+            },
         }
     )
 
@@ -61,7 +64,7 @@ def test_parameter_content_templates_format_human_facing_values():
 def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v3",
+            "schema": "dataviz/dashboard/v4",
             "id": "hourly-sales",
             "title": "小时销售",
             "controls": [
@@ -70,7 +73,10 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
                     "kind": "selection",
                     "type": "single_select",
                     "default": "south",
-                    "choices": [{"label": "华南", "value": "south"}],
+                    "options": {
+                        "mode": "static",
+                        "choices": [{"label": "华南", "value": "south"}],
+                    },
                 }
             ],
             "sections": [
@@ -84,10 +90,13 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
                             "kind": "selection",
                             "type": "single_select",
                             "default": 5,
-                            "choices": [
-                                {"label": "周四", "value": 4},
-                                {"label": "周五", "value": 5},
-                            ],
+                            "options": {
+                                "mode": "static",
+                                "choices": [
+                                    {"label": "周四", "value": 4},
+                                    {"label": "周五", "value": 5},
+                                ],
+                            },
                         }
                     ],
                     "views": ["detail"],
@@ -127,10 +136,13 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
             "id": "dow",
             "kind": "selection",
             "type": "multi_select",
-            "choices": [
-                {"label": "周四", "value": 4},
-                {"label": "周五", "value": 5},
-            ],
+            "options": {
+                "mode": "static",
+                "choices": [
+                    {"label": "周四", "value": 4},
+                    {"label": "周五", "value": 5},
+                ],
+            },
         }
     )
     assert format_selection_value([4, 5], selection) == "全部"
@@ -139,7 +151,7 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
 def test_interpolation_is_limited_to_declarative_content_fields():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v3",
+            "schema": "dataviz/dashboard/v4",
             "id": "hourly-sales",
             "title": "商品 {{ parameters.product_id }}",
             "subtitle": "{{ parameters.period }}",
@@ -248,7 +260,10 @@ def test_custom_canvas_content_helper_keeps_selection_binding(tmp_path: Path):
             "field": "region",
             "type": "single_select",
             "default": "华东",
-            "choices": [{"label": "周五", "value": "华东"}],
+            "options": {
+                "mode": "static",
+                "choices": [{"label": "周五", "value": "华东"}],
+            },
         }
     ]
     definition["canvas"] = {"template": "canvas/content.html"}
@@ -287,7 +302,10 @@ def test_validate_rejects_unknown_and_executable_content_expressions(tmp_path: P
             "id": "dow",
             "kind": "selection",
             "type": "single_select",
-            "choices": [{"label": "周五", "value": 5}],
+            "options": {
+                "mode": "static",
+                "choices": [{"label": "周五", "value": 5}],
+            },
         }
     ]
     definition["views"][0]["description"] = (

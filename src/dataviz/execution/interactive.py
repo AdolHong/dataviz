@@ -53,6 +53,9 @@ class InteractivePlanNode:
     definition: Any
     inputs: dict[str, OutputReference]
     dependencies: set[str]
+    query_parameters: tuple[str, ...]
+    selection_inputs: dict[str, str]
+    compute_inputs: dict[str, str]
 
 
 def normalize_interactive_target(value: str) -> str:
@@ -75,34 +78,8 @@ def compile_interactive_plan(
             details={"code": "interactive_transform_unknown", "id": target_id},
         )
 
-    selected: set[str] = set()
-    visiting: set[str] = set()
-    ordered: list[str] = []
-
-    def include(identifier: str) -> None:
-        if identifier in selected:
-            return
-        if identifier in visiting:
-            raise ValidationFailure(
-                "Interactive Transform dependency graph contains a cycle",
-                details={"code": "interactive_cycle", "node": identifier},
-            )
-        visiting.add(identifier)
-        definition = dashboard.interactive_transforms[identifier][1]
-        for value in definition.inputs.values():
-            reference = parse_output_reference(value)
-            if reference.node_id.startswith("interactive:"):
-                dependency_id = reference.node_id.split(":", 1)[1]
-                if dependency_id not in dashboard.interactive_transforms:
-                    raise ValidationFailure(
-                        f"Unknown Interactive dependency: {dependency_id}"
-                    )
-                include(dependency_id)
-        visiting.remove(identifier)
-        selected.add(identifier)
-        ordered.append(identifier)
-
-    include(target_id)
+    contract = dashboard.dependency_contract
+    ordered = contract.interactive_closure(target_id)
     return [
         InteractivePlanNode(
             id=f"interactive:{identifier}",
@@ -111,20 +88,15 @@ def compile_interactive_plan(
             definition=dashboard.interactive_transforms[identifier][1],
             inputs={
                 name: parse_output_reference(value)
-                for name, value in dashboard.interactive_transforms[
-                    identifier
-                ][1].inputs.items()
+                for name, value in contract.interactive_inputs[identifier].items()
             },
             dependencies={
-                reference.node_id
-                for reference in (
-                    parse_output_reference(value)
-                    for value in dashboard.interactive_transforms[
-                        identifier
-                    ][1].inputs.values()
-                )
-                if reference.node_id.startswith("interactive:")
+                f"interactive:{dependency}"
+                for dependency in contract.interactive_dependencies[identifier]
             },
+            query_parameters=contract.interactive_query_parameters[identifier],
+            selection_inputs=dict(contract.interactive_selection_inputs[identifier]),
+            compute_inputs=dict(contract.interactive_compute_inputs[identifier]),
         )
         for identifier in ordered
     ]
@@ -497,7 +469,7 @@ class InteractionExecutor:
                     "alias": alias,
                     "value": interaction.selections.get(control_key),
                 }
-                for alias, control_key in node.definition.selection_inputs.items()
+                for alias, control_key in node.selection_inputs.items()
             )
             context = ExecutionContext(
                 workspace_root=self.workspace.root,
@@ -505,15 +477,15 @@ class InteractionExecutor:
                 run_id=run.run_id,
                 query_params={
                     key: run.query_parameters.get(key)
-                    for key in node.definition.query_params
+                    for key in node.query_parameters
                 },
                 compute_params={
                     alias: interaction.compute_parameters.get(control_key)
-                    for alias, control_key in node.definition.compute_inputs.items()
+                    for alias, control_key in node.compute_inputs.items()
                 },
                 selections={
                     alias: interaction.selections.get(control_key)
-                    for alias, control_key in node.definition.selection_inputs.items()
+                    for alias, control_key in node.selection_inputs.items()
                 },
                 selection_filters=selection_filters,
                 inputs=inputs,

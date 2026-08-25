@@ -1,0 +1,10 @@
+schema: dataviz/component-test/v1
+tests:
+  - id: control.tree-select.navigation
+    component: control.tree-select
+    kind: accessibility
+    assertions: [tree-role, expandable-branches, leaf-selection, full-path-search, arrow-navigation]
+  - id: control.tree-select.parent-descendants
+    component: control.tree-select
+    kind: browser
+    assertions: [cascade-mode-selects-descendant-leaves, parent-exposes-mixed-state, checked-summary-strategy, multiple-branches-remain-selectable]

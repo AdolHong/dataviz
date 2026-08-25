@@ -2,12 +2,12 @@ schema: dataviz/presentation/v1
 kind: presentation
 dashboard: cascade-explorer
 
-selectors:
+control_components:
   dashboard:cascade-explorer/province:
-    template: checkbox-group
+    component: checkbox-group
     select_all_label: 全选
     invert_label: 反选
   section:geography/city:
-    template: checkbox-group
+    component: checkbox-group
     select_all_label: 全选
     invert_label: 反选

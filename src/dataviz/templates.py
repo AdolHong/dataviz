@@ -40,119 +40,40 @@ LAYOUT_TEMPLATES: dict[str, dict[str, str]] = {
 }
 
 THEME_PRESETS: dict[str, dict[str, str]] = {
-    "plain": {"purpose": "Neutral analytical default"},
+    "plain": {"purpose": "Minimal neutral analysis style"},
     "editorial": {"purpose": "Warm report and narrative style"},
     "terminal": {"purpose": "Dark technical monitoring style"},
-    "business": {"purpose": "Crisp enterprise analysis style"},
+    "business": {"purpose": "Modern indigo analytical default"},
 }
+
+THEME_TOKENS = [
+    "--dv-paper",
+    "--dv-panel",
+    "--dv-overlay-surface",
+    "--dv-soft",
+    "--dv-soft-blue",
+    "--dv-ink",
+    "--dv-muted",
+    "--dv-line",
+    "--dv-accent",
+    "--dv-accent-strong",
+    "--dv-green",
+    "--dv-amber",
+    "--dv-red",
+    "--dv-blue",
+    "--dv-chart-grid",
+    *[f"--dv-chart-{index}" for index in range(1, 9)],
+    "--dv-radius",
+    "--dv-radius-sm",
+    "--dv-shadow",
+    "--dv-shadow-float",
+    "--dv-font-sans",
+    "--dv-font-mono",
+    "--dv-header-bg",
+]
 
 
 COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
-    "selector.select": {
-        "category": "selector",
-        "purpose": "Search and select from one flat option list at any supported scale",
-        "use_when": "More than four single-select or eight multi-select choices, or whenever a compact control is preferred",
-        "logic": {"types": ["single_select", "multi_select"], "fields": ["choices"]},
-        "presentation": {
-            "template": "select",
-            "options": ["search", "virtual", "search_threshold", "virtual_threshold", "max_visible_tags", "max_selected", "hide_selected", "placeholder", "select_all_label", "invert_label", "clear_label", "css_class"],
-        },
-        "behavior": {"search": "capability", "virtual": "capability", "canonical_state": "native select"},
-        "semantic_dom": [".dv-selector", ".dv-select", ".dv-select-panel", ".dv-choice-option"],
-        "tokens": ["--dv-accent", "--dv-green", "--dv-ink", "--dv-line", "--dv-panel"],
-    },
-    "selector.segmented": {
-        "category": "selector",
-        "purpose": "Keep a very small single-select visible for immediate comparison",
-        "use_when": "At most four peer choices, including boolean All/Yes/No selection",
-        "logic": {"types": ["single_select", "boolean"], "fields": ["choices"]},
-        "presentation": {"template": "segmented", "options": ["variant", "all_label", "show_unavailable", "css_class"]},
-        "semantic_dom": [".dv-selector", ".dv-segmented", ".dv-segmented__option"],
-        "tokens": ["--dv-accent", "--dv-green", "--dv-ink", "--dv-line", "--dv-panel"],
-    },
-    "selector.checkbox-group": {
-        "category": "selector",
-        "purpose": "Keep a small multi-select visible with explicit select-all and subset states",
-        "use_when": "At most eight short peer choices",
-        "logic": {"type": "multi_select", "fields": ["choices"]},
-        "presentation": {"template": "checkbox-group", "options": ["variant", "select_all_label", "invert_label", "max_selected", "show_unavailable", "css_class"]},
-        "semantic_dom": [".dv-selector", ".dv-checkbox-group", ".dv-checkbox-option"],
-        "tokens": ["--dv-accent", "--dv-green", "--dv-ink", "--dv-line", "--dv-panel"],
-    },
-    "selector.cascader": {
-        "category": "selector",
-        "purpose": "Select full paths from associated hierarchical data such as province/city/district",
-        "use_when": "Leaf labels need parent context or the value is a multi-stage classification",
-        "logic": {
-            "type": "multi_select",
-            "fields": ["path_fields"],
-            "value_shape": [["level-1", "level-2", "leaf"]],
-            "empty_selection": "all paths",
-        },
-        "presentation": {
-            "template": "cascader",
-            "options": ["level_labels", "placeholder", "search_placeholder", "path_separator", "empty_text", "hierarchy_selection", "checked_strategy", "max_visible_tags", "css_class"],
-        },
-        "behavior": {
-            "overlay": "viewport-aware",
-            "placement": "bottom-or-top",
-            "safe_area": "12px",
-            "reposition_on": ["scroll", "resize", "path-change"],
-            "navigation_state": "independent from selected paths",
-            "multi_branch_selection": True,
-        },
-        "semantic_dom": [
-            ".dv-selector", ".dv-cascader", ".dv-cascader-panel", ".dv-cascader-columns",
-            ".dv-cascader-column", ".dv-cascader-option", ".dv-cascader-results",
-        ],
-        "tokens": ["--dv-accent", "--dv-green", "--dv-ink", "--dv-line", "--dv-panel"],
-        "example": {
-            "dashboard.yaml": {
-                "id": "district",
-                "type": "multi_select",
-                "path_fields": ["province", "city", "district"],
-                "default": [],
-            },
-            "presentation.yaml": {
-                "selectors": {
-                    "view:detail/district": {
-                        "template": "cascader",
-                        "level_labels": ["省份", "城市", "区县"],
-                        "search_placeholder": "搜索省 / 市 / 区县…",
-                        "css_class": "location-cascader",
-                    }
-                }
-            },
-        },
-    },
-    "selector.date-range": {
-        "category": "selector",
-        "purpose": "Choose an inclusive start and end date with two reviewable native date controls",
-        "use_when": "A query parameter or browser Selection uses type: date_range",
-        "logic": {"type": "date_range", "value_shape": ["start", "end"]},
-        "presentation": {
-            "template": "date-range",
-            "options": ["start_label", "end_label", "min", "max", "allow_open_range", "presets", "clear_label", "css_class"],
-        },
-        "semantic_dom": [".dv-date-range", ".dv-date-range__field"],
-        "tokens": ["--dv-accent", "--dv-ink", "--dv-line", "--dv-panel"],
-    },
-    "selector.tree-select": {
-        "category": "selector",
-        "purpose": "Search, expand and select hierarchy leaves in one narrow tree overlay",
-        "use_when": "Parent context matters and a multi-column Cascader would be too wide",
-        "logic": {
-            "type": "multi_select",
-            "fields": ["path_fields"],
-            "value_shape": [["level-1", "level-2", "leaf"]],
-        },
-        "presentation": {
-            "template": "tree-select",
-            "options": ["level_labels", "placeholder", "search_placeholder", "path_separator", "default_expand_depth", "hierarchy_selection", "checked_strategy", "max_visible_tags", "css_class"],
-        },
-        "semantic_dom": [".dv-tree-select", ".dv-tree-panel", ".dv-tree-list", ".dv-tree-option"],
-        "tokens": ["--dv-accent", "--dv-green", "--dv-ink", "--dv-line", "--dv-panel"],
-    },
     "control-panel.adaptive": {
         "category": "presentation",
         "purpose": "Keep Query Parameters and scoped Controls readable inside the viewport",
@@ -279,7 +200,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
         "logic": {
             "template": "selection-gallery",
             "fields": ["controls", "views", "repeat.by", "repeat.selection"],
-            "selector_templates": ["select", "cascader", "tree-select"],
+            "recommended_components": ["control.select", "control.cascader", "control.tree-select"],
         },
         "behavior": {
             "empty_selection": "Show the configured empty state instead of rendering every group",
@@ -383,12 +304,13 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
         "behavior": {
             "isolation": "A renderer failure marks only its View failed",
             "state": "Runtime retains renderer state per View id",
+            "plotly_wheel": "Custom Plotly calls must default to scrollZoom:false so the Dashboard keeps wheel ownership; enable true only on an explicit user request",
         },
     },
 }
 
 
-COMPONENT_REGISTRY_VERSION = "3.0.0"
+COMPONENT_REGISTRY_VERSION = "4.0.0"
 RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v2"
 
 
@@ -475,7 +397,7 @@ def _generated_component_templates() -> dict[str, dict[str, Any]]:
                 "optional": ["accent", "background", "panel", "ink", "density"],
             },
             "semantic_dom": [f".dv-theme--{name}"],
-            "tokens": ["--dv-accent", "--dv-paper", "--dv-panel", "--dv-ink"],
+            "tokens": THEME_TOKENS,
         }
     generated.update(COMPONENT_TEMPLATES)
     return generated
@@ -485,13 +407,14 @@ def component_catalog(category: str | None = None) -> dict[str, dict[str, Any]]:
     packages = component_index()
     definitions = _generated_component_templates()
     for name, packaged in packages.items():
-        definitions.setdefault(
-            name,
-            {
-                "category": packaged["package"]["category"],
-                "purpose": packaged["purpose"],
-            },
-        )
+        declaration = {
+            key: value
+            for key, value in packaged.items()
+            if key not in {"package", "stories", "tests"}
+        }
+        # A physical Component Package is the semantic source of truth. Generated
+        # contracts exist only for DSL templates that do not own a package yet.
+        definitions[name] = {**definitions.get(name, {}), **declaration}
     result: dict[str, dict[str, Any]] = {}
     for name, definition in definitions.items():
         if category is not None and definition.get("category") != category:
@@ -539,8 +462,8 @@ def template_catalog() -> dict[str, Any]:
         "presentation": {
             "schema": "dataviz/presentation/v1",
             "optional": True,
-            "id_scopes": ["sections", "views", "selectors"],
-            "visual_fields": ["theme", "layout", "sections", "views", "selectors", "controls", "assets", "canvas"],
+            "id_scopes": ["sections", "views", "control_components"],
+            "visual_fields": ["theme", "layout", "sections", "views", "control_components", "control_panels", "assets", "canvas"],
             "protected_logic": ["adapters", "query_parameters", "controls", "sources", "dataset_transforms", "interactive_transforms", "sections", "views"],
         },
         "selection_operators": ["auto", "equals", "in", "between", "contains", "gte", "lte", "gt", "lt"],

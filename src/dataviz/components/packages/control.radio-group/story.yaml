@@ -1,0 +1,12 @@
+schema: dataviz/component-story/v1
+stories:
+  - id: control.radio-group.basic
+    component: control.radio-group
+    title: Visible single selection
+    summary: Every declared value is a real radio option; no synthetic All or Clear option is introduced.
+    gallery: {dashboard: component-gallery, target: "[data-control-component='radio-group']", anchor: control-radio-group}
+  - id: control.radio-group.button
+    component: control.radio-group
+    title: Radio button presentation
+    summary: The same scalar value contract can use compact button-style radio options.
+    gallery: {dashboard: component-gallery, target: "[data-control-component='radio-group']", anchor: control-radio-group-button}

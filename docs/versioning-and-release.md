@@ -2,13 +2,14 @@
 
 ## 独立版本
 
-Dataviz 同时维护四类版本：
+Dataviz 同时维护六类版本：
 
-- Python package：当前 `workspace-dataviz 0.3.2`。
-- 文件 DSL：Workspace v1、Dashboard v3、Presentation v1、Source v1、Dataset/Interactive Transform v1。
+- Python package：当前 `ai-dataviz 0.5.4`。
+- 文件 DSL：Workspace v1、Dashboard v4、Presentation v1、Source v1、Dataset/Interactive Transform v1。
+- Dashboard 依赖协议：`dataviz/dependency-contract/v1`。
 - 浏览器协议：`dataviz/runtime/v2`。
 - Server 热更新协议：`dataviz/workspace-change/v1`。
-- Component Registry：当前 `3.0.0`。
+- Component Registry：当前 `4.0.0`。
 
 它们不会因为 package 发布补丁版本而机械同步升级。安装环境的权威清单来自：
 
@@ -52,7 +53,7 @@ python scripts/build_release_zip.py
 python scripts/build_release_zip.py --output-dir /tmp/dataviz-release
 ```
 
-源码 CLI 使用 `uv sync --extra dev --no-editable --reinstall-package workspace-dataviz`，规避部分 macOS/Python 组合忽略带 `UF_HIDDEN` 标记 editable `.pth` 的问题。修改 `src/` 后必须重新安装，再运行 CLI smoke；pytest 通过项目 `pythonpath=src` 读取当前源码。发布门禁另外使用干净 venv 验证安装产物，不能把源码测试混作发行包证据。
+源码 CLI 使用 `uv sync --extra dev --no-editable --reinstall-package ai-dataviz`，规避部分 macOS/Python 组合忽略带 `UF_HIDDEN` 标记 editable `.pth` 的问题。修改 `src/` 后必须重新安装，再运行 CLI smoke；pytest 通过项目 `pythonpath=src` 读取当前源码。发布门禁另外使用干净 venv 验证安装产物，不能把源码测试混作发行包证据。
 
 建议把产物写入临时目录先做安装 smoke，确认后再生成正式 `dist/`。
 

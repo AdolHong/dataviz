@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v3
+schema: dataviz/dashboard/v4
 kind: dashboard
 id: sales-overview
 title: 销售概览
@@ -30,10 +30,12 @@ controls:
     type: multi_select
     label: 区域
     default: [华东, 华南, 华北]
-    choices:
-      - {label: 华东, value: 华东}
-      - {label: 华南, value: 华南}
-      - {label: 华北, value: 华北}
+    options:
+      mode: static
+      choices:
+        - {label: 华东, value: 华东}
+        - {label: 华南, value: 华南}
+        - {label: 华北, value: 华北}
 
 views:
   - id: total-revenue

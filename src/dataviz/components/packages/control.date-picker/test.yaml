@@ -1,0 +1,6 @@
+schema: dataviz/component-test/v1
+tests:
+  - id: control.date-picker.contract
+    component: control.date-picker
+    kind: browser
+    assertions: [ISO-date-source-of-truth, min-max-date, platform-calendar-fallback, keyboard-entry, bubbling-change]

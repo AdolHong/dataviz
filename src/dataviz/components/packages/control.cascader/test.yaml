@@ -1,0 +1,14 @@
+schema: dataviz/component-test/v1
+tests:
+  - id: control.cascader.multi-branch
+    component: control.cascader
+    kind: interaction
+    assertions: [parent-context, multi-branch-selection, search-full-path, upstream-reconciliation, viewport-containment]
+  - id: control.cascader.keyboard
+    component: control.cascader
+    kind: accessibility
+    assertions: [tree-navigation, aria-selected, escape-closes, focus-returns]
+  - id: control.cascader.parent-descendants
+    component: control.cascader
+    kind: browser
+    assertions: [cascade-mode-selects-descendant-leaves, partial-branches-expose-mixed-state, checked-summary-strategy, upstream-change-removes-stale-paths]

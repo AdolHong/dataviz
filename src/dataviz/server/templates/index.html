@@ -38,18 +38,6 @@
           </button>
         </div>
         <div class="topbar-actions">
-          <details id="query-parameters-control" class="header-control" data-header-popover data-dv-control-panel data-control-role="query" data-control-count="0" data-overlay-floating="true" data-overlay-width="520">
-            <summary class="header-control__trigger">
-              <span class="header-control__index">01</span>
-              <span><strong>Parameters</strong><small id="query-control-meta">Not applied</small></span>
-              <i>⌄</i>
-            </summary>
-            <div class="header-control__popover header-control__popover--query">
-              <div class="section-heading"><span>01</span><div><h3>Query parameters</h3><p>Changes require a new dataset query.</p></div></div>
-              <form id="parameter-form" class="parameter-form"></form>
-              <div id="query-state" class="query-state">No dataset loaded.</div>
-            </div>
-          </details>
           <details id="dashboard-controls-control" class="header-control" data-header-popover data-dv-control-panel data-control-role="dashboard" data-control-count="0" data-overlay-floating="true" data-overlay-width="760">
             <summary class="header-control__trigger">
               <span class="header-control__index header-control__index--controls">02</span>
@@ -80,8 +68,25 @@
               <div id="run-message" class="run-message">Data pipeline has not run.</div>
             </div>
           </details>
-          <button id="run-button" class="button button--run" disabled><span class="button-light"></span>Run query</button>
+          <div id="query-run-control" class="query-run-control">
+            <button id="run-button" class="button button--run query-run-control__primary" type="button" disabled>
+              <span class="button-light" aria-hidden="true"></span>
+              <span class="query-run-control__copy"><strong data-run-label>Run query</strong><small id="query-control-meta">Not applied</small></span>
+            </button>
+            <button id="query-parameters-toggle" class="query-run-control__toggle" type="button" aria-controls="query-parameters-panel" aria-expanded="true" aria-label="Collapse query parameters" title="Collapse query parameters">
+              <span class="query-run-control__chevron" aria-hidden="true"></span>
+            </button>
+          </div>
         </div>
+        <section id="query-parameters-control" class="query-parameters-control" data-dv-control-panel data-control-role="query" data-control-count="0">
+          <div id="query-parameters-panel" class="header-control__popover header-control__popover--query query-parameters-panel" data-control-panel-body>
+            <header class="query-parameters-panel__header">
+              <div><strong>Query parameters</strong><small id="query-parameter-count">0 fields · changes apply on next run</small></div>
+              <div id="query-state" class="query-state" role="status">No dataset loaded.</div>
+            </header>
+            <form id="parameter-form" class="parameter-form"></form>
+          </div>
+        </section>
       </header>
 
       <section id="workspace-update" class="workspace-update" data-impact="canvas" role="status" aria-live="polite" hidden>

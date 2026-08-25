@@ -16,14 +16,17 @@ from dataviz.execution import Executor
 from dataviz.rendering import CanvasRenderer, template_catalog
 from dataviz.workspace import load_workspace, validate_workspace
 from dataviz.workspace.models import (
+    ComputeControlDefinition,
     DashboardDefinition,
     InteractiveTransformDefinition,
     PresentationDefinition,
+    PresentationControlComponentDefinition,
+    QueryParameterDefinition,
     SelectionControlDefinition,
     WorkspaceDefinition,
 )
 from dataviz.workspace.controls import compile_control_contract
-from dataviz.workspace.selector_templates import resolve_selector_presentation
+from dataviz.workspace.control_components import resolve_control_component
 from typer.testing import CliRunner
 
 
@@ -60,7 +63,7 @@ def test_repeat_section_components_are_ai_discoverable():
     assert listing.exit_code == 0
     assert gallery.exit_code == 0
     assert json.loads(listing.stdout)["logic"]["template"] == "small-multiples"
-    assert "cascader" in json.loads(gallery.stdout)["logic"]["selector_templates"]
+    assert "control.cascader" in json.loads(gallery.stdout)["logic"]["recommended_components"]
 
 
 def test_repeat_templates_share_one_dataset_and_render_dynamic_instances(tmp_path: Path):
@@ -110,18 +113,18 @@ def test_repeat_templates_share_one_dataset_and_render_dynamic_instances(tmp_pat
 
 def test_component_registry_has_human_and_ai_help():
     listing = CliRunner().invoke(app, ["components"])
-    detail = CliRunner().invoke(app, ["components", "selector.cascader"])
+    detail = CliRunner().invoke(app, ["components", "control.cascader"])
     machine = CliRunner().invoke(
-        app, ["components", "selector.cascader", "--format", "json"]
+        app, ["components", "control.cascader", "--format", "json"]
     )
 
     assert listing.exit_code == 0
-    assert "selector.cascader" in listing.stdout
+    assert "control.cascader" in listing.stdout
     assert detail.exit_code == 0
     assert "path_fields" in detail.stdout
     assert "Semantic DOM" in detail.stdout
     assert machine.exit_code == 0
-    assert json.loads(machine.stdout)["presentation"]["template"] == "cascader"
+    assert json.loads(machine.stdout)["presentation"]["component"] == "cascader"
 
 
 def test_cli_docs_provide_onboarding_chart_recipes_and_error_recovery():
@@ -179,6 +182,24 @@ def test_cli_docs_provide_onboarding_chart_recipes_and_error_recovery():
     assert failure.exit_code == 1
     failure_payload = json.loads(failure.stdout)
     assert failure_payload["help"]["command"] == "dataviz docs troubleshooting"
+
+
+def test_cli_docs_publish_machine_readable_design_language_contract():
+    result = CliRunner().invoke(app, ["docs", "visual", "--format", "json"])
+
+    assert result.exit_code == 0
+    topic = json.loads(result.stdout)
+    assert topic["topic"] == "design-language"
+    assert topic["default_direction"]["default_preset"] == "business"
+    assert topic["core_tokens"]["surfaces"]["--dv-overlay-surface"].startswith(
+        "必须不透明"
+    )
+    assert topic["core_tokens"]["semantic"]["--dv-green"].startswith("Ready")
+    assert topic["customization_order"][0].startswith("先选择")
+    assert "schema: dataviz/presentation/v1" in topic["presentation_example"]
+    PresentationDefinition.model_validate(yaml.safe_load(topic["presentation_example"]))
+    assert "--dv-chart-1" in topic["css_example"]
+    assert any("Perspective" in item for item in topic["acceptance_checklist"])
 
 
 def test_init_creates_declarative_dashboard_without_frontend_scaffold(tmp_path: Path):
@@ -347,7 +368,7 @@ def test_optional_presentation_overrides_ids_without_changing_logic():
     dashboard = workspace.dashboard("sales-overview")
 
     assert dashboard.presentation is not None
-    assert dashboard.logic_definition.theme.preset == "plain"
+    assert dashboard.logic_definition.theme.preset == "business"
     assert all(section.template == "stack" for section in dashboard.logic_definition.sections)
     assert dashboard.definition.theme.preset == "business"
     assert [section.template for section in dashboard.definition.sections] == [
@@ -385,15 +406,15 @@ def test_presentation_cannot_inject_fields_ignored_by_a_view_template(tmp_path: 
     )
 
 
-def test_selector_presentation_templates_are_visual_only():
+def test_control_component_presentation_is_visual_only():
     presentation = PresentationDefinition.model_validate(
         {
             "schema": "dataviz/presentation/v1",
             "dashboard": "sales-overview",
-            "selectors": {
-                "dashboard:sales-overview/region": {"template": "checkbox-group", "variant": "tags"},
+            "control_components": {
+                "dashboard:sales-overview/region": {"component": "checkbox-group"},
                 "view:sales-detail/product": {
-                    "template": "select",
+                    "component": "select",
                     "search": "always",
                     "select_all_label": "Choose all",
                     "invert_label": "Invert values",
@@ -402,7 +423,7 @@ def test_selector_presentation_templates_are_visual_only():
                     "css_class": "product-picker",
                 },
             },
-            "controls": {
+            "control_panels": {
                 "query": {
                     "template": "grid",
                     "width": "wide",
@@ -417,68 +438,188 @@ def test_selector_presentation_templates_are_visual_only():
         }
     )
 
-    assert presentation.selectors["dashboard:sales-overview/region"].template == "checkbox-group"
-    assert presentation.selectors["dashboard:sales-overview/region"].variant == "tags"
-    product = presentation.selectors["view:sales-detail/product"]
-    assert product.template == "select"
+    assert presentation.control_components["dashboard:sales-overview/region"].component == "checkbox-group"
+    product = presentation.control_components["view:sales-detail/product"]
+    assert product.component == "select"
     assert product.search == "always"
     assert product.select_all_label == "Choose all"
     assert product.invert_label == "Invert values"
     assert product.show_unavailable is False
     assert product.css_class == "product-picker"
-    assert presentation.controls.query.template == "grid"
-    assert presentation.controls.query.columns == 3
-    assert presentation.controls.query.density == "compact"
-    assert presentation.controls.dashboard.template == "stack"
+    assert presentation.control_panels.query.template == "grid"
+    assert presentation.control_panels.query.columns == 3
+    assert presentation.control_panels.query.density == "compact"
+    assert presentation.control_panels.dashboard.template == "stack"
 
     with pytest.raises(ValidationError):
         PresentationDefinition.model_validate(
             {
                 "schema": "dataviz/presentation/v1",
                 "dashboard": "sales-overview",
-                "controls": {"query": {"template": "stack", "columns": 2}},
+                "control_panels": {"query": {"template": "stack", "columns": 2}},
             }
         )
 
 
-def test_selector_auto_resolution_is_deterministic_and_unknown_names_are_rejected():
+def test_control_component_auto_resolution_is_deterministic_and_unknown_names_are_rejected():
     choices = [{"label": str(index), "value": index} for index in range(9)]
-    assert resolve_selector_presentation(
+    assert resolve_control_component(
         SelectionControlDefinition(
-            id="status", kind="selection", type="single_select", choices=choices[:4]
+            id="status", kind="selection", type="single_select",
+            options={"mode": "static", "choices": choices[:4]},
         )
-    )["template"] == "segmented"
-    assert resolve_selector_presentation(
+    )["component"] == "radio-group"
+    assert resolve_control_component(
         SelectionControlDefinition(
-            id="region", kind="selection", type="multi_select", choices=choices[:8]
+            id="region", kind="selection", type="multi_select",
+            options={"mode": "static", "choices": choices[:8]},
         )
-    )["template"] == "checkbox-group"
-    flat = resolve_selector_presentation(
+    )["component"] == "checkbox-group"
+    flat = resolve_control_component(
         SelectionControlDefinition(
-            id="store", kind="selection", type="multi_select", choices=choices
+            id="store", kind="selection", type="multi_select",
+            options={"mode": "static", "choices": choices},
         )
     )
-    assert flat["template"] == "select"
+    assert flat["component"] == "select"
     assert flat["virtual"] == "auto"
-    assert resolve_selector_presentation(
+    assert resolve_control_component(
         SelectionControlDefinition(
             id="district",
             kind="selection",
             type="multi_select",
             path_fields=["province", "city", "district"],
+            options={"mode": "infer"},
         )
-    )["template"] == "cascader"
+    )["component"] == "cascader"
     with pytest.raises(ValidationError):
         PresentationDefinition.model_validate(
             {
                 "schema": "dataviz/presentation/v1",
                 "dashboard": "sales-overview",
-                "selectors": {"dashboard:sales-overview/region": {"template": "unknown"}},
+                "control_components": {
+                    "dashboard:sales-overview/region": {"component": "unknown"}
+                },
             }
         )
 
 
-def test_portable_selector_markup_supports_search_and_hidden_unavailable_options():
+@pytest.mark.parametrize(
+    ("definition", "configured", "expected"),
+    [
+        (QueryParameterDefinition(id="note", type="string"), None, "input"),
+        (
+            QueryParameterDefinition(
+                id="scenario",
+                type="string",
+                suggestions=[{"label": "Base", "value": "base"}],
+            ),
+            None,
+            "auto-complete",
+        ),
+        (ComputeControlDefinition(id="count", kind="compute", type="integer"), None, "input-number"),
+        (ComputeControlDefinition(id="enabled", kind="compute", type="boolean"), None, "checkbox"),
+        (
+            ComputeControlDefinition(id="live", kind="compute", type="boolean"),
+            PresentationControlComponentDefinition(component="switch"),
+            "switch",
+        ),
+        (
+            SelectionControlDefinition(
+                id="mode",
+                kind="selection",
+                type="single_select",
+                options={"mode": "static", "choices": [{"label": "A", "value": "a"}, {"label": "B", "value": "b"}]},
+            ),
+            None,
+            "radio-group",
+        ),
+        (
+            SelectionControlDefinition(
+                id="store",
+                kind="selection",
+                type="single_select",
+                options={"mode": "static", "choices": [{"label": str(index), "value": index} for index in range(5)]},
+            ),
+            None,
+            "select",
+        ),
+        (
+            SelectionControlDefinition(
+                id="regions",
+                kind="selection",
+                type="multi_select",
+                options={"mode": "static", "choices": [{"label": "A", "value": "a"}, {"label": "B", "value": "b"}]},
+            ),
+            None,
+            "checkbox-group",
+        ),
+        (
+            SelectionControlDefinition(
+                id="district",
+                kind="selection",
+                type="multi_select",
+                path_fields=["province", "city", "district"],
+                options={"mode": "infer"},
+            ),
+            None,
+            "cascader",
+        ),
+        (
+            SelectionControlDefinition(
+                id="tree",
+                kind="selection",
+                type="multi_select",
+                path_fields=["province", "city"],
+                options={"mode": "infer"},
+            ),
+            PresentationControlComponentDefinition(component="tree-select"),
+            "tree-select",
+        ),
+        (QueryParameterDefinition(id="day", type="date"), None, "date-picker"),
+        (QueryParameterDefinition(id="period", type="date_range"), None, "range-picker"),
+        (
+            ComputeControlDefinition(id="threshold", kind="compute", type="number"),
+            PresentationControlComponentDefinition(component="slider"),
+            "slider",
+        ),
+    ],
+)
+def test_every_data_entry_component_has_one_strict_value_semantics(
+    definition, configured, expected
+):
+    resolved = resolve_control_component(definition, configured)
+    assert resolved["component"] == expected
+    assert "template" not in resolved
+
+
+def test_data_entry_components_reject_semantically_incompatible_configuration():
+    with pytest.raises(ValueError, match="select cannot render control type string"):
+        resolve_control_component(
+            QueryParameterDefinition(id="note", type="string"),
+            PresentationControlComponentDefinition(component="select"),
+        )
+    with pytest.raises(ValueError, match="auto-complete requires suggestions"):
+        resolve_control_component(
+            QueryParameterDefinition(id="scenario", type="string"),
+            PresentationControlComponentDefinition(component="auto-complete"),
+        )
+    with pytest.raises(ValueError, match="require cascader or tree-select"):
+        resolve_control_component(
+            SelectionControlDefinition(
+                id="district",
+                kind="selection",
+                type="multi_select",
+                path_fields=["province", "city", "district"],
+                options={"mode": "infer"},
+            ),
+            PresentationControlComponentDefinition(component="select"),
+        )
+    with pytest.raises(ValidationError, match="does not accept presentation options"):
+        PresentationControlComponentDefinition(component="radio-group", search="always")
+
+
+def test_portable_control_markup_supports_search_and_hidden_unavailable_options():
     workspace = load_workspace(WORKSPACE)
     dashboard = workspace.dashboard("sales-overview")
     definition = dashboard.definition.controls[0]
@@ -487,7 +628,7 @@ def test_portable_selector_markup_supports_search_and_hidden_unavailable_options
         definition,
         definition.default,
         {
-            "template": "select",
+            "component": "select",
             "search": "always",
             "show_unavailable": False,
             "search_placeholder": "Search regions…",
@@ -496,11 +637,11 @@ def test_portable_selector_markup_supports_search_and_hidden_unavailable_options
         },
     )
 
-    assert 'data-selector-template="select"' in markup
+    assert 'data-control-component="select"' in markup
     assert 'data-search-mode="always"' in markup
     assert 'data-show-unavailable="false"' in markup
     assert 'data-search-placeholder="Search regions…"' in markup
-    assert 'class="dv-selector region-picker"' in markup
+    assert 'class="dv-control region-picker"' in markup
 
 
 def test_portable_cascader_declares_data_driven_path_levels():
@@ -511,21 +652,21 @@ def test_portable_cascader_declares_data_driven_path_levels():
         label="District",
         type="multi_select",
         path_fields=["province", "city", "district"],
-        default=[],
+        options={"mode": "infer"},
     )
     markup = CanvasRenderer(workspace)._portable_field(
         "view:detail/district",
         definition,
         [],
         {
-            "template": "cascader",
+            "component": "cascader",
             "level_labels": ["Province", "City", "District"],
             "search_placeholder": "Search paths…",
         },
         "detail",
     )
 
-    assert 'data-selector-template="cascader"' in markup
+    assert 'data-control-component="cascader"' in markup
     assert 'data-cascader-view="detail"' in markup
     assert "province" in markup
     assert "Province" in markup
@@ -540,7 +681,7 @@ def test_showcase_view_selection_uses_data_driven_cascader():
     detail = dashboard.views["city-detail"]
     district = next(item for item in detail.controls if item.id == "district")
     assert district.path_fields == ["province", "city", "district"]
-    assert 'data-selector-template="cascader"' in report
+    assert 'data-control-component="cascader"' in report
     assert 'data-cascader-view="city-detail"' in report
 
 
@@ -551,7 +692,7 @@ def test_presentation_is_included_in_ai_context():
     payload = json.loads(result.stdout)
 
     assert result.exit_code == 0
-    assert payload["dashboard_logic"]["theme"]["preset"] == "plain"
+    assert payload["dashboard_logic"]["theme"]["preset"] == "business"
     assert payload["dashboard"]["theme"]["preset"] == "business"
     assert payload["presentation"]["dashboard"] == "sales-overview"
     assert payload["presentation_file"].endswith("presentation.yaml")
@@ -564,7 +705,9 @@ def test_stale_presentation_references_fail_preflight_but_runtime_falls_back(tmp
     presentation = yaml.safe_load(presentation_path.read_text(encoding="utf-8"))
     presentation["views"]["deleted-view"] = {"span": 12}
     presentation["sections"]["deleted-section"] = {"template": "single"}
-    presentation["selectors"] = {"view:deleted-view/region": {"template": "select"}}
+    presentation["control_components"] = {
+        "view:deleted-view/region": {"component": "select"}
+    }
     presentation["assets"]["css"].append("assets/missing.css")
     presentation_path.write_text(
         yaml.safe_dump(presentation, allow_unicode=True, sort_keys=False), encoding="utf-8"
@@ -579,7 +722,7 @@ def test_stale_presentation_references_fail_preflight_but_runtime_falls_back(tmp
     assert errors >= {
         "presentation_unknown_view",
         "presentation_unknown_section",
-        "presentation_unknown_selector",
+        "presentation_unknown_control",
         "presentation_asset_missing",
     }
 
@@ -595,7 +738,7 @@ def test_invalid_presentation_falls_back_to_logic_definition(tmp_path: Path):
     diagnostics = validate_workspace(workspace)
 
     assert dashboard.presentation is None
-    assert dashboard.definition.theme.preset == "plain"
+    assert dashboard.definition.theme.preset == "business"
     assert any(
         item.level == "error" and item.code == "presentation_invalid"
         for item in diagnostics
@@ -712,7 +855,7 @@ def test_removed_schema_fields_are_rejected(removed_fragment):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v3",
+                "schema": "dataviz/dashboard/v4",
                 "kind": "dashboard",
                 "id": "strict",
                 **removed_fragment,
@@ -773,7 +916,7 @@ def test_layout_and_view_bounds_are_enforced(fragment, location):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v3",
+                "schema": "dataviz/dashboard/v4",
                 "kind": "dashboard",
                 "id": "strict",
                 **fragment,
@@ -826,6 +969,10 @@ def test_default_renderer_builds_templates_and_portable_report(tmp_path: Path):
     assert "const valueFields = view.template === 'heatmap'" in report
     assert "view.template === 'metric'" in report
     assert "const plotlyDescriptor" in report
+    assert "const plotlyConfig = (config = {})" in report
+    assert "scrollZoom:false" in report
+    assert "plotlyConfig(descriptor.config)" in report
+    assert "plotlyConfig(spec.config)" in report
     assert "const createPerspective" in report
     assert "const updatePerspective" in report
     assert "const disposePerspective" in report

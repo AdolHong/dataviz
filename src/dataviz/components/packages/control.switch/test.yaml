@@ -1,0 +1,6 @@
+schema: dataviz/component-test/v1
+tests:
+  - id: control.switch.contract
+    component: control.switch
+    kind: accessibility
+    assertions: [role-switch, aria-checked, keyboard-toggle, canonical-boolean, immediate-input-and-change]

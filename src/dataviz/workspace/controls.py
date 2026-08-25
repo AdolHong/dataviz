@@ -4,18 +4,24 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from dataviz.errors import ExecutionFailure
-from dataviz.value_contract import ValueContractViolation, normalize_control_value
+from dataviz.value_contract import (
+    ValueContractViolation,
+    is_empty_control_value,
+    normalize_control_value,
+)
 from dataviz.workspace.models import (
     ComputeControlDefinition,
     DashboardDefinition,
     ScopedControlDefinition,
     SelectionBindingDefinition,
     SelectionControlDefinition,
+    InferredOptionDomainDefinition,
 )
 
 
 ControlOrigin = Literal["dashboard", "section", "view"]
 ControlKind = Literal["selection", "compute"]
+ControlResolutionPhase = Literal["execution", "canvas-hydration"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +45,37 @@ class EffectiveControl:
         }
         if self.binding is not None:
             payload["binding"] = self.binding.model_dump(mode="json")
+        initial_intent = initial_selection_intent(self.definition)
+        if initial_intent is not None:
+            payload["initial_intent"] = initial_intent
         return payload
+
+
+def initial_selection_intent(
+    definition: ScopedControlDefinition,
+) -> Literal["all_available", "explicit"] | None:
+    """Compile initial multi-select intent from the option-domain contract."""
+
+    if not isinstance(definition, SelectionControlDefinition):
+        return None
+    if definition.type != "multi_select":
+        return None
+    return (
+        "all_available"
+        if isinstance(definition.options, InferredOptionDomainDefinition)
+        and definition.options.initial == "auto"
+        else "explicit"
+    )
+
+
+def initial_selection_intents(
+    dashboard: DashboardDefinition,
+) -> dict[str, Literal["all_available", "explicit"]]:
+    return {
+        key: intent
+        for key, item in scoped_control_registry(dashboard, kind="selection").items()
+        if (intent := initial_selection_intent(item.definition)) is not None
+    }
 
 
 def canonical_control_key(
@@ -150,8 +186,17 @@ def resolve_control_values(
     dashboard: DashboardDefinition,
     kind: ControlKind,
     provided: dict[str, Any] | None,
+    *,
+    phase: ControlResolutionPhase = "execution",
 ) -> dict[str, Any]:
-    """Normalize one semantic Control namespace using canonical scoped keys."""
+    """Normalize one semantic Control namespace using canonical scoped keys.
+
+    ``execution`` accepts only final canonical values. ``canvas-hydration`` is the
+    one bootstrap boundary at which a missing inferred Selection may remain
+    unresolved until immutable Base Outputs have been hydrated and its option
+    domain can be reconciled. Static domains and every execution boundary remain
+    strict.
+    """
     registry = scoped_control_registry(dashboard, kind=kind)
     supplied = provided or {}
     unknown = sorted(set(supplied) - set(registry))
@@ -163,8 +208,21 @@ def resolve_control_values(
     normalized: dict[str, Any] = {}
     for key, control in registry.items():
         raw = supplied.get(key, control.definition.default)
+        unresolved_inferred = (
+            phase == "canvas-hydration"
+            and kind == "selection"
+            and isinstance(
+                control.definition.options,
+                InferredOptionDomainDefinition,
+            )
+            and is_empty_control_value(raw)
+        )
         try:
-            normalized[key] = normalize_control_value(control.definition, raw)
+            normalized[key] = normalize_control_value(
+                control.definition,
+                raw,
+                enforce_required=not unresolved_inferred,
+            )
         except ValueContractViolation as error:
             raise ExecutionFailure(
                 f"Invalid {kind.title()} Control {key}: {error.message}",
@@ -180,8 +238,15 @@ def resolve_control_values(
 def resolve_selection_values(
     dashboard: DashboardDefinition,
     provided: dict[str, Any] | None,
+    *,
+    phase: ControlResolutionPhase = "execution",
 ) -> dict[str, Any]:
-    return resolve_control_values(dashboard, "selection", provided)
+    return resolve_control_values(
+        dashboard,
+        "selection",
+        provided,
+        phase=phase,
+    )
 
 
 def resolve_compute_values(

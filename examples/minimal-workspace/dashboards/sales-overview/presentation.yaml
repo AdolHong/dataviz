@@ -4,7 +4,6 @@ dashboard: sales-overview
 
 theme:
   preset: business
-  accent: "#d5532d"
   density: compact
 
 layout:

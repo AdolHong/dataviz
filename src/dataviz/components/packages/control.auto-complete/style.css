@@ -1,0 +1,7 @@
+.dv-auto-complete { position: relative; min-width: 0; }
+.dv-auto-complete__input { box-sizing: border-box; width: 100%; min-height: 2.5rem; padding: .55rem .72rem; color: var(--dv-ink, #202536); background: var(--dv-panel, #fff); border: 1px solid var(--dv-line, #d9e0ec); border-radius: 7px; outline: 0; }
+.dv-auto-complete__input:focus { border-color: var(--dv-accent, #3949ab); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dv-accent, #3949ab) 14%, transparent); }
+.dv-auto-complete__panel { align-content: start; padding: .35rem; }
+.dv-auto-complete__option { display: grid; gap: .15rem; width: 100%; min-height: 2.35rem; padding: .45rem .6rem; color: var(--dv-ink, #202536); background: transparent; border: 0; border-radius: 5px; cursor: pointer; text-align: left; }
+.dv-auto-complete__option:hover, .dv-auto-complete__option.is-active { background: color-mix(in srgb, var(--dv-accent, #3949ab) 10%, transparent); }
+.dv-auto-complete__option small { color: var(--dv-muted, #667085); }

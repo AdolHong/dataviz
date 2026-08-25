@@ -334,13 +334,16 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert "installDatavizOverlay" in report
     assert "typeof event.composedPath === 'function'" in report
     assert "root.overlay = {register, registerDetails, hydrate, open, close, closeAll" in report
-    assert '"view_inputs": {' in report
+    assert '"dependency_contract": {' in report
+    assert '"views": {"revenue": {"inputs":' in report
     assert "const refreshCascadingSelections = () =>" in report
-    assert "[0, 1, 2].forEach(rank =>" in report
-    assert "Commit each scope before deriving the next one" in report
+    assert "dependency_contract?.control_order" in report
+    assert "cascade_upstream" in report
+    assert "Commit each compiled Control" in report
     assert "function position(record)" in report
     assert "if (!activePath.length && selectedValues.size)" in report
-    assert "viewportWidth - gutter * 2" in report
+    assert "viewport.width - gutter * 2" in report
+    assert "record.panel.getBoundingClientRect().height" in report
     assert "available.forEach(option => { option.selected = !allSelected; });" in report
     assert "normalizeAll" not in report
     assert "await datavizRuntime.runTransforms(changedSelectionKeys, [], {" in report
@@ -415,7 +418,9 @@ def test_direct_render_and_export_reject_runtime_assets_outside_workspace(
         "https://cdn.jsdelivr.net/npm/echarts@6.0.0/dist/echarts.min.js"
     )
     workspace.definition.runtime.pyodide_bundle_path = "../outside-pyodide"
-    monkeypatch.setattr(renderer, "_browser_python_export_assets", lambda _: "bundle")
+    monkeypatch.setattr(
+        renderer, "_browser_python_export_assets", lambda _, **__: "bundle"
+    )
     with pytest.raises(ExecutionFailure) as bundle_failure:
         renderer.write_report(dashboard, result, tmp_path / "outside.html")
     assert bundle_failure.value.details["code"] == "runtime_asset_outside_workspace"
@@ -442,7 +447,9 @@ def test_report_export_rejects_symlinked_runtime_bundle_assets(
     result = Executor(workspace).run("sales")
     workspace.definition.runtime.pyodide_bundle_path = "pyodide"
     renderer = CanvasRenderer(workspace)
-    monkeypatch.setattr(renderer, "_browser_python_export_assets", lambda _: "bundle")
+    monkeypatch.setattr(
+        renderer, "_browser_python_export_assets", lambda _, **__: "bundle"
+    )
 
     with pytest.raises(ExecutionFailure) as failure:
         renderer.write_report(dashboard, result, tmp_path / "report.html")
@@ -467,7 +474,9 @@ def test_report_export_atomically_replaces_local_runtime_assets(
     result = Executor(workspace).run("sales")
     workspace.definition.runtime.pyodide_bundle_path = "pyodide"
     renderer = CanvasRenderer(workspace)
-    monkeypatch.setattr(renderer, "_browser_python_export_assets", lambda _: "bundle")
+    monkeypatch.setattr(
+        renderer, "_browser_python_export_assets", lambda _, **__: "bundle"
+    )
     output = tmp_path / "report.html"
 
     renderer.write_report(dashboard, result, output)
@@ -515,7 +524,9 @@ def test_report_export_rolls_back_assets_and_manifest_when_html_publish_fails(
     result = Executor(workspace).run("sales")
     workspace.definition.runtime.pyodide_bundle_path = "pyodide"
     renderer = CanvasRenderer(workspace)
-    monkeypatch.setattr(renderer, "_browser_python_export_assets", lambda _: "bundle")
+    monkeypatch.setattr(
+        renderer, "_browser_python_export_assets", lambda _, **__: "bundle"
+    )
     output = tmp_path / "report.html"
     renderer.write_report(dashboard, result, output)
 

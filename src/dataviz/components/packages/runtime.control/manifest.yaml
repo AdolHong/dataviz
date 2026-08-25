@@ -1,0 +1,24 @@
+schema: dataviz/component-package/v1
+package: runtime.control
+version: 2.1.0
+category: runtime
+purpose: Shared canonical-value bridge, lifecycle and keyboard utilities for Data Entry components.
+implementation: {mode: package, sources: []}
+dependencies: [runtime.overlay]
+components:
+  - id: runtime.control
+    purpose: Hydrate independently packaged Data Entry components while preserving one canonical native form control.
+    status: stable
+    behavior:
+      state_owner: native form control
+      event_contract: bubbling input and change
+      enhancement: progressive
+      overlay_surface: opaque_by_default
+      ownership: value and scope semantics remain outside the component
+      dynamic_domain_intent: all_available expands with its option domain; explicit keeps only the valid intersection
+    semantic_dom: [.dv-control, '[data-control-component]', '[data-control-input]', '[data-control-mount]', .dv-control-panel]
+    tokens: [--dv-accent, --dv-green, --dv-ink, --dv-line, --dv-panel, --dv-overlay-surface]
+runtime:
+  controller: controller.js
+  adapter: adapter.js
+  style: style.css

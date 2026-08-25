@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v3
+schema: dataviz/dashboard/v4
 kind: dashboard
 id: component-gallery
 title: Component Gallery
@@ -21,10 +21,62 @@ controls:
     type: multi_select
     label: Region tags
     default: [East, South, North]
-    choices:
-      - {label: East, value: East}
-      - {label: South, value: South}
-      - {label: North, value: North}
+    options:
+      mode: static
+      choices:
+        - {label: East, value: East}
+        - {label: South, value: South}
+        - {label: North, value: North}
+  - id: analyst-note
+    kind: compute
+    type: string
+    label: Analyst note
+    default: Review the selected cohort
+    placeholder: Add a short analysis note
+    max_length: 120
+  - id: scenario-name
+    kind: compute
+    type: string
+    label: Scenario name
+    default: Baseline
+    placeholder: Choose or type a scenario
+    suggestions:
+      - {label: Baseline, value: Baseline}
+      - {label: Upside, value: Upside}
+      - {label: Downside, value: Downside}
+  - id: sample-size
+    kind: compute
+    type: integer
+    label: Sample size
+    default: 50
+    min: 10
+    max: 100
+    step: 10
+  - id: include-returns
+    kind: compute
+    type: boolean
+    label: Include returns
+    default: false
+  - id: live-preview
+    kind: compute
+    type: boolean
+    label: Live preview
+    default: true
+  - id: as-of-date
+    kind: compute
+    type: date
+    label: As-of date
+    default: "2026-03-01"
+    min_date: "2026-01-01"
+    max_date: "2026-12-31"
+  - id: confidence
+    kind: compute
+    type: number
+    label: Confidence
+    default: 0.8
+    min: 0
+    max: 1
+    step: 0.05
 
 views:
   - {id: total-revenue, title: Revenue, template: metric, input: source:gallery-data/main, value: revenue, aggregate: sum, label: selected revenue}
@@ -37,7 +89,7 @@ views:
   - {id: revenue-heatmap, title: Heatmap, template: heatmap, engine: echarts, input: source:gallery-data/main, x: month, y: region, z: revenue, aggregate: sum}
   - {id: store-radar, title: Radar, template: radar, engine: echarts, input: source:gallery-data/main, label: store_id, columns: [revenue, orders, satisfaction], limit: 4}
   - id: detail-table
-    title: Themeable table + View selectors
+    title: Themeable table + View controls
     template: table
     input: source:gallery-data/main
     columns: [date, month, region, category, product, province, city, district, store_id, revenue, orders]
@@ -48,32 +100,38 @@ views:
         field: product
         type: multi_select
         label: Search products
-        choices:
-          - {label: Atlas, value: Atlas, group: Core, description: Established line}
-          - {label: Beacon, value: Beacon, group: Core, description: Established line}
-          - {label: Comet, value: Comet, group: New, description: Growth line}
-          - {label: Delta, value: Delta, group: New, description: Growth line}
+        options:
+          mode: static
+          choices:
+            - {label: Atlas, value: Atlas, group: Core, description: Established line}
+            - {label: Beacon, value: Beacon, group: Core, description: Established line}
+            - {label: Comet, value: Comet, group: New, description: Growth line}
+            - {label: Delta, value: Delta, group: New, description: Growth line}
       - id: category-focus
         kind: selection
         field: category
         type: single_select
         label: Category focus
         default: Hardware
-        choices:
-          - {label: Hardware, value: Hardware}
-          - {label: Software, value: Software}
+        options:
+          mode: static
+          choices:
+            - {label: Hardware, value: Hardware}
+            - {label: Software, value: Software}
       - id: location
         kind: selection
         field: district
         path_fields: [province, city, district]
         type: multi_select
         label: Province / city / district
+        options: {mode: infer}
       - id: location-tree
         kind: selection
         field: district
         path_fields: [province, city, district]
         type: multi_select
         label: Location tree
+        options: {mode: infer}
       - id: date-window
         kind: selection
         field: date
@@ -86,11 +144,13 @@ views:
         type: multi_select
         label: Virtualized stores
         default: [S01, S02, S03, S04]
-        choices:
-          - {label: Store S01, value: S01}
-          - {label: Store S02, value: S02}
-          - {label: Store S03, value: S03}
-          - {label: Store S04, value: S04}
+        options:
+          mode: static
+          choices:
+            - {label: Store S01, value: S01}
+            - {label: Store S02, value: S02}
+            - {label: Store S03, value: S03}
+            - {label: Store S04, value: S04}
   - {id: pivot-table, title: Perspective, template: perspective, input: source:gallery-data/main, columns: [month, region, category, revenue, orders]}
   - id: narrative
     title: Markdown
@@ -99,7 +159,7 @@ views:
   - id: image-specimen
     title: Image
     template: image
-    url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 420'%3E%3Crect width='800' height='420' fill='%2317211d'/%3E%3Ccircle cx='610' cy='120' r='82' fill='%2369dca5'/%3E%3Cpath d='M0 350L250 130L430 290L800 40V420H0Z' fill='%23e2592a'/%3E%3Ctext x='44' y='78' fill='%23fffdf6' font-family='serif' font-size='42'%3EIMAGE VIEW%3C/text%3E%3C/svg%3E"
+    url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 420'%3E%3Crect width='800' height='420' fill='%231a237e'/%3E%3Ccircle cx='610' cy='120' r='82' fill='%2326a69a'/%3E%3Cpath d='M0 350L250 130L430 290L800 40V420H0Z' fill='%233949ab'/%3E%3Ctext x='44' y='78' fill='%23ffffff' font-family='sans-serif' font-size='42'%3EIMAGE VIEW%3C/text%3E%3C/svg%3E"
   - {id: custom-specimen, title: Custom renderer, template: custom, renderer: gallery.spark, input: source:gallery-data/main}
   - {id: all-store-trend, title: Store trend blueprint, template: line, input: source:gallery-data/main, x: month, y: revenue, aggregate: sum}
   - {id: selected-store-trend, title: Selected store blueprint, template: line, input: source:gallery-data/main, x: month, y: revenue, aggregate: sum}
@@ -113,7 +173,7 @@ sections:
 
   - id: trends
     title: Cartesian and composition
-    description: A Section-scoped Selection Control demonstrates the compact selector template.
+    description: A Section-scoped Selection Control demonstrates the compact Data Entry component.
     template: grid
     controls:
       - id: category
@@ -122,9 +182,11 @@ sections:
         type: multi_select
         label: Category select
         default: [Hardware, Software]
-        choices:
-          - {label: Hardware, value: Hardware}
-          - {label: Software, value: Software}
+        options:
+          mode: static
+          choices:
+            - {label: Hardware, value: Hardware}
+            - {label: Software, value: Software}
     views: [revenue-line, category-bars, stacked-orders, category-share]
 
   - id: relationships
@@ -166,11 +228,13 @@ sections:
         type: multi_select
         label: Stores
         default: [S01, S03]
-        choices:
-          - {label: Store S01, value: S01}
-          - {label: Store S02, value: S02}
-          - {label: Store S03, value: S03}
-          - {label: Store S04, value: S04}
+        options:
+          mode: static
+          choices:
+            - {label: Store S01, value: S01}
+            - {label: Store S02, value: S02}
+            - {label: Store S03, value: S03}
+            - {label: Store S04, value: S04}
     views: [selected-store-trend]
     repeat:
       view: selected-store-trend

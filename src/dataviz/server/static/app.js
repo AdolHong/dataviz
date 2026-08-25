@@ -23,6 +23,7 @@ function runtimeFor(dashboardId) {
       pendingRunId: null,
       committedQueryParameters: null,
       queryParameterValues: null,
+      queryParametersOpen: null,
       committedComputeParameters: null,
       draftComputeParameters: null,
       dashboardSelectionValues: null,
@@ -30,6 +31,8 @@ function runtimeFor(dashboardId) {
       nodeErrors: {},
       nodeStatuses: {},
       canvasSelections: {},
+      canvasSelectionIntents: {},
+      dashboardSelectionIntents: {},
       queryStatus: 'idle',
       queryLabel: 'Not run',
       message: 'Data pipeline is ready to run.',
@@ -58,9 +61,10 @@ for (const property of [
   'eventSource',
   'nodeErrors',
   'canvasSelections',
+  'canvasSelectionIntents',
 ]) {
   Object.defineProperty(state, property, {
-    get() { return activeRuntime()?.[property] ?? (property.endsWith('Errors') || property.endsWith('Selections') ? {} : null); },
+    get() { return activeRuntime()?.[property] ?? (property.endsWith('Errors') || property.endsWith('Selections') || property.endsWith('Intents') ? {} : null); },
     set(value) { const runtime = activeRuntime(); if (runtime) runtime[property] = value; },
   });
 }
@@ -171,10 +175,13 @@ function saveTabUiState() {
   for (const [dashboardId, runtime] of state.dashboardStates) {
     dashboards[dashboardId] = {
       queryParameterValues: runtime.queryParameterValues,
+      queryParametersOpen: runtime.queryParametersOpen,
       committedComputeParameters: runtime.committedComputeParameters,
       draftComputeParameters: runtime.draftComputeParameters,
       dashboardSelectionValues: runtime.dashboardSelectionValues,
       canvasSelections: runtime.canvasSelections,
+      canvasSelectionIntents: runtime.canvasSelectionIntents,
+      dashboardSelectionIntents: runtime.dashboardSelectionIntents,
     };
   }
   sessionStorage.setItem(
@@ -353,6 +360,7 @@ async function downloadReport() {
           session_id:state.sessionId,
           run_id:runId,
           selections:selectionValues,
+          selection_intents:selectionIntents(),
           compute_parameters:computeValues,
           snapshot_outputs:snapshotOutputs,
         }),
@@ -389,15 +397,20 @@ async function downloadReport() {
   }
 }
 
-function selectorTemplate(parameter, presentation = {}) {
-  if (presentation.template && presentation.template !== 'auto') return presentation.template;
-  if (parameter.type === 'date_range') return 'date-range';
+function controlComponent(parameter, presentation = {}) {
+  if (presentation.component && presentation.component !== 'auto') return presentation.component;
   if ((parameter.path_fields || []).length) return 'cascader';
-  const count = (parameter.choices || []).length;
-  if (parameter.type === 'boolean') return 'segmented';
+  if (parameter.type === 'date_range') return 'range-picker';
+  if (parameter.type === 'date') return 'date-picker';
+  if (['number', 'integer'].includes(parameter.type)) return 'input-number';
+  if (parameter.type === 'boolean') return 'checkbox';
+  if (parameter.type === 'string') return (parameter.suggestions || []).length ? 'auto-complete' : 'input';
+  const count = parameter.options?.mode === 'static'
+    ? (parameter.options.choices || []).length
+    : 0;
   if (parameter.type === 'multi_select') return count > 0 && count <= 8 ? 'checkbox-group' : 'select';
-  if (parameter.type === 'single_select') return count > 0 && count <= 4 ? 'segmented' : 'select';
-  return 'auto';
+  if (parameter.type === 'single_select') return count > 0 && count <= 4 ? 'radio-group' : 'select';
+  throw new Error(`No Data Entry component for ${parameter.type}`);
 }
 
 function field(parameter, name = parameter.id, presentation = {}, behavior = {}) {
@@ -408,19 +421,22 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
   label.htmlFor = inputId;
   label.textContent = parameter.label || parameter.id;
   let input;
-  const template = selectorTemplate(parameter, presentation);
-  const enhancedBoolean = parameter.type === 'boolean' && behavior.selection === true;
-  if (['single_select', 'multi_select'].includes(parameter.type) || enhancedBoolean) {
+  const component = controlComponent(parameter, presentation);
+  const clearable = parameter.clearable == null
+    ? !parameter.required && ['string', 'multi_select', 'date', 'date_range'].includes(parameter.type)
+    : Boolean(parameter.clearable);
+  if (['single_select', 'multi_select'].includes(parameter.type)) {
     input = document.createElement('select');
     if (parameter.type === 'multi_select') {
       input.multiple = true;
     }
-    const choices = enhancedBoolean && !(parameter.choices || []).length
-      ? [{label: 'Yes', value: true}, {label: 'No', value: false}]
-      : (parameter.choices || []);
-    const typedChoices = choices.some(choice => typeof choice.value !== 'string');
+    const choices = parameter.options?.mode === 'static'
+      ? (parameter.options.choices || [])
+      : [];
+    const typedChoices = (parameter.path_fields || []).length > 0
+      || choices.some(choice => typeof choice.value !== 'string');
     input.dataset.valueEncoding = typedChoices ? 'json' : 'string';
-    if (behavior.selection === true && parameter.type !== 'multi_select') {
+    if (parameter.type !== 'multi_select') {
       const empty = document.createElement('option');
       empty.value = '';
       empty.hidden = true;
@@ -435,88 +451,115 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
       if (choice.group) option.dataset.group = choice.group;
       if (choice.description) option.dataset.description = choice.description;
       if (choice.keywords?.length) option.dataset.keywords = choice.keywords.join(' ');
-      const defaults = Array.isArray(parameter.default) ? parameter.default : [parameter.default];
+      const hierarchicalSingle = parameter.type === 'single_select' && (parameter.path_fields || []).length;
+      const defaults = parameter.type === 'multi_select'
+        ? (Array.isArray(parameter.default) ? parameter.default : [])
+        : hierarchicalSingle
+        ? [parameter.default]
+        : [parameter.default];
       option.selected = defaults.map(value => typedChoices ? JSON.stringify(value) : String(value)).includes(option.value);
       input.append(option);
     }
-    if (!input.multiple && parameter.default == null && behavior.selection !== true) {
+    if (!input.multiple && parameter.default == null) {
       input.selectedIndex = -1;
     }
   } else {
-    input = document.createElement('input');
-    input.type = parameter.type === 'boolean'
-      ? 'checkbox'
-      : ['number', 'integer'].includes(parameter.type)
-      ? 'number'
-      : parameter.type === 'date'
-      ? 'date'
-      : 'text';
-    if (parameter.type === 'date_range') input.dataset.selectorNative = '';
+    input = component === 'input' && presentation.multiline
+      ? document.createElement('textarea')
+      : document.createElement('input');
+    if (input instanceof HTMLInputElement) {
+      input.type = parameter.type === 'boolean'
+        ? 'checkbox'
+        : ['number', 'integer'].includes(parameter.type)
+        ? component === 'slider' ? 'range' : 'number'
+        : parameter.type === 'date'
+        ? 'date'
+        : 'text';
+    }
     if (parameter.type === 'boolean') input.checked = Boolean(parameter.default);
     else if (Array.isArray(parameter.default)) input.value = parameter.default.join(',');
     else input.value = parameter.default ?? '';
   }
-  input.required = Boolean(parameter.required);
+  input.required = Boolean(parameter.required && parameter.type !== 'boolean');
   if (parameter.placeholder) input.placeholder = parameter.placeholder;
   if (parameter.min != null) input.min = parameter.min;
   if (parameter.max != null) input.max = parameter.max;
   if (parameter.step != null) input.step = parameter.step;
   else if (parameter.type === 'integer') input.step = '1';
+  if (parameter.min_date) input.min = parameter.min_date;
+  if (parameter.max_date) input.max = parameter.max_date;
+  if (parameter.max_length) input.maxLength = parameter.max_length;
   input.id = inputId;
   input.name = name;
   input.dataset.type = parameter.type;
+  input.dataset.controlInput = '';
+  if (behavior.selection === true) input.dataset.selectionInput = name;
+  if (behavior.compute === true) input.dataset.computeInput = name;
   wrapper.append(label);
-  if (['single_select', 'multi_select', 'date_range'].includes(parameter.type) || enhancedBoolean) {
-    wrapper.classList.add('field--selector');
-    if (presentation.css_class) wrapper.classList.add(...presentation.css_class.split(/\s+/).filter(Boolean));
-    const selector = document.createElement('div');
-    selector.className = 'dv-selector';
-    selector.dataset.selectorTemplate = template;
-    selector.dataset.requestedTemplate = presentation.requested_template || presentation.template || 'auto';
-    selector.dataset.autoReason = presentation.auto_reason || '';
-    selector.dataset.emptyMeansAll = String(Boolean(behavior.selection));
-    selector.dataset.required = String(Boolean(parameter.required));
-    selector.dataset.variant = presentation.variant || 'default';
-    selector.dataset.showUnavailable = String(Boolean(presentation.show_unavailable));
-    selector.dataset.searchMode = presentation.search || 'auto';
-    selector.dataset.virtualMode = presentation.virtual || 'auto';
-    selector.dataset.searchThreshold = String(presentation.search_threshold ?? 9);
-    selector.dataset.virtualThreshold = String(presentation.virtual_threshold ?? 200);
-    selector.dataset.maxVisibleTags = String(presentation.max_visible_tags ?? 2);
-    selector.dataset.maxSelected = String(presentation.max_selected || '');
-    selector.dataset.hideSelected = String(Boolean(presentation.hide_selected));
-    selector.dataset.searchPlaceholder = presentation.search_placeholder || 'Search options…';
-    selector.dataset.emptyText = presentation.empty_text || 'No matching options';
-    selector.dataset.placeholder = presentation.placeholder || 'Choose…';
-    selector.dataset.allLabel = presentation.all_label || 'All';
-    selector.dataset.selectAllLabel = presentation.select_all_label || 'Select all';
-    selector.dataset.invertLabel = presentation.invert_label || 'Invert';
-    selector.dataset.clearLabel = presentation.clear_label || 'Clear';
-    selector.dataset.pathSeparator = presentation.path_separator || ' / ';
-    selector.dataset.hierarchySelection = presentation.hierarchy_selection || 'leaf';
-    selector.dataset.checkedStrategy = presentation.checked_strategy || 'child';
-    selector.dataset.startLabel = presentation.start_label || 'Start';
-    selector.dataset.endLabel = presentation.end_label || 'End';
-    selector.dataset.min = presentation.min || '';
-    selector.dataset.max = presentation.max || '';
-    selector.dataset.allowOpenRange = String(Boolean(presentation.allow_open_range));
-    selector.dataset.presets = JSON.stringify(presentation.presets || []);
-    selector.dataset.itemHeight = String(presentation.item_height || 38);
-    selector.dataset.viewportHeight = String(presentation.viewport_height || 304);
-    selector.dataset.overscan = String(presentation.overscan || 5);
-    selector.dataset.defaultExpandDepth = String(presentation.default_expand_depth || 0);
-    selector.dataset.cascaderLevels = JSON.stringify((parameter.path_fields || []).map((field, index) => ({
+  wrapper.classList.add('field--control');
+  if (presentation.css_class) wrapper.classList.add(...presentation.css_class.split(/\s+/).filter(Boolean));
+  const control = document.createElement('div');
+  control.className = 'dv-control';
+  control.dataset.controlComponent = component;
+  control.dataset.requestedComponent = presentation.requested_component || presentation.component || 'auto';
+  control.dataset.autoReason = presentation.auto_reason || '';
+  control.dataset.emptyMeansAll = String(Boolean(behavior.selection && parameter.type === 'multi_select'));
+  control.dataset.required = String(Boolean(parameter.required));
+  control.dataset.clearable = String(clearable);
+  control.dataset.showUnavailable = String(Boolean(presentation.show_unavailable));
+  control.dataset.searchMode = presentation.search || 'auto';
+  control.dataset.virtualMode = presentation.virtual || 'auto';
+  control.dataset.searchThreshold = String(presentation.search_threshold ?? 9);
+  control.dataset.virtualThreshold = String(presentation.virtual_threshold ?? 200);
+  control.dataset.maxTagCount = String(presentation.max_tag_count ?? 2);
+  control.dataset.maxSelected = String(parameter.max_selected || '');
+  control.dataset.hideSelected = String(Boolean(presentation.hide_selected));
+  control.dataset.searchPlaceholder = presentation.search_placeholder || 'Search options…';
+  control.dataset.emptyText = presentation.empty_text || 'No matching options';
+  control.dataset.placeholder = parameter.placeholder || 'Choose…';
+  control.dataset.selectAllLabel = presentation.select_all_label || 'Select all';
+  control.dataset.invertLabel = presentation.invert_label || 'Invert';
+  control.dataset.clearLabel = presentation.clear_label || 'Clear';
+  control.dataset.pathSeparator = presentation.path_separator || ' / ';
+  control.dataset.selectionStrategy = presentation.selection_strategy || 'leaf';
+  control.dataset.showCheckedStrategy = presentation.show_checked_strategy || 'child';
+  control.dataset.startLabel = presentation.start_label || 'Start';
+  control.dataset.endLabel = presentation.end_label || 'End';
+  control.dataset.minDate = parameter.min_date || '';
+  control.dataset.maxDate = parameter.max_date || '';
+  control.dataset.allowEmptyStart = String(Boolean(parameter.allow_empty?.[0]));
+  control.dataset.allowEmptyEnd = String(Boolean(parameter.allow_empty?.[1]));
+  control.dataset.presets = JSON.stringify(presentation.presets || []);
+  control.dataset.itemHeight = String(presentation.item_height || 38);
+  control.dataset.viewportHeight = String(presentation.viewport_height || 304);
+  control.dataset.overscan = String(presentation.overscan || 5);
+  control.dataset.defaultExpandDepth = String(presentation.default_expand_depth || 0);
+  control.dataset.optionType = presentation.option_type || 'default';
+  control.dataset.buttonStyle = presentation.button_style || 'outline';
+  control.dataset.bulkActions = String(presentation.bulk_actions !== false);
+  control.dataset.checkedLabel = presentation.checked_label || '';
+  control.dataset.uncheckedLabel = presentation.unchecked_label || '';
+  control.dataset.multiline = String(Boolean(presentation.multiline));
+  control.dataset.minRows = String(presentation.min_rows || 2);
+  control.dataset.maxRows = String(presentation.max_rows || 6);
+  control.dataset.showCount = String(Boolean(presentation.show_count));
+  control.dataset.prefix = presentation.prefix || '';
+  control.dataset.suffix = presentation.suffix || '';
+  control.dataset.numberControls = String(presentation.number_controls !== false);
+  control.dataset.showInput = String(Boolean(presentation.show_input));
+  control.dataset.tooltip = presentation.tooltip || 'auto';
+  control.dataset.marks = JSON.stringify(presentation.marks || []);
+  control.dataset.suggestions = JSON.stringify(parameter.suggestions || []);
+  control.dataset.cascaderLevels = JSON.stringify((parameter.path_fields || []).map((field, index) => ({
       field,
       label: presentation.level_labels?.[index] || field,
-    })));
-    const mount = document.createElement('div');
-    mount.dataset.selectorMount = '';
-    input.classList.add('field__native-choice');
-    selector.append(input, mount);
-    wrapper.append(selector);
-  } else {
-    wrapper.append(input);
-  }
+  })));
+  const hiddenNative = ['select', 'radio-group', 'checkbox-group', 'cascader', 'tree-select', 'range-picker', 'switch'].includes(component);
+  input.dataset.controlNative = hiddenNative ? 'hidden' : 'visible';
+  const mount = document.createElement('div');
+  mount.dataset.controlMount = '';
+  control.append(input, mount);
+  wrapper.append(control);
   return wrapper;
 }
 
@@ -537,7 +580,12 @@ function dashboardControls(kind = null) {
 }
 
 function computeField(control) {
-  const wrapper = field(control.definition, control.key);
+  const wrapper = field(
+    control.definition,
+    control.key,
+    control.presentation || {},
+    {compute: true},
+  );
   wrapper.dataset.computeParameter = control.key;
   wrapper.dataset.computeTrigger = control.trigger || 'apply';
   wrapper.dataset.controlKind = 'compute';
@@ -547,13 +595,42 @@ function computeField(control) {
 function applyDashboardControlPresentation(dashboard) {
   const shell = window.datavizComponents?.presentationShell;
   if (!shell?.applyControlPanel) return;
-  const controls = dashboard.presentation?.controls || {};
+  const controls = dashboard.presentation?.control_panels || {};
   shell.applyControlPanel($('#query-parameters-control'), controls.query, {
     role:'query', count:dashboard.query_parameters.length,
   });
   shell.applyControlPanel($('#dashboard-controls-control'), controls.dashboard, {
     role:'dashboard', count:dashboardControls().length,
   });
+}
+
+function setRunButtonLabel(label) {
+  const target = $('#run-button [data-run-label]');
+  if (target) target.textContent = label;
+}
+
+function setQueryParametersOpen(open, {persist = false} = {}) {
+  const owner = $('#query-parameters-control');
+  const panel = $('#query-parameters-panel');
+  const toggle = $('#query-parameters-toggle');
+  const hasParameters = Number(owner.dataset.controlCount || 0) > 0;
+  const expanded = hasParameters && Boolean(open);
+  panel.hidden = !expanded;
+  toggle.setAttribute('aria-expanded', String(expanded));
+  toggle.setAttribute(
+    'aria-label',
+    expanded ? 'Collapse query parameters' : 'Expand query parameters',
+  );
+  toggle.title = expanded ? 'Collapse query parameters' : 'Expand query parameters';
+  $('#query-run-control').classList.toggle('is-parameters-open', expanded);
+  const runtime = activeRuntime();
+  if (runtime && hasParameters) runtime.queryParametersOpen = expanded;
+  if (persist) saveTabUiState();
+}
+
+function toggleQueryParameters() {
+  const expanded = $('#query-parameters-toggle').getAttribute('aria-expanded') === 'true';
+  setQueryParametersOpen(!expanded, {persist: true});
 }
 
 function dashboardSelectionValues() {
@@ -568,6 +645,14 @@ function dashboardSelectionValues() {
     ) values[input.name] = remembered[input.name];
   }
   return values;
+}
+
+function captureDashboardSelectionIntent(event) {
+  const input = event?.target;
+  if (!(input instanceof HTMLSelectElement) || !input.multiple || !input.name) return;
+  const intent = window.datavizComponents?.controls?.inferSelectionIntent?.(input);
+  const runtime = activeRuntime();
+  if (intent && runtime) runtime.dashboardSelectionIntents[input.name] = intent;
 }
 
 function syncDashboardSelectionOptions(controls = []) {
@@ -590,16 +675,18 @@ function syncDashboardSelectionOptions(controls = []) {
       ? runtime.dashboardSelectionValues[control.key]
       : definition?.default ?? formValues(form)[control.key];
     const previousValues = input.multiple && Array.isArray(previous) ? previous : [previous];
-    const selected = new Set(previousValues.filter(value => value != null && value !== '').map(value => JSON.stringify(value)));
     const typed = options.some(option => typeof option.value !== 'string');
     input.dataset.valueEncoding = typed ? 'json' : 'string';
+    const encode = value => typed ? JSON.stringify(value) : String(value);
+    const selectedValues = previousValues
+      .filter(value => value != null && value !== '')
+      .map(encode);
     const nodes = [];
     if (!input.multiple) {
       const empty = document.createElement('option');
       empty.value = '';
       empty.hidden = true;
       empty.dataset.emptyOption = 'true';
-      empty.selected = selected.size === 0;
       nodes.push(empty);
     }
     for (const item of options) {
@@ -607,19 +694,23 @@ function syncDashboardSelectionOptions(controls = []) {
       option.value = typed ? JSON.stringify(item.value) : String(item.value);
       option.textContent = item.label ?? String(item.value);
       option.disabled = item.available === false;
-      option.selected = !option.disabled && selected.has(JSON.stringify(item.value));
       if (item.group) option.dataset.group = item.group;
       if (item.description) option.dataset.description = item.description;
       if (item.keywords?.length) option.dataset.keywords = item.keywords.join(' ');
       nodes.push(option);
     }
-    if (definition?.required && !nodes.some(option => option.selected && !option.disabled)) {
-      const fallback = nodes.find(
-        option => option.dataset.emptyOption !== 'true' && !option.disabled,
-      );
-      if (fallback) fallback.selected = true;
-    }
-    input.replaceChildren(...nodes);
+    const reconciled = window.datavizComponents?.controls?.reconcileOptionDomain?.(
+      input,
+      nodes,
+      {
+        selectedValues,
+        intent:runtime?.dashboardSelectionIntents?.[control.key],
+        required:Boolean(definition?.required),
+      },
+    );
+    if (reconciled?.intent && runtime) {
+      runtime.dashboardSelectionIntents[control.key] = reconciled.intent;
+    } else if (!reconciled) input.replaceChildren(...nodes);
     input.dataset.runtimeOptionsSignature = signature;
     input._syncChoiceControl?.();
     synchronized = true;
@@ -661,7 +752,9 @@ function selectDashboard(id) {
   const runtime = activeRuntime();
   document.querySelectorAll('.nav-button').forEach((node) => node.classList.toggle('active', node.dataset.id === id));
   const runnable = Boolean(state.dashboard.runnable);
-  $('#parameter-form').replaceChildren(...state.dashboard.query_parameters.map((item) => field(item)));
+  $('#parameter-form').replaceChildren(...state.dashboard.query_parameters.map(
+    item => field(item, item.id, item.presentation || {}, {query: true}),
+  ));
   const dataControls = dashboardControls('selection');
   const logicControls = dashboardControls('compute');
   $('#compute-parameter-form').replaceChildren(...logicControls.map(computeField));
@@ -675,6 +768,26 @@ function selectDashboard(id) {
   $('#dashboard-compute-group').hidden = logicControls.length === 0;
   $('#dashboard-selection-form').replaceChildren(...dataControls.map(selectionField));
   applyDashboardControlPresentation(state.dashboard);
+  const queryParameterCount = state.dashboard.query_parameters.length;
+  const hasQueryParameters = queryParameterCount > 0;
+  $('#query-run-control').dataset.empty = String(!hasQueryParameters);
+  $('#query-parameters-control').dataset.empty = String(!hasQueryParameters);
+  $('#query-parameter-count').textContent = hasQueryParameters
+    ? `${queryParameterCount} parameter${queryParameterCount === 1 ? '' : 's'} · changes apply on next run`
+    : 'No query parameters';
+  if (runtime.queryParametersOpen == null && hasQueryParameters) {
+    runtime.queryParametersOpen = true;
+  }
+  setQueryParametersOpen(runtime.queryParametersOpen);
+  for (const control of dataControls) {
+    if (
+      control.initial_intent
+      && !Object.prototype.hasOwnProperty.call(
+        runtime.dashboardSelectionIntents,
+        control.key,
+      )
+    ) runtime.dashboardSelectionIntents[control.key] = control.initial_intent;
+  }
   if (runtime.dashboardSelectionValues == null) {
     runtime.dashboardSelectionValues = Object.fromEntries(
       dataControls.map(control => [control.key, structuredClone(control.definition.default)]),
@@ -705,7 +818,7 @@ function selectDashboard(id) {
   loadCanvasFrame(id, runtime.pendingRunId || runtime.runId);
   $('#run-button').disabled = !runnable;
   $('#run-button').classList.toggle('is-cancelling', Boolean(runtime.pendingRunId));
-  $('#run-button').lastChild.textContent = runtime.pendingRunId ? 'Cancel query' : 'Run query';
+  setRunButtonLabel(runtime.pendingRunId ? 'Cancel query' : 'Run query');
   $('#download-button').disabled = !runtime.runId;
   saveTabUiState();
 }
@@ -743,6 +856,26 @@ function selections() {
   return Object.fromEntries(Object.entries(values).filter(([key]) => validKeys.has(key)));
 }
 
+function selectionIntents() {
+  const normalize = window.datavizComponents?.controls?.normalizeSelectionIntent;
+  const runtime = activeRuntime();
+  const values = Object.assign(
+    {},
+    runtime?.dashboardSelectionIntents || {},
+    state.canvasSelectionIntents || {},
+  );
+  const validKeys = new Set(
+    (state.dashboard?.controls || [])
+      .filter(control => control.kind === 'selection')
+      .map(control => control.key),
+  );
+  return Object.fromEntries(
+    Object.entries(values).filter(
+      ([key, value]) => validKeys.has(key) && Boolean(normalize?.(value)),
+    ),
+  );
+}
+
 function formValues(form) {
   const values = {};
   for (const input of form.elements) {
@@ -769,21 +902,22 @@ async function runDashboard() {
   if (runtime.pendingRunId) {
     const runId = runtime.pendingRunId;
     $('#run-button').disabled = true;
-    $('#run-button').lastChild.textContent = 'Cancelling…';
+    setRunButtonLabel('Cancelling…');
     try {
       await request(`/api/runs/${encodeURIComponent(runId)}?${sessionQuery()}`, {method:'DELETE'});
       runtime.message = 'Cancelling this Dashboard query…';
       $('#run-message').textContent = runtime.message;
     } catch (error) {
       $('#run-button').disabled = false;
-      $('#run-button').lastChild.textContent = 'Cancel query';
+      setRunButtonLabel('Cancel query');
       runtime.message = error.message;
       $('#run-message').textContent = error.message;
     }
     return;
   }
   if (!$('#parameter-form').checkValidity()) {
-    $('#parameter-form').reportValidity();
+    setQueryParametersOpen(true, {persist: true});
+    window.requestAnimationFrame(() => $('#parameter-form').reportValidity());
     return;
   }
   closeHeaderPopovers();
@@ -826,7 +960,7 @@ async function runDashboard() {
     runtime.message = 'Querying a new dataset…';
     $('#run-button').disabled = false;
     $('#run-button').classList.add('is-cancelling');
-    $('#run-button').lastChild.textContent = 'Cancel query';
+    setRunButtonLabel('Cancel query');
     if (state.dashboard?.id === dashboardId) {
       loadCanvasFrame(dashboardId, response.run_id);
     }
@@ -843,7 +977,7 @@ async function runDashboard() {
       $('#query-diagnostics-label').textContent = 'Failed';
       $('#run-button').disabled = false;
       $('#run-button').classList.remove('is-cancelling');
-      $('#run-button').lastChild.textContent = 'Run query';
+      setRunButtonLabel('Run query');
     }
   }
 }
@@ -923,7 +1057,7 @@ async function finishRun(runId, dashboardId) {
     $('#run-message').textContent = runtime.message;
     $('#run-button').disabled = false;
     $('#run-button').classList.remove('is-cancelling');
-    $('#run-button').lastChild.textContent = 'Run query';
+    setRunButtonLabel('Run query');
     $('#download-button').disabled = !runtime.runId;
     $('#query-diagnostics').dataset.status = runtime.queryStatus;
     $('#query-diagnostics-label').textContent = runtime.queryLabel;
@@ -1046,6 +1180,7 @@ function pendingParametersMatchDataset() {
 function setQueryState(message = null) {
   const node = $('#query-state');
   const runtime = activeRuntime();
+  const hasQueryParameters = Boolean(state.dashboard?.query_parameters?.length);
   if (state.dashboard && !state.dashboard.runnable) {
     node.dataset.stale = 'true';
     node.textContent = state.dashboard.message || 'Dashboard unavailable.';
@@ -1060,6 +1195,12 @@ function setQueryState(message = null) {
     node.dataset.stale = state.runId ? 'true' : 'false';
     node.textContent = message;
     $('#query-control-meta').textContent = 'Check values';
+  } else if (!hasQueryParameters) {
+    node.dataset.stale = 'false';
+    node.textContent = state.runId
+      ? `Loaded dataset · ${state.runId}`
+      : 'This dashboard has no query parameters.';
+    $('#query-control-meta').textContent = 'No parameters';
   } else if (!state.runId) {
     node.dataset.stale = 'false';
     node.textContent = 'No dataset loaded. Query parameters are pending.';
@@ -1091,7 +1232,11 @@ function closeHeaderPopovers(except = null) {
 
 function applyViewSelections() {
   if (!state.runId && !state.pendingRunId) return;
-  postCanvasMessage({type: 'dataviz:set-selections', selections: selections()});
+  postCanvasMessage({
+    type:'dataviz:set-selections',
+    selections:selections(),
+    selection_intents:selectionIntents(),
+  });
 }
 
 function scheduleViewSelections() {
@@ -1894,6 +2039,7 @@ async function boot() {
 }
 
 $('#run-button').addEventListener('click', runDashboard);
+$('#query-parameters-toggle').addEventListener('click', toggleQueryParameters);
 $('#download-button').addEventListener('click', downloadReport);
 $('#dashboard-reload').addEventListener('click', reloadDashboardFromDisk);
 $('#workspace-update-dismiss').addEventListener('click', hideWorkspaceUpdate);
@@ -1911,7 +2057,8 @@ $('#parameter-form').addEventListener('change', () => {
   saveTabUiState();
   setQueryState();
 });
-$('#dashboard-selection-form').addEventListener('input', () => {
+$('#dashboard-selection-form').addEventListener('input', event => {
+  captureDashboardSelectionIntent(event);
   if (activeRuntime()) activeRuntime().dashboardSelectionValues = dashboardSelectionValues();
   saveTabUiState();
   updateDashboardControlSummary();
@@ -1944,7 +2091,8 @@ const onComputeDraft = (event) => {
 $('#compute-parameter-form').addEventListener('input', onComputeDraft);
 $('#compute-parameter-form').addEventListener('change', onComputeDraft);
 $('#compute-apply').addEventListener('click', applyDashboardControls);
-$('#dashboard-selection-form').addEventListener('change', () => {
+$('#dashboard-selection-form').addEventListener('change', event => {
+  captureDashboardSelectionIntent(event);
   if (activeRuntime()) activeRuntime().dashboardSelectionValues = dashboardSelectionValues();
   saveTabUiState();
   updateDashboardControlSummary();
@@ -1965,6 +2113,10 @@ window.addEventListener('message', (event) => {
     runtime.canvasSelections = {
       ...(event.data.selections || {}),
       ...(runtime.canvasSelections || {}),
+    };
+    runtime.canvasSelectionIntents = {
+      ...(event.data.selection_intents || {}),
+      ...(runtime.canvasSelectionIntents || {}),
     };
     frame.dataset.runtimeReady = 'true';
     saveTabUiState();
@@ -2016,6 +2168,7 @@ window.addEventListener('message', (event) => {
     // Canvas messages contain the complete canonical state. Replacing it also
     // removes keys restored from sessionStorage after a Selection is renamed.
     state.canvasSelections = {...(event.data.selections || {})};
+    state.canvasSelectionIntents = {...(event.data.selection_intents || {})};
     saveTabUiState();
   }
 });

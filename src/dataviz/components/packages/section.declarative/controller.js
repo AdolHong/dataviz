@@ -14,7 +14,7 @@
     if (!view) return [];
     const viewController = root.viewDeclarative;
     const repeatedView = spec.input ? {...view, input:spec.input, inputs:{}} : view;
-    const contract = state.portable?.selection_contract?.[view.id] || [];
+    const contract = state.dependency_contract?.views?.[view.id]?.selection_contract || [];
     if (spec.template === 'selection-gallery') {
       const selection = contract.find(item => (
         item.origin === 'section'

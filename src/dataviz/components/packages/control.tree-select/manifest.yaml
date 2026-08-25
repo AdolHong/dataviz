@@ -1,0 +1,23 @@
+schema: dataviz/component-package/v1
+package: control.tree-select
+version: 3.0.0
+category: data-entry
+purpose: Search, expand and multi-select leaves in a hierarchy without losing parent context.
+implementation: {mode: package, sources: []}
+dependencies: [control.cascader]
+components:
+  - id: control.tree-select
+    purpose: Use one expandable tree when a cascader's side-by-side columns would be too wide.
+    status: stable
+    alignment:
+      design_system: Ant Design
+      component: TreeSelect
+      official: https://ant.design/components/tree-select/
+      adopted: [single-and-multiple-mode, searchable-tree, tree-checkable, show-checked-strategy, default-expanded-levels]
+      omitted: [async-load-data, custom-tree-title-render, semantic-DOM-React-hooks]
+    logic: {types: [single_select, multi_select], fields: [path_fields], value_shape: {single: [level-1, level-2, leaf], multiple: [[level-1, level-2, leaf]]}}
+    presentation: {component: tree-select, options: [level_labels, search, search_placeholder, path_separator, default_expand_depth, selection_strategy, show_checked_strategy, max_tag_count, show_unavailable, clear_label, css_class]}
+    behavior: {selection: leaves, parent_context: persistent, search: full-path, branch_selection: optional_descendant_toggle, checked_summary: [child, parent, all]}
+    semantic_dom: [.dv-tree-select, .dv-control-panel, .dv-tree-panel, .dv-tree-list, .dv-tree-option]
+    tokens: [--dv-accent, --dv-green, --dv-ink, --dv-line, --dv-panel, --dv-overlay-surface]
+runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

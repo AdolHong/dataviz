@@ -134,7 +134,7 @@ def test_generated_schema_cli_uses_strict_installed_models():
 
 def test_dsl_schema_versions_are_literals_not_descriptive_strings():
     assert DashboardDefinition.model_validate(
-        {"schema": "dataviz/dashboard/v3", "kind": "dashboard", "id": "current"}
+        {"schema": "dataviz/dashboard/v4", "kind": "dashboard", "id": "current"}
     ).id == "current"
     with pytest.raises(ValidationError):
         DashboardDefinition.model_validate(
@@ -166,7 +166,7 @@ def test_machine_identifiers_are_portable_and_unambiguous(identifier: str):
     with pytest.raises(ValidationError):
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v3",
+                "schema": "dataviz/dashboard/v4",
                 "kind": "dashboard",
                 "id": identifier,
             }
@@ -188,7 +188,7 @@ def test_old_dashboard_is_rejected_and_no_migration_command_is_exposed(tmp_path:
     entry = next(item for item in workspace.catalog if item.id == "hello")
     assert entry.status == "invalid"
     assert any(
-        "dataviz/dashboard/v3" in str(item.details)
+        "dataviz/dashboard/v4" in str(item.details)
         for item in workspace.load_diagnostics
         if item.code == "dashboard_invalid"
     )
@@ -531,7 +531,9 @@ def test_release_zip_keeps_previous_archive_and_checksum_if_publish_fails(
     tmp_path: Path,
     monkeypatch,
 ):
-    archive = tmp_path / f"workspace-dataviz-{release_zip.PROJECT['version']}.zip"
+    archive = tmp_path / (
+        f"{release_zip.PROJECT['name']}-{release_zip.PROJECT['version']}.zip"
+    )
     checksum = archive.with_suffix(archive.suffix + ".sha256")
     archive.write_bytes(b"last-good-archive")
     checksum.write_text("last-good-checksum\n", encoding="utf-8")

@@ -1,0 +1,7 @@
+schema: dataviz/component-story/v1
+stories:
+  - id: control.input-number.bounded
+    component: control.input-number
+    title: Bounded numeric input
+    summary: Min, max and step belong to the value contract; visual step controls remain optional.
+    gallery: {dashboard: component-gallery, target: "[data-control-component='input-number']", anchor: control-input-number}

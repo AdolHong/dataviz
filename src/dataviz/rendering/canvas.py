@@ -25,21 +25,23 @@ from dataviz.content_templates import (
     interpolate_dashboard_content,
 )
 from dataviz.errors import ExecutionFailure
-from dataviz.execution.plan import reachable_output_references
+from dataviz.execution.dependencies import (
+    DashboardDependencyContract,
+)
 from dataviz.execution.results import RunResult
 from dataviz.execution.fingerprint import ensure_query_run_compatible
 from dataviz.filesystem import atomic_write_bytes, atomic_write_text
 from dataviz.templates import COMPONENT_REGISTRY_VERSION, RUNTIME_PROTOCOL_SCHEMA
+from dataviz.value_contract import static_control_choices
 from dataviz.workspace.models import DashboardDefinition, DeclarativeViewDefinition
 from dataviz.workspace.controls import (
-    compile_control_contract,
+    initial_selection_intents,
     resolve_compute_values,
     resolve_selection_values,
     scoped_control_registry,
 )
 from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace
-from dataviz.workspace.selection_domains import selection_option_domain_references
-from dataviz.workspace.selector_templates import resolve_selector_presentation
+from dataviz.workspace.control_components import resolve_control_component
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
@@ -179,6 +181,7 @@ class CanvasRenderer:
         dashboard: LoadedDashboard,
         outputs: dict[str, Any],
         *,
+        dependency_contract: DashboardDependencyContract,
         live: dict[str, str] | None,
         asset_mode: str,
         snapshot_interactions: set[str],
@@ -208,7 +211,7 @@ class CanvasRenderer:
             or any(view.template == "perspective" for view in declarative_views)
         )
         runtime = self.workspace.definition.runtime
-        _, reachable_interactive_ids = self._reachable_outputs(dashboard)
+        reachable_interactive_ids = dependency_contract.reachable_interactive_order
         interactive_table_outputs = any(
             output.kind == "table"
             for transform_id in reachable_interactive_ids
@@ -232,6 +235,7 @@ class CanvasRenderer:
         )
         active_browser_interactions = self._active_browser_interactions(
             dashboard,
+            dependency_contract=dependency_contract,
             asset_mode=asset_mode,
             snapshot_interactions=snapshot_interactions,
         )
@@ -259,7 +263,12 @@ class CanvasRenderer:
         if needs_pyodide:
             add_remote(
                 "pyodide",
-                pyodide_index_url or self._pyodide_index_url(dashboard, asset_mode),
+                pyodide_index_url
+                or self._pyodide_index_url(
+                    dashboard,
+                    asset_mode,
+                    dependency_contract=dependency_contract,
+                ),
             )
         for view in declarative_views:
             if view.template == "image" and view.url:
@@ -286,19 +295,28 @@ class CanvasRenderer:
         session_id: str | None = None,
         compute_parameters: dict[str, Any] | None = None,
         selections: dict[str, Any] | None = None,
+        selection_intents: dict[str, str] | None = None,
         derived_outputs: dict[str, Any] | None = None,
         snapshot_interactions: set[str] | None = None,
         pyodide_index_url: str | None = None,
         frame_id: str | None = None,
+        dependency_contract: DashboardDependencyContract | None = None,
     ) -> str:
         ensure_query_run_compatible(dashboard, result)
+        dependency_contract = dependency_contract or dashboard.dependency_contract
         compute_values = resolve_compute_values(
             dashboard.definition,
             compute_parameters,
         )
         selection_values = resolve_selection_values(
-            dashboard.definition, selections
+            dashboard.definition,
+            selections,
+            phase="canvas-hydration",
         )
+        selection_intent_values = {
+            **initial_selection_intents(dashboard.definition),
+            **(selection_intents or {}),
+        }
         merged_outputs = {**result.outputs, **(derived_outputs or {})}
         render_state = SimpleNamespace(
             run_id=result.run_id,
@@ -418,6 +436,7 @@ class CanvasRenderer:
         asset_usage = self._runtime_asset_usage(
             dashboard,
             merged_outputs,
+            dependency_contract=dependency_contract,
             live=live,
             asset_mode=asset_mode,
             snapshot_interactions=snapshot_interactions or set(),
@@ -440,6 +459,7 @@ class CanvasRenderer:
         )
         interactive_transform_script = self._interactive_transform_script(
             dashboard,
+            dependency_contract=dependency_contract,
             asset_mode=asset_mode,
             snapshot_interactions=frozen_interactions,
         )
@@ -460,6 +480,7 @@ class CanvasRenderer:
                 dashboard,
                 render_state,
                 store,
+                dependency_contract=dependency_contract,
                 allow_missing=(
                     live is not None
                     or render_state.status in {"partial", "error", "cancelled"}
@@ -475,6 +496,7 @@ class CanvasRenderer:
             self._portable_controls(
                 dashboard,
                 render_state,
+                dependency_contract=dependency_contract,
                 snapshot_interactions=snapshot_interactions or set(),
             )
             if portable and asset_mode == "inline"
@@ -501,6 +523,8 @@ class CanvasRenderer:
             },
             "draft_compute_parameters": dict(compute_values),
             "selections": selection_values,
+            "selection_intents": selection_intent_values,
+            "dependency_contract": dependency_contract.runtime_manifest(),
             "content_bindings": content_bindings,
             "portable": portable_bundle,
             "live": live,
@@ -519,7 +543,11 @@ class CanvasRenderer:
                     {
                         "pyodide": self.workspace.definition.runtime.pyodide_version,
                         "pyodide_index_url": pyodide_index_url
-                        or self._pyodide_index_url(dashboard, asset_mode),
+                        or self._pyodide_index_url(
+                            dashboard,
+                            asset_mode,
+                            dependency_contract=dependency_contract,
+                        ),
                     }
                     if any(
                         dashboard.interactive_transforms[identifier][1].runtime
@@ -605,17 +633,20 @@ class CanvasRenderer:
     def _control_consumers(
         self,
         dashboard: LoadedDashboard,
+        *,
+        dependency_contract: DashboardDependencyContract | None = None,
     ) -> dict[str, list[SimpleNamespace]]:
-        consumers: dict[str, list[SimpleNamespace]] = {}
-        for transform_id, (_, transform) in dashboard.interactive_transforms.items():
-            for control_key in {
-                *transform.selection_inputs.values(),
-                *transform.compute_inputs.values(),
-            }:
-                consumers.setdefault(control_key, []).append(
-                    SimpleNamespace(id=transform_id, definition=transform)
+        dependency_contract = dependency_contract or dashboard.dependency_contract
+        return {
+            key: [
+                SimpleNamespace(
+                    id=transform_id,
+                    definition=dashboard.interactive_transforms[transform_id][1],
                 )
-        return consumers
+                for transform_id in dependency.transform_consumers
+            ]
+            for key, dependency in dependency_contract.controls.items()
+        }
 
     def _context_controls(
         self,
@@ -624,7 +655,7 @@ class CanvasRenderer:
         origin: str,
         owner_id: str,
     ) -> str:
-        contract = compile_control_contract(dashboard.definition)
+        contract = dashboard.dependency_contract.view_control_contract
         controls = {}
         for effective_controls in contract.values():
             for item in effective_controls:
@@ -632,11 +663,11 @@ class CanvasRenderer:
                     controls.setdefault(item.key, item)
         if not controls:
             return ""
-        selector_view_id = owner_id if origin == "view" else None
+        control_view_id = owner_id if origin == "view" else None
         if origin == "section":
             section = next((item for item in dashboard.definition.sections if item.id == owner_id), None)
             if section and section.views:
-                selector_view_id = section.views[0]
+                control_view_id = section.views[0]
         consumers_by_control = self._control_consumers(dashboard)
         selection_fields = []
         compute_fields = []
@@ -661,7 +692,7 @@ class CanvasRenderer:
                     f'data-selection-type="{html.escape(definition.type)}" '
                     f'data-selection-path="{str(bool(definition.path_fields)).lower()}">'
                     f'<span>{html.escape(definition.label or definition.id)}</span>'
-                    f'{self._portable_field(key, definition, value, self._selector_presentation(dashboard, key, definition), selector_view_id)}</label>'
+                    f'{self._portable_field(key, definition, value, self._control_component_presentation(dashboard, key, definition), control_view_id, kind="selection")}</label>'
                 )
                 continue
             triggers = {consumer.definition.trigger for consumer in consumers}
@@ -672,6 +703,7 @@ class CanvasRenderer:
             )
             compute_fields.append(
                 self._compute_control_html(
+                    dashboard,
                     key,
                     definition,
                     result.compute_parameters.get(key, definition.default),
@@ -784,13 +816,13 @@ class CanvasRenderer:
         self,
         dashboard: LoadedDashboard,
         *,
+        dependency_contract: DashboardDependencyContract,
         asset_mode: str,
         snapshot_interactions: set[str],
     ) -> set[str]:
-        _, interactive_ids = self._reachable_outputs(dashboard)
         return {
             identifier
-            for identifier in interactive_ids
+            for identifier in dependency_contract.reachable_interactive_order
             if dashboard.interactive_transforms[identifier][1].runtime
             in {"browser-js", "browser-python"}
             and not (
@@ -807,16 +839,12 @@ class CanvasRenderer:
         self,
         dashboard: LoadedDashboard,
         *,
+        dependency_contract: DashboardDependencyContract,
         asset_mode: str,
         snapshot_interactions: set[str],
     ) -> str:
         registrations = []
-        _, interactive_ids = self._reachable_outputs(dashboard)
-        selection_registry = scoped_control_registry(
-            dashboard.definition,
-            kind="selection",
-        )
-        for transform_id in interactive_ids:
+        for transform_id in dependency_contract.reachable_interactive_order:
             transform_path, definition = dashboard.interactive_transforms[transform_id]
             code = "null"
             dependencies = "{}"
@@ -837,10 +865,6 @@ class CanvasRenderer:
                     ensure_ascii=False,
                 ).replace("</", "<\\/")
             spec_payload = definition.model_dump(mode="json", by_alias=True)
-            spec_payload["selection_contract"] = {
-                alias: selection_registry[key].as_dict()
-                for alias, key in definition.selection_inputs.items()
-            }
             spec = json.dumps(
                 spec_payload,
                 ensure_ascii=False,
@@ -905,15 +929,16 @@ class CanvasRenderer:
             )
         return f"<script>{''.join(scripts)}</script>"
 
-    def _reachable_outputs(self, dashboard: LoadedDashboard) -> tuple[set[str], list[str]]:
-        """Return the minimal Base payload and Interactive Transform dependency order."""
-        return reachable_output_references(dashboard)
-
-    def _browser_python_export_assets(self, dashboard: LoadedDashboard) -> str | None:
-        _, interactive_ids = self._reachable_outputs(dashboard)
+    def _browser_python_export_assets(
+        self,
+        dashboard: LoadedDashboard,
+        *,
+        dependency_contract: DashboardDependencyContract | None = None,
+    ) -> str | None:
+        dependency_contract = dependency_contract or dashboard.dependency_contract
         policies = {
             dashboard.interactive_transforms[identifier][1].export.assets
-            for identifier in interactive_ids
+            for identifier in dependency_contract.reachable_interactive_order
             if dashboard.interactive_transforms[identifier][1].runtime == "browser-python"
             and dashboard.interactive_transforms[identifier][1].export.mode == "interactive"
         }
@@ -924,10 +949,19 @@ class CanvasRenderer:
             )
         return next(iter(policies), None)
 
-    def _pyodide_index_url(self, dashboard: LoadedDashboard, asset_mode: str) -> str:
+    def _pyodide_index_url(
+        self,
+        dashboard: LoadedDashboard,
+        asset_mode: str,
+        *,
+        dependency_contract: DashboardDependencyContract | None = None,
+    ) -> str:
         runtime = self.workspace.definition.runtime
         if asset_mode == "inline":
-            export_assets = self._browser_python_export_assets(dashboard)
+            export_assets = self._browser_python_export_assets(
+                dashboard,
+                dependency_contract=dependency_contract,
+            )
             if export_assets == "bundle":
                 return "./pyodide/"
             return runtime.pyodide_index_url.rstrip("/") + "/"
@@ -941,16 +975,18 @@ class CanvasRenderer:
         result: RunResult,
         store: ArtifactStore,
         *,
+        dependency_contract: DashboardDependencyContract | None = None,
         allow_missing: bool = False,
         asset_mode: str = "inline",
         session_id: str | None = None,
         snapshot_interactions: set[str] | None = None,
     ) -> dict[str, Any]:
+        dependency_contract = dependency_contract or dashboard.dependency_contract
         outputs: dict[str, Any] = {}
         output_transports: dict[str, Any] = {}
         output_kinds: dict[str, str] = {}
         output_errors: dict[str, Any] = {}
-        reachable, _ = self._reachable_outputs(dashboard)
+        reachable = set(dependency_contract.base_output_roots)
         for transform_id in snapshot_interactions or set():
             definition = dashboard.interactive_transforms[transform_id][1]
             reachable.update(
@@ -1055,26 +1091,12 @@ class CanvasRenderer:
                     "references": sorted(reachable),
                 },
             )
-        contract = compile_control_contract(dashboard.definition)
         return {
             "outputs": outputs,
             "output_transports": output_transports,
             "output_kinds": output_kinds,
             "output_errors": output_errors,
             "pending_outputs": pending_outputs,
-            "view_inputs": {
-                view.id: view.input_refs
-                for view in dashboard.definition.views
-            },
-            "selection_option_domains": selection_option_domain_references(dashboard),
-            "selection_contract": {
-                view_id: [
-                    item.as_dict()
-                    for item in controls
-                    if item.kind == "selection"
-                ]
-                for view_id, controls in contract.items()
-            },
         }
 
     def _control_panel_attributes(
@@ -1088,7 +1110,7 @@ class CanvasRenderer:
         config = None
         if presentation is not None:
             if role in {"query", "dashboard"}:
-                config = getattr(presentation.controls, role)
+                config = getattr(presentation.control_panels, role)
             elif role == "section" and owner_id is not None:
                 section = presentation.sections.get(owner_id)
                 config = section.controls if section is not None else None
@@ -1131,9 +1153,10 @@ class CanvasRenderer:
         dashboard: LoadedDashboard,
         result,
         *,
+        dependency_contract: DashboardDependencyContract,
         snapshot_interactions: set[str],
     ) -> str:
-        contract = compile_control_contract(dashboard.definition)
+        contract = dependency_contract.view_control_contract
         controls: dict[str, dict[str, Any]] = {}
         for view_id, effective_controls in contract.items():
             for item in effective_controls:
@@ -1143,7 +1166,10 @@ class CanvasRenderer:
                 )
                 control["views"].append(view_id)
 
-        consumers_by_control = self._control_consumers(dashboard)
+        consumers_by_control = self._control_consumers(
+            dashboard,
+            dependency_contract=dependency_contract,
+        )
         selection_items: list[str] = []
         compute_items: list[str] = []
         dashboard_control_keys: list[str] = []
@@ -1159,7 +1185,8 @@ class CanvasRenderer:
                     key,
                     definition,
                     value,
-                    self._selector_presentation(dashboard, key, definition),
+                    self._control_component_presentation(dashboard, key, definition),
+                    kind="selection",
                 )
                 selection_items.append(
                     f'<div class="dv-report-selection" data-selection-key="{html.escape(key)}" '
@@ -1178,6 +1205,7 @@ class CanvasRenderer:
             )
             compute_items.append(
                 self._compute_control_html(
+                    dashboard,
                     key,
                     definition,
                     result.compute_parameters.get(key, definition.default),
@@ -1192,17 +1220,22 @@ class CanvasRenderer:
         ) or '<div class="dv-query-value"><span>Query parameters</span><strong>None</strong></div>'
         actionable = [
             transform_id
-            for transform_id, (_, transform) in dashboard.interactive_transforms.items()
+            for transform_id in dependency_contract.reachable_interactive_order
+            for transform in [dashboard.interactive_transforms[transform_id][1]]
             if transform.trigger in {"apply", "manual"}
             and transform_id not in snapshot_interactions
             and (
-                not transform.selection_inputs
-                and not transform.compute_inputs
+                not dependency_contract.interactive_selection_inputs[transform_id]
+                and not dependency_contract.interactive_compute_inputs[transform_id]
                 or any(
                     key in dashboard_control_keys
                     for key in {
-                        *transform.selection_inputs.values(),
-                        *transform.compute_inputs.values(),
+                        *dependency_contract.interactive_selection_inputs[
+                            transform_id
+                        ].values(),
+                        *dependency_contract.interactive_compute_inputs[
+                            transform_id
+                        ].values(),
                     }
                 )
             )
@@ -1275,6 +1308,7 @@ class CanvasRenderer:
 
     def _compute_control_html(
         self,
+        dashboard: LoadedDashboard,
         key: str,
         definition,
         value: Any,
@@ -1282,10 +1316,12 @@ class CanvasRenderer:
         trigger: str,
         frozen: bool,
     ) -> str:
-        field = self._compute_field(
+        field = self._portable_field(
             key,
             definition,
             value,
+            self._control_component_presentation(dashboard, key, definition),
+            kind="compute",
             trigger=trigger,
             disabled=frozen,
         )
@@ -1296,206 +1332,57 @@ class CanvasRenderer:
             f'{"<small>Fixed snapshot</small>" if frozen else ""}</label>'
         )
 
-    def _compute_field(
+    def _control_component_presentation(
         self,
+        dashboard: LoadedDashboard,
         key: str,
         definition,
-        value: Any,
-        *,
-        trigger: str,
-        disabled: bool,
-    ) -> str:
-        attrs = (
-            f' data-compute-input="{html.escape(key, quote=True)}"'
-            f' data-compute-type="{html.escape(definition.type)}"'
-            f' data-compute-trigger="{html.escape(trigger)}"'
-            + (" disabled" if disabled else "")
+    ) -> dict[str, Any]:
+        configured = (
+            dashboard.presentation.control_components.get(key)
+            if dashboard.presentation
+            else None
         )
-        if definition.type in {"single_select", "multi_select"}:
-            typed_choices = any(not isinstance(choice.value, str) for choice in definition.choices)
-            encode_choice = (
-                lambda item: json.dumps(item, ensure_ascii=False, separators=(",", ":"))
-                if typed_choices
-                else str(item)
-            )
-            selected = {
-                encode_choice(item)
-                for item in (value if isinstance(value, list) else [value])
-            }
-            options = "".join(
-                f'<option value="{html.escape(encode_choice(choice.value), quote=True)}"'
-                f'{" selected" if encode_choice(choice.value) in selected else ""}>'
-                f'{html.escape(choice.label)}</option>'
-                for choice in definition.choices
-            )
-            multiple = " multiple" if definition.type == "multi_select" else ""
-            encoding = "json" if typed_choices else "string"
-            return f'<select{attrs}{multiple} data-value-encoding="{encoding}">{options}</select>'
-        if definition.type == "boolean":
-            return (
-                f'<input type="checkbox"{attrs}'
-                f'{" checked" if bool(value) else ""}>'
-            )
-        if definition.type == "date_range":
-            values = value if isinstance(value, (list, tuple)) else ["", ""]
-            values = [*values, "", ""]
-            disabled_attr = " disabled" if disabled else ""
-            return (
-                f'<span class="dv-compute-range" data-compute-input="{html.escape(key, quote=True)}" '
-                f'data-compute-type="date_range" data-compute-trigger="{html.escape(trigger)}">'
-                f'<input type="date" data-compute-range="start" value="{html.escape(str(values[0]), quote=True)}"{disabled_attr}>'
-                '<i>—</i>'
-                f'<input type="date" data-compute-range="end" value="{html.escape(str(values[1]), quote=True)}"{disabled_attr}></span>'
-            )
-        input_type = (
-            "number"
-            if definition.type in {"number", "integer"}
-            else "date"
-            if definition.type == "date"
-            else "text"
-        )
-        bounds = ""
-        if definition.min is not None:
-            bounds += f' min="{html.escape(str(definition.min), quote=True)}"'
-        if definition.max is not None:
-            bounds += f' max="{html.escape(str(definition.max), quote=True)}"'
-        if definition.step is not None:
-            bounds += f' step="{html.escape(str(definition.step), quote=True)}"'
-        elif definition.type == "integer":
-            bounds += ' step="1"'
-        return (
-            f'<input type="{input_type}"{attrs}{bounds} '
-            f'value="{html.escape("" if value is None else str(value), quote=True)}" '
-            f'placeholder="{html.escape(definition.placeholder, quote=True)}">'
-        )
-
-    def _selector_presentation(self, dashboard: LoadedDashboard, key: str, definition) -> dict[str, Any]:
-        selector = dashboard.presentation.selectors.get(key) if dashboard.presentation else None
-        return resolve_selector_presentation(definition, selector)
+        return resolve_control_component(definition, configured)
 
     def _portable_field(
         self,
         key: str,
         definition,
         value: Any,
-        selector: dict[str, Any] | None = None,
+        presentation: dict[str, Any] | None = None,
         view_id: str | None = None,
+        *,
+        kind: str = "selection",
+        trigger: str = "auto",
+        disabled: bool = False,
     ) -> str:
-        escaped_key = html.escape(key)
-        if definition.type in {"single_select", "multi_select", "boolean"}:
-            selector = selector or {}
-            choice_count = len(definition.choices)
-            default_template = (
-                "segmented"
-                if definition.type == "boolean"
-                or (definition.type == "single_select" and 0 < choice_count <= 4)
-                else "checkbox-group"
-                if definition.type == "multi_select" and 0 < choice_count <= 8
-                else "select"
+        """Render the canonical native value plus one packaged Data Entry host."""
+
+        presentation = presentation or resolve_control_component(definition)
+        component = presentation["component"]
+        escaped_key = html.escape(key, quote=True)
+        label = html.escape(definition.label or definition.id, quote=True)
+        path_fields = list(getattr(definition, "path_fields", []) or [])
+        role_attributes = (
+            f'data-selection-input="{escaped_key}"'
+            if kind == "selection"
+            else (
+                f'data-compute-input="{escaped_key}" '
+                f'data-compute-type="{html.escape(definition.type, quote=True)}" '
+                f'data-compute-trigger="{html.escape(trigger, quote=True)}"'
             )
-            template = selector.get("template", default_template)
-            css_class = html.escape(selector.get("css_class", ""))
-            multiple = " multiple" if definition.type == "multi_select" else ""
-            choices = list(definition.choices)
-            if definition.type == "boolean" and not choices:
-                choices = [
-                    SimpleNamespace(label="Yes", value=True, group=None, description="", keywords=[]),
-                    SimpleNamespace(label="No", value=False, group=None, description="", keywords=[]),
-                ]
-            typed_choices = any(not isinstance(choice.value, str) for choice in choices)
-            choice_value = (
-                (lambda item: json.dumps(item, ensure_ascii=False, separators=(",", ":")))
-                if typed_choices
-                else (lambda item: str(item))
+        )
+        common_native = (
+            f'aria-label="{label}" data-control-input {role_attributes}'
+            + (" disabled" if disabled else "")
+            + (
+                " required"
+                if definition.required and definition.type != "boolean"
+                else ""
             )
-            selected = {choice_value(item) for item in (value if isinstance(value, list) else [value])}
-            options = ""
-            if definition.type != "multi_select":
-                empty_selected = value is None or value == "" or value == []
-                options += f'<option value="" data-empty-option="true" hidden{" selected" if empty_selected else ""}></option>'
-            for choice in choices:
-                serialized_value = choice_value(choice.value)
-                metadata = ""
-                if getattr(choice, "group", None):
-                    metadata += f' data-group="{html.escape(choice.group, quote=True)}"'
-                if getattr(choice, "description", ""):
-                    metadata += f' data-description="{html.escape(choice.description, quote=True)}"'
-                if getattr(choice, "keywords", []):
-                    metadata += f' data-keywords="{html.escape(" ".join(choice.keywords), quote=True)}"'
-                options += (
-                    f'<option value="{html.escape(serialized_value, quote=True)}"{metadata}'
-                    f'{" selected" if serialized_value in selected else ""}>{html.escape(choice.label)}</option>'
-                )
-            encoding = "json" if typed_choices else "string"
-            select = f'<select aria-label="{html.escape(definition.label or definition.id)}" data-selection-input="{escaped_key}" data-value-encoding="{encoding}"{multiple}>{options}</select>'
-            attrs = (
-                f'data-selector-template="{html.escape(template)}" '
-                f'data-requested-template="{html.escape(selector.get("requested_template", selector.get("template", "auto")))}" '
-                f'data-auto-reason="{html.escape(selector.get("auto_reason", ""))}" '
-                'data-empty-means-all="true" '
-                f'data-required="{str(bool(definition.required)).lower()}" '
-                f'data-variant="{html.escape(selector.get("variant", "default"))}" '
-                f'data-show-unavailable="{str(bool(selector.get("show_unavailable", False))).lower()}" '
-                f'data-search-mode="{html.escape(selector.get("search", "auto"))}" '
-                f'data-virtual-mode="{html.escape(selector.get("virtual", "auto"))}" '
-                f'data-search-threshold="{int(selector.get("search_threshold", 9))}" '
-                f'data-virtual-threshold="{int(selector.get("virtual_threshold", 200))}" '
-                f'data-max-visible-tags="{int(selector.get("max_visible_tags", 2))}" '
-                f'data-max-selected="{selector.get("max_selected") or ""}" '
-                f'data-hide-selected="{str(bool(selector.get("hide_selected", False))).lower()}" '
-                f'data-search-placeholder="{html.escape(selector.get("search_placeholder", "Search options…"))}" '
-                f'data-empty-text="{html.escape(selector.get("empty_text", "No matching options"))}"'
-                f' data-placeholder="{html.escape(selector.get("placeholder", "Choose…"))}"'
-                f' data-all-label="{html.escape(selector.get("all_label", "All"))}"'
-                f' data-select-all-label="{html.escape(selector.get("select_all_label", "Select all"))}"'
-                f' data-invert-label="{html.escape(selector.get("invert_label", "Invert"))}"'
-                f' data-clear-label="{html.escape(selector.get("clear_label", "Clear"))}"'
-                f' data-item-height="{int(selector.get("item_height", 38))}"'
-                f' data-viewport-height="{int(selector.get("viewport_height", 304))}"'
-                f' data-overscan="{int(selector.get("overscan", 5))}"'
-            )
-            if template in {"cascader", "tree-select"}:
-                levels = [
-                    {"field": field, "label": (
-                        selector.get("level_labels", [])[index]
-                        if index < len(selector.get("level_labels", []))
-                        else field
-                    )}
-                    for index, field in enumerate(definition.path_fields)
-                ]
-                attrs += (
-                    f' data-cascader-levels="{html.escape(json.dumps(levels, ensure_ascii=False), quote=True)}"'
-                    f' data-cascader-view="{html.escape(view_id or "")}"'
-                    f' data-placeholder="{html.escape(selector.get("placeholder", "Choose…"))}"'
-                    f' data-path-separator="{html.escape(selector.get("path_separator", " / "))}"'
-                    f' data-default-expand-depth="{int(selector.get("default_expand_depth", 0))}"'
-                    f' data-hierarchy-selection="{html.escape(selector.get("hierarchy_selection", "leaf"))}"'
-                    f' data-checked-strategy="{html.escape(selector.get("checked_strategy", "child"))}"'
-                )
-            return f'<div class="dv-selector {css_class}" {attrs}>{select}<div data-selector-mount></div></div>'
-        input_type = "number" if definition.type in {"number", "integer"} else "date" if definition.type == "date" else "text"
-        display = ",".join(map(str, value)) if isinstance(value, list) else "" if value is None else str(value)
-        if definition.type == "date_range":
-            selector = selector or {"template": "date-range"}
-            css_class = html.escape(selector.get("css_class", ""))
-            attrs = (
-                'data-selector-template="date-range" '
-                f'data-start-label="{html.escape(selector.get("start_label", "Start"))}" '
-                f'data-end-label="{html.escape(selector.get("end_label", "End"))}" '
-                f'data-clear-label="{html.escape(selector.get("clear_label", "Clear"))}" '
-                f'data-min="{html.escape(selector.get("min") or "")}" '
-                f'data-max="{html.escape(selector.get("max") or "")}" '
-                f'data-allow-open-range="{str(bool(selector.get("allow_open_range", False))).lower()}" '
-                f'data-presets="{html.escape(json.dumps(selector.get("presets", []), ensure_ascii=False), quote=True)}"'
-            )
-            native = (
-                f'<input type="text" value="{html.escape(display)}" aria-label="{html.escape(definition.label or definition.id)}" '
-                f'data-selection-input="{escaped_key}" data-selector-native>'
-            )
-            return f'<div class="dv-selector {css_class}" {attrs}>{native}<div data-selector-mount></div></div>'
+        )
         constraints = ""
-        if definition.required:
-            constraints += " required"
         if definition.min is not None:
             constraints += f' min="{html.escape(str(definition.min), quote=True)}"'
         if definition.max is not None:
@@ -1504,10 +1391,196 @@ class CanvasRenderer:
             constraints += f' step="{html.escape(str(definition.step), quote=True)}"'
         elif definition.type == "integer":
             constraints += ' step="1"'
+        if definition.min_date:
+            constraints += f' min="{html.escape(definition.min_date, quote=True)}"'
+        if definition.max_date:
+            constraints += f' max="{html.escape(definition.max_date, quote=True)}"'
+        if definition.max_length:
+            constraints += f' maxlength="{int(definition.max_length)}"'
+
+        if definition.type in {"single_select", "multi_select"}:
+            choices = static_control_choices(definition)
+            typed_choices = bool(path_fields) or any(
+                not isinstance(choice.value, str) for choice in choices
+            )
+            encode = (
+                lambda item: json.dumps(
+                    item, ensure_ascii=False, separators=(",", ":")
+                )
+                if typed_choices
+                else str(item)
+            )
+            if definition.type == "multi_select":
+                selected_values = value if isinstance(value, list) else []
+            elif path_fields:
+                selected_values = [value] if isinstance(value, (list, tuple)) else []
+            else:
+                selected_values = [value]
+            selected = {encode(item) for item in selected_values if item is not None}
+            options = ""
+            if definition.type == "single_select":
+                empty_selected = (
+                    not value
+                    if isinstance(value, (list, tuple))
+                    else value in {None, ""}
+                )
+                options += (
+                    '<option value="" data-empty-option="true" hidden'
+                    f'{" selected" if empty_selected else ""}></option>'
+                )
+            for choice in choices:
+                serialized = encode(choice.value)
+                metadata = ""
+                if choice.group:
+                    metadata += f' data-group="{html.escape(choice.group, quote=True)}"'
+                if choice.description:
+                    metadata += (
+                        f' data-description="{html.escape(choice.description, quote=True)}"'
+                    )
+                if choice.keywords:
+                    metadata += (
+                        f' data-keywords="{html.escape(" ".join(choice.keywords), quote=True)}"'
+                    )
+                options += (
+                    f'<option value="{html.escape(serialized, quote=True)}"{metadata}'
+                    f'{" selected" if serialized in selected else ""}>'
+                    f'{html.escape(choice.label)}</option>'
+                )
+            multiple = " multiple" if definition.type == "multi_select" else ""
+            native = (
+                f'<select {common_native} data-value-encoding="'
+                f'{"json" if typed_choices else "string"}"{multiple}>{options}</select>'
+            )
+        else:
+            if definition.type == "boolean":
+                native = (
+                    f'<input type="checkbox" {common_native}'
+                    f'{" checked" if bool(value) else ""}>'
+                )
+            else:
+                input_type = (
+                    "range"
+                    if component == "slider"
+                    else "number"
+                    if definition.type in {"number", "integer"}
+                    else "date"
+                    if definition.type == "date"
+                    else "text"
+                )
+                display = (
+                    ",".join("" if item is None else str(item) for item in value)
+                    if isinstance(value, (list, tuple))
+                    else ""
+                    if value is None
+                    else str(value)
+                )
+                value_attribute = html.escape(display, quote=True)
+                placeholder = html.escape(definition.placeholder, quote=True)
+                if component == "input" and presentation.get("multiline"):
+                    native = (
+                        f'<textarea {common_native}{constraints} placeholder="{placeholder}">'
+                        f'{html.escape(display)}</textarea>'
+                    )
+                else:
+                    native = (
+                        f'<input type="{input_type}" {common_native}{constraints} '
+                        f'value="{value_attribute}" placeholder="{placeholder}">'
+                    )
+
+        clearable = (
+            definition.clearable
+            if definition.clearable is not None
+            else (
+                not definition.required
+                and definition.type in {"string", "multi_select", "date", "date_range"}
+            )
+        )
+        allow_empty = list(getattr(definition, "allow_empty", (False, False)))
+        suggestions = [
+            item.model_dump(mode="json") for item in definition.suggestions
+        ]
+        levels = [
+            {
+                "field": field,
+                "label": (
+                    presentation.get("level_labels", [])[index]
+                    if index < len(presentation.get("level_labels", []))
+                    else field
+                ),
+            }
+            for index, field in enumerate(path_fields)
+        ]
+        hidden_native = component in {
+            "select",
+            "radio-group",
+            "checkbox-group",
+            "cascader",
+            "tree-select",
+            "range-picker",
+            "switch",
+        }
+        attrs = (
+            f'data-control-component="{html.escape(component, quote=True)}" '
+            f'data-requested-component="{html.escape(presentation.get("requested_component", "auto"), quote=True)}" '
+            f'data-auto-reason="{html.escape(presentation.get("auto_reason", ""), quote=True)}" '
+            f'data-empty-means-all="{str(kind == "selection" and definition.type == "multi_select").lower()}" '
+            f'data-required="{str(bool(definition.required)).lower()}" '
+            f'data-clearable="{str(bool(clearable)).lower()}" '
+            f'data-show-unavailable="{str(bool(presentation.get("show_unavailable", False))).lower()}" '
+            f'data-search-mode="{html.escape(presentation.get("search", "auto"), quote=True)}" '
+            f'data-virtual-mode="{html.escape(presentation.get("virtual", "auto"), quote=True)}" '
+            f'data-search-threshold="{int(presentation.get("search_threshold", 9))}" '
+            f'data-virtual-threshold="{int(presentation.get("virtual_threshold", 200))}" '
+            f'data-max-tag-count="{int(presentation.get("max_tag_count", 2))}" '
+            f'data-max-selected="{definition.max_selected or ""}" '
+            f'data-hide-selected="{str(bool(presentation.get("hide_selected", False))).lower()}" '
+            f'data-search-placeholder="{html.escape(presentation.get("search_placeholder", "Search options…"), quote=True)}" '
+            f'data-empty-text="{html.escape(presentation.get("empty_text", "No matching options"), quote=True)}" '
+            f'data-placeholder="{html.escape(definition.placeholder or "Choose…", quote=True)}" '
+            f'data-select-all-label="{html.escape(presentation.get("select_all_label", "Select all"), quote=True)}" '
+            f'data-invert-label="{html.escape(presentation.get("invert_label", "Invert"), quote=True)}" '
+            f'data-clear-label="{html.escape(presentation.get("clear_label", "Clear"), quote=True)}" '
+            f'data-path-separator="{html.escape(presentation.get("path_separator", " / "), quote=True)}" '
+            f'data-selection-strategy="{html.escape(presentation.get("selection_strategy", "leaf"), quote=True)}" '
+            f'data-show-checked-strategy="{html.escape(presentation.get("show_checked_strategy", "child"), quote=True)}" '
+            f'data-start-label="{html.escape(presentation.get("start_label", "Start"), quote=True)}" '
+            f'data-end-label="{html.escape(presentation.get("end_label", "End"), quote=True)}" '
+            f'data-min-date="{html.escape(definition.min_date or "", quote=True)}" '
+            f'data-max-date="{html.escape(definition.max_date or "", quote=True)}" '
+            f'data-allow-empty-start="{str(bool(allow_empty[0])).lower()}" '
+            f'data-allow-empty-end="{str(bool(allow_empty[1])).lower()}" '
+            f'data-presets="{html.escape(json.dumps(presentation.get("presets", []), ensure_ascii=False), quote=True)}" '
+            f'data-item-height="{int(presentation.get("item_height", 38))}" '
+            f'data-viewport-height="{int(presentation.get("viewport_height", 304))}" '
+            f'data-overscan="{int(presentation.get("overscan", 5))}" '
+            f'data-default-expand-depth="{int(presentation.get("default_expand_depth", 0))}" '
+            f'data-option-type="{html.escape(presentation.get("option_type", "default"), quote=True)}" '
+            f'data-button-style="{html.escape(presentation.get("button_style", "outline"), quote=True)}" '
+            f'data-bulk-actions="{str(bool(presentation.get("bulk_actions", True))).lower()}" '
+            f'data-checked-label="{html.escape(presentation.get("checked_label", ""), quote=True)}" '
+            f'data-unchecked-label="{html.escape(presentation.get("unchecked_label", ""), quote=True)}" '
+            f'data-min-rows="{int(presentation.get("min_rows", 2))}" '
+            f'data-max-rows="{int(presentation.get("max_rows", 6))}" '
+            f'data-show-count="{str(bool(presentation.get("show_count", False))).lower()}" '
+            f'data-prefix="{html.escape(presentation.get("prefix", ""), quote=True)}" '
+            f'data-suffix="{html.escape(presentation.get("suffix", ""), quote=True)}" '
+            f'data-number-controls="{str(bool(presentation.get("number_controls", True))).lower()}" '
+            f'data-show-input="{str(bool(presentation.get("show_input", False))).lower()}" '
+            f'data-tooltip="{html.escape(presentation.get("tooltip", "auto"), quote=True)}" '
+            f'data-marks="{html.escape(json.dumps(presentation.get("marks", []), ensure_ascii=False), quote=True)}" '
+            f'data-suggestions="{html.escape(json.dumps(suggestions, ensure_ascii=False), quote=True)}" '
+            f'data-cascader-levels="{html.escape(json.dumps(levels, ensure_ascii=False), quote=True)}" '
+            f'data-cascader-view="{html.escape(view_id or "", quote=True)}"'
+        )
+        css_class = html.escape(presentation.get("css_class", ""), quote=True)
+        native = native.replace(
+            "data-control-input",
+            f'data-control-native="{"hidden" if hidden_native else "visible"}" data-control-input',
+            1,
+        )
         return (
-            f'<input type="{input_type}" value="{html.escape(display)}" '
-            f'aria-label="{html.escape(definition.label or definition.id)}" '
-            f'data-selection-input="{escaped_key}"{constraints}>'
+            f'<div class="dv-control {css_class}" {attrs}>{native}'
+            '<div data-control-mount></div></div>'
         )
 
     def write_report(
@@ -1518,10 +1591,12 @@ class CanvasRenderer:
         *,
         compute_parameters: dict[str, Any] | None = None,
         selections: dict[str, Any] | None = None,
+        selection_intents: dict[str, str] | None = None,
         derived_outputs: dict[str, Any] | None = None,
         snapshot_interactions: set[str] | None = None,
     ) -> Path:
         output.parent.mkdir(parents=True, exist_ok=True)
+        dependency_contract = dashboard.dependency_contract
         pyodide_index_url = None
         asset_manifest: dict[str, Any] = {}
         staged_asset_root: Path | None = None
@@ -1531,7 +1606,10 @@ class CanvasRenderer:
         manifest = output.with_suffix(output.suffix + ".manifest.json")
         previous_manifest = manifest.read_bytes() if manifest.is_file() else None
         manifest_published = False
-        if self._browser_python_export_assets(dashboard) == "bundle":
+        if self._browser_python_export_assets(
+            dashboard,
+            dependency_contract=dependency_contract,
+        ) == "bundle":
             configured = self.workspace.definition.runtime.pyodide_bundle_path
             if not configured:
                 raise ExecutionFailure(
@@ -1570,9 +1648,14 @@ class CanvasRenderer:
                     "version": self.workspace.definition.runtime.pyodide_version,
                 }
             }
+        effective_selection_intents = {
+            **initial_selection_intents(dashboard.definition),
+            **(selection_intents or {}),
+        }
         runtime_assets = self._runtime_asset_usage(
             dashboard,
             {**result.outputs, **(derived_outputs or {})},
+            dependency_contract=dependency_contract,
             live=None,
             asset_mode="inline",
             snapshot_interactions=snapshot_interactions or set(),
@@ -1585,20 +1668,24 @@ class CanvasRenderer:
                 asset_mode="inline",
                 compute_parameters=compute_parameters,
                 selections=selections,
+                selection_intents=effective_selection_intents,
                 derived_outputs=derived_outputs,
                 snapshot_interactions=snapshot_interactions,
                 pyodide_index_url=pyodide_index_url,
+                dependency_contract=dependency_contract,
             )
             manifest_content = json.dumps(
                 {
                     "schema": "dataviz/report-manifest/v2",
                     "runtime": RUNTIME_PROTOCOL_SCHEMA,
                     "dashboard": dashboard.definition.id,
+                    "dependency_contract": dependency_contract.as_dict(),
                     "query_run": _portable_run_result(result, self.workspace.root),
                     "state": {
                         "query_parameters": result.query_parameters,
                         "compute_parameters": compute_parameters or {},
                         "selections": selections or {},
+                        "selection_intents": effective_selection_intents,
                     },
                     "derived_outputs": {
                         reference: descriptor.model_dump(mode="json", by_alias=True)

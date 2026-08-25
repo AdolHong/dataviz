@@ -151,9 +151,31 @@ def _load_package(root: Path) -> ComponentPackage:
     components = manifest.get("components")
     if not isinstance(components, list) or not components:
         raise ComponentPackageError(f"Package {root.name} must own at least one component")
+    if manifest.get("category") == "data-entry" and len(components) != 1:
+        raise ComponentPackageError(
+            f"Data Entry Package {root.name} must own exactly one component"
+        )
     for item in components:
         if not isinstance(item, dict) or not item.get("id") or not item.get("purpose"):
             raise ComponentPackageError(f"Package {root.name} has an invalid component declaration")
+        if manifest.get("category") == "data-entry":
+            if item.get("id") != root.name:
+                raise ComponentPackageError(
+                    f"Data Entry Package {root.name} must have the same package and component id"
+                )
+            alignment = item.get("alignment")
+            if (
+                not isinstance(alignment, dict)
+                or alignment.get("design_system") != "Ant Design"
+                or not str(alignment.get("official", "")).startswith(
+                    "https://ant.design/components/"
+                )
+                or not isinstance(alignment.get("adopted"), list)
+                or not isinstance(alignment.get("omitted"), list)
+            ):
+                raise ComponentPackageError(
+                    f"Data Entry Package {root.name} must declare its Ant Design semantic alignment"
+                )
     for item in story["stories"]:
         gallery = item.get("gallery") if isinstance(item, dict) else None
         if (

@@ -37,7 +37,7 @@ title: Transform tests
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v3
+        """schema: dataviz/dashboard/v4
 kind: dashboard
 id: transform-contract
 title: Transform contract

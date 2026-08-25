@@ -8,6 +8,7 @@ Dataviz 是一套 **workspace-first、AI-friendly** 的 Python 看板工具。
 - AI 与自动化使用 CLI 校验、查数、计算、调试和导出 HTML。
 - 普通看板只写声明式 YAML、SQL/Python/JavaScript 逻辑和简单布局。
 - 特殊页面可以逐级覆盖 Theme、Component、Renderer、CSS/JS，完整 Canvas 是最后的逃生口。
+- 默认提供统一的现代靛蓝主题；Server、HTML、图表、表格和交互控件共享设计 Token。
 
 ## 核心模型
 
@@ -37,13 +38,22 @@ Query Parameter → Adapter → Source → Dataset Transform（可选）
 - Interactive Transform 一旦通过 `selection_inputs` 声明依赖，Runtime 会先对其表输入应用 include Selection，再把已选样本交给 Compute 逻辑；业务代码不应再手写一遍相同筛选。
 - 三种 Interactive Runtime 使用相同 Named Output 契约；图、表和文本统一由 JavaScript Renderer 呈现。
 
-Select 型 Selection 可以写静态 `choices`，也可以从数据生成选项。动态选项不会从“当前 View 已筛选后的 Derived Output”反推，否则会形成“先有 Selection 还是先运行 Transform”的循环；Runtime 会追溯该 View 的不可变 Base Output，复杂或多输入场景可显式写 `options_from: source:<id>/<output>`。`dataviz validate` 会提前拒绝未知、非表格、Interactive Output 或无法提供字段的 option domain。
+每次载入或热更新后的 Dashboard 快照会以并发安全方式只编译一次 `dataviz/dependency-contract/v1`。Query Planner、Server、Browser Runtime、HTML Export 和 AI context 都消费同一个对象；浏览器注册配置只用于检查漂移，Transform 调度和 View 输入仍以契约为准，不会再次猜测拓扑或按 DOM 重建级联。契约会直接拒绝环、未知 Output、非法跨 Runtime 依赖和越界 Control consumer。可以在运行前直接检查：
+
+```bash
+dataviz dependencies myworkspace sales-overview
+dataviz dependencies myworkspace sales-overview --format json
+```
+
+输出会列出 Query Parameter 最终需要重跑的节点、受影响的动态 option Control 和 View，并区分 Control 的结构 scope、直接数据 View、Interactive consumer、派生 View、内容绑定和级联上游。若表格 Output 没有声明足以保证字段存在的 Schema，直接筛选关系会明确标记为 runtime field check，而不是伪装成静态精确关系。
+
+Select 必须显式声明候选域来源：`options.mode: static` 表示由 Dashboard 维护封闭 `choices`，`options.mode: infer` 表示从数据推导。`infer` 不写随维度成员漂移的 `default` 值列表；多选默认跟随全部可用项，需要初始为空时使用 `initial: empty`。动态域不会从依赖当前 Selection 的 Derived Output 反推；Runtime 会追溯不可变 Base Output，复杂或多输入场景可显式写 `options.source: source:<id>/<output>`。`dataviz validate` 会提前拒绝未知、非表格、Interactive Output 或无法提供字段的 option domain。
 
 Query Run 的可达 Base Output 会写入 Workspace 的 `.dataviz/runs/<run-id>/artifacts/`，不会写进 Dashboard 文件夹。Runtime 会额外标记被 `server-python` Interactive Transform 消费的 canonical Output；后续交互按 `browser tab session + dashboard + query run + output reference` 读取同一份不可变快照，刷新当前 tab 可以继续使用，其他 tab 或用户不能访问，也不会暗中重新执行 Source。Run 与缓存受 Workspace 保留策略统一清理，因此分享 Dashboard ZIP 不会夹带运行数据。
 
 简单逻辑默认按 `browser-js → browser-python → server-python` 选择：前两者可让导出报告继续交互，后者适合原生 Python 包、大模型、运筹求解和大规模计算。这个顺序强调可移植性和启动成本，不是绝对性能排名。
 
-当前契约是 `dataviz/dashboard/v3` 与 `dataviz/runtime/v2`。项目处于 `0.x` 阶段，不兼容更早的实验性 Dashboard/Transform 字段，也不在 Runtime 中保留迁移分支。
+当前契约是 `dataviz/dashboard/v4` 与 `dataviz/runtime/v2`。项目处于 `0.x` 阶段，不兼容更早的实验性 Dashboard/Transform 字段，也不在 Runtime 中保留迁移分支。
 
 ## 快速开始
 
@@ -55,7 +65,7 @@ Query Run 的可达 Base Output 会写入 Workspace 的 `.dataviz/runs/<run-id>/
 git clone https://github.com/AdolHong/dataviz.git
 cd dataviz
 uv sync --python 3.12 --extra dev --no-editable \
-  --reinstall-package workspace-dataviz
+  --reinstall-package ai-dataviz
 uv run --no-editable dataviz version
 ```
 
@@ -76,13 +86,13 @@ Server 不提供账号体系或 HTTP 鉴权，默认只监听本机回环地址�
 
 ```bash
 uv sync --python 3.12 --extra dev --no-editable \
-  --reinstall-package workspace-dataviz
+  --reinstall-package ai-dataviz
 ```
 
 从发行 ZIP 安装时：
 
 ```bash
-python -m pip install ./workspace-dataviz-0.3.2.zip
+python -m pip install ./ai-dataviz-0.5.4.zip
 dataviz version
 dataviz serve /path/to/workspace --port 8080
 ```
@@ -93,6 +103,7 @@ dataviz serve /path/to/workspace --port 8080
 
 ```bash
 dataviz validate myworkspace --dashboard sales-overview --format json
+dataviz dependencies myworkspace sales-overview --format json
 ```
 
 再按需要查询、检查 Named Output、运行服务端交互计算或导出报告：
@@ -132,13 +143,15 @@ Pyodide bundle 只解决 Python Runtime 资产，不自动打包所有前端库�
 ```bash
 dataviz docs quickstart
 dataviz docs pipeline --format json
+dataviz docs data-entry-components --format json
+dataviz docs design-language --format json
 dataviz schemas dashboard --full --format json
 dataviz components --format json
 dataviz gallery --output component-gallery.html
 dataviz context myworkspace sales-overview --focus view:revenue --format json
 ```
 
-Component Registry 的 13 个 Package 都物理拥有自己的 controller、Runtime Adapter、功能 CSS、Story 与测试声明。内置 Gallery 还提供 Selector、Control、View、Section 的 `ready / loading / stale / empty / error / cancelled / unavailable` 状态矩阵，以及真实 10、100、1,000 选项的 Select Story；AI 可以先复用这些已验证组件，再决定是否写局部 CSS/JS。
+Component Registry 当前包含 20 个 package-owned Package，其中 13 个 `control.*` Data Entry Package 分别对齐 Ant Design 的 Input、InputNumber、AutoComplete、Checkbox、Switch、Radio.Group、Select、Checkbox.Group、Cascader、TreeSelect、DatePicker、RangePicker 与 Slider 语义。每个 Package 都有独立 controller、Runtime Adapter、功能 CSS、Story 与测试声明；详见 [Data Entry Component 语义契约](docs/data-entry-components.md)。内置 Gallery 还提供 Control、View、Section 的 `ready / loading / stale / empty / error / cancelled / unavailable` 状态矩阵，以及真实 10、100、1,000 选项的 Select Story。
 
 项目也内置了 Dataviz 与 standalone HTML 的成对 AI 开发评测协议；它只记录客户端提供的真实 Token，不按文本大小估算：
 
@@ -180,10 +193,10 @@ myworkspace/
 
 Dashboard 文件夹末级名称就是导航显示名；`##` 表达逻辑目录，`__TRASH__##` 表示回收站。`dashboard.id` 是 CLI/DAG 使用的稳定机器 ID，使用可跨 Windows/Linux/macOS 的 ASCII 字母、数字、点、下划线和连字符；中文等展示内容放在文件夹名、`title`、`subtitle` 和 `description`。
 
-页面只有两个一级入口：`Parameters` 负责重新查询，`Controls` 负责 Query 后的选择与计算。Controls 在同一托盘内按 DATA（selection）和 LOGIC（compute）分组；参数多时自动分栏，面板过高时在内部滚动，不会击穿屏幕。各 Dashboard 可在可选的 `presentation.yaml` 中只改视觉编排，而不复制交互逻辑：
+Header 用一个 split control 合并 Query 操作：主按钮执行 `Run query`，右侧箭头显式展开或收起 Query Parameters。参数区默认展开，是 Header 的内联第二行，会在正常文档流中把 Canvas 向下推；它不是浮层，因此点击其他区域或按 `Esc` 都不会收起。没有 Query Parameter 时自动退化为普通 Run 按钮。`Controls` 负责 Query 后的选择与计算，并在临时托盘内按 DATA（selection）和 LOGIC（compute）分组；参数多时自动分栏，面板过高时在内部滚动，不会击穿屏幕。各 Dashboard 可在可选的 `presentation.yaml` 中只改视觉编排，而不复制交互逻辑：
 
 ```yaml
-controls:
+control_panels:
   query: {template: grid, width: wide, columns: 3, density: compact}
   dashboard: {template: grid, width: regular, columns: 2}
 ```
@@ -194,11 +207,13 @@ controls:
 
 当前 `dataviz serve` 的受支持部署方式是：一个 Workspace 对应一个 Dataviz Server 进程。Server 没有账号体系或 HTTP 鉴权，默认只允许回环地址；远程监听必须显式传入 `--allow-remote`，并由可信网络、反向代理或其他外部边界负责访问控制。Run、Navigation 和持久缓存的协调锁是进程内锁；不要让多个 Server 进程同时写同一个 Workspace 或同一个报告路径。修改 Runtime 并发上限后需重启 Server。
 
-需要生成配置时，先运行 `dataviz scaffold --list --format json` 获取当前安装版本真正支持的 Recipe；Component ID 与 Scaffold Recipe 不是同一套名字。生成或修改后始终运行 `dataviz validate <workspace>`。
+需要生成配置时，先运行 `dataviz scaffold --list --format json` 获取当前安装版本真正支持的 Recipe；Component ID 与 Scaffold Recipe 不是同一套名字。生成或修改后始终运行 `dataviz validate <workspace>`。Custom Renderer 若直接调用 Plotly，必须默认传入 `scrollZoom: false`，避免图表截获 Dashboard 页面滚轮；只有用户明确要求图内滚轮缩放时才设为 `true`。
 
 ## 文档
 
 - [设计与架构不变量](DESIGN.md)
+- [Dashboard 视觉语言](docs/design-language.md)
+- [Data Entry Component 语义契约](docs/data-entry-components.md)
 - [当前计划与验收状态](plan.md)
 - [代码实现索引](docs/product-architecture.md)
 - [版本与发布流程](docs/versioning-and-release.md)

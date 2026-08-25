@@ -11,7 +11,6 @@ import pytest
 from dataviz.artifacts import ArtifactStore
 from dataviz.execution import Executor, InteractionExecutor
 from dataviz.execution.interactive import load_run_result
-from dataviz.execution.plan import server_interactive_base_references
 from dataviz.errors import ExecutionFailure
 from dataviz.server.manager import RunManager
 from dataviz.server import create_app
@@ -45,7 +44,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v3
+        """schema: dataviz/dashboard/v4
 kind: dashboard
 id: interactive
 title: Interactive contract
@@ -58,9 +57,11 @@ controls:
     kind: selection
     type: multi_select
     field: region
-    choices:
-      - {label: North, value: north}
-      - {label: South, value: south}
+    options:
+      mode: static
+      choices:
+        - {label: North, value: north}
+        - {label: South, value: south}
 sources:
   - id: raw
     kind: source
@@ -197,7 +198,9 @@ def test_server_interactive_inputs_are_classified_and_reuse_the_tab_run_snapshot
 ):
     workspace = load_workspace(build_interactive_workspace(tmp_path / "workspace"))
     dashboard = workspace.dashboard("interactive")
-    assert server_interactive_base_references(dashboard) == {"source:raw/main"}
+    assert dashboard.dependency_contract.server_interactive_base_references() == {
+        "source:raw/main"
+    }
 
     manager = RunManager(workspace)
     run = manager.start("interactive", {"batch": 11}, SESSION_A)
@@ -248,7 +251,7 @@ def test_browser_only_interactive_branch_does_not_pin_server_inputs(tmp_path: Pa
     dashboard = workspace.dashboard("interactive")
     dashboard.interactive_transforms["summary"][1].runtime = "browser-js"
 
-    assert server_interactive_base_references(dashboard) == set()
+    assert dashboard.dependency_contract.server_interactive_base_references() == set()
 
 
 def test_server_interactive_logs_and_tracebacks_redact_workspace_credentials(

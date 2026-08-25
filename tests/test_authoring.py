@@ -39,12 +39,13 @@ from dataviz.templates import (
 from dataviz.workspace import load_workspace, validate_workspace
 from dataviz.workspace.models import (
     DashboardDefinition,
+    ComputeControlDefinition,
     DatasetTransformDefinition,
     DeclarativeViewDefinition,
     InteractiveTransformDefinition,
     LayoutDefinition,
     PresentationDefinition,
-    PresentationSelectorDefinition,
+    PresentationControlComponentDefinition,
     SectionDefinition,
     SelectionControlDefinition,
     SOURCE_DEFINITION_ADAPTER,
@@ -88,14 +89,21 @@ def test_template_catalog_matches_strict_model_enums():
     assert set(SECTION_TEMPLATES) == enum_values(SectionDefinition, "template")
     assert set(LAYOUT_TEMPLATES) == enum_values(LayoutDefinition, "template")
     assert set(THEME_PRESETS) == enum_values(ThemeDefinition, "preset")
-    selector_templates = {
-        identifier.removeprefix("selector.")
+    control_components = {
+        identifier.removeprefix("control.")
         for identifier in component_catalog()
-        if identifier.startswith("selector.")
+        if identifier.startswith("control.")
     }
-    assert selector_templates == (
-        enum_values(PresentationSelectorDefinition, "template") - {"auto"}
+    assert control_components == (
+        enum_values(PresentationControlComponentDefinition, "component") - {"auto"}
     )
+
+
+def test_business_is_the_default_theme_preset():
+    assert ThemeDefinition().preset == "business"
+    assert THEME_PRESETS["business"]["purpose"] == "Modern indigo analytical default"
+    tokens = component_catalog()["theme.business"]["tokens"]
+    assert {"--dv-overlay-surface", "--dv-chart-8", "--dv-shadow-float"} <= set(tokens)
 
 
 def test_machine_readable_component_examples_use_canonical_output_references():
@@ -133,7 +141,7 @@ def test_machine_readable_component_examples_use_canonical_output_references():
 
 def test_machine_readable_documentation_examples_match_current_schemas():
     providers = {
-        "dataviz/dashboard/v3": DashboardDefinition,
+        "dataviz/dashboard/v4": DashboardDefinition,
         "dataviz/source/v1": SOURCE_DEFINITION_ADAPTER,
         "dataviz/dataset-transform/v1": DatasetTransformDefinition,
         "dataviz/interactive-transform/v1": InteractiveTransformDefinition,
@@ -175,33 +183,57 @@ def test_machine_readable_documentation_examples_match_current_schemas():
             raise AssertionError(f"Invalid built-in documentation example: {path}") from error
 
 
+def test_plotly_wheel_docs_distinguish_declarative_and_custom_renderers():
+    wheel = DOC_TOPICS["charts"]["plotly_wheel"]
+    custom = DOC_TOPICS["renderers"]["custom_plotly"]
+
+    assert "scrollZoom=false" in wheel["declarative_default"]
+    assert "不会自动继承" in wheel["custom_renderer"]
+    assert "scrollZoom: false" in custom["rule"]
+    assert "明确要求" in custom["exception"]
+
+
 def test_component_registry_reports_package_owned_implementations():
     catalog = component_catalog()
     report = validate_component_packages(catalog)
 
-    assert COMPONENT_REGISTRY_VERSION == "3.0.0"
+    assert COMPONENT_REGISTRY_VERSION == "4.0.0"
     assert set(component_packages()) == {
+        "control.auto-complete",
+        "control.cascader",
+        "control.checkbox",
+        "control.checkbox-group",
+        "control.date-picker",
+        "control.input",
+        "control.input-number",
+        "control.radio-group",
+        "control.range-picker",
+        "control.select",
+        "control.slider",
+        "control.switch",
+        "control.tree-select",
         "data.pipeline",
         "presentation.shell",
         "renderer.custom",
+        "runtime.control",
         "runtime.overlay",
-        "runtime.selector",
         "section.declarative",
-        "selector.cascader",
-        "selector.checkbox-group",
-        "selector.date-range",
-        "selector.segmented",
-        "selector.select",
-        "selector.tree-select",
         "view.declarative",
     }
-    assert {identifier for identifier in catalog if identifier.startswith("selector.")} == {
-        "selector.select",
-        "selector.segmented",
-        "selector.checkbox-group",
-        "selector.cascader",
-        "selector.date-range",
-        "selector.tree-select",
+    assert {identifier for identifier in catalog if identifier.startswith("control.")} == {
+        "control.auto-complete",
+        "control.cascader",
+        "control.checkbox",
+        "control.checkbox-group",
+        "control.date-picker",
+        "control.input",
+        "control.input-number",
+        "control.radio-group",
+        "control.range-picker",
+        "control.select",
+        "control.slider",
+        "control.switch",
+        "control.tree-select",
     }
 
     assert report == {
@@ -209,12 +241,12 @@ def test_component_registry_reports_package_owned_implementations():
         "scope": "package-metadata-and-test-declarations",
         "behavior_tests_executed": False,
         "valid": True,
-        "packages": 13,
-        "package_implemented": 13,
+        "packages": 20,
+        "package_implemented": 20,
         "bridge_implemented": 0,
-        "components": 51,
-        "stories": 29,
-        "test_declarations": 61,
+        "components": 58,
+        "stories": 38,
+        "test_declarations": 70,
         "errors": [],
     }
     assert set(component_index()) == set(catalog)
@@ -244,26 +276,26 @@ def test_component_registry_reports_package_owned_implementations():
     }
 
 
-def test_component_package_cli_check_and_new_selector_scaffolds():
+def test_component_package_cli_check_and_data_entry_scaffolds():
     check = CliRunner().invoke(app, ["components", "--check", "--format", "json"])
     tree = CliRunner().invoke(
-        app, ["scaffold", "selector.tree-select", "--id", "location", "--format", "json"]
+        app, ["scaffold", "control.tree-select", "--id", "location", "--format", "json"]
     )
     date = CliRunner().invoke(
-        app, ["scaffold", "selector.date-range", "--id", "window", "--format", "json"]
+        app, ["scaffold", "control.range-picker", "--id", "window", "--format", "json"]
     )
     flat = CliRunner().invoke(
-        app, ["scaffold", "selector.select", "--id", "region", "--format", "json"]
+        app, ["scaffold", "control.select", "--id", "region", "--format", "json"]
     )
-    segmented = CliRunner().invoke(
-        app, ["scaffold", "selector.segmented", "--id", "status", "--format", "json"]
+    radio = CliRunner().invoke(
+        app, ["scaffold", "control.radio-group", "--id", "status", "--format", "json"]
     )
     checkbox = CliRunner().invoke(
-        app, ["scaffold", "selector.checkbox-group", "--id", "channel", "--format", "json"]
+        app, ["scaffold", "control.checkbox-group", "--id", "channel", "--format", "json"]
     )
     docs = CliRunner().invoke(app, ["docs", "controls", "--format", "json"])
     component = CliRunner().invoke(
-        app, ["components", "selector.select", "--format", "json"]
+        app, ["components", "control.select", "--format", "json"]
     )
 
     assert check.exit_code == 0, check.stdout
@@ -275,29 +307,35 @@ def test_component_package_cli_check_and_new_selector_scaffolds():
     assert date_selection["type"] == "date_range"
     flat_selection = yaml.safe_load(json.loads(flat.stdout)["files"]["dashboard.control.snippet.yaml"])[0]
     assert flat_selection["type"] == "multi_select"
-    assert [item["value"] for item in flat_selection["choices"]] == ["alpha", "beta"]
-    segmented_selection = yaml.safe_load(
-        json.loads(segmented.stdout)["files"]["dashboard.control.snippet.yaml"]
+    assert flat_selection["options"]["mode"] == "static"
+    assert [item["value"] for item in flat_selection["options"]["choices"]] == [
+        "alpha",
+        "beta",
+    ]
+    radio_control = yaml.safe_load(
+        json.loads(radio.stdout)["files"]["dashboard.control.snippet.yaml"]
     )[0]
     checkbox_selection = yaml.safe_load(
         json.loads(checkbox.stdout)["files"]["dashboard.control.snippet.yaml"]
     )[0]
-    assert segmented_selection["type"] == "single_select"
-    assert segmented_selection["default"] == "alpha"
+    assert radio_control["type"] == "single_select"
+    assert radio_control["default"] == "alpha"
     assert checkbox_selection["type"] == "multi_select"
     assert yaml.safe_load(
-        json.loads(checkbox.stdout)["files"]["presentation.selector.snippet.yaml"]
-    )["selectors"]["view:view-id/channel"]["template"] == "checkbox-group"
+        json.loads(checkbox.stdout)["files"]["presentation.control-component.snippet.yaml"]
+    )["control_components"]["view:view-id/channel"]["component"] == "checkbox-group"
     docs_payload = json.loads(docs.stdout)
-    assert set(docs_payload["selector_choice"]) == {
-        "auto", "select", "segmented", "checkbox-group", "cascader", "tree-select", "date-range"
+    assert set(docs_payload["component_choice"]) == {
+        "auto", "input", "input-number", "auto-complete", "checkbox", "switch",
+        "radio-group", "select", "checkbox-group", "cascader", "tree-select",
+        "date-picker", "range-picker", "slider",
     }
-    assert "auto/always/never" in docs_payload["selector_choice"]["select"]
+    assert "auto/always/never" in docs_payload["component_choice"]["select"]
     documented_controls = yaml.safe_load(docs_payload["dashboard_example"])["controls"]
     assert [item["kind"] for item in documented_controls] == ["selection", "compute"]
     documented_inputs = yaml.safe_load(docs_payload["interactive_input_example"])
     assert set(documented_inputs) == {"selection_inputs", "compute_inputs"}
-    assert json.loads(component.stdout)["id"] == "selector.select"
+    assert json.loads(component.stdout)["id"] == "control.select"
 
 
 def test_every_scaffold_recipe_matches_the_current_strict_models():
@@ -329,18 +367,20 @@ def test_every_scaffold_recipe_matches_the_current_strict_models():
             SectionDefinition.model_validate(
                 yaml.safe_load(files["dashboard.section.snippet.yaml"])[0]
             )
-        elif recipe.startswith("selector."):
-            SelectionControlDefinition.model_validate(
-                yaml.safe_load(files["dashboard.control.snippet.yaml"])[0]
-            )
-            selector = next(
+        elif recipe.startswith("control."):
+            control = yaml.safe_load(files["dashboard.control.snippet.yaml"])[0]
+            if control["kind"] == "selection":
+                SelectionControlDefinition.model_validate(control)
+            else:
+                ComputeControlDefinition.model_validate(control)
+            presentation = next(
                 iter(
-                    yaml.safe_load(files["presentation.selector.snippet.yaml"])[
-                        "selectors"
+                    yaml.safe_load(files["presentation.control-component.snippet.yaml"])[
+                        "control_components"
                     ].values()
                 )
             )
-            PresentationSelectorDefinition.model_validate(selector)
+            PresentationControlComponentDefinition.model_validate(presentation)
         else:  # pragma: no cover - the catalog and this contract must evolve together
             raise AssertionError(f"Unhandled Scaffold recipe: {recipe}")
 
@@ -511,7 +551,7 @@ def test_component_focus_and_scaffold_are_machine_readable(tmp_path: Path):
             str(MINIMAL_WORKSPACE),
             "sales-overview",
             "--focus",
-            "component:selector.cascader",
+            "component:control.cascader",
             "--format",
             "json",
         ],
@@ -530,7 +570,7 @@ def test_component_focus_and_scaffold_are_machine_readable(tmp_path: Path):
 
     assert context_result.exit_code == 0, context_result.stdout
     context_payload = json.loads(context_result.stdout)
-    assert context_payload["focus"] == "component:selector.cascader"
+    assert context_payload["focus"] == "component:control.cascader"
     assert "workspace" not in context_payload
     assert context_payload["component"]["logic"]["fields"] == ["path_fields"]
 
@@ -588,7 +628,7 @@ def test_coordinate_layout_fields_are_strictly_rejected(layout):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v3",
+                "schema": "dataviz/dashboard/v4",
                 "kind": "dashboard",
                 "id": "strict",
                 "layout": layout,
@@ -641,12 +681,12 @@ def test_builtin_gallery_is_a_valid_real_workspace_and_exports(tmp_path: Path):
     assert "Component Gallery" in html
     assert "registerRenderer('gallery.spark'" in html
     assert "dv-section--small-multiples" in html
-    assert 'data-selector-template="cascader"' in html
-    assert 'data-selector-template="date-range"' in html
-    assert 'data-selector-template="tree-select"' in html
-    assert 'data-selector-template="select"' in html
-    assert 'data-selector-template="segmented"' in html
-    assert 'data-selector-template="checkbox-group"' in html
+    assert 'data-control-component="cascader"' in html
+    assert 'data-control-component="range-picker"' in html
+    assert 'data-control-component="tree-select"' in html
+    assert 'data-control-component="select"' in html
+    assert 'data-control-component="radio-group"' in html
+    assert 'data-control-component="checkbox-group"' in html
     assert 'data-component-package="runtime.overlay"' in html
 
 
@@ -664,6 +704,8 @@ def test_custom_renderer_scaffold_includes_style_and_contract(tmp_path: Path):
     script = (target / "assets" / "team.spark.js").read_text()
     style = (target / "assets" / "team.spark.css").read_text()
     assert 'node.className = "renderer-team-spark"' in script
+    assert "Plotly.newPlot/react, pass scrollZoom:false" in script
+    assert "Use true only on an explicit user request" in script
     assert ".renderer-team-spark" in style
     assets = yaml.safe_load((target / "presentation.asset.snippet.yaml").read_text())
     assert assets["assets"]["css"] == ["assets/team.spark.css"]
@@ -682,9 +724,9 @@ def test_gallery_cli_never_writes_runtime_artifacts_into_the_installed_package(
     assert output.is_file()
     exported = output.read_text(encoding="utf-8")
     assert "window.datavizComponentStories = [" in exported
-    assert '"id": "selector.select.scale-10"' in exported
-    assert '"id": "selector.select.scale-100"' in exported
-    assert '"id": "selector.select.scale-1000"' in exported
+    assert '"id": "control.select.scale-10"' in exported
+    assert '"id": "control.select.scale-100"' in exported
+    assert '"id": "control.select.scale-1000"' in exported
     assert "runtime specimens" in exported
     assert after == before
 
@@ -734,6 +776,9 @@ def test_runtime_v2_has_one_owner_for_each_migrated_behavior():
         assert implementation not in runtime
     assert "window.datavizRuntimeServices = Object.freeze" in runtime
     assert "dataviz:runtime-ready" in runtime
+    assert "Object.entries(spec.inputs || {})" not in runtime
+    assert "Object.entries(this.transformInputs(id))" in runtime
+    assert "this.views.set(id, {inputs: {...expectedInputs}" in runtime
 
     owners = {
         "data.pipeline": "createInteractiveAdapters",

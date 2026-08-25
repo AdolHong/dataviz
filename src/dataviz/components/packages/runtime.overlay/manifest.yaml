@@ -1,8 +1,8 @@
 schema: dataviz/component-package/v1
 package: runtime.overlay
-version: 1.1.0
+version: 1.2.0
 category: runtime
-purpose: One overlay controller for popovers, selector panels and future floating components.
+purpose: One overlay controller for popovers, Data Entry panels and future floating components.
 implementation: {mode: package, sources: []}
 dependencies: []
 components:
@@ -12,8 +12,9 @@ components:
     behavior:
       exclusivity: One open overlay per group
       dismiss: [outside-pointer, escape, explicit]
-      placement: viewport-aware
+      placement: visual-viewport-aware top layer with containing-block fallback
       stacking: Floating panels stay above sibling controls
+      activation: positioned before first visible frame
       focus_return: trigger
 runtime:
   controller: controller.js

@@ -1,7 +1,7 @@
 schema: dataviz/component-test/v1
 tests:
   - {id: view.metric.lifecycle, component: view.metric, kind: renderer, assertions: [mount, update, dispose]}
-  - {id: view.line.lifecycle, component: view.line, kind: renderer, assertions: [mount, update, dispose]}
+  - {id: view.line.lifecycle, component: view.line, kind: renderer, assertions: [mount, update, dispose, page-wheel-default, explicit-scroll-zoom]}
   - {id: view.bar.lifecycle, component: view.bar, kind: renderer, assertions: [mount, update, dispose]}
   - {id: view.stacked-bar.lifecycle, component: view.stacked-bar, kind: renderer, assertions: [mount, update, dispose]}
   - {id: view.pie.lifecycle, component: view.pie, kind: renderer, assertions: [mount, update, dispose]}

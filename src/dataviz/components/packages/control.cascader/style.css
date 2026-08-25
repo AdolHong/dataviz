@@ -1,0 +1,19 @@
+.dv-cascader { position: relative; }
+.dv-cascader-panel { min-width: min(42rem, calc(100vw - 1.5rem)); }
+.dv-cascader-columns { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(10rem, 1fr); min-height: 12rem; max-height: min(23rem, 55vh); overflow: auto; border: 1px solid var(--dv-line, #d9e0ec); border-radius: 6px; }
+.dv-cascader-column { display: grid; align-content: start; min-width: 0; border-right: 1px solid var(--dv-line, #e3ddce); }
+.dv-cascader-column:last-child { border-right: 0; }
+.dv-cascader-column::before { content: attr(data-level); position: sticky; top: 0; z-index: 1; padding: .45rem .6rem; color: var(--dv-muted, #667085); background: var(--dv-paper, #f5f7fa); font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; }
+.dv-cascader-results { display: grid; grid-column: 1 / -1; }
+.dv-cascader-option > i { font-style: normal; color: var(--dv-accent, #3949ab); }
+.dv-cascader-branch { display: grid; grid-template-columns: 2rem minmax(0, 1fr); align-items: stretch; border-bottom: 1px solid var(--dv-line, #e3ddce); }
+.dv-cascader-branch .dv-cascader-option { border-bottom: 0; }
+.dv-cascader-branch__check { display: grid; place-items: center; width: 100%; color: var(--dv-panel, #fffdf6); background: transparent; border: 0; border-right: 1px solid var(--dv-line, #e3ddce); cursor: pointer; font-size: .68rem; }
+.dv-cascader-branch__check::before { content: ''; width: .85rem; height: .85rem; background: var(--dv-panel, #fffdf6); border: 1px solid var(--dv-line, #9ba39f); }
+.dv-cascader-branch.is-selected .dv-cascader-branch__check::before { content: '✓'; display: grid; place-items: center; color: #fff; background: var(--dv-accent, #3949ab); border-color: var(--dv-accent, #3949ab); }
+.dv-cascader-branch.is-mixed .dv-cascader-branch__check::before { content: '−'; display: grid; place-items: center; color: #fff; background: var(--dv-green, #38a169); border-color: var(--dv-green, #38a169); }
+.dv-cascader-branch__check:focus-visible { outline: 2px solid var(--dv-accent, #3949ab); outline-offset: -2px; }
+@media (max-width: 680px) {
+  .dv-cascader-columns { grid-auto-flow: row; grid-auto-columns: auto; grid-template-columns: 1fr; }
+  .dv-cascader-column { max-height: 11rem; overflow: auto; border-right: 0; border-bottom: 1px solid var(--dv-line, #e3ddce); }
+}

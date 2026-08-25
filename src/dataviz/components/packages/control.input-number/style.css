@@ -1,0 +1,9 @@
+.dv-input-number { display: flex; align-items: stretch; min-width: 0; color: var(--dv-ink, #202536); background: var(--dv-panel, #fff); border: 1px solid var(--dv-line, #d9e0ec); border-radius: 7px; }
+.dv-input-number:focus-within { border-color: var(--dv-accent, #3949ab); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dv-accent, #3949ab) 14%, transparent); }
+.dv-input-number__control { box-sizing: border-box; flex: 1 1 auto; width: 100%; min-width: 0; min-height: 2.5rem; padding: .5rem .7rem; color: inherit; background: transparent; border: 0; outline: 0; font-variant-numeric: tabular-nums; }
+.dv-input-number__control::-webkit-inner-spin-button { appearance: none; }
+.dv-input-number__affix { display: inline-flex; align-items: center; padding: 0 .6rem; color: var(--dv-muted, #667085); }
+.dv-input-number__steps { display: grid; flex: 0 0 2rem; border-left: 1px solid var(--dv-line, #d9e0ec); }
+.dv-input-number__step { display: grid; place-items: center; color: var(--dv-muted, #667085); background: transparent; border: 0; cursor: pointer; line-height: 1; }
+.dv-input-number__step + .dv-input-number__step { border-top: 1px solid var(--dv-line, #d9e0ec); }
+.dv-input-number__step:hover:not(:disabled) { color: var(--dv-accent, #3949ab); background: color-mix(in srgb, var(--dv-accent, #3949ab) 8%, transparent); }

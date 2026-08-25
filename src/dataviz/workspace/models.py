@@ -97,6 +97,34 @@ class Choice(Model):
     keywords: list[str] = Field(default_factory=list)
 
 
+class StaticOptionDomainDefinition(Model):
+    """A closed business enumeration owned by the Dashboard definition."""
+
+    mode: Literal["static"]
+    choices: list[Choice] = Field(min_length=1)
+
+
+class InferredOptionDomainDefinition(Model):
+    """An option domain inferred from immutable query-stage table outputs."""
+
+    mode: Literal["infer"]
+    initial: Literal["auto", "empty"] = "auto"
+    source: str | None = Field(
+        default=None,
+        description=(
+            "Optional Base Named Output used as the option domain. When omitted, "
+            "Dataviz traces consuming Views through Interactive Transforms to their "
+            "immutable Base Outputs."
+        ),
+    )
+
+
+OptionDomainDefinition = Annotated[
+    StaticOptionDomainDefinition | InferredOptionDomainDefinition,
+    Field(discriminator="mode"),
+]
+
+
 class _ValueControlDefinition(Model):
     id: StableId
     type: Literal[
@@ -113,10 +141,17 @@ class _ValueControlDefinition(Model):
     description: str = ""
     default: Any = None
     required: bool = False
-    choices: list[Choice] = Field(default_factory=list)
+    clearable: bool | None = None
+    options: OptionDomainDefinition | None = None
+    suggestions: list[Choice] = Field(default_factory=list)
     min: float | int | None = None
     max: float | int | None = None
     step: float | int | None = None
+    min_date: str | None = None
+    max_date: str | None = None
+    max_length: int | None = Field(None, ge=1)
+    max_selected: int | None = Field(None, ge=1)
+    allow_empty: tuple[bool, bool] = (False, False)
     placeholder: str = ""
 
     @model_validator(mode="after")
@@ -129,9 +164,11 @@ class QueryParameterDefinition(_ValueControlDefinition):
 
     @model_validator(mode="after")
     def validate_static_choices(self):
-        if self.type in {"single_select", "multi_select"} and not self.choices:
+        if self.type in {"single_select", "multi_select"} and not isinstance(
+            self.options, StaticOptionDomainDefinition
+        ):
             raise ValueError(
-                "Query Parameter select controls require explicit choices"
+                "Query Parameter select controls require options.mode=static"
             )
         return self
 
@@ -143,9 +180,11 @@ class ComputeControlDefinition(_ValueControlDefinition):
 
     @model_validator(mode="after")
     def validate_static_choices(self):
-        if self.type in {"single_select", "multi_select"} and not self.choices:
+        if self.type in {"single_select", "multi_select"} and not isinstance(
+            self.options, StaticOptionDomainDefinition
+        ):
             raise ValueError(
-                "Compute controls with select input types require explicit choices"
+                "Compute select controls require options.mode=static"
             )
         return self
 
@@ -158,22 +197,24 @@ class SelectionControlDefinition(_ValueControlDefinition):
     field: str | None = None
     path_fields: list[str] = Field(default_factory=list, min_length=0)
     cascade: bool = True
-    options_from: str | None = Field(
-        default=None,
-        description=(
-            "Optional Base Named Output used as this Selection's option domain. "
-            "When omitted, Dataviz traces each consuming View through Interactive "
-            "Transforms to its immutable Base Outputs. Interactive Outputs are not "
-            "valid option domains because they may depend on the Selection itself."
-        ),
-    )
 
     @model_validator(mode="after")
     def validate_option_domain_contract(self):
-        if self.options_from and self.type not in {"single_select", "multi_select"}:
+        if self.type in {"single_select", "multi_select"} and self.options is None:
             raise ValueError(
-                "selection.options_from is only valid for single_select or multi_select"
+                "Selection select controls require options.mode=static or options.mode=infer"
             )
+        if isinstance(self.options, InferredOptionDomainDefinition) and "default" in self.model_fields_set:
+            raise ValueError(
+                "Inferred Selection options cannot declare default; the Runtime derives "
+                "the initial value from the available option domain"
+            )
+        if (
+            isinstance(self.options, InferredOptionDomainDefinition)
+            and self.required
+            and self.options.initial == "empty"
+        ):
+            raise ValueError("required inferred Selection options cannot use initial=empty")
         return self
 
 
@@ -256,7 +297,7 @@ class LayoutDefinition(Model):
 
 
 class ThemeDefinition(Model):
-    preset: Literal["plain", "editorial", "terminal", "business"] = "plain"
+    preset: Literal["plain", "editorial", "terminal", "business"] = "business"
     accent: str | None = None
     background: str | None = None
     panel: str | None = None
@@ -314,47 +355,115 @@ class DateRangePresetDefinition(Model):
     end: str
 
 
-class PresentationSelectorDefinition(Model):
-    template: Literal[
+class SliderMarkDefinition(Model):
+    value: float
+    label: str
+
+
+class PresentationControlComponentDefinition(Model):
+    """Presentation-only choice of one independently packaged Data Entry component."""
+
+    component: Literal[
         "auto",
+        "input",
+        "input-number",
+        "auto-complete",
+        "checkbox",
+        "switch",
+        "radio-group",
         "select",
-        "segmented",
         "checkbox-group",
         "cascader",
-        "date-range",
+        "date-picker",
+        "range-picker",
+        "slider",
         "tree-select",
     ] = "auto"
-    variant: Literal["default", "tags", "radio"] = "default"
+    multiline: bool = False
+    min_rows: int = Field(2, ge=1, le=40)
+    max_rows: int = Field(6, ge=1, le=80)
+    show_count: bool = False
+    prefix: str = ""
+    suffix: str = ""
+    number_controls: bool = True
+    show_input: bool = False
+    tooltip: Literal["auto", "always", "never"] = "auto"
+    marks: list[SliderMarkDefinition] = Field(default_factory=list)
+    checked_label: str = ""
+    unchecked_label: str = ""
+    option_type: Literal["default", "button"] = "default"
+    button_style: Literal["outline", "solid"] = "outline"
+    bulk_actions: bool = True
     show_unavailable: bool = False
     search: Literal["auto", "always", "never"] = "auto"
     virtual: Literal["auto", "always", "never"] = "auto"
     search_threshold: int = Field(9, ge=0)
     virtual_threshold: int = Field(200, ge=1)
-    max_visible_tags: int = Field(2, ge=0, le=20)
-    max_selected: int | None = Field(None, ge=1)
+    max_tag_count: int = Field(2, ge=0, le=20)
     hide_selected: bool = False
     search_placeholder: str = "Search options…"
     empty_text: str = "No matching options"
-    placeholder: str = "Choose…"
-    all_label: str = "All"
     select_all_label: str = "Select all"
     invert_label: str = "Invert"
     clear_label: str = "Clear"
     level_labels: list[str] = Field(default_factory=list)
     path_separator: str = " / "
-    hierarchy_selection: Literal["leaf", "cascade"] = "leaf"
-    checked_strategy: Literal["all", "parent", "child"] = "child"
+    selection_strategy: Literal["leaf", "cascade"] = "leaf"
+    show_checked_strategy: Literal["all", "parent", "child"] = "child"
     start_label: str = "Start"
     end_label: str = "End"
-    min: str | None = None
-    max: str | None = None
-    allow_open_range: bool = False
     presets: list[DateRangePresetDefinition] = Field(default_factory=list)
     item_height: int = Field(38, ge=28, le=80)
     viewport_height: int = Field(304, ge=120, le=720)
     overscan: int = Field(5, ge=1, le=40)
     default_expand_depth: int = Field(0, ge=0, le=12)
     css_class: str = ""
+
+    @model_validator(mode="after")
+    def validate_component_options(self):
+        common = {"component", "css_class"}
+        options = {
+            "auto": set(),
+            "input": {"multiline", "min_rows", "max_rows", "show_count", "prefix", "suffix"},
+            "input-number": {"prefix", "suffix", "number_controls"},
+            "auto-complete": {"search_placeholder", "empty_text"},
+            "checkbox": set(),
+            "switch": {"checked_label", "unchecked_label"},
+            "radio-group": {"option_type", "button_style", "show_unavailable"},
+            "select": {
+                "show_unavailable", "search", "virtual", "search_threshold",
+                "virtual_threshold", "max_tag_count", "hide_selected",
+                "search_placeholder", "empty_text", "select_all_label", "invert_label",
+                "clear_label", "item_height", "viewport_height", "overscan",
+            },
+            "checkbox-group": {
+                "bulk_actions", "show_unavailable", "select_all_label",
+                "invert_label",
+            },
+            "cascader": {
+                "show_unavailable", "search", "search_placeholder", "empty_text",
+                "clear_label", "level_labels", "path_separator", "selection_strategy",
+                "show_checked_strategy", "max_tag_count",
+            },
+            "date-picker": {"clear_label"},
+            "range-picker": {"start_label", "end_label", "presets", "clear_label"},
+            "slider": {"show_input", "tooltip", "marks"},
+            "tree-select": {
+                "show_unavailable", "search", "search_placeholder", "empty_text",
+                "clear_label", "level_labels", "path_separator", "selection_strategy",
+                "show_checked_strategy", "max_tag_count", "default_expand_depth",
+            },
+        }
+        explicit = set(self.model_fields_set) - common
+        unsupported = explicit - options[self.component]
+        if unsupported:
+            names = ", ".join(sorted(unsupported))
+            raise ValueError(
+                f"{self.component} does not accept presentation options: {names}"
+            )
+        if self.min_rows > self.max_rows:
+            raise ValueError("min_rows cannot be greater than max_rows")
+        return self
 
 
 class PresentationAssetsDefinition(Model):
@@ -387,7 +496,7 @@ class PresentationControlPanelDefinition(Model):
         return self
 
 
-class PresentationControlsDefinition(Model):
+class PresentationControlPanelsDefinition(Model):
     query: PresentationControlPanelDefinition = Field(default_factory=PresentationControlPanelDefinition)
     dashboard: PresentationControlPanelDefinition = Field(default_factory=PresentationControlPanelDefinition)
 
@@ -400,8 +509,8 @@ class PresentationDefinition(Model):
     layout: PresentationLayoutDefinition = Field(default_factory=PresentationLayoutDefinition)
     sections: dict[StableId, PresentationSectionDefinition] = Field(default_factory=dict)
     views: dict[StableId, PresentationViewDefinition] = Field(default_factory=dict)
-    selectors: dict[str, PresentationSelectorDefinition] = Field(default_factory=dict)
-    controls: PresentationControlsDefinition = Field(default_factory=PresentationControlsDefinition)
+    control_components: dict[str, PresentationControlComponentDefinition] = Field(default_factory=dict)
+    control_panels: PresentationControlPanelsDefinition = Field(default_factory=PresentationControlPanelsDefinition)
     assets: PresentationAssetsDefinition = Field(default_factory=PresentationAssetsDefinition)
     canvas: PresentationCanvasDefinition = Field(default_factory=PresentationCanvasDefinition)
 
@@ -466,7 +575,7 @@ class DeclarativeViewDefinition(Model):
 
 
 class DashboardDefinition(Model):
-    schema_: Literal["dataviz/dashboard/v3"] = Field(alias="schema")
+    schema_: Literal["dataviz/dashboard/v4"] = Field(alias="schema")
     kind: Literal["dashboard"] = "dashboard"
     id: StableId
     title: str = ""

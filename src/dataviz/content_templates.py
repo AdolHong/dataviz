@@ -6,6 +6,7 @@ import json
 import re
 from typing import TYPE_CHECKING, Any, Literal
 
+from dataviz.value_contract import static_control_choices
 from dataviz.workspace.controls import canonical_control_key
 
 if TYPE_CHECKING:
@@ -247,7 +248,7 @@ def _choice_label(
     definition: QueryParameterDefinition | ScopedControlDefinition,
     value: Any,
 ) -> str | None:
-    for choice in definition.choices:
+    for choice in static_control_choices(definition):
         if choice.value == value or str(choice.value) == str(value):
             return choice.label
     return None
@@ -315,10 +316,11 @@ def format_selection_value(value: Any, definition: SelectionControlDefinition) -
         value = [item.strip() for item in value.split(",") if item.strip()]
     if isinstance(value, (list, tuple, set)):
         items = list(value)
-        if definition.choices and len(items) == len(definition.choices) and all(
+        choices = static_control_choices(definition)
+        if choices and len(items) == len(choices) and all(
             any(
                 choice.value == item or str(choice.value) == str(item)
-                for choice in definition.choices
+                for choice in choices
             )
             for item in items
         ):

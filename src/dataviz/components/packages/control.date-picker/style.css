@@ -1,0 +1,6 @@
+.dv-date-picker { display: flex; align-items: stretch; min-width: 0; color: var(--dv-ink, #202536); background: var(--dv-panel, #fff); border: 1px solid var(--dv-line, #d9e0ec); border-radius: 7px; }
+.dv-date-picker:focus-within { border-color: var(--dv-accent, #3949ab); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dv-accent, #3949ab) 14%, transparent); }
+.dv-date-picker__control { box-sizing: border-box; flex: 1 1 auto; min-width: 0; min-height: 2.5rem; padding: .5rem .7rem; color: inherit; background: transparent; border: 0; outline: 0; }
+.dv-date-picker__calendar, .dv-date-picker__clear { min-width: 2.4rem; color: var(--dv-muted, #667085); background: transparent; border: 0; border-left: 1px solid var(--dv-line, #d9e0ec); cursor: pointer; }
+.dv-date-picker__clear { padding: 0 .55rem; color: var(--dv-accent, #3949ab); font-size: .72rem; }
+.dv-date-picker__calendar:hover:not(:disabled), .dv-date-picker__clear:hover:not(:disabled) { background: color-mix(in srgb, var(--dv-accent, #3949ab) 8%, transparent); }

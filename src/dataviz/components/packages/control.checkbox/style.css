@@ -1,0 +1,7 @@
+.dv-checkbox { position: relative; display: inline-grid; place-items: center; width: 1.15rem; height: 1.15rem; cursor: pointer; }
+.dv-checkbox__native { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: inherit; }
+.dv-checkbox__mark { box-sizing: border-box; width: 1.05rem; height: 1.05rem; background: var(--dv-panel, #fff); border: 1px solid var(--dv-line, #9ba39f); border-radius: 3px; }
+.dv-checkbox.is-checked .dv-checkbox__mark { display: grid; place-items: center; color: #fff; background: var(--dv-accent, #3949ab); border-color: var(--dv-accent, #3949ab); }
+.dv-checkbox.is-checked .dv-checkbox__mark::after { content: '✓'; font-size: .72rem; font-weight: 800; }
+.dv-checkbox:has(input:focus-visible) { outline: 2px solid var(--dv-accent, #3949ab); outline-offset: 2px; }
+.dv-checkbox:has(input:disabled) { opacity: .42; cursor: not-allowed; }

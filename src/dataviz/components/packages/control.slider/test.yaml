@@ -1,0 +1,6 @@
+schema: dataviz/component-test/v1
+tests:
+  - id: control.slider.contract
+    component: control.slider
+    kind: accessibility
+    assertions: [native-range-source-of-truth, min-max-step, keyboard-arrows, marks, optional-number-input, bubbling-input-change]

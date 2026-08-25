@@ -63,13 +63,13 @@
       return (this.manifest.view_specs || []).find(view => view.id === id) || null;
     }
     viewInputReferences(id) {
-      return this.manifest.portable?.view_inputs?.[id] || this.view(id)?.inputs || {};
+      return this.manifest.dependency_contract?.views?.[id]?.inputs || {};
     }
     viewRows(id, input = 'main') {
       const references = this.viewInputReferences(id);
       const reference = references[input] || Object.values(references)[0];
       const source = rows(this.output(reference));
-      const contract = this.manifest.portable?.selection_contract?.[id] || [];
+      const contract = this.manifest.dependency_contract?.views?.[id]?.selection_contract || [];
       return source.filter(row => contract.every(item => matches(
         row, item, this.manifest.selections?.[item.key],
       )));

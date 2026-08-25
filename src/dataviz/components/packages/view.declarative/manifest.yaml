@@ -1,6 +1,6 @@
 schema: dataviz/component-package/v1
 package: view.declarative
-version: 1.0.0
+version: 1.1.0
 category: view
 purpose: Declarative View descriptors, Renderer adapters and lifecycle state boundaries.
 implementation:
@@ -9,7 +9,7 @@ implementation:
 dependencies: [data.pipeline, runtime.overlay]
 components:
   - {id: view.metric, purpose: Single scalar or aggregated KPI, status: stable}
-  - {id: view.line, purpose: Trend or ordered series, status: stable}
+  - {id: view.line, purpose: Trend or ordered series with page-first wheel interaction, status: stable}
   - {id: view.bar, purpose: Category comparison, status: stable}
   - {id: view.stacked-bar, purpose: Part-to-whole category comparison, status: stable}
   - {id: view.pie, purpose: Compact part-to-whole view, status: stable}

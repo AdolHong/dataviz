@@ -11,7 +11,7 @@ from packaging.requirements import Requirement
 from dataviz.filesystem import sha256_file
 
 
-_CORE_RUNTIME_PACKAGES = {"workspace-dataviz", "pandas", "pyarrow", "pydantic"}
+_CORE_RUNTIME_PACKAGES = {"ai-dataviz", "pandas", "pyarrow", "pydantic"}
 
 
 def hash_path(path: Path) -> str:

@@ -8,7 +8,11 @@ from pydantic import ValidationError
 from dataviz.errors import ExecutionFailure
 from dataviz.execution import resolve_query_parameters
 from dataviz.value_contract import normalize_control_value
-from dataviz.workspace.controls import resolve_compute_values, resolve_selection_values
+from dataviz.workspace.controls import (
+    initial_selection_intents,
+    resolve_compute_values,
+    resolve_selection_values,
+)
 from dataviz.workspace.models import (
     CacheDefinition,
     Choice,
@@ -20,6 +24,10 @@ from dataviz.workspace.models import (
     QueryParameterDefinition,
     SelectionControlDefinition,
 )
+
+
+def static_options(choices):
+    return {"mode": "static", "choices": choices}
 
 
 def test_control_defaults_are_validated_when_the_dsl_is_loaded():
@@ -35,8 +43,120 @@ def test_control_defaults_are_validated_when_the_dsl_is_loaded():
             kind="selection",
             type="single_select",
             default="missing",
-            choices=[Choice(label="North", value="north")],
+            options=static_options([Choice(label="North", value="north")]),
         )
+    with pytest.raises(ValidationError, match="required controls cannot be clearable"):
+        SelectionControlDefinition(
+            id="region",
+            kind="selection",
+            type="multi_select",
+            required=True,
+            clearable=True,
+            options=static_options([Choice(label="North", value="north")]),
+        )
+    with pytest.raises(ValidationError, match="single_select does not expose a clear action"):
+        SelectionControlDefinition(
+            id="region",
+            kind="selection",
+            type="single_select",
+            clearable=True,
+            options=static_options([Choice(label="North", value="north")]),
+        )
+
+
+def test_select_option_domains_separate_static_values_from_inferred_intent():
+    with pytest.raises(ValidationError, match="cannot declare default"):
+        SelectionControlDefinition.model_validate(
+            {
+                "id": "city",
+                "kind": "selection",
+                "type": "multi_select",
+                "field": "city",
+                "default": ["Shenzhen"],
+                "options": {"mode": "infer"},
+            }
+        )
+    with pytest.raises(ValidationError, match="options.mode=static"):
+        QueryParameterDefinition.model_validate(
+            {
+                "id": "city",
+                "type": "single_select",
+                "options": {"mode": "infer"},
+            }
+        )
+    with pytest.raises(ValidationError):
+        SelectionControlDefinition.model_validate(
+            {
+                "id": "city",
+                "kind": "selection",
+                "type": "multi_select",
+                "choices": [{"label": "Shenzhen", "value": "Shenzhen"}],
+            }
+        )
+
+    definition = DashboardDefinition.model_validate(
+        {
+            "schema": "dataviz/dashboard/v4",
+            "id": "option-intents",
+            "controls": [
+                {
+                    "id": "city",
+                    "kind": "selection",
+                    "type": "multi_select",
+                    "field": "city",
+                    "options": {"mode": "infer"},
+                },
+                {
+                    "id": "store",
+                    "kind": "selection",
+                    "type": "multi_select",
+                    "field": "store",
+                    "options": {"mode": "infer", "initial": "empty"},
+                },
+                {
+                    "id": "region",
+                    "kind": "selection",
+                    "type": "multi_select",
+                    "field": "region",
+                    "default": ["north"],
+                    "options": {
+                        "mode": "static",
+                        "choices": [{"label": "North", "value": "north"}],
+                    },
+                },
+            ],
+        }
+    )
+
+    assert initial_selection_intents(definition) == {
+        "dashboard:option-intents/city": "all_available",
+        "dashboard:option-intents/store": "explicit",
+        "dashboard:option-intents/region": "explicit",
+    }
+
+    required_inferred = DashboardDefinition.model_validate(
+        {
+            "schema": "dataviz/dashboard/v4",
+            "id": "required-inferred",
+            "controls": [
+                {
+                    "id": "city",
+                    "kind": "selection",
+                    "type": "single_select",
+                    "field": "city",
+                    "required": True,
+                    "options": {"mode": "infer"},
+                }
+            ],
+        }
+    )
+    with pytest.raises(ExecutionFailure, match="a value is required"):
+        resolve_selection_values(required_inferred, {})
+    assert resolve_selection_values(
+        required_inferred,
+        {},
+        phase="canvas-hydration",
+    ) == {"dashboard:required-inferred/city": None}
 
 
 def test_view_templates_reject_ignored_fields_and_require_real_renderer_paths():
@@ -97,7 +217,10 @@ def test_view_templates_reject_ignored_fields_and_require_real_renderer_paths():
 
 def test_date_range_empty_and_open_values_have_one_canonical_shape():
     definition = SelectionControlDefinition(
-        id="period", kind="selection", type="date_range"
+        id="period",
+        kind="selection",
+        type="date_range",
+        allow_empty=(False, True),
     )
 
     assert normalize_control_value(definition, "") == []
@@ -106,8 +229,87 @@ def test_date_range_empty_and_open_values_have_one_canonical_shape():
         "2026-01-01",
         "",
     ]
+    with pytest.raises(Exception, match="requires a start date"):
+        normalize_control_value(definition, ["", "2026-01-31"])
     with pytest.raises(Exception, match="start cannot be after end"):
         normalize_control_value(definition, ["2026-02-01", "2026-01-01"])
+
+
+def test_text_suggestions_remain_open_strings_and_obey_length_contracts():
+    definition = QueryParameterDefinition(
+        id="scenario",
+        type="string",
+        max_length=8,
+        suggestions=[
+            Choice(label="Base", value="base"),
+            Choice(label="Upside", value="upside"),
+        ],
+    )
+
+    assert normalize_control_value(definition, "custom") == "custom"
+    with pytest.raises(Exception, match="longer than 8"):
+        normalize_control_value(definition, "custom-value")
+    with pytest.raises(ValidationError, match="suggestion values must be unique"):
+        QueryParameterDefinition(
+            id="duplicate",
+            type="string",
+            suggestions=[
+                Choice(label="A", value="same"),
+                Choice(label="B", value="same"),
+            ],
+        )
+    with pytest.raises(ValidationError, match="suggestions are only valid for string"):
+        QueryParameterDefinition(
+            id="count",
+            type="integer",
+            suggestions=[Choice(label="One", value="1")],
+        )
+
+
+def test_date_bounds_and_hierarchical_selection_shapes_are_strict():
+    day = QueryParameterDefinition(
+        id="day",
+        type="date",
+        min_date="2026-01-01",
+        max_date="2026-12-31",
+    )
+    assert normalize_control_value(day, "2026-08-24") == "2026-08-24"
+    with pytest.raises(Exception, match="cannot be before"):
+        normalize_control_value(day, "2025-12-31")
+
+    single_path = SelectionControlDefinition(
+        id="district",
+        kind="selection",
+        type="single_select",
+        path_fields=["province", "city", "district"],
+        options={"mode": "infer"},
+    )
+    assert normalize_control_value(single_path, ["Fujian", "Xiamen", "Siming"]) == [
+        "Fujian",
+        "Xiamen",
+        "Siming",
+    ]
+    with pytest.raises(Exception, match="3-level path"):
+        normalize_control_value(single_path, ["Fujian", "Xiamen"])
+
+    multiple_paths = SelectionControlDefinition(
+        id="districts",
+        kind="selection",
+        type="multi_select",
+        path_fields=["province", "city", "district"],
+        options={"mode": "infer"},
+        max_selected=2,
+    )
+    values = [
+        ["Fujian", "Xiamen", "Siming"],
+        ["Fujian", "Quanzhou", "Fengze"],
+    ]
+    assert normalize_control_value(multiple_paths, values) == values
+    with pytest.raises(Exception, match="at most 2"):
+        normalize_control_value(
+            multiple_paths,
+            [*values, ["Guangdong", "Shenzhen", "Nanshan"]],
+        )
 
 
 def test_portable_numbers_and_dates_reject_browser_python_ambiguities():
@@ -132,7 +334,9 @@ def test_portable_numbers_and_dates_reject_browser_python_ambiguities():
             id="unsafe-choice",
             kind="selection",
             type="single_select",
-            choices=[Choice(label="unsafe", value=9_007_199_254_740_992)],
+            options=static_options(
+                [Choice(label="unsafe", value=9_007_199_254_740_992)]
+            ),
         )
     with pytest.raises(Exception, match="YYYY-MM-DD"):
         normalize_control_value(day, "20260824")
@@ -142,7 +346,7 @@ def test_portable_numbers_and_dates_reject_browser_python_ambiguities():
 def test_query_compute_and_selection_resolvers_share_strict_contracts():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v3",
+            "schema": "dataviz/dashboard/v4",
             "id": "contract",
             "query_parameters": [{"id": "batch", "type": "integer", "default": 7}],
             "controls": [
@@ -153,10 +357,13 @@ def test_query_compute_and_selection_resolvers_share_strict_contracts():
                     "kind": "selection",
                     "type": "multi_select",
                     "field": "region",
-                    "choices": [
-                        {"label": "North", "value": "north"},
-                        {"label": "South", "value": "south"},
-                    ],
+                    "options": {
+                        "mode": "static",
+                        "choices": [
+                            {"label": "North", "value": "north"},
+                            {"label": "South", "value": "south"},
+                        ],
+                    },
                 }
             ],
             "views": [
@@ -203,10 +410,12 @@ def test_typed_choice_values_round_trip_to_the_declared_json_value():
         id="mode",
         kind="compute",
         type="single_select",
-        choices=[
-            Choice(label="One", value=1),
-            Choice(label="Enabled", value=True),
-        ],
+        options=static_options(
+            [
+                Choice(label="One", value=1),
+                Choice(label="Enabled", value=True),
+            ]
+        ),
     )
 
     assert normalize_control_value(definition, "1") == 1

@@ -1,0 +1,6 @@
+schema: dataviz/component-test/v1
+tests:
+  - id: control.input-number.contract
+    component: control.input-number
+    kind: browser
+    assertions: [numeric-native-value, min-max-step, keyboard-entry, optional-step-controls, bubbling-input-change]

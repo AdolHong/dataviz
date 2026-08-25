@@ -1,0 +1,6 @@
+schema: dataviz/component-test/v1
+tests:
+  - id: control.auto-complete.contract
+    component: control.auto-complete
+    kind: accessibility
+    assertions: [free-text-preserved, suggestions-filter, combobox-role, arrow-navigation, enter-commits, escape-closes]

@@ -1,0 +1,7 @@
+schema: dataviz/component-story/v1
+stories:
+  - id: runtime.control.state-matrix
+    component: runtime.control
+    title: Data Entry state matrix
+    summary: Ready, Loading, Stale, Empty, Error, Cancelled and Unavailable use one canonical native-control contract.
+    gallery: {dashboard: component-gallery, target: "#story-control-state-matrix", anchor: control-state-matrix}

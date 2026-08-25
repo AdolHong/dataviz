@@ -1,0 +1,23 @@
+schema: dataviz/component-package/v1
+package: control.switch
+version: 1.0.0
+category: data-entry
+purpose: Toggle a boolean setting with immediate visual and runtime feedback.
+implementation: {mode: package, sources: []}
+dependencies: [runtime.control]
+components:
+  - id: control.switch
+    purpose: Present a boolean as an immediate toggle while retaining the same canonical value contract.
+    status: stable
+    alignment:
+      design_system: Ant Design
+      component: Switch
+      official: https://ant.design/components/switch/
+      adopted: [role-switch, checked-state, checked-and-unchecked-content, keyboard-toggle]
+      omitted: [loading-spinner, size-variants]
+    logic: {type: boolean, value_shape: boolean}
+    presentation: {component: switch, options: [checked_label, unchecked_label, css_class]}
+    behavior: {event_semantics: immediate-input-and-change}
+    semantic_dom: [.dv-switch, .dv-switch__thumb, .dv-switch__label]
+    tokens: [--dv-accent, --dv-ink, --dv-line, --dv-panel]
+runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

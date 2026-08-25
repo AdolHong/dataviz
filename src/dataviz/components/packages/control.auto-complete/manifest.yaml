@@ -1,0 +1,22 @@
+schema: dataviz/component-package/v1
+package: control.auto-complete
+version: 1.0.0
+category: data-entry
+purpose: Suggest likely text while preserving free-form string entry.
+implementation: {mode: package, sources: []}
+dependencies: [runtime.control]
+components:
+  - id: control.auto-complete
+    purpose: Distinguish searchable suggestions from a closed Select choice contract.
+    status: stable
+    alignment:
+      design_system: Ant Design
+      component: AutoComplete
+      official: https://ant.design/components/auto-complete/
+      adopted: [free-text-value, suggestion-filtering, keyboard-navigation, combobox-aria]
+      omitted: [remote-fetch-hook, custom-option-React-render]
+    logic: {type: string, fields: [suggestions, placeholder, max_length]}
+    presentation: {component: auto-complete, options: [search_placeholder, empty_text, css_class]}
+    semantic_dom: [.dv-auto-complete, .dv-control-panel, .dv-auto-complete__option]
+    tokens: [--dv-accent, --dv-ink, --dv-line, --dv-panel, --dv-overlay-surface]
+runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

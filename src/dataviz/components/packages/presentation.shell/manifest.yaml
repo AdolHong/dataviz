@@ -1,6 +1,6 @@
 schema: dataviz/component-package/v1
 package: presentation.shell
-version: 1.2.0
+version: 1.3.0
 category: presentation
 purpose: Stable layout, theme and semantic component-state contracts around declarative content.
 implementation:
@@ -13,9 +13,9 @@ components:
   - {id: layout.report, purpose: Long-form analytical narrative, status: stable}
   - {id: layout.exploration, purpose: Selection and table-led exploration, status: stable}
   - {id: layout.freeform, purpose: Minimal preset for custom Canvas HTML and CSS, status: stable}
-  - {id: theme.plain, purpose: Neutral analytical default, status: stable}
+  - {id: theme.plain, purpose: Minimal neutral analysis style, status: stable}
   - {id: theme.editorial, purpose: Warm report and narrative style, status: stable}
   - {id: theme.terminal, purpose: Dark technical monitoring style, status: stable}
-  - {id: theme.business, purpose: Crisp enterprise analysis style, status: stable}
+  - {id: theme.business, purpose: Modern indigo analytical default, status: stable}
   - {id: control-panel.adaptive, purpose: Viewport-bound adaptive Query and scoped Controls tray, status: stable}
 runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

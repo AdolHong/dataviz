@@ -3,7 +3,7 @@ stories:
   - id: runtime.overlay.header
     component: runtime.overlay
     title: Exclusive header popovers
-    summary: Opening another control or clicking outside closes the current popover.
+    summary: Opening another control or clicking outside closes the current popover; every panel remains inside the visual viewport.
     gallery:
       dashboard: component-gallery
       target: "[data-runtime-popover]"

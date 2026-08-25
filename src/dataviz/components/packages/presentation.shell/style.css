@@ -26,13 +26,75 @@
 .dv-density--compact .dv-view-header { min-height: 38px; padding: 8px 11px; }
 .dv-density--compact .dv-view-body { padding: 10px; }
 .dv-density--spacious { --dv-gap: 26px; }
-.dv-theme--business {
-  --dv-paper: #eef2f5;
+.dv-theme--plain {
+  --dv-paper: #f7f8fa;
   --dv-panel: #fff;
-  --dv-ink: #102033;
-  --dv-line: #cad3dc;
-  --dv-accent: #2457d6;
-  --dv-green: #16735b;
+  --dv-ink: #242936;
+  --dv-line: #dde2ea;
+  --dv-accent: #4b5568;
+  --dv-accent-strong: #252b39;
+  --dv-green: #338566;
+  --dv-muted: #687080;
+  --dv-soft: #edf0f4;
+  --dv-soft-blue: #f1f3f7;
+  --dv-shadow: 0 2px 8px rgba(20, 27, 44, .05);
+  --dv-shadow-float: 0 18px 48px rgba(20, 27, 44, .13);
+  --dv-header-bg: linear-gradient(135deg, #252b39, #41495c);
+  --dv-chart-1: #4b5568;
+  --dv-chart-2: #338566;
+  --dv-chart-3: #b67a2f;
+  --dv-chart-4: #b65d52;
+}
+.dv-theme--business {
+  --dv-paper: #f5f7fa;
+  --dv-panel: #fff;
+  --dv-ink: #202536;
+  --dv-line: #d9e0ec;
+  --dv-accent: #3949ab;
+  --dv-accent-strong: #1a237e;
+  --dv-green: #38a169;
+  --dv-amber: #d69e2e;
+  --dv-red: #e53e3e;
+  --dv-blue: #3b82f6;
+  --dv-muted: #667085;
+  --dv-soft: #e8eaf6;
+  --dv-soft-blue: #eef2ff;
+  --dv-overlay-surface: #fff;
+  --dv-chart-grid: #e8edf5;
+  --dv-shadow: 0 2px 8px rgba(20, 31, 64, .06);
+  --dv-shadow-float: 0 18px 48px rgba(26, 35, 126, .14);
+  --dv-header-bg: linear-gradient(135deg, #1a237e 0%, #283593 100%);
+  --dv-chart-1: #3949ab;
+  --dv-chart-2: #26a69a;
+  --dv-chart-3: #f2a93b;
+  --dv-chart-4: #e76f51;
+  --dv-chart-5: #7e57c2;
+  --dv-chart-6: #2f80ed;
+  --dv-chart-7: #4caf50;
+  --dv-chart-8: #e65b7a;
+  font-family: var(--dv-font-sans);
+}
+.dv-theme--business .dv-report-header {
+  padding: clamp(24px, 3.5vw, 42px);
+  color: #fff;
+  background: var(--dv-header-bg);
+  border: 0;
+  border-radius: var(--dv-radius);
+  box-shadow: 0 10px 30px rgba(26, 35, 126, .16);
+}
+.dv-theme--business .dv-report-header h1 {
+  max-width: 22ch;
+  font-size: clamp(34px, 4.5vw, 58px);
+}
+.dv-theme--business .dv-report-header .dv-eyebrow { color: #9fa8da; }
+.dv-theme--business .dv-report-header .dv-subtitle { color: #fff; }
+.dv-theme--business .dv-report-header .dv-deck { color: #d9dcf3; }
+.dv-theme--business .dv-section__header h2 { color: var(--dv-accent-strong); }
+.dv-theme--business .dv-section__header p { color: var(--dv-muted); }
+.dv-theme--business .dv-view { border-radius: var(--dv-radius); overflow: clip; }
+.dv-theme--business .dv-report-header--compact {
+  align-items: center;
+  padding: 22px 26px;
 }
 .dv-theme--terminal {
   --dv-paper: #0b100e;
@@ -40,7 +102,20 @@
   --dv-ink: #ddf5e8;
   --dv-line: #2e4439;
   --dv-accent: #ff7657;
+  --dv-accent-strong: #ff9d88;
   --dv-green: #6df0a8;
+  --dv-muted: #91a99d;
+  --dv-soft: #18261f;
+  --dv-soft-blue: #17231e;
+  --dv-overlay-surface: #111a16;
+  --dv-chart-grid: #25372e;
+  --dv-shadow: 0 2px 8px rgba(0, 0, 0, .22);
+  --dv-shadow-float: 0 18px 48px rgba(0, 0, 0, .48);
+  --dv-header-bg: linear-gradient(135deg, #07100c, #16251e);
+  --dv-chart-1: #6df0a8;
+  --dv-chart-2: #64a9ff;
+  --dv-chart-3: #ff7657;
+  --dv-chart-4: #eabf56;
   color-scheme: dark;
 }
 .dv-theme--terminal .dv-deck,
@@ -51,13 +126,46 @@
   --dv-ink: #221d18;
   --dv-line: #d8cbbb;
   --dv-accent: #b9462f;
+  --dv-accent-strong: #783124;
   --dv-green: #3e755b;
+  --dv-muted: #6f665d;
+  --dv-soft: #eee4d4;
+  --dv-soft-blue: #eee7dc;
+  --dv-overlay-surface: #fffaf0;
+  --dv-chart-grid: #e8ded0;
+  --dv-shadow: 0 8px 28px rgba(57, 43, 29, .08);
+  --dv-shadow-float: 0 18px 48px rgba(57, 43, 29, .18);
+  --dv-header-bg: #221d18;
+  --dv-chart-1: #b9462f;
+  --dv-chart-2: #3e755b;
+  --dv-chart-3: #c79543;
+  --dv-chart-4: #6f779f;
+  font-family: "Newsreader", Georgia, serif;
 }
+.dv-theme--editorial {
+  background-image:
+    linear-gradient(rgba(34, 29, 24, .035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 29, 24, .035) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+.dv-theme--editorial .dv-report-header {
+  color: var(--dv-ink);
+  background: transparent;
+  border-bottom-color: var(--dv-ink);
+  border-radius: 0;
+  box-shadow: none;
+}
+.dv-theme--editorial .dv-report-header h1 {
+  max-width: 15ch;
+  font-size: clamp(42px, 7vw, 94px);
+  line-height: .92;
+}
+.dv-theme--editorial .dv-deck { color: var(--dv-muted); }
 [data-component-status="loading"] { cursor: progress; }
-[data-component-status="stale"] { --dv-component-state: #a86718; }
-[data-component-status="error"] { --dv-component-state: #b83a2f; }
-[data-component-status="cancelled"] { --dv-component-state: #a86718; }
-[data-component-status="unavailable"] { --dv-component-state: #66716b; }
+[data-component-status="stale"] { --dv-component-state: var(--dv-amber, #d69e2e); }
+[data-component-status="error"] { --dv-component-state: var(--dv-red, #e53e3e); }
+[data-component-status="cancelled"] { --dv-component-state: var(--dv-amber, #d69e2e); }
+[data-component-status="unavailable"] { --dv-component-state: var(--dv-muted, #667085); }
 [data-component-state-label] { color: var(--dv-component-state, var(--dv-green, #1c7a55)); }
 
 /* Shared Query and scoped Control trays. */
@@ -93,14 +201,15 @@
 .dv-context-controls__group {
   min-width: 0;
   padding: 12px;
-  background: color-mix(in srgb, var(--dv-panel, #fffdf6) 76%, var(--dv-paper, #f3f0e7));
-  border: 1px solid var(--dv-line, #d5d0c2);
-  border-left: 3px solid var(--dv-green, #1c7a55);
+  background: color-mix(in srgb, var(--dv-panel, #fff) 78%, var(--dv-paper, #f5f7fa));
+  border: 1px solid var(--dv-line, #d9e0ec);
+  border-left: 3px solid var(--dv-green, #38a169);
+  border-radius: 0 var(--dv-radius-sm, 8px) var(--dv-radius-sm, 8px) 0;
 }
 .dashboard-control-group[data-control-kind="compute"],
 .dv-runtime-control-group[data-control-kind="compute"],
 .dv-context-controls__group[data-control-kind="compute"] {
-  border-left-color: var(--dv-accent, #e2592a);
+  border-left-color: var(--dv-accent, #3949ab);
 }
 .dashboard-control-group > header,
 .dv-runtime-control-group > header,
@@ -115,14 +224,15 @@
 .dv-context-controls__group > header > span {
   flex: 0 0 auto;
   padding: 3px 5px;
-  color: var(--dv-green, #1c7a55);
-  background: color-mix(in srgb, var(--dv-green, #1c7a55) 10%, transparent);
-  font: 600 8px "DM Mono", monospace;
+  color: var(--dv-green, #38a169);
+  background: color-mix(in srgb, var(--dv-green, #38a169) 10%, transparent);
+  border-radius: 4px;
+  font: 650 8px var(--dv-font-mono, monospace);
   letter-spacing: .1em;
 }
 [data-control-kind="compute"] > header > span {
-  color: var(--dv-accent, #e2592a);
-  background: color-mix(in srgb, var(--dv-accent, #e2592a) 10%, transparent);
+  color: var(--dv-accent, #3949ab);
+  background: color-mix(in srgb, var(--dv-accent, #3949ab) 10%, transparent);
 }
 .dashboard-control-group > header strong,
 .dashboard-control-group > header small,
@@ -138,8 +248,8 @@
 .dashboard-control-group > header small,
 .dv-runtime-control-group > header small {
   margin-top: 2px;
-  color: #758079;
-  font: 8px "DM Mono", monospace;
+  color: var(--dv-muted, #667085);
+  font: 8px var(--dv-font-mono, monospace);
 }
 .dashboard-control-group > .parameter-form,
 .dashboard-control-group > .selection-form,
@@ -208,7 +318,7 @@
 }
 [data-dv-control-panel][data-control-density="compact"] > .header-control__popover .field input,
 [data-dv-control-panel][data-control-density="compact"] > .header-control__popover .field select,
-[data-dv-control-panel][data-control-density="compact"] > .header-control__popover .dv-selector > [data-selector-mount] > button {
+[data-dv-control-panel][data-control-density="compact"] > .header-control__popover .dv-control > [data-control-mount] > button {
   height: 32px;
   min-height: 32px;
 }
@@ -229,4 +339,12 @@
   .dv-runtime-control-group > .dv-compute-fields {
     grid-template-columns: minmax(0, 1fr) !important;
   }
+}
+
+/* Query Parameters belong to the Server Header's document flow, not Overlay Runtime. */
+[data-dv-control-panel][data-control-role="query"] > [data-control-panel-body] {
+  max-height: min(52dvh, 520px);
+}
+[data-dv-control-panel][data-control-role="query"] > [data-control-panel-body][hidden] {
+  display: none !important;
 }

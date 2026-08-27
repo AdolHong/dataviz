@@ -35,7 +35,7 @@ from dataviz.workspace.models import (
 )
 
 
-SCHEMA_CATALOG_VERSION = "dataviz/schema-catalog/v5"
+SCHEMA_CATALOG_VERSION = "dataviz/schema-catalog/v6"
 SchemaProvider = type[BaseModel] | TypeAdapter
 
 
@@ -69,12 +69,12 @@ SCHEMA_MODELS: OrderedDict[str, SchemaProvider] = OrderedDict(
 
 CURRENT_SCHEMAS = {
     "workspace": "dataviz/workspace/v1",
-    "dashboard": "dataviz/dashboard/v5",
-    "presentation": "dataviz/presentation/v1",
+    "dashboard": "dataviz/dashboard/v7",
+    "presentation": "dataviz/presentation/v2",
     "source": "dataviz/source/v2",
     "dataset_transform": "dataviz/dataset-transform/v2",
     "interactive_transform": "dataviz/interactive-transform/v2",
-    "runtime": "dataviz/runtime/v3",
+    "runtime": "dataviz/runtime/v5",
 }
 
 

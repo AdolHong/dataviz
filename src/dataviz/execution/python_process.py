@@ -38,6 +38,7 @@ def _run_python_node(
     query_inputs: dict[str, Any],
     compute_params: dict[str, Any],
     selections: dict[str, Any],
+    selection_state: dict[str, dict[str, Any]],
     selection_filters: tuple[dict[str, Any], ...],
     inputs: dict[str, dict[str, Any]],
     adapter: dict[str, Any] | None,
@@ -60,6 +61,7 @@ def _run_python_node(
             query_inputs=query_inputs,
             compute_params=compute_params,
             selections=selections,
+            selection_state=selection_state,
             selection_filters=selection_filters,
             inputs={
                 name: ArtifactDescriptor.model_validate(descriptor)
@@ -160,6 +162,7 @@ def execute_python_node(
             "query_inputs": context.query_inputs,
             "compute_params": context.compute_params,
             "selections": context.selections,
+            "selection_state": context.selection_state,
             "selection_filters": context.selection_filters,
             "inputs": {
                 name: descriptor.model_dump(mode="json", by_alias=True)

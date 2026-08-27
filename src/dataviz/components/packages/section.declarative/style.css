@@ -16,26 +16,16 @@
   letter-spacing: .12em;
   text-transform: uppercase;
 }
-.dv-section__body { display: flex; flex-direction: column; gap: var(--dv-gap, 18px); }
-.dv-section-view { grid-column: 1 / -1; min-width: 0; min-height: 320px; }
-.dv-section--grid .dv-section__body,
-.dv-section--split .dv-section__body,
-.dv-section--hero-metrics .dv-section__body,
-.dv-section--chart-and-table .dv-section__body,
-.dv-section--comparison .dv-section__body,
-.dv-section--band .dv-section__body {
+.dv-section__body {
   display: grid;
-  grid-template-columns: repeat(var(--dv-columns, 12), minmax(0, 1fr));
+  grid-template-columns: repeat(var(--dv-section-columns, 12), minmax(0, 1fr));
+  gap: var(--dv-gap, 18px);
 }
-.dv-section--grid .dv-section-view { grid-column: span var(--dv-span, 6); }
-.dv-section--split .dv-section-view:first-child,
-.dv-section--chart-and-table .dv-section-view:first-child { grid-column: span 8; }
-.dv-section--split .dv-section-view:not(:first-child),
-.dv-section--chart-and-table .dv-section-view:not(:first-child) { grid-column: span 4; }
-.dv-section--hero-metrics .dv-section-view:first-child { grid-column: 1 / -1; min-height: 380px; }
-.dv-section--hero-metrics .dv-section-view:not(:first-child),
-.dv-section--band .dv-section-view { grid-column: span 3; min-height: 180px; }
-.dv-section--comparison .dv-section-view { grid-column: span 6; }
+.dv-section-view {
+  grid-column: span var(--dv-span, var(--dv-section-columns, 12));
+  min-width: 0;
+  min-height: 320px;
+}
 .dv-section--band .dv-view { min-height: 180px; }
 .dv-section--small-multiples .dv-section__body,
 .dv-section--selection-gallery .dv-section__body { display: block; }
@@ -115,7 +105,8 @@
 @keyframes dv-repeat-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes dv-repeat-pulse { 50% { opacity: .35; transform: scaleX(.55); } }
 @media (max-width: 800px) {
-  .dv-section__body { display: flex; flex-direction: column; }
+  .dv-section__body { grid-template-columns: 1fr; }
+  .dv-section-view { grid-column: 1 / -1; }
   .dv-section-view { min-height: 280px; }
   .dv-section__header { align-items: flex-start; }
   .dv-repeat { grid-template-columns: 1fr; }

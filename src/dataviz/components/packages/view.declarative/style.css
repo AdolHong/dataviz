@@ -128,6 +128,11 @@
 .dv-table tbody tr:hover td {
   background: color-mix(in srgb, var(--dv-accent, #3949ab) 8%, var(--dv-panel, #fff));
 }
+.dv-table tbody tr[aria-selected="true"] td {
+  background: color-mix(in srgb, var(--dv-accent, #3949ab) 15%, var(--dv-panel, #fff));
+  box-shadow: inset 3px 0 0 var(--dv-accent, #3949ab);
+}
+.dv-table tbody tr[tabindex] { cursor: pointer; }
 .dv-table--compact th, .dv-table--compact td { padding: 6px 10px; font-size: 10px; }
 .dv-table-empty {
   display: grid;

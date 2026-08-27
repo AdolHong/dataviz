@@ -378,6 +378,11 @@ def test_server_run_and_canvas():
     assert {item["kind"] for item in summary["dashboards"][0]["controls"]} == {
         "selection"
     }
+    assert all(
+        "runtime_checked_views" in item
+        and "declared_direct_views" in item
+        for item in summary["dashboards"][0]["controls"]
+    )
     started = client.post(
         "/api/dashboards/sales/runs",
         json={
@@ -432,8 +437,12 @@ def test_server_run_and_canvas():
         json={
             "session_id": SESSION_A,
             "run_id": run_id,
-            "selections": {"dashboard:sales/region": ["East"]},
-            "selection_intents": {"dashboard:sales/region": "explicit"},
+            "selection_state": {
+                "dashboard:sales/region": {
+                    "intent": "explicit",
+                    "values": ["East"],
+                }
+            },
         },
     )
     assert report.status_code == 200
@@ -441,7 +450,7 @@ def test_server_run_and_canvas():
     assert '<option value="East" selected>' in report.text
     assert '<option value="West">' in report.text
     assert '"region": "West"' in report.text
-    assert '"selection_intents": {"dashboard:sales/region": "explicit"}' in report.text
+    assert '"dashboard:sales/region": {"intent": "explicit", "values": ["East"]}' in report.text
 
 
 def test_server_shell_exposes_source_evidence_inspector():
@@ -543,8 +552,8 @@ def test_server_app_selections_are_browser_only():
     assert "frame_id=" in script
     assert "closeHeaderPopovers();" in script
     assert "filter(([key]) => validKeys.has(key))" in script
-    assert "state.canvasSelections = {...(event.data.selections || {})};" in script
-    assert "state.canvasSelections = {...state.canvasSelections" not in script
+    assert "state.selectionState = {...(event.data.selection_state || {})};" in script
+    assert "state.canvasSelections" not in script
     assert "/static/app.js?v=" in template
     select_block = script[script.index("function selectDashboard"):script.index("function queryParameters")]
     assert "eventSource.close()" not in select_block
@@ -570,7 +579,7 @@ def test_query_parameters_are_an_inline_header_tray_owned_by_the_run_control():
     assert "setQueryParametersOpen(true, {persist: true})" in script
     assert "Escape" not in script[
         script.index("function setQueryParametersOpen"):
-        script.index("function dashboardSelectionValues")
+        script.index("function dashboardSelectionState")
     ]
 
 
@@ -791,7 +800,7 @@ def test_fast_dag_branch_publishes_output_before_slow_branch_finishes(
         encoding="utf-8",
     )
     (dashboard_root / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v5
+        """schema: dataviz/dashboard/v7
 kind: dashboard
 id: progressive
 title: Progressive branches
@@ -917,7 +926,7 @@ cache: {mode: none}
             "transform_id": "fast-summary",
             "generation": 1,
             "compute_parameters": {},
-            "selections": {},
+            "selection_state": {},
         },
     )
     assert interaction.status_code == 200, interaction.text
@@ -1199,7 +1208,7 @@ def test_query_cancel_is_tab_scoped_and_same_dashboard_run_supersedes(tmp_path: 
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v5
+        """schema: dataviz/dashboard/v7
 kind: dashboard
 id: slow
 title: Slow

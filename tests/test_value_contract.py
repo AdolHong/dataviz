@@ -11,9 +11,9 @@ from dataviz.execution import resolve_query_parameters
 from dataviz.execution.parameters import project_query_inputs
 from dataviz.value_contract import normalize_control_value
 from dataviz.workspace.controls import (
-    initial_selection_intents,
+    initial_selection_states,
     resolve_compute_values,
-    resolve_selection_values,
+    resolve_selection_states,
 )
 from dataviz.workspace.models import (
     CacheDefinition,
@@ -36,7 +36,7 @@ def static_options(choices):
 def test_relative_date_defaults_resolve_once_in_workspace_timezone_and_project_parts():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v5",
+            "schema": "dataviz/dashboard/v7",
             "id": "relative-dates",
             "query_parameters": [
                 {
@@ -146,14 +146,14 @@ def test_control_defaults_are_validated_when_the_dsl_is_loaded():
             clearable=True,
             options=static_options([Choice(label="North", value="north")]),
         )
-    with pytest.raises(ValidationError, match="single_select does not expose a clear action"):
-        SelectionControlDefinition(
-            id="region",
-            kind="selection",
-            type="single_select",
-            clearable=True,
-            options=static_options([Choice(label="North", value="north")]),
-        )
+    optional_single = SelectionControlDefinition(
+        id="region",
+        kind="selection",
+        type="single_select",
+        clearable=True,
+        options=static_options([Choice(label="North", value="north")]),
+    )
+    assert optional_single.clearable is True
 
 
 def test_select_option_domains_separate_static_values_from_inferred_intent():
@@ -188,7 +188,7 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
 
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v5",
+            "schema": "dataviz/dashboard/v7",
             "id": "option-intents",
             "controls": [
                 {
@@ -220,15 +220,24 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
         }
     )
 
-    assert initial_selection_intents(definition) == {
-        "dashboard:option-intents/city": "all_available",
-        "dashboard:option-intents/store": "explicit",
-        "dashboard:option-intents/region": "explicit",
+    assert initial_selection_states(definition) == {
+        "dashboard:option-intents/city": {
+            "intent": "all_available",
+            "values": [],
+        },
+        "dashboard:option-intents/store": {
+            "intent": "explicit",
+            "values": [],
+        },
+        "dashboard:option-intents/region": {
+            "intent": "explicit",
+            "values": ["north"],
+        },
     }
 
     required_inferred = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v5",
+            "schema": "dataviz/dashboard/v7",
             "id": "required-inferred",
             "controls": [
                 {
@@ -243,14 +252,75 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
         }
     )
     with pytest.raises(ExecutionFailure, match="a value is required"):
-        resolve_selection_values(required_inferred, {})
-    assert resolve_selection_values(
+        resolve_selection_states(required_inferred, {})
+    assert resolve_selection_states(
         required_inferred,
         {},
         phase="canvas-hydration",
-    ) == {"dashboard:required-inferred/city": None}
+    ) == {
+        "dashboard:required-inferred/city": {
+            "intent": "explicit",
+            "values": [],
+        }
+    }
 
 
+def test_selection_dependency_authoring_contract_is_explicit_and_strict():
+    definition = SelectionControlDefinition.model_validate(
+        {
+            "id": "dates",
+            "kind": "selection",
+            "type": "multi_select",
+            "field": "job_date",
+            "depends_on": ["dashboard.province", "section.city", "view.dow"],
+            "options": {"mode": "infer"},
+        }
+    )
+    assert definition.depends_on == [
+        "dashboard.province",
+        "section.city",
+        "view.dow",
+    ]
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        SelectionControlDefinition.model_validate(
+            {
+                "id": "dates",
+                "kind": "selection",
+                "type": "multi_select",
+                "cascade": True,
+                "options": {"mode": "infer"},
+            }
+        )
+    with pytest.raises(ValidationError, match="String should match pattern"):
+        SelectionControlDefinition.model_validate(
+            {
+                "id": "dates",
+                "kind": "selection",
+                "type": "multi_select",
+                "depends_on": ["dow"],
+                "options": {"mode": "infer"},
+            }
+        )
+    with pytest.raises(ValidationError, match="duplicate references"):
+        SelectionControlDefinition.model_validate(
+            {
+                "id": "dates",
+                "kind": "selection",
+                "type": "multi_select",
+                "depends_on": ["view.dow", "view.dow"],
+                "options": {"mode": "infer"},
+            }
+        )
+    with pytest.raises(ValidationError, match="only valid for single_select or multi_select"):
+        SelectionControlDefinition.model_validate(
+            {
+                "id": "threshold",
+                "kind": "selection",
+                "type": "number",
+                "depends_on": ["view.dow"],
+            }
+        )
 def test_view_templates_reject_ignored_fields_and_require_real_renderer_paths():
     table = DeclarativeViewDefinition(
         id="detail",
@@ -438,7 +508,7 @@ def test_portable_numbers_and_dates_reject_browser_python_ambiguities():
 def test_query_compute_and_selection_resolvers_share_strict_contracts():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v5",
+            "schema": "dataviz/dashboard/v7",
             "id": "contract",
             "query_parameters": [{"id": "batch", "type": "integer", "default": 7}],
             "controls": [
@@ -486,17 +556,30 @@ def test_query_compute_and_selection_resolvers_share_strict_contracts():
     assert compute_error.value.details["code"] == "compute_control_invalid_type"
 
     with pytest.raises(ExecutionFailure) as alias_error:
-        resolve_selection_values(definition, {"region": ["north"]})
+        resolve_selection_states(
+            definition,
+            {"region": {"intent": "explicit", "values": ["north"]}},
+        )
     assert alias_error.value.details == {
         "code": "selection_control_unknown",
         "keys": ["region"],
     }
 
-    resolved = resolve_selection_values(
+    resolved = resolve_selection_states(
         definition,
-        {"dashboard:contract/region": ["north"]},
+        {
+            "dashboard:contract/region": {
+                "intent": "explicit",
+                "values": ["north"],
+            }
+        },
     )
-    assert resolved == {"dashboard:contract/region": ["north"]}
+    assert resolved == {
+        "dashboard:contract/region": {
+            "intent": "explicit",
+            "values": ["north"],
+        }
+    }
 
 
 def test_typed_choice_values_round_trip_to_the_declared_json_value():

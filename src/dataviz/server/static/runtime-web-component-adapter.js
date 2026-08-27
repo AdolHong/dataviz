@@ -1,7 +1,7 @@
 (function installDatavizWebComponentAdapter(global) {
   'use strict';
 
-  const PROTOCOL = 'dataviz/runtime/v3';
+  const PROTOCOL = 'dataviz/runtime/v5';
   const canonical = reference => {
     const raw = String(reference || '').trim();
     if (!raw) throw new Error('Output reference cannot be empty');
@@ -19,9 +19,16 @@
     : [item.binding?.field || item.id];
   const canApply = (row, item) => row && typeof row === 'object'
     && fields(item).every(field => Object.prototype.hasOwnProperty.call(row, field));
-  const matches = (row, item, value) => {
-    if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) return true;
+  const projectedValue = (item, state) => {
+    const values = Array.isArray(state?.values) ? state.values : [];
+    if (item.definition?.type === 'multi_select') return values;
+    if (item.definition?.type === 'date_range') return values.length ? values[0] : [];
+    return values.length ? values[0] : null;
+  };
+  const matches = (row, item, state) => {
     if (!canApply(row, item)) return true;
+    const value = projectedValue(item, state);
+    if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) return false;
     const pathFields = item.definition?.path_fields || [];
     if (pathFields.length) {
       const paths = Array.isArray(value?.[0]) ? value : [value];
@@ -71,7 +78,7 @@
       const source = rows(this.output(reference));
       const contract = this.manifest.dependency_contract?.views?.[id]?.selection_contract || [];
       return source.filter(row => contract.every(item => matches(
-        row, item, this.manifest.selections?.[item.key],
+        row, item, this.manifest.selection_state?.[item.key],
       )));
     }
   }

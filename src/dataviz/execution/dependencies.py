@@ -16,16 +16,21 @@ from dataviz.execution.parameters import (
 )
 from dataviz.workspace.controls import (
     EffectiveControl,
+    canonical_control_key,
     compile_control_contract,
     scoped_control_registry,
 )
-from dataviz.workspace.models import InferredOptionDomainDefinition
+from dataviz.selection_state import initial_selection_state
+from dataviz.workspace.models import (
+    InferredOptionDomainDefinition,
+    ViewControlBindingDefinition,
+)
 
 if TYPE_CHECKING:
     from dataviz.workspace.loader import LoadedDashboard
 
 
-DEPENDENCY_CONTRACT_SCHEMA = "dataviz/dependency-contract/v2"
+DEPENDENCY_CONTRACT_SCHEMA = "dataviz/dependency-contract/v4"
 
 
 def _topological_order(
@@ -61,6 +66,168 @@ def _topological_order(
         for dependencies in pending.values():
             dependencies.difference_update(ready)
     return tuple(order)
+
+
+def _dependency_cycle(graph: dict[str, set[str]]) -> tuple[str, ...] | None:
+    """Return one deterministic dependency cycle, including its repeated start."""
+
+    visited: set[str] = set()
+    active: list[str] = []
+    active_index: dict[str, int] = {}
+
+    def visit(node: str) -> tuple[str, ...] | None:
+        if node in active_index:
+            start = active_index[node]
+            return tuple([*active[start:], node])
+        if node in visited:
+            return None
+        active_index[node] = len(active)
+        active.append(node)
+        for dependency in sorted(graph[node]):
+            cycle = visit(dependency)
+            if cycle is not None:
+                return cycle
+        active.pop()
+        active_index.pop(node)
+        visited.add(node)
+        return None
+
+    for node in sorted(graph):
+        cycle = visit(node)
+        if cycle is not None:
+            return cycle
+    return None
+
+
+def _compile_control_dependency_graph(
+    dashboard_id: str,
+    registry: dict[str, EffectiveControl],
+    section_for_view: dict[str, Any],
+) -> tuple[
+    dict[str, set[str]],
+    dict[str, set[str]],
+    dict[str, set[str]],
+    tuple[str, ...],
+]:
+    """Resolve scoped references and compile one explicit Selection DAG."""
+
+    dependencies: dict[str, set[str]] = {key: set() for key in registry}
+
+    for target in registry.values():
+        references = getattr(target.definition, "depends_on", ())
+        for reference in references:
+            scope, control_id = reference.split(".", 1)
+            if scope == "dashboard":
+                owner_id = dashboard_id
+            elif scope == "section":
+                if target.origin == "dashboard":
+                    owner_id = None
+                elif target.origin == "section":
+                    owner_id = target.owner_id
+                else:
+                    section = section_for_view.get(target.owner_id)
+                    owner_id = section.id if section is not None else None
+            else:  # view
+                owner_id = target.owner_id if target.origin == "view" else None
+
+            if owner_id is None:
+                raise ValidationFailure(
+                    f"Control {target.key} cannot depend on {reference} from its scope",
+                    details={
+                        "code": "control_dependency_scope_invalid",
+                        "control": target.key,
+                        "dependency": reference,
+                        "origin": target.origin,
+                    },
+                )
+
+            dependency_key = canonical_control_key(scope, owner_id, control_id)
+            dependency = registry.get(dependency_key)
+            if dependency is None:
+                raise ValidationFailure(
+                    f"Control {target.key} references unknown dependency: {reference}",
+                    details={
+                        "code": "control_dependency_unknown",
+                        "control": target.key,
+                        "dependency": reference,
+                        "resolved_key": dependency_key,
+                    },
+                )
+            if dependency.kind != "selection":
+                raise ValidationFailure(
+                    f"Control {target.key} dependency must be a Selection: {reference}",
+                    details={
+                        "code": "control_dependency_kind_invalid",
+                        "control": target.key,
+                        "dependency": dependency_key,
+                        "kind": dependency.kind,
+                    },
+                )
+            dependencies[target.key].add(dependency_key)
+
+    cycle = _dependency_cycle(dependencies)
+    if cycle is not None:
+        raise ValidationFailure(
+            "Control dependency DAG contains a cycle: " + " -> ".join(cycle),
+            details={
+                "code": "control_dependency_cycle",
+                "cycle": list(cycle),
+            },
+        )
+
+    order = _topological_order(dependencies, label="Control dependency DAG")
+    ancestors: dict[str, set[str]] = {key: set() for key in registry}
+    for key in order:
+        for dependency in dependencies[key]:
+            ancestors[key].add(dependency)
+            ancestors[key].update(ancestors[dependency])
+    descendants: dict[str, set[str]] = {key: set() for key in registry}
+    for key, upstream in ancestors.items():
+        for dependency in upstream:
+            descendants[dependency].add(key)
+    return dependencies, ancestors, descendants, order
+
+
+def _resolve_control_reference(
+    reference: str,
+    *,
+    dashboard_id: str,
+    view_id: str,
+    section_for_view: dict[str, Any],
+) -> str:
+    """Resolve an author-facing scoped key from one View's location."""
+
+    scope, control_id = reference.split(".", 1)
+    if scope == "dashboard":
+        owner_id = dashboard_id
+    elif scope == "section":
+        section = section_for_view.get(view_id)
+        owner_id = section.id if section is not None else None
+    else:
+        owner_id = view_id
+    if owner_id is None:
+        raise ValidationFailure(
+            f"View {view_id} cannot resolve Control binding {reference}",
+            details={
+                "code": "view_control_binding_scope_invalid",
+                "view": view_id,
+                "control": reference,
+            },
+        )
+    return canonical_control_key(scope, owner_id, control_id)
+
+
+def _selection_fields(item: EffectiveControl) -> tuple[str, ...]:
+    """Return the row fields required by one effective Selection binding."""
+
+    return tuple(
+        item.definition.path_fields
+        or [
+            item.binding.field
+            if item.binding is not None and item.binding.field
+            else item.id
+        ]
+    )
 
 
 def _declared_outputs(kind: str, identifier: str, definition: Any) -> tuple[str, ...]:
@@ -189,6 +356,22 @@ class SelectionViewDependency:
 
 
 @dataclass(frozen=True, slots=True)
+class ViewControlBindingDependency:
+    view_id: str
+    control: str
+    fields: tuple[str, ...]
+    renderer: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "control": self.control,
+            "fields": list(self.fields),
+            "renderer": self.renderer,
+            "actions": ["select", "select_many", "clear"],
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ControlDependency:
     key: str
     kind: str
@@ -200,6 +383,8 @@ class ControlDependency:
     runtime_checked_views: tuple[str, ...]
     non_data_views: tuple[str, ...]
     direct_view_bindings: dict[str, SelectionViewDependency]
+    writer_view: str | None
+    writer_fields: tuple[str, ...]
     transform_consumers: tuple[str, ...]
     transform_inputs: dict[str, tuple[str, ...]]
     derived_views: tuple[str, ...]
@@ -207,10 +392,12 @@ class ControlDependency:
     content_views: tuple[str, ...]
     affected_views: tuple[str, ...]
     option_domain_references: tuple[str, ...]
-    cascade_upstream: tuple[str, ...]
-    cascade_downstream: tuple[str, ...]
+    depends_on: tuple[str, ...]
+    dependency_ancestors: tuple[str, ...]
+    dependency_descendants: tuple[str, ...]
     definition: dict[str, Any]
     binding: dict[str, Any] | None
+    initial_state: dict[str, Any] | None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -227,6 +414,8 @@ class ControlDependency:
                 view_id: dependency.as_dict()
                 for view_id, dependency in self.direct_view_bindings.items()
             },
+            "writer_view": self.writer_view,
+            "writer_fields": list(self.writer_fields),
             "transform_consumers": list(self.transform_consumers),
             "transform_inputs": {
                 transform_id: list(aliases)
@@ -237,10 +426,12 @@ class ControlDependency:
             "content_views": list(self.content_views),
             "affected_views": list(self.affected_views),
             "option_domain_references": list(self.option_domain_references),
-            "cascade_upstream": list(self.cascade_upstream),
-            "cascade_downstream": list(self.cascade_downstream),
+            "depends_on": list(self.depends_on),
+            "dependency_ancestors": list(self.dependency_ancestors),
+            "dependency_descendants": list(self.dependency_descendants),
             "definition": self.definition,
             "binding": self.binding,
+            "initial_state": self.initial_state,
         }
 
 
@@ -272,6 +463,7 @@ class DashboardDependencyContract:
     view_inputs: dict[str, dict[str, str]]
     view_controls: dict[str, tuple[str, ...]]
     view_control_contract: dict[str, tuple[EffectiveControl, ...]]
+    view_control_bindings: dict[str, ViewControlBindingDependency]
     output_view_consumers: dict[str, tuple[str, ...]]
     selection_option_domains: dict[str, tuple[str, ...]]
     control_order: tuple[str, ...]
@@ -399,6 +591,11 @@ class DashboardDependencyContract:
                     "selection_contract": list(
                         self.view_selection_contract(view_id)
                     ),
+                    "control_binding": (
+                        self.view_control_bindings[view_id].as_dict()
+                        if view_id in self.view_control_bindings
+                        else None
+                    ),
                 }
                 for view_id, inputs in self.view_inputs.items()
             },
@@ -475,6 +672,11 @@ class DashboardDependencyContract:
                 key: {
                     "inputs": value,
                     "controls": list(self.view_controls.get(key, ())),
+                    "control_binding": (
+                        self.view_control_bindings[key].as_dict()
+                        if key in self.view_control_bindings
+                        else None
+                    ),
                 }
                 for key, value in self.view_inputs.items()
             },
@@ -629,6 +831,21 @@ def compile_dashboard_dependencies(
             }
 
     registry = scoped_control_registry(dashboard.definition)
+    section_for_view = {
+        view_id: section
+        for section in dashboard.definition.sections
+        for view_id in section.views
+    }
+    (
+        control_dependencies,
+        control_ancestors,
+        control_descendants,
+        control_order,
+    ) = _compile_control_dependency_graph(
+        dashboard.definition.id,
+        registry,
+        section_for_view,
+    )
     option_domains: dict[str, set[str]] = {key: set() for key in registry}
     explicit_option_roots: list[str] = []
     for key, item in registry.items():
@@ -689,6 +906,177 @@ def compile_dashboard_dependencies(
         view_id: tuple(item.key for item in items)
         for view_id, items in effective_controls.items()
     }
+    view_control_bindings: dict[str, ViewControlBindingDependency] = {}
+    writer_by_control: dict[str, ViewControlBindingDependency] = {}
+    scope_rank = {"dashboard": 0, "section": 1, "view": 2}
+    chart_templates = {
+        "line", "bar", "stacked-bar", "pie", "scatter", "heatmap", "radar"
+    }
+    views_by_id = {view.id: view for view in dashboard.definition.views}
+    for view_id, view in views_by_id.items():
+        raw_binding = view.control_binding
+        if raw_binding is None:
+            continue
+        binding = (
+            ViewControlBindingDefinition(control=raw_binding)
+            if isinstance(raw_binding, str)
+            else raw_binding
+        )
+        control_key = _resolve_control_reference(
+            binding.control,
+            dashboard_id=dashboard.definition.id,
+            view_id=view_id,
+            section_for_view=section_for_view,
+        )
+        target = registry.get(control_key)
+        if target is None:
+            raise ValidationFailure(
+                f"View {view_id} binds unknown Control: {binding.control}",
+                details={
+                    "code": "view_control_binding_unknown",
+                    "view": view_id,
+                    "control": binding.control,
+                    "resolved_key": control_key,
+                },
+            )
+        if target.kind != "selection":
+            raise ValidationFailure(
+                f"View {view_id} can only bind a Selection Control: {control_key}",
+                details={
+                    "code": "view_control_binding_kind_invalid",
+                    "view": view_id,
+                    "control": control_key,
+                    "kind": target.kind,
+                },
+            )
+        if control_key not in view_controls.get(view_id, ()):
+            raise ValidationFailure(
+                f"Control {control_key} is outside View {view_id} scope",
+                details={
+                    "code": "view_control_binding_out_of_scope",
+                    "view": view_id,
+                    "control": control_key,
+                },
+            )
+        previous_writer = writer_by_control.get(control_key)
+        if previous_writer is not None:
+            raise ValidationFailure(
+                f"Control {control_key} has more than one writer View",
+                details={
+                    "code": "view_control_binding_writer_conflict",
+                    "control": control_key,
+                    "views": [previous_writer.view_id, view_id],
+                },
+            )
+        narrower = sorted(
+            item.key
+            for item in view_control_contract[view_id]
+            if item.kind == "selection"
+            and item.key != control_key
+            and scope_rank[item.origin] > scope_rank[target.origin]
+        )
+        if narrower:
+            raise ValidationFailure(
+                f"View {view_id} cannot narrow bound Control {control_key} with "
+                + ", ".join(narrower),
+                details={
+                    "code": "view_control_binding_reverse_scope",
+                    "view": view_id,
+                    "control": control_key,
+                    "narrower_controls": narrower,
+                },
+            )
+        fields = tuple(
+            [binding.field]
+            if binding.field
+            else _selection_fields(target)
+        )
+        value_fields = (
+            [view.z]
+            if view.template == "heatmap"
+            else (
+                list(view.y)
+                if isinstance(view.y, list)
+                else [view.y or view.value or view.z]
+            )
+        )
+        value_fields = [field for field in value_fields if field]
+        group_fields = [
+            field
+            for field in (
+                [view.x, view.y] if view.template == "heatmap"
+                else [view.x or view.label, view.series]
+            )
+            if isinstance(field, str) and field
+        ]
+        operation = (
+            "none"
+            if view.template == "metric"
+            else (
+                view.aggregate
+                or (
+                    "none"
+                    if view.template in {"scatter", "table", "perspective"}
+                    else "sum"
+                )
+            )
+        )
+        if operation != "none" and value_fields and not set(fields) <= set(group_fields):
+            raise ValidationFailure(
+                f"View {view_id} aggregates away its Control binding field",
+                details={
+                    "code": "view_control_binding_aggregate_ambiguous",
+                    "view": view_id,
+                    "control": control_key,
+                    "fields": list(fields),
+                    "group_fields": group_fields,
+                    "aggregate": operation,
+                },
+            )
+        if view.template == "custom":
+            renderer = view.renderer or "custom"
+        elif view.template == "table":
+            renderer = "table"
+        elif view.template in chart_templates:
+            renderer = view.engine
+        else:
+            raise ValidationFailure(
+                f"View {view_id} template does not support Control binding: {view.template}",
+                details={
+                    "code": "view_control_binding_renderer_unsupported",
+                    "view": view_id,
+                    "template": view.template,
+                },
+            )
+        references = tuple(sorted(view_inputs.get(view_id, {}).values()))
+        declared_tables = [
+            output_definitions[reference]
+            for reference in references
+            if output_definitions[reference].kind == "table"
+            and output_definitions[reference].schema_
+        ]
+        if declared_tables and not any(
+            all(any(column.name == field for column in output.schema_) for field in fields)
+            for output in declared_tables
+        ):
+            raise ValidationFailure(
+                f"View {view_id} binding fields are absent from its declared table schema",
+                details={
+                    "code": "view_control_binding_field_unknown",
+                    "view": view_id,
+                    "control": control_key,
+                    "fields": list(fields),
+                    "references": list(references),
+                },
+            )
+        compiled_binding = ViewControlBindingDependency(
+            view_id=view_id,
+            control=control_key,
+            fields=fields,
+            renderer=renderer,
+        )
+        view_control_bindings[view_id] = compiled_binding
+        writer_by_control[control_key] = compiled_binding
     for view_id, items in effective_controls.items():
         _, inferred = _output_dependency_closure(
             view_inputs.get(view_id, {}).values(),
@@ -702,13 +1090,84 @@ def compile_dashboard_dependencies(
                 isinstance(options, InferredOptionDomainDefinition)
                 and not options.source
             )
-            cascading_static_domain = (
+            dependent_static_domain = (
                 options is not None
                 and not isinstance(options, InferredOptionDomainDefinition)
-                and item.definition.cascade
+                and bool(control_dependencies[item.key])
             )
-            if dynamic_domain or cascading_static_domain:
+            if dynamic_domain or dependent_static_domain:
                 option_domains[item.key].update(inferred)
+
+    # Explicit Control dependencies are executable only when the child has an
+    # immutable table relation from which its candidate values can be derived.
+    # This is intentionally part of the Dependency Compiler: ``validate`` and
+    # the browser must not maintain separate interpretations of the same edge.
+    effective_by_view_and_key = {
+        (view_id, item.key): item
+        for view_id, items in effective_controls.items()
+        for item in items
+    }
+    for key, dependencies in control_dependencies.items():
+        if not dependencies:
+            continue
+        references = option_domains[key]
+        if not references:
+            raise ValidationFailure(
+                f"Dependent Selection {key} has no Base Output option domain",
+                details={
+                    "code": "control_dependency_option_domain_missing",
+                    "control": key,
+                    "depends_on": sorted(dependencies),
+                },
+            )
+
+        # If every candidate Output declares a schema, validate the complete
+        # relation now: child fields plus every effective transitive ancestor.
+        # A schema-less Output remains runtime-checked because validate does not
+        # execute arbitrary queries merely to inspect their rows.
+        declared_domains = [
+            {column.name for column in output_definitions[reference].schema_}
+            for reference in references
+            if output_definitions[reference].schema_
+        ]
+        has_runtime_schema = any(
+            not output_definitions[reference].schema_
+            for reference in references
+        )
+        if has_runtime_schema:
+            continue
+        required_field_sets: list[set[str]] = []
+        for view_id, items in effective_controls.items():
+            target = next((item for item in items if item.key == key), None)
+            if target is None:
+                continue
+            required = set(_selection_fields(target))
+            for dependency_key in control_ancestors[key]:
+                ancestor = effective_by_view_and_key.get((view_id, dependency_key))
+                if ancestor is not None:
+                    required.update(_selection_fields(ancestor))
+            required_field_sets.append(required)
+        if required_field_sets and not all(
+            any(fields <= declared for declared in declared_domains)
+            for fields in required_field_sets
+        ):
+            raise ValidationFailure(
+                f"Dependent Selection {key} option domain does not declare the "
+                "fields required by its dependency relation",
+                details={
+                    "code": "control_dependency_field_unknown",
+                    "control": key,
+                    "depends_on": sorted(dependencies),
+                    "dependency_ancestors": sorted(control_ancestors[key]),
+                    "references": sorted(references),
+                    "required_field_sets": [
+                        sorted(fields) for fields in required_field_sets
+                    ],
+                    "declared_domains": [
+                        sorted(fields) for fields in declared_domains
+                    ],
+                },
+            )
 
     direct_transform_views: dict[str, set[str]] = {
         identifier: set() for identifier in interactive_dependencies
@@ -788,27 +1247,6 @@ def compile_dashboard_dependencies(
             content_fields_by_control[item.key].add(field)
             if field.startswith("views."):
                 content_views_by_control[item.key].add(field.split(".", 2)[1])
-
-    selection_rank = {"dashboard": 0, "section": 1, "view": 2}
-    cascade_upstream: dict[str, set[str]] = {key: set() for key in registry}
-    for items in effective_controls.values():
-        selections = [item for item in items if item.kind == "selection"]
-        for target in selections:
-            if not target.definition.cascade or target.definition.type not in {
-                "single_select",
-                "multi_select",
-            }:
-                continue
-            target_rank = selection_rank[target.origin]
-            cascade_upstream[target.key].update(
-                candidate.key
-                for candidate in selections
-                if selection_rank[candidate.origin] < target_rank
-            )
-    cascade_downstream: dict[str, set[str]] = {key: set() for key in registry}
-    for key, upstream in cascade_upstream.items():
-        for parent in upstream:
-            cascade_downstream[parent].add(key)
 
     controls: dict[str, ControlDependency] = {}
     for key, item in registry.items():
@@ -902,6 +1340,16 @@ def compile_dashboard_dependencies(
             runtime_checked_views=tuple(sorted(runtime_checked_views)),
             non_data_views=tuple(sorted(non_data_views)),
             direct_view_bindings=direct_view_bindings,
+            writer_view=(
+                writer_by_control[key].view_id
+                if key in writer_by_control
+                else None
+            ),
+            writer_fields=(
+                writer_by_control[key].fields
+                if key in writer_by_control
+                else ()
+            ),
             transform_consumers=tuple(sorted(transform_consumers_by_control[key])),
             transform_inputs={
                 transform_id: tuple(sorted(aliases))
@@ -911,15 +1359,29 @@ def compile_dashboard_dependencies(
             content_fields=tuple(sorted(content_fields_by_control[key])),
             content_views=tuple(sorted(content_views)),
             affected_views=tuple(
-                sorted(direct_views | derived_views | content_views)
+                sorted(
+                    direct_views
+                    | derived_views
+                    | content_views
+                    | ({writer_by_control[key].view_id} if key in writer_by_control else set())
+                )
             ),
             option_domain_references=tuple(sorted(option_domains[key])),
-            cascade_upstream=tuple(sorted(cascade_upstream[key])),
-            cascade_downstream=tuple(sorted(cascade_downstream[key])),
+            depends_on=tuple(sorted(control_dependencies[key])),
+            dependency_ancestors=tuple(sorted(control_ancestors[key])),
+            dependency_descendants=tuple(sorted(control_descendants[key])),
             definition=item.definition.model_dump(mode="json", by_alias=True),
             binding=(
                 item.binding.model_dump(mode="json")
                 if item.binding is not None
+                else None
+            ),
+            initial_state=(
+                initial_selection_state(
+                    item.definition,
+                    allow_unresolved_inferred=True,
+                ).as_dict()
+                if item.kind == "selection"
                 else None
             ),
         )
@@ -1186,6 +1648,7 @@ def compile_dashboard_dependencies(
         view_inputs=view_inputs,
         view_controls=view_controls,
         view_control_contract=view_control_contract,
+        view_control_bindings=view_control_bindings,
         output_view_consumers={
             key: tuple(sorted(value))
             for key, value in output_view_consumers.items()
@@ -1193,12 +1656,6 @@ def compile_dashboard_dependencies(
         selection_option_domains={
             key: tuple(sorted(value)) for key, value in option_domains.items()
         },
-        control_order=_topological_order(
-            {
-                key: set(cascade_upstream[key])
-                for key in registry
-            },
-            label="Control DAG",
-        ),
+        control_order=control_order,
         controls=controls,
     )

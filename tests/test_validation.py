@@ -45,7 +45,7 @@ runtime:{runtime or ' {}'}
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v5
+        """schema: dataviz/dashboard/v7
 kind: dashboard
 id: browser-python
 title: Browser Python
@@ -210,6 +210,45 @@ def test_validate_rejects_unknown_selection_option_domain(tmp_path: Path):
     assert report["status"] == "invalid"
     assert "Unknown output node" in diagnostic["message"]
     assert "options" in diagnostic["hint"]
+
+
+def test_validate_reports_control_dependency_cycles_before_runtime(tmp_path: Path):
+    workspace = _copy_workspace(tmp_path)
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    definition["controls"][0]["depends_on"] = ["dashboard.day"]
+    definition["controls"].append(
+        {
+            "id": "day",
+            "kind": "selection",
+            "field": "day",
+            "type": "multi_select",
+            "depends_on": ["dashboard.region"],
+            "options": {
+                "mode": "infer",
+                "source": "source:sales/main",
+            },
+        }
+    )
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    report = validate_preflight(workspace, dashboard_id="sales-overview")
+    diagnostic = next(
+        item
+        for item in report["diagnostics"]
+        if item["code"] == "control_dependency_cycle"
+    )
+
+    assert report["status"] == "invalid"
+    assert diagnostic["details"]["cycle"] == [
+        "dashboard:sales-overview/day",
+        "dashboard:sales-overview/region",
+        "dashboard:sales-overview/day",
+    ]
+    assert "direct Selection parents" in diagnostic["hint"]
 
 
 def test_validate_rejects_fields_outside_the_selected_source_variant(tmp_path: Path):
@@ -566,7 +605,7 @@ def test_validate_focus_excludes_another_broken_dashboard(tmp_path: Path):
     broken = workspace / "dashboards" / "broken"
     broken.mkdir()
     (broken / "dashboard.yaml").write_text(
-        "schema: dataviz/dashboard/v5\nkind: dashboard\nid: broken\nretired_field: true\n",
+        "schema: dataviz/dashboard/v7\nkind: dashboard\nid: broken\nretired_field: true\n",
         encoding="utf-8",
     )
 

@@ -21,8 +21,9 @@
         && item.owner_id === spec.section
         && (!spec.selection || item.id === spec.selection)
       ));
-      const value = selection ? state.selections[selection.key] : null;
-      if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) {
+      const entry = selection ? state.selection.state(selection.key) : null;
+      const values = Array.isArray(entry?.values) ? entry.values : [];
+      if (!values.length) {
         return [];
       }
     }
@@ -88,7 +89,7 @@
   };
 
   root.sectionDeclarative = {
-    protocol:'dataviz/runtime/v3',
+    protocol:'dataviz/runtime/v5',
     flow:'document',
     coordinates:false,
     repeatTitle,

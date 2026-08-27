@@ -5,6 +5,7 @@ from typing import Any
 
 from dataviz import __version__
 from dataviz.errors import Diagnostic
+from dataviz.semantic_validation import validate_workspace_semantics
 from dataviz.workspace.loader import (
     DashboardCatalogEntry,
     LoadedWorkspace,
@@ -13,7 +14,7 @@ from dataviz.workspace.loader import (
 )
 
 
-VALIDATION_SCHEMA = "dataviz/validation/v2"
+VALIDATION_SCHEMA = "dataviz/validation/v3"
 
 _CHECKS = (
     ("schema-contracts", "Workspace and Dashboard schemas"),
@@ -23,6 +24,7 @@ _CHECKS = (
     ("content-contracts", "Content interpolation and scoped Control contracts"),
     ("presentation-assets", "Presentation, Renderer and local assets"),
     ("runtime-dependencies", "Runtime, code and package dependencies"),
+    ("semantic-effective-config", "Final effective configuration semantics"),
 )
 
 
@@ -30,6 +32,8 @@ def _diagnostic_category(item: Diagnostic) -> str:
     code = item.code or "validation"
     field = item.field or ""
     message = item.message.lower()
+    if code.startswith("semantic_") or code.startswith("layout_"):
+        return "semantic-effective-config"
     if code.startswith("adapter_") or field == "adapter":
         return "adapter-bindings"
     if code.startswith("sql_"):
@@ -90,6 +94,13 @@ def _hint_for(item: Diagnostic) -> str:
             "Use `options: {mode: static, choices: [...]}` for a closed enum, or "
             "`options: {mode: infer, source: source:sales/main}` for a data-derived "
             "domain. Interactive Outputs are invalid because they may depend on this Selection."
+        )
+    if code.startswith("control_dependency_"):
+        return (
+            "Declare only direct Selection parents with scoped references such as "
+            "`dashboard.province`, `section.city`, or `view.dow`. A child may only "
+            "reference its current Dashboard, containing Section, or own View; its "
+            "immutable option-domain table must expose the child and ancestor fields."
         )
     if code == "file_reader_dependency_unavailable":
         return "Install the Excel reader extra with `pip install 'ai-dataviz[excel]'`, then rerun validate."
@@ -209,6 +220,7 @@ def _check_report(diagnostics: list[dict[str, Any]]) -> list[dict[str, Any]]:
         related = [item for item in diagnostics if item["category"] == check_id]
         errors = sum(item["level"] == "error" for item in related)
         warnings = sum(item["level"] == "warning" for item in related)
+        advice = sum(item["level"] == "advice" for item in related)
         status = "failed" if errors else "warning" if warnings else "passed"
         reports.append(
             {
@@ -217,6 +229,7 @@ def _check_report(diagnostics: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "status": status,
                 "errors": errors,
                 "warnings": warnings,
+                "advice": advice,
             }
         )
     return reports
@@ -237,6 +250,7 @@ def validate_preflight(
         scope_entry, scope_error = _entry_for_scope(workspace, dashboard_id)
 
     raw_diagnostics = validate_workspace(workspace)
+    raw_diagnostics.extend(validate_workspace_semantics(workspace))
     raw_diagnostics = _filter_scope(workspace, raw_diagnostics, scope_entry)
     if scope_error:
         raw_diagnostics.append(scope_error)
@@ -255,7 +269,7 @@ def validate_preflight(
         diagnostics.append(value)
     diagnostics.sort(
         key=lambda item: (
-            0 if item["level"] == "error" else 1,
+            {"error": 0, "warning": 1, "advice": 2}.get(item["level"], 3),
             item["dashboard"] or "",
             item["file"] or "",
             item["field"] or "",
@@ -265,6 +279,7 @@ def validate_preflight(
 
     errors = sum(item["level"] == "error" for item in diagnostics)
     warnings = sum(item["level"] == "warning" for item in diagnostics)
+    advice = sum(item["level"] == "advice" for item in diagnostics)
     status = "invalid" if errors else "valid_with_warnings" if warnings else "valid"
     exit_code = 1 if errors or (strict and warnings) else 0
     scope_id = scope_entry.id if scope_entry else dashboard_id
@@ -316,6 +331,7 @@ def validate_preflight(
         "summary": {
             "errors": errors,
             "warnings": warnings,
+            "advice": advice,
             "dashboards_checked": checked_count,
             "checks_passed": sum(item["status"] == "passed" for item in _check_report(diagnostics)),
             "checks_total": len(_CHECKS),
@@ -334,7 +350,8 @@ def format_validation_text(report: dict[str, Any]) -> str:
         f"{icon} Dataviz preflight: {report['status']}",
         (
             f"  {summary['dashboards_checked']} dashboard(s) · "
-            f"{summary['errors']} error(s) · {summary['warnings']} warning(s) · no queries executed"
+            f"{summary['errors']} error(s) · {summary['warnings']} warning(s) · "
+            f"{summary.get('advice', 0)} advice · no queries executed"
         ),
         "",
     ]

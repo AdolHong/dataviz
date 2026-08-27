@@ -31,13 +31,14 @@ from dataviz.execution.dependencies import (
 from dataviz.execution.results import RunResult
 from dataviz.execution.fingerprint import ensure_query_run_compatible
 from dataviz.filesystem import atomic_write_bytes, atomic_write_text
+from dataviz.state_snapshot import build_state_snapshot
 from dataviz.templates import COMPONENT_REGISTRY_VERSION, RUNTIME_PROTOCOL_SCHEMA
 from dataviz.value_contract import static_control_choices
 from dataviz.workspace.models import DashboardDefinition, DeclarativeViewDefinition
 from dataviz.workspace.controls import (
-    initial_selection_intents,
+    project_selection_values,
     resolve_compute_values,
-    resolve_selection_values,
+    resolve_selection_states,
     scoped_control_registry,
 )
 from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace
@@ -294,8 +295,7 @@ class CanvasRenderer:
         interaction: dict[str, Any] | None = None,
         session_id: str | None = None,
         compute_parameters: dict[str, Any] | None = None,
-        selections: dict[str, Any] | None = None,
-        selection_intents: dict[str, str] | None = None,
+        selection_state: dict[str, dict[str, Any]] | None = None,
         derived_outputs: dict[str, Any] | None = None,
         snapshot_interactions: set[str] | None = None,
         pyodide_index_url: str | None = None,
@@ -308,15 +308,15 @@ class CanvasRenderer:
             dashboard.definition,
             compute_parameters,
         )
-        selection_values = resolve_selection_values(
+        resolved_selection_state = resolve_selection_states(
             dashboard.definition,
-            selections,
+            selection_state,
             phase="canvas-hydration",
         )
-        selection_intent_values = {
-            **initial_selection_intents(dashboard.definition),
-            **(selection_intents or {}),
-        }
+        selection_values = project_selection_values(
+            dashboard.definition,
+            resolved_selection_state,
+        )
         merged_outputs = {**result.outputs, **(derived_outputs or {})}
         render_state = SimpleNamespace(
             run_id=result.run_id,
@@ -502,6 +502,18 @@ class CanvasRenderer:
             if portable and asset_mode == "inline"
             else ""
         )
+        state_summary = (
+            dashboard.presentation.state_summary.model_dump(mode="json")
+            if dashboard.presentation
+            else {"enabled": True, "max_values": 3, "items": {}}
+        )
+        state_snapshot = build_state_snapshot(
+            dashboard,
+            query_parameters=result.query_parameters,
+            selection_state=resolved_selection_state,
+            compute_parameters=compute_values,
+            draft_compute_parameters=compute_values,
+        )
         meta = {
             "protocol": {
                 "schema": RUNTIME_PROTOCOL_SCHEMA,
@@ -522,9 +534,11 @@ class CanvasRenderer:
                 ).values()
             },
             "draft_compute_parameters": dict(compute_values),
-            "selections": selection_values,
-            "selection_intents": selection_intent_values,
+            "selection_state": resolved_selection_state,
+            "state_snapshot": state_snapshot,
+            "state_summary": state_summary,
             "dependency_contract": dependency_contract.runtime_manifest(),
+            "layout_contract": dashboard.layout_contract.as_dict(),
             "content_bindings": content_bindings,
             "portable": portable_bundle,
             "live": live,
@@ -626,6 +640,8 @@ class CanvasRenderer:
             f'<span class="dv-view-title" role="heading" aria-level="3"{title_binding}>{html.escape(title)}</span>'
             f'{description_html}</div>'
             f'<div class="dv-view-actions">{controls}<small data-view-status-label>{html.escape(status)}</small></div></header>'
+            f'<div class="dv-state-summary dv-state-summary--view" data-state-summary-scope="view" '
+            f'data-state-summary-owner="{html.escape(view_id, quote=True)}" hidden></div>'
             '<div class="dv-view-body"><div class="dv-view-placeholder">Waiting for dataset</div></div>'
             '</article>'
         )
@@ -687,12 +703,16 @@ class CanvasRenderer:
             )
             if item.kind == "selection":
                 value = result.selections.get(key, definition.default)
+                presentation = self._control_component_presentation(
+                    dashboard, key, definition
+                )
                 selection_fields.append(
                     f'<label class="dv-context-selection" data-selection-key="{html.escape(key)}" '
                     f'data-selection-type="{html.escape(definition.type)}" '
-                    f'data-selection-path="{str(bool(definition.path_fields)).lower()}">'
+                    f'data-selection-path="{str(bool(definition.path_fields)).lower()}" '
+                    f'data-control-span="{int(presentation.get("span", 1))}">'
                     f'<span>{html.escape(definition.label or definition.id)}</span>'
-                    f'{self._portable_field(key, definition, value, self._control_component_presentation(dashboard, key, definition), control_view_id, kind="selection")}</label>'
+                    f'{self._portable_field(key, definition, value, presentation, control_view_id, kind="selection")}</label>'
                 )
                 continue
             triggers = {consumer.definition.trigger for consumer in consumers}
@@ -985,6 +1005,7 @@ class CanvasRenderer:
         outputs: dict[str, Any] = {}
         output_transports: dict[str, Any] = {}
         output_kinds: dict[str, str] = {}
+        output_schemas: dict[str, list[dict[str, Any]]] = {}
         output_errors: dict[str, Any] = {}
         reachable = set(dependency_contract.base_output_roots)
         for transform_id in snapshot_interactions or set():
@@ -1021,6 +1042,7 @@ class CanvasRenderer:
             if artifact.kind == "table":
                 table_rows = int(artifact.metadata.get("row_count", 0))
                 row_count += table_rows
+                output_schemas[reference] = artifact.schema_ or []
                 use_arrow = runtime.browser_table_transport == "arrow" or (
                     runtime.browser_table_transport == "auto"
                     and table_rows >= runtime.arrow_min_rows
@@ -1095,6 +1117,7 @@ class CanvasRenderer:
             "outputs": outputs,
             "output_transports": output_transports,
             "output_kinds": output_kinds,
+            "output_schemas": output_schemas,
             "output_errors": output_errors,
             "pending_outputs": pending_outputs,
         }
@@ -1181,18 +1204,34 @@ class CanvasRenderer:
             definition = item.definition
             if item.kind == "selection":
                 value = result.selections.get(key, definition.default)
+                dependency = dependency_contract.controls.get(key)
+                affected_count = len(dependency.affected_views) if dependency else 0
+                affected_noun = "view" if affected_count == 1 else "views"
+                affected_prefix = (
+                    "Up to "
+                    if dependency and dependency.runtime_checked_views
+                    else ""
+                )
+                affected_label = (
+                    f"{affected_prefix}{affected_count} {affected_noun}"
+                )
+                presentation = self._control_component_presentation(
+                    dashboard, key, definition
+                )
                 field = self._portable_field(
                     key,
                     definition,
                     value,
-                    self._control_component_presentation(dashboard, key, definition),
+                    presentation,
                     kind="selection",
                 )
                 selection_items.append(
                     f'<div class="dv-report-selection" data-selection-key="{html.escape(key)}" '
-                    f'data-selection-type="{html.escape(definition.type)}">'
+                    f'data-selection-type="{html.escape(definition.type)}" '
+                    f'data-control-span="{int(presentation.get("span", 1))}">'
                     '<div class="dv-report-selection__scope"><span>Data selection</span>'
-                    f'<small>{len(control["views"])} view{"s" if len(control["views"]) != 1 else ""}</small></div>'
+                    f'<small data-control-impact-key="{html.escape(key, quote=True)}" '
+                    f'data-control-impact-count>{html.escape(affected_label)}</small></div>'
                     f'<strong>{html.escape(definition.label or definition.id)}</strong>{field}</div>'
                 )
                 continue
@@ -1286,7 +1325,8 @@ class CanvasRenderer:
                 else ""
             )
             control_block = (
-                f'<details class="dv-runtime-control" data-runtime-popover data-control-origin="dashboard" '
+                f'<details class="dv-runtime-control" name="dv-runtime-header-control" '
+                f'data-runtime-popover data-overlay-group="runtime-header" data-control-origin="dashboard" '
                 f'data-overlay-floating="true" {control_panel_attributes}>'
                 '<summary><span>02</span><div><strong>Controls</strong>'
                 f'<small>{len(dashboard_control_keys)} control{"" if len(dashboard_control_keys) == 1 else "s"}</small>'
@@ -1300,7 +1340,9 @@ class CanvasRenderer:
             '<header class="dv-runtime-header" aria-label="Report controls">'
             '<div class="dv-runtime-brand"><span>PORTABLE ANALYSIS</span><strong>Dataset fixed. Views live.</strong></div>'
             '<nav class="dv-runtime-actions" aria-label="Dataset and analysis controls">'
-            f'<details class="dv-runtime-control" data-runtime-popover data-overlay-floating="true" {query_panel_attributes}>'
+            f'<details class="dv-runtime-control" name="dv-runtime-header-control" '
+            f'data-runtime-popover data-overlay-group="runtime-header" '
+            f'data-overlay-floating="true" {query_panel_attributes}>'
             '<summary><span>01</span><div><strong>Parameters</strong><small>Fixed snapshot</small></div><i>⌄</i></summary>'
             f'<div class="dv-runtime-popover dv-runtime-popover--query"><header><span>01</span><div><strong>Query snapshot</strong><small>Values embedded in this HTML</small></div></header><div class="dv-runtime-query-values">{query_items}</div></div></details>'
             f'{control_block}</nav></header>'
@@ -1316,18 +1358,22 @@ class CanvasRenderer:
         trigger: str,
         frozen: bool,
     ) -> str:
+        presentation = self._control_component_presentation(
+            dashboard, key, definition
+        )
         field = self._portable_field(
             key,
             definition,
             value,
-            self._control_component_presentation(dashboard, key, definition),
+            presentation,
             kind="compute",
             trigger=trigger,
             disabled=frozen,
         )
         return (
             f'<label class="dv-compute-control" data-compute-key="{html.escape(key)}" '
-            f'data-compute-trigger="{html.escape(trigger)}" data-compute-frozen="{str(frozen).lower()}">'
+            f'data-compute-trigger="{html.escape(trigger)}" data-compute-frozen="{str(frozen).lower()}" '
+            f'data-control-span="{int(presentation.get("span", 1))}">'
             f'<span>{html.escape(definition.label or definition.id)}</span>{field}'
             f'{"<small>Fixed snapshot</small>" if frozen else ""}</label>'
         )
@@ -1492,7 +1538,9 @@ class CanvasRenderer:
             if definition.clearable is not None
             else (
                 not definition.required
-                and definition.type in {"string", "multi_select", "date", "date_range"}
+                and definition.type in {
+                    "string", "single_select", "multi_select", "date", "date_range"
+                }
             )
         )
         allow_empty = list(getattr(definition, "allow_empty", (False, False)))
@@ -1523,7 +1571,6 @@ class CanvasRenderer:
             f'data-control-component="{html.escape(component, quote=True)}" '
             f'data-requested-component="{html.escape(presentation.get("requested_component", "auto"), quote=True)}" '
             f'data-auto-reason="{html.escape(presentation.get("auto_reason", ""), quote=True)}" '
-            f'data-empty-means-all="{str(kind == "selection" and definition.type == "multi_select").lower()}" '
             f'data-required="{str(bool(definition.required)).lower()}" '
             f'data-clearable="{str(bool(clearable)).lower()}" '
             f'data-show-unavailable="{str(bool(presentation.get("show_unavailable", False))).lower()}" '
@@ -1590,8 +1637,7 @@ class CanvasRenderer:
         output: Path,
         *,
         compute_parameters: dict[str, Any] | None = None,
-        selections: dict[str, Any] | None = None,
-        selection_intents: dict[str, str] | None = None,
+        selection_state: dict[str, dict[str, Any]] | None = None,
         derived_outputs: dict[str, Any] | None = None,
         snapshot_interactions: set[str] | None = None,
     ) -> Path:
@@ -1648,10 +1694,11 @@ class CanvasRenderer:
                     "version": self.workspace.definition.runtime.pyodide_version,
                 }
             }
-        effective_selection_intents = {
-            **initial_selection_intents(dashboard.definition),
-            **(selection_intents or {}),
-        }
+        resolved_selection_state = resolve_selection_states(
+            dashboard.definition,
+            selection_state,
+            phase="canvas-hydration",
+        )
         runtime_assets = self._runtime_asset_usage(
             dashboard,
             {**result.outputs, **(derived_outputs or {})},
@@ -1667,8 +1714,7 @@ class CanvasRenderer:
                 result,
                 asset_mode="inline",
                 compute_parameters=compute_parameters,
-                selections=selections,
-                selection_intents=effective_selection_intents,
+                selection_state=resolved_selection_state,
                 derived_outputs=derived_outputs,
                 snapshot_interactions=snapshot_interactions,
                 pyodide_index_url=pyodide_index_url,
@@ -1680,12 +1726,12 @@ class CanvasRenderer:
                     "runtime": RUNTIME_PROTOCOL_SCHEMA,
                     "dashboard": dashboard.definition.id,
                     "dependency_contract": dependency_contract.as_dict(),
+                    "layout_contract": dashboard.layout_contract.as_dict(),
                     "query_run": _portable_run_result(result, self.workspace.root),
                     "state": {
                         "query_parameters": result.query_parameters,
                         "compute_parameters": compute_parameters or {},
-                        "selections": selections or {},
-                        "selection_intents": effective_selection_intents,
+                        "selection_state": resolved_selection_state,
                     },
                     "derived_outputs": {
                         reference: descriptor.model_dump(mode="json", by_alias=True)
@@ -1746,24 +1792,27 @@ class CanvasRenderer:
             for index, value in enumerate(definition.assumptions)
         )
         presentation_views = dashboard.presentation.views if dashboard.presentation else {}
+        layout_contract = dashboard.layout_contract
+        layout_sections = {
+            section.section_id: section for section in layout_contract.sections
+        }
         all_view_ids = list(dashboard.views)
         declarative_views = {item.id: item for item in definition.views}
         run_state = SimpleNamespace(selections=selections)
 
-        def view_item(view_id: str) -> str:
-            layout = presentation_views.get(view_id)
-            style = ""
+        def view_item(view_id: str, section_id: str) -> str:
+            visual = presentation_views.get(view_id)
+            placement = layout_contract.placement(section_id, view_id)
+            style = f"--dv-span:{placement.span};" if placement else ""
             css_class = ""
-            if layout:
-                if layout.span is not None:
-                    style = f"--dv-span:{max(1, min(definition.layout.columns, layout.span))};"
-                if layout.min_height is not None:
-                    style += f"min-height:{max(1, layout.min_height)}px;"
+            if visual:
+                if visual.min_height is not None:
+                    style += f"min-height:{max(1, visual.min_height)}px;"
                 css_class = " ".join(
                     value
                     for value in [
-                        f"dv-view--{layout.container}" if layout.container else "",
-                        layout.css_class,
+                        f"dv-view--{visual.container}" if visual.container else "",
+                        visual.css_class,
                     ]
                     if value
                 )
@@ -1793,12 +1842,15 @@ class CanvasRenderer:
                 if section.description or description_binding
                 else ""
             )
-            if section.repeat:
-                section_style = f' style="--dv-repeat-columns:{max(1, section.columns or 1)}"'
-            else:
-                section_style = (
-                    f' style="--dv-columns:{max(1, section.columns)}"' if section.columns else ""
+            compiled_section = layout_sections[section.id]
+            section_tokens = [
+                f"--dv-section-columns:{compiled_section.columns}",
+            ]
+            if compiled_section.repeat_columns is not None:
+                section_tokens.append(
+                    f"--dv-repeat-columns:{compiled_section.repeat_columns}"
                 )
+            section_style = f' style="{";".join(section_tokens)}"'
             if section.repeat:
                 section_body = (
                     f'<div class="dv-repeat" data-repeat-section="{html.escape(section.id)}" '
@@ -1807,19 +1859,28 @@ class CanvasRenderer:
                     '<span>The browser will build each view from the shared dataset.</span></div></div>'
                 )
             else:
-                section_body = "".join(view_item(view_id) for view_id in view_ids)
+                section_body = "".join(
+                    view_item(view_id, section.id) for view_id in view_ids
+                )
             sections.append(
                 f'<section class="dv-section dv-section--{html.escape(section.template)} {html.escape(section.css_class)}" data-section-id="{html.escape(section.id)}"{section_style}>'
                 '<header class="dv-section__header"><div>'
                 f'<p class="dv-section__eyebrow">{html.escape(section.id)}</p><h2{title_binding}>{html.escape(section.title)}</h2>{description}'
-                f'</div>{section_selection}</header><div class="dv-section__body">'
+                f'</div>{section_selection}</header>'
+                f'<div class="dv-state-summary dv-state-summary--section" data-state-summary-scope="section" '
+                f'data-state-summary-owner="{html.escape(section.id, quote=True)}" hidden></div>'
+                f'<div class="dv-section__body">'
                 f'{section_body}</div></section>'
             )
         remaining = [view_id for view_id in all_view_ids if view_id not in assigned]
         if remaining:
+            overview = layout_sections["overview"]
             sections.append(
-                '<section class="dv-section dv-section--stack" data-section-id="overview">'
-                f'<div class="dv-section__body">{"".join(view_item(view_id) for view_id in remaining)}</div></section>'
+                '<section class="dv-section dv-section--stack" data-section-id="overview" '
+                f'style="--dv-section-columns:{overview.columns}">'
+                f'<div class="dv-section__body">'
+                f'{"".join(view_item(view_id, "overview") for view_id in remaining)}'
+                '</div></section>'
             )
         dashboard_title_binding = (
             ' data-dv-content-field="title"' if "title" in binding_fields else ""
@@ -1833,7 +1894,7 @@ class CanvasRenderer:
             else ""
         )
         return f"""
-<div class="dv-default-shell" style="--dv-columns:{definition.layout.columns};--dv-gap:{definition.layout.gap}px">
+<div class="dv-default-shell" style="--dv-columns:{layout_contract.columns};--dv-gap:{layout_contract.gap}px">
 <header class="dv-report-header dv-report-header--compact">
   <div>
     <p class="dv-eyebrow">{html.escape(definition.id.upper())}</p>
@@ -1842,6 +1903,7 @@ class CanvasRenderer:
     {f'<p class="dv-deck"{dashboard_description_binding}>{html.escape(definition.description)}</p>' if definition.description or 'description' in binding_fields else ''}
   </div>
 </header>
+<div class="dv-state-summary dv-state-summary--dashboard" data-state-summary-scope="dashboard" data-state-summary-owner="{html.escape(definition.id, quote=True)}" hidden></div>
 {f'<details class="dv-assumptions"><summary>口径与假设</summary><ul>{assumptions}</ul></details>' if assumptions else ''}
 <div class="dv-sections">{''.join(sections)}</div>
 </div>
@@ -1876,7 +1938,7 @@ window.datavizPerspectiveReady = (async () => {{
   await import("{base}/viewer-datagrid@{version}/dist/cdn/perspective-viewer-datagrid.js");
   await import("{base}/viewer-charts@{version}/dist/cdn/perspective-viewer-charts.js");
   await customElements.whenDefined("perspective-viewer");
-  return {{perspective, worker: await perspective.worker(), version: {json.dumps(self.workspace.definition.runtime.perspective_version)}}};
+  return {{perspective, version: {json.dumps(self.workspace.definition.runtime.perspective_version)}}};
 }})();
 </script>"""
 

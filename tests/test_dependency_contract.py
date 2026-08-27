@@ -6,6 +6,7 @@ import shutil
 import time
 
 import pytest
+import yaml
 from typer.testing import CliRunner
 
 from dataviz.cli import app
@@ -23,6 +24,38 @@ FEATURES = ROOT / "examples" / "feature-showcase"
 SALES = ROOT / "examples" / "sales-workspace"
 WORKER = ROOT / "tests" / "fixtures" / "browser-worker-workspace"
 PROGRESSIVE = ROOT / "tests" / "fixtures" / "progressive-workspace"
+MINIMAL = ROOT / "examples" / "minimal-workspace"
+
+
+def _copy_cascade_workspace(tmp_path: Path) -> tuple[Path, Path, dict]:
+    workspace = tmp_path / "workspace"
+    shutil.copytree(FEATURES, workspace)
+    dashboard_path = (
+        workspace
+        / "dashboards"
+        / "功能示例##cascade-explorer"
+        / "dashboard.yaml"
+    )
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    return workspace, dashboard_path, definition
+
+
+def _city_detail(definition: dict) -> dict:
+    return next(view for view in definition["views"] if view["id"] == "city-detail")
+
+
+def _copy_bound_view_workspace(tmp_path: Path) -> tuple[Path, Path, dict]:
+    workspace = tmp_path / "bound-view"
+    shutil.copytree(MINIMAL, workspace)
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    view = next(item for item in definition["views"] if item["id"] == "region-comparison")
+    view["control_binding"] = "dashboard.region"
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    return workspace, dashboard_path, definition
 
 
 def test_query_graph_and_progressive_targets_share_one_compiled_closure():
@@ -80,18 +113,23 @@ def test_selection_domains_and_control_effects_are_explicit():
     )
     assert province.direct_views == province.affected_views
     assert province.transform_consumers == ()
-    assert province.cascade_upstream == ()
-    assert province.cascade_downstream == (
+    assert province.depends_on == ()
+    assert province.dependency_ancestors == ()
+    assert province.dependency_descendants == (
         "section:geography/city",
         "view:city-detail/district",
     )
     assert city.option_domain_references == ("source:cities/main",)
     assert city.direct_views == ("city-detail", "map-bars")
-    assert city.cascade_upstream == ("dashboard:cascade-explorer/province",)
-    assert city.cascade_downstream == ("view:city-detail/district",)
+    assert city.depends_on == ("dashboard:cascade-explorer/province",)
+    assert city.dependency_ancestors == (
+        "dashboard:cascade-explorer/province",
+    )
+    assert city.dependency_descendants == ("view:city-detail/district",)
     assert district.option_domain_references == ("source:cities/main",)
     assert district.direct_views == ("city-detail",)
-    assert district.cascade_upstream == (
+    assert district.depends_on == ("section:geography/city",)
+    assert district.dependency_ancestors == (
         "dashboard:cascade-explorer/province",
         "section:geography/city",
     )
@@ -103,6 +141,207 @@ def test_selection_domains_and_control_effects_are_explicit():
     assert district.direct_view_bindings["city-detail"].input_references == (
         "source:cities/main",
     )
+
+
+def test_view_control_binding_compiles_one_writer_and_projection_edge(tmp_path: Path):
+    workspace, _, _ = _copy_bound_view_workspace(tmp_path)
+    contract = load_workspace(workspace).dashboard("sales-overview").dependency_contract
+
+    binding = contract.view_control_bindings["region-comparison"]
+    assert binding.control == "dashboard:sales-overview/region"
+    assert binding.fields == ("region",)
+    assert binding.renderer == "plotly"
+    control = contract.controls["dashboard:sales-overview/region"]
+    assert control.writer_view == "region-comparison"
+    assert control.writer_fields == ("region",)
+    assert "region-comparison" in control.affected_views
+    assert contract.runtime_manifest()["views"]["region-comparison"][
+        "control_binding"
+    ]["actions"] == ["select", "select_many", "clear"]
+
+
+def test_view_control_binding_rejects_a_second_writer(tmp_path: Path):
+    workspace, dashboard_path, definition = _copy_bound_view_workspace(tmp_path)
+    second = next(item for item in definition["views"] if item["id"] == "revenue-trend")
+    second["control_binding"] = "dashboard.region"
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationFailure) as caught:
+        _ = load_workspace(workspace).dashboard("sales-overview").dependency_contract
+    assert caught.value.as_dict()["code"] == "view_control_binding_writer_conflict"
+
+
+def test_view_control_binding_rejects_narrower_candidate_selection(tmp_path: Path):
+    workspace, dashboard_path, definition = _copy_bound_view_workspace(tmp_path)
+    view = next(item for item in definition["views"] if item["id"] == "region-comparison")
+    view["controls"] = [
+        {
+            "id": "city",
+            "kind": "selection",
+            "type": "single_select",
+            "field": "city",
+            "options": {"mode": "infer", "initial": "empty"},
+        }
+    ]
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationFailure) as caught:
+        _ = load_workspace(workspace).dashboard("sales-overview").dependency_contract
+    assert caught.value.as_dict()["code"] == "view_control_binding_reverse_scope"
+
+
+def test_same_view_dependencies_compile_direct_edges_transitive_closure_and_order(
+    tmp_path: Path,
+):
+    workspace, dashboard_path, definition = _copy_cascade_workspace(tmp_path)
+    controls = _city_detail(definition)["controls"]
+    controls[0:0] = [
+        {
+            "id": "dow",
+            "kind": "selection",
+            "field": "city",
+            "type": "single_select",
+            "depends_on": ["section.city"],
+            "options": {
+                "mode": "static",
+                "choices": [
+                    {"label": "深圳", "value": "深圳"},
+                    {"label": "厦门", "value": "厦门"},
+                ],
+            },
+        },
+        {
+            "id": "dates",
+            "kind": "selection",
+            "field": "district",
+            "type": "multi_select",
+            "depends_on": ["view.dow"],
+            "options": {"mode": "infer", "source": "source:cities/main"},
+        },
+    ]
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    contract = load_workspace(workspace).dashboard("cascade-explorer").dependency_contract
+    dow_key = "view:city-detail/dow"
+    dates_key = "view:city-detail/dates"
+    province_key = "dashboard:cascade-explorer/province"
+    city_key = "section:geography/city"
+
+    assert contract.controls[dow_key].depends_on == (city_key,)
+    assert contract.controls[dates_key].depends_on == (dow_key,)
+    assert contract.controls[dates_key].dependency_ancestors == (
+        province_key,
+        city_key,
+        dow_key,
+    )
+    assert contract.controls[province_key].dependency_descendants == (
+        city_key,
+        dates_key,
+        "view:city-detail/district",
+        dow_key,
+    )
+    positions = {key: index for index, key in enumerate(contract.control_order)}
+    assert positions[province_key] < positions[city_key] < positions[dow_key] < positions[dates_key]
+
+
+@pytest.mark.parametrize(
+    ("reference", "expected_code"),
+    [
+        ("section.city", "control_dependency_scope_invalid"),
+        ("dashboard.missing", "control_dependency_unknown"),
+    ],
+)
+def test_control_dependencies_reject_invalid_scope_and_unknown_parent(
+    tmp_path: Path,
+    reference: str,
+    expected_code: str,
+):
+    workspace, dashboard_path, definition = _copy_cascade_workspace(tmp_path)
+    definition["controls"][0]["depends_on"] = [reference]
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    dashboard = load_workspace(workspace).dashboard("cascade-explorer")
+    with pytest.raises(ValidationFailure) as caught:
+        _ = dashboard.dependency_contract
+    assert caught.value.as_dict()["code"] == expected_code
+
+
+def test_control_dependencies_reject_compute_parent_and_report_full_cycle(
+    tmp_path: Path,
+):
+    workspace, dashboard_path, definition = _copy_cascade_workspace(tmp_path)
+    controls = _city_detail(definition)["controls"]
+    controls.extend(
+        [
+            {"id": "seed", "kind": "compute", "type": "integer", "default": 42},
+            {
+                "id": "dow",
+                "kind": "selection",
+                "field": "city",
+                "type": "multi_select",
+                "depends_on": ["view.seed"],
+                "options": {"mode": "infer", "source": "source:cities/main"},
+            },
+        ]
+    )
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    dashboard = load_workspace(workspace).dashboard("cascade-explorer")
+    with pytest.raises(ValidationFailure) as caught:
+        _ = dashboard.dependency_contract
+    assert caught.value.as_dict()["code"] == "control_dependency_kind_invalid"
+
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    controls = _city_detail(definition)["controls"]
+    controls.pop()  # dow with the invalid Compute parent
+    controls.extend(
+        [
+            {
+                "id": "first",
+                "kind": "selection",
+                "field": "city",
+                "type": "multi_select",
+                "depends_on": ["view.second"],
+                "options": {"mode": "infer", "source": "source:cities/main"},
+            },
+            {
+                "id": "second",
+                "kind": "selection",
+                "field": "district",
+                "type": "multi_select",
+                "depends_on": ["view.first"],
+                "options": {"mode": "infer", "source": "source:cities/main"},
+            },
+        ]
+    )
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    dashboard = load_workspace(workspace).dashboard("cascade-explorer")
+    with pytest.raises(ValidationFailure) as caught:
+        _ = dashboard.dependency_contract
+    payload = caught.value.as_dict()
+    assert payload["code"] == "control_dependency_cycle"
+    assert payload["details"]["cycle"] == [
+        "view:city-detail/first",
+        "view:city-detail/second",
+        "view:city-detail/first",
+    ]
 
 
 def test_compute_and_selection_paths_distinguish_direct_and_derived_views():
@@ -172,10 +411,8 @@ def test_query_parameter_consumers_are_compiled_once():
         "dataset:sales-metrics",
         "source:targets",
     )
-    assert target_factor.affected_option_controls == ("dashboard:sales/region",)
+    assert target_factor.affected_option_controls == ()
     assert target_factor.affected_views == (
-        "detail",
-        "distribution",
         "revenue",
         "target",
     )
@@ -207,7 +444,7 @@ def test_dependency_contract_is_directly_inspectable_by_ai_and_humans():
 
     assert machine.exit_code == 0, machine.stdout
     assert machine.stdout.lstrip().startswith("{")
-    assert '"schema": "dataviz/dependency-contract/v2"' in machine.stdout
+    assert '"schema": "dataviz/dependency-contract/v4"' in machine.stdout
     assert human.exit_code == 0, human.stdout
     assert "Query DAG" in human.stdout
     assert "Query Parameters" in human.stdout

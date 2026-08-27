@@ -55,6 +55,25 @@ Select 必须明确候选域由谁拥有：
 
 `infer` 不允许写具体值列表 `default`。多选默认 `initial: auto`，编译为 `all_available` 意图，因此 Source 从 4 个城市增加到 10 个时无需修改 Dashboard；Selection Gallery 等需要初始不选择的场景使用 `initial: empty`。这不是候选值副本，不会随数据漂移。
 
+候选项依赖属于值/数据契约，不属于 Component。下游 Selection 只用 `depends_on` 声明直接父节点：
+
+```yaml
+controls:
+  - id: dow
+    kind: selection
+    field: dow
+    type: single_select
+    options: {mode: infer, source: source:hourly/main}
+  - id: dates
+    kind: selection
+    field: job_date
+    type: multi_select
+    depends_on: [view.dow]
+    options: {mode: infer, source: source:hourly/main}
+```
+
+`dashboard.<id>` 指当前 Dashboard，`section.<id>` 指当前所在 Section，`view.<id>` 指当前 View；不能跨兄弟 Section/View。链式关系只写直接边，例如 A 依赖 B、B 依赖 C，不在 A 重复列 C。`dataviz validate` 负责作用域、未知父节点、Selection 类型、候选关系字段和环；Select、Checkbox Group、Cascader 或 Tree Select 只呈现同一份 canonical 状态。
+
 ## 自动选择规则
 
 不写 Presentation 时，默认 Renderer 使用确定性规则：
@@ -103,11 +122,16 @@ controls:
 Presentation 只选 Component 和视觉选项：
 
 ```yaml
-schema: dataviz/presentation/v1
+schema: dataviz/presentation/v2
 kind: presentation
 dashboard: forecast
 
 control_components:
+  # RangePicker 默认仍是一列；只有确有需要时才显式跨两列。
+  query:job_date_range:
+    component: range-picker
+    span: 2
+
   dashboard:forecast/model:
     component: radio-group
     option_type: button
@@ -120,11 +144,16 @@ control_components:
     show_checked_strategy: parent
 
 control_panels:
+  query:
+    template: grid
+    columns: 4
   dashboard:
     template: grid
     width: wide
     columns: 2
 ```
+
+Query Parameters 的默认网格在宽屏最多放置 4 个控件，每轨保持可读宽度；容器变窄时自动降为 3、2、1 列。`columns` 表示响应式最大列数，不会强迫窄屏挤出固定列数。所有控件默认 `span: 1`；`span: 2` 是显式排版选择，RangePicker 不会因为组件类型自动变宽。
 
 错误组合会在 `dataviz validate` 阶段失败。例如：
 

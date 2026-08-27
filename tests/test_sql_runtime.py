@@ -35,7 +35,7 @@ def _sql_workspace(
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v5
+        """schema: dataviz/dashboard/v7
 kind: dashboard
 id: sql-test
 title: SQL test
@@ -222,7 +222,7 @@ cache: {mode: none}
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v5
+        """schema: dataviz/dashboard/v7
 kind: dashboard
 id: sql-test
 title: SQL test

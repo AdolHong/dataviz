@@ -76,7 +76,7 @@ class InteractionResult(BaseModel):
     finished_at: str | None = None
     query_parameters: dict[str, Any] = Field(default_factory=dict)
     compute_parameters: dict[str, Any] = Field(default_factory=dict)
-    selections: dict[str, Any] = Field(default_factory=dict)
+    selection_state: dict[str, dict[str, Any]] = Field(default_factory=dict)
     nodes: dict[str, NodeResult] = Field(default_factory=dict)
     outputs: dict[str, ArtifactDescriptor] = Field(default_factory=dict)
     warnings: list[dict[str, Any]] = Field(default_factory=list)

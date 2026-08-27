@@ -53,7 +53,7 @@ DOC_ALIASES = {
     "content": "dashboard",
     "interpolation": "dashboard",
     "title": "dashboard",
-    "layout": "presentation",
+    "layout": "layout-contract",
     "style": "presentation",
     "visual": "design-language",
     "visual-language": "design-language",
@@ -137,7 +137,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
         },
         "execution": {
             "compiled_contract": (
-                "每个 Dashboard load snapshot 以并发安全方式只编译并缓存一份 dataviz/dependency-contract/v2；"
+                "每个 Dashboard load snapshot 以并发安全方式只编译并缓存一份 dataviz/dependency-contract/v4；"
                 "Query planner、Interactive executor、Canvas、Server API 与浏览器 Runtime 都消费同一个对象。"
             ),
             "query_dag": "Source 与 Dataset Transform；完成的独立分支立即发布 Base Output。",
@@ -157,14 +157,14 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "dataviz dependencies <workspace> <dashboard-id>",
             "dataviz dependencies <workspace> <dashboard-id> --format json",
         ],
-        "schema": "dataviz/dependency-contract/v2",
+        "schema": "dataviz/dependency-contract/v4",
         "graphs": {
             "query": (
                 "Query Parameter → Source/Dataset Transform → immutable Base Named Output；"
                 "同时列出最终失效的 Query/Interactive/option Control/View 闭包。"
             ),
             "control": (
-                "Control 分开报告 scope_views、cascade edges、option domains、Selection direct_view_bindings、"
+                "Control 分开报告 scope_views、depends_on、传递祖先/后代、option domains、Selection direct_view_bindings、"
                 "runtime field checks、Transform aliases/consumers、derived_views、content_fields 与最终 affected_views。"
             ),
             "interactive": (
@@ -175,12 +175,14 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
         "initialization": [
             "Hydrate immutable Base Outputs。",
             "从 Base Outputs 推导 Selection option domains。",
-            "按 Dashboard → Section → View 级联得到 canonical Controls。",
+            "按编译后的 Control DAG 拓扑顺序协调候选域并提交 canonical Controls。",
             "先渲染 Base Views，再按编译顺序执行 Interactive DAG。",
         ],
         "rules": [
             "Selection 直接筛选其作用域内、且实际拥有绑定字段的 View 数据。",
-            "Browser 使用编译后的 control_order/cascade_upstream，不按 DOM 层级重建 Control DAG。",
+            "Selection 只用 depends_on 声明直接父节点；Compiler 生成 control_order 和 dependency_ancestors。",
+            "dashboard.<id>、section.<id>、view.<id> 相对当前 owner 解析，不能跨兄弟 Section/View。",
+            "Browser 使用编译后的 Control DAG，不按 DOM 层级重建依赖。",
             "Browser 注册 payload 只检查契约漂移；Transform 调度、View waiting 和 Renderer 输入仍读取编译契约。",
             "Compute 不直接筛选任何 View，只触发显式消费它的 Interactive Transform。",
             "Control 经 Transform 影响的 View 由 Derived Output 依赖反向索引决定。",
@@ -198,10 +200,12 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             {"stage": "Discover", "command": "dataviz list <workspace>"},
             {"stage": "Read", "command": "dataviz context <workspace> <dashboard> --focus view:<id> --format json"},
             {"stage": "Validate", "command": "dataviz validate <workspace> --dashboard <dashboard> --format json"},
+            {"stage": "Layout", "command": "dataviz inspect-layout <workspace> <dashboard> --format json"},
             {"stage": "Query", "command": "dataviz query <workspace> <dashboard> --source <id>"},
             {"stage": "Inspect", "command": "dataviz output <workspace> <dashboard> <canonical-output>"},
             {"stage": "Compute", "command": "dataviz compute <workspace> <dashboard> <transform-id> --run-id <run>"},
             {"stage": "Render", "command": "dataviz report <workspace> <dashboard> --output report.html"},
+            {"stage": "Visual", "command": "dataviz visual-check <workspace> <dashboard> --target both"},
             {"stage": "Interact", "command": "dataviz serve <workspace>"},
         ],
         "do_not": [
@@ -236,13 +240,18 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
     },
     "dashboard": {
         "summary": "dashboard.yaml 是分析逻辑；presentation.yaml 是可删除的视觉覆盖。",
-        "schema": "dataviz/dashboard/v5",
+        "schema": "dataviz/dashboard/v7",
+        "state_summary": {
+            "schema": "dataviz/state-snapshot/v1",
+            "behavior": "默认画布在 Dashboard/Section/View 标题附近展示当前已提交 Query、applied Selection 与 committed Compute；草稿只标记待应用。",
+            "presentation": "presentation.state_summary.items 可按 canonical Control key 调整 label/order/hidden/formatter；不允许改写状态值。",
+        },
         "identity": {
             "folder": "导航显示名及 ## 目录位置；复制、重命名和打包时所见即所得。",
             "id": "CLI、DAG、API 与 Presentation 使用的稳定程序身份。",
             "title": "页面内容，可与文件夹名不同；为空时回退到文件夹末级名称。",
         },
-        "minimal_example": """schema: dataviz/dashboard/v5
+        "minimal_example": """schema: dataviz/dashboard/v7
 kind: dashboard
 id: sales-overview
 title: 销售概览
@@ -278,7 +287,30 @@ sections:
                 "selection_control": "Selection Control 变化后即时更新可见文案与受影响 View。",
             },
         },
-        "related": ["presentation", "controls", "interactive-transforms"],
+        "related": ["layout-contract", "presentation", "controls", "interactive-transforms"],
+    },
+    "layout-contract": {
+        "summary": "Dashboard owns page structure; the compiler emits the only deterministic Layout Contract consumed by every renderer.",
+        "schema": "dataviz/layout-contract/v1",
+        "example": """layout: {template: overview, columns: 12, gap: 18}
+views:
+  - {id: trend, template: line, input: source:sales/main, x: day, y: revenue, span: 8}
+  - {id: detail, template: table, input: source:sales/main, span: 4}
+sections:
+  - {id: overview, template: chart-and-table, views: [trend, detail]}
+""",
+        "ownership": {
+            "dashboard": "Section/View order, Section template and columns, View span, global columns and gap.",
+            "presentation": "Theme, container appearance, min_height, component appearance, visual renderer options and local assets only.",
+            "custom_canvas": "Contract mode=custom exposes stable Section/View mount IDs but does not pretend arbitrary CSS has a static grid.",
+        },
+        "rules": [
+            "Explicit view.span wins over a template default; a template may not silently discard it.",
+            "single requires one View; split/comparison/chart-and-table require two; repeat templates require one blueprint View.",
+            "validate compiles the Layout Contract without querying and rejects unknown Views, duplicate placement, invalid cardinality and span overflow.",
+            "Server, exported HTML, AI context and the default Renderer consume the same compiled object.",
+        ],
+        "related": ["dashboard", "presentation", "validation"],
     },
     "query-parameters": {
         "summary": "Query Parameter 创建不可变 Query Run；节点通过 query_inputs 使用本地别名和显式投影。",
@@ -398,8 +430,8 @@ timeout_seconds: 120
             ),
         },
         "triggers": {
-            "apply": "默认；用户提交相关草稿后执行。",
-            "auto": "输入变化后 debounce，并取消同一 Transform 的旧 generation。",
+            "auto": "browser-js/browser-python 默认；输入变化后 debounce，并取消同一 Transform 的旧 generation。",
+            "apply": "server-python 默认；用户提交相关草稿后执行。",
             "manual": "仅明确指定 Transform 时执行，同时补齐其依赖闭包。",
         },
         "export_modes": {
@@ -515,9 +547,12 @@ selection_inputs:
             "view:<view-id>/<control-id>",
         ],
         "behavior": [
-            "Single Select 不出现 All、Select all、Invert 或 Clear；尚未选择时显示 placeholder，选中后保持恰好一个真实值。",
+            "Single Select 不出现 All、Select all 或 Invert；optional + clearable 的单选允许 Clear，required single 始终恰好一个值且拒绝 clearable。",
+            "Selection 的 canonical state 始终是 {intent, values}：all_available 跟随当前完整候选域；explicit 是显式子集；explicit + [] 是不选择任何样本。",
             "Multi Select 和 Date Range 用 required 控制是否允许空值；clearable 可显式关闭清空操作，required: true 与 clearable: true 会被 validate 拒绝。",
-            "级联上游域改变时，会移除不可用的下游已选值。",
+            "候选依赖用 depends_on 声明直接 Selection 父节点；Compiler 计算传递闭包和拓扑顺序。",
+            "Dashboard Control 只可依赖 dashboard.*；Section 可再依赖本 section.*；View 可再依赖自身 view.*。",
+            "上游域改变时，下游 all_available 意图跟随全部新候选；explicit 意图只保留有效交集。",
             "Select 必须显式声明 options.mode；static 表示封闭业务枚举，infer 表示从数据推导候选域。",
             "options.mode=static 的 choices 是权威白名单；Source 中未声明的成员会被有意排除。",
             "options.mode=infer 不允许 default 值列表；多选默认跟随全部可用项，initial: empty 可用于初始不选择。",
@@ -528,12 +563,39 @@ selection_inputs:
             "Interactive Transform 用 selection_inputs / compute_inputs 把本地 alias 映射到 canonical Control key。",
             "Runtime 先将 selection_inputs 应用于具有对应字段的表输入，再执行 Compute 逻辑；Transform 不应重复手写同一筛选。",
         ],
+        "view_control_binding": {
+            "summary": "一个 Selection Control 最多有一个可读写 Bound View；Control Component 和 View event 写同一 canonical state。",
+            "example": """views:
+  - id: store-map
+    input: source:stores/main
+    template: scatter
+    x: lng
+    y: lat
+    control_binding:
+      control: section.selected_store
+      field: store_id
+""",
+            "supported": ["Plotly point/select", "ECharts item click", "Table row", "typed Custom Renderer outlet"],
+            "rules": [
+                "Control owns values and candidate domain; it never declares highlight, row, cell, Renderer or callback.",
+                "The bound View receives candidate rows after ancestor Controls but before the target Control filters itself.",
+                "A View event can only dispatch select, select_many or clear through context.controlBinding.emit.",
+                "Unknown targets, a second writer, narrower reverse-scope candidate dependencies, unsupported Renderers and missing fields fail validation.",
+            ],
+        },
         "dynamic_option_example": """controls:
-  - id: job_date
+  - id: dow
     kind: selection
     type: single_select
+    field: dow
+    options:
+      mode: infer
+      source: source:forecast-series/main
+  - id: job_date
+    kind: selection
+    type: multi_select
     field: job_date
-    required: true
+    depends_on: [view.dow]
     options:
       mode: infer
       source: source:forecast-series/main
@@ -546,7 +608,7 @@ selection_inputs:
         "architecture": {
             "value": "dashboard.yaml 定义 type、default、required、options/suggestions、min/max/step、path_fields 等可验证逻辑。",
             "scope": "Query，或 dashboard/section/view 范围内的 Selection/Compute。",
-            "component": "presentation.yaml 的 control_components.<canonical-key>.component 只选择交互表现。",
+            "component": "presentation.yaml 的 control_components.<canonical-key>.component 只选择交互表现；span: 1|2 是独立的排版选择。",
             "runtime": "runtime.control 管理 canonical native value、事件、键盘与浮层生命周期；每个 control.* 包只实现一个组件。",
         },
         "ant_design_alignment": {
@@ -609,6 +671,10 @@ controls:
 
 # presentation.yaml: UI component only
 control_components:
+  query:job_date_range:
+    component: range-picker
+    span: 2  # optional; every component defaults to one track
+
   dashboard:forecast/model:
     component: radio-group
     option_type: button
@@ -627,11 +693,19 @@ control_components:
         "summary": "Renderer 只消费 Named Output 和 View descriptor，不执行业务取数。",
         "view_templates": list(VIEW_TEMPLATE_CONTRACTS),
         "chart_engines": ["plotly", "echarts"],
-        "lifecycle": ["validate", "mount", "update", "dispose"],
+        "lifecycle": {
+            "author_hooks": ["validate", "mount", "update", "dispose"],
+            "platform_matrix": [
+                "mount", "update", "empty", "restore",
+                "interaction", "resize", "dispose", "export",
+            ],
+            "rule": "Renderer 作者只实现四个 hook；平台宿主负责 Empty/Restore，Adapter/Chart Service 负责 Interaction/Resize，Server 与 portable HTML 必须通过同一矩阵。",
+        },
         "isolation": "一个 Renderer 失败只影响自己的 View；输入没有变化时不 update。",
-        "custom_plotly": {
-            "rule": "Custom Renderer 直接调用 Plotly.newPlot/react 时必须默认传 scrollZoom: false，保持 Dashboard 页面滚动。",
-            "exception": "只有用户明确要求图内滚轮缩放时，才允许设置 scrollZoom: true；不得把它作为复制粘贴的 Plotly 默认配置。",
+        "chart_service": {
+            "api": "Custom Renderer 使用 context.charts.plotly/echarts 的 mount/update/resize/dispose。",
+            "ownership": "平台统一 Theme、responsive、page-first wheel、ResizeObserver、首屏 bootstrap、更新、Empty/Restore 与释放。",
+            "escape_hatch": "直接调用底层 Plotly/ECharts 仍可用，但作者必须自行承担完整生命周期。",
         },
     },
     "charts": {
@@ -640,9 +714,10 @@ control_components:
         "rule": "先验证字段、聚合和 Named Output，再用 Presentation options 调视觉细节。",
         "plotly_wheel": {
             "declarative_default": "内置 Plotly 模板使用 scrollZoom=false；滚轮继续滚动 Dashboard 页面，不缩放图表。",
-            "custom_renderer": "Custom Renderer 不会自动继承内置模板配置；直接调用 Plotly.newPlot/react 时同样必须默认传 scrollZoom: false。",
+            "custom_renderer": "Custom Renderer 使用 context.charts.plotly 时继承平台默认；直接调用底层 API 时必须自行设置。",
             "opt_in": "只有用户明确要求图内滚轮缩放时，才在 View config、Presentation View config 或 Custom Renderer 中设置 scrollZoom: true。",
         },
+        "service_example": "const state = await context.charts.plotly.mount(node, {data, layout, config});",
     },
     "tables": {
         "summary": "普通 Table 用于可定制展示；Perspective 用于排序、筛选和透视分析。",
@@ -661,8 +736,9 @@ control_components:
         "rule": "所有实例共享一个 Named Output，不为每个实体重复查询 Source。",
     },
     "presentation": {
-        "summary": "可选 Presentation 按稳定 ID 覆盖布局、容器、Theme、Data Entry Component 和资源，不改变逻辑。",
-        "file": "dashboard 文件夹中的 presentation.yaml；删除后退化为自上而下的默认布局。",
+        "summary": "可选 Presentation 按稳定 ID 覆盖 Theme、容器外观、Data Entry Component 和资源；结构布局只属于 Dashboard。",
+        "file": "dashboard 文件夹中的 presentation.yaml；删除后仍使用 Dashboard Layout Contract，只退化为默认视觉样式。",
+        "forbidden_structure": ["layout", "section.template", "section.columns", "view.span"],
         "themes": {
             "default": "business：冷灰页面、白色卡片、靛蓝主色、低阴影；图表与控件自动继承同一组 token。",
             "presets": {
@@ -679,9 +755,10 @@ control_components:
             "options": {
                 "template": ["auto", "stack", "grid"],
                 "width": ["auto", "compact", "regular", "wide"],
-                "columns": "1–4；省略时按可用宽度自动换列",
+                "columns": "1–4，表示响应式最大列数；Query 默认最多 4 列并按可用宽度降为 3/2/1 列",
                 "density": ["compact", "comfortable"],
             },
+            "control_span": "control_components.<canonical-key>.span 可显式设为 1 或 2；默认 1，RangePicker 等组件不会自动跨列，窄容器会安全退化为单列。",
             "boundary": "这些字段只调整排版；值、校验、级联、tab 状态和执行仍由共享 Runtime 管理。导出 HTML 中 Query 为只读快照，Controls 保持交互。",
             "example": {
                 "control_panels": {
@@ -788,7 +865,7 @@ control_components:
             "只有模板无法表达行为时才写自定义 Renderer",
             "只有整个页面结构都特殊时才使用完整 Canvas",
         ],
-        "presentation_example": """schema: dataviz/presentation/v1
+        "presentation_example": """schema: dataviz/presentation/v2
 kind: presentation
 dashboard: sales-overview
 
@@ -797,22 +874,16 @@ theme:
   accent: \"#3451b2\"
   density: comfortable
 
-layout:
-  template: overview
-  gap: 18
-
 sections:
   performance:
-    template: chart-and-table
+    css_class: insight-section
 
 views:
   revenue-trend:
-    span: 8
     min_height: 380
     container: chart
     css_class: insight-primary
   sales-detail:
-    span: 4
     container: table
 
 assets:
@@ -940,12 +1011,16 @@ assets:
             "Interactive export.mode、Pyodide 依赖和 bundle 资产",
             "SQL named parameter、Python 依赖和输入/输出 Schema",
             "View/Section/Presentation/Data Entry Control 引用",
+            "最终 Layout/Dependency/Renderer 配置中的确定性冲突、no-op 与无 consumer Control",
         ],
         "json_contract": {
             "queries_executed": "固定为 0；静态验证不触发任何数据源。",
             "passed": "无 error；--strict 时 warning 也令 exit code 非零。",
+            "advice": "主观或依赖未知数据规模的启发式建议，不阻塞 --strict。",
             "diagnostic": "包含稳定 code、field/JSON path、file、details 和 hint。",
         },
+        "layout": "inspect-layout 输出 dataviz/layout-inspection/v1 的最终 rows、span、来源与 custom 边界。",
+        "visual": "visual-check 在真实浏览器中输出 dataviz/visual-check/v1、截图和客观几何诊断；不评价配色或业务图表选择。",
         "sql_parameter_example": {
             "errors": ["sql_parameter_undeclared", "sql_parameter_unused"],
             "fix": "同时更新 SQL placeholder、Source query_inputs 本地别名和 Dashboard query_parameters 绑定。",
@@ -954,10 +1029,10 @@ assets:
     "strict-schema": {
         "summary": "只接受当前 DSL；不提供 deprecated 层、字段别名、自动迁移或双协议 Runtime。",
         "current": {
-            "dashboard": "dataviz/dashboard/v5",
+            "dashboard": "dataviz/dashboard/v7",
             "source": "dataviz/source/v2",
-            "runtime": "dataviz/runtime/v3",
-            "dependency_contract": "dataviz/dependency-contract/v2",
+            "runtime": "dataviz/runtime/v5",
+            "dependency_contract": "dataviz/dependency-contract/v4",
             "dataset_transform": "dataviz/dataset-transform/v2",
             "interactive_transform": "dataviz/interactive-transform/v2",
         },
@@ -968,7 +1043,7 @@ assets:
         ],
     },
     "frontend-adapters": {
-        "summary": "前端实现只消费 dataviz/runtime/v3 Manifest/Event/Output，不读取 Python 内部对象。",
+        "summary": "前端实现只消费 dataviz/runtime/v5 Manifest/Event/Output，不读取 Python 内部对象。",
         "commands": [
             "dataviz frontend-adapters --format json",
             "dataviz frontend-adapters web-component --output runtime-adapter.js",

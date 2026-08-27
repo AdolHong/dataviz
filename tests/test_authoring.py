@@ -141,11 +141,11 @@ def test_machine_readable_component_examples_use_canonical_output_references():
 
 def test_machine_readable_documentation_examples_match_current_schemas():
     providers = {
-        "dataviz/dashboard/v5": DashboardDefinition,
+        "dataviz/dashboard/v7": DashboardDefinition,
         "dataviz/source/v2": SOURCE_DEFINITION_ADAPTER,
         "dataviz/dataset-transform/v2": DatasetTransformDefinition,
         "dataviz/interactive-transform/v2": InteractiveTransformDefinition,
-        "dataviz/presentation/v1": PresentationDefinition,
+        "dataviz/presentation/v2": PresentationDefinition,
     }
     examples: list[tuple[str, dict[str, object]]] = []
 
@@ -185,19 +185,19 @@ def test_machine_readable_documentation_examples_match_current_schemas():
 
 def test_plotly_wheel_docs_distinguish_declarative_and_custom_renderers():
     wheel = DOC_TOPICS["charts"]["plotly_wheel"]
-    custom = DOC_TOPICS["renderers"]["custom_plotly"]
+    service = DOC_TOPICS["renderers"]["chart_service"]
 
     assert "scrollZoom=false" in wheel["declarative_default"]
-    assert "不会自动继承" in wheel["custom_renderer"]
-    assert "scrollZoom: false" in custom["rule"]
-    assert "明确要求" in custom["exception"]
+    assert "context.charts.plotly" in wheel["custom_renderer"]
+    assert "context.charts.plotly/echarts" in service["api"]
+    assert "底层" in service["escape_hatch"]
 
 
 def test_component_registry_reports_package_owned_implementations():
     catalog = component_catalog()
     report = validate_component_packages(catalog)
 
-    assert COMPONENT_REGISTRY_VERSION == "4.0.0"
+    assert COMPONENT_REGISTRY_VERSION == "4.2.0"
     assert set(component_packages()) == {
         "control.auto-complete",
         "control.cascader",
@@ -244,9 +244,9 @@ def test_component_registry_reports_package_owned_implementations():
         "packages": 20,
         "package_implemented": 20,
         "bridge_implemented": 0,
-        "components": 58,
+        "components": 60,
         "stories": 38,
-        "test_declarations": 70,
+        "test_declarations": 72,
         "errors": [],
     }
     assert set(component_index()) == set(catalog)
@@ -628,7 +628,7 @@ def test_coordinate_layout_fields_are_strictly_rejected(layout):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v5",
+                "schema": "dataviz/dashboard/v7",
                 "kind": "dashboard",
                 "id": "strict",
                 "layout": layout,
@@ -642,7 +642,7 @@ def test_coordinate_presentation_fields_are_strictly_rejected(field):
     with pytest.raises(ValidationError) as failure:
         PresentationDefinition.model_validate(
             {
-                "schema": "dataviz/presentation/v1",
+                "schema": "dataviz/presentation/v2",
                 "kind": "presentation",
                 "dashboard": "strict",
                 "views": {"chart": {field: 6}},
@@ -704,8 +704,8 @@ def test_custom_renderer_scaffold_includes_style_and_contract(tmp_path: Path):
     script = (target / "assets" / "team.spark.js").read_text()
     style = (target / "assets" / "team.spark.css").read_text()
     assert 'node.className = "renderer-team-spark"' in script
-    assert "Plotly.newPlot/react, pass scrollZoom:false" in script
-    assert "Use true only on an explicit user request" in script
+    assert "context.charts.plotly/echarts" in script
+    assert "Direct Plotly/ECharts calls" in script
     assert ".renderer-team-spark" in style
     assets = yaml.safe_load((target / "presentation.asset.snippet.yaml").read_text())
     assert assets["assets"]["css"] == ["assets/team.spark.css"]
@@ -754,7 +754,8 @@ def test_initial_runtime_render_includes_input_free_content_views():
     assert declarative.index("view.template === 'image'") < declarative.index(
         "let rows = preparedRows"
     )
-    assert "return {type:view.renderer, rows, inputs, view" in declarative
+    assert "type:view.renderer" in declarative
+    assert "controlBinding:binding" in declarative
     assert "series:groups.map(group =>" in declarative
 
 
@@ -802,7 +803,7 @@ def test_component_docs_only_offer_fields_consumed_by_each_view_path():
         component = catalog[f"view.{template}"]
         assert component["logic"]["fields"] == contract["fields"]
         assert set(component["logic"]["optional"]) == set(contract["optional"])
-        expected_presentation = {"span", "min_height", "container", "css_class"}
+        expected_presentation = {"min_height", "container", "css_class"}
         expected_presentation.update(
             field
             for field in ("engine", "options", "config")
@@ -817,7 +818,6 @@ def test_component_docs_only_offer_fields_consumed_by_each_view_path():
     radar = catalog["view.radar"]
 
     assert table["presentation"]["options"] == [
-        "span",
         "min_height",
         "container",
         "css_class",

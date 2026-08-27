@@ -129,6 +129,7 @@ def test_content_title_is_optional_and_falls_back_to_canvas_name(tmp_path: Path)
     definition = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
     definition.pop("title", None)
     definition["subtitle"] = "华东经营专题"
+    definition["canvas"]["template"] = None
     definition_path.write_text(
         yaml.safe_dump(definition, allow_unicode=True, sort_keys=False), encoding="utf-8"
     )
@@ -143,7 +144,6 @@ def test_content_title_is_optional_and_falls_back_to_canvas_name(tmp_path: Path)
     assert entry.title == "销售看板"
 
     result = Executor(workspace).run("sales")
-    dashboard.definition.canvas.template = None
     rendered = CanvasRenderer(workspace).render(dashboard, result)
     assert "<title>销售看板</title>" in rendered
     assert "<h1>销售看板</h1>" in rendered
@@ -289,13 +289,22 @@ def test_three_level_selections_are_browser_state_and_do_not_enter_query_run():
     report = CanvasRenderer(workspace).render(
         dashboard,
         filtered,
-        selections={
-            "dashboard:sales/region": ["North"],
-            "section:pulse/min_revenue": 15000,
-            "view:detail/min_orders": 120,
+        selection_state={
+            "dashboard:sales/region": {
+                "intent": "explicit",
+                "values": ["North"],
+            },
+            "section:pulse/min_revenue": {
+                "intent": "explicit",
+                "values": [15000],
+            },
+            "view:detail/min_orders": {
+                "intent": "explicit",
+                "values": [120],
+            },
         },
     )
-    assert '"dashboard:sales/region": ["North"]' in report
+    assert '"dashboard:sales/region": {"intent": "explicit", "values": ["North"]}' in report
 
 
 def test_custom_canvas_and_report(tmp_path: Path):
@@ -323,6 +332,8 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert "PORTABLE ANALYSIS" in report
     assert "Query snapshot" in report
     assert "Dashboard controls" in report
+    assert report.count('name="dv-runtime-header-control"') == 2
+    assert report.count('data-overlay-group="runtime-header"') == 2
     assert "data-dv-control-panel" in report
     assert 'data-control-role="dashboard"' in report
     assert "Section controls" in report
@@ -334,11 +345,12 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert "installDatavizOverlay" in report
     assert "typeof event.composedPath === 'function'" in report
     assert "root.overlay = {register, registerDetails, hydrate, open, close, closeAll" in report
+    assert "if (isOpen(record)) open(record);" in report
     assert '"dependency_contract": {' in report
     assert '"views": {"revenue": {"inputs":' in report
-    assert "const refreshCascadingSelections = () =>" in report
+    assert "const refreshSelectionOptionDomains = () =>" in report
     assert "dependency_contract?.control_order" in report
-    assert "cascade_upstream" in report
+    assert "dependency_ancestors" in report
     assert "Commit each compiled Control" in report
     assert "function position(record)" in report
     assert "if (!activePath.length && selectedValues.size)" in report
@@ -349,12 +361,12 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert "await datavizRuntime.runTransforms(changedSelectionKeys, [], {" in report
     assert "changedComputeKeys: previous == null ? null : []" in report
     assert "if (!relevant && missingOutput && this.activeTransforms.has(id)) return;" in report
-    assert "refreshCascadingSelections();\n  readSelectionInputs();" in report
+    assert "refreshSelectionOptionDomains();\n  readSelectionInputs();" in report
     assert "affectedViews(changedSelectionKeys, new Set())" in report
     assert "changedSelectionKeys == null || changedSelectionKeys.length" in report
     assert "datavizSelectionCanApply" in report
     assert "dataset does not expose the selected field" in report
-    assert "state.selection.matches(row, item, state.selections[item.key])" in report
+    assert "state.selection.matches(row, item, state.selection.state(item.key))" in report
     assert "document.documentElement.dataset.selecting" not in report
     assert '"source:orders/main": [' in report
     assert '"dataset:sales-metrics/trend": [' in report
@@ -561,7 +573,12 @@ def test_report_selection_is_initial_state_not_an_export_cut(tmp_path: Path):
         workspace.dashboard("sales"),
         result,
         tmp_path / "interactive.html",
-        selections={"dashboard:sales/region": ["East"]},
+        selection_state={
+            "dashboard:sales/region": {
+                "intent": "explicit",
+                "values": ["East"],
+            }
+        },
     )
     report = output.read_text(encoding="utf-8")
     assert '<option value="East" selected>' in report

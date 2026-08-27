@@ -71,6 +71,7 @@
           if (button.disabled) return;
           if (option.selected && selected.length === 1 && !allowEmpty) return;
           option.selected = !option.selected;
+          api.markSelectionIntent(input, 'explicit');
           sync();
           api.emitChange(input);
         });
@@ -84,6 +85,7 @@
       const allSelected = available.length > 0 && available.every(option => option.selected);
       if (allSelected && !allowEmpty) return;
       available.forEach(option => { option.selected = !allSelected; });
+      api.markSelectionIntent(input, allSelected ? 'explicit' : 'all_available');
       sync();
       api.emitChange(input);
     });

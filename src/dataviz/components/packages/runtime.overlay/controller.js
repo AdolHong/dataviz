@@ -72,7 +72,11 @@
       record.zIndex || record.panel.dataset.overlayZIndex || 1000,
     );
     record.panel.style.width = `${width}px`;
-    record.panel.style.maxHeight = `${Math.max(120, viewport.height - gutter * 2)}px`;
+    // Measure against the viewport first, then constrain the panel to the side
+    // of the trigger where it will be placed. Clamping an almost viewport-high
+    // panel after measuring it used to move the panel over its own Header
+    // triggers, making adjacent controls impossible to click.
+    record.panel.style.maxHeight = `${Math.max(1, viewport.height - gutter * 2)}px`;
     record.panel.style.right = 'auto';
     record.panel.style.bottom = 'auto';
     record.panel.style.margin = '0';
@@ -81,13 +85,25 @@
     // ``scrollHeight`` excludes borders while positioning uses the border-box
     // rectangle. Firefox exposes that difference here; clamping with the
     // rendered box prevents a nominal 12px gutter from becoming 10px.
-    const height = Math.min(
+    const desiredHeight = Math.min(
       record.panel.getBoundingClientRect().height,
       viewport.height - gutter * 2,
     );
-    const roomBelow = viewport.bottom - triggerRect.bottom - gutter;
-    const roomAbove = triggerRect.top - viewport.top - gutter;
-    const above = height > roomBelow && roomAbove > roomBelow;
+    const roomBelow = Math.max(
+      1,
+      viewport.bottom - triggerRect.bottom - gutter - gap,
+    );
+    const roomAbove = Math.max(
+      1,
+      triggerRect.top - viewport.top - gutter - gap,
+    );
+    const above = desiredHeight > roomBelow && roomAbove > roomBelow;
+    const availableHeight = above ? roomAbove : roomBelow;
+    record.panel.style.maxHeight = `${availableHeight}px`;
+    const height = Math.min(
+      record.panel.getBoundingClientRect().height,
+      availableHeight,
+    );
     const align = record.align || 'end';
     const rawLeft = align === 'start' ? triggerRect.left : triggerRect.right - width;
     const left = Math.max(
@@ -95,10 +111,9 @@
       Math.min(rawLeft, viewport.right - width - gutter),
     );
     const rawTop = above ? triggerRect.top - height - gap : triggerRect.bottom + gap;
-    const top = Math.max(
-      viewport.top + gutter,
-      Math.min(rawTop, viewport.bottom - height - gutter),
-    );
+    // Height is already constrained to the selected side, so no bottom clamp
+    // may move the panel across the trigger that owns it.
+    const top = Math.max(viewport.top + gutter, rawTop);
     record.panel.style.left = `${left}px`;
     record.panel.style.top = `${top}px`;
     if (!record.topLayer) {
@@ -242,6 +257,13 @@
       isOpen: () => isOpen(record),
       destroy: () => records.delete(record),
     };
+    // Browsers may restore native <details open> state before this controller
+    // hydrates (notably when reopening a portable report or traversing history).
+    // Adopt that state through the same open path so group exclusivity,
+    // top-layer ownership and viewport positioning are established immediately.
+    // Without this normalization, two restored Header trays can remain open and
+    // occupy the same floating coordinates even though later clicks are exclusive.
+    if (isOpen(record)) open(record);
     return record;
   }
 

@@ -63,7 +63,9 @@
       const selectionKey = control.closest('[data-selection-key]')?.dataset.selectionKey;
       const computeKey = control.closest('[data-compute-key]')?.dataset.computeKey;
       const key = selectionKey || computeKey;
-      const stored = global.dataviz?.selections?.[key] ?? global.dataviz?.compute_parameters?.[key];
+      const stored = selectionKey
+        ? global.dataviz?.selection?.value?.(selectionKey)
+        : global.dataviz?.compute_parameters?.[key];
       const storedPaths = input.multiple
         ? (Array.isArray(stored) ? stored : [])
         : (Array.isArray(stored) && stored.length ? [stored] : []);
@@ -89,6 +91,7 @@
       const option = api.options(input).find(item => item.value === value);
       if (!option) return;
       if (input.multiple && option.selected && selected().size === 1 && !allowEmpty) return;
+      if (selectionKeyFor(input)) api.markSelectionIntent(input, 'explicit');
       api.setOption(input, option, input.multiple ? !option.selected : true);
       render(false);
       api.emitChange(input);
@@ -100,6 +103,7 @@
       const shouldSelect = values.some(value => !selectedValues.has(value));
       const selectedOutside = [...selectedValues].filter(value => !values.includes(value)).length;
       if (!shouldSelect && !allowEmpty && selectedOutside === 0) return;
+      if (selectionKeyFor(input)) api.markSelectionIntent(input, 'explicit');
       api.options(input).forEach(option => {
         if (values.includes(option.value)) option.selected = shouldSelect;
       });
@@ -210,6 +214,7 @@
     search.addEventListener('input', () => render(false));
     clear.addEventListener('click', () => {
       if (!allowEmpty || input.disabled) return;
+      if (selectionKeyFor(input)) api.markSelectionIntent(input, 'explicit');
       api.clearOptions(input);
       render(false);
       api.emitChange(input);
@@ -217,4 +222,7 @@
     api.keyboardList(panel, button => button.click());
     return {sync: () => render(true), overlay};
   });
+  function selectionKeyFor(input) {
+    return input?.closest('[data-selection-key]')?.dataset.selectionKey || null;
+  }
 })(window);

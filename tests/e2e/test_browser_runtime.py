@@ -102,6 +102,90 @@ def _copy_workspace(source: Path, destination: Path) -> Path:
     return destination
 
 
+def _build_same_view_dependency_workspace(root: Path) -> Path:
+    dashboard = root / "dashboards" / "same-view-controls"
+    sources = dashboard / "sources"
+    auth = root / "auth"
+    sources.mkdir(parents=True)
+    auth.mkdir()
+    (root / "workspace.yaml").write_text(
+        """schema: dataviz/workspace/v1
+kind: workspace
+id: same-view-controls
+title: Same View Controls
+folders: []
+""",
+        encoding="utf-8",
+    )
+    (auth / "adapters.yaml").write_text(
+        """adapters:
+  warehouse:
+    type: duckdb
+    database: ':memory:'
+""",
+        encoding="utf-8",
+    )
+    (dashboard / "dashboard.yaml").write_text(
+        """schema: dataviz/dashboard/v7
+kind: dashboard
+id: same-view-controls
+title: Same View Controls
+adapters: {warehouse: warehouse}
+sources: [sources/daily.yaml]
+views:
+  - id: daily-detail
+    title: Daily detail
+    input: source:daily/main
+    template: table
+    columns: [dow, job_date, sales]
+    controls:
+      - id: dow
+        kind: selection
+        field: dow
+        type: single_select
+        label: Weekday
+        options: {mode: infer, source: source:daily/main}
+      - id: dates
+        kind: selection
+        field: job_date
+        type: multi_select
+        label: Dates
+        depends_on: [view.dow]
+        options: {mode: infer, source: source:daily/main}
+sections:
+  - {id: results, title: Results, views: [daily-detail]}
+""",
+        encoding="utf-8",
+    )
+    (sources / "daily.yaml").write_text(
+        """schema: dataviz/source/v2
+kind: source
+id: daily
+type: sql
+adapter: warehouse
+code: daily.sql
+outputs:
+  main:
+    kind: table
+    schema:
+      - {name: dow}
+      - {name: job_date}
+      - {name: sales}
+""",
+        encoding="utf-8",
+    )
+    (sources / "daily.sql").write_text(
+        """select * from (values
+ ('周一', '2026-08-03', 10),
+ ('周一', '2026-08-10', 20),
+ ('周二', '2026-08-04', 30)
+) as t(dow, job_date, sales)
+""",
+        encoding="utf-8",
+    )
+    return root
+
+
 def _build_scale_workspace(root: Path, *, rows: int = 150_000) -> Path:
     dashboard = root / "dashboards" / "scale"
     transforms = dashboard / "transforms"
@@ -133,7 +217,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v5
+        """schema: dataviz/dashboard/v7
 kind: dashboard
 id: scale
 title: Scale Runtime
@@ -237,7 +321,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v5
+        """schema: dataviz/dashboard/v7
 kind: dashboard
 id: runtime-matrix
 title: Interactive Runtime Matrix
@@ -511,6 +595,72 @@ def test_header_overlays_stay_in_viewport_and_query_parameters_are_discoverable(
 
 
 @pytest.mark.e2e
+def test_portable_header_controls_normalize_restored_open_state(
+    page: Page, tmp_path: Path
+):
+    report_path = tmp_path / "portable-header-controls.html"
+    with _running_server(MINIMAL) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        _run_and_wait(page)
+        with page.expect_download(timeout=20_000) as download_info:
+            page.locator("#download-button").click()
+        download_info.value.save_as(report_path)
+
+    # Simulate a browser restoring both native Details elements before the
+    # component controller hydrates. Remove the native exclusive name so this
+    # fixture specifically verifies Runtime normalization as a second defence.
+    report = report_path.read_text(encoding="utf-8")
+    report = report.replace(' name="dv-runtime-header-control"', "", 2)
+    report = report.replace(
+        '<details class="dv-runtime-control"',
+        '<details open class="dv-runtime-control"',
+        2,
+    )
+    report_path.write_text(report, encoding="utf-8")
+
+    with _running_static_server(report_path.parent) as report_url:
+        page.goto(f"{report_url}/{report_path.name}", wait_until="domcontentloaded")
+        controls = page.locator("details.dv-runtime-control")
+        expect(controls).to_have_count(2)
+        expect(page.locator("details.dv-runtime-control[open]")).to_have_count(1)
+
+        # Opening the other Header tray must atomically transfer ownership;
+        # Parameters and Controls may never occupy the floating layer together.
+        closed_index = controls.evaluate_all(
+            "nodes => nodes.findIndex(node => !node.open)"
+        )
+        geometry = controls.evaluate_all(
+            """nodes => nodes.map(node => {
+              const summary = node.querySelector(':scope > summary').getBoundingClientRect();
+              const panel = node.querySelector(':scope > summary + *').getBoundingClientRect();
+              return {
+                open:node.open,
+                summary:{top:summary.top, bottom:summary.bottom, left:summary.left, right:summary.right},
+                panel:{top:panel.top, bottom:panel.bottom, left:panel.left, right:panel.right},
+                maxHeight:getComputedStyle(node.querySelector(':scope > summary + *')).maxHeight,
+              };
+            })"""
+        )
+        open_geometry = next(item for item in geometry if item["open"])
+        closed_geometry = geometry[closed_index]
+        assert (
+            closed_geometry["summary"]["right"]
+            <= open_geometry["summary"]["left"]
+            or open_geometry["summary"]["right"]
+            <= closed_geometry["summary"]["left"]
+        ), geometry
+        assert (
+            open_geometry["panel"]["top"] >= closed_geometry["summary"]["bottom"]
+            or open_geometry["panel"]["bottom"] <= closed_geometry["summary"]["top"]
+        ), geometry
+        controls.nth(closed_index).locator(":scope > summary").click(timeout=5_000)
+        expect(page.locator("details.dv-runtime-control[open]")).to_have_count(1)
+        states = controls.evaluate_all("nodes => nodes.map(node => node.open)")
+        assert states[closed_index] is True
+        assert sum(bool(value) for value in states) == 1
+
+
+@pytest.mark.e2e
 def test_workspace_hot_reload_preserves_run_and_marks_query_contract_outdated(
     page: Page, tmp_path: Path
 ):
@@ -565,24 +715,38 @@ def test_committed_parameter_content_and_stale_selection_export(
         _run_and_wait(page)
         frame = page.frame_locator("#canvas-frame")
         expect(frame.locator(".dv-subtitle")).to_have_text("当前取数下限：0")
+        expect(
+            frame.locator('[data-state-key="parameter:min_query_revenue"]')
+        ).to_contain_text("取数最低收入0")
+        expect(
+            frame.locator('[data-state-key="dashboard:sales-overview/region"]')
+        ).to_contain_text("区域")
 
         parameter = page.locator(
             '#parameter-form input[name="min_query_revenue"]'
         )
         parameter.fill("150000")
         expect(frame.locator(".dv-subtitle")).to_have_text("当前取数下限：0")
+        pending_parameter = frame.locator(
+            '[data-state-key="parameter:min_query_revenue"]'
+        )
+        expect(pending_parameter).to_have_attribute("data-state-stale", "true")
+        expect(pending_parameter).to_contain_text("待应用：150000")
         _run_and_wait(page)
         expect(frame.locator(".dv-subtitle")).to_have_text(
             "当前取数下限：150000",
             timeout=20_000,
         )
+        expect(
+            frame.locator('[data-state-key="parameter:min_query_revenue"]')
+        ).to_contain_text("150000")
 
         inject_stale_state = """() => {
           const sessionId = sessionStorage.getItem('dataviz.tab-session.v2');
-          const key = `dataviz.tab-ui.v2.${sessionId}`;
+          const key = `dataviz.tab-ui.v3.${sessionId}`;
           const saved = JSON.parse(sessionStorage.getItem(key));
-          saved.dashboards['sales-overview'].canvasSelections = {
-            'view:deleted/value': ['stale'],
+          saved.dashboards['sales-overview'].selectionState = {
+            'view:deleted/value': {intent:'explicit', values:['stale']},
           };
           sessionStorage.setItem(key, JSON.stringify(saved));
         }"""
@@ -594,10 +758,10 @@ def test_committed_parameter_content_and_stale_selection_export(
             """() => {
               const sessionId = sessionStorage.getItem('dataviz.tab-session.v2');
               const saved = JSON.parse(
-                sessionStorage.getItem(`dataviz.tab-ui.v2.${sessionId}`)
+                sessionStorage.getItem(`dataviz.tab-ui.v3.${sessionId}`)
               );
               return !('view:deleted/value' in (
-                saved.dashboards['sales-overview'].canvasSelections || {}
+                saved.dashboards['sales-overview'].selectionState || {}
               ));
             }""",
             timeout=20_000,
@@ -606,10 +770,10 @@ def test_committed_parameter_content_and_stale_selection_export(
             """() => {
               const sessionId = sessionStorage.getItem('dataviz.tab-session.v2');
               const saved = JSON.parse(
-                sessionStorage.getItem(`dataviz.tab-ui.v2.${sessionId}`)
+                sessionStorage.getItem(`dataviz.tab-ui.v3.${sessionId}`)
               );
               return Object.keys(
-                saved.dashboards['sales-overview'].canvasSelections || {}
+                saved.dashboards['sales-overview'].selectionState || {}
               );
             }"""
         )
@@ -636,7 +800,7 @@ def test_committed_parameter_content_and_stale_selection_export(
             with page.expect_download(timeout=20_000) as download_info:
                 page.locator("#download-button").click()
         download = download_info.value
-        supplied = request_info.value.post_data_json["selections"]
+        supplied = request_info.value.post_data_json["selection_state"]
         assert "view:deleted/value" not in supplied
 
         report_path = tmp_path / "parameter-report.html"
@@ -671,7 +835,11 @@ def test_canvas_messages_are_bound_to_the_current_frame_instance(
                 dashboard_id:active.dataset.dashboardId,
                 run_id:active.dataset.runId,
                 frame_id:active.dataset.frameId,
-                selections:{'view:rogue/value':['wrong-source']},
+                selection_state:{
+                  'view:rogue/value':{intent:'explicit', values:['wrong-source']},
+                },
+                selection_epoch:window.parent.document.querySelector('#canvas-frame')
+                  ?.contentWindow?.dataviz?.selection_epoch ?? 0,
               };
               rogue.contentWindow.eval(`parent.postMessage(${JSON.stringify(payload)}, location.origin)`);
             }"""
@@ -685,7 +853,10 @@ def test_canvas_messages_are_bound_to_the_current_frame_instance(
               dashboard_id:window.dataviz.dashboard_id,
               run_id:window.dataviz.run_id,
               frame_id:'frame_stale',
-              selections:{'view:rogue/value':['wrong-generation']},
+              selection_state:{
+                'view:rogue/value':{intent:'explicit', values:['wrong-generation']},
+              },
+              selection_epoch:window.dataviz.selection_epoch,
             }, location.origin)"""
         )
         page.wait_for_timeout(150)
@@ -693,9 +864,9 @@ def test_canvas_messages_are_bound_to_the_current_frame_instance(
             """() => {
               const sessionId = sessionStorage.getItem('dataviz.tab-session.v2');
               const saved = JSON.parse(
-                sessionStorage.getItem(`dataviz.tab-ui.v2.${sessionId}`)
+                sessionStorage.getItem(`dataviz.tab-ui.v3.${sessionId}`)
               );
-              return saved.dashboards['sales-overview'].canvasSelections?.['view:rogue/value'];
+              return saved.dashboards['sales-overview'].selectionState?.['view:rogue/value'];
             }"""
         )
         assert rogue_value is None
@@ -822,6 +993,39 @@ def test_sources_inspector_exposes_resolved_and_parameterized_sql(
 
 
 @pytest.mark.e2e
+def test_selection_impact_count_resolves_against_loaded_output_schemas(
+    page: Page, tmp_path: Path
+):
+    with _running_server(SHOWCASE) as base_url:
+        _open_dashboard(page, base_url, "source-lab")
+
+        dashboard_scope = page.locator(
+            '#dashboard-selection-form .selection-scope[data-control-key="dashboard:source-lab/day"]'
+        )
+        expect(dashboard_scope.locator("[data-control-impact-count]")).to_have_text(
+            "Up to 3 views"
+        )
+
+        _run_and_wait(page)
+        expect(dashboard_scope.locator("[data-control-impact-count]")).to_have_text(
+            "2 views",
+            timeout=20_000,
+        )
+
+        with page.expect_download(timeout=20_000) as download_info:
+            page.locator("#download-button").click()
+        report_path = tmp_path / "source-lab-impact.html"
+        download_info.value.save_as(report_path)
+
+    with _running_static_server(tmp_path) as report_url:
+        page.goto(f"{report_url}/{report_path.name}", wait_until="domcontentloaded")
+        impact = page.locator(
+            '[data-control-impact-key="dashboard:source-lab/day"]'
+        )
+        expect(impact).to_have_text("2 views", timeout=20_000)
+
+
+@pytest.mark.e2e
 def test_sources_inspector_loads_structured_python_execution_log(
     page: Page, tmp_path: Path
 ):
@@ -848,11 +1052,16 @@ def test_web_component_reference_adapter_consumes_runtime_v2_without_canvas_runt
     page: Page,
 ):
     manifest = {
-        "protocol": {"schema": "dataviz/runtime/v3", "component_registry_version": "3.0.0"},
-        "selections": {"dashboard:probe/region": ["East"]},
+        "protocol": {"schema": "dataviz/runtime/v5", "component_registry_version": "3.0.0"},
+        "selection_state": {
+            "dashboard:probe/region": {
+                "intent": "explicit",
+                "values": ["East"],
+            }
+        },
         "view_specs": [{"id": "detail", "inputs": {"main": "source:data/main"}}],
         "dependency_contract": {
-            "schema": "dataviz/dependency-contract/v2",
+            "schema": "dataviz/dependency-contract/v4",
             "views": {
                 "detail": {
                     "inputs": {"main": "source:data/main"},
@@ -893,7 +1102,9 @@ def test_web_component_reference_adapter_consumes_runtime_v2_without_canvas_runt
     assert page.evaluate("() => typeof window.datavizRuntime") == "undefined"
     page.evaluate(
         """() => {
-          window.dataviz.selections['dashboard:probe/region'] = ['West'];
+          window.dataviz.selection_state['dashboard:probe/region'] = {
+            intent:'explicit', values:['West'],
+          };
           window.dispatchEvent(new CustomEvent('dataviz:selectionchange'));
         }"""
     )
@@ -910,7 +1121,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         _run_and_wait(page)
         frame = page.frame_locator("#canvas-frame")
         detail = frame.locator('[data-view-id="detail-table"]')
-        expect(detail).to_have_attribute("data-view-status", "ready", timeout=20_000)
+        expect(detail).to_have_attribute("data-view-status", "empty", timeout=20_000)
 
         owner_contract = frame.locator("body").evaluate(
             """() => ({
@@ -925,7 +1136,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         assert {
             owner_contract[key]
             for key in ("runtime", "data", "view", "section", "presentation")
-        } == {"dataviz/runtime/v3"}
+        } == {"dataviz/runtime/v5"}
         assert {
             "data.pipeline", "view.declarative", "section.declarative", "presentation.shell"
         } <= set(owner_contract["packages"])
@@ -1171,15 +1382,16 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
             """() => new Promise((resolve, reject) => {
               const deadline = performance.now() + 3000;
               const check = () => {
-                const value = window.dataviz.selections['view:detail-table/date-window'];
-                if (Array.isArray(value) && value.length === 0) return resolve();
+                const state = window.dataviz.selection.state('view:detail-table/date-window');
+                if (state.intent === 'explicit' && state.values.length === 0) return resolve();
+                const value = state.values;
                 if (performance.now() > deadline) return reject(new Error(JSON.stringify(value)));
                 setTimeout(check, 25);
               };
               check();
             })"""
         )
-        expect(detail).not_to_contain_text("No rows match the current selections")
+        expect(detail).to_contain_text("No rows match the current selections")
 
         # The Gallery owns three real scale Stories. The 1,000-option Story uses
         # a canonical native select while keeping the enhanced row DOM bounded.
@@ -1241,6 +1453,89 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         expect(frame.locator('[data-view-id="narrative"]')).to_have_attribute(
             "data-view-status", "ready"
         )
+
+
+@pytest.mark.e2e
+def test_default_query_grid_caps_at_four_without_oversizing_range_picker(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(MINIMAL, tmp_path / "four-column-query-grid")
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    definition["query_parameters"].insert(
+        0,
+        {
+            "id": "job_date_range",
+            "type": "date_range",
+            "label": "Analysis window",
+            "required": True,
+            "default": ["2026-08-17", "2026-08-23"],
+        },
+    )
+    definition["query_parameters"].extend(
+        {
+            "id": f"scenario_{index:02d}",
+            "type": "number",
+            "label": f"Scenario {index:02d}",
+            "default": index,
+        }
+        for index in range(1, 10)
+    )
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    presentation_path = workspace / "dashboards" / "sales-overview" / "presentation.yaml"
+    presentation = yaml.safe_load(presentation_path.read_text(encoding="utf-8"))
+    presentation["control_components"] = {
+        "query:scenario_01": {"span": 2},
+    }
+    presentation_path.write_text(
+        yaml.safe_dump(presentation, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    page.set_viewport_size({"width": 2048, "height": 900})
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        form = page.locator("#parameter-form")
+        range_field = form.locator(".field", has=page.locator("#input-job_date_range"))
+        wide_field = form.locator(".field", has=page.locator("#input-scenario_01"))
+        expect(range_field.locator("[data-control-trigger]")).to_be_visible()
+
+        wide = form.evaluate(
+            """form => ({
+              columns:getComputedStyle(form).gridTemplateColumns.split(' ').length,
+              width:form.getBoundingClientRect().width,
+            })"""
+        )
+        assert wide["columns"] == 4, wide
+        assert wide["width"] <= 1397, wide
+        range_box = range_field.bounding_box()
+        wide_box = wide_field.bounding_box()
+        assert range_box is not None and wide_box is not None
+        assert range_box["width"] < 400, range_box
+        assert wide_box["width"] > range_box["width"] * 1.8, (range_box, wide_box)
+        assert range_field.locator(".dv-date-range__value").evaluate(
+            """value => [...value.querySelectorAll(':scope > span')]
+              .every(item => item.scrollWidth <= item.clientWidth)"""
+        )
+
+        page.set_viewport_size({"width": 760, "height": 700})
+        assert form.evaluate(
+            "form => getComputedStyle(form).gridTemplateColumns.split(' ').length"
+        ) == 2
+
+        page.set_viewport_size({"width": 480, "height": 700})
+        narrow = form.evaluate(
+            """form => ({
+              columns:getComputedStyle(form).gridTemplateColumns.split(' ').length,
+              width:form.getBoundingClientRect().width,
+              widest:Math.max(...[...form.children].map(item => item.getBoundingClientRect().width)),
+            })"""
+        )
+        assert narrow["columns"] == 1, narrow
+        assert narrow["widest"] <= narrow["width"] + 1, narrow
 
 
 @pytest.mark.e2e
@@ -1313,6 +1608,7 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(
                 position:getComputedStyle(panel).position,
                 width:rect.width,
                 ownerWidth:panel.parentElement.getBoundingClientRect().width,
+                configuredColumns:panel.parentElement.dataset.controlColumns,
                 columns: getComputedStyle(form).gridTemplateColumns.split(' ').length,
                 formClientHeight: form.clientHeight,
                 formScrollHeight: form.scrollHeight,
@@ -1323,7 +1619,8 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(
         )
         assert geometry["position"] == "relative", geometry
         assert abs(geometry["width"] - geometry["ownerWidth"]) <= 1, geometry
-        assert geometry["columns"] == 3
+        assert geometry["configuredColumns"] == "3"
+        assert geometry["columns"] == 2
         assert geometry["panelOverflow"] == "hidden"
         assert geometry["formOverflow"] == "auto"
         assert geometry["formScrollHeight"] > geometry["formClientHeight"]
@@ -1672,7 +1969,7 @@ def test_selection_cascade_popovers_view_isolation_and_table_wheel(
         )
         assert enabled_cities == ["厦门", "泉州"]
         assert frame.locator("body").evaluate(
-            "() => window.dataviz.selection_intents['section:geography/city']"
+            "() => window.dataviz.selection.state('section:geography/city').intent"
         ) == "all_available"
 
         dashboard_select.select_option(["广东", "福建"], force=True)
@@ -1691,7 +1988,7 @@ def test_selection_cascade_popovers_view_isolation_and_table_wheel(
         city_select.select_option(["厦门"], force=True)
         expect(city_rows).to_have_count(2, timeout=5_000)
         assert frame.locator("body").evaluate(
-            "() => window.dataviz.selection_intents['section:geography/city']"
+            "() => window.dataviz.selection.state('section:geography/city').intent"
         ) == "explicit"
         dashboard_select.select_option(["福建"], force=True)
         expect(city_select).to_have_values(["厦门"], timeout=5_000)
@@ -1703,7 +2000,7 @@ def test_selection_cascade_popovers_view_isolation_and_table_wheel(
         page.wait_for_function(
             """() => {
               const values = document.querySelector('#canvas-frame').contentWindow.dataviz
-                .selections['section:geography/city'];
+                .selection.value('section:geography/city');
               return values.length === 2 && values.includes('深圳') && values.includes('厦门');
             }"""
         )
@@ -1718,6 +2015,13 @@ def test_selection_cascade_popovers_view_isolation_and_table_wheel(
         cascader.locator("[data-control-trigger]").click()
         cascader.locator("footer button", has_text="Clear").click()
         columns = cascader.locator(".dv-cascader-columns")
+        page.wait_for_function(
+            """() => {
+              const state = document.querySelector('#canvas-frame').contentWindow.dataviz.selection;
+              return state.value('section:geography/city').length === 2
+                && state.value('view:city-detail/district').length === 0;
+            }"""
+        )
 
         columns.locator(".dv-cascader-column").nth(0).locator(
             "button", has_text="广东"
@@ -1797,6 +2101,404 @@ def test_selection_cascade_popovers_view_isolation_and_table_wheel(
             }"""
         )
         assert scroll_after > 0
+
+
+@pytest.mark.e2e
+def test_echarts_legend_filter_prunes_categories_on_mount_update_and_export(
+    page: Page, tmp_path: Path
+):
+    report_path = tmp_path / "echarts-legend-filter.html"
+
+    def legend_action(frame, selected: bool) -> list[str]:
+        return frame.locator("body").evaluate(
+            """(body, selected) => {
+              const state = window.datavizRuntime.viewAdapter.states.get('map-bars').state;
+              const legendState = Object.fromEntries(
+                state.descriptor.options.series.map(series => [series.name, true])
+              );
+              legendState['泉州'] = selected;
+              state.chart.trigger('legendselectchanged', {
+                name:'泉州',
+                selected:legendState,
+              });
+              return state.chart.getOption().xAxis[0].data;
+            }""",
+            selected,
+        )
+
+    with _running_server(SHOWCASE) as base_url:
+        _open_dashboard(page, base_url, "cascade-explorer")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        chart = frame.locator('[data-view-id="map-bars"]')
+        expect(chart).to_have_attribute("data-view-status", "ready", timeout=15_000)
+
+        # The very first legend interaction after mount must remove a category
+        # that belongs exclusively to the hidden series.
+        assert "鲤城区" not in legend_action(frame, False)
+        assert "鲤城区" in legend_action(frame, True)
+
+        # A Selection-driven renderer update must preserve the same interaction
+        # contract without duplicating or losing the listener.
+        city_select = frame.locator(
+            'select[data-selection-input="section:geography/city"]'
+        )
+        city_select.select_option(["深圳", "佛山", "厦门"], force=True)
+        page.wait_for_function(
+            """() => !document.querySelector('#canvas-frame').contentWindow
+              .datavizRuntime.viewAdapter.states.get('map-bars').state
+              .chart.getOption().xAxis[0].data.includes('鲤城区')"""
+        )
+        city_select.select_option(["深圳", "佛山", "厦门", "泉州"], force=True)
+        page.wait_for_function(
+            """() => document.querySelector('#canvas-frame').contentWindow
+              .datavizRuntime.viewAdapter.states.get('map-bars').state
+              .chart.getOption().xAxis[0].data.includes('鲤城区')"""
+        )
+        assert "鲤城区" not in legend_action(frame, False)
+        assert "鲤城区" in legend_action(frame, True)
+
+        with page.expect_download(timeout=20_000) as download_info:
+            page.locator("#download-button").click()
+        download_info.value.save_as(report_path)
+
+    with _running_static_server(report_path.parent) as report_url:
+        page.goto(f"{report_url}/{report_path.name}", wait_until="domcontentloaded")
+        chart = page.locator('[data-view-id="map-bars"]')
+        expect(chart).to_have_attribute("data-view-status", "ready", timeout=15_000)
+        assert "鲤城区" not in legend_action(page, False)
+        assert "鲤城区" in legend_action(page, True)
+
+
+@pytest.mark.e2e
+def test_managed_renderer_lifecycle_matrix_in_server_and_export(
+    page: Page, tmp_path: Path
+):
+    """One behavioral contract guards every imperative managed Renderer.
+
+    Renderer implementations keep the small validate/mount/update/dispose hook
+    API. The platform owns the wider behavioral matrix exercised here:
+    mount -> update -> empty -> restore -> interaction -> resize -> dispose -> export.
+    """
+    workspace = _copy_workspace(MINIMAL, tmp_path / "renderer-lifecycle")
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    echarts_view = next(
+        item for item in definition["views"] if item["id"] == "region-comparison"
+    )
+    echarts_view["engine"] = "echarts"
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    report_path = tmp_path / "renderer-lifecycle.html"
+    view_ids = ["revenue-trend", "region-comparison", "sales-perspective"]
+
+    def expect_ready(frame):
+        for view_id in view_ids:
+            expect(frame.locator(f'[data-view-id="{view_id}"]')).to_have_attribute(
+                "data-view-status", "ready", timeout=30_000
+            )
+
+    def mark_instances(frame):
+        return frame.locator("body").evaluate(
+                """(_body, ids) => {
+              const states = window.datavizRuntime.viewAdapter.states;
+              const plotly = states.get(ids[0]).state;
+              const echarts = states.get(ids[1]).state;
+              const perspective = states.get(ids[2]).state;
+              plotly.node.__datavizLifecycleIdentity = 'plotly-mounted';
+              echarts.chart.__datavizLifecycleIdentity = 'echarts-mounted';
+              perspective.viewer.__datavizLifecycleIdentity = 'perspective-mounted';
+              return {
+                hooks:[...window.datavizRuntime.viewAdapter.lifecycle.hooks],
+                phases:[...window.datavizRuntime.viewAdapter.lifecycle.phases],
+                perspectiveWorkerOwned:Boolean(perspective.worker),
+              };
+            }""",
+            view_ids,
+        )
+
+    def assert_update_reuses_instances(frame):
+        identities = frame.locator("body").evaluate(
+                """(_body, ids) => {
+              const states = window.datavizRuntime.viewAdapter.states;
+              return [
+                states.get(ids[0]).state.node.__datavizLifecycleIdentity,
+                states.get(ids[1]).state.chart.__datavizLifecycleIdentity,
+                states.get(ids[2]).state.viewer.__datavizLifecycleIdentity,
+              ];
+            }""",
+            view_ids,
+        )
+        assert identities == [
+            "plotly-mounted", "echarts-mounted", "perspective-mounted"
+        ]
+
+    def assert_interaction_and_resize(frame):
+        evidence = frame.locator("body").evaluate(
+                """async (_body, ids) => {
+              const runtime = window.datavizRuntime;
+              const states = runtime.viewAdapter.states;
+              const plotly = states.get(ids[0]).state;
+              const echarts = states.get(ids[1]).state;
+              const perspective = states.get(ids[2]).state;
+
+              let plotlyInteraction = 0;
+              plotly.node.once('plotly_click', () => { plotlyInteraction += 1; });
+              plotly.node.emit('plotly_click', {
+                points:[{curveNumber:0, pointNumber:0}],
+              });
+
+              const seriesNames = echarts.descriptor.options.series.map(item => item.name);
+              echarts.chart.trigger('legendselectchanged', {
+                name:seriesNames[0],
+                selected:Object.fromEntries(seriesNames.map(name => [name, false])),
+              });
+              const echartsCategories = echarts.chart.getOption().xAxis[0].data;
+
+              await perspective.viewer.restore({sort:[['revenue', 'desc']]});
+              await perspective.viewer.flush();
+              const perspectiveConfig = await perspective.viewer.save();
+
+              const beforeResize = runtime.metrics.renderers.resizes;
+              runtime.viewAdapter.states.get(ids[0]).state
+                && runtime.viewAdapter.states.get(ids[0]).state.node
+                && window.dataviz.charts.plotly.resize(plotly);
+              window.dataviz.charts.echarts.resize(echarts);
+              await perspective.viewer.resize();
+              return {
+                plotlyInteraction,
+                echartsCategories,
+                perspectiveSort:perspectiveConfig.sort,
+                resizeDelta:runtime.metrics.renderers.resizes - beforeResize,
+                failures:runtime.metrics.renderers.failed,
+              };
+            }""",
+            view_ids,
+        )
+        assert evidence["plotlyInteraction"] == 1
+        assert evidence["echartsCategories"] == []
+        assert evidence["perspectiveSort"] == [["revenue", "desc"]]
+        assert evidence["resizeDelta"] >= 2
+        assert evidence["failures"] == 0
+
+    def assert_dispose(frame):
+        evidence = frame.locator("body").evaluate(
+                """async (_body, ids) => {
+              const runtime = window.datavizRuntime;
+              const perspectiveBefore = structuredClone(runtime.metrics.perspective);
+              runtime.dispose();
+              const deadline = performance.now() + 5000;
+              while (
+                runtime.metrics.perspective.disposed < perspectiveBefore.created
+                && performance.now() < deadline
+              ) await new Promise(resolve => setTimeout(resolve, 20));
+              return {
+                states:runtime.viewAdapter.states.size,
+                rendererMetrics:structuredClone(runtime.metrics.renderers),
+                perspectiveMetrics:structuredClone(runtime.metrics.perspective),
+              };
+            }""",
+            view_ids,
+        )
+        assert evidence["states"] == 0
+        assert evidence["rendererMetrics"]["disposes"] >= 3
+        assert evidence["perspectiveMetrics"]["disposed"] >= 1
+        assert evidence["rendererMetrics"]["failed"] == 0
+
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+
+        # mount
+        expect_ready(frame)
+        contract = mark_instances(frame)
+        assert contract == {
+            "hooks": ["validate", "mount", "update", "dispose"],
+            "phases": [
+                "mount", "update", "empty", "restore",
+                "interaction", "resize", "dispose", "export",
+            ],
+            "perspectiveWorkerOwned": True,
+        }
+
+        # update: retain one region and preserve each engine instance.
+        page.locator("#dashboard-controls-control > summary").click()
+        options = page.locator(
+            '#dashboard-selection-form [data-control-component="checkbox-group"] '
+            '.dv-checkbox-option'
+        )
+        expect(options).to_have_count(3)
+        options.nth(1).click()
+        options.nth(2).click()
+        expect_ready(frame)
+        assert_update_reuses_instances(frame)
+
+        # empty: the host publishes one terminal state and disposes all engines.
+        options.nth(0).click()
+        for view_id in view_ids:
+            view = frame.locator(f'[data-view-id="{view_id}"]')
+            expect(view).to_have_attribute("data-view-status", "empty", timeout=2_000)
+            expect(view).to_contain_text("No rows match the current selections.")
+        assert frame.locator("body").evaluate(
+            "(_body, ids) => ids.every(id => !window.datavizRuntime.viewAdapter.states.has(id))",
+            view_ids,
+        )
+
+        # restore: every engine mounts exactly one fresh instance.
+        options.nth(0).click()
+        expect_ready(frame)
+        restored = frame.locator("body").evaluate(
+            """(_body, ids) => ({
+              identities:[
+                window.datavizRuntime.viewAdapter.states.get(ids[0]).state
+                  .node.__datavizLifecycleIdentity || null,
+                window.datavizRuntime.viewAdapter.states.get(ids[1]).state
+                  .chart.__datavizLifecycleIdentity || null,
+                window.datavizRuntime.viewAdapter.states.get(ids[2]).state
+                  .viewer.__datavizLifecycleIdentity || null,
+              ],
+              metrics:structuredClone(window.datavizRuntime.metrics.renderers),
+            })""",
+            view_ids,
+        )
+        assert restored["identities"] == [None, None, None]
+        assert restored["metrics"]["restores"] >= 3
+
+        # interaction + resize
+        assert_interaction_and_resize(frame)
+
+        # export is generated from the same live canonical state before the
+        # Server host is explicitly disposed.
+        page.locator("#dashboard-controls-control > summary").click()
+        with page.expect_download(timeout=20_000) as download_info:
+            page.locator("#download-button").click()
+        download_info.value.save_as(report_path)
+
+        # dispose
+        assert_dispose(frame)
+
+    # export: the portable host repeats the same lifecycle rather than using a
+    # separate static chart implementation.
+    with _running_static_server(report_path.parent) as report_url:
+        page.goto(f"{report_url}/{report_path.name}", wait_until="domcontentloaded")
+        expect_ready(page)
+        mark_instances(page)
+        selection = page.locator(
+            'select[data-selection-input="dashboard:sales-overview/region"]'
+        )
+
+        selection.select_option(["华南"], force=True)
+        expect_ready(page)
+        assert_update_reuses_instances(page)
+
+        selection.evaluate(
+            """input => {
+              window.datavizComponents.controls.clearOptions(input);
+              window.datavizComponents.controls.markSelectionIntent(input, 'explicit');
+              window.datavizComponents.controls.emitChange(input);
+            }"""
+        )
+        for view_id in view_ids:
+            expect(page.locator(f'[data-view-id="{view_id}"]')).to_have_attribute(
+                "data-view-status", "empty", timeout=2_000
+            )
+
+        selection.evaluate(
+            """input => {
+              input.options[0].selected = true;
+              window.datavizComponents.controls.markSelectionIntent(input, 'explicit');
+              window.datavizComponents.controls.emitChange(input);
+            }"""
+        )
+        expect_ready(page)
+        assert_interaction_and_resize(page)
+        assert_dispose(page)
+
+
+@pytest.mark.e2e
+def test_perspective_async_mount_has_bounded_table_fallback(page: Page, tmp_path: Path):
+    """An unresolved external engine cannot leave a View permanently Loading."""
+    workspace = _copy_workspace(MINIMAL, tmp_path / "perspective-bounded-fallback")
+    page.add_init_script(
+        """(() => {
+          window.__datavizRendererOperationTimeoutMs = 100;
+          Object.defineProperty(window, 'datavizPerspectiveReady', {
+            configurable:true,
+            get() { return new Promise(() => {}); },
+            set(_value) {},
+          });
+        })();"""
+    )
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        perspective = frame.locator('[data-view-id="sales-perspective"]')
+        expect(perspective).to_have_attribute("data-view-status", "ready", timeout=5_000)
+        expect(perspective.locator("[data-view-status-label]")).to_have_text(
+            "table fallback"
+        )
+        expect(perspective.locator("table")).to_have_count(1)
+        assert frame.locator("body").evaluate(
+            "window.datavizRuntime.metrics.perspective.failed"
+        ) == 1
+
+
+@pytest.mark.e2e
+def test_same_view_control_dependency_reconciles_in_server_and_export(
+    page: Page, tmp_path: Path
+):
+    workspace = _build_same_view_dependency_workspace(
+        tmp_path / "same-view-controls"
+    )
+    report_path = tmp_path / "same-view-controls.html"
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "same-view-controls")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        detail = frame.locator('[data-view-id="daily-detail"]')
+        expect(detail).to_have_attribute("data-view-status", "empty", timeout=15_000)
+        controls = detail.locator(
+            '.dv-context-controls[data-control-origin="view"]'
+        )
+        controls.locator("summary").click()
+        dow = frame.locator(
+            'select[data-selection-input="view:daily-detail/dow"]'
+        )
+        dates = frame.locator(
+            'select[data-selection-input="view:daily-detail/dates"]'
+        )
+
+        dow.select_option("周一", force=True)
+        expect(dates).to_have_values(
+            ["2026-08-03", "2026-08-10"], timeout=5_000
+        )
+        expect(detail.locator("tbody tr")).to_have_count(2)
+        dow.select_option("周二", force=True)
+        expect(dates).to_have_values(["2026-08-04"], timeout=5_000)
+        expect(detail.locator("tbody tr")).to_have_count(1)
+        dow.select_option("周一", force=True)
+        expect(dates).to_have_values(
+            ["2026-08-03", "2026-08-10"], timeout=5_000
+        )
+        expect(detail.locator("tbody tr")).to_have_count(2)
+
+        with page.expect_download(timeout=20_000) as download_info:
+            page.locator("#download-button").click()
+        download_info.value.save_as(report_path)
+
+    with _running_static_server(report_path.parent) as report_url:
+        page.goto(f"{report_url}/{report_path.name}", wait_until="domcontentloaded")
+        detail = page.locator('[data-view-id="daily-detail"]')
+        expect(detail).to_have_attribute("data-view-status", "ready", timeout=15_000)
+        dates = page.locator(
+            'select[data-selection-input="view:daily-detail/dates"]'
+        )
+        expect(dates).to_have_values(["2026-08-03", "2026-08-10"])
+        expect(detail.locator("tbody tr")).to_have_count(2)
 
 
 @pytest.mark.e2e
@@ -1939,6 +2641,87 @@ def test_perspective_fills_view_uses_opaque_settings_and_releases_page_wheel(
 
 
 @pytest.mark.e2e
+def test_perspective_enters_empty_state_immediately_after_last_selection_is_cleared(
+    page: Page, tmp_path: Path,
+):
+    report_path = tmp_path / "perspective-empty-selection.html"
+    with _running_server(MINIMAL) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        perspective = frame.locator('[data-view-id="sales-perspective"]')
+        detail = frame.locator('[data-view-id="sales-detail"]')
+        expect(perspective).to_have_attribute("data-view-status", "ready", timeout=30_000)
+
+        page.locator("#dashboard-controls-control > summary").click()
+        options = page.locator(
+            '#dashboard-selection-form [data-control-component="checkbox-group"] '
+            '.dv-checkbox-option'
+        )
+        expect(options).to_have_count(3)
+        options.nth(0).click()
+        options.nth(1).click()
+        expect(perspective).to_have_attribute("data-view-status", "ready", timeout=5_000)
+
+        started = time.monotonic()
+        options.nth(2).click()
+        expect(detail).to_contain_text(
+            "No rows match the current selections.", timeout=2_000
+        )
+        expect(perspective).to_have_attribute("data-view-status", "empty", timeout=2_000)
+        expect(perspective).to_contain_text(
+            "No rows match the current selections.", timeout=2_000
+        )
+        assert time.monotonic() - started < 2
+
+        # Returning from Empty creates one fresh Perspective instance; stale
+        # cleanup from the old instance must not overwrite the restored View.
+        options.nth(0).click()
+        expect(perspective).to_have_attribute("data-view-status", "ready", timeout=30_000)
+        expect(perspective.locator("perspective-viewer")).to_have_count(1)
+
+        with page.expect_download(timeout=20_000) as download_info:
+            page.locator("#download-button").click()
+        download_info.value.save_as(report_path)
+
+    # Portable reports use the same View Package lifecycle. Clearing the last
+    # selected value must therefore publish Empty immediately without waiting
+    # for Perspective's internal flush timeout.
+    with _running_static_server(report_path.parent) as report_url:
+        page.goto(f"{report_url}/{report_path.name}", wait_until="domcontentloaded")
+        perspective = page.locator('[data-view-id="sales-perspective"]')
+        expect(perspective).to_have_attribute("data-view-status", "ready", timeout=30_000)
+        selection = page.locator(
+            'select[data-selection-input="dashboard:sales-overview/region"]'
+        )
+        expect(selection).to_have_count(1)
+
+        started = time.monotonic()
+        selection.evaluate(
+            """input => {
+              window.datavizComponents.controls.clearOptions(input);
+              window.datavizComponents.controls.markSelectionIntent(input, 'explicit');
+              window.datavizComponents.controls.emitChange(input);
+            }"""
+        )
+        expect(perspective).to_have_attribute("data-view-status", "empty", timeout=2_000)
+        expect(perspective).to_contain_text(
+            "No rows match the current selections.", timeout=2_000
+        )
+        assert time.monotonic() - started < 2
+
+        selection.evaluate(
+            """input => {
+              input.options[0].selected = true;
+              window.datavizComponents.controls.markSelectionIntent(input, 'explicit');
+              window.datavizComponents.controls.emitChange(input);
+            }"""
+        )
+        expect(perspective).to_have_attribute("data-view-status", "ready", timeout=30_000)
+        expect(perspective.locator("perspective-viewer")).to_have_count(1)
+
+
+@pytest.mark.e2e
 def test_cross_browser_perspective_repeated_dispose_and_restore(
     page: Page, tmp_path: Path
 ):
@@ -2061,8 +2844,7 @@ def test_required_dynamic_view_selection_bootstraps_from_base_output_and_exports
               dashboard_id:window.dataviz.dashboard_id,
               run_id:window.dataviz.run_id,
               frame_id:window.dataviz.frame_id,
-              selections:{},
-              selection_intents:{},
+              selection_state:{},
             }, window.location.origin)"""
         )
 
@@ -2149,7 +2931,7 @@ def test_browser_query_inputs_project_date_range_parts(page: Page, tmp_path: Pat
         }
         stored = page.evaluate(
             """() => {
-              const key = Object.keys(sessionStorage).find(value => value.startsWith('dataviz.tab-ui.v2.'));
+              const key = Object.keys(sessionStorage).find(value => value.startsWith('dataviz.tab-ui.v3.'));
               return JSON.parse(sessionStorage.getItem(key)).dashboards['worker-runtime'].queryParameterValues;
             }"""
         )
@@ -2312,7 +3094,9 @@ def test_server_and_browser_python_share_output_contract_and_export_runtime(
         )
         frame.locator("body").evaluate(
             """async () => {
-              window.dataviz.selections['dashboard:runtime-matrix/name'] = ['alpha'];
+              window.dataviz.selection.set(
+                'dashboard:runtime-matrix/name', ['alpha'], {intent:'explicit'},
+              );
               await window.dataviz.applySelections();
             }"""
         )
@@ -2364,6 +3148,243 @@ def test_server_and_browser_python_share_output_contract_and_export_runtime(
         assert page.locator("body").evaluate(
             "() => window.datavizRuntime.metrics.interactiveTransforms.completed"
         ) >= 1
+
+
+@pytest.mark.e2e
+def test_selection_gallery_canonical_empty_all_and_clear(page: Page):
+    with _running_server(REPEAT) as base_url:
+        _open_dashboard(page, base_url, "store-performance")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        host = frame.locator('[data-repeat-section="selected-stores"]')
+        summary = frame.locator(
+            '[data-selection-key="section:selected-stores/stores"] [data-control-summary]'
+        )
+
+        expect(host).to_have_attribute("data-repeat-count", "0")
+        expect(host).to_contain_text("Nothing selected")
+        assert frame.locator("body").evaluate(
+            """() => window.dataviz.selection.state(
+              'section:selected-stores/stores'
+            )"""
+        ) == {"intent": "explicit", "values": []}
+
+        frame.locator(
+            '[data-selection-key="section:selected-stores/stores"] '
+            'select[data-selection-input]'
+        ).evaluate(
+            """input => {
+              Array.from(input.options).forEach(option => { option.selected = true; });
+              window.datavizComponents.controls.markSelectionIntent(input, 'all_available');
+              window.datavizComponents.controls.emitChange(input);
+            }"""
+        )
+        expect(host).to_have_attribute("data-repeat-count", "100", timeout=20_000)
+        expect(summary).to_have_text("All (100)")
+        assert frame.locator("body").evaluate(
+            """() => window.dataviz.selection.state(
+              'section:selected-stores/stores'
+            ).intent"""
+        ) == "all_available"
+
+        frame.locator(
+            '[data-selection-key="section:selected-stores/stores"] '
+            'select[data-selection-input]'
+        ).evaluate(
+            """input => {
+              window.datavizComponents.controls.clearOptions(input);
+              window.datavizComponents.controls.markSelectionIntent(input, 'explicit');
+              window.datavizComponents.controls.emitChange(input);
+            }"""
+        )
+        expect(host).to_have_attribute("data-repeat-count", "0")
+        expect(host).to_contain_text("Nothing selected")
+        assert frame.locator("body").evaluate(
+            """() => window.dataviz.selection.state(
+              'section:selected-stores/stores'
+            )"""
+        ) == {"intent": "explicit", "values": []}
+
+
+@pytest.mark.e2e
+def test_plotly_control_binding_commits_once_and_keeps_bound_candidates(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(MINIMAL, tmp_path / "bound-view")
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    bound_view = next(
+        item for item in definition["views"] if item["id"] == "region-comparison"
+    )
+    bound_view["control_binding"] = "dashboard.region"
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    report_path = tmp_path / "bound-view-report.html"
+
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        bound = frame.locator('[data-view-id="region-comparison"]')
+        consumer = frame.locator('[data-view-id="sales-detail"]')
+        expect(bound).to_have_attribute("data-view-status", "ready", timeout=20_000)
+        chart = bound.locator(".dv-plotly")
+        expect(chart).to_be_visible()
+        assert chart.evaluate("node => node.data[0].x.length") == 3
+
+        chart.evaluate(
+            """node => node.emit('plotly_click', {
+              points:[{customdata:node.data[0].customdata[0]}],
+            })"""
+        )
+        expect(consumer.locator(".dv-table-meta strong")).to_have_text("4")
+        assert chart.evaluate("node => node.data[0].x.length") == 3
+        state = frame.locator("body").evaluate(
+            """() => ({
+              selection:window.dataviz.selection.state('dashboard:sales-overview/region'),
+              revision:window.dataviz.controlActions.revision,
+            })"""
+        )
+        assert state["selection"] == {"intent": "explicit", "values": ["华东"]}
+        assert state["revision"] == 1
+
+        no_op = chart.evaluate(
+            """node => window.dataviz.controlActions.dispatch({
+              view_id:'region-comparison',
+              control:'dashboard:sales-overview/region',
+              generation:document.querySelector('[data-view-id="region-comparison"]')
+                ._datavizRenderGeneration,
+              action:'select',
+              data:{__datavizControlValue:'华东'},
+            })"""
+        )
+        assert no_op == {"status": "noop", "revision": 1}
+        assert frame.locator("body").evaluate(
+            "() => window.dataviz.controlActions.revision"
+        ) == 1
+
+        stale = frame.locator("body").evaluate(
+            """() => window.dataviz.controlActions.dispatch({
+              view_id:'region-comparison',
+              control:'dashboard:sales-overview/region',
+              generation:0,
+              action:'select',
+              data:{__datavizControlValue:'华南'},
+            })"""
+        )
+        assert stale == {"status": "discarded", "reason": "stale_view_generation"}
+        assert frame.locator("body").evaluate(
+            "() => window.dataviz.controlActions.revision"
+        ) == 1
+
+        frame.locator("body").evaluate(
+            """() => window.dataviz.controlActions.dispatch({
+              view_id:'region-comparison',
+              control:'dashboard:sales-overview/region',
+              generation:document.querySelector('[data-view-id="region-comparison"]')
+                ._datavizRenderGeneration,
+              action:'clear',
+            })"""
+        )
+        expect(consumer).to_have_attribute("data-view-status", "empty")
+        expect(consumer).to_contain_text("No rows match the current selections.")
+        assert chart.evaluate("node => node.data[0].x.length") == 3
+
+        with page.expect_download(timeout=20_000) as download_info:
+            page.locator("#download-button").click()
+        download_info.value.save_as(report_path)
+
+    # The portable report uses the same View Adapter and canonical commit path;
+    # it does not carry a server-only callback implementation.
+    with _running_static_server(report_path.parent) as report_url:
+        page.goto(f"{report_url}/{report_path.name}", wait_until="domcontentloaded")
+        bound = page.locator('[data-view-id="region-comparison"]')
+        consumer = page.locator('[data-view-id="sales-detail"]')
+        expect(bound).to_have_attribute("data-view-status", "ready", timeout=20_000)
+        chart = bound.locator(".dv-plotly")
+        assert chart.evaluate("node => node.data[0].x.length") == 3
+        chart.evaluate(
+            """node => node.emit('plotly_click', {
+              points:[{customdata:node.data[0].customdata[0]}],
+            })"""
+        )
+        expect(consumer.locator(".dv-table-meta strong")).to_have_text("4")
+
+
+@pytest.mark.e2e
+def test_table_control_binding_writes_the_shared_selection(page: Page, tmp_path: Path):
+    workspace = _copy_workspace(MINIMAL, tmp_path / "table-bound-view")
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    bound_view = next(item for item in definition["views"] if item["id"] == "sales-detail")
+    bound_view["control_binding"] = {
+        "control": "dashboard.region",
+        "field": "region",
+    }
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        table = frame.locator('[data-view-id="sales-detail"]')
+        chart = frame.locator('[data-view-id="region-comparison"] .dv-plotly')
+        expect(table).to_have_attribute("data-view-status", "ready", timeout=20_000)
+        assert table.locator("tbody tr").count() == 12
+
+        east_row = table.locator("tbody tr").filter(has_text="华东").first
+        east_row.click()
+
+        expect(east_row).to_have_attribute("aria-selected", "true")
+        assert table.locator("tbody tr").count() == 12
+        assert chart.evaluate("node => node.data[0].x") == ["华东"]
+        assert frame.locator("body").evaluate(
+            "() => window.dataviz.selection.state('dashboard:sales-overview/region')"
+        ) == {"intent": "explicit", "values": ["华东"]}
+
+
+@pytest.mark.e2e
+def test_echarts_control_binding_normalizes_click_events(page: Page, tmp_path: Path):
+    workspace = _copy_workspace(MINIMAL, tmp_path / "echarts-bound-view")
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    bound_view = next(
+        item for item in definition["views"] if item["id"] == "region-comparison"
+    )
+    bound_view["engine"] = "echarts"
+    bound_view["control_binding"] = "dashboard.region"
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        bound = frame.locator('[data-view-id="region-comparison"]')
+        consumer = frame.locator('[data-view-id="sales-detail"]')
+        expect(bound).to_have_attribute("data-view-status", "ready", timeout=20_000)
+
+        event_result = frame.locator("body").evaluate(
+            """() => {
+              const mounted = window.datavizRuntime.viewAdapter.states
+                .get('region-comparison').state;
+              const datum = mounted.descriptor.options.series[0].data[0];
+              mounted.chart.trigger('click', {data:datum});
+              return datum.__datavizControlValue;
+            }"""
+        )
+        assert event_result == "华东"
+        expect(consumer.locator(".dv-table-meta strong")).to_have_text("4")
+        assert frame.locator("body").evaluate(
+            "() => window.dataviz.selection.state('dashboard:sales-overview/region')"
+        ) == {"intent": "explicit", "values": ["华东"]}
 
 
 @pytest.mark.e2e

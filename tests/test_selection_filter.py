@@ -53,6 +53,23 @@ def test_selection_filters_are_include_only_and_ignore_unrelated_tables():
     ).equals(unrelated)
 
 
+def test_explicit_empty_selection_means_zero_rows_not_all_rows():
+    frame = pd.DataFrame(
+        [
+            {"region": "north", "value": 1},
+            {"region": "south", "value": 2},
+        ]
+    )
+
+    selected = apply_selection_filters(
+        frame,
+        [_filter(control_id="region", value=[], field="region")],
+    )
+
+    assert selected.empty
+    assert list(selected.columns) == ["region", "value"]
+
+
 def test_selection_filters_support_path_date_and_numeric_contracts():
     frame = pd.DataFrame(
         [

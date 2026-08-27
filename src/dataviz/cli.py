@@ -6,11 +6,13 @@ import os
 import platform
 import shlex
 import shutil
+import socket
 import statistics
 import sys
 import threading
 import time
 from pathlib import Path
+from contextlib import contextmanager
 from tempfile import TemporaryDirectory
 from typing import Any
 
@@ -60,7 +62,12 @@ from dataviz.server import create_app
 from dataviz.templates import component_catalog
 from dataviz.validation import format_validation_text, validate_preflight
 from dataviz.workspace import load_workspace
-from dataviz.workspace.controls import resolve_compute_values, resolve_selection_values
+from dataviz.selection_state import state_from_explicit_values
+from dataviz.semantic_validation import validate_dashboard_semantics
+from dataviz.workspace.controls import (
+    project_selection_values,
+    resolve_compute_values,
+)
 
 
 app = typer.Typer(
@@ -533,6 +540,170 @@ def handle_error(exc: Exception) -> None:
     raise typer.Exit(1)
 
 
+def _result_detail(value: str) -> str:
+    if value not in {"summary", "debug", "full"}:
+        raise typer.BadParameter("--detail must be summary, debug, or full")
+    return value
+
+
+def _artifact_result_summary(
+    *,
+    status: str,
+    reference: str,
+    artifact,
+    value: Any,
+    truncated: bool,
+    run_id: str,
+    duration_ms: int | None = None,
+) -> dict[str, Any]:
+    schema = artifact.schema_ or []
+    columns = [item.get("name") for item in schema if item.get("name")]
+    return {
+        "schema": "dataviz/cli-result/v1",
+        "status": status,
+        "run_id": run_id,
+        "reference": reference,
+        "kind": artifact.kind,
+        "rows": artifact.metadata.get("row_count"),
+        "columns": columns,
+        "duration_ms": duration_ms,
+        "preview": value,
+        "truncated": truncated,
+        "next_actions": [
+            "Use --detail debug to inspect bindings and diagnostics.",
+            "Use --detail full only when the complete execution envelope is required.",
+        ],
+    }
+
+
+def _failed_result_summary(result, reference: str, node=None) -> dict[str, Any]:
+    return {
+        "schema": "dataviz/cli-result/v1",
+        "status": result.status,
+        "run_id": result.run_id,
+        "reference": reference,
+        "error": node.error if node else {"code": "output_unavailable", "message": "Named Output was not produced"},
+        "next_actions": [
+            "Run dataviz validate WORKSPACE --dashboard DASHBOARD --format json.",
+            "Repeat with --detail debug to inspect the failing node.",
+        ],
+    }
+
+
+@contextmanager
+def _visual_server(workspace: Path):
+    import uvicorn
+
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = int(probe.getsockname()[1])
+    probe.close()
+    server = uvicorn.Server(
+        uvicorn.Config(
+            create_app(workspace, watch=False),
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
+        )
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while not server.started and thread.is_alive() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    if not server.started:
+        raise RuntimeError("Visual-check Server did not start")
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+
+
+def _visual_page_diagnostics(page, *, target: str, viewport: str) -> list[dict[str, Any]]:
+    return page.evaluate(
+        """({target, viewport}) => {
+          const diagnostics = [];
+          const add = (level, code, message, details = {}) => diagnostics.push({
+            level, code, message, target, viewport, details,
+          });
+          const doc = document.documentElement;
+          if (doc.scrollWidth > doc.clientWidth + 2) add(
+            'error', 'visual_horizontal_overflow',
+            `Document is ${doc.scrollWidth - doc.clientWidth}px wider than the viewport`,
+            {scroll_width:doc.scrollWidth, client_width:doc.clientWidth},
+          );
+          const views = [...document.querySelectorAll('.dv-view')].filter(node => {
+            const style = getComputedStyle(node);
+            return style.display !== 'none' && style.visibility !== 'hidden';
+          });
+          views.forEach(node => {
+            const rect = node.getBoundingClientRect();
+            const id = node.dataset.viewId || 'unknown';
+            if (rect.width < 2 || rect.height < 2) add(
+              'error', 'visual_zero_size_view', `View ${id} has no usable geometry`,
+              {view:id, width:rect.width, height:rect.height},
+            );
+            if (node.dataset.viewStatus === 'loading') add(
+              'error', 'visual_permanent_loading', `View ${id} is still Loading`, {view:id},
+            );
+          });
+          for (let leftIndex = 0; leftIndex < views.length; leftIndex += 1) {
+            const left = views[leftIndex];
+            const a = left.getBoundingClientRect();
+            for (let rightIndex = leftIndex + 1; rightIndex < views.length; rightIndex += 1) {
+              const right = views[rightIndex];
+              if (left.contains(right) || right.contains(left)) continue;
+              const b = right.getBoundingClientRect();
+              const width = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+              const height = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+              if (width > 4 && height > 4) add(
+                'error', 'visual_view_overlap',
+                `Views ${left.dataset.viewId} and ${right.dataset.viewId} overlap`,
+                {views:[left.dataset.viewId, right.dataset.viewId], width, height},
+              );
+            }
+          }
+          document.querySelectorAll('[data-dv-control-panel]:not([hidden])').forEach(panel => {
+            const rect = panel.getBoundingClientRect();
+            if (rect.left < -2 || rect.right > innerWidth + 2) add(
+              'error', 'visual_control_panel_clipped', 'A Control panel is clipped horizontally',
+              {left:rect.left, right:rect.right, viewport_width:innerWidth},
+            );
+          });
+          document.querySelectorAll('details[data-runtime-popover], details.dv-context-controls').forEach(owner => {
+            const wasOpen = owner.open;
+            const overlay = owner._datavizOverlayRecord?.api;
+            if (overlay) overlay.open();
+            else owner.open = true;
+            const panel = owner.querySelector('.dv-runtime-popover, .dv-context-controls__panel');
+            if (panel) {
+              const rect = panel.getBoundingClientRect();
+              if (rect.left < -2 || rect.right > innerWidth + 2 || rect.top < -2) add(
+                'error', 'visual_overlay_clipped', 'A scoped Control overlay is outside the viewport',
+                {left:rect.left, right:rect.right, top:rect.top, viewport_width:innerWidth},
+              );
+            }
+            if (overlay && !wasOpen) overlay.close();
+            else owner.open = wasOpen;
+          });
+          document.querySelectorAll('.dv-view--perspective').forEach(node => {
+            const viewer = node.querySelector('perspective-viewer');
+            if (!viewer) return;
+            const body = node.querySelector('.dv-view-body');
+            const height = viewer.getBoundingClientRect().height;
+            if (height < 180 || (body && height < body.clientHeight * .65)) add(
+              'error', 'visual_perspective_height',
+              `Perspective View ${node.dataset.viewId || 'unknown'} has insufficient usable height`,
+              {view:node.dataset.viewId, viewer_height:height, body_height:body?.clientHeight || null},
+            );
+          });
+          return diagnostics;
+        }""",
+        {"target": target, "viewport": viewport},
+    )
+
+
 @app.command()
 def init(path: Path = typer.Argument(..., help="New workspace directory")) -> None:
     """Create a minimal Git-friendly workspace."""
@@ -566,7 +737,7 @@ Finish the returned session with `dataviz authoring finish`. Commit the generate
 `dataviz-authoring.jsonl` when its task text and notes contain no sensitive data;
 sharing that file gives the Dataviz author real retry, time and documentation-friction data.
 """,
-        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v5
+        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v7
 kind: dashboard
 id: hello
 title: Hello dashboard
@@ -887,6 +1058,163 @@ def schemas(
         typer.echo(f"```json\n{json.dumps(payload['json_schema'], ensure_ascii=False, indent=2)}\n```")
 
 
+@app.command("visual-check")
+def visual_check(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    dashboard: str = typer.Argument(...),
+    browser: str = typer.Option("chromium", "--browser"),
+    viewport: list[str] | None = typer.Option(
+        None, "--viewport", help="Repeat WIDTHxHEIGHT; defaults to desktop and narrow"
+    ),
+    target: str = typer.Option("both", "--target", help="report, server, or both"),
+    output: Path | None = typer.Option(None, "--output"),
+    timeout_seconds: float = typer.Option(20.0, "--timeout", min=1),
+    output_format: str = typer.Option("text", "--format", help="text or json"),
+) -> None:
+    """Render in a real browser and report objective geometry/runtime defects."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as error:
+        raise typer.BadParameter("visual-check requires: uv sync --extra dev") from error
+    if browser not in {"chromium", "firefox", "webkit"}:
+        raise typer.BadParameter("--browser must be chromium, firefox, or webkit")
+    if target not in {"report", "server", "both"}:
+        raise typer.BadParameter("--target must be report, server, or both")
+    if output_format not in {"text", "json"}:
+        raise typer.BadParameter("--format must be text or json")
+    viewports = viewport or ["1440x900", "390x844"]
+    parsed_viewports: list[tuple[str, int, int]] = []
+    for value in viewports:
+        try:
+            width, height = (int(item) for item in value.lower().split("x", 1))
+        except (TypeError, ValueError) as error:
+            raise typer.BadParameter(f"Invalid viewport {value}; use WIDTHxHEIGHT") from error
+        if width < 240 or height < 240:
+            raise typer.BadParameter("Viewport dimensions must be at least 240px")
+        parsed_viewports.append((value, width, height))
+    try:
+        loaded = load_workspace(workspace)
+        loaded_dashboard = loaded.dashboard(dashboard)
+        output_root = (output or workspace / ".dataviz" / "visual-check" / dashboard).resolve()
+        output_root.mkdir(parents=True, exist_ok=True)
+        result = Executor(loaded).run(dashboard, refresh=True)
+        if result.status != "ready":
+            print_json(result)
+            raise typer.Exit(1)
+        report = CanvasRenderer(loaded).write_report(
+            loaded_dashboard,
+            result,
+            output_root / "report.html",
+        )
+        diagnostics: list[dict[str, Any]] = []
+        screenshots: list[str] = []
+        with sync_playwright() as playwright:
+            try:
+                browser_instance = getattr(playwright, browser).launch(headless=True)
+            except Exception as error:
+                raise typer.BadParameter(
+                    f"{browser} is unavailable; run: playwright install {browser}"
+                ) from error
+
+            def inspect_url(url: str, mode: str, *, server_shell: bool = False) -> None:
+                for _viewport_name, width, height in parsed_viewports:
+                    context = browser_instance.new_context(viewport={"width": width, "height": height})
+                    page = context.new_page()
+                    console_errors: list[str] = []
+                    def capture_console_error(message, errors=console_errors):
+                        if message.type == "error":
+                            errors.append(message.text)
+
+                    page.on("console", capture_console_error)
+                    page.goto(url, wait_until="domcontentloaded", timeout=int(timeout_seconds * 1000))
+                    canvas_page = page
+                    if server_shell:
+                        dashboard_item = page.locator(
+                            f'[data-nav-type="dashboard"][data-id="{dashboard}"]'
+                        )
+                        dashboard_item.click()
+                        page.locator("#run-button").click()
+                        page.locator("#query-diagnostics-label").wait_for(
+                            state="visible", timeout=int(timeout_seconds * 1000)
+                        )
+                        page.wait_for_function(
+                            "() => document.querySelector('#query-diagnostics-label')?.textContent?.trim() === 'Ready'",
+                            timeout=int(timeout_seconds * 1000),
+                        )
+                        frame_handle = page.locator("#canvas-frame").element_handle()
+                        canvas_page = frame_handle.content_frame() if frame_handle else page
+                    try:
+                        canvas_page.wait_for_function(
+                            "() => [...document.querySelectorAll('.dv-view')].every(node => node.dataset.viewStatus !== 'loading')",
+                            timeout=int(timeout_seconds * 1000),
+                        )
+                    except Exception:
+                        pass
+                    viewport_label = f"{width}x{height}"
+                    diagnostics.extend(
+                        _visual_page_diagnostics(
+                            canvas_page,
+                            target=mode,
+                            viewport=viewport_label,
+                        )
+                    )
+                    diagnostics.extend(
+                        {
+                            "level": "error",
+                            "code": "visual_console_error",
+                            "message": message,
+                            "target": mode,
+                            "viewport": viewport_label,
+                            "details": {},
+                        }
+                        for message in console_errors
+                    )
+                    screenshot = output_root / f"{mode}-{browser}-{width}x{height}.png"
+                    page.screenshot(path=str(screenshot), full_page=True)
+                    screenshots.append(str(screenshot))
+                    context.close()
+
+            if target in {"report", "both"}:
+                inspect_url(report.as_uri(), "report")
+            if target in {"server", "both"}:
+                with _visual_server(workspace) as base_url:
+                    inspect_url(base_url, "server", server_shell=True)
+            browser_instance.close()
+        payload = {
+            "schema": "dataviz/visual-check/v1",
+            "status": "failed" if any(item["level"] == "error" for item in diagnostics) else "passed",
+            "dashboard": dashboard,
+            "browser": browser,
+            "targets": [target] if target != "both" else ["report", "server"],
+            "viewports": [item[0] for item in parsed_viewports],
+            "diagnostics": diagnostics,
+            "screenshots": screenshots,
+        }
+        atomic_write_text(
+            output_root / "visual-check.json",
+            json.dumps(payload, ensure_ascii=False, indent=2),
+        )
+        if output_format == "json":
+            print_json(payload)
+        else:
+            typer.echo(
+                f"Visual check {payload['status']}: {dashboard} · {browser} · "
+                f"{len(diagnostics)} diagnostic(s)"
+            )
+            for item in diagnostics:
+                typer.echo(
+                    f"- {item['level'].upper()} {item['code']} "
+                    f"[{item['target']} {item['viewport']}]: {item['message']}"
+                )
+            typer.echo(f"Artifacts: {output_root}")
+        if payload["status"] == "failed":
+            raise typer.Exit(1)
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        handle_error(exc)
+
+
 @app.command("version")
 def version(output_format: str = typer.Option("json", "--format", help="json or text")) -> None:
     """Show package, DSL, Component Registry and browser protocol versions."""
@@ -919,7 +1247,7 @@ def frontend_adapters(
     ),
     output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
 ) -> None:
-    """Inspect frontend implementations that consume dataviz/runtime/v3."""
+    """Inspect frontend implementations that consume dataviz/runtime/v5."""
     if output_format not in {"markdown", "json"}:
         raise typer.BadParameter("--format must be markdown or json")
     catalog = frontend_adapter_catalog()
@@ -1621,13 +1949,71 @@ def dependencies_command(
             runtime_checked = ", ".join(dependency.runtime_checked_views) or "none"
             transforms = ", ".join(dependency.transform_consumers) or "none"
             derived = ", ".join(dependency.derived_views) or "none"
-            upstream = ", ".join(dependency.cascade_upstream) or "none"
+            direct_dependencies = ", ".join(dependency.depends_on) or "none"
+            ancestors = ", ".join(dependency.dependency_ancestors) or "none"
             typer.echo(
                 f"- `{key}` ({dependency.kind}) · scope: {scope}; "
                 f"direct data Views: {direct} (runtime field check: {runtime_checked}); "
-                f"cascade upstream: {upstream}; Transforms: {transforms}; "
+                f"depends on: {direct_dependencies}; effective ancestors: {ancestors}; "
+                f"Transforms: {transforms}; "
                 f"derived Views: {derived}"
             )
+    except Exception as exc:
+        handle_error(exc)
+
+
+@app.command("inspect-layout")
+def inspect_layout(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    dashboard: str = typer.Argument(...),
+    output_format: str = typer.Option("text", "--format", help="text or json"),
+) -> None:
+    """Print the one compiled Layout Contract without starting a browser."""
+    if output_format not in {"text", "json"}:
+        raise typer.BadParameter("--format must be text or json")
+    try:
+        loaded = load_workspace(workspace)
+        item = loaded.dashboard(dashboard)
+        contract = item.layout_contract.as_dict()
+        semantic = [
+            diagnostic.as_dict()
+            for diagnostic in validate_dashboard_semantics(item)
+            if diagnostic.code.startswith(("layout_", "semantic_"))
+        ]
+        payload = {
+            "schema": "dataviz/layout-inspection/v1",
+            "dashboard": dashboard,
+            "layout": contract,
+            "diagnostics": semantic,
+        }
+        if output_format == "json":
+            print_json(payload)
+            return
+        typer.echo(f"# Dashboard layout · {item.canvas_name}\n")
+        typer.echo(f"Mode: {contract['mode']} · {contract['columns']} columns · gap {contract['gap']}px")
+        if contract["mode"] == "custom":
+            typer.echo("\nCustom Canvas boundary")
+            typer.echo("- Sections: " + (", ".join(contract["mount_points"]["sections"]) or "none"))
+            typer.echo("- Views: " + (", ".join(contract["mount_points"]["views"]) or "none"))
+        for section in contract["sections"]:
+            typer.echo(
+                f"\n## {section['id']} · {section['template']} · {section['columns']} columns"
+            )
+            placements = {item["view"]: item for item in section["placements"]}
+            for row in section["rows"]:
+                cells = " | ".join(
+                    f"{view} span={placements[view]['span']} "
+                    f"({placements[view]['source']})"
+                    for view in row["views"]
+                )
+                typer.echo(f"- row {row['index'] + 1}: {cells}")
+        if semantic:
+            typer.echo("\nDiagnostics")
+            for diagnostic in semantic:
+                typer.echo(
+                    f"- [{diagnostic['level'].upper()}] {diagnostic['code']}: "
+                    f"{diagnostic['message']}"
+                )
     except Exception as exc:
         handle_error(exc)
 
@@ -1837,11 +2223,13 @@ def query(
     ),
     limit: int = typer.Option(100, "--limit", min=1),
     refresh: bool = typer.Option(False, "--refresh"),
+    detail: str = typer.Option("summary", "--detail", help="summary, debug, or full"),
 ) -> None:
     """Query one named Source Output without starting a server."""
     try:
         if output_format not in {"json", "csv", "markdown", "text"}:
             raise typer.BadParameter("--format must be json, csv, markdown, or text")
+        detail = _result_detail(detail)
         loaded = load_workspace(workspace)
         reference = parse_output_reference(f"source:{source}/{output_name}")
         result = Executor(loaded).run(
@@ -1853,7 +2241,9 @@ def query(
         node = result.nodes[reference.node_id]
         artifact = node.outputs.get(reference.output)
         if not artifact:
-            print_json(result)
+            print_json(
+                result if detail == "full" else _failed_result_summary(result, reference.canonical, node)
+            )
             raise typer.Exit(1)
         store = ArtifactStore(loaded.root, result.run_id)
         value = store.read_value(artifact)
@@ -1875,20 +2265,26 @@ def query(
             typer.echo(str(value))
             return
         if output_format == "json":
+            summary = _artifact_result_summary(
+                status=result.status,
+                reference=reference.canonical,
+                artifact=artifact,
+                value=value,
+                truncated=truncated,
+                run_id=result.run_id,
+                duration_ms=node.duration_ms,
+            )
+            if detail == "debug":
+                summary.update(
+                    query_parameters=result.query_parameters,
+                    artifact=artifact.model_dump(mode="json", by_alias=True),
+                    node=node.model_dump(mode="json", by_alias=True),
+                )
             print_json(
-                {
-                    "status": result.status,
-                    "run_id": result.run_id,
-                    "source": source,
-                    "reference": reference.canonical,
-                    "query_parameters": result.query_parameters,
-                    "schema": artifact.schema_,
-                    "row_count": artifact.metadata.get("row_count"),
-                    "value": value,
-                    "truncated": truncated,
-                    "artifact": artifact.model_dump(mode="json", by_alias=True),
-                    "node": node.model_dump(mode="json", by_alias=True),
-                }
+                result.model_dump(mode="json", by_alias=True)
+                | {"value": value, "reference": reference.canonical}
+                if detail == "full"
+                else summary
             )
         if result.status == "error":
             raise typer.Exit(1)
@@ -1909,11 +2305,13 @@ def inspect_output(
     output_format: str = typer.Option("json", "--format", help="json, csv, markdown, or text"),
     limit: int = typer.Option(100, "--limit", min=1),
     refresh: bool = typer.Option(False, "--refresh"),
+    detail: str = typer.Option("summary", "--detail", help="summary, debug, or full"),
 ) -> None:
     """Execute the dependency closure and inspect one canonical Named Output."""
     try:
         if output_format not in {"json", "csv", "markdown", "text"}:
             raise typer.BadParameter("--format must be json, csv, markdown, or text")
+        detail = _result_detail(detail)
         loaded = load_workspace(workspace)
         parsed = parse_output_reference(reference)
         canonical = parsed.canonical
@@ -1929,7 +2327,10 @@ def inspect_output(
         )
         artifact = result.outputs.get(canonical)
         if artifact is None:
-            print_json(result)
+            node = result.nodes.get(parsed.node_id)
+            print_json(
+                result if detail == "full" else _failed_result_summary(result, canonical, node)
+            )
             raise typer.Exit(1)
         store = ArtifactStore(loaded.root, result.run_id)
         value = store.read_value(artifact)
@@ -1948,19 +2349,28 @@ def inspect_output(
         elif output_format != "json":
             typer.echo(str(value))
             return
+        truncated = artifact.kind == "table" and int(artifact.metadata.get("row_count", 0)) > limit
+        node = result.nodes.get(parsed.node_id)
+        summary = _artifact_result_summary(
+            status=result.status,
+            reference=canonical,
+            artifact=artifact,
+            value=value,
+            truncated=truncated,
+            run_id=result.run_id,
+            duration_ms=node.duration_ms if node else None,
+        )
+        if detail == "debug":
+            summary.update(
+                query_parameters=result.query_parameters,
+                artifact=artifact.model_dump(mode="json", by_alias=True),
+                node=node.model_dump(mode="json", by_alias=True) if node else None,
+            )
         print_json(
-            {
-                "status": result.status,
-                "run_id": result.run_id,
-                "reference": canonical,
-                "query_parameters": result.query_parameters,
-                "artifact": artifact.model_dump(mode="json", by_alias=True),
-                "value": value,
-                "truncated": (
-                    artifact.kind == "table"
-                    and int(artifact.metadata.get("row_count", 0)) > limit
-                ),
-            }
+            result.model_dump(mode="json", by_alias=True)
+            | {"value": value, "reference": canonical}
+            if detail == "full"
+            else summary
         )
     except typer.Exit:
         raise
@@ -1984,26 +2394,79 @@ def compute(
     ),
     limit: int = typer.Option(100, "--limit", min=1),
     refresh: bool = typer.Option(False, "--refresh"),
+    detail: str = typer.Option("summary", "--detail", help="summary, debug, or full"),
 ) -> None:
     """Run one server-python Interactive Transform against an existing Query Run."""
     try:
         if output_format not in {"json", "csv", "markdown", "text"}:
             raise typer.BadParameter("--format must be json, csv, markdown, or text")
+        detail = _result_detail(detail)
         loaded = load_workspace(workspace)
         run_result = load_run_result(loaded.root, run_id)
         if run_result.dashboard != dashboard:
             raise typer.BadParameter(
                 f"Query Run {run_id} belongs to {run_result.dashboard}, not {dashboard}"
             )
+        loaded_dashboard = loaded.dashboard(dashboard)
+        selection_state = state_from_explicit_values(
+            loaded_dashboard.definition,
+            parse_params(selection),
+        )
         interaction = InteractionExecutor(loaded).execute(
             run_result,
             interactive_transform,
             compute_parameters=parse_params(compute_param),
-            selections=parse_params(selection),
+            selection_state=selection_state,
             refresh=refresh,
         )
         if output_format == "json":
-            print_json(interaction)
+            if detail == "full":
+                print_json(interaction)
+            else:
+                output_summaries = []
+                store = ArtifactStore(loaded.root, run_id)
+                for reference, artifact in interaction.outputs.items():
+                    preview = artifact.preview
+                    if preview is None:
+                        raw = store.read_value(artifact)
+                        if artifact.kind == "table":
+                            preview = json.loads(raw.head(limit).to_json(orient="records", date_format="iso"))
+                        else:
+                            preview = raw
+                    output_summaries.append(
+                        _artifact_result_summary(
+                            status=interaction.status,
+                            reference=reference,
+                            artifact=artifact,
+                            value=preview,
+                            truncated=(
+                                artifact.kind == "table"
+                                and int(artifact.metadata.get("row_count", 0)) > limit
+                            ),
+                            run_id=run_id,
+                            duration_ms=interaction.nodes.get(interactive_transform).duration_ms
+                            if interaction.nodes.get(interactive_transform)
+                            else None,
+                        )
+                    )
+                payload = {
+                    "schema": "dataviz/cli-result/v1",
+                    "status": interaction.status,
+                    "run_id": run_id,
+                    "interaction_id": interaction.interaction_id,
+                    "target": interactive_transform,
+                    "outputs": output_summaries,
+                }
+                if detail == "debug":
+                    payload.update(
+                        compute_parameters=interaction.compute_parameters,
+                        selection_state=interaction.selection_state,
+                        nodes={
+                            key: value.model_dump(mode="json", by_alias=True)
+                            for key, value in interaction.nodes.items()
+                        },
+                    )
+                print_json(payload)
         else:
             if not output_name:
                 raise typer.BadParameter("--output-name is required for non-JSON formats")
@@ -2088,10 +2551,14 @@ def report(
             loaded_dashboard.definition,
             parse_params(compute_param),
         )
-        selection_values = resolve_selection_values(
+        resolved_selection_state = state_from_explicit_values(
             loaded_dashboard.definition,
             parse_params(selection),
             phase="canvas-hydration",
+        )
+        selection_values = project_selection_values(
+            loaded_dashboard.definition,
+            resolved_selection_state,
         )
         interactive_ids = loaded_dashboard.dependency_contract.reachable_interactive_order
         derived_outputs = {}
@@ -2129,7 +2596,7 @@ def report(
                 result,
                 transform_id,
                 compute_parameters=compute_values,
-                selections=selection_values,
+                selection_state=resolved_selection_state,
                 refresh=refresh,
             )
             interaction_results.append(interaction)
@@ -2142,7 +2609,7 @@ def report(
             result,
             output.resolve(),
             compute_parameters=compute_values,
-            selections=selection_values,
+            selection_state=resolved_selection_state,
             derived_outputs=derived_outputs,
             snapshot_interactions=snapshot_interactions,
         )
@@ -2159,7 +2626,8 @@ def report(
                 "network_dependencies": manifest["network_dependencies"],
                 "query_parameters": result.query_parameters,
                 "compute_parameters": compute_values,
-                "selections": selection_values,
+                "selection_state": resolved_selection_state,
+                "selection_values": selection_values,
                 "snapshot_interactions": [
                     value.interaction_id for value in interaction_results
                 ],

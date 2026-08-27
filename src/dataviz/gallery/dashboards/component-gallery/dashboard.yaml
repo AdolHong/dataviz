@@ -1,9 +1,11 @@
-schema: dataviz/dashboard/v5
+schema: dataviz/dashboard/v7
 kind: dashboard
 id: component-gallery
 title: Component Gallery
 subtitle: Runtime-native specimens
 description: Every specimen uses the same DSL, component behavior and Renderer lifecycle as a real Dashboard.
+
+layout: {template: exploration, columns: 12, gap: 16}
 
 sources:
   - id: gallery-data
@@ -81,19 +83,20 @@ controls:
 views:
   - {id: total-revenue, title: Revenue, template: metric, input: source:gallery-data/main, value: revenue, aggregate: sum, label: selected revenue}
   - {id: total-orders, title: Orders, template: metric, input: source:gallery-data/main, value: orders, aggregate: sum, label: selected orders}
-  - {id: revenue-line, title: Line · Plotly, template: line, input: source:gallery-data/main, x: month, y: revenue, series: region, aggregate: sum}
-  - {id: category-bars, title: Bar · ECharts, template: bar, engine: echarts, input: source:gallery-data/main, x: category, y: revenue, series: region, aggregate: sum}
-  - {id: stacked-orders, title: Stacked bar, template: stacked-bar, engine: echarts, input: source:gallery-data/main, x: month, y: orders, series: category, aggregate: sum}
-  - {id: category-share, title: Pie, template: pie, engine: echarts, input: source:gallery-data/main, label: category, value: revenue, aggregate: sum}
-  - {id: revenue-scatter, title: Scatter, template: scatter, input: source:gallery-data/main, x: orders, y: revenue, series: region, size: satisfaction}
-  - {id: revenue-heatmap, title: Heatmap, template: heatmap, engine: echarts, input: source:gallery-data/main, x: month, y: region, z: revenue, aggregate: sum}
-  - {id: store-radar, title: Radar, template: radar, engine: echarts, input: source:gallery-data/main, label: store_id, columns: [revenue, orders, satisfaction], limit: 4}
+  - {id: revenue-line, title: Line · Plotly, template: line, input: source:gallery-data/main, x: month, y: revenue, series: region, aggregate: sum, span: 7}
+  - {id: category-bars, title: Bar · ECharts, template: bar, engine: echarts, input: source:gallery-data/main, x: category, y: revenue, series: region, aggregate: sum, span: 5}
+  - {id: stacked-orders, title: Stacked bar, template: stacked-bar, engine: echarts, input: source:gallery-data/main, x: month, y: orders, series: category, aggregate: sum, span: 7}
+  - {id: category-share, title: Pie, template: pie, engine: echarts, input: source:gallery-data/main, label: category, value: revenue, aggregate: sum, span: 5}
+  - {id: revenue-scatter, title: Scatter, template: scatter, input: source:gallery-data/main, x: orders, y: revenue, series: region, size: satisfaction, span: 6}
+  - {id: revenue-heatmap, title: Heatmap, template: heatmap, engine: echarts, input: source:gallery-data/main, x: month, y: region, z: revenue, aggregate: sum, span: 6}
+  - {id: store-radar, title: Radar, template: radar, engine: echarts, input: source:gallery-data/main, label: store_id, columns: [revenue, orders, satisfaction], limit: 4, span: 12}
   - id: detail-table
     title: Themeable table + View controls
     template: table
     input: source:gallery-data/main
     columns: [date, month, region, category, product, province, city, district, store_id, revenue, orders]
     limit: 100
+    span: 6
     controls:
       - id: product
         kind: selection
@@ -151,16 +154,18 @@ views:
             - {label: Store S02, value: S02}
             - {label: Store S03, value: S03}
             - {label: Store S04, value: S04}
-  - {id: pivot-table, title: Perspective, template: perspective, input: source:gallery-data/main, columns: [month, region, category, revenue, orders]}
+  - {id: pivot-table, title: Perspective, template: perspective, input: source:gallery-data/main, columns: [month, region, category, revenue, orders], span: 6}
   - id: narrative
     title: Markdown
     template: markdown
     text: "A compact narrative View uses the same container contract as a chart.\n\nUse it for assumptions, decisions and analysis notes."
+    span: 4
   - id: image-specimen
     title: Image
     template: image
     url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 420'%3E%3Crect width='800' height='420' fill='%231a237e'/%3E%3Ccircle cx='610' cy='120' r='82' fill='%2326a69a'/%3E%3Cpath d='M0 350L250 130L430 290L800 40V420H0Z' fill='%233949ab'/%3E%3Ctext x='44' y='78' fill='%23ffffff' font-family='sans-serif' font-size='42'%3EIMAGE VIEW%3C/text%3E%3C/svg%3E"
-  - {id: custom-specimen, title: Custom renderer, template: custom, renderer: gallery.spark, input: source:gallery-data/main}
+    span: 4
+  - {id: custom-specimen, title: Custom renderer, template: custom, renderer: gallery.spark, input: source:gallery-data/main, span: 4}
   - {id: all-store-trend, title: Store trend blueprint, template: line, input: source:gallery-data/main, x: month, y: revenue, aggregate: sum}
   - {id: selected-store-trend, title: Selected store blueprint, template: line, input: source:gallery-data/main, x: month, y: revenue, aggregate: sum}
 

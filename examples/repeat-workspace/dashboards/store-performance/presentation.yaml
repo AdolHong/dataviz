@@ -1,4 +1,4 @@
-schema: dataviz/presentation/v1
+schema: dataviz/presentation/v2
 kind: presentation
 dashboard: store-performance
 
@@ -6,16 +6,6 @@ theme:
   preset: editorial
   accent: "#b9472f"
   density: compact
-
-layout:
-  template: exploration
-  gap: 18
-
-sections:
-  selected-stores:
-    columns: 2
-  all-stores:
-    columns: 2
 
 control_components:
   section:selected-stores/stores:

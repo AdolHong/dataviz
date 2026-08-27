@@ -2,6 +2,101 @@
 
 Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本化。这里记录使用者可观察到的变化；字段细节以 `dataviz schemas` 和 `dataviz components` 为准。
 
+## Unreleased
+
+## 0.8.0 — 2026-08-26
+
+### Unified Renderer lifecycle
+
+- Plotly、ECharts 与 Perspective 统一遵守平台行为矩阵：`mount → update → empty → restore → interaction → resize → dispose → export`；Custom Renderer 作者接口仍保持精简的 `validate → mount → update → dispose`。
+- 首屏 Server/HTML bootstrap 不再绕过 View Package，而是按真实 View ID 注册到同一实例状态表；后续更新、空集、恢复、Resize 与销毁因此只有一个生命周期 owner。
+- 空数据成为同步终态：View 立即发布 Empty 并释放旧实例；数据恢复时创建唯一的新实例，不保留旧坐标轴、图例、透视状态或事件监听器。
+- Perspective Worker、Table 与 Viewer 改由单个 Renderer 实例共同拥有和释放，不再跨 View 生命周期共享 Canvas 全局 Worker；加载、建表、恢复、更新与销毁均有有界终态，外部资产或引擎停滞时回退普通 Table，不会永久 Loading。
+- Plotly/ECharts 交互监听和 ResizeObserver 由平台 Chart Service 管理，重复 update 不会叠加回调；Perspective 的 resize/dispose 也进入同一指标与错误边界。
+- Runtime 暴露 mount、update、empty、restore、interaction、resize、dispose、failed 与耗时指标，便于 Gallery、Visual Check 和浏览器回归定位生命周期缺口。
+
+### Component contract and verification
+
+- Component Registry 升级为 `4.2.0`，新增 `view.renderer-lifecycle` 契约；`view.declarative` 与 `renderer.custom` manifest 明确区分作者 hooks 和平台矩阵。
+- Chromium、Firefox、WebKit 在 Server Canvas 与 portable HTML 中共同覆盖 Plotly、ECharts、Perspective 的八阶段矩阵，并保留 ECharts 图例更新与 Perspective 空集恢复专项回归。
+- 373 项当前测试契约、全部示例 Workspace strict validate、20 个 Component Package（60 个组件、38 个 Story、72 个测试声明）检查，以及 wheel/sdist/pip ZIP 独立 Python 3.12 安装与报告导出冒烟通过。
+- CLI Renderer 文档、Design、Product Architecture 和 Plan 同步记录唯一生命周期 owner、空集语义及 Export 同构要求。
+
+## 0.7.2 — 2026-08-26
+
+### Perspective empty-state lifecycle
+
+- 当最后一个 Selection 值被取消、结果变为空集时，Perspective View 立即发布统一的 Empty 状态，不再等待 Perspective 内部 `replace([])` / `flush()` 超时并残留旧透视结果。
+- 旧 Perspective 实例改为后台释放；数据重新出现时按 Empty → create 生命周期建立唯一的新实例，避免异步清理覆盖恢复后的 View。
+- Server 与导出 HTML 共用同一 View Package 行为。
+
+### Verification
+
+- Chromium、Firefox、WebKit 均覆盖最后一个选项取消后 2 秒内显示空状态，以及重新选择后恢复唯一 Perspective 实例。
+- 导出 HTML 覆盖相同的空集与恢复流程；既有 Perspective 滚动、样式、重复 dispose/restore 回归通过。
+
+## 0.7.1 — 2026-08-26
+
+### Runtime Control impact
+
+- Dashboard Selection 的影响计数不再把编译期作用域上限误报为实际受影响 View 数量。Schema 尚不可判定时显示 `Up to N views`，Base Output 加载后按真实字段契约收敛为准确计数。
+- View 局部重绘与影响计数共用同一套运行时适用性判断；Server 页面和导出 HTML 行为一致。
+- Table Schema 随 JSON/Arrow Output 一起发布到浏览器，0 行结果也能可靠判断 Selection 是否适用。
+
+### Verification
+
+- Source Study 浏览器回归确认查询前显示 `Up to 3 views`、查询后及导出 HTML 均显示 `2 views`。
+
+## 0.7.0 — 2026-08-26
+
+### Breaking Selection, Control Binding and Layout contracts
+
+- Dashboard 升级为 `dataviz/dashboard/v7`、Presentation 升级为 v2、Dependency Contract 升级为 v4、Browser Runtime 升级为 v5，并新增 Layout Contract v1；不提供兼容分支。
+- Selection 统一保存 `{intent, values}`；`explicit + []` 是明确空集，`all_available` 随候选域扩张。optional Single Select 支持 Clear，required Single 禁止 clearable。
+- View 可用一条 `control_binding` 双向绑定现有 Selection Control；一个 Control 最多一个 writer View，Plotly/ECharts/Table/Custom 共用类型化 Action 和 canonical commit。
+- Section/View 顺序、模板、columns 与 span 全部属于 Dashboard；Presentation v2 删除结构布局字段。默认 Renderer、Server/HTML、AI context 与 validate 共用 `dataviz/layout-contract/v1`。
+- Selection 使用 `depends_on: [dashboard.<id> | section.<id> | view.<id>]` 只声明直接父节点。Compiler 相对当前 owner 解析 canonical key，生成传递祖先/后代和稳定拓扑顺序，并拒绝未知引用、Compute 父节点、越界和完整环路径。
+- 支持同一 View 内的显式多级候选关系，例如 `dates depends_on view.dow`；Dashboard、Section 与 View 的跨层依赖继续遵守结构作用域，不能跨兄弟 Section/View。
+- Server 与导出 HTML 统一按 `control_order` 协调候选域并一次提交 canonical Selection 快照；上游收缩/扩张保留 `all_available` 与 `explicit` 用户意图，只重绘实际受影响的 View。
+- `dataviz validate` 在查询前检查 Control DAG 与可静态确认的候选关系字段；浏览器对 Schema 未声明的实际行关系保留运行时错误边界。
+
+### Verification
+
+- Dependency Contract、Value Contract、Validate 与 Runtime 定向测试覆盖直接边、传递链、同 View 依赖、非法作用域、未知父节点、Compute 父节点和环。
+- 真实 Chromium 覆盖既有 Dashboard→Section→View 级联，以及同 View `dow → dates` 在 Server 和导出 HTML 中的收缩、恢复与全选意图。
+
+### Semantic authoring and state evidence
+
+- `validate` 升级为 `dataviz/validation/v3`，在最终 Layout/Dependency/Renderer 配置上输出稳定 error/warning/advice；非确定性 advice 不阻塞 strict。
+- 新增 `inspect-layout` 和 `dataviz/layout-inspection/v1`，公开最终 rows、span、来源与 custom mount 边界。
+- 新增 `dataviz/state-snapshot/v1`；默认 Dashboard、Section、View 自动展示 committed/applied 状态，Query/Compute draft 明确标记为待应用，未提交 Query 不会伪装成当前 Dataset 的上下文。
+
+### Runtime, CLI and browser verification
+
+- browser-js/browser-python 未显式声明时默认 `trigger: auto`，server-python 默认 `apply`；Scaffold 与文档使用同一规则。
+- `query`、`output`、`compute` 默认输出紧凑 `dataviz/cli-result/v1`，`--detail debug|full` 才展开执行证据。
+- Component Registry 升级为 4.1.0；Custom Renderer 可通过 `context.charts.plotly/echarts` 复用平台 Theme、滚轮、Resize、Update 与 Dispose。
+- 新增 `visual-check`，真实加载 Server/Report 并输出 `dataviz/visual-check/v1`、截图和稳定几何/Loading/Console 诊断；不判断主观美感。
+- Interactive Runtime 按完整输入指纹合并同一时刻的重复请求，消除 Base Output 与父页面同步竞态造成的无意义 Worker 重启；输入真正变化时仍按 generation 取消旧任务。
+
+### Verification
+
+- 335 项 Python 契约测试、Chromium 32 项及 Firefox/WebKit 各 31 项真实浏览器回归通过；5 个代表性 Workspace 严格校验为 0 error / 0 warning。
+- 20 个 Component Package（59 个组件、38 个 Story、71 个测试声明）通过 Registry 检查；wheel、sdist 与 pip ZIP 通过内容审计和独立 Python 3.12 全流程安装冒烟。
+- 同一 wheel 在 Python 3.11、3.12、3.13、3.14 完成干净安装、版本、Component Registry、Scaffold 与严格校验冒烟。
+
+## 0.6.1 — 2026-08-25
+
+### Query Parameter layout
+
+- Header Query Parameters 的默认网格从无限 `auto-fit` 改为最多 4 个可读轨道；超宽页面不再把 7–8 个控件挤在同一行，窄容器会自然降为 3、2、1 列。
+- `control_panels.query.columns` 现在明确表示响应式最大列数。`control_components.<key>.span: 1|2` 可显式安排宽控件，但 RangePicker 默认仍只占一列，避免在 2K 屏幕上被放大到接近半个页面。
+
+### Verification
+
+- 312 项 Python 契约测试、Chromium/Firefox/WebKit 各 26 项真实浏览器回归、Ruff、Component Package 检查与全部示例 Workspace 严格校验通过。
+- wheel、sdist 与 pip ZIP 均通过内容审计，并分别在独立 Python 3.12 环境完成安装与 CLI/报告冒烟。
+
 ## 0.6.0 — 2026-08-25
 
 ### Breaking Query Input contract

@@ -84,6 +84,7 @@
       if (input.multiple && !option.selected && maxSelected && selectedCount >= maxSelected) return;
       if (input.multiple && option.selected && selectedCount === 1 && !allowEmpty) return;
       api.setOption(input, option, input.multiple ? !option.selected : true);
+      api.markSelectionIntent(input, 'explicit');
       sync();
       api.emitChange(input);
       if (!input.multiple) overlay.close({returnFocus: true});
@@ -163,7 +164,7 @@
       const limit = maxSelected ? ` · max ${maxSelected}` : '';
       const matching = filtered.length === availableCount ? '' : `${filtered.length} matching · `;
       count.textContent = `${matching}${selectedCount} selected · ${availableCount} available${limit}`;
-      clear.hidden = !input.multiple || !allowEmpty;
+      clear.hidden = !allowEmpty;
       clear.disabled = input.disabled || selectedCount === 0;
       all.hidden = !input.multiple;
       const candidates = filtered.filter(option => !option.disabled);
@@ -247,14 +248,17 @@
       ).length;
       if (allCandidatesSelected && !allowEmpty && selectedOutsideCandidates === 0) return;
       candidates.forEach(option => { option.selected = !allCandidatesSelected; });
+      api.markSelectionIntent(input, allCandidatesSelected ? 'explicit' : 'all_available');
       sync();
       api.emitChange(input);
     });
     clear.addEventListener('click', () => {
-      if (input.disabled || !input.multiple || !allowEmpty) return;
+      if (input.disabled || !allowEmpty) return;
       api.clearOptions(input);
+      api.markSelectionIntent(input, 'explicit');
       sync();
       api.emitChange(input);
+      if (!input.multiple) overlay.close({returnFocus: true});
     });
 
     return {

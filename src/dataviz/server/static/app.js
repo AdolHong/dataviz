@@ -26,13 +26,12 @@ function runtimeFor(dashboardId) {
       queryParametersOpen: null,
       committedComputeParameters: null,
       draftComputeParameters: null,
-      dashboardSelectionValues: null,
+      selectionState: {},
+      controlImpacts: {},
+      selectionEpoch: 0,
       eventSource: null,
       nodeErrors: {},
       nodeStatuses: {},
-      canvasSelections: {},
-      canvasSelectionIntents: {},
-      dashboardSelectionIntents: {},
       queryStatus: 'idle',
       queryLabel: 'Not run',
       message: 'Data pipeline is ready to run.',
@@ -60,11 +59,10 @@ for (const property of [
   'draftComputeParameters',
   'eventSource',
   'nodeErrors',
-  'canvasSelections',
-  'canvasSelectionIntents',
+  'selectionState',
 ]) {
   Object.defineProperty(state, property, {
-    get() { return activeRuntime()?.[property] ?? (property.endsWith('Errors') || property.endsWith('Selections') || property.endsWith('Intents') ? {} : null); },
+    get() { return activeRuntime()?.[property] ?? (property.endsWith('Errors') || property.endsWith('State') ? {} : null); },
     set(value) { const runtime = activeRuntime(); if (runtime) runtime[property] = value; },
   });
 }
@@ -160,6 +158,21 @@ function syncCanvasInteraction() {
   });
 }
 
+function syncCanvasQueryDraft() {
+  const runtime = activeRuntime();
+  if (!runtime) return false;
+  const hasCommittedDataset = Boolean(runtime.runId);
+  const valuesMatch = hasCommittedDataset && pendingParametersMatchDataset();
+  return postCanvasMessage({
+    type: 'dataviz:set-query-draft',
+    query_parameters: structuredClone(runtime.queryParameterValues || queryParameters()),
+    query_stale: Boolean(
+      runtime.queryDefinitionStale || (hasCommittedDataset && !valuesMatch)
+    ),
+    query_definition_stale: Boolean(runtime.queryDefinitionStale),
+  });
+}
+
 function isCurrentCanvasMessage(event) {
   const frame = $('#canvas-frame');
   const identity = canvasIdentity(frame);
@@ -178,14 +191,11 @@ function saveTabUiState() {
       queryParametersOpen: runtime.queryParametersOpen,
       committedComputeParameters: runtime.committedComputeParameters,
       draftComputeParameters: runtime.draftComputeParameters,
-      dashboardSelectionValues: runtime.dashboardSelectionValues,
-      canvasSelections: runtime.canvasSelections,
-      canvasSelectionIntents: runtime.canvasSelectionIntents,
-      dashboardSelectionIntents: runtime.dashboardSelectionIntents,
+      selectionState: runtime.selectionState,
     };
   }
   sessionStorage.setItem(
-    `dataviz.tab-ui.v2.${state.sessionId}`,
+    `dataviz.tab-ui.v3.${state.sessionId}`,
     JSON.stringify({
       activeDashboardId: state.dashboard?.id || state.preferredDashboardId,
       sidebar: {width: state.sidebarWidth, collapsed: state.sidebarCollapsed},
@@ -216,7 +226,7 @@ function applySidebarState({persist = false} = {}) {
 
 function restoreTabUiState() {
   try {
-    const saved = JSON.parse(sessionStorage.getItem(`dataviz.tab-ui.v2.${state.sessionId}`) || '{}');
+    const saved = JSON.parse(sessionStorage.getItem(`dataviz.tab-ui.v3.${state.sessionId}`) || '{}');
     state.preferredDashboardId = saved.activeDashboardId || null;
     state.sidebarWidth = Number(saved.sidebar?.width) || 220;
     state.sidebarCollapsed = Boolean(saved.sidebar?.collapsed);
@@ -325,8 +335,7 @@ function collectCanvasSnapshot(expectedIdentity) {
       else if (event.data.missing?.length) reject(new Error(`Run analysis before export: ${event.data.missing.join(', ')}`));
       else resolve({
         outputs:event.data.outputs || {},
-        selections:event.data.selections || {},
-        selectionIntents:event.data.selection_intents || {},
+        selectionState:event.data.selection_state || {},
         computeParameters:event.data.compute_parameters || {},
       });
     };
@@ -365,8 +374,7 @@ async function downloadReport() {
           // Canvas owns the canonical Section/View Controls and returns them in
           // the same atomic snapshot as Derived Outputs. Reading the parent's
           // asynchronous shadow before this handshake races on Firefox.
-          selections:snapshot.selections,
-          selection_intents:snapshot.selectionIntents,
+          selection_state:snapshot.selectionState,
           compute_parameters:snapshot.computeParameters,
           snapshot_outputs:snapshot.outputs,
         }),
@@ -415,7 +423,9 @@ function controlComponent(parameter, presentation = {}) {
     ? (parameter.options.choices || []).length
     : 0;
   if (parameter.type === 'multi_select') return count > 0 && count <= 8 ? 'checkbox-group' : 'select';
-  if (parameter.type === 'single_select') return count > 0 && count <= 4 ? 'radio-group' : 'select';
+  if (parameter.type === 'single_select') {
+    return !parameter.clearable && count > 0 && count <= 4 ? 'radio-group' : 'select';
+  }
   throw new Error(`No Data Entry component for ${parameter.type}`);
 }
 
@@ -432,7 +442,7 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
   let input;
   const component = controlComponent(parameter, presentation);
   const clearable = parameter.clearable == null
-    ? !parameter.required && ['string', 'multi_select', 'date', 'date_range'].includes(parameter.type)
+    ? !parameter.required && ['string', 'single_select', 'multi_select', 'date', 'date_range'].includes(parameter.type)
     : Boolean(parameter.clearable);
   if (['single_select', 'multi_select'].includes(parameter.type)) {
     input = document.createElement('select');
@@ -506,13 +516,13 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
   if (behavior.compute === true) input.dataset.computeInput = name;
   wrapper.append(label);
   wrapper.classList.add('field--control');
+  wrapper.dataset.controlSpan = String(presentation.span || 1);
   if (presentation.css_class) wrapper.classList.add(...presentation.css_class.split(/\s+/).filter(Boolean));
   const control = document.createElement('div');
   control.className = 'dv-control';
   control.dataset.controlComponent = component;
   control.dataset.requestedComponent = presentation.requested_component || presentation.component || 'auto';
   control.dataset.autoReason = presentation.auto_reason || '';
-  control.dataset.emptyMeansAll = String(Boolean(behavior.selection && parameter.type === 'multi_select'));
   control.dataset.required = String(Boolean(parameter.required));
   control.dataset.clearable = String(clearable);
   control.dataset.showUnavailable = String(Boolean(presentation.show_unavailable));
@@ -576,10 +586,37 @@ function selectionField(control) {
   const wrapper = document.createElement('div');
   wrapper.className = 'selection-scope';
   wrapper.dataset.origin = control.origin;
+  wrapper.dataset.controlKey = control.key;
+  wrapper.dataset.controlSpan = String(control.presentation?.span || 1);
   const scopeNames = {dashboard: 'All views', section: `Section · ${control.owner_title}`, view: `View · ${control.owner_title}`};
-  wrapper.innerHTML = `<div class="selection-scope__meta"><span>${escapeHtml(scopeNames[control.origin])}</span><span>${control.affected_views.length} view${control.affected_views.length === 1 ? '' : 's'}</span></div>`;
+  const impact = activeRuntime()?.controlImpacts?.[control.key];
+  wrapper.innerHTML = `<div class="selection-scope__meta"><span>${escapeHtml(scopeNames[control.origin])}</span><span data-control-impact-count>${escapeHtml(controlImpactLabel(control, impact))}</span></div>`;
   wrapper.append(field(control.definition, control.key, control.presentation || {}, {selection: true}));
   return wrapper;
+}
+
+function controlImpactLabel(control, impact = null) {
+  const pending = impact?.status === 'pending'
+    || (!impact && (control.runtime_checked_views || []).length > 0);
+  const views = pending
+    ? (impact?.potential_views || control.affected_views || [])
+    : (impact?.affected_views || control.affected_views || []);
+  const count = views.length;
+  return `${pending ? 'Up to ' : ''}${count} view${count === 1 ? '' : 's'}`;
+}
+
+function syncDashboardControlImpacts(impacts = []) {
+  const runtime = activeRuntime();
+  if (!runtime) return;
+  for (const impact of impacts) {
+    const control = selectionControl(impact?.key);
+    if (!control || control.origin !== 'dashboard') continue;
+    runtime.controlImpacts[impact.key] = impact;
+    const wrapper = [...document.querySelectorAll('#dashboard-selection-form .selection-scope')]
+      .find(candidate => candidate.dataset.controlKey === impact.key);
+    const label = wrapper?.querySelector('[data-control-impact-count]');
+    if (label) label.textContent = controlImpactLabel(control, impact);
+  }
 }
 
 function dashboardControls(kind = null) {
@@ -642,26 +679,68 @@ function toggleQueryParameters() {
   setQueryParametersOpen(!expanded, {persist: true});
 }
 
-function dashboardSelectionValues() {
+function selectionControl(key) {
+  return (state.dashboard?.controls || []).find(
+    control => control.kind === 'selection' && control.key === key,
+  ) || null;
+}
+
+function selectionValueFromState(definition, entry) {
+  const values = Array.isArray(entry?.values) ? entry.values : [];
+  if (definition?.type === 'multi_select') return structuredClone(values);
+  if (definition?.type === 'date_range') return values.length ? structuredClone(values[0]) : [];
+  return values.length ? structuredClone(values[0]) : null;
+}
+
+function selectionStateFromValue(definition, value, intent = 'explicit') {
+  const empty = value == null || value === '' || (Array.isArray(value) && value.length === 0);
+  let values;
+  if (empty) values = [];
+  else if (definition?.type === 'multi_select') values = structuredClone(value);
+  else if (definition?.type === 'date_range') values = [structuredClone(value)];
+  else values = [structuredClone(value)];
+  return {
+    intent: intent === 'all_available' && definition?.type === 'multi_select'
+      ? 'all_available'
+      : 'explicit',
+    values,
+  };
+}
+
+function dashboardSelectionState() {
   const form = $('#dashboard-selection-form');
   const values = formValues(form);
-  const remembered = activeRuntime()?.dashboardSelectionValues || {};
+  const runtime = activeRuntime();
+  const remembered = runtime?.selectionState || {};
   for (const input of form.elements) {
+    const control = selectionControl(input.name);
+    if (!control) continue;
     if (
       input instanceof HTMLSelectElement
       && input.options.length === 0
       && Object.prototype.hasOwnProperty.call(remembered, input.name)
-    ) values[input.name] = remembered[input.name];
+    ) continue;
+    const intent = input instanceof HTMLSelectElement && input.multiple
+      ? (window.datavizComponents?.controls?.inferSelectionIntent?.(input) || 'explicit')
+      : 'explicit';
+    remembered[input.name] = selectionStateFromValue(control.definition, values[input.name], intent);
   }
-  return values;
+  return remembered;
 }
 
 function captureDashboardSelectionIntent(event) {
   const input = event?.target;
   if (!(input instanceof HTMLSelectElement) || !input.multiple || !input.name) return;
-  const intent = window.datavizComponents?.controls?.inferSelectionIntent?.(input);
+  const intent = window.datavizComponents?.controls?.consumeSelectionIntent?.(input);
   const runtime = activeRuntime();
-  if (intent && runtime) runtime.dashboardSelectionIntents[input.name] = intent;
+  const control = selectionControl(input.name);
+  if (intent && runtime && control) {
+    runtime.selectionState[input.name] = selectionStateFromValue(
+      control.definition,
+      formValues($('#dashboard-selection-form'))[input.name],
+      intent,
+    );
+  }
 }
 
 function syncDashboardSelectionOptions(controls = []) {
@@ -679,10 +758,10 @@ function syncDashboardSelectionOptions(controls = []) {
     const signature = JSON.stringify(options);
     if (input.dataset.runtimeOptionsSignature === signature) continue;
     const runtime = activeRuntime();
-    const previous = runtime?.dashboardSelectionValues
-      && Object.prototype.hasOwnProperty.call(runtime.dashboardSelectionValues, control.key)
-      ? runtime.dashboardSelectionValues[control.key]
-      : definition?.default ?? formValues(form)[control.key];
+    const previousState = runtime?.selectionState?.[control.key] || control.initial_state || {
+      intent:'explicit', values:[],
+    };
+    const previous = selectionValueFromState(definition, previousState);
     const previousValues = input.multiple && Array.isArray(previous) ? previous : [previous];
     const typed = options.some(option => typeof option.value !== 'string');
     input.dataset.valueEncoding = typed ? 'json' : 'string';
@@ -713,13 +792,11 @@ function syncDashboardSelectionOptions(controls = []) {
       nodes,
       {
         selectedValues,
-        intent:runtime?.dashboardSelectionIntents?.[control.key],
+        intent:previousState.intent,
         required:Boolean(definition?.required),
       },
     );
-    if (reconciled?.intent && runtime) {
-      runtime.dashboardSelectionIntents[control.key] = reconciled.intent;
-    } else if (!reconciled) input.replaceChildren(...nodes);
+    if (!reconciled) input.replaceChildren(...nodes);
     input.dataset.runtimeOptionsSignature = signature;
     input._syncChoiceControl?.();
     synchronized = true;
@@ -728,7 +805,7 @@ function syncDashboardSelectionOptions(controls = []) {
   }
   if (!synchronized) return;
   const runtime = activeRuntime();
-  if (runtime) runtime.dashboardSelectionValues = formValues(form);
+  if (runtime) dashboardSelectionState();
   updateDashboardControlSummary();
   saveTabUiState();
   if (changed) scheduleViewSelections();
@@ -751,7 +828,7 @@ function selectDashboard(id) {
     const previous = activeRuntime();
     previous.queryParameterValues = queryParameters();
     previous.draftComputeParameters = computeParameters();
-    previous.dashboardSelectionValues = dashboardSelectionValues();
+    dashboardSelectionState();
     try { previous.canvasScrollY = $('#canvas-frame').contentWindow.scrollY || 0; } catch (_) { previous.canvasScrollY = 0; }
     saveTabUiState();
   }
@@ -789,18 +866,11 @@ function selectDashboard(id) {
   }
   setQueryParametersOpen(runtime.queryParametersOpen);
   for (const control of dataControls) {
-    if (
-      control.initial_intent
-      && !Object.prototype.hasOwnProperty.call(
-        runtime.dashboardSelectionIntents,
-        control.key,
-      )
-    ) runtime.dashboardSelectionIntents[control.key] = control.initial_intent;
-  }
-  if (runtime.dashboardSelectionValues == null) {
-    runtime.dashboardSelectionValues = Object.fromEntries(
-      dataControls.map(control => [control.key, structuredClone(control.definition.default)]),
-    );
+    if (!Object.prototype.hasOwnProperty.call(runtime.selectionState, control.key)) {
+      runtime.selectionState[control.key] = structuredClone(
+        control.initial_state || {intent:'explicit', values:[]},
+      );
+    }
   }
   window.datavizComponents?.hydrate(document);
   setFormValues(
@@ -817,7 +887,13 @@ function selectDashboard(id) {
     $('#compute-parameter-form'),
     runtime.draftComputeParameters || runtime.committedComputeParameters || {},
   );
-  setFormValues($('#dashboard-selection-form'), runtime.dashboardSelectionValues || {});
+  setFormValues(
+    $('#dashboard-selection-form'),
+    Object.fromEntries(dataControls.map(control => [
+      control.key,
+      selectionValueFromState(control.definition, runtime.selectionState[control.key]),
+    ])),
+  );
   updateDashboardControlSummary();
   $('#node-list').replaceChildren(...state.dashboard.nodes.map(nodeRow));
   document.querySelectorAll('.node').forEach((node) => {
@@ -861,34 +937,15 @@ function computeParameters() {
   return formValues($('#compute-parameter-form'));
 }
 
-function selections() {
-  const values = Object.assign({}, state.canvasSelections, dashboardSelectionValues());
+function selectionState() {
+  dashboardSelectionState();
+  const values = activeRuntime()?.selectionState || {};
   const validKeys = new Set(
     (state.dashboard?.controls || [])
       .filter(control => control.kind === 'selection')
       .map(control => control.key),
   );
   return Object.fromEntries(Object.entries(values).filter(([key]) => validKeys.has(key)));
-}
-
-function selectionIntents() {
-  const normalize = window.datavizComponents?.controls?.normalizeSelectionIntent;
-  const runtime = activeRuntime();
-  const values = Object.assign(
-    {},
-    runtime?.dashboardSelectionIntents || {},
-    state.canvasSelectionIntents || {},
-  );
-  const validKeys = new Set(
-    (state.dashboard?.controls || [])
-      .filter(control => control.kind === 'selection')
-      .map(control => control.key),
-  );
-  return Object.fromEntries(
-    Object.entries(values).filter(
-      ([key, value]) => validKeys.has(key) && Boolean(normalize?.(value)),
-    ),
-  );
 }
 
 function formValues(form) {
@@ -1245,12 +1302,24 @@ function closeHeaderPopovers(except = null) {
   window.datavizComponents?.overlay.closeAll({except, group: 'popover'});
 }
 
-function applyViewSelections() {
+function applyViewSelections({full = false} = {}) {
   if (!state.runId && !state.pendingRunId) return;
+  dashboardSelectionState();
+  const runtime = activeRuntime();
+  const dashboardKeys = new Set(
+    dashboardControls('selection').map(control => control.key),
+  );
+  const selectionPatch = Object.fromEntries(
+    Object.entries(runtime?.selectionState || {}).filter(([key]) => dashboardKeys.has(key)),
+  );
   postCanvasMessage({
     type:'dataviz:set-selections',
-    selections:selections(),
-    selection_intents:selectionIntents(),
+    // After bootstrap the Header owns Dashboard Controls only. Sending its
+    // asynchronous full shadow would overwrite newer Section/View writes made
+    // inside the Canvas. The Canvas merges this owner-scoped patch, reconciles
+    // downstream domains, then returns one complete canonical snapshot.
+    selection_state:full ? selectionState() : selectionPatch,
+    selection_epoch:runtime?.selectionEpoch || 0,
   });
 }
 
@@ -2066,15 +2135,18 @@ $('#parameter-form').addEventListener('input', () => setQueryState());
 $('#parameter-form').addEventListener('input', () => {
   if (activeRuntime()) activeRuntime().queryParameterValues = queryParameters();
   saveTabUiState();
+  syncCanvasQueryDraft();
 });
 $('#parameter-form').addEventListener('change', () => {
   if (activeRuntime()) activeRuntime().queryParameterValues = queryParameters();
   saveTabUiState();
   setQueryState();
+  syncCanvasQueryDraft();
 });
 $('#dashboard-selection-form').addEventListener('input', event => {
+  if (activeRuntime()) activeRuntime().selectionEpoch += 1;
   captureDashboardSelectionIntent(event);
-  if (activeRuntime()) activeRuntime().dashboardSelectionValues = dashboardSelectionValues();
+  dashboardSelectionState();
   saveTabUiState();
   updateDashboardControlSummary();
   scheduleViewSelections();
@@ -2107,8 +2179,9 @@ $('#compute-parameter-form').addEventListener('input', onComputeDraft);
 $('#compute-parameter-form').addEventListener('change', onComputeDraft);
 $('#compute-apply').addEventListener('click', applyDashboardControls);
 $('#dashboard-selection-form').addEventListener('change', event => {
+  if (activeRuntime()) activeRuntime().selectionEpoch += 1;
   captureDashboardSelectionIntent(event);
-  if (activeRuntime()) activeRuntime().dashboardSelectionValues = dashboardSelectionValues();
+  dashboardSelectionState();
   saveTabUiState();
   updateDashboardControlSummary();
   scheduleViewSelections();
@@ -2122,25 +2195,21 @@ window.addEventListener('message', (event) => {
     const runtime = activeRuntime();
     const frame = $('#canvas-frame');
     if (!runtime) return;
-    // Fresh Canvas defaults seed an empty tab state; remembered tab-local state
-    // wins on reload. selections() applies the current v3 contract allow-list
-    // before anything is sent back to the iframe.
-    runtime.canvasSelections = {
-      ...(event.data.selections || {}),
-      ...(runtime.canvasSelections || {}),
-    };
-    runtime.canvasSelectionIntents = {
-      ...(event.data.selection_intents || {}),
-      ...(runtime.canvasSelectionIntents || {}),
+    // Fresh Canvas defaults seed missing keys; remembered tab-local canonical
+    // state wins on reload. Invalid/removed keys are filtered before sending.
+    runtime.selectionState = {
+      ...(event.data.selection_state || {}),
+      ...(runtime.selectionState || {}),
     };
     frame.dataset.runtimeReady = 'true';
     saveTabUiState();
-    applyViewSelections();
+    applyViewSelections({full:true});
     const values = runtime.committedComputeParameters
       || runtime.draftComputeParameters
       || computeParameters();
     sendCompute(values, {commit:true});
     syncCanvasInteraction();
+    syncCanvasQueryDraft();
     return;
   }
   if (event.data?.type === 'dataviz:canvas-interaction') {
@@ -2179,11 +2248,36 @@ window.addEventListener('message', (event) => {
     syncDashboardSelectionOptions(event.data.controls || []);
     return;
   }
+  if (event.data?.type === 'dataviz:control-impact-changed') {
+    syncDashboardControlImpacts(event.data.controls || []);
+    return;
+  }
   if (event.data?.type === 'dataviz:selections-changed') {
+    const runtime = activeRuntime();
+    // A Canvas event created before a newer parent-owned Dashboard Control
+    // change must not restore the old full snapshot when its postMessage task
+    // arrives late. The parent epoch advances only for parent-origin writes;
+    // child View/Control actions remain serial within the current epoch.
+    if (
+      !runtime
+      || Number(event.data.selection_epoch || 0) !== Number(runtime.selectionEpoch || 0)
+    ) return;
     // Canvas messages contain the complete canonical state. Replacing it also
     // removes keys restored from sessionStorage after a Selection is renamed.
-    state.canvasSelections = {...(event.data.selections || {})};
-    state.canvasSelectionIntents = {...(event.data.selection_intents || {})};
+    state.selectionState = {...(event.data.selection_state || {})};
+    runtime.selectionState = state.selectionState;
+    const controls = dashboardControls('selection');
+    setFormValues(
+      $('#dashboard-selection-form'),
+      Object.fromEntries(controls.map(control => [
+        control.key,
+        selectionValueFromState(control.definition, state.selectionState[control.key]),
+      ])),
+    );
+    for (const input of $('#dashboard-selection-form').elements) {
+      input._syncChoiceControl?.();
+    }
+    updateDashboardControlSummary();
     saveTabUiState();
   }
 });

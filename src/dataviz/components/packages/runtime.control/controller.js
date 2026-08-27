@@ -12,11 +12,28 @@
   const availableOptions = input => options(input).filter(option => !option.disabled);
   const selectionIntentModes = new Set(['all_available', 'explicit']);
   const normalizeSelectionIntent = value => selectionIntentModes.has(value) ? value : null;
+  const setSelectionIntent = (input, intent = 'explicit') => {
+    const normalized = normalizeSelectionIntent(intent) || 'explicit';
+    if (input) input.dataset.selectionIntent = normalized;
+    return normalized;
+  };
+  const markSelectionIntent = (input, intent = 'explicit') => {
+    const normalized = setSelectionIntent(input, intent);
+    if (input) input.dataset.selectionIntentEvent = normalized;
+    return normalized;
+  };
+  const consumeSelectionIntent = input => {
+    if (!(input instanceof HTMLSelectElement) || !input.multiple) return null;
+    const pending = normalizeSelectionIntent(input.dataset.selectionIntentEvent);
+    delete input.dataset.selectionIntentEvent;
+    // A native value change without an adapter-declared operation is always an
+    // explicit user subset. Merely selecting every current option must not
+    // silently turn into the persistent all-available intent.
+    return setSelectionIntent(input, pending || 'explicit');
+  };
   const inferSelectionIntent = input => {
     if (!(input instanceof HTMLSelectElement) || !input.multiple) return null;
-    const available = availableOptions(input);
-    if (!available.length) return null;
-    return available.every(option => option.selected) ? 'all_available' : 'explicit';
+    return normalizeSelectionIntent(input.dataset.selectionIntent) || 'explicit';
   };
   const reconcileOptionDomain = (
     input,
@@ -65,6 +82,7 @@
     if (input.multiple && resolvedIntent == null) {
       resolvedIntent = inferSelectionIntent(input) || 'explicit';
     }
+    if (input.multiple) setSelectionIntent(input, resolvedIntent || 'explicit');
     return {
       intent:resolvedIntent,
       selectedValues:selectedOptions(input).map(option => option.value),
@@ -102,14 +120,17 @@
     if (!host) return;
     const available = availableOptions(input);
     const selected = selectedOptions(input);
-    const emptyMeansAll = control.dataset.emptyMeansAll === 'true';
+    const selectionKey = control.closest('[data-selection-key]')?.dataset.selectionKey;
+    const selectionIntent = selectionKey
+      ? global.dataviz?.selection?.state?.(selectionKey)?.intent
+      : null;
     const maxVisible = Math.max(0, Number(control.dataset.maxTagCount || 2));
     host.replaceChildren();
     if (!input.multiple) {
       host.textContent = selected[0]?.textContent || placeholder;
       return;
     }
-    if (emptyMeansAll && (!selected.length || (available.length && selected.length === available.length))) {
+    if (input.multiple && selectionIntent === 'all_available') {
       const label = document.createElement('span');
       label.className = 'dv-choice-summary__all';
       label.textContent = available.length ? `${control.dataset.allLabel || 'All'} (${available.length})` : control.dataset.allLabel || 'All';
@@ -245,6 +266,8 @@
     selectedOptions,
     availableOptions,
     normalizeSelectionIntent,
+    consumeSelectionIntent,
+    markSelectionIntent,
     inferSelectionIntent,
     reconcileOptionDomain,
     emitChange,

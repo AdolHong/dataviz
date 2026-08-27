@@ -717,6 +717,7 @@ class Executor:
             query_inputs=project_query_inputs(node.parameter_inputs, parameters),
             compute_params={},
             selections={},
+            selection_state={},
             inputs=inputs,
             store=store,
             adapter=adapter,

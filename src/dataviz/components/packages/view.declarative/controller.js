@@ -31,11 +31,34 @@
     const references = inputReferences(view, state);
     return references.main || Object.values(references)[0];
   };
+  const controlBinding = (view, state) => (
+    state.dependency_contract?.views?.[view.id]?.control_binding || null
+  );
+  const bindingValue = (binding, row) => {
+    if (!binding || !row || typeof row !== 'object') return null;
+    const values = (binding.fields || []).map(field => row[field]);
+    return values.length === 1 ? values[0] : values;
+  };
+  const bindingDescriptor = (view, state, rows) => {
+    const binding = controlBinding(view, state);
+    if (!binding) return null;
+    return {
+      ...binding,
+      state:structuredClone(state.selection.state(binding.control)),
+      values:rows.map(row => bindingValue(binding, row)),
+    };
+  };
+  const bindingValueSignature = value => JSON.stringify(value);
+  const bindingSelected = (binding, value) => new Set(
+    (binding?.state?.values || []).map(bindingValueSignature)
+  ).has(bindingValueSignature(value));
   const selectRows = (view, state) => {
     const contract = state.dependency_contract?.views?.[view.id]?.selection_contract || [];
+    const boundControl = controlBinding(view, state)?.control;
     const reference = mainInputReference(view, state);
     return state.data.table(reference).rows().filter(row => contract.every(item => (
-      state.selection.matches(row, item, state.selections[item.key])
+      item.key === boundControl
+      || state.selection.matches(row, item, state.selection.state(item.key))
     )));
   };
   const aggregate = (rows, groupFields, valueFields, operation = 'sum') => {
@@ -81,7 +104,7 @@
     }
     return view.limit ? rows.slice(0, view.limit) : rows;
   };
-  const plotlyDescriptor = (view, rows) => {
+  const plotlyDescriptor = (view, rows, binding = null) => {
     const groups = view.series ? [...new Set(rows.map(row => row[view.series]))] : [null];
     const measures = Array.isArray(view.y) ? view.y : [view.y];
     const traces = groups.flatMap(group => measures.map(measure => {
@@ -90,6 +113,10 @@
         name:[group, measures.length > 1 ? measure : null].filter(Boolean).join(' · ') || view.title,
         x:selected.map(row => row[view.x]),
         y:selected.map(row => row[measure]),
+        customdata:binding ? selected.map(row => bindingValue(binding, row)) : undefined,
+        selectedpoints:binding ? selected.map((row, index) => (
+          bindingSelected(binding, bindingValue(binding, row)) ? index : null
+        )).filter(index => index != null) : undefined,
       };
       if (view.template === 'line') return {...common, type:'scatter', mode:'lines+markers'};
       if (view.template === 'scatter') return {
@@ -108,6 +135,10 @@
         type:'pie',
         labels:rows.map(row => row[view.label || view.x]),
         values:rows.map(row => row[view.value || view.y]),
+        customdata:binding ? rows.map(row => bindingValue(binding, row)) : undefined,
+        pull:binding ? rows.map(row => (
+          bindingSelected(binding, bindingValue(binding, row)) ? 0.08 : 0
+        )) : undefined,
         hole:view.options?.hole || 0,
       });
     }
@@ -134,17 +165,30 @@
         ...view.options?.layout,
       },
       config:view.config,
+      controlBinding:binding,
     };
   };
-  const echartsDescriptor = (view, rows) => {
+  const echartsPoint = (binding, row, value, extra = {}) => binding ? {
+    value,
+    __datavizControlValue:bindingValue(binding, row),
+    selected:bindingSelected(binding, bindingValue(binding, row)),
+    ...extra,
+  } : (Object.keys(extra).length ? {value, ...extra} : value);
+  const echartsDescriptor = (view, rows, binding = null) => {
     if (view.template === 'pie') return {
       type:'echarts',
+      controlBinding:binding,
       options:{
         tooltip:{trigger:'item'},
         series:[{
           type:'pie', radius:['18%', '72%'],
-          data:rows.map(row => ({
-            name:row[view.label || view.x], value:row[view.value || view.y],
+          selectedMode:binding ? 'multiple' : false,
+          data:rows.map(row => binding ? ({
+            name:row[view.label || view.x],
+            ...echartsPoint(binding, row, row[view.value || view.y]),
+          }) : ({
+            name:row[view.label || view.x],
+            value:row[view.value || view.y],
           })),
         }],
         ...view.options,
@@ -165,12 +209,15 @@
       };
       return {
         type:'echarts',
+        controlBinding:binding,
         options:{
           tooltip:{},
           xAxis:{type:'category', data:xs},
           yAxis:{type:'category', data:ys},
           visualMap,
-          series:[{type:'heatmap', data}],
+          series:[{type:'heatmap', data:rows.map((row, index) => (
+            echartsPoint(binding, row, data[index])
+          ))}],
           ...heatmapOptions,
         },
       };
@@ -180,6 +227,7 @@
       const {legend_interaction:legendInteraction = 'filter', ...chartOptions} = view.options || {};
       return {
         type:'echarts',
+        controlBinding:binding,
         legendInteraction,
         options:{
           tooltip:{trigger:'item'}, legend:{},
@@ -191,7 +239,12 @@
               type:'scatter',
               data:selected.map(row => {
                 const value = [row[view.x], row[view.y], view.size ? row[view.size] : undefined];
-                return view.color ? {value, itemStyle:{color:row[view.color]}} : value;
+                return echartsPoint(
+                  binding,
+                  row,
+                  value,
+                  view.color ? {itemStyle:{color:row[view.color]}} : {},
+                );
               }),
               symbolSize:item => (Array.isArray(item) ? item : item.value)?.[2] || 10,
             };
@@ -207,6 +260,7 @@
       ));
       return {
         type:'echarts',
+        controlBinding:binding,
         options:{
           tooltip:{}, legend:{},
           radar:{indicator:view.columns.map((field, index) => ({name:field, max:maxima[index]}))},
@@ -215,6 +269,8 @@
             data:rows.map(row => ({
               name:String(row[view.label] ?? ''),
               value:view.columns.map(field => row[field]),
+              __datavizControlValue:binding ? bindingValue(binding, row) : undefined,
+              selected:binding ? bindingSelected(binding, bindingValue(binding, row)) : false,
             })),
           }],
           ...view.options,
@@ -232,6 +288,7 @@
     return {
       type:'echarts',
       legendInteraction,
+      controlBinding:binding,
       options:{
         tooltip:{trigger:'axis'},
         legend:{
@@ -246,9 +303,13 @@
           name:[group, measures.length > 1 ? measure : null].filter(Boolean).join(' · ') || view.title,
           type:view.template === 'line' ? 'line' : 'bar',
           stack:view.template === 'stacked-bar' ? 'total' : undefined,
-          data:categories.map(category => rows.find(row => (
-            row[view.x] === category && (group == null || row[view.series] === group)
-          ))?.[measure] ?? null),
+          data:categories.map(category => {
+            const row = rows.find(candidate => (
+              candidate[view.x] === category
+              && (group == null || candidate[view.series] === group)
+            ));
+            return row ? echartsPoint(binding, row, row[measure]) : null;
+          }),
         }))),
         ...chartOptions,
       },
@@ -308,13 +369,19 @@
       }
       if (view.limit) rows = rows.slice(0, view.limit);
     }
+    const binding = bindingDescriptor(view, state, rows);
     if (view.template === 'table') return {
       type:'table', rows,
+      empty:rows.length === 0,
+      emptyMessage:view.options?.empty_text || 'No rows match the current selections.',
       columns:view.columns?.length ? view.columns : Object.keys(rows[0] || {}),
       limit:view.limit, options:view.options, config:view.config,
+      controlBinding:binding,
     };
     if (view.template === 'perspective') return {
       type:'perspective', rows,
+      empty:rows.length === 0,
+      emptyMessage:view.options?.empty_text || 'No rows match the current selections.',
       columns:view.columns?.length ? view.columns : Object.keys(rows[0] || {}),
       config:view.config, limit:view.limit,
     };
@@ -322,7 +389,10 @@
       const inputs = Object.fromEntries(
         Object.entries(references).map(([name, reference]) => [name, state.data.output(reference)])
       );
-      return {type:view.renderer, rows, inputs, view, options:view.options, config:view.config};
+      return {
+        type:view.renderer, rows, inputs, view, options:view.options, config:view.config,
+        controlBinding:binding,
+      };
     }
     if (view.template === 'metric') {
       const field = view.value || view.y;
@@ -336,9 +406,14 @@
         html:`<div class="dv-metric"><strong>${escape(formatted)}</strong><span>${escape(view.label || field || '')}</span></div>`,
       };
     }
-    return view.engine === 'echarts'
-      ? echartsDescriptor(view, rows)
-      : plotlyDescriptor(view, rows);
+    const descriptor = view.engine === 'echarts'
+      ? echartsDescriptor(view, rows, binding)
+      : plotlyDescriptor(view, rows, binding);
+    return {
+      ...descriptor,
+      empty:rows.length === 0,
+      emptyMessage:view.options?.empty_text || 'No rows match the current selections.',
+    };
   };
 
   function registerViews(runtime) {
@@ -351,19 +426,21 @@
   }
 
   root.viewDeclarative = {
-    protocol:'dataviz/runtime/v3',
+    protocol:'dataviz/runtime/v5',
     escape,
     numericAggregate,
     inputReferences,
     mainInputReference,
     selectRows,
+    controlBinding,
+    bindingValue,
     prepareRows,
     build,
     registerViews,
   };
   root.descriptors = root.descriptors || new Map();
   root.descriptors.set('view.declarative', {
-    protocol:'dataviz/runtime/v3',
+    protocol:'dataviz/runtime/v5',
     owns:['descriptor-builders', 'renderer-lifecycle'],
   });
 })(window);

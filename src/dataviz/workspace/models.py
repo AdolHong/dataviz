@@ -3,9 +3,16 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    TypeAdapter,
+    model_validator,
+)
 
-from dataviz.identifiers import StableId
+from dataviz.identifiers import STABLE_ID_PATTERN, StableId
 from dataviz.relative_dates import is_relative_date_default
 from dataviz.value_contract import validate_control_definition
 from dataviz.view_contracts import validate_view_contract
@@ -145,6 +152,21 @@ OptionDomainDefinition = Annotated[
 ]
 
 
+ControlDependencyReference = Annotated[
+    str,
+    StringConstraints(
+        pattern=rf"^(?:dashboard|section|view)\.{STABLE_ID_PATTERN}$"
+    ),
+]
+
+
+class ViewControlBindingDefinition(Model):
+    """Bind one View interaction outlet to one canonical Selection Control."""
+
+    control: ControlDependencyReference
+    field: str | None = None
+
+
 class _ValueControlDefinition(Model):
     id: StableId
     type: Literal[
@@ -218,7 +240,7 @@ class SelectionControlDefinition(_ValueControlDefinition):
 
     field: str | None = None
     path_fields: list[str] = Field(default_factory=list, min_length=0)
-    cascade: bool = True
+    depends_on: list[ControlDependencyReference] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_option_domain_contract(self):
@@ -228,6 +250,12 @@ class SelectionControlDefinition(_ValueControlDefinition):
             raise ValueError(
                 "Selection select controls require options.mode=static or options.mode=infer"
             )
+        if self.depends_on and self.type not in {"single_select", "multi_select"}:
+            raise ValueError(
+                "Selection depends_on is only valid for single_select or multi_select controls"
+            )
+        if len(self.depends_on) != len(set(self.depends_on)):
+            raise ValueError("Selection depends_on cannot contain duplicate references")
         if isinstance(self.options, InferredOptionDomainDefinition) and "default" in self.model_fields_set:
             raise ValueError(
                 "Inferred Selection options cannot declare default; the Runtime derives "
@@ -338,32 +366,12 @@ class PresentationThemeDefinition(Model):
     density: Literal["compact", "comfortable", "spacious"] | None = None
 
 
-class PresentationLayoutDefinition(Model):
-    template: Literal["overview", "monitoring", "report", "exploration", "freeform"] | None = None
-    columns: int | None = Field(None, ge=1, le=24)
-    gap: int | None = Field(None, ge=0)
-
-
 class PresentationSectionDefinition(Model):
-    template: Literal[
-        "single",
-        "stack",
-        "grid",
-        "split",
-        "hero-metrics",
-        "chart-and-table",
-        "comparison",
-        "band",
-        "small-multiples",
-        "selection-gallery",
-    ] | None = None
-    columns: int | None = Field(None, ge=1, le=24)
     css_class: str = ""
     controls: PresentationControlPanelDefinition | None = None
 
 
 class PresentationViewDefinition(Model):
-    span: int | None = Field(None, ge=1, le=24)
     min_height: int | None = Field(None, ge=1)
     container: Literal["panel", "metric", "chart", "table", "plain", "elevated"] | None = None
     css_class: str = ""
@@ -403,6 +411,7 @@ class PresentationControlComponentDefinition(Model):
         "slider",
         "tree-select",
     ] = "auto"
+    span: Literal[1, 2] = 1
     multiline: bool = False
     min_rows: int = Field(2, ge=1, le=40)
     max_rows: int = Field(6, ge=1, le=80)
@@ -445,7 +454,7 @@ class PresentationControlComponentDefinition(Model):
 
     @model_validator(mode="after")
     def validate_component_options(self):
-        common = {"component", "css_class"}
+        common = {"component", "css_class", "span"}
         options = {
             "auto": set(),
             "input": {"multiline", "min_rows", "max_rows", "show_count", "prefix", "suffix"},
@@ -525,16 +534,29 @@ class PresentationControlPanelsDefinition(Model):
     dashboard: PresentationControlPanelDefinition = Field(default_factory=PresentationControlPanelDefinition)
 
 
+class PresentationStateSummaryItemDefinition(Model):
+    label: str | None = None
+    hidden: bool = False
+    order: int = 0
+    formatter: Literal["auto", "value", "count", "date_range"] = "auto"
+
+
+class PresentationStateSummaryDefinition(Model):
+    enabled: bool = True
+    max_values: int = Field(3, ge=1, le=20)
+    items: dict[str, PresentationStateSummaryItemDefinition] = Field(default_factory=dict)
+
+
 class PresentationDefinition(Model):
-    schema_: Literal["dataviz/presentation/v1"] = Field(alias="schema")
+    schema_: Literal["dataviz/presentation/v2"] = Field(alias="schema")
     kind: Literal["presentation"] = "presentation"
     dashboard: StableId
     theme: PresentationThemeDefinition = Field(default_factory=PresentationThemeDefinition)
-    layout: PresentationLayoutDefinition = Field(default_factory=PresentationLayoutDefinition)
     sections: dict[StableId, PresentationSectionDefinition] = Field(default_factory=dict)
     views: dict[StableId, PresentationViewDefinition] = Field(default_factory=dict)
     control_components: dict[str, PresentationControlComponentDefinition] = Field(default_factory=dict)
     control_panels: PresentationControlPanelsDefinition = Field(default_factory=PresentationControlPanelsDefinition)
+    state_summary: PresentationStateSummaryDefinition = Field(default_factory=PresentationStateSummaryDefinition)
     assets: PresentationAssetsDefinition = Field(default_factory=PresentationAssetsDefinition)
     canvas: PresentationCanvasDefinition = Field(default_factory=PresentationCanvasDefinition)
 
@@ -543,6 +565,7 @@ class DeclarativeViewDefinition(Model):
     id: StableId
     title: str | None = None
     description: str = ""
+    span: int | None = Field(None, ge=1, le=24)
     template: Literal[
         "metric",
         "line",
@@ -580,6 +603,7 @@ class DeclarativeViewDefinition(Model):
     config: dict[str, Any] = Field(default_factory=dict)
     controls: list[ScopedControlDefinition] = Field(default_factory=list)
     selection_bindings: dict[str, str | SelectionBindingDefinition] = Field(default_factory=dict)
+    control_binding: ControlDependencyReference | ViewControlBindingDefinition | None = None
 
     @property
     def input_ref(self) -> str | None:
@@ -599,7 +623,7 @@ class DeclarativeViewDefinition(Model):
 
 
 class DashboardDefinition(Model):
-    schema_: Literal["dataviz/dashboard/v5"] = Field(alias="schema")
+    schema_: Literal["dataviz/dashboard/v7"] = Field(alias="schema")
     kind: Literal["dashboard"] = "dashboard"
     id: StableId
     title: str = ""
@@ -830,7 +854,7 @@ class InteractiveTransformDefinition(Model):
     query_inputs: dict[StableId, QueryInputBindingDefinition] = Field(default_factory=dict)
     selection_inputs: dict[StableId, str] = Field(default_factory=dict)
     compute_inputs: dict[StableId, str] = Field(default_factory=dict)
-    trigger: Literal["apply", "auto", "manual"] = "apply"
+    trigger: Literal["apply", "auto", "manual"] = "auto"
     debounce_ms: int = Field(300, ge=0, le=10_000)
     export: InteractiveExportDefinition
     outputs: dict[StableId, OutputDefinition] = Field(min_length=1)
@@ -838,6 +862,16 @@ class InteractiveTransformDefinition(Model):
     python_dependencies: list[str] = Field(default_factory=list)
     timeout_seconds: float = Field(30.0, gt=0)
     cache: CacheDefinition = Field(default_factory=CacheDefinition)
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_trigger_for_runtime(cls, value):
+        if isinstance(value, dict) and "trigger" not in value:
+            value = dict(value)
+            value["trigger"] = (
+                "apply" if value.get("runtime") == "server-python" else "auto"
+            )
+        return value
 
     @model_validator(mode="after")
     def validate_runtime_contract(self):

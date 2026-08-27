@@ -31,6 +31,7 @@ from dataviz.execution.dependencies import (
     DashboardDependencyContract,
     compile_dashboard_dependencies,
 )
+from dataviz.layout import DashboardLayoutContract, compile_layout_contract
 from dataviz.sql_contract import sql_parameter_names
 from dataviz.workspace.models import (
     DashboardDefinition,
@@ -166,6 +167,16 @@ class LoadedDashboard:
         init=False,
         repr=False,
     )
+    _layout_contract: DashboardLayoutContract | None = dataclass_field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+    _layout_contract_lock: Lock = dataclass_field(
+        default_factory=Lock,
+        init=False,
+        repr=False,
+    )
 
     @property
     def dependency_contract(self) -> DashboardDependencyContract:
@@ -182,6 +193,16 @@ class LoadedDashboard:
                 if self._dependency_contract is None:
                     self._dependency_contract = compile_dashboard_dependencies(self)
         return self._dependency_contract
+
+    @property
+    def layout_contract(self) -> DashboardLayoutContract:
+        """Return the only compiled owner of declarative page structure."""
+
+        if self._layout_contract is None:
+            with self._layout_contract_lock:
+                if self._layout_contract is None:
+                    self._layout_contract = compile_layout_contract(self)
+        return self._layout_contract
 
     @property
     def canvas_name(self) -> str:
@@ -497,10 +518,6 @@ def _apply_presentation(
     if theme_update:
         effective.theme = effective.theme.model_copy(update=theme_update)
 
-    layout_update = _present_fields(presentation.layout)
-    if layout_update:
-        effective.layout = effective.layout.model_copy(update=layout_update)
-
     control_definitions = {
         f"query:{item.id}": item for item in logic.query_parameters
     }
@@ -548,12 +565,17 @@ def _apply_presentation(
                 )
             )
             continue
-        update = _present_fields(override)
-        if "css_class" in update:
-            update["css_class"] = _append_css_class(section.css_class, update["css_class"])
-        replacement = section.model_copy(update=update)
-        effective.sections[effective.sections.index(section)] = replacement
-        sections[section_id] = replacement
+        if "css_class" in override.model_fields_set:
+            replacement = section.model_copy(
+                update={
+                    "css_class": _append_css_class(
+                        section.css_class,
+                        override.css_class,
+                    )
+                }
+            )
+            effective.sections[effective.sections.index(section)] = replacement
+            sections[section_id] = replacement
 
     declarative_views = {view.id: view for view in effective.views}
     for view_id, override in presentation.views.items():
@@ -1651,6 +1673,31 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
         control_content_contract = content_control_contract(dashboard.definition)
         dependency_contract = None
         view_ids = set(dashboard.views)
+
+        try:
+            _ = dashboard.layout_contract
+        except DatavizError as error:
+            payload = error.as_dict()
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    f"Cannot compile Dashboard Layout Contract: {error.message}",
+                    definition_path,
+                    "layout",
+                    payload["code"],
+                    payload.get("details"),
+                )
+            )
+        except Exception as error:
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    f"Cannot compile Dashboard Layout Contract: {error}",
+                    definition_path,
+                    "layout",
+                    "layout_contract_invalid",
+                )
+            )
 
         duplicate_contracts = [
             (

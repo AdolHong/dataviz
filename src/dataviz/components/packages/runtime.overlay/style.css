@@ -3,6 +3,10 @@
 [data-overlay-panel], [data-control-panel] { z-index: var(--dv-overlay-z, 1000); box-sizing: border-box; overflow: auto; overscroll-behavior: contain; }
 [data-dv-overlay-top-layer] { margin: 0; }
 .dv-context-controls, .dv-runtime-control, [data-header-popover], [data-runtime-popover] { position: relative; }
+.dv-runtime-actions > .dv-runtime-control {
+  flex: 0 0 auto;
+  min-width: 120px;
+}
 .dv-context-controls > summary,
 .dv-runtime-control > summary,
 [data-header-popover] > summary,

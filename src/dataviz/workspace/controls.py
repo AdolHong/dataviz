@@ -6,8 +6,12 @@ from typing import Any, Literal
 from dataviz.errors import ExecutionFailure
 from dataviz.value_contract import (
     ValueContractViolation,
-    is_empty_control_value,
     normalize_control_value,
+)
+from dataviz.selection_state import (
+    initial_selection_state,
+    resolve_selection_state,
+    selection_values,
 )
 from dataviz.workspace.models import (
     ComputeControlDefinition,
@@ -15,7 +19,6 @@ from dataviz.workspace.models import (
     ScopedControlDefinition,
     SelectionBindingDefinition,
     SelectionControlDefinition,
-    InferredOptionDomainDefinition,
 )
 
 
@@ -45,37 +48,18 @@ class EffectiveControl:
         }
         if self.binding is not None:
             payload["binding"] = self.binding.model_dump(mode="json")
-        initial_intent = initial_selection_intent(self.definition)
-        if initial_intent is not None:
-            payload["initial_intent"] = initial_intent
+        if isinstance(self.definition, SelectionControlDefinition):
+            payload["initial_state"] = initial_selection_state(
+                self.definition,
+                allow_unresolved_inferred=True,
+            ).as_dict()
         return payload
 
 
-def initial_selection_intent(
-    definition: ScopedControlDefinition,
-) -> Literal["all_available", "explicit"] | None:
-    """Compile initial multi-select intent from the option-domain contract."""
+def initial_selection_states(dashboard: DashboardDefinition) -> dict[str, dict[str, Any]]:
+    """Return the one canonical bootstrap state for every Selection Control."""
 
-    if not isinstance(definition, SelectionControlDefinition):
-        return None
-    if definition.type != "multi_select":
-        return None
-    return (
-        "all_available"
-        if isinstance(definition.options, InferredOptionDomainDefinition)
-        and definition.options.initial == "auto"
-        else "explicit"
-    )
-
-
-def initial_selection_intents(
-    dashboard: DashboardDefinition,
-) -> dict[str, Literal["all_available", "explicit"]]:
-    return {
-        key: intent
-        for key, item in scoped_control_registry(dashboard, kind="selection").items()
-        if (intent := initial_selection_intent(item.definition)) is not None
-    }
+    return resolve_selection_state(dashboard, None, phase="canvas-hydration")
 
 
 def canonical_control_key(
@@ -182,78 +166,55 @@ def compile_control_contract(
     return contract
 
 
-def resolve_control_values(
+def resolve_selection_states(
     dashboard: DashboardDefinition,
-    kind: ControlKind,
-    provided: dict[str, Any] | None,
+    provided: dict[str, dict[str, Any]] | None,
     *,
     phase: ControlResolutionPhase = "execution",
-) -> dict[str, Any]:
-    """Normalize one semantic Control namespace using canonical scoped keys.
-
-    ``execution`` accepts only final canonical values. ``canvas-hydration`` is the
-    one bootstrap boundary at which a missing inferred Selection may remain
-    unresolved until immutable Base Outputs have been hydrated and its option
-    domain can be reconciled. Static domains and every execution boundary remain
-    strict.
-    """
-    registry = scoped_control_registry(dashboard, kind=kind)
-    supplied = provided or {}
-    unknown = sorted(set(supplied) - set(registry))
-    if unknown:
-        raise ExecutionFailure(
-            f"Unknown {kind.title()} Control key",
-            details={"code": f"{kind}_control_unknown", "keys": unknown},
-        )
-    normalized: dict[str, Any] = {}
-    for key, control in registry.items():
-        raw = supplied.get(key, control.definition.default)
-        unresolved_inferred = (
-            phase == "canvas-hydration"
-            and kind == "selection"
-            and isinstance(
-                control.definition.options,
-                InferredOptionDomainDefinition,
-            )
-            and is_empty_control_value(raw)
-        )
-        try:
-            normalized[key] = normalize_control_value(
-                control.definition,
-                raw,
-                enforce_required=not unresolved_inferred,
-            )
-        except ValueContractViolation as error:
-            raise ExecutionFailure(
-                f"Invalid {kind.title()} Control {key}: {error.message}",
-                details={
-                    "code": f"{kind}_control_{error.code}",
-                    "key": key,
-                    "reason": error.message,
-                },
-            ) from error
-    return normalized
-
-
-def resolve_selection_values(
-    dashboard: DashboardDefinition,
-    provided: dict[str, Any] | None,
-    *,
-    phase: ControlResolutionPhase = "execution",
-) -> dict[str, Any]:
-    return resolve_control_values(
+) -> dict[str, dict[str, Any]]:
+    return resolve_selection_state(
         dashboard,
-        "selection",
         provided,
         phase=phase,
     )
+
+
+def project_selection_values(
+    dashboard: DashboardDefinition,
+    state: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    return selection_values(dashboard, state)
 
 
 def resolve_compute_values(
     dashboard: DashboardDefinition,
     provided: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    return resolve_control_values(dashboard, "compute", provided)
+    registry = scoped_control_registry(dashboard, kind="compute")
+    supplied = provided or {}
+    unknown = sorted(set(supplied) - set(registry))
+    if unknown:
+        raise ExecutionFailure(
+            "Unknown Compute Control key",
+            details={"code": "compute_control_unknown", "keys": unknown},
+        )
+    normalized: dict[str, Any] = {}
+    for key, control in registry.items():
+        try:
+            normalized[key] = normalize_control_value(
+                control.definition,
+                supplied.get(key, control.definition.default),
+            )
+        except ValueContractViolation as error:
+            raise ExecutionFailure(
+                f"Invalid Compute Control {key}: {error.message}",
+                details={
+                    "code": f"compute_control_{error.code}",
+                    "key": key,
+                    "reason": error.message,
+                },
+            ) from error
+    return normalized
 
 
 def control_definition(

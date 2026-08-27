@@ -2,7 +2,7 @@
 
 > 快速安装和当前可用命令见 [README](README.md)；后续工作见 [plan.md](plan.md)。安装版本真正接受的字段始终以 `dataviz schemas`、`dataviz docs` 和 `dataviz components` 为准。
 
-本文描述 Dataviz 当前已经落地的执行架构与必须长期保持的设计不变量。当前严格契约是 `dataviz/dashboard/v5`、`dataviz/dependency-contract/v2`、`dataviz/runtime/v3` 与 Component Registry `4.0.0`；scoped Controls、Selection-before-Compute、两种 Transform、三种 Interactive Runtime、独立 Data Entry Component 与开发态 Workspace Hot Reload 已进入实现、CLI、示例与测试，不是兼容旧实验接口的抽象层。当前实现不保留 Dashboard v4、Source/Transform v1、`query_params` 或旧 Selector 字段，使用者必须按当前契约重写未迁移的实验看板。
+本文记录已经落地并可由当前 Schema、CLI、Runtime 和测试证明的契约，以及明确标注的后续目标。当前严格契约是 `dataviz/dashboard/v7`、`dataviz/presentation/v2`、`dataviz/dependency-contract/v4`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v1`、`dataviz/runtime/v5` 与 Component Registry `4.2.0`。统一 Selection State、Control Binding、Layout/Semantic Contract、自动分析状态、Runtime-aware trigger、Chart Service、Renderer 行为矩阵、inspect-layout 与 visual-check 已进入实现；当前代码不保留 Dashboard v6、Presentation v1、旧 `cascade`、Source/Transform v1、`query_params` 或旧 Selector 字段。
 
 Dataviz 是一个 workspace-first、AI-friendly 的数据看板工具。看板是普通文件，能够被 Git 管理、复制和审查；Server 面向人提供交互页面，CLI 面向 AI 与自动化提供校验、查询和 HTML 导出。
 
@@ -12,6 +12,31 @@ Dataviz 是一个 workspace-first、AI-friendly 的数据看板工具。看板�
 2. AI 开发新看板所需的输入上下文、输出代码和修正轮次是否更少。
 
 第二项必须通过真实任务测量，不预设没有证据的 Token 目标。第一优先级始终是先把工具做得好用。
+
+## 设计原则：复杂度必须下沉
+
+Dataviz 可以支持复杂数据流，但不能要求普通作者理解 Runtime 内部实现。作者面对的稳定模型只有五件事：取数参数、数据节点、Controls、Views/Sections、布局；`presentation.yaml`、Transform 代码和 Custom Renderer 都是按需逃生口。Dependency Contract、拓扑排序、状态事务、revision、缓存和 Renderer 生命周期由 Compiler/Runtime 自动生成，不能变成 Dashboard 的手写负担。
+
+| 作者想做的事 | 唯一默认路径 |
+| --- | --- |
+| 改变取数范围 | Query Parameter |
+| 在已有数据中选择样本 | `kind: selection` Control |
+| 改变查询后的计算逻辑 | `kind: compute` Control + Interactive Transform |
+| 点击图/表联动其他 View | View event 写入一个既有 Selection Control |
+| 编排 Section/View | `dashboard.yaml` 的语义模板与 span |
+| 调整颜色、容器和局部样式 | 可选 `presentation.yaml` |
+
+普通路径必须满足“一个需求、一种写法、一个状态 owner”。平台不会为 View 联动再创建隐藏 filter，不允许 View 直接调用另一个 View，也不会要求作者手写事件总线。只有字段映射、触发策略或视觉行为确实偏离默认值时才展开高级配置。若一个常见看板必须写回调、复制状态、理解 canonical key 或阅读 Runtime 源码才能完成，应把它视为框架缺口，而不是作者责任。
+
+能力按下面顺序渐进开放，前一层始终可以独立工作：
+
+```text
+声明式默认模板
+  → 模板参数与 Dashboard 布局
+  → Presentation token / 局部样式
+  → 单个 Custom Renderer
+  → 完整自定义 Canvas
+```
 
 ## 1. 核心执行模型
 
@@ -23,22 +48,24 @@ Dataviz 是一个 workspace-first、AI-friendly 的数据看板工具。看板�
 Query Parameter → Workspace Adapter → Source → Dataset Transform（可选，Server）
                                                    ↓
                                            Base Named Output
-                                                   ↓
-                            scoped Controls（Dashboard / Section / View）
-                               ├─ kind: selection → 选择数据
-                               └─ kind: compute   → 改变计算逻辑
-                                                   ↓
-                                        Interactive Transform（可选）
-                                         ├─ server-python
-                                         ├─ browser-python
-                                         └─ browser-js
-                                                   ↓
-                                           Derived Named Output
-                                                   ↓
-                                      View Renderer → Presentation
+
+交互阶段
+
+Control Component ──────────────→ scoped Controls（Dashboard / Section / View）
+View user event ─→ Selection ───┘      ├─ kind: selection → 选择数据
+                                      └─ kind: compute   → 改变计算逻辑
+
+Base Named Output + resolved Controls
+             ├─→ View Renderer → Presentation
+             └─→ Interactive Transform（可选）
+                   ├─ server-python
+                   ├─ browser-python
+                   └─ browser-js
+                            ↓
+                    Derived Named Output → View Renderer → Presentation
 ```
 
-这是一张 DAG，不要求每层都出现。最简单的看板仍然只有：
+查询与计算部分是一张 DAG，不要求每层都出现；Control Component/View user event 是状态写入边，不是会自动继续触发自身的执行边。最简单的看板仍然只有：
 
 ```text
 Source/main → View → 默认 Presentation
@@ -50,23 +77,24 @@ Source/main → View → 默认 Presentation
 - **Source**：从 File、SQL 或可信 Python 入口读取外部数据。
 - **Dataset Transform**：查询阶段在 Server 对 Source Output 做清洗、合并、特征加工和基础模型计算。
 - **Base Named Output**：一次 Query Run 确定后保持不变的基础结果。
-- **Control**：Query 后的统一交互入口；由作用域和 `kind` 同时定义可见范围与数据/计算语义。
+- **Control**：Query 后唯一的交互状态入口；Control Component 和目标 View 的用户选择只是同一状态的不同 writer，由作用域和 `kind` 定义可见范围与数据/计算语义。
 - **Interactive Transform**：不重新取数，只根据 Base Output 与显式 Control 输入产生交互结果。
 - **Derived Named Output**：Interactive Transform 的标准命名结果。
 - **View Renderer**：把 Base/Derived Output 渲染为图、表、指标、文本或自定义组件。
-- **Presentation**：按稳定 ID 调整布局、容器、组件与样式，不改变分析语义。
+- **Dashboard Composition**：拥有 Section/View 顺序、结构模板、列数和 span；删除 Presentation 后仍能确定完整阅读结构。
+- **Presentation**：按稳定 ID 调整主题、容器外观、组件外观、Renderer 视觉参数和局部样式，不拥有结构布局或分析语义。
 
 “Dataset”不是额外的隐式对象。表格 Dataset 是一种 Named Output；所有节点必须通过显式 Output 引用连接，Runtime 不暗中猜测数据来源或执行隐藏聚合。
 
 ### 单一 Dependency Contract
 
-每次 Workspace 载入或热更新都会创建新的不可变 Dashboard 快照；每个快照只编译一次版本化的 `dataviz/dependency-contract/v2`。同一快照内的执行、交互和渲染层共享同一个契约对象，不能重复编译或各自解释 DSL。它包含：
+每次 Workspace 载入或热更新都会创建新的不可变 Dashboard 快照；每个快照只编译一次版本化的 `dataviz/dependency-contract/v4`。同一快照内的执行、交互和渲染层共享同一个契约对象，不能重复编译或各自解释 DSL。它包含：
 
 - Query 节点的输入 alias、上游节点、Named Output、拓扑顺序、下游 View/option Control，以及每个节点允许读取的 Query Parameter；
 - 每个 Query Parameter 的直接消费者和最终受影响 Query 节点、Interactive 分支、option Control、内容字段与 View；
 - Interactive Transform 的 Base/Derived 输入、Query/Selection/Compute 输入 alias、Runtime、Named Output、直接/完整下游 View 和拓扑顺序；
 - View 的有效输入、继承后的 Control 与 View-specific Selection binding；
-- Control 的作用域、候选域 Base Output、级联上/下游、直接数据 View、Interactive consumer、派生 View、内容绑定和最终影响上界；
+- Control 的作用域、显式直接父节点、传递祖先/后代、拓扑顺序、候选域 Base Output、直接数据 View、Interactive consumer、派生 View、内容绑定和最终影响上界；
 - Named Output 到直接 View consumer 的反向索引，以及首次水合的固定顺序。
 
 下面这些层只能消费或投影该契约，不能各自再推导一张“差不多”的图：
@@ -78,7 +106,9 @@ Server Pipeline / AI context / dependencies CLI
 Canvas Runtime / HTML Export / Web Component Adapter
 ```
 
-Browser Runtime 注册 Transform 和 View 时会核对 data inputs、Control inputs、Query Parameter inputs 与 Output names；任何注册结果和编译契约不一致都会直接失败，不能静默运行另一张图。注册 payload 只承担 drift assertion，调度器、View 等待态和声明式 Renderer 实际读取的输入都来自 Dependency Contract，不会“校验契约后又执行原始配置”。浏览器也不再根据 DOM 顺序重建 Control 级联，统一使用契约中的 `control_order` 和 `cascade_upstream`。
+Browser Runtime 注册 Transform 和 View 时会核对 data inputs、Control inputs、Query Parameter inputs 与 Output names；任何注册结果和编译契约不一致都会直接失败，不能静默运行另一张图。注册 payload 只承担 drift assertion，调度器、View 等待态和声明式 Renderer 实际读取的输入都来自 Dependency Contract，不会“校验契约后又执行原始配置”。浏览器不根据 DOM 或作用域层级猜测 Control 依赖，统一使用契约中的 `control_order`、`depends_on` 与 `dependency_ancestors`。
+
+Selection Control 使用 `depends_on` 只声明直接父节点。引用采用相对 owner 的稳定前缀：`dashboard.<id>`、`section.<id>`、`view.<id>`。Dashboard 只能引用当前 Dashboard；Section 只能引用当前 Dashboard 或本 Section；View 只能引用当前 Dashboard、所在 Section 或自身 View，不能跨兄弟容器。Compiler 解析 canonical key、计算传递闭包和拓扑顺序，并拒绝未知引用、Compute 父节点、越界和完整环路径。Runtime 按拓扑顺序协调候选域并一次提交 canonical Selection 快照；链 `A depends_on B`、`B depends_on C` 只写两条直接边，A 自动拥有 B/C 两个有效祖先。Server 与 HTML 共用该事务，不允许组件各自实现另一套级联。
 
 契约缓存使用并发安全的首次初始化。同一 load snapshot 即使同时收到多个 Planner、Server 或 Canvas 请求，也只编译一次并返回同一个对象；热更新才创建新的快照和契约。
 
@@ -105,6 +135,8 @@ dataviz dependencies WORKSPACE DASHBOARD --format json
 | Control | Dashboard/Section/View 的 `controls` | Query 后选择数据或改变计算 | 局部筛选、重绘或重算 Interactive Transform | 保持交互；能力取决于 Runtime/export mode |
 
 Control 不是无类型参数袋。每一项必须显式声明 `kind: selection | compute`；统一入口只消除重复的 authoring/UI 结构，不抹掉两者在 Runtime 中的不同 delta、提交周期和失效语义。
+
+View 点击、框选或表格行选择不是第三个一级入口，也不拥有独立状态；它只是修改既有 Selection Control 的另一种输入手势。因此 Header/Panel、View event、tab 恢复与 HTML Export 始终看到同一份 canonical Control state。
 
 ### Query Parameter
 
@@ -156,12 +188,24 @@ View Control      → 单个 View
 
 一个 View 的有效 Selection Control 由它可见的三个作用域合成，不支持任意 Group、多个归属或隐式同名联动。相同业务含义需要联动时使用同一个上游 Control；不需要联动时使用不同稳定 ID。
 
-Selection 有两种不同的级联：
+Selection 有两种不同的候选关系：
 
-1. **作用域级联**：上游 Selection Control 改变可用数据域，下游组件立即重算选项并清除失效值。
+1. **Control DAG**：下游用 `depends_on` 显式声明直接上游 Selection；上游改变可用数据域后，Runtime 按编译拓扑立即重算下游候选并协调失效值。
 2. **组件内路径级联**：一个 Selection Control 用 `path_fields` 表达省/市/区、组织/团队等完整路径，由 Cascader 或 Tree Select 展示父级上下文。
 
-Canonical state 中空值表示没有 include 约束。交互上的“全选”显式选中当前可用项，从而允许继续反选或取消少量项；上游域变化后再做确定性 reconciliation。
+Selection 的有效状态不能只看 raw value，必须由 `intent + values + current option domain` 共同解析：`all_available` 表示包含当前全部候选并随候选域扩张；`explicit + values` 表示显式子集；`explicit + []` 表示不包含任何样本。交互上的“全选”进入 `all_available`，从而允许继续反选或取消少量项；清空进入 `explicit + []`；上游域变化后再做确定性 reconciliation。Control summary、内容绑定、普通 View、Repeat、三种 Interactive Runtime、tab 恢复和 HTML Export 必须消费同一个解析结果，不能分别从空数组猜测 All 或 None。
+
+选择基数、是否必填与是否允许清空是三个正交契约，不能再把“单选”解释成“永远必须有一个值”：
+
+| 类型 | `required` | `clearable` | 合法状态与交互 |
+| --- | --- | --- | --- |
+| `single_select` | `true` | 只能为 `false` | 始终恰好一个真实值 |
+| `single_select` | `false` | `false` | 可以从空状态开始；选中后 UI 不提供 Clear |
+| `single_select` | `false` | `true` | 可以从空状态开始、选择一个值，并再次 Clear 回明确空状态 |
+| `multi_select` | `true` | 只能为 `false` | 至少一个值，可提供不会产生空集的批量操作 |
+| `multi_select` | `false` | `true/false` | 允许或禁止用户主动进入明确空集；仍可独立使用 `all_available` |
+
+单选的 Clear 是 `explicit + []`，不是 `All`、不是“未初始化”，也不是恢复默认值。单选不合成 `All`、`Select all` 或 `Invert`；`reset` 才恢复声明的初始状态。Query Parameter/Compute Control 的可空单选对外投影为 scalar 或 `null`，Selection Control 则仍由统一 resolver 保存明确空意图。`required: true` 与 `clearable: true` 在编译期冲突。Radio.Group 本身没有自然的清空手势，因此可清空单选默认使用 Select；作者显式要求 `radio-group + clearable: true` 时，Semantic Validation 必须报错，而不是静默丢掉 Clear。
 
 Select 型 Selection 的“选项域”和“被筛选 View 数据”是两个不同契约：
 
@@ -182,7 +226,88 @@ hydrate Base Output → reconcile Selection option domains
 
 `canvas-ready` 是完成上述初始化后的生命周期事件，不是脚本加载通知。Server Shell 只有收到当前 dashboard/run/frame identity 的 ready 后，才把该 tab 记忆的 Control state 回灌 Canvas；Canvas 在初始化窗口内捕获到的用户输入先进入 canonical state，因此不会被迟到的默认值覆盖。
 
+父页面与 Canvas 的双向同步遵守字段所有权，而不是互相发送可能过期的全量影子：首次握手允许父页面恢复完整 tab snapshot；之后 Header 只向 Canvas 发送它拥有的 Dashboard Control patch，Canvas 负责合并、按 `control_order` 协调 Section/View 候选域，再回传完整 canonical snapshot。消息携带 parent selection epoch，并同时校验 dashboard/run/frame identity。这样延迟到达的 Header 消息既不能覆盖 Canvas 刚提交的 Section/View 值，旧 Canvas 消息也不能恢复更新前的 Dashboard 值。
+
 动态多选的 canonical value 与选择意图是两类状态。Runtime 用 `all_available` 表达“始终包含当前可用域”，用 `explicit` 表达“用户指定的有限集合”：上游收缩再扩张时，前者自动纳入重新可用的项，后者只保留有效交集且不会因暂时覆盖整个小域而被误判为全选。该意图由共享 Control Runtime 协调，并随 tab 恢复、Canvas 握手和 HTML 导出保存；Checkbox Group、Select、Cascader 与 Tree Select 不得各自实现不同的级联规则。
+
+#### Control Binding / Linked Views
+
+表格选中一行、图表点击一个点或框选一组点，本质上不是建立 `View A → View B` 回调，而是在读写一个已经声明的 Selection Control。Control 是唯一变量与状态 owner；普通 Control Component 和一个可选的 View Adapter 都只是它的交互入口，其他 View 与 Interactive Transform 只是 consumer：
+
+```text
+Control Component ─┐
+                   ├─→ canonical Selection Control ─→ View / Interactive Transform
+bound View event ──┘                  │
+                                     └─→ bound View projection
+```
+
+这意味着 Control 不关心下游是散点、地图、表格行还是某个 cell，也不声明 `effect: highlight`。读写投影属于绑定它的 View Adapter：Plotly/ECharts 可以把 Control 值投影为 selected point，Table 可以投影为 selected row/cell，Custom Renderer 必须实现相同的类型化 Adapter Contract。上游只提供值、候选域、作用域和 Selection 语义，不了解 Renderer。
+
+当前 author-facing DSL 只在 View 侧增加一条 `control_binding`：字符串用于目标字段与 Control 字段一致的常见情况，对象形式可显式写 `field`：
+
+```yaml
+sections:
+  - id: stores
+    controls:
+      - id: province
+        kind: selection
+        type: single_select
+        field: province
+        options: {mode: infer, source: source:stores/main}
+      - id: city
+        kind: selection
+        type: single_select
+        field: city
+        depends_on: [section.province]
+        options: {mode: infer, source: source:stores/main}
+      - id: selected_store
+        kind: selection
+        type: single_select
+        field: store_id
+        required: false
+        clearable: true
+        depends_on: [section.city]
+        options:
+          mode: infer
+          source: source:stores/main
+          initial: empty
+    views:
+      - id: store_map
+        template: scatter
+        input: source:stores/main
+        control_binding:
+          control: section.selected_store
+```
+
+标准 Adapter 默认从目标 Control 的 `field`/`path_fields` 读取事件 datum，并按 View 模板选择 point、row 或 selected item 投影；字段不一致、Table cell 或自定义图元才展开 Adapter 参数。Control 定义中不得出现 Renderer 名称、highlight/filter、row/cell 或事件回调。Presentation 可以把同一个 Section Control 的面板放到某个 View 附近，但不会改变它的语义作用域。
+
+绑定基数刻意受限：一个 Selection Control 最多绑定一个可读写 View；标准 Control Component 仍可同时修改它，任意数量的其他 View/Transform 可以只读消费它。一个 View 可以读取所有可见的 Dashboard/Section/View Controls，但第一版最多拥有一个可读写 Selection Binding。需要两个图都能写同一变量、多目标 fan-out 或任意 callback 时，先用真实案例证明必要性，不能提前把 Runtime 变成事件总线。
+
+Control 候选域只由它声明的 `depends_on` 祖先决定，计算时不应用它自身或后代 Selection。依赖作用域只能保持或收窄：
+
+| Control 所在作用域 | 允许依赖 |
+| --- | --- |
+| Dashboard | 同 Dashboard Control |
+| Section | Dashboard Control、同 Section Control |
+| View | Dashboard Control、所属 Section Control、同 View Control |
+
+同级链式依赖合法，例如 `A depends_on B`、`B depends_on C` 时只声明这两条直接边，由 Validator 检查未知引用、越界、重复边和环；更窄作用域永远不能反向决定更宽作用域 Control 的候选域。尤其当 View 绑定了 Section/Dashboard 的 `selected_store` 时，该 View 中任何会缩小门店候选域的 province/city Selection 也必须提升到同一或更宽作用域，并通过 `depends_on` 接入同一 Control DAG。第一版 Semantic Validation 直接拒绝“Section selected_store 绑定到 View，但该 View 又以 View Selection 缩小其可选门店”的结构；View 级 Compute/纯展示 Control 不改变候选域时仍然允许。
+
+Bound View 的数据投影也必须避免自我收缩：它接收应用了目标 Control 祖先后的候选数据和目标 Control 当前值，由 Adapter 显示完整候选上下文并选中对应 point/row/cell；目标 Control 自身不先把 Bound View 裁成一行。其他 consumer 继续按普通 Selection include 语义筛选。因此 `selected_store = explicit + []` 时，地图仍展示当前省市下所有候选门店但没有高亮，而依赖 selected_store 的明细 View 显示空状态；选中 S001 后地图高亮 S001，明细 View 只分析 S001。
+
+Dependency Contract 必须明确区分三类边：
+
+1. `Control → Control`：候选域 `depends_on` 边，参与拓扑和环检查；
+2. `View user event → Control`：一个真实用户事件 writer binding，不是自动执行边；
+3. `Control → View/Transform`：普通只读 consumer 或 Bound View projection。
+
+作者只声明 Control、直接 `depends_on` 和一条 View 侧 `control_binding`；Compiler 生成其余索引。程序化 selected point/row 更新、状态恢复和 Renderer 重绘绝不能重新发出用户事件，从根源上阻断 `View → Control → View` 反馈循环。所有 Control Component、Bound View event、tab restore 和 API 写入共用同一个原子事务：校验 action → 更新目标 Control → 按 `control_order` 协调下游候选域 → 提交 canonical snapshot → 计算一次 delta → 调度 consumer。若有效状态没有变化，不重绘；每个受影响 consumer 每次事务最多更新一次。
+
+View event envelope 由 Adapter 携带 dashboard/run/frame/view/render generation；旧 frame、已 dispose View 或旧 generation 的事件直接拒绝。较早的 Browser/Server Interactive 结果若在新 revision 后完成也必须丢弃。Table、Plotly 与 ECharts Adapter 只把真实用户操作归一化为 `select`、`select_many` 或 `clear`；Custom Renderer 只通过类型化出口发送 datum，不得修改 Control DOM、调用另一个 View 或绕过 Dependency Contract。
+
+以同一 Section 的 A/B 两个 View 为例：A 绑定 `section.selected_store`，B 只读消费它。用户在 A 点击门店 X 后，共享 Control 提交 X，A Adapter 选中 X，B 更新一次，Control 面板同步显示 X；随后用户在面板 Clear，Control 提交 `explicit + []`，A 清除 selected projection，B 进入空状态。不存在“图表状态”和“面板状态”谁覆盖谁，只有按 revision 排序的一份 canonical state。
+
+Server 与交互 HTML 共用同一 Control reducer 和 View Binding Contract。若该 Selection 触发 `server-python` Interactive Transform，Server 仍遵循 Transform trigger；独立 HTML 服从既有 export capability，不能伪装缺失的 Server 重算。自动分析状态展示同一个 Control 值，避免 Bound View 产生不可见的隐藏筛选。
 
 对 Interactive Transform，Selection 不是一个需要业务代码自行解释的普通参数。Transform 通过 `selection_inputs` 声明依赖后，Runtime 必须在进入三种 Interactive Runtime 前，对每个具有相应字段契约的表输入应用 include 筛选；不含该字段的无关输入保持不变。因此统一顺序是：
 
@@ -225,9 +350,11 @@ controls:
 
 Interactive Transform 支持：
 
-- `trigger: apply`：默认。控件变化先形成草稿，分支标记 stale，用户点击 Apply/Run analysis 后提交。
-- `trigger: auto`：提交前 debounce；新状态会取消或 supersede 旧计算。
+- `trigger: auto`：控件变化后 debounce 并自动提交；新状态会取消或 supersede 旧计算。
+- `trigger: apply`：控件变化先形成草稿，分支标记 stale，用户点击 Apply/Run analysis 后提交。
 - `trigger: manual`：只由明确按钮或 CLI/API 调用。
+
+目标默认值按 Runtime 决定：`browser-js` 与 `browser-python` 默认 `auto`，`server-python` 默认 `apply`；作者仍可显式覆盖。浏览器并不等于计算便宜，因此不得删除 `apply/manual`，也不得由静态校验猜测计算成本。当前 Interactive Transform v2 仍统一默认 `apply`，在 Runtime-aware 默认值进入 Schema、Dependency Contract、CLI 文档和测试前，以显式 `trigger` 为准。
 
 直接 Selection Control 筛选仍即时生效；只有依赖该 Control 的重型 Interactive Transform 可以进入 stale 状态等待 Apply。页面标题、说明和运行证据引用的是产生当前结果的 **已提交值**，不能把未应用的草稿伪装成结果上下文。
 
@@ -419,15 +546,51 @@ Adapter 只有两个权威位置：提交到 Git 的 `auth/adapters.yaml` 保存
 - Adapter、Query Parameter 与 scoped Controls；
 - Source、Dataset Transform、Interactive Transform 与 Named Output；
 - Dashboard、Section、View 的 Selection/Compute Control；
-- View 模板、字段编码、聚合与最小阅读顺序。
+- View 模板、字段编码和聚合；
+- Section/View 的阅读顺序、结构模板、列数和 span。
 
 `presentation.yaml` 是可选的稀疏覆盖，负责：
 
 - Theme、颜色、密度和 design token；
-- 语义 Layout、Section/View 容器和 Data Entry Component；
+- Section/View 容器外观和 Data Entry Component；
 - Query 与 Dashboard/Section/View Controls 托盘的模板、宽度、列数与密度；
 - 不改变业务语义的 Renderer options/config；
 - 局部 CSS/JS 与 Canvas 资源。
+
+这里的“结构布局”特指 Dashboard Canvas 中 Section/View 的顺序、分栏和占位。Controls 托盘内部的响应式列数、控件宽度和密度仍是 Component 的呈现配置，不进入 Layout Contract，也不能改变 Control 的值、作用域或依赖关系。
+
+### 单一 Layout Contract
+
+结构布局只能有一个 owner。目标声明式结构为：
+
+```yaml
+sections:
+  - id: night_analysis
+    title: 夜间分析
+    template: grid
+    columns: 12
+    views: [daily_after_hour_detail, dow_hourly_sales]
+
+views:
+  - {id: daily_after_hour_detail, input: source:sales/main, template: table, span: 6}
+  - {id: dow_hourly_sales, input: source:sales/main, template: line, span: 6}
+```
+
+Compiler 为每个 Dashboard 快照生成唯一的 `dataviz/layout-contract/v1`。契约包含 Canvas mode、Section 顺序、模板、列数、View 顺序、最终 span、确定性行分配，以及每个值来自显式声明还是模板默认。默认 Renderer、Server、HTML Export、AI context、Validator 与 `inspect-layout` 消费该契约，不再从 CSS、Presentation 和 DOM 各自猜测布局。
+
+模板提供结构默认值，不静默吞掉显式属性：`grid` 中显式 span 覆盖模板默认；`single` 必须恰好包含一个全宽 View，声明多个 View 或额外 span 属于确定性冲突；`split`、`comparison`、`chart-and-table` 等模板声明默认比例，并明确哪些结构属性允许覆盖。任意 View 的最终 span 和行位置都必须能由 `inspect-layout` 解释。
+
+完整自定义 Canvas 是显式逃生口，Layout Contract 只记录 `mode: custom`、声明的挂载点和稳定 View/Section ID，不尝试静态解释任意 HTML/CSS。其真实几何将由浏览器 `visual-check` 检查。Dashboard v7 与 Presentation v2 已删除 Presentation 的全局 layout、Section template/columns 和 View span；旧结构字段直接校验失败。
+
+### 最终配置的 Semantic Validation
+
+Schema 合法不等于配置有效。Semantic Validation 必须在 Dashboard、Presentation、Component/Renderer manifest 和 Layout/Dependency Contract 全部编译后运行，至少区分：
+
+- `error`：确定无法执行或结构矛盾，例如 `single` 包含多个 View、行占用超过列数、Renderer 不接受声明属性；
+- `warning`：能够运行但确定是 no-op，例如 span 被模板忽略、Selection 没有任何 View/Transform/内容 consumer；
+- `advice`：依赖经验而非确定事实，例如大型 Table 放入 band、可疑的 `min_height`、Browser Transform 使用 `apply`。
+
+`--strict` 只把 `warning/error` 作为门禁，不能因主观 `advice` 失败。所有诊断必须有稳定 code、文件/字段、最终有效值、冲突来源和最小修复建议；Validator 不得维护第二套 Layout 或 Dependency 推导。
 
 默认 Theme 是 `business`：冷灰页面、白色分析卡片、靛蓝主色、低阴影和紧凑数据表。Server、导出 HTML、Plotly、ECharts、普通 Table、Perspective 与 Data Entry Component 共同消费一组 Theme token，避免每个 Renderer 各带一套视觉。`plain` 是更克制的中性版本，`editorial` 与 `terminal` 分别用于叙事报告和深色技术监控；Dashboard 仍可通过 token、`css_class` 和局部 CSS 覆盖，而不改数据语义。
 
@@ -443,9 +606,9 @@ Adapter 只有两个权威位置：提交到 Git 的 `auth/adapters.yaml` 保存
   → 完整 Canvas HTML/CSS/JS
 ```
 
-默认布局是文档流。`grid`、`split`、`chart-and-table` 等只是语义模板，不是 Mosaic、拖拽坐标或固定画布协议。
+默认布局是文档流。`grid`、`split`、`chart-and-table` 等只是可编译的语义模板，不是 Mosaic、拖拽坐标或固定画布协议。
 
-Header 把 Query 收敛为一个 split control：主按钮执行 `Run query`，相邻箭头控制 Header 内联的 Query Parameters 区域。参数区默认展开并占据正常文档流，展开时把 Canvas 向下推；它不属于 Overlay Runtime，点击外部或按 `Esc` 不改变状态。折叠状态按浏览器 tab 与 Dashboard 保存；没有 Query Parameter 时退化为普通 Run 按钮。Controls 仍是临时托盘，在同一面板里按 DATA（selection）与 LOGIC（compute）分组，并由外部点击或 `Esc` 关闭。默认 `auto` 在单项时堆叠、多项时自适应分栏，过高内容在面板内部滚动。Dashboard 可在 `presentation.yaml` 的 `control_panels.query`、`control_panels.dashboard` 中调整布局，Section/View 可在各自 Presentation 条目的 `controls` 中调整局部托盘。Presentation 不得重写值、kind、校验、级联、tab 隔离或执行事件；Query 在导出 HTML 中只是固定快照，scoped Controls 保持交互。
+Header 把 Query 收敛为一个 split control：主按钮执行 `Run query`，相邻箭头控制 Header 内联的 Query Parameters 区域。参数区默认展开并占据正常文档流，展开时把 Canvas 向下推；它不属于 Overlay Runtime，点击外部或按 `Esc` 不改变状态。折叠状态按浏览器 tab 与 Dashboard 保存；没有 Query Parameter 时退化为普通 Run 按钮。Controls 仍是临时托盘，在同一面板里按 DATA（selection）与 LOGIC（compute）分组，并由外部点击或 `Esc` 关闭。Query 默认最多使用四个具有可读最小宽度的轨道，容器变窄时减少列数而不是继续挤压；`columns` 是响应式最大列数，控件默认 `span: 1`，只有 Presentation 显式声明 `span: 2` 才跨列，RangePicker 等组件不根据类型自动变宽。过高内容在面板内部滚动。Dashboard 可在 `presentation.yaml` 的 `control_panels.query`、`control_panels.dashboard` 中调整布局，Section/View 可在各自 Presentation 条目的 `controls` 中调整局部托盘。Presentation 不得重写值、kind、校验、级联、tab 隔离或执行事件；Query 在导出 HTML 中只是固定快照，scoped Controls 保持交互。
 
 ## 8. 内容绑定
 
@@ -462,6 +625,17 @@ Header 把 Query 收敛为一个 split control：主按钮执行 `Run query`，�
 - Compute Control 内容只在对应 Interactive Transform 提交后更新。
 - Selection Control 在浏览器内即时更新；如果重型分支使用 `trigger: apply`，结果区域必须标记 stale，直到重新计算完成。
 - 引用本身就是依赖声明；跨不可见作用域、未知 ID 和任意模板表达式由 `dataviz validate` 拒绝。
+
+### 自动分析状态
+
+标题插值是作者表达能力，不应成为用户理解当前结果的唯一办法。Runtime 为每个 tab/Dashboard/Run 维护统一的 `dataviz/state-snapshot/v1`，区分 committed Query Parameter、applied Selection、committed Compute、draft Compute 和 stale 状态。Server 与 HTML 从同一快照自动生成可配置的分析状态摘要：
+
+```text
+仓 5740 · 商品 980464683 · 2026-08-18 至 2026-08-24
+周四 · 18:00 及之后 · 3 个日期
+```
+
+Dashboard Header 默认展示 Query Parameter 与 Dashboard Control；Section/View 在自己的标题附近展示对应局部 Control。长多选使用数量摘要并可展开查看，不把全部值塞进标题。摘要只描述真正产生当前结果的已提交值；存在未应用草稿时单独显示“待应用”，不能提前替换 committed context。作者可以调整 label、顺序、formatter 或隐藏非关键项，但不需要手写 JS 或重复维护状态。
 
 ## 9. 渐进执行、局部失败与隔离
 
@@ -537,7 +711,7 @@ Dataset Transform 与 `server-python` Interactive Transform 都是可信单机 P
 - Data Entry：Input、InputNumber、AutoComplete、Checkbox、Switch、Radio.Group、Select、Checkbox.Group、Cascader、TreeSelect、DatePicker、RangePicker、Slider。
 - Query Parameter、Selection Control 与 Compute Control 共用这套组件，但保留各自 delta、作用域、提交和执行语义。
 
-值语义、作用域与展示组件是三个正交维度。`dashboard.yaml` 拥有 type/default/required/options/suggestions/min/max/step/path_fields 等可验证逻辑；Control 的 Dashboard/Section/View 位置拥有作用域；`presentation.yaml.control_components` 只选择 UI。Single Select 只渲染声明的真实选项，不合成 `All`、`Select all`、`Invert` 或 `Clear`。Multi Select 才拥有批量操作，并由 `required`、`clearable` 与 `max_selected` 决定合法集合。RangePicker 使用一个触发器和一个浮层日历，在同一上下文中依次选择开始、结束日期；宽屏显示相邻双月，窄屏收敛为单月，preset、范围预览、键盘导航与范围边界属于同一个 Component Contract。
+值语义、作用域与展示组件是三个正交维度。`dashboard.yaml` 拥有 type/default/required/clearable/options/suggestions/min/max/step/path_fields 等可验证逻辑；Control 的 Dashboard/Section/View 位置拥有作用域；`presentation.yaml.control_components` 只选择 UI 组件及 `span` 等视觉排版。Single Select 只渲染声明的真实选项，不合成 `All`、`Select all` 或 `Invert`，但 optional Single Select 可以显式 `clearable: true`，从一个值回到明确空状态。Multi Select 才拥有批量操作，并由 `required`、`clearable` 与 `max_selected` 决定合法集合。RangePicker 使用一个触发器和一个浮层日历，在同一上下文中依次选择开始、结束日期；宽屏显示相邻双月，窄屏收敛为单月，preset、范围预览、键盘导航与范围边界属于同一个 Component Contract。组件语义不决定网格宽度，因此 RangePicker 默认也只占一轨。
 
 `options.mode=static` 的 `choices` 是封闭候选集合，而不是动态数据域的标签缓存。维度成员来自 Source 时必须使用 `options.mode=infer`，由 `options.source` 或消费 View 的 Base Output 推导；否则 Source 新增但未写入静态枚举的值会被有意排除。候选域来源与初始选择意图分开，避免 Dashboard 同时维护数据和一份易漂移的默认值/白名单。
 
@@ -564,11 +738,28 @@ Gallery 是这些契约的可执行说明，而不是截图目录。Control、Vi
 
 公开浏览器边界是版本化 Runtime Manifest、Output Store 和稳定事件。Vanilla JS、Web Component 或未来 React/Vue Adapter 只能消费公开协议，不能依赖 Python Renderer 私有结构或默认 Runtime 内部函数。
 
-自定义 Renderer 使用：
+自定义 Renderer 的作者接口保持最小：
 
 ```text
 validate → mount → update → dispose
 ```
+
+这四项是实现 hook，不等于完整产品行为。所有内置或托管 Renderer 必须由平台通过统一行为矩阵：
+
+```text
+mount → update → empty → restore → interaction → resize → dispose → export
+```
+
+`view.declarative` 宿主统一识别空数据、发布 Empty、释放旧实例并在数据恢复时重新 mount；Renderer/Chart Service 负责交互事件与 ResizeObserver；Export 必须加载同一 Runtime 和 Adapter，不能另写静态渲染分支。首屏 Python 生成的 Plotly/ECharts/Perspective bootstrap 也必须注册到同一 View ID 状态表，不能绕过后续 update/dispose。命令式引擎资源必须归属具体 Renderer 实例：Perspective 的 Worker、Table 与 Viewer 一同 mount/dispose，不能把 Worker 隐藏成 Canvas 全局单例。异步 mount/update/dispose 必须在平台时限内进入 Ready、Fallback 或 Error，不能永久停在 Loading。矩阵至少同时覆盖 Plotly、ECharts、Perspective 的 Server Canvas 和 portable HTML。
+
+Custom Renderer 的目标默认路径不是直接调用全局 Plotly/ECharts，而是使用平台 Chart Service：
+
+```javascript
+context.charts.plotly.mount(element, {data, layout, config})
+context.charts.echarts.mount(element, {options})
+```
+
+Service 与内置 View Adapter 共用 Theme、responsive、`scrollZoom`、resize、update、dispose、错误状态和 HTML Export 策略。直接访问底层库仍是显式逃生口，但不会自动继承平台默认值；Scaffold、Gallery 和 AI 文档优先生成 Service 调用。`view.declarative` Package manifest 声明 `service.charts` 能力，Semantic Validation 可据最终 Renderer 配置判断属性是否生效。
 
 Server 页面与导出 HTML 必须使用同一组件实现。
 
@@ -577,6 +768,15 @@ Server 页面与导出 HTML 必须使用同一组件实现。
 - **Server** 面向人：提交 Query Parameter、操作 scoped Controls、运行 Interactive Transform、查看 Source/Transform 证据。
 - **CLI** 面向 AI/自动化：validate、query、run、compute、output、report、docs、schemas、components、context、scaffold 和 benchmark。
 - **HTML** 是一次 Query Run 的可移植快照：Query Parameter 固定；Browser Interactive Transform 可以继续执行；Server Interactive Transform 只能保留 snapshot 或 unavailable。
+
+AI 默认 JSON 紧凑且稳定。`query/output/compute` 默认只输出状态、行列数、耗时、Schema 摘要和有限预览；完整 Node、Artifact、Resolved SQL、bindings、provenance 和 diagnostics 通过 `--detail debug|full` 请求。精简不能删除失败所需的稳定错误 code 和下一步建议，也不能让 summary/full 使用两套执行逻辑。
+
+目标布局与视觉检查分为两层：
+
+1. `dataviz inspect-layout WORKSPACE DASHBOARD --format json` 只读取编译后的 Layout Contract，输出 Section/View 行列、span、默认来源、冲突和 `mode: declarative|custom`，不启动浏览器；
+2. `dataviz visual-check WORKSPACE DASHBOARD` 使用真实浏览器和固定 viewport 检查溢出、重叠、零尺寸、弹层裁切、稳定后永久 Loading、Perspective 容器高度、Console error 等客观事实，并可输出 Screenshot 与机器可读 geometry report。
+
+`visual-check` 不声称判断配色、信息层级、业务图表选择或“是否好看”。自定义 Canvas 的任意 CSS 无法由静态 Contract 完整解释，必须走浏览器检查；视觉模型或人工审阅仍是主观质量的最终证据。
 
 AI 的默认工作应该是选择模板、绑定 Output、填写状态依赖和业务表达式，而不是每次生成整页前端代码。安装包必须提供严格 Schema、静态 validate、机器可读 docs/components/context、Scaffold、Gallery、稳定错误码和 authoring 日志。
 
@@ -588,13 +788,15 @@ AI 的默认工作应该是选择模板、绑定 Output、填写状态依赖和�
 
 | 契约 | 版本 |
 | --- | --- |
-| Dashboard schema | `dataviz/dashboard/v5` |
+| Dashboard schema | `dataviz/dashboard/v7` |
+| Presentation schema | `dataviz/presentation/v2` |
 | Source schema | `dataviz/source/v2` |
-| Dashboard Dependency Contract | `dataviz/dependency-contract/v2` |
-| Browser Runtime Manifest/Event | `dataviz/runtime/v3` |
+| Dashboard Dependency Contract | `dataviz/dependency-contract/v4` |
+| Dashboard Layout Contract | `dataviz/layout-contract/v1` |
+| Browser Runtime Manifest/Event | `dataviz/runtime/v5` |
 | Dataset Transform schema | `dataviz/dataset-transform/v2` |
 | Interactive Transform schema | `dataviz/interactive-transform/v2` |
-| Component Registry | `4.0.0` |
+| Component Registry | `4.2.0` |
 
 已经实现：
 
@@ -608,11 +810,18 @@ AI 的默认工作应该是选择模板、绑定 Output、填写状态依赖和�
 8. `validate`、`compute`、`docs`、`schemas`、`components`、`context` 和 Scaffold 使用同一当前契约。
 9. 同一 tab 的状态可恢复，不同 tab、Dashboard、用户、Query Run 与 Interaction generation 相互隔离；父页面/Canvas 消息还校验当前 frame identity。
 10. `authoring prepare/verify/assess/start/finish/compare` 可以用固定任务、经过完整性校验的 approach prompt、输入完整性、逐项验收证据、真实客户端 Token、首次成功率、修正轮次和耗时对比 Dataviz 与 standalone HTML；缺失 Token 不做估算。
-11. `data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 已从 bridge 完整迁入物理 owner Package；Runtime v3 通过公开 ready event 装配且 dispose 幂等。
+11. `data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 已从 bridge 完整迁入物理 owner Package；Runtime v5 通过公开 ready event 装配且 dispose 幂等。
 12. Gallery 已覆盖四类组件的七状态矩阵，以及真实 10/100/1,000 选项 Select Story；Story 元数据、页面目标与 Chromium 行为测试使用同一 Package。
 13. `selection_inputs` 在 Server `ExecutionContext` 和 Browser `data.pipeline` 的公共输入边界先裁剪表数据，三种 Interactive Runtime 都保证 Selection 先于 Compute。
 14. 动态 Selection option domain 从 Base Output 建立；首次运行先 hydration/reconciliation，再渲染与调度 Interactive 分支。`canvas-ready` 只在首次 canonical state 提交后发布，Browser Interactive 状态通过 frame identity 约束的事件同步到 Server `Pipeline` 面板。
 15. Query、Interactive、Control、Output 与 View 的所有边由单一 Dependency Contract 编译；Planner、Server、Browser、Export、CLI 与 AI context 只消费其投影。Query/Interactive 节点只能读取声明的参数，Browser 注册与契约漂移会立即失败。
+16. Selection 的唯一状态是 `{intent, values}`；Control、Repeat、View、三种 Interactive Runtime、tab 恢复与 HTML Export 共用 resolver。`explicit + []` 是明确空集，`all_available` 随候选域变化；optional Single Select 支持受契约约束的 Clear。
+17. View 可通过一条 `control_binding` 双向绑定现有 Selection Control。Dependency Contract v4 编译唯一 writer 与普通 consumers；Plotly、ECharts、Table 和 Custom Renderer 只通过类型化 Adapter Action 写 canonical state，并拒绝越界、第二 writer、旧 generation 与反向作用域依赖。
+18. Layout Contract v1 是声明式页面结构的唯一编译结果；Dashboard 拥有顺序、模板、columns 与 span，Presentation v2 只拥有视觉。默认 Renderer、Server、HTML、AI context 与 validate 共用该契约，自定义 Canvas 只暴露稳定 mount points。
+19. Semantic Validation 在最终 Layout/Dependency/Renderer 配置上输出稳定 error/warning/advice；`inspect-layout` 公开编译后的行列与来源，不维护第二张布局图。
+20. `state-snapshot/v1` 是当前分析状态的只读证据；默认画布在 Dashboard/Section/View 三层展示 committed/applied 值，并把 Compute draft 明确标成待应用。
+21. browser-js/browser-python 默认 `auto`，server-python 默认 `apply`；显式 trigger 仍优先。`query/output/compute` 默认返回紧凑 `dataviz/cli-result/v1`，调试证据通过 `--detail debug|full` 获取。
+22. Custom Renderer 通过 `context.charts.plotly/echarts` 复用平台 Theme、滚轮、Resize、Update 与 Dispose；`visual-check` 对 Server/Report 执行真实浏览器几何和永久 Loading 检查并保存截图。
 
 仍属于后续优化，而不是隐藏的兼容工作：
 
@@ -623,6 +832,9 @@ AI 的默认工作应该是选择模板、绑定 Output、填写状态依赖和�
 5. Chromium/Firefox/WebKit 已覆盖 390×520 弹层几何、内部滚动、键盘、ARIA、外部关闭，以及 Perspective 重复 dispose/reload/wheel 恢复；新增组件必须继续进入同一矩阵。
 6. 当前协调模型是单进程：`dataviz serve` 启动一个进程，Run、Navigation、Cache 与报告发布锁不提供跨进程互斥；多个进程不得同时写同一 Workspace/输出路径。Runtime 并发上限在启动时捕获，修改配置后需重启。
 7. Server 不提供账号体系或 HTTP 鉴权，默认只绑定回环地址；非回环 `--host` 必须显式使用 `--allow-remote`，访问控制由可信网络或外部代理承担。`session_id` 是 tab 状态命名空间，不是身份认证。
+8. Semantic Validation 只判断确定性 no-op 与保守启发式；它不会根据未知真实数据规模判定图表是否适合，也不会替代人工审美判断。
+9. 自动分析状态覆盖默认 Canvas；完整自定义 Canvas 需要显式放置稳定的 state-summary mount，平台不会猜测任意 HTML 的标题区域。
+10. visual-check 判断溢出、裁切、重叠、零尺寸、永久 Loading、Perspective 高度和 Console error，不判断配色、业务图表选择或叙事质量。
 
 Component Registry 独立版本化，只在公共组件契约变化时升级，不跟随 Dashboard schema 机械改号。
 

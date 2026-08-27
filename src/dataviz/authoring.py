@@ -630,6 +630,7 @@ def build_context_payload(
             view_ids=view_ids,
             control_keys=control_keys,
         ),
+        "layout_contract": dashboard.layout_contract.as_dict(),
         "sources": {
             key: _source_payload(workspace, *dashboard.sources[key])
             for key in sorted(source_ids)
@@ -815,7 +816,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         files = {
             "dashboard.yaml": _yaml(
                 {
-                    "schema": "dataviz/dashboard/v5",
+                    "schema": "dataviz/dashboard/v7",
                     "kind": "dashboard",
                     "id": item_id,
                     "title": item_id.replace("-", " ").title(),
@@ -906,7 +907,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                     "inputs": {"data": "source:data/main"},
                     "compute_inputs": {},
                     "selection_inputs": {},
-                    "trigger": "apply",
+                    "trigger": "apply" if runtime == "server-python" else "auto",
                     "export": (
                         {"mode": "interactive", "assets": "cdn"}
                         if runtime == "browser-python"
@@ -1110,8 +1111,9 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                 ]
             ),
             f"assets/{item_id}.js": (
-                "// If this Custom Renderer uses Plotly.newPlot/react, pass scrollZoom:false\n"
-                "// so the Dashboard keeps wheel scrolling. Use true only on an explicit user request.\n"
+                "// For charts use context.charts.plotly/echarts. The platform owns theme,\n"
+                "// responsive resize, page-first wheel behavior, update and disposal.\n"
+                "// Direct Plotly/ECharts calls are an explicit low-level escape hatch.\n"
                 f"window.datavizRuntime.registerRenderer({renderer_literal}, {{\n"
                 "  validate(descriptor) {},\n"
                 "  mount(context, descriptor) {\n"

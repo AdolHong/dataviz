@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v5
+schema: dataviz/dashboard/v7
 kind: dashboard
 id: chart-gallery
 title: 多图表陈列室

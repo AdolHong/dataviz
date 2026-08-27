@@ -7,12 +7,6 @@ from typing import Any, Iterable
 import pandas as pd
 
 
-def _is_unconstrained(value: Any) -> bool:
-    return value is None or value == "" or (
-        isinstance(value, (list, tuple)) and len(value) == 0
-    )
-
-
 def _text(value: Any) -> str:
     if value is None:
         return ""
@@ -50,8 +44,15 @@ def _mask(
     item: dict[str, Any],
     value: Any,
 ) -> pd.Series:
-    if _is_unconstrained(value) or not _can_apply(frame, item):
+    if not _can_apply(frame, item):
         return pd.Series(True, index=frame.index, dtype=bool)
+    # Canonical Selection semantics: explicit empty means no samples.  The
+    # all_available intent carries the currently resolved domain in ``values``
+    # and therefore follows the same include filter.
+    if value is None or value == "" or (
+        isinstance(value, (list, tuple)) and len(value) == 0
+    ):
+        return pd.Series(False, index=frame.index, dtype=bool)
 
     definition = item.get("definition") or {}
     binding = item.get("binding") or {}

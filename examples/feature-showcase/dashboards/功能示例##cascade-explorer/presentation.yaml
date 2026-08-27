@@ -1,4 +1,4 @@
-schema: dataviz/presentation/v1
+schema: dataviz/presentation/v2
 kind: presentation
 dashboard: cascade-explorer
 

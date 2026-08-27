@@ -19,6 +19,7 @@ class ExecutionContext:
     query_inputs: dict[str, Any]
     compute_params: dict[str, Any]
     selections: dict[str, Any]
+    selection_state: dict[str, dict[str, Any]]
     inputs: dict[str, ArtifactDescriptor]
     store: ArtifactStore
     selection_filters: tuple[dict[str, Any], ...] = ()

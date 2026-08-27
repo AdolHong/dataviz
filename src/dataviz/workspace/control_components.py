@@ -40,7 +40,13 @@ def _auto_component(definition: Any) -> tuple[str, str]:
         return "checkbox", "boolean"
     if value_type == "string":
         return ("auto-complete", "suggestions") if suggestions else ("input", "free_text")
-    if value_type == "single_select" and 0 < len(choices) <= 4:
+    # A radio group has no honest empty-state interaction. Optional clearable
+    # singles therefore resolve to Select even for a tiny static domain.
+    if (
+        value_type == "single_select"
+        and not bool(getattr(definition, "clearable", False))
+        and 0 < len(choices) <= 4
+    ):
         return "radio-group", "small_single_select"
     if value_type == "multi_select" and 0 < len(choices) <= 8:
         return "checkbox-group", "small_multi_select"
@@ -75,6 +81,10 @@ def resolve_control_component(
         )
     if component == "auto-complete" and not getattr(definition, "suggestions", []):
         raise ValueError("auto-complete requires suggestions")
+    if component == "radio-group" and bool(getattr(definition, "clearable", False)):
+        raise ValueError(
+            "radio-group cannot render clearable single_select; use component=select"
+        )
     result.update(
         {
             "component": component,

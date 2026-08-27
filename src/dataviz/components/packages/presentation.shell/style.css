@@ -303,6 +303,54 @@
 [data-dv-control-panel]:not([data-control-columns="auto"]) > .dv-runtime-popover > .dv-compute-fields {
   grid-template-columns: repeat(var(--dv-control-columns, 1), minmax(0, 1fr));
 }
+
+/*
+ * Query Parameters live in the Header's document flow and can be much wider
+ * than a floating Controls tray. Treat `columns` as a responsive maximum,
+ * cap the default at four comfortable tracks, and leave intentional whitespace
+ * instead of stretching or packing fields until their values become unreadable.
+ */
+[data-dv-control-panel][data-control-role="query"] {
+  container-name: dv-query-controls;
+  container-type: inline-size;
+  --dv-query-control-form-max: 1396px;
+}
+[data-dv-control-panel][data-control-role="query"][data-control-columns="1"] {
+  --dv-query-control-form-max: 340px;
+}
+[data-dv-control-panel][data-control-role="query"][data-control-columns="2"] {
+  --dv-query-control-form-max: 692px;
+}
+[data-dv-control-panel][data-control-role="query"][data-control-columns="3"] {
+  --dv-query-control-form-max: 1044px;
+}
+[data-dv-control-panel][data-control-role="query"][data-control-columns="4"] {
+  --dv-query-control-form-max: 1396px;
+}
+[data-dv-control-panel][data-control-role="query"] > .header-control__popover > .parameter-form {
+  box-sizing: border-box;
+  width: min(100%, var(--dv-query-control-form-max));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)) !important;
+  align-content: start;
+}
+
+/* `span` is an explicit Presentation choice; no component spans automatically. */
+.parameter-form > [data-control-span="2"],
+.selection-form > [data-control-span="2"],
+.dv-report-selection-group__fields > [data-control-span="2"],
+.dv-compute-fields > [data-control-span="2"],
+.dv-context-controls__group > div > [data-control-span="2"] {
+  grid-column: span 2;
+}
+[data-dv-control-panel][data-control-template="stack"] [data-control-span],
+[data-dv-control-panel][data-control-columns="1"] [data-control-span] {
+  grid-column: span 1;
+}
+@container dv-query-controls (max-width: 600px) {
+  .parameter-form > [data-control-span] {
+    grid-column: span 1;
+  }
+}
 [data-dv-control-panel] > .header-control__popover > .query-state,
 [data-dv-control-panel] > .header-control__popover > .compute-actions {
   margin-top: 12px;
@@ -326,7 +374,7 @@
   .dv-canvas { padding: 20px; }
   .dv-report-header--compact { display: block; }
   .dv-report-header--compact h1 { font-size: 38px; }
-  [data-dv-control-panel] > .header-control__popover > .parameter-form,
+  [data-dv-control-panel]:not([data-control-role="query"]) > .header-control__popover > .parameter-form,
   [data-dv-control-panel] > .header-control__popover > .selection-form,
   [data-dv-control-panel] > .dv-runtime-popover > .dv-report-selection-group__fields,
   [data-dv-control-panel] > .dv-runtime-popover > .dv-runtime-query-values,
@@ -339,6 +387,9 @@
   .dv-runtime-control-group > .dv-compute-fields {
     grid-template-columns: minmax(0, 1fr) !important;
   }
+  [data-dv-control-panel]:not([data-control-role="query"]) [data-control-span] {
+    grid-column: span 1;
+  }
 }
 
 /* Query Parameters belong to the Server Header's document flow, not Overlay Runtime. */
@@ -347,4 +398,79 @@
 }
 [data-dv-control-panel][data-control-role="query"] > [data-control-panel-body][hidden] {
   display: none !important;
+}
+
+/* Canonical, read-only analysis-state evidence shared by Server and reports. */
+.dv-state-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin: 10px 0 16px;
+}
+.dv-state-summary[hidden] { display: none !important; }
+.dv-state-summary--section,
+.dv-state-summary--view {
+  margin: 0;
+  padding: 8px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--dv-line, #d7dce5) 72%, transparent);
+}
+.dv-state-summary--view { padding-inline: 16px; }
+.dv-state-chip {
+  position: relative;
+  max-width: min(100%, 520px);
+  color: var(--dv-ink, #17242d);
+  border: 1px solid color-mix(in srgb, var(--dv-line, #d7dce5) 82%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--dv-paper, #fff) 88%, var(--dv-surface, #f3f5f8));
+  font: 11px/1.2 var(--dv-font-sans, sans-serif);
+}
+.dv-state-chip__main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 9px;
+}
+.dv-state-chip__main strong {
+  flex: 0 0 auto;
+  color: var(--dv-muted, #667085);
+  font-size: 10px;
+  font-weight: 650;
+}
+.dv-state-chip__main > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+details.dv-state-chip > summary { cursor: pointer; list-style: none; }
+details.dv-state-chip > summary::-webkit-details-marker { display: none; }
+details.dv-state-chip > summary::after {
+  content: "⌄";
+  margin-left: 2px;
+  color: var(--dv-muted, #667085);
+}
+.dv-state-chip__expanded {
+  position: absolute;
+  z-index: 45;
+  top: calc(100% + 5px);
+  left: 0;
+  width: max-content;
+  max-width: min(480px, 80vw);
+  padding: 10px 12px;
+  border: 1px solid var(--dv-line, #d7dce5);
+  border-radius: 10px;
+  background: var(--dv-paper, #fff);
+  box-shadow: 0 14px 36px rgba(23, 36, 45, .14);
+  line-height: 1.55;
+}
+.dv-state-chip__pending {
+  display: inline-flex;
+  margin-right: 8px;
+  color: var(--dv-warning, #a15c00);
+  font-size: 10px;
+  font-style: normal;
+}
+.dv-state-chip[data-state-stale="true"] {
+  border-color: color-mix(in srgb, var(--dv-warning, #a15c00) 46%, var(--dv-line, #d7dce5));
 }

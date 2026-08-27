@@ -346,10 +346,6 @@ def validate_control_definition(definition: Any) -> Any:
 
     if definition.required and definition.clearable is True:
         raise ValueError("required controls cannot be clearable")
-    if definition.type == "single_select" and definition.clearable is True:
-        raise ValueError(
-            "single_select does not expose a clear action; use required: false for an initially empty value"
-        )
     if definition.min is not None and definition.max is not None and definition.min > definition.max:
         raise ValueError("min cannot be greater than max")
     if definition.step is not None and definition.step <= 0:

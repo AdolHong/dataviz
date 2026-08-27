@@ -1,4 +1,4 @@
-schema: dataviz/presentation/v1
+schema: dataviz/presentation/v2
 kind: presentation
 dashboard: sales-overview
 
@@ -6,35 +6,21 @@ theme:
   preset: business
   density: compact
 
-layout:
-  template: overview
-  columns: 12
-  gap: 18
-
 sections:
   pulse:
-    template: band
     css_class: presentation-kpi-band
-  trend:
-    template: split
-  detail:
-    template: comparison
 
 views:
   revenue-trend:
-    span: 8
     min_height: 420
     container: chart
   region-comparison:
-    span: 4
     min_height: 420
     container: chart
   sales-detail:
-    span: 6
     container: table
     css_class: presentation-detail-table
   sales-perspective:
-    span: 6
     container: table
 
 assets:

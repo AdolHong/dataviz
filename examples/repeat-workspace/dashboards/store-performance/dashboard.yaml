@@ -1,9 +1,11 @@
-schema: dataviz/dashboard/v5
+schema: dataviz/dashboard/v7
 kind: dashboard
 id: store-performance
 title: 百店业绩巡检
 subtitle: 一份 Dataset，两种重复视图阅读方式
 description: 全量 Small Multiples 用于巡检；Selection Gallery 用于搜索并聚焦少量门店。
+
+layout: {template: exploration, columns: 12, gap: 18}
 
 adapters:
   warehouse: demo-duckdb
@@ -46,6 +48,7 @@ sections:
     title: 聚焦门店
     description: 支持搜索和区域 → 城市 → 门店级联多选；空选择时不创建图表。
     template: selection-gallery
+    columns: 2
     controls:
       - id: stores
         kind: selection
@@ -67,6 +70,7 @@ sections:
     title: 全部门店
     description: 100 个 View 实例共享一个 Source；只在接近视口时创建 Plotly 图表。
     template: small-multiples
+    columns: 2
     views: [all-store-trend]
     repeat:
       view: all-store-trend

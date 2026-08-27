@@ -96,9 +96,11 @@ VIEW_COMMON_FIELDS = {
     "id",
     "title",
     "description",
+    "span",
     "template",
     "controls",
     "selection_bindings",
+    "control_binding",
 }
 
 

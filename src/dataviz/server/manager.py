@@ -20,7 +20,7 @@ from dataviz.execution.events import ExecutionEvent
 from dataviz.errors import DatavizError, ExecutionFailure
 from dataviz.maintenance import cleanup_workspace_storage
 from dataviz.workspace.loader import LoadedWorkspace
-from dataviz.workspace.controls import resolve_compute_values, resolve_selection_values
+from dataviz.workspace.controls import resolve_compute_values, resolve_selection_states
 
 
 @dataclass
@@ -55,7 +55,7 @@ class InteractionRecord:
     dashboard_id: str
     target: str
     compute_parameters: dict[str, Any] = field(default_factory=dict)
-    selections: dict[str, Any] = field(default_factory=dict)
+    selection_state: dict[str, dict[str, Any]] = field(default_factory=dict)
     status: str = "queued"
     events: list[dict[str, Any]] = field(default_factory=list)
     event_offset: int = 0
@@ -424,7 +424,7 @@ class RunManager:
         target: str,
         generation: int,
         compute_parameters: dict[str, Any],
-        selections: dict[str, Any],
+        selection_state: dict[str, dict[str, Any]],
         refresh: bool = False,
         _workspace: LoadedWorkspace | None = None,
     ) -> InteractionRecord:
@@ -452,9 +452,9 @@ class RunManager:
             dashboard.definition,
             compute_parameters,
         )
-        resolved_selections = resolve_selection_values(
+        resolved_selection_state = resolve_selection_states(
             dashboard.definition,
-            selections,
+            selection_state,
         )
         key = (session_id, run_record.dashboard_id, run_id, target_id)
         with self.lock:
@@ -484,7 +484,7 @@ class RunManager:
                 dashboard_id=run_record.dashboard_id,
                 target=target_id,
                 compute_parameters=dict(resolved_compute),
-                selections=dict(resolved_selections),
+                selection_state=dict(resolved_selection_state),
             )
             self.interactions[interaction_id] = record
             self.latest_interactions[key] = interaction_id
@@ -533,7 +533,7 @@ class RunManager:
                     query_run,
                     target_id,
                     compute_parameters=resolved_compute,
-                    selections=resolved_selections,
+                    selection_state=resolved_selection_state,
                     generation=generation,
                     interaction_id=interaction_id,
                     refresh=refresh,

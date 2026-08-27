@@ -105,6 +105,10 @@ def test_repeat_templates_share_one_dataset_and_render_dynamic_instances(tmp_pat
         asset_mode="inline",
     )
     descriptor = bundle["output_transports"]["source:store-sales/main"]
+    assert [
+        column["name"]
+        for column in bundle["output_schemas"]["source:store-sales/main"]
+    ] == ["store_id", "store_name", "region", "city", "week", "revenue"]
     compressed = b"".join(base64.b64decode(value) for value in descriptor["chunks"])
     table = pa.ipc.open_stream(gzip.decompress(compressed)).read_all()
     assert table.num_rows == 1200
@@ -196,7 +200,7 @@ def test_cli_docs_publish_machine_readable_design_language_contract():
     )
     assert topic["core_tokens"]["semantic"]["--dv-green"].startswith("Ready")
     assert topic["customization_order"][0].startswith("先选择")
-    assert "schema: dataviz/presentation/v1" in topic["presentation_example"]
+    assert "schema: dataviz/presentation/v2" in topic["presentation_example"]
     PresentationDefinition.model_validate(yaml.safe_load(topic["presentation_example"]))
     assert "--dv-chart-1" in topic["css_example"]
     assert any("Perspective" in item for item in topic["acceptance_checklist"])
@@ -241,8 +245,22 @@ def test_query_cli_reads_an_explicit_named_source_output():
     assert result.exit_code == 0, result.stdout
     payload = json.loads(result.stdout)
     assert payload["reference"] == "source:sales/main"
-    assert len(payload["value"]) == 1
+    assert payload["schema"] == "dataviz/cli-result/v1"
+    assert len(payload["preview"]) == 1
     assert payload["truncated"] is True
+
+    debug = CliRunner().invoke(
+        app,
+        [
+            "query", str(WORKSPACE), "sales-overview", "--source", "sales",
+            "--limit", "1", "--format", "json", "--detail", "debug",
+        ],
+    )
+    assert debug.exit_code == 0, debug.stdout
+    debug_payload = json.loads(debug.stdout)
+    assert debug_payload["schema"] == "dataviz/cli-result/v1"
+    assert debug_payload["artifact"]["kind"] == "table"
+    assert debug_payload["node"]["diagnostics"]
 
 
 def test_inline_sources_and_views_load_without_frontend_files():
@@ -369,15 +387,26 @@ def test_optional_presentation_overrides_ids_without_changing_logic():
 
     assert dashboard.presentation is not None
     assert dashboard.logic_definition.theme.preset == "business"
-    assert all(section.template == "stack" for section in dashboard.logic_definition.sections)
+    assert [section.template for section in dashboard.logic_definition.sections] == [
+        "band",
+        "split",
+        "comparison",
+    ]
     assert dashboard.definition.theme.preset == "business"
     assert [section.template for section in dashboard.definition.sections] == [
         "band",
         "split",
         "comparison",
     ]
-    assert dashboard.presentation.views["revenue-trend"].span == 8
     assert dashboard.presentation.views["revenue-trend"].min_height == 420
+    assert dashboard.views["revenue-trend"].span == 8
+    trend = next(
+        section for section in dashboard.layout_contract.sections if section.section_id == "trend"
+    )
+    assert [(item.view_id, item.span) for item in trend.placements] == [
+        ("revenue-trend", 8),
+        ("region-comparison", 4),
+    ]
     assert dashboard.definition.views[0].input == dashboard.logic_definition.views[0].input
     assert validate_workspace(workspace) == []
 
@@ -409,12 +438,13 @@ def test_presentation_cannot_inject_fields_ignored_by_a_view_template(tmp_path: 
 def test_control_component_presentation_is_visual_only():
     presentation = PresentationDefinition.model_validate(
         {
-            "schema": "dataviz/presentation/v1",
+            "schema": "dataviz/presentation/v2",
             "dashboard": "sales-overview",
             "control_components": {
                 "dashboard:sales-overview/region": {"component": "checkbox-group"},
                 "view:sales-detail/product": {
                     "component": "select",
+                    "span": 2,
                     "search": "always",
                     "select_all_label": "Choose all",
                     "invert_label": "Invert values",
@@ -441,6 +471,7 @@ def test_control_component_presentation_is_visual_only():
     assert presentation.control_components["dashboard:sales-overview/region"].component == "checkbox-group"
     product = presentation.control_components["view:sales-detail/product"]
     assert product.component == "select"
+    assert product.span == 2
     assert product.search == "always"
     assert product.select_all_label == "Choose all"
     assert product.invert_label == "Invert values"
@@ -454,11 +485,14 @@ def test_control_component_presentation_is_visual_only():
     with pytest.raises(ValidationError):
         PresentationDefinition.model_validate(
             {
-                "schema": "dataviz/presentation/v1",
+                "schema": "dataviz/presentation/v2",
                 "dashboard": "sales-overview",
                 "control_panels": {"query": {"template": "stack", "columns": 2}},
             }
         )
+
+    with pytest.raises(ValidationError):
+        PresentationControlComponentDefinition(component="range-picker", span=3)
 
 
 def test_control_component_auto_resolution_is_deterministic_and_unknown_names_are_rejected():
@@ -495,7 +529,7 @@ def test_control_component_auto_resolution_is_deterministic_and_unknown_names_ar
     with pytest.raises(ValidationError):
         PresentationDefinition.model_validate(
             {
-                "schema": "dataviz/presentation/v1",
+                "schema": "dataviz/presentation/v2",
                 "dashboard": "sales-overview",
                 "control_components": {
                     "dashboard:sales-overview/region": {"component": "unknown"}
@@ -675,6 +709,9 @@ def test_portable_cascader_declares_data_driven_path_levels():
 def test_showcase_view_selection_uses_data_driven_cascader():
     workspace = load_workspace(SHOWCASE_WORKSPACE)
     dashboard = workspace.dashboard("cascade-explorer")
+    dashboard.presentation.control_components["view:city-detail/district"] = (
+        PresentationControlComponentDefinition(component="cascader", span=2)
+    )
     result = Executor(workspace).run("cascade-explorer")
     report = CanvasRenderer(workspace).render(dashboard, result)
 
@@ -683,6 +720,7 @@ def test_showcase_view_selection_uses_data_driven_cascader():
     assert district.path_fields == ["province", "city", "district"]
     assert 'data-control-component="cascader"' in report
     assert 'data-cascader-view="city-detail"' in report
+    assert 'data-control-span="2"' in report
 
 
 def test_presentation_is_included_in_ai_context():
@@ -703,8 +741,8 @@ def test_stale_presentation_references_fail_preflight_but_runtime_falls_back(tmp
     shutil.copytree(WORKSPACE, root)
     presentation_path = root / "dashboards" / "sales-overview" / "presentation.yaml"
     presentation = yaml.safe_load(presentation_path.read_text(encoding="utf-8"))
-    presentation["views"]["deleted-view"] = {"span": 12}
-    presentation["sections"]["deleted-section"] = {"template": "single"}
+    presentation["views"]["deleted-view"] = {"min_height": 320}
+    presentation["sections"]["deleted-section"] = {"css_class": "missing"}
     presentation["control_components"] = {
         "view:deleted-view/region": {"component": "select"}
     }
@@ -789,11 +827,10 @@ def test_presentation_can_place_file_based_views(tmp_path: Path):
     shutil.copytree(SALES_WORKSPACE, root)
     dashboard_root = root / "dashboards" / "sales"
     (dashboard_root / "presentation.yaml").write_text(
-        """schema: dataviz/presentation/v1
+        """schema: dataviz/presentation/v2
 dashboard: sales
 views:
   revenue:
-    span: 9
     min_height: 360
     container: chart
 """,
@@ -804,9 +841,10 @@ views:
     dashboard = workspace.dashboard("sales")
     revenue_layout = dashboard.presentation.views["revenue"]
 
-    assert revenue_layout.span == 9
     assert revenue_layout.min_height == 360
     assert revenue_layout.container == "chart"
+    assert dashboard.layout_contract.mode == "custom"
+    assert "revenue" in dashboard.layout_contract.mount_views
     assert not [
         item
         for item in validate_workspace(workspace)
@@ -855,7 +893,7 @@ def test_removed_schema_fields_are_rejected(removed_fragment):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v5",
+                "schema": "dataviz/dashboard/v7",
                 "kind": "dashboard",
                 "id": "strict",
                 **removed_fragment,
@@ -916,7 +954,7 @@ def test_layout_and_view_bounds_are_enforced(fragment, location):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v5",
+                "schema": "dataviz/dashboard/v7",
                 "kind": "dashboard",
                 "id": "strict",
                 **fragment,
@@ -960,7 +998,7 @@ def test_default_renderer_builds_templates_and_portable_report(tmp_path: Path):
     assert "Optional presentation-only polish" in report
     assert "min-height:420px" in report
     assert "global.dataviz?.view_specs" in report
-    assert '"schema": "dataviz/runtime/v3"' in report
+    assert '"schema": "dataviz/runtime/v5"' in report
     assert "runtime.registerView(view.id" in report
     assert "window.datavizClient" not in report
     assert '"source:sales/main": [' in report
@@ -971,13 +1009,20 @@ def test_default_renderer_builds_templates_and_portable_report(tmp_path: Path):
     assert "const plotlyDescriptor" in report
     assert "const plotlyConfig = (config = {})" in report
     assert "scrollZoom:false" in report
-    assert "plotlyConfig(descriptor.config)" in report
-    assert "plotlyConfig(spec.config)" in report
+    assert "chartService.plotly.mount" in report
+    assert "chartService.plotly.update" in report
+    assert "chartService.plotly.mount(chartNode, spec" in report
+    assert "const syncEchartsInteractions" in report
+    # Initial bootstrap, managed mount and update all install the same event contract.
+    assert report.count("syncEchartsInteractions(state, descriptor)") == 3
     assert "const createPerspective" in report
     assert "const updatePerspective" in report
     assert "const disposePerspective" in report
     assert "state.mode === 'empty' && state.latestRows.length" in report
-    assert "if (typeof state.viewer?.flush === 'function') await state.viewer.flush()" in report
+    assert "!state.latestRows.length && ['loading', 'perspective'].includes(state.mode)" in report
+    assert "await awaitPerspectiveOperation(state, 'flush', state.viewer.flush())" in report
+    assert "perspectiveRuntime.perspective.worker()" in report
+    assert "state.worker = worker" in report
     assert "applyStatus(root, 'ready', 'perspective')" in report
     assert "viewer.delete" in report
     assert "@perspective-dev/viewer@5.2.0" in report

@@ -33,8 +33,9 @@ from dataviz.workspace.loader import (
     dashboard_validation_diagnostics,
 )
 from dataviz.workspace.controls import (
+    project_selection_values,
     resolve_compute_values,
-    resolve_selection_values,
+    resolve_selection_states,
     scoped_control_registry,
 )
 
@@ -184,7 +185,7 @@ class InteractionExecutor:
         target: str,
         *,
         compute_parameters: dict[str, Any] | None = None,
-        selections: dict[str, Any] | None = None,
+        selection_state: dict[str, dict[str, Any]] | None = None,
         generation: int = 1,
         interaction_id: str | None = None,
         refresh: bool = False,
@@ -248,8 +249,8 @@ class InteractionExecutor:
             dashboard.definition,
             compute_parameters,
         )
-        selection_values = resolve_selection_values(
-            dashboard.definition, selections
+        resolved_selection_state = resolve_selection_states(
+            dashboard.definition, selection_state
         )
         result = InteractionResult(
             interaction_id=interaction_id,
@@ -261,7 +262,7 @@ class InteractionExecutor:
             status="loading",
             query_parameters=dict(run.query_parameters),
             compute_parameters=compute_values,
-            selections=selection_values,
+            selection_state=resolved_selection_state,
             nodes={
                 node.id: NodeResult(
                     node_id=node.id,
@@ -464,11 +465,16 @@ class InteractionExecutor:
                 dashboard.definition,
                 kind="selection",
             )
+            selection_value_map = project_selection_values(
+                dashboard.definition,
+                interaction.selection_state,
+            )
             selection_filters = tuple(
                 {
                     **selection_registry[control_key].as_dict(),
                     "alias": alias,
-                    "value": interaction.selections.get(control_key),
+                    "state": interaction.selection_state.get(control_key),
+                    "value": selection_value_map.get(control_key),
                 }
                 for alias, control_key in node.selection_inputs.items()
             )
@@ -484,7 +490,11 @@ class InteractionExecutor:
                     for alias, control_key in node.compute_inputs.items()
                 },
                 selections={
-                    alias: interaction.selections.get(control_key)
+                    alias: selection_value_map.get(control_key)
+                    for alias, control_key in node.selection_inputs.items()
+                },
+                selection_state={
+                    alias: interaction.selection_state.get(control_key, {})
                     for alias, control_key in node.selection_inputs.items()
                 },
                 selection_filters=selection_filters,
@@ -510,6 +520,7 @@ class InteractionExecutor:
                 "cache_key": cache_key,
                 "query_inputs": context.query_inputs,
                 "compute_parameters": context.compute_params,
+                "selection_state": context.selection_state,
                 "selections": context.selections,
                 "inputs": {
                     name: {

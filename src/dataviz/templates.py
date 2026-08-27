@@ -110,7 +110,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
             "optional": ["columns", "sort", "limit", "options"],
         },
         "presentation": {
-            "options": ["span", "min_height", "container", "css_class", "options"]
+            "options": ["min_height", "container", "css_class", "options"]
         },
         "behavior": {"wheel_boundary": "Scroll the table only while it can consume vertical movement; otherwise continue scrolling the page"},
         "semantic_dom": [".dv-view--table", ".dv-table-meta", ".dv-table-wrap", ".dv-table"],
@@ -166,7 +166,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
             "optional": ["columns", "sort", "limit", "config"],
         },
         "presentation": {
-            "options": ["span", "min_height", "container", "css_class", "config"]
+            "options": ["min_height", "container", "css_class", "config"]
         },
         "behavior": {"wheel_boundary": "Shadow-DOM scrolling yields to the page for short data and at the top or bottom boundary"},
         "semantic_dom": [".dv-view--perspective", ".dv-perspective", ".dv-perspective-loading"],
@@ -304,14 +304,18 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
         "behavior": {
             "isolation": "A renderer failure marks only its View failed",
             "state": "Runtime retains renderer state per View id",
+            "platform_matrix": [
+                "mount", "update", "empty", "restore",
+                "interaction", "resize", "dispose", "export",
+            ],
             "plotly_wheel": "Custom Plotly calls must default to scrollZoom:false so the Dashboard keeps wheel ownership; enable true only on an explicit user request",
         },
     },
 }
 
 
-COMPONENT_REGISTRY_VERSION = "4.0.0"
-RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v3"
+COMPONENT_REGISTRY_VERSION = "4.2.0"
+RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v5"
 
 
 def _generated_component_templates() -> dict[str, dict[str, Any]]:
@@ -323,7 +327,7 @@ def _generated_component_templates() -> dict[str, dict[str, Any]]:
     generated: dict[str, dict[str, Any]] = {}
     for name, definition in VIEW_TEMPLATES.items():
         optional = definition.get("optional", [])
-        presentation_options = ["span", "min_height", "container", "css_class"]
+        presentation_options = ["min_height", "container", "css_class"]
         presentation_options.extend(
             field
             for field in ("engine", "options", "config")
@@ -353,7 +357,13 @@ def _generated_component_templates() -> dict[str, dict[str, Any]]:
                     if optional_inputs
                     else "Self-contained; consumes no Named Output"
                 ),
-                "lifecycle": ["validate", "mount", "update", "dispose"],
+                "lifecycle": {
+                    "author_hooks": ["validate", "mount", "update", "dispose"],
+                    "platform_matrix": [
+                        "mount", "update", "empty", "restore",
+                        "interaction", "resize", "dispose", "export",
+                    ],
+                },
                 "failure_scope": "view",
             },
             "semantic_dom": [".dv-view", f".dv-view--{name}", ".dv-view-body"],
@@ -460,7 +470,7 @@ def template_catalog() -> dict[str, Any]:
         "runtime_protocol": RUNTIME_PROTOCOL_SCHEMA,
         "components": component_catalog(),
         "presentation": {
-            "schema": "dataviz/presentation/v1",
+            "schema": "dataviz/presentation/v2",
             "optional": True,
             "id_scopes": ["sections", "views", "control_components"],
             "visual_fields": ["theme", "layout", "sections", "views", "control_components", "control_panels", "assets", "canvas"],

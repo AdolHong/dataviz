@@ -1,15 +1,10 @@
-schema: dataviz/presentation/v1
+schema: dataviz/presentation/v2
 kind: presentation
 dashboard: component-gallery
 
 theme:
   preset: business
   density: comfortable
-
-layout:
-  template: exploration
-  columns: 12
-  gap: 16
 
 control_components:
   dashboard:component-gallery/region:
@@ -85,15 +80,15 @@ control_panels:
     density: compact
 
 views:
-  revenue-line: {span: 7, min_height: 380, container: chart}
-  category-bars: {span: 5, min_height: 380, container: chart}
-  stacked-orders: {span: 7, min_height: 360, container: chart}
-  category-share: {span: 5, min_height: 360, container: chart}
-  revenue-scatter: {span: 6, min_height: 360, container: chart}
-  revenue-heatmap: {span: 6, min_height: 360, container: chart}
-  store-radar: {span: 12, min_height: 420, container: chart}
-  detail-table: {span: 6, min_height: 520, container: table}
-  pivot-table: {span: 6, min_height: 520, container: table}
-  narrative: {span: 4, min_height: 300, container: plain}
-  image-specimen: {span: 4, min_height: 300, container: plain}
-  custom-specimen: {span: 4, min_height: 300, container: elevated}
+  revenue-line: {min_height: 380, container: chart}
+  category-bars: {min_height: 380, container: chart}
+  stacked-orders: {min_height: 360, container: chart}
+  category-share: {min_height: 360, container: chart}
+  revenue-scatter: {min_height: 360, container: chart}
+  revenue-heatmap: {min_height: 360, container: chart}
+  store-radar: {min_height: 420, container: chart}
+  detail-table: {min_height: 520, container: table}
+  pivot-table: {min_height: 520, container: table}
+  narrative: {min_height: 300, container: plain}
+  image-specimen: {min_height: 300, container: plain}
+  custom-specimen: {min_height: 300, container: elevated}

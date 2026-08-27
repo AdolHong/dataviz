@@ -16,7 +16,7 @@ from urllib.parse import quote
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.background import BackgroundTask
 
@@ -41,11 +41,11 @@ from dataviz.server.hot_reload import (
 )
 from dataviz.server.manager import RunManager
 from dataviz.workspace import load_workspace, validate_workspace
+from dataviz.selection_state import initial_selection_state
 from dataviz.workspace.controls import (
     compile_control_contract,
-    initial_selection_intent,
     resolve_compute_values,
-    resolve_selection_values,
+    resolve_selection_states,
 )
 from dataviz.workspace.control_components import resolve_control_component
 from dataviz.workspace.navigation import NavigationEditor
@@ -55,42 +55,43 @@ from dataviz.workspace.models import PresentationControlPanelsDefinition
 PACKAGE_ROOT = Path(__file__).resolve().parent
 
 
-class RunRequest(BaseModel):
+class ApiRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class RunRequest(ApiRequest):
     session_id: str = Field(min_length=8, max_length=128)
     query_parameters: dict[str, Any] = Field(default_factory=dict)
     refresh: bool = False
 
 
-class InteractionRequest(BaseModel):
+class InteractionRequest(ApiRequest):
     session_id: str = Field(min_length=8, max_length=128)
     transform_id: str
     generation: int = Field(ge=1)
     compute_parameters: dict[str, Any] = Field(default_factory=dict)
-    selections: dict[str, Any] = Field(default_factory=dict)
+    selection_state: dict[str, dict[str, Any]] = Field(default_factory=dict)
     refresh: bool = False
 
 
-class ReportRequest(BaseModel):
+class ReportRequest(ApiRequest):
     session_id: str = Field(min_length=8, max_length=128)
     run_id: str
-    selections: dict[str, Any] = Field(default_factory=dict)
-    selection_intents: dict[
-        str, Literal["all_available", "explicit"]
-    ] = Field(default_factory=dict)
+    selection_state: dict[str, dict[str, Any]] = Field(default_factory=dict)
     compute_parameters: dict[str, Any] = Field(default_factory=dict)
     snapshot_outputs: dict[str, Any] = Field(default_factory=dict)
 
 
-class FolderRequest(BaseModel):
+class FolderRequest(ApiRequest):
     title: str
     parent_id: str | None = None
 
 
-class FolderRenameRequest(BaseModel):
+class FolderRenameRequest(ApiRequest):
     title: str
 
 
-class DashboardPlacementRequest(BaseModel):
+class DashboardPlacementRequest(ApiRequest):
     parent_id: str | None = None
 
 
@@ -455,7 +456,14 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                                 else view_titles.get(item.owner_id, item.owner_id)
                             ),
                             "definition": item.definition.model_dump(mode="json"),
-                            "initial_intent": initial_selection_intent(item.definition),
+                            "initial_state": (
+                                initial_selection_state(
+                                    item.definition,
+                                    allow_unresolved_inferred=True,
+                                ).as_dict()
+                                if item.kind == "selection"
+                                else None
+                            ),
                             "presentation": _control_component_presentation(
                                 dashboard, item.key, item.definition
                             ),
@@ -466,6 +474,12 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                             ),
                             "direct_views": (
                                 list(dependency.direct_views) if dependency else []
+                            ),
+                            "declared_direct_views": (
+                                list(dependency.declared_direct_views) if dependency else []
+                            ),
+                            "runtime_checked_views": (
+                                list(dependency.runtime_checked_views) if dependency else []
                             ),
                             "derived_views": (
                                 list(dependency.derived_views) if dependency else []
@@ -522,6 +536,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                         if dependency_contract is not None
                         else None
                     ),
+                    "layout_contract": dashboard.layout_contract.as_dict(),
                     "nodes": [
                         {
                             "id": f"source:{source_id}",
@@ -828,7 +843,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 target=request.transform_id,
                 generation=request.generation,
                 compute_parameters=request.compute_parameters,
-                selections=request.selections,
+                selection_state=request.selection_state,
                 refresh=request.refresh,
                 _workspace=snapshot,
             )
@@ -1252,8 +1267,8 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         except DatavizError as error:
             raise HTTPException(409, error.as_dict()) from error
         try:
-            resolved_selections = resolve_selection_values(
-                dashboard.definition, request.selections
+            resolved_selection_state = resolve_selection_states(
+                dashboard.definition, request.selection_state
             )
             resolved_compute = resolve_compute_values(
                 dashboard.definition,
@@ -1261,17 +1276,6 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             )
         except Exception as error:
             raise HTTPException(422, f"Invalid report state: {error}") from error
-        valid_selection_keys = {
-            key
-            for key, dependency in dashboard.dependency_contract.controls.items()
-            if dependency.kind == "selection"
-        }
-        resolved_selection_intents = {
-            key: value
-            for key, value in request.selection_intents.items()
-            if key in valid_selection_keys
-        }
-
         derived_outputs = {}
         interactive_ids = dashboard.dependency_contract.reachable_interactive_order
         snapshot_interactions: set[str] = {
@@ -1293,7 +1297,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 result,
                 transform_id,
                 compute_parameters=resolved_compute,
-                selections=resolved_selections,
+                selection_state=resolved_selection_state,
             )
             if interaction_result.status != "ready":
                 raise HTTPException(
@@ -1413,8 +1417,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                     result,
                     temporary / report_name,
                     compute_parameters=resolved_compute,
-                    selections=resolved_selections,
-                    selection_intents=resolved_selection_intents,
+                    selection_state=resolved_selection_state,
                     derived_outputs=derived_outputs,
                     snapshot_interactions=snapshot_interactions,
                 )
@@ -1439,8 +1442,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             result,
             asset_mode="inline",
             compute_parameters=resolved_compute,
-            selections=resolved_selections,
-            selection_intents=resolved_selection_intents,
+            selection_state=resolved_selection_state,
             derived_outputs=derived_outputs,
             snapshot_interactions=snapshot_interactions,
         )

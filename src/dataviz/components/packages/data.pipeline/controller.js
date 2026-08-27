@@ -103,7 +103,7 @@
       ([alias, key]) => ({
         alias,
         contract:global.dataviz.dependency_contract.controls[key],
-        value:global.dataviz.selections?.[key],
+        state:global.dataviz.selection.state(key),
       })
     );
     const prepared = Object.fromEntries(
@@ -111,25 +111,18 @@
     );
     if (!filters.length) return prepared;
 
-    const active = filters.filter(({value}) => !(
-      value == null
-      || value === ''
-      || (Array.isArray(value) && value.length === 0)
-    ));
-    if (!active.length) return prepared;
-
     const filterRows = rows => {
       if (!Array.isArray(rows) || !rows.some(row => row && typeof row === 'object' && !Array.isArray(row))) {
         return rows;
       }
-      return rows.filter(row => active.every(({contract, value}) => (
-        services.selectionMatches(row, contract, value)
+      return rows.filter(row => filters.every(({contract, state}) => (
+        services.selectionMatches(row, contract, state)
       )));
     };
     const filterColumnar = table => {
       const columns = table?.columns || {};
       const length = Number(table?.length || 0);
-      const applicable = active.filter(({contract}) => {
+      const applicable = filters.filter(({contract}) => {
         const definition = contract.definition || {};
         const fields = (definition.path_fields || []).length
           ? definition.path_fields
@@ -142,7 +135,7 @@
         const row = Object.fromEntries(
           Object.entries(columns).map(([name, values]) => [name, values[index]])
         );
-        if (applicable.every(({contract, value}) => services.selectionMatches(row, contract, value))) {
+        if (applicable.every(({contract, state}) => services.selectionMatches(row, contract, state))) {
           indices.push(index);
         }
       }
@@ -212,14 +205,14 @@
   }
 
   root.dataPipeline = {
-    protocol:'dataviz/runtime/v3',
+    protocol:'dataviz/runtime/v5',
     createInteractiveAdapters,
     createDataApi,
     selectedWorkerInputs,
   };
   root.descriptors = root.descriptors || new Map();
   root.descriptors.set('data.pipeline', {
-    protocol:'dataviz/runtime/v3',
+    protocol:'dataviz/runtime/v5',
     owns:['interactive-adapters', 'data-frame'],
   });
 })(window);

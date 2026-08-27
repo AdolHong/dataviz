@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v5
+schema: dataviz/dashboard/v7
 kind: dashboard
 id: cascade-explorer
 title: 级联选择器
@@ -45,6 +45,7 @@ views:
         type: multi_select
         label: 区县
         path_fields: [province, city, district]
+        depends_on: [section.city]
         options: {mode: infer}
       - id: min_value
         kind: selection
@@ -80,6 +81,7 @@ sections:
         field: city
         type: multi_select
         label: 城市
+        depends_on: [dashboard.province]
         options: {mode: infer}
     views: [map-bars, city-detail]
   - {id: files, title: 文件来源, views: [uploaded-file, bundled-file]}

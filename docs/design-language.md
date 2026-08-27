@@ -96,7 +96,7 @@ Query Parameters 默认作为 Header 的内联第二行展开，让首次进入�
 - 保持主题字体、网格和 palette，除非颜色本身承载稳定业务语义。
 - 优先使用位置、长度、直接标签和小倍图完成比较。
 - 避免 3D、彩虹色、厚重阴影和多个同时争夺注意力的图表风格。
-- 页面滚动优先于图表滚轮手势。内置 Plotly 模板默认 `scrollZoom: false`；Custom Renderer 直接调用 `Plotly.newPlot`/`Plotly.react` 时也必须传入该默认值。只有用户明确要求图内滚轮缩放时才能设为 `true`。
+- 页面滚动优先于图表滚轮手势。内置模板和 Custom Renderer 的 `context.charts.plotly` 默认 `scrollZoom: false`，并统一 Theme、Resize、Update 与 Dispose。直接调用 `Plotly.newPlot`/`Plotly.react` 是低层逃生口，作者必须自行承担这些策略；只有用户明确要求图内滚轮缩放时才能设为 `true`。
 
 ### Table 与 Perspective
 
@@ -131,7 +131,7 @@ Query Parameters 默认作为 Header 的内联第二行展开，让首次进入�
 示例 `presentation.yaml`：
 
 ```yaml
-schema: dataviz/presentation/v1
+schema: dataviz/presentation/v2
 kind: presentation
 dashboard: sales-overview
 

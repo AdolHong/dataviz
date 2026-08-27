@@ -1,9 +1,11 @@
-schema: dataviz/dashboard/v5
+schema: dataviz/dashboard/v7
 kind: dashboard
 id: sales-overview
 title: 销售概览
 subtitle: "当前取数下限：{{ parameters.min_query_revenue }}"
 description: 收入、订单与区域表现。
+
+layout: {template: overview, columns: 12, gap: 18}
 
 adapters:
   warehouse: demo-duckdb
@@ -45,6 +47,7 @@ views:
     value: revenue
     label: 当前选择范围
     aggregate: sum
+    span: 6
 
   - id: total-orders
     title: 总订单
@@ -53,6 +56,7 @@ views:
     value: orders
     label: 当前选择范围
     aggregate: sum
+    span: 6
 
   - id: revenue-trend
     title: 收入趋势
@@ -62,6 +66,7 @@ views:
     y: revenue
     series: region
     aggregate: sum
+    span: 8
 
   - id: region-comparison
     title: 区域收入
@@ -70,6 +75,7 @@ views:
     x: region
     y: revenue
     aggregate: sum
+    span: 4
 
   - id: sales-detail
     title: 展示型销售明细
@@ -77,6 +83,7 @@ views:
     template: table
     columns: [day, region, revenue, orders]
     limit: 50
+    span: 6
     options:
       labels: {day: 日期, region: 区域, revenue: 收入, orders: 订单}
       formats: {revenue: currency, orders: number}
@@ -89,6 +96,7 @@ views:
     input: source:sales/main
     template: perspective
     columns: [day, region, revenue, orders]
+    span: 6
     config:
       plugin: Datagrid
       columns: [revenue, orders]
@@ -99,13 +107,16 @@ views:
 sections:
   - id: pulse
     title: 核心指标
+    template: band
     views: [total-revenue, total-orders]
 
   - id: trend
     title: 趋势与结构
+    template: split
     views: [revenue-trend, region-comparison]
 
   - id: detail
     title: 两种表格模板
     description: 普通 Table 负责可定制展示，Perspective 负责自助分析。
+    template: comparison
     views: [sales-detail, sales-perspective]

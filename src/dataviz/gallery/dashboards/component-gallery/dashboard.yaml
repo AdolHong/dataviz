@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v7
+schema: dataviz/dashboard/v8
 kind: dashboard
 id: component-gallery
 title: Component Gallery
@@ -20,7 +20,8 @@ controls:
   - id: region
     kind: selection
     field: region
-    type: multi_select
+    type: multiple_select
+    value_type: text
     label: Region tags
     default: [East, South, North]
     options:
@@ -31,14 +32,16 @@ controls:
         - {label: North, value: North}
   - id: analyst-note
     kind: compute
-    type: string
+    type: single_input
+    value_type: text
     label: Analyst note
     default: Review the selected cohort
     placeholder: Add a short analysis note
     max_length: 120
   - id: scenario-name
     kind: compute
-    type: string
+    type: single_input
+    value_type: text
     label: Scenario name
     default: Baseline
     placeholder: Choose or type a scenario
@@ -48,7 +51,8 @@ controls:
       - {label: Downside, value: Downside}
   - id: sample-size
     kind: compute
-    type: integer
+    type: single_input
+    value_type: integer
     label: Sample size
     default: 50
     min: 10
@@ -56,26 +60,46 @@ controls:
     step: 10
   - id: include-returns
     kind: compute
-    type: boolean
+    type: single_input
+    value_type: boolean
     label: Include returns
     default: false
   - id: live-preview
     kind: compute
-    type: boolean
+    type: single_input
+    value_type: boolean
     label: Live preview
     default: true
   - id: as-of-date
     kind: compute
-    type: date
+    type: single_input
+    value_type: date
     label: As-of date
     default: "2026-03-01"
     min_date: "2026-01-01"
     max_date: "2026-12-31"
   - id: confidence
     kind: compute
-    type: number
+    type: single_input
+    value_type: number
     label: Confidence
     default: 0.8
+    min: 0
+    max: 1
+    step: 0.05
+  - id: scenario-tags
+    kind: compute
+    type: multiple_input
+    value_type: text
+    label: Scenario tags
+    default: [baseline, reviewed]
+    max_items: 6
+  - id: confidence-band
+    kind: compute
+    type: range_input
+    value_type: number
+    label: Confidence band
+    default: [0.25, 0.75]
     min: 0
     max: 1
     step: 0.05
@@ -101,7 +125,8 @@ views:
       - id: product
         kind: selection
         field: product
-        type: multi_select
+        type: multiple_select
+        value_type: text
         label: Search products
         options:
           mode: static
@@ -114,6 +139,7 @@ views:
         kind: selection
         field: category
         type: single_select
+        value_type: text
         label: Category focus
         default: Hardware
         options:
@@ -125,26 +151,30 @@ views:
         kind: selection
         field: district
         path_fields: [province, city, district]
-        type: multi_select
+        type: multiple_select
+        value_type: text
         label: Province / city / district
         options: {mode: infer}
       - id: location-tree
         kind: selection
         field: district
         path_fields: [province, city, district]
-        type: multi_select
+        type: multiple_select
+        value_type: text
         label: Location tree
         options: {mode: infer}
       - id: date-window
         kind: selection
         field: date
-        type: date_range
+        type: range_input
+        value_type: date
         label: Date window
         default: ["2026-01-01", "2026-03-01"]
       - id: store-virtual
         kind: selection
         field: store_id
-        type: multi_select
+        type: multiple_select
+        value_type: text
         label: Virtualized stores
         default: [S01, S02, S03, S04]
         options:
@@ -184,7 +214,8 @@ sections:
       - id: category
         kind: selection
         field: category
-        type: multi_select
+        type: multiple_select
+        value_type: text
         label: Category select
         default: [Hardware, Software]
         options:
@@ -230,7 +261,8 @@ sections:
       - id: stores
         kind: selection
         field: store_id
-        type: multi_select
+        type: multiple_select
+        value_type: text
         label: Stores
         default: [S01, S03]
         options:

@@ -15,7 +15,7 @@ components:
       official: https://ant.design/components/input/
       adopted: [prefix, suffix, max-length, character-count, textarea-auto-size]
       omitted: [password, OTP, search-button, addon-layout]
-    logic: {type: string, fields: [placeholder, max_length]}
+    logic: {type: single_input, value_type: text, fields: [placeholder, max_length]}
     presentation: {component: input, options: [multiline, min_rows, max_rows, show_count, prefix, suffix, css_class]}
     semantic_dom: [.dv-input, .dv-input__control, .dv-input__count]
     tokens: [--dv-accent, --dv-ink, --dv-line, --dv-panel]

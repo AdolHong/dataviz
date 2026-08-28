@@ -15,7 +15,7 @@ components:
       official: https://ant.design/components/auto-complete/
       adopted: [free-text-value, suggestion-filtering, keyboard-navigation, combobox-aria]
       omitted: [remote-fetch-hook, custom-option-React-render]
-    logic: {type: string, fields: [suggestions, placeholder, max_length]}
+    logic: {type: single_input, value_type: text, fields: [suggestions, placeholder, max_length]}
     presentation: {component: auto-complete, options: [search_placeholder, empty_text, css_class]}
     semantic_dom: [.dv-auto-complete, .dv-control-panel, .dv-auto-complete__option]
     tokens: [--dv-accent, --dv-ink, --dv-line, --dv-panel, --dv-overlay-surface]

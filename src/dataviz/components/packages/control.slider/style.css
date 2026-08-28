@@ -8,3 +8,6 @@
 .dv-slider__marks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
 .dv-slider__input { box-sizing: border-box; grid-column: 2; grid-row: 1 / span 2; width: 6rem; min-height: 2.35rem; padding: .4rem .55rem; color: var(--dv-ink, #202536); background: var(--dv-panel, #fff); border: 1px solid var(--dv-line, #d9e0ec); border-radius: 6px; }
 .dv-slider__track:focus-visible, .dv-slider__input:focus-visible { outline: 2px solid var(--dv-accent, #3949ab); outline-offset: 2px; }
+.dv-slider--range { grid-template-columns: minmax(8rem, 1fr) minmax(8rem, 1fr) auto; }
+.dv-slider--range .dv-slider__value { grid-column: 3; grid-row: 1; }
+.dv-slider--range .dv-slider__input { grid-column: auto; grid-row: 2; width: 100%; }

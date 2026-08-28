@@ -1,6 +1,6 @@
 schema: dataviz/component-package/v1
 package: control.range-picker
-version: 3.0.0
+version: 3.1.0
 category: data-entry
 purpose: Choose an inclusive start and end date from one floating calendar interaction.
 implementation: {mode: package, sources: []}
@@ -13,11 +13,11 @@ components:
       design_system: Ant Design
       component: DatePicker.RangePicker
       official: https://ant.design/components/date-picker/
-      adopted: [single-popup, start-then-end, presets, min-max-bounds, allow-empty-pair, keyboard-grid]
+      adopted: [single-popup, editable-iso-endpoints, start-then-end, presets, min-max-bounds, allow-empty-pair, keyboard-grid]
       omitted: [time-selection, locale-package, multiple-ranges]
-    logic: {type: date_range, value_shape: [start, end], fields: [min_date, max_date, allow_empty]}
+    logic: {type: range_input, value_type: date, value_shape: [start, end], fields: [min_date, max_date, allow_empty]}
     presentation: {component: range-picker, options: [start_label, end_label, presets, clear_label, css_class]}
     behavior: {inclusive: true, commit: second-date-or-preset, responsive_months: [one, two], order_validation: true}
-    semantic_dom: [.dv-date-range, .dv-date-range__trigger, .dv-date-range__panel, .dv-date-range__calendars, .dv-date-range__day]
+    semantic_dom: [.dv-date-range, .dv-date-range__field, .dv-date-range__endpoint, .dv-date-range__trigger, .dv-date-range__panel, .dv-date-range__calendars, .dv-date-range__day]
     tokens: [--dv-accent, --dv-ink, --dv-line, --dv-panel, --dv-overlay-surface, --dv-shadow-float]
 runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

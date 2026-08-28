@@ -3,7 +3,7 @@ tests:
   - id: control.range-picker.contract
     component: control.range-picker
     kind: contract
-    assertions: [one-trigger, one-floating-dialog, start-then-end, canonical-pair-value, order-validation, bubbling-change]
+    assertions: [one-calendar-trigger, two-editable-ISO-endpoints, one-floating-dialog, start-then-end, canonical-pair-value, order-validation, bubbling-change]
   - id: control.range-picker.presets-and-empty-bounds
     component: control.range-picker
     kind: browser

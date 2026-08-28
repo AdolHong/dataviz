@@ -32,6 +32,11 @@ control_components:
       - {value: 0, label: "0"}
       - {value: 0.5, label: "0.5"}
       - {value: 1, label: "1"}
+  dashboard:component-gallery/scenario-tags:
+    component: multiple-input
+  dashboard:component-gallery/confidence-band:
+    component: slider
+    show_input: true
   section:trends/category:
     component: checkbox-group
   view:detail-table/product:

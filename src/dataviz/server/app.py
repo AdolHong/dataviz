@@ -9,12 +9,19 @@ import threading
 import time
 import uuid
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.gzip import GZipMiddleware
@@ -32,6 +39,7 @@ from dataviz.execution.fingerprint import ensure_query_run_compatible
 from dataviz.execution.outputs import normalize_outputs
 from dataviz.execution.parameters import resolve_parameter_default
 from dataviz.execution.references import parse_output_reference
+from dataviz.filesystem import atomic_copy_file, atomic_write_text
 from dataviz.rendering import CanvasRenderer
 from dataviz.server.hot_reload import (
     WorkspaceChangeJournal,
@@ -50,6 +58,10 @@ from dataviz.workspace.controls import (
 from dataviz.workspace.control_components import resolve_control_component
 from dataviz.workspace.navigation import NavigationEditor
 from dataviz.workspace.models import PresentationControlPanelsDefinition
+from dataviz.workspace.parameter_editor import (
+    ParameterEditor,
+    parameter_editor_contract,
+)
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -80,6 +92,7 @@ class ReportRequest(ApiRequest):
     selection_state: dict[str, dict[str, Any]] = Field(default_factory=dict)
     compute_parameters: dict[str, Any] = Field(default_factory=dict)
     snapshot_outputs: dict[str, Any] = Field(default_factory=dict)
+    destination: Literal["download", "share"] = "download"
 
 
 class FolderRequest(ApiRequest):
@@ -95,11 +108,37 @@ class DashboardPlacementRequest(ApiRequest):
     parent_id: str | None = None
 
 
+class ParameterEditorChoiceRequest(ApiRequest):
+    label: str = Field(min_length=1)
+    value: Any
+    group: str | None = None
+    description: str = ""
+    keywords: list[str] = Field(default_factory=list)
+
+
+class ParameterEditorItemRequest(ApiRequest):
+    id: str
+    default: Any = None
+    choices: list[ParameterEditorChoiceRequest] | None = None
+
+
+class ParameterEditorGroupRequest(ApiRequest):
+    owner: str
+    order: list[str]
+    items: list[ParameterEditorItemRequest]
+
+
+class ParameterEditorUpdateRequest(ApiRequest):
+    revision: str = Field(min_length=64, max_length=64)
+    group: ParameterEditorGroupRequest
+
+
 def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
     workspace = load_workspace(workspace_path)
     workspace_root = workspace.root
     manager = RunManager(workspace)
     navigation_editor = NavigationEditor(workspace_root)
+    parameter_editor = ParameterEditor()
     app = FastAPI(title=f"Dataviz · {workspace.definition.title}")
     app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
     app.state.workspace = workspace
@@ -119,6 +158,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         response = await call_next(request)
         if (
             request.url.path == "/"
+            or request.url.path.startswith("/dashboards/")
             or request.url.path.startswith("/static/")
             or request.url.path.startswith("/runtime/pyodide/")
             or request.url.path.endswith("/canvas")
@@ -306,9 +346,182 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             headers={"Cache-Control": "private, no-store"},
         )
 
+    def shell_page() -> str:
+        return (PACKAGE_ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+
+    def shared_cache_path(share_id: str) -> Path:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{8,255}", share_id or ""):
+            raise HTTPException(404, "Shared result not found")
+        root = (workspace_root / "shared_caches").resolve()
+        target = (root / share_id).resolve()
+        if not target.is_relative_to(root):
+            raise HTTPException(404, "Shared result not found")
+        return target
+
+    def shared_cache_documents(share_id: str) -> tuple[Path, dict[str, Any]]:
+        root = shared_cache_path(share_id)
+        manifest_path = root / "manifest.json"
+        result_path = root / "query-result.json"
+        if not manifest_path.is_file() or not result_path.is_file():
+            raise HTTPException(404, "Shared result not found")
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise HTTPException(409, "Shared result manifest is invalid") from error
+        if (
+            manifest.get("schema") != "dataviz/shared-cache/v1"
+            or manifest.get("share_id") != share_id
+        ):
+            raise HTTPException(409, "Shared result manifest is invalid")
+        return root, manifest
+
+    def hydrate_shared_result(
+        share_id: str,
+        session_id: str,
+        cache_root: Path,
+        manifest: dict[str, Any],
+    ) -> RunResult:
+        synthetic_run_id = (
+            "run_shared_"
+            + uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"dataviz:{share_id}:{session_id}",
+            ).hex[:24]
+        )
+        existing = manager.get(synthetic_run_id, session_id)
+        if existing and existing.result:
+            return existing.result
+        try:
+            payload = json.loads(
+                (cache_root / "query-result.json").read_text(encoding="utf-8")
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise HTTPException(409, "Shared Query Result is invalid") from error
+        payload["run_id"] = synthetic_run_id
+        store = ArtifactStore(workspace_root, synthetic_run_id)
+        restored_paths: dict[tuple[str, str], str] = {}
+        for item in manifest.get("artifacts", []):
+            if not isinstance(item, dict):
+                raise HTTPException(409, "Shared Artifact manifest is invalid")
+            artifact_id = str(item.get("artifact_id") or "")
+            content_hash = str(item.get("content_hash") or "")
+            relative = str(item.get("path") or "")
+            source = (cache_root / relative).resolve()
+            if (
+                not source.is_relative_to(cache_root.resolve())
+                or not source.is_file()
+                or not re.fullmatch(r"[0-9a-f]{64}", content_hash)
+            ):
+                raise HTTPException(409, "Shared Artifact is missing or invalid")
+            destination = store.artifact_root / source.name
+            try:
+                atomic_copy_file(
+                    source,
+                    destination,
+                    expected_sha256=content_hash,
+                )
+            except ValueError as error:
+                raise HTTPException(409, "Shared Artifact hash does not match") from error
+            restored_paths[(artifact_id, content_hash)] = str(
+                destination.relative_to(workspace_root)
+            )
+
+        def restore_descriptor_paths(value: Any) -> None:
+            if isinstance(value, dict):
+                key = (str(value.get("artifact_id") or ""), str(value.get("content_hash") or ""))
+                if "path" in value and key in restored_paths:
+                    value["path"] = restored_paths[key]
+                for child in value.values():
+                    restore_descriptor_paths(child)
+            elif isinstance(value, list):
+                for child in value:
+                    restore_descriptor_paths(child)
+
+        restore_descriptor_paths(payload)
+        try:
+            return RunResult.model_validate(payload)
+        except Exception as error:
+            raise HTTPException(409, "Shared Query Result is invalid") from error
+
     @app.get("/", response_class=HTMLResponse)
     def index():
-        return (PACKAGE_ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+        return shell_page()
+
+    @app.get("/dashboards/{dashboard_id}", response_class=HTMLResponse)
+    def dashboard_shell(dashboard_id: str):
+        try:
+            refresh_workspace(preserve_on_error=True).catalog_entry(dashboard_id)
+        except WorkspaceError as error:
+            raise HTTPException(404, error.message) from error
+        return shell_page()
+
+    @app.get("/shared/{share_id}", response_class=HTMLResponse)
+    def shared_result(share_id: str, session_id: str | None = None):
+        cache_root, manifest = shared_cache_documents(share_id)
+        if session_id is None:
+            shared_session = f"shared_{uuid.uuid4().hex[:24]}"
+            return RedirectResponse(
+                url=(
+                    f"/shared/{quote(share_id, safe='')}"
+                    f"?session_id={quote(shared_session, safe='')}"
+                ),
+                status_code=307,
+                headers={"Cache-Control": "no-store"},
+            )
+        checked = checked_session(session_id)
+        dashboard_id = str(manifest.get("dashboard_id") or "")
+        try:
+            snapshot, dashboard = dashboard_from_disk(
+                dashboard_id,
+                preserve_on_error=True,
+            )
+        except WorkspaceError as error:
+            raise HTTPException(409, "Shared Dashboard is unavailable") from error
+        result = hydrate_shared_result(
+            share_id,
+            checked,
+            cache_root,
+            manifest,
+        )
+        try:
+            ensure_query_run_compatible(dashboard, result)
+            manager.restore_shared_result(
+                result,
+                session_id=checked,
+                dashboard_id=dashboard_id,
+            )
+            interaction = {
+                "run_id": result.run_id,
+                "session_id": checked,
+                "start_url": f"/api/runs/{result.run_id}/interactions",
+                "status_url": "/api/interactions/{interaction_id}",
+                "outputs_url": "/api/interactions/{interaction_id}/outputs",
+                "query_snapshot_available": True,
+                "query_complete": True,
+            }
+            content = CanvasRenderer(snapshot).render(
+                dashboard,
+                result,
+                asset_mode="inline",
+                pyodide_index_url="/runtime/pyodide/",
+                interaction=interaction,
+                session_id=checked,
+                compute_parameters=manifest.get("compute_parameters") or {},
+                selection_state=manifest.get("selection_state") or {},
+            )
+        except DatavizError as error:
+            raise HTTPException(409, error.as_dict()) from error
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from error
+        return HTMLResponse(content, headers={"Cache-Control": "no-store"})
+
+    @app.get("/shared/{share_id}/{asset_path:path}")
+    def shared_result_asset(share_id: str, asset_path: str):
+        root = shared_cache_path(share_id)
+        target = (root / asset_path).resolve()
+        if not target.is_relative_to(root) or not target.is_file():
+            raise HTTPException(404, "Shared asset not found")
+        return FileResponse(target, headers={"Cache-Control": "no-store"})
 
     @app.get("/runtime/plotly.js")
     def plotly_runtime():
@@ -686,9 +899,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
 
     @app.delete("/api/navigation/folders/{folder_id}")
     def delete_navigation_folder(folder_id: str):
-        return apply_navigation_change(
-            lambda: {"trash_id": navigation_editor.trash_folder(folder_id)}
-        )
+        return apply_navigation_change(lambda: navigation_editor.trash_folder(folder_id))
 
     @app.patch("/api/navigation/dashboards/{dashboard_id}")
     def place_navigation_dashboard(dashboard_id: str, request: DashboardPlacementRequest):
@@ -711,6 +922,41 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
     @app.post("/api/navigation/trash/{trash_id}/restore")
     def restore_navigation_item(trash_id: str):
         return apply_navigation_change(lambda: navigation_editor.restore(trash_id))
+
+    @app.delete("/api/navigation/trash/{trash_id}")
+    def purge_navigation_item(trash_id: str):
+        return apply_navigation_change(lambda: navigation_editor.purge(trash_id))
+
+    @app.get("/api/dashboards/{dashboard_id}/parameter-editor")
+    def dashboard_parameter_editor(dashboard_id: str):
+        try:
+            _, dashboard = dashboard_from_disk(dashboard_id)
+            return parameter_editor_contract(dashboard)
+        except WorkspaceError as error:
+            raise HTTPException(409, error.as_dict()) from error
+
+    @app.patch("/api/dashboards/{dashboard_id}/parameter-editor")
+    def update_dashboard_parameter_editor(
+        dashboard_id: str,
+        request: ParameterEditorUpdateRequest,
+    ):
+        try:
+            _, dashboard = dashboard_from_disk(dashboard_id)
+            result = parameter_editor.update_group(
+                dashboard,
+                expected_revision=request.revision,
+                owner=request.group.owner,
+                order=request.group.order,
+                items=[item.model_dump(mode="json") for item in request.group.items],
+            )
+            fresh = refresh_workspace()
+            return {
+                "status": "success",
+                "result": result,
+                "editor": parameter_editor_contract(fresh.dashboard(dashboard_id)),
+            }
+        except WorkspaceError as error:
+            raise HTTPException(409, error.as_dict()) from error
 
     @app.post("/api/dashboards/{dashboard_id}/runs")
     def start_run(dashboard_id: str, request: RunRequest):
@@ -1185,8 +1431,8 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 _canvas_state_page(
                     label="Canvas waiting",
                     title=waiting_title,
-                    message="设置参数并运行后，结果将在这里出现。",
-                    tone="indigo",
+                    message="设置参数后，点击 Run。",
+                    tone="quiet",
                     bridge=_canvas_interaction_bridge(dashboard_id, run_id, frame_id),
                 )
             )
@@ -1278,12 +1524,34 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             raise HTTPException(422, f"Invalid report state: {error}") from error
         derived_outputs = {}
         interactive_ids = dashboard.dependency_contract.reachable_interactive_order
-        snapshot_interactions: set[str] = {
+        server_interactions = {
             transform_id
             for transform_id in interactive_ids
-            if dashboard.interactive_transforms[transform_id][1].export.mode
-            == "snapshot"
+            if dashboard.interactive_transforms[transform_id][1].runtime
+            == "server-python"
         }
+        if request.destination == "download" and server_interactions:
+            raise HTTPException(
+                409,
+                {
+                    "code": "html_export_server_runtime_unavailable",
+                    "message": (
+                        "This Dashboard uses Server Python Interactive Transforms; "
+                        "create a shared link instead of exporting HTML"
+                    ),
+                    "transforms": sorted(server_interactions),
+                },
+            )
+        snapshot_interactions: set[str] = (
+            set()
+            if request.destination == "share"
+            else {
+                transform_id
+                for transform_id in interactive_ids
+                if dashboard.interactive_transforms[transform_id][1].export.mode
+                == "snapshot"
+            }
+        )
         interaction_executor = InteractionExecutor(
             snapshot,
             cache=manager.executor_for(checked, workspace=snapshot).cache,
@@ -1291,7 +1559,11 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         renderer = CanvasRenderer(snapshot)
         for transform_id in interactive_ids:
             transform = dashboard.interactive_transforms[transform_id][1]
-            if transform.runtime != "server-python" or transform.export.mode != "snapshot":
+            if (
+                transform_id not in snapshot_interactions
+                or transform.runtime != "server-python"
+                or transform.export.mode != "snapshot"
+            ):
                 continue
             interaction_result = interaction_executor.execute(
                 result,
@@ -1322,8 +1594,10 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             for transform_id in browser_snapshot_ids
             for name in dashboard.interactive_transforms[transform_id][1].outputs
         }
-        unknown_snapshot_references = sorted(
-            set(request.snapshot_outputs) - allowed_snapshot_references
+        unknown_snapshot_references = (
+            []
+            if request.destination == "share"
+            else sorted(set(request.snapshot_outputs) - allowed_snapshot_references)
         )
         if unknown_snapshot_references:
             raise HTTPException(
@@ -1335,7 +1609,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 },
             )
         encoded_snapshots = json.dumps(
-            request.snapshot_outputs,
+            {} if request.destination == "share" else request.snapshot_outputs,
             ensure_ascii=False,
             default=str,
             separators=(",", ":"),
@@ -1408,6 +1682,90 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                         },
                     )
                 derived_outputs[f"interactive:{transform_id}/{name}"] = descriptor
+        if request.destination == "share":
+            shared_root = workspace_root / "shared_caches"
+            shared_root.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            base_share_id = f"{dashboard_id}_{timestamp}_{result.run_id}"
+            share_id = base_share_id
+            suffix = 2
+            while (shared_root / share_id).exists():
+                share_id = f"{base_share_id}_{suffix}"
+                suffix += 1
+            temporary_share = shared_root / f".{share_id}.{uuid.uuid4().hex}.tmp"
+            final_share = shared_root / share_id
+            temporary_share.mkdir(parents=True)
+            try:
+                descriptors: dict[tuple[str, str], ArtifactDescriptor] = {}
+                for descriptor in result.outputs.values():
+                    descriptors[(descriptor.artifact_id, descriptor.content_hash)] = descriptor
+                for node in result.nodes.values():
+                    for descriptor in node.outputs.values():
+                        descriptors[(descriptor.artifact_id, descriptor.content_hash)] = descriptor
+                    if node.log is not None:
+                        descriptors[(node.log.artifact_id, node.log.content_hash)] = node.log
+                for descriptor in derived_outputs.values():
+                    descriptors[(descriptor.artifact_id, descriptor.content_hash)] = descriptor
+                copied_artifacts = []
+                source_store = ArtifactStore(workspace_root, result.run_id)
+                for descriptor in descriptors.values():
+                    if not descriptor.path:
+                        continue
+                    source = source_store.resolve_managed(descriptor)
+                    safe_artifact_id = re.sub(
+                        r"[^A-Za-z0-9._-]+", "_", descriptor.artifact_id
+                    ).strip("._") or "artifact"
+                    destination = (
+                        temporary_share
+                        / "artifacts"
+                        / f"{safe_artifact_id}_{descriptor.content_hash[:12]}{source.suffix}"
+                    )
+                    atomic_copy_file(
+                        source,
+                        destination,
+                        expected_sha256=descriptor.content_hash,
+                    )
+                    copied_artifacts.append(
+                        {
+                            "artifact_id": descriptor.artifact_id,
+                            "path": str(destination.relative_to(temporary_share)),
+                            "content_hash": descriptor.content_hash,
+                            "kind": descriptor.kind,
+                            "format": descriptor.format,
+                        }
+                    )
+                manifest = {
+                    "schema": "dataviz/shared-cache/v1",
+                    "share_id": share_id,
+                    "dashboard_id": dashboard_id,
+                    "run_id": result.run_id,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "url": f"/shared/{share_id}",
+                    "query_parameters": result.query_parameters,
+                    "compute_parameters": resolved_compute,
+                    "selection_state": resolved_selection_state,
+                    "artifacts": copied_artifacts,
+                }
+                atomic_write_text(
+                    temporary_share / "manifest.json",
+                    json.dumps(manifest, ensure_ascii=False, indent=2, default=str),
+                )
+                atomic_write_text(
+                    temporary_share / "query-result.json",
+                    result.model_dump_json(by_alias=True, indent=2),
+                )
+                temporary_share.replace(final_share)
+            except BaseException:
+                shutil.rmtree(temporary_share, ignore_errors=True)
+                raise
+            return {
+                "status": "success",
+                "share_id": share_id,
+                "dashboard_id": dashboard_id,
+                "run_id": result.run_id,
+                "url": f"/shared/{share_id}",
+                "path": str(final_share.relative_to(workspace_root)),
+            }
         if renderer._browser_python_export_assets(dashboard) == "bundle":
             temporary = Path(tempfile.mkdtemp(prefix="dataviz-report-"))
             try:
@@ -1448,6 +1806,13 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         )
         headers = {"Content-Disposition": f'attachment; filename="{dashboard_id}-{result.run_id}.html"'}
         return Response(content, media_type="text/html", headers=headers)
+
+    @app.post("/api/dashboards/{dashboard_id}/share")
+    def create_shared_result(dashboard_id: str, request: ReportRequest):
+        return download_report(
+            dashboard_id,
+            request.model_copy(update={"destination": "share"}),
+        )
 
     return app
 
@@ -1490,6 +1855,19 @@ def _canvas_state_page(
     tone: str = "indigo",
     bridge: str = "",
 ) -> str:
+    if tone == "quiet":
+        return (
+            "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' "
+            "content='width=device-width,initial-scale=1'></head>"
+            "<body style='margin:0;padding:clamp(32px,5vw,72px);color:#18211d;background:#fff;"
+            "font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,sans-serif'>"
+            "<main aria-live='polite' style='max-width:640px'>"
+            "<h1 style='margin:0;font-size:clamp(24px,3vw,34px);font-weight:650;"
+            "letter-spacing:-.025em;line-height:1.2'>"
+            f"{_escape_html(title)}</h1>"
+            "<p style='margin:10px 0 0;color:#69736e;font-size:14px;line-height:1.6'>"
+            f"{_escape_html(message)}</p></main>{bridge}</body></html>"
+        )
     palettes = {
         "indigo": ("#1a237e", "#283593", "#9fa8da", "#d9dcf3"),
         "warning": ("#5f4300", "#8a6200", "#ffe082", "#fff3c4"),

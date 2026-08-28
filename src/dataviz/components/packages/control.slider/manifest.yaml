@@ -2,20 +2,20 @@ schema: dataviz/component-package/v1
 package: control.slider
 version: 1.0.0
 category: data-entry
-purpose: Adjust one bounded numeric value over a continuous or stepped range.
+purpose: Adjust one bounded numeric value or one numeric interval over a continuous or stepped range.
 implementation: {mode: package, sources: []}
 dependencies: [runtime.control]
 components:
   - id: control.slider
-    purpose: Make bounded numeric exploration direct while preserving integer or number semantics.
+    purpose: Make bounded scalar and range exploration direct while preserving integer or number semantics.
     status: stable
     alignment:
       design_system: Ant Design
       component: Slider
       official: https://ant.design/components/slider/
-      adopted: [min, max, step, marks, tooltip, optional-input-sync, keyboard-arrows]
-      omitted: [range-pair, draggable-track, vertical-mode]
-    logic: {types: [integer, number], fields: [min, max, step]}
+      adopted: [min, max, step, marks, tooltip, optional-input-sync, keyboard-arrows, range-pair]
+      omitted: [draggable-track, vertical-mode]
+    logic: {types: [single_input, range_input], value_types: [integer, number], fields: [min, max, step]}
     presentation: {component: slider, options: [show_input, tooltip, marks, css_class]}
     semantic_dom: [.dv-slider, .dv-slider__track, .dv-slider__value, .dv-slider__marks]
     tokens: [--dv-accent, --dv-ink, --dv-line, --dv-panel]

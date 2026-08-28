@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import uuid
+import shutil
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -360,7 +361,7 @@ class NavigationEditor:
             self._rename_dashboards({entry.path: target})
             return dashboard_trash_id(target.name)
 
-    def trash_folder(self, identifier: str) -> str:
+    def trash_folder(self, identifier: str) -> dict[str, Any]:
         with _LOCK:
             old = folder_segments(identifier)
             document = self._read()
@@ -374,6 +375,22 @@ class NavigationEditor:
                     mappings[source] = self.dashboards_root / encode_dashboard_name(
                         location.segments, trashed=True
                     )
+            if not mappings:
+                rewritten = []
+                for record in records:
+                    raw = str(record["path"])
+                    trashed = raw.startswith(f"{TRASH_SEGMENT}/")
+                    logical = raw[len(TRASH_SEGMENT) :].strip("/") if trashed else raw
+                    segments = normalize_logical_path(logical)
+                    if not trashed and _is_prefix(old, segments):
+                        continue
+                    rewritten.append(record)
+                self._write(document, rewritten)
+                return {
+                    "trash_id": None,
+                    "deleted": True,
+                    "path": "/".join(old),
+                }
             rewritten: list[dict[str, Any]] = []
             represented = False
             for record in records:
@@ -382,15 +399,87 @@ class NavigationEditor:
                 logical = raw[len(TRASH_SEGMENT) :].strip("/") if trashed else raw
                 segments = normalize_logical_path(logical)
                 if not trashed and _is_prefix(old, segments):
+                    if segments != old:
+                        continue
                     trashed = True
-                    represented = represented or segments == old
+                    represented = True
                 rewritten.append(
                     {"path": self._record_path(segments, trashed=trashed), "order": record["order"]}
                 )
             if not represented:
                 rewritten.append({"path": self._record_path(old, trashed=True), "order": 0})
             self._rename_then_write(mappings, document, rewritten)
-            return folder_trash_id(old)
+            return {
+                "trash_id": folder_trash_id(old),
+                "deleted": False,
+                "path": "/".join(old),
+            }
+
+    def _purge_dashboard_directory(self, path: Path) -> None:
+        target = path.absolute()
+        root = self.dashboards_root.absolute()
+        if target.parent != root:
+            raise WorkspaceError("Trash target must be directly under dashboards/", file=target)
+        if target.is_symlink():
+            raise WorkspaceError("Refusing to permanently delete a symlink", file=target)
+        if not target.is_dir():
+            raise WorkspaceError("Trashed dashboard directory no longer exists", file=target)
+        location = decode_dashboard_path(root, target)
+        if not location.trashed:
+            raise WorkspaceError("Only a trashed dashboard can be permanently deleted", file=target)
+        shutil.rmtree(target)
+
+    def purge(self, trash_identifier: str) -> dict[str, Any]:
+        with _LOCK:
+            if trash_identifier.startswith(DASHBOARD_TRASH_PREFIX):
+                encoded = dashboard_trash_name(trash_identifier)
+                location = decode_dashboard_name(encoded)
+                if not location.trashed:
+                    raise WorkspaceError("Invalid dashboard trash id")
+                source = self.dashboards_root / encoded
+                self._purge_dashboard_directory(source)
+                return {
+                    "kind": "dashboard",
+                    "path": encode_dashboard_name(location.segments),
+                }
+
+            if trash_identifier.startswith(FOLDER_TRASH_PREFIX):
+                old = folder_trash_segments(trash_identifier)
+                document = self._read()
+                records = self._folder_records(document)
+                locations = self._dashboard_locations()
+                targets = [
+                    source
+                    for source, location in locations.items()
+                    if location.trashed and _is_prefix(old, location.folder_segments)
+                ]
+                represented = any(
+                    str(record["path"]).startswith(f"{TRASH_SEGMENT}/")
+                    and _is_prefix(
+                        old,
+                        normalize_logical_path(
+                            str(record["path"])[len(TRASH_SEGMENT) :].strip("/")
+                        ),
+                    )
+                    for record in records
+                )
+                if not targets and not represented:
+                    raise WorkspaceError("Unknown folder trash item")
+                for target in targets:
+                    self._purge_dashboard_directory(target)
+                rewritten = []
+                for record in records:
+                    raw = str(record["path"])
+                    trashed = raw.startswith(f"{TRASH_SEGMENT}/")
+                    logical = raw[len(TRASH_SEGMENT) :].strip("/") if trashed else raw
+                    segments = normalize_logical_path(logical)
+                    if trashed and _is_prefix(old, segments):
+                        continue
+                    rewritten.append(record)
+                self._write(document, rewritten)
+                return {"kind": "folder", "path": "/".join(old)}
+
+            raise WorkspaceError(f"Unknown trash id: {trash_identifier}")
 
     def restore(self, trash_identifier: str) -> dict[str, str]:
         with _LOCK:

@@ -1,23 +1,23 @@
 schema: dataviz/component-package/v1
 package: control.checkbox-group
-version: 3.0.0
+version: 4.0.0
 category: data-entry
 purpose: Choose zero or more visible options from a small flat set.
 implementation: {mode: package, sources: []}
 dependencies: [runtime.control]
 components:
   - id: control.checkbox-group
-    purpose: Select up to eight peer values without opening an overlay.
+    purpose: Select two to five peer values without opening an overlay.
     status: stable
     alignment:
       design_system: Ant Design
       component: Checkbox.Group
       official: https://ant.design/components/checkbox/
-      adopted: [independent-checks, group-value-array, disabled-options, indeterminate-bulk-state]
-      omitted: [Grid-component-coupling, Form.Item-integration]
-    logic: {type: multi_select, fields: [choices, max_selected]}
-    presentation: {component: checkbox-group, options: [bulk_actions, select_all_label, invert_label, show_unavailable, css_class]}
-    behavior: {empty_state: explicit_empty_array, explicit_all: preserved, optional_bulk_action: select_all_then_invert}
-    semantic_dom: [.dv-checkbox-group, .dv-checkbox-group__toolbar, .dv-checkbox-group__action, .dv-checkbox-option]
+      adopted: [independent-checks, group-value-array, disabled-options]
+      omitted: [group-level-check-all, Grid-component-coupling, Form.Item-integration]
+    logic: {type: multiple_select, value_types: [text, integer, number, boolean, date], fields: [choices, max_selected]}
+    presentation: {component: checkbox-group, options: [show_unavailable, css_class]}
+    behavior: {recommended_option_count: [2, 5], empty_state: explicit_empty_array, explicit_all: preserved, bulk_actions: false, clear_by_unchecking: only_when_allowed}
+    semantic_dom: [.dv-checkbox-group, .dv-checkbox-group__options, .dv-checkbox-option]
     tokens: [--dv-accent, --dv-green, --dv-ink, --dv-line, --dv-panel]
 runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

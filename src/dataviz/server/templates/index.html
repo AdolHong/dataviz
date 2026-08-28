@@ -9,85 +9,85 @@
 </head>
 <body>
   <div class="shell">
+    <header class="topbar dv-shell-header">
+      <div class="topbar-leading">
+        <button id="sidebar-toggle" class="brand dv-shell-brand" type="button" aria-controls="dashboard-sidebar" aria-expanded="true" aria-label="收起导航栏" aria-keyshortcuts="B" title="收起导航栏 (B)">
+          <span class="brand-mark" aria-hidden="true">D/V</span>
+          <strong>DATAVIZ</strong>
+        </button>
+        <div id="query-diagnostics" class="pipeline-signals" data-status="idle" aria-label="Data pipeline status">
+          <span id="query-diagnostics-label" aria-live="polite" hidden>Not run</span>
+          <div id="node-list" class="pipeline-signal-list" aria-label="Pipeline tasks"></div>
+          <span id="run-message" hidden>Data pipeline has not run.</span>
+          <button id="dashboard-reload" class="pipeline-reload" type="button" hidden>Reload files</button>
+        </div>
+      </div>
+      <div class="topbar-actions dv-shell-header-actions">
+        <details id="share-control" class="header-control share-control" data-header-popover data-overlay-floating="true" data-overlay-width="250" data-empty="true">
+          <summary id="share-button" class="share-control__trigger" aria-disabled="true">
+            <strong>SHARE</strong>
+            <span class="header-control__chevron" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></svg></span>
+          </summary>
+          <div class="header-control__popover share-control__menu">
+            <button id="copy-share-link" type="button">分享链接</button>
+            <button id="download-button" type="button" disabled>导出 HTML</button>
+          </div>
+        </details>
+        <details id="dashboard-controls-control" class="header-control" data-header-popover data-dv-control-panel data-control-role="dashboard" data-control-count="0" data-overlay-floating="true" data-overlay-width="760">
+          <summary class="header-control__trigger" title="左键打开控件，右键编辑默认配置">
+            <span class="header-control__mark" aria-hidden="true">C</span>
+            <strong class="header-control__label">DASHBOARD CONTROLS</strong>
+            <small id="dashboard-control-meta" hidden>None</small>
+            <span class="header-control__chevron" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></svg></span>
+          </summary>
+          <div class="header-control__popover header-control__popover--controls">
+            <div class="dashboard-control-groups">
+              <section id="dashboard-selection-group" class="dashboard-control-group" data-control-kind="selection">
+                <form id="dashboard-selection-form" class="selection-form"></form>
+              </section>
+              <section id="dashboard-compute-group" class="dashboard-control-group" data-control-kind="compute">
+                <form id="compute-parameter-form" class="parameter-form"></form>
+              </section>
+            </div>
+            <footer id="dashboard-compute-actions" class="compute-actions"><span id="compute-state">Results are current.</span><button id="compute-apply" class="button button--run" type="button" disabled>Run analysis</button></footer>
+          </div>
+        </details>
+        <div id="query-run-control" class="query-run-control">
+          <button id="run-button" class="button button--run query-run-control__primary" type="button" aria-keyshortcuts="Control+Enter Meta+Enter" title="运行查询 (Ctrl/Cmd + Enter)；右键编辑参数默认配置" disabled>
+            <span class="query-run-control__copy"><strong data-run-label>查询</strong><small id="query-control-meta">Not applied</small></span>
+          </button>
+          <button id="query-parameters-toggle" class="query-run-control__toggle" type="button" aria-controls="query-parameters-panel" aria-expanded="true" aria-label="Collapse query parameters" aria-keyshortcuts="Q" title="Collapse query parameters (Q)">
+            <span class="query-run-control__chevron" aria-hidden="true"></span>
+          </button>
+        </div>
+      </div>
+    </header>
+
     <aside id="dashboard-sidebar" class="rail">
-      <div class="brand">
-        <span class="brand-mark">D/V</span>
-        <strong>DATAVIZ</strong>
-      </div>
-      <div class="workspace-meta">
-        <h1 id="workspace-title">Dashboards</h1>
-        <button id="add-root-folder" class="rail-action" type="button" title="新建目录" aria-label="新建目录">＋</button>
-      </div>
       <div id="nav-root-drop" class="nav-root-drop" aria-hidden="true">↰ 放到根目录</div>
       <nav id="dashboard-nav" class="dashboard-nav" aria-label="Dashboards"></nav>
-      <details id="nav-trash" class="nav-trash">
-        <summary><span class="nav-trash__icon">⌫</span><strong>回收站</strong><small id="nav-trash-count">0</small><i>›</i></summary>
+      <details id="nav-trash" class="nav-trash" data-empty="true">
+        <summary aria-disabled="true">
+          <span class="nav-trash__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"/></svg></span>
+          <strong>回收站</strong><small id="nav-trash-count" hidden>0</small>
+          <span class="nav-trash__chevron" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></svg></span>
+        </summary>
         <div id="nav-trash-list" class="nav-trash__list"></div>
       </details>
-      <div id="sidebar-resizer" class="sidebar-resizer" role="separator" aria-label="调整导航栏宽度" aria-orientation="vertical" aria-valuemin="180" aria-valuemax="480" aria-valuenow="220" tabindex="0"><span></span></div>
+      <div id="sidebar-resizer" class="sidebar-resizer" role="separator" aria-label="调整导航栏宽度" aria-orientation="vertical" aria-valuemin="180" aria-valuemax="480" aria-valuenow="250" tabindex="0"><span></span></div>
     </aside>
 
     <main class="workbench">
-      <header class="topbar">
-        <div class="topbar-leading">
-          <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-controls="dashboard-sidebar" aria-expanded="true" title="收起导航栏">
-            <span aria-hidden="true">◫</span><small>Navigation</small>
-          </button>
-          <button id="dashboard-reload" class="sidebar-toggle" type="button" title="重新读取当前 Workspace">
-            <span aria-hidden="true">↻</span><small>Reload</small>
-          </button>
-        </div>
-        <div class="topbar-actions">
-          <details id="dashboard-controls-control" class="header-control" data-header-popover data-dv-control-panel data-control-role="dashboard" data-control-count="0" data-overlay-floating="true" data-overlay-width="760">
-            <summary class="header-control__trigger">
-              <span class="header-control__index header-control__index--controls">02</span>
-              <span><strong>Controls</strong><small id="dashboard-control-meta">None</small></span>
-              <i>⌄</i>
-            </summary>
-            <div class="header-control__popover header-control__popover--controls">
-              <div class="section-heading"><span>02</span><div><h3>Dashboard controls</h3><p>Choose data, adjust calculation logic, then render the affected views.</p></div></div>
-              <div class="dashboard-control-groups">
-                <section id="dashboard-selection-group" class="dashboard-control-group" data-control-kind="selection">
-                  <header><span>DATA</span><div><strong>Data selection</strong><small>Choose included rows</small></div></header>
-                  <form id="dashboard-selection-form" class="selection-form"></form>
-                </section>
-                <section id="dashboard-compute-group" class="dashboard-control-group" data-control-kind="compute">
-                  <header><span>LOGIC</span><div><strong>Calculation settings</strong><small>Recompute selected data</small></div></header>
-                  <form id="compute-parameter-form" class="parameter-form"></form>
-                </section>
-              </div>
-              <footer id="dashboard-compute-actions" class="compute-actions"><span id="compute-state">Results are current.</span><button id="compute-apply" class="button button--run" type="button" disabled>Run analysis</button></footer>
-            </div>
-          </details>
-          <button id="download-button" class="button button--ghost" disabled>Export HTML</button>
-          <details id="query-diagnostics" class="query-diagnostics" data-status="idle" data-header-popover data-overlay-floating="true" data-overlay-width="620">
-            <summary class="button button--ghost"><span class="query-diagnostics__light"></span><span class="query-diagnostics__copy"><strong>Pipeline</strong><small id="query-diagnostics-label">Not run</small></span><span class="query-diagnostics__chevron">⌄</span></summary>
-            <div class="query-diagnostics__popover">
-              <div class="section-heading"><span>↳</span><div><h3>Data pipeline</h3><p>Query nodes and browser/server Interactive Transform status.</p></div></div>
-              <div id="node-list" class="node-list"></div>
-              <div id="run-message" class="run-message">Data pipeline has not run.</div>
-            </div>
-          </details>
-          <div id="query-run-control" class="query-run-control">
-            <button id="run-button" class="button button--run query-run-control__primary" type="button" disabled>
-              <span class="button-light" aria-hidden="true"></span>
-              <span class="query-run-control__copy"><strong data-run-label>Run query</strong><small id="query-control-meta">Not applied</small></span>
-            </button>
-            <button id="query-parameters-toggle" class="query-run-control__toggle" type="button" aria-controls="query-parameters-panel" aria-expanded="true" aria-label="Collapse query parameters" title="Collapse query parameters">
-              <span class="query-run-control__chevron" aria-hidden="true"></span>
-            </button>
-          </div>
-        </div>
-        <section id="query-parameters-control" class="query-parameters-control" data-dv-control-panel data-control-role="query" data-control-count="0">
-          <div id="query-parameters-panel" class="header-control__popover header-control__popover--query query-parameters-panel" data-control-panel-body>
-            <header class="query-parameters-panel__header">
-              <div><strong>Query parameters</strong><small id="query-parameter-count">0 fields · changes apply on next run</small></div>
-              <div id="query-state" class="query-state" role="status">No dataset loaded.</div>
-            </header>
+      <section id="query-parameters-control" class="query-parameters-control dv-query-card-host" data-dv-control-panel data-control-role="query" data-control-count="0" data-open="true">
+        <div class="dv-query-card">
+          <header class="dv-query-card__header">
+            <h2>查询参数</h2>
+          </header>
+          <div id="query-parameters-panel" class="header-control__popover header-control__popover--query query-parameters-panel dv-query-card__body" data-control-panel-body>
             <form id="parameter-form" class="parameter-form"></form>
           </div>
-        </section>
-      </header>
+        </div>
+      </section>
 
       <section id="workspace-update" class="workspace-update" data-impact="canvas" role="status" aria-live="polite" hidden>
         <span class="workspace-update__light" aria-hidden="true"></span>
@@ -117,6 +117,21 @@
   </dialog>
   <div id="nav-context-menu" class="nav-context-menu" role="menu" hidden></div>
   <dialog id="nav-dialog" class="nav-dialog"></dialog>
+  <dialog id="parameter-editor-dialog" class="parameter-editor-dialog" aria-labelledby="parameter-editor-title"></dialog>
+  <div id="shortcut-toast" class="shortcut-toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+  <dialog id="keyboard-shortcuts-dialog" class="keyboard-shortcuts-dialog" aria-labelledby="keyboard-shortcuts-title">
+    <form method="dialog">
+      <header><h2 id="keyboard-shortcuts-title">快捷键</h2><button type="submit" aria-label="关闭">×</button></header>
+      <dl>
+        <div><dt><kbd>Q</kbd></dt><dd>查询参数</dd></div>
+        <div><dt><kbd>Ctrl/Cmd</kbd><span>+</span><kbd>Enter</kbd></dt><dd>运行查询</dd></div>
+        <div><dt><kbd>B</kbd></dt><dd>侧边栏</dd></div>
+        <div><dt><kbd>Esc</kbd></dt><dd>关闭临时面板</dd></div>
+        <div><dt><kbd>?</kbd></dt><dd>快捷键帮助</dd></div>
+      </dl>
+      <footer><button type="submit" class="button button--ghost">关闭</button></footer>
+    </form>
+  </dialog>
   <script src="/runtime/components.js?v=component-v3"></script>
   <script type="module" src="/static/app.js?v=runtime-v2"></script>
 </body>

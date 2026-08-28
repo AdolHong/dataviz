@@ -21,8 +21,8 @@
     && fields(item).every(field => Object.prototype.hasOwnProperty.call(row, field));
   const projectedValue = (item, state) => {
     const values = Array.isArray(state?.values) ? state.values : [];
-    if (item.definition?.type === 'multi_select') return values;
-    if (item.definition?.type === 'date_range') return values.length ? values[0] : [];
+    if (['multiple_input', 'multiple_select'].includes(item.definition?.type)) return values;
+    if (item.definition?.type === 'range_input') return values.length ? values[0] : [];
     return values.length ? values[0] : null;
   };
   const matches = (row, item, state) => {
@@ -38,8 +38,8 @@
     }
     const actual = row[item.binding?.field || item.id];
     const operator = item.binding?.operator === 'auto'
-      ? (item.definition?.type === 'multi_select' ? 'in'
-        : item.definition?.type === 'date_range' ? 'between' : 'equals')
+      ? (['multiple_input', 'multiple_select'].includes(item.definition?.type) ? 'in'
+        : item.definition?.type === 'range_input' ? 'between' : 'equals')
       : item.binding?.operator;
     if (operator === 'in') return (Array.isArray(value) ? value : [value]).map(String).includes(String(actual));
     if (operator === 'between') {

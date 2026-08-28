@@ -6,7 +6,12 @@ Dataviz 把三个问题彻底分开：
 2. Control 所在位置定义作用域：Dashboard、Section 或 View。
 3. `presentation.yaml` 只选择如何编辑这个值：`control.input`、`control.select`、`control.cascader` 等。
 
-因此，同一个 `boolean` 可以显示成 Checkbox 或 Switch，但它的默认值、校验、作用域和依赖关系不会被 CSS 或 Component 改写。
+因此，Control 契约始终由两个正交字段组成：
+
+- `type` 描述输入形态：`single_input | multiple_input | single_select | multiple_select | range_input`。
+- `value_type` 描述每个原子值：`text | integer | number | boolean | date`。
+
+例如，单日期是 `single_input/date`，日期范围是 `range_input/date`，整数 Slider 是 `single_input/integer`，双端浮点 Slider 是 `range_input/number`。同一个 `single_input/boolean` 可以显示成 Checkbox 或 Switch，但它的默认值、校验、作用域和依赖关系不会被 CSS 或 Component 改写。
 
 ## 为什么不直接依赖 Ant Design
 
@@ -23,21 +28,48 @@ Dataviz 把三个问题彻底分开：
 
 | Dataviz | 对齐对象 | Value contract | 关键语义 |
 |---|---|---|---|
-| `control.input` | [Input](https://ant.design/components/input/) | `string` | 单行或 TextArea；`max_length` 属于逻辑，prefix/suffix/count 属于展示 |
-| `control.input-number` | [InputNumber](https://ant.design/components/input-number/) | `number` / `integer` | `min`、`max`、`step` 不由 Presentation 改写 |
-| `control.auto-complete` | [AutoComplete](https://ant.design/components/auto-complete/) | `string + suggestions` | suggestion 只帮助输入；任意合法文本仍可提交，不等同 Select |
-| `control.checkbox` | [Checkbox](https://ant.design/components/checkbox/) | `boolean` | 一个随外层 Query/Apply 工作流提交的布尔字段 |
-| `control.switch` | [Switch](https://ant.design/components/switch/) | `boolean` | 立即发出 input/change；是否触发计算仍由外层工作流决定 |
-| `control.radio-group` | [Radio.Group](https://ant.design/components/radio/) | `single_select` | 少量互斥选项；不生成 All、Clear 或虚假空选项 |
-| `control.select` | [Select](https://ant.design/components/select/) | `single_select` / `multi_select` | 分组、搜索、tag summary、max count、自动虚拟列表；批量操作只属于多选 |
-| `control.checkbox-group` | [Checkbox.Group](https://ant.design/components/checkbox/) | `multi_select` | 少量显式多选；可配置全选、反选、清空；每个选中项始终可见 |
+| `control.input` | [Input](https://ant.design/components/input/) | `single_input/text` | 单行或 TextArea；`max_length` 属于逻辑，prefix/suffix/count 属于展示 |
+| `control.multiple-input` | [Form.List + Input](https://ant.design/components/form/) | `multiple_input` + text/integer/number/date | 输入开放的有序值列表；不是 Select 的封闭候选域 |
+| `control.input-number` | [InputNumber](https://ant.design/components/input-number/) | `single_input/integer|number` | `min`、`max`、`step` 不由 Presentation 改写 |
+| `control.auto-complete` | [AutoComplete](https://ant.design/components/auto-complete/) | `single_input/text + suggestions` | suggestion 只帮助输入；任意合法文本仍可提交，不等同 Select |
+| `control.checkbox` | [Checkbox](https://ant.design/components/checkbox/) | `single_input/boolean` | 一个随外层 Query/Apply 工作流提交的布尔字段 |
+| `control.switch` | [Switch](https://ant.design/components/switch/) | `single_input/boolean` | 立即发出 input/change；是否触发计算仍由外层工作流决定 |
+| `control.radio-group` | [Radio.Group](https://ant.design/components/radio/) | `single_select` + 任一标量类型 | 少量互斥选项；不生成 All、Clear 或虚假空选项 |
+| `control.select` | [Select](https://ant.design/components/select/) | `single_select|multiple_select` + 任一标量类型 | 分组、搜索、tag summary、max count、自动虚拟列表；批量操作只属于多选 |
+| `control.checkbox-group` | [Checkbox.Group](https://ant.design/components/checkbox/) | `multiple_select` + 任一标量类型 | 2–5 个并列选项的直接多选；不显示冗余的全选、反选或清空工具栏 |
 | `control.cascader` | [Cascader](https://ant.design/components/cascader/) | 单/多条完整 path | 用 `path_fields` 逐列保留父级上下文；可搜索完整路径与跨分支选择 |
 | `control.tree-select` | [TreeSelect](https://ant.design/components/tree-select/) | 单/多条完整 path | 在窄弹层内搜索、展开和选择层级路径 |
-| `control.date-picker` | [DatePicker](https://ant.design/components/date-picker/) | ISO `date` | 单个日期；`min_date` / `max_date` 属于逻辑契约 |
-| `control.range-picker` | [DatePicker.RangePicker](https://ant.design/components/date-picker/) | `[start, end]` | 一个触发器、一个弹层、一次协同选择；支持 preset 与可选空端点 |
-| `control.slider` | [Slider](https://ant.design/components/slider/) | `number` / `integer` | 有界数值、step、marks、tooltip 与可选同步 InputNumber |
+| `control.date-picker` | [DatePicker](https://ant.design/components/date-picker/) | `single_input/date` | 可直接编辑的 `YYYY-MM-DD` 与统一日历；`min_date` / `max_date` 属于逻辑契约 |
+| `control.range-picker` | [DatePicker.RangePicker](https://ant.design/components/date-picker/) | `range_input/date` | 两个可编辑 ISO 端点、一个日历触发器和一个协同弹层；支持 preset 与可选空端点 |
+| `control.slider` | [Slider](https://ant.design/components/slider/) | `single_input|range_input` + integer/number | 单值或双端范围；有界数值、step、marks、tooltip 与可选同步 InputNumber |
 
 `Form` 不拥有一个新的 value type。Dataviz 用 `control_panels` 组合 label、description、validation、布局和 Query/Apply 行为，对齐 [Ant Design Form](https://ant.design/components/form/) 的组合职责。
+
+## 日期默认值与编辑器
+
+日期默认值由独立的 **Date Atom** 组成。一个 Atom 只能是固定 ISO 日期，或相对 Workspace 时区中“今天”的整数日偏移：
+
+```yaml
+# 固定日期
+default: "2026-08-20"
+
+# 相对日期
+default: {mode: relative, anchor: today, offset: -1d}
+```
+
+`range_input/date` 恰好包含两个彼此独立的 Atom，因此开始和结束不必使用同一种模式：
+
+```yaml
+default:
+  - "2026-08-01"
+  - {mode: relative, anchor: today, offset: -1d}
+```
+
+Server 默认值编辑器也按 Atom 呈现。单日期只有“类型 + 值”两个控件；日期范围分别为开始、结束各提供一组“类型 + 值”，共四个控件。选择“固定日期”时复用运行界面的可编辑 ISO DatePicker（包括八位数字自动分段、统一图标、浮层和校验），选择“相对今天”时值控件是整数 offset。编辑器不会同时显示两种输入，也不接受旧的 `start_offset/end_offset` 范围对象。
+
+相对表达式只允许用于 Query Parameter；在 Run 创建前解析成具体 `YYYY-MM-DD`，随后 SQL 绑定、缓存和导出 HTML 都使用该不可变日期。Selection/Compute 的交互状态必须保存具体日期，不能随浏览日期漂移。
+
+运行界面的 DatePicker 与 RangePicker 始终展示 `YYYY-MM-DD`，不采用浏览器原生 `date` 控件的本地化格式。键入或粘贴连续八位数字会自动跨过年/月/日分隔符：`20260809` → `2026-08-09`。这只是输入辅助，不放宽日期契约；`20260231` 仍会被真实日期校验拒绝。Range 的两个端点可以分别文本编辑，也可以在同一双月弹层中依次选择；两个端点共用一个外框，不各自绘制输入边框。单日期、Range 和默认值编辑器的日历都可直接下拉选择年与月；没有声明 preset 时不渲染空工具条，没有 Clear/Apply 时不再用 footer 重复已选日期范围。
 
 ## 动态选项域与多选意图
 
@@ -67,7 +99,7 @@ controls:
   - id: dates
     kind: selection
     field: job_date
-    type: multi_select
+    type: multiple_select
     depends_on: [view.dow]
     options: {mode: infer, source: source:hourly/main}
 ```
@@ -79,15 +111,20 @@ controls:
 不写 Presentation 时，默认 Renderer 使用确定性规则：
 
 ```text
-path_fields                         → cascader
-date_range / date                   → range-picker / date-picker
-number or integer                   → input-number
-boolean                             → checkbox
-string + suggestions / plain string → auto-complete / input
+path_fields                              → cascader
+range_input/date                         → range-picker
+single_input/date                        → date-picker
+range_input/integer|number               → slider
+single_input/integer|number              → input-number
+single_input/boolean                     → checkbox
+multiple_input                           → multiple-input
+single_input/text + suggestions / plain  → auto-complete / input
 single_select with ≤ 4 choices      → radio-group
-multi_select with ≤ 8 choices       → checkbox-group
+multiple_select with 2–5 choices       → checkbox-group
 other flat select                   → select
 ```
+
+Checkbox Group 的意义是“所有少量选项都值得直接看到”。可清空时，用户直接取消最后一个勾选；必选时，Runtime 会阻止取消最后一项。6 个及以上的平面候选项默认使用 Select，由它承担搜索、虚拟列表和多选批量操作；层级候选项使用 Cascader 或 TreeSelect。
 
 自动规则只负责开箱即用。需要特定交互时，显式写 `control_components`。
 
@@ -100,6 +137,7 @@ controls:
   - id: model
     kind: compute
     type: single_select
+    value_type: text
     label: 模型
     required: true
     default: baseline
@@ -111,7 +149,8 @@ controls:
 
   - id: location
     kind: selection
-    type: multi_select
+    type: multiple_select
+    value_type: text
     label: 地区
     field: district
     path_fields: [province, city, district]
@@ -146,18 +185,18 @@ control_components:
 control_panels:
   query:
     template: grid
-    columns: 4
+    columns: 6
   dashboard:
     template: grid
     width: wide
     columns: 2
 ```
 
-Query Parameters 的默认网格在宽屏最多放置 4 个控件，每轨保持可读宽度；容器变窄时自动降为 3、2、1 列。`columns` 表示响应式最大列数，不会强迫窄屏挤出固定列数。所有控件默认 `span: 1`；`span: 2` 是显式排版选择，RangePicker 不会因为组件类型自动变宽。
+Query Parameters 的 `columns` 表示最大列数（默认 6），`column_width` 表示目标轨道宽度（默认 280 px）。Runtime 根据 Query Panel 自身宽度计算实际列数，不会强迫窄容器挤出固定列数；参数较少时也不会把两三个控件拉伸到占满整行。所有控件默认 `span: 1`；`span: 2` 是显式排版选择。Dashboard/Section/View Controls 默认单列，避免把 Query 的密集网格交互扩散到局部操作。
 
 错误组合会在 `dataviz validate` 阶段失败。例如：
 
-- `radio-group` 不能渲染 `multi_select`；
+- `radio-group` 不能渲染 `multiple_select`；
 - `auto-complete` 必须有 `suggestions`；
 - `cascader` / `tree-select` 必须有 `path_fields`；
 - 其他 Component 不能悄悄忽略 `path_fields`；

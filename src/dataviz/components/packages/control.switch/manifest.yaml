@@ -15,7 +15,7 @@ components:
       official: https://ant.design/components/switch/
       adopted: [role-switch, checked-state, checked-and-unchecked-content, keyboard-toggle]
       omitted: [loading-spinner, size-variants]
-    logic: {type: boolean, value_shape: boolean}
+    logic: {type: single_input, value_type: boolean, value_shape: scalar}
     presentation: {component: switch, options: [checked_label, unchecked_label, css_class]}
     behavior: {event_semantics: immediate-input-and-change}
     semantic_dom: [.dv-switch, .dv-switch__thumb, .dv-switch__label]

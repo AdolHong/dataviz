@@ -16,7 +16,8 @@ components:
       adopted: [single-and-multiple-mode, search-full-path, change-on-leaf, show-checked-strategy, branch-cascade]
       omitted: [lazy-network-loading, custom-panel-render, hover-expand]
     logic:
-      types: [single_select, multi_select]
+      types: [single_select, multiple_select]
+      value_types: [text, integer, number, boolean, date]
       fields: [path_fields]
       value_shape: {single: [level-1, level-2, leaf], multiple: [[level-1, level-2, leaf]]}
     presentation:

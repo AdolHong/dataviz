@@ -5,6 +5,12 @@
     'ready', 'loading', 'stale', 'empty', 'error', 'cancelled', 'unavailable',
   ]);
   const panelWidths = Object.freeze({compact:460, regular:680, wide:880});
+  const queryGridSelector = [
+    ':scope > .header-control__popover > .parameter-form',
+    ':scope > .dv-runtime-query-panel > .dv-runtime-query-values',
+    ':scope > .dv-query-card > .dv-query-card__body > .parameter-form',
+    ':scope > .dv-query-card > .dv-query-card__body > .dv-runtime-query-values',
+  ].join(',');
   const apply = (node, status, options = {}) => {
     if (!node || !statuses.has(status)) {
       throw new Error(`Unknown component state: ${status}`);
@@ -36,12 +42,16 @@
     const count = Math.max(0, Number(options.count ?? owner.dataset.controlCount ?? 0));
     const requestedTemplate = config.template || owner.dataset.controlTemplate || 'auto';
     const template = requestedTemplate === 'auto'
-      ? (count <= 1 ? 'stack' : 'grid')
+      ? (role === 'query' && count > 1 ? 'grid' : 'stack')
       : requestedTemplate;
     const configuredColumns = Object.prototype.hasOwnProperty.call(config, 'columns')
       ? config.columns
       : owner.dataset.controlColumns;
-    const columns = Number(configuredColumns || 0);
+    const columns = Number(configuredColumns || (role === 'query' ? 6 : 1));
+    const configuredColumnWidth = Object.prototype.hasOwnProperty.call(config, 'column_width')
+      ? config.column_width
+      : owner.dataset.controlColumnWidth;
+    const columnWidth = Number(configuredColumnWidth || (role === 'query' ? 280 : 240));
     const density = config.density || owner.dataset.controlDensity || 'comfortable';
     const widthName = config.width || owner.dataset.controlWidth || 'auto';
     const width = resolvedPanelWidth(role, widthName, count, template);
@@ -49,11 +59,14 @@
     owner.dataset.controlRole = role;
     owner.dataset.controlCount = String(count);
     owner.dataset.controlTemplate = template;
-    owner.dataset.controlColumns = String(template === 'stack' ? 1 : (columns || 'auto'));
+    owner.dataset.controlColumns = String(template === 'stack' ? 1 : columns);
+    owner.dataset.controlColumnWidth = String(columnWidth);
+    owner.style.setProperty('--dv-control-column-width', `${columnWidth}px`);
     owner.dataset.controlDensity = density;
     owner.dataset.controlWidth = widthName;
     owner.dataset.overlayWidth = String(width);
     const panel = owner.querySelector(':scope > [data-control-panel-body]')
+      || owner.querySelector(':scope > .dv-query-card > [data-control-panel-body]')
       || owner.querySelector(':scope > summary + *');
     if (panel) panel.dataset.overlayWidth = String(width);
     const record = owner._datavizOverlayRecord;
@@ -61,7 +74,34 @@
       record.width = width;
       if (record.api?.isOpen()) record.api.reposition();
     }
-    return {role, count, template, columns: columns || null, density, width:widthName};
+    owner._datavizControlPanelResizeObserver?.disconnect();
+    owner._datavizControlPanelResizeObserver = null;
+    if (role === 'query' && template === 'grid') {
+      const updateColumns = () => {
+        const grid = owner.querySelector(queryGridSelector);
+        if (!grid) return;
+        const available = grid.clientWidth;
+        if (available <= 0) return;
+        const gap = Number.parseFloat(global.getComputedStyle(grid).columnGap) || 10;
+        const fitting = Math.max(1, Math.floor((available + gap) / (columnWidth + gap)));
+        const effective = Math.max(1, Math.min(count || 1, columns, fitting));
+        owner.style.setProperty('--dv-control-columns', String(effective));
+        owner.dataset.controlEffectiveColumns = String(effective);
+      };
+      updateColumns();
+      if (typeof global.ResizeObserver === 'function') {
+        owner._datavizControlPanelResizeObserver = new global.ResizeObserver(updateColumns);
+        owner._datavizControlPanelResizeObserver.observe(owner);
+        const grid = owner.querySelector(queryGridSelector);
+        if (grid) owner._datavizControlPanelResizeObserver.observe(grid);
+      }
+    } else {
+      owner.style.setProperty('--dv-control-columns', String(template === 'stack' ? 1 : columns));
+      owner.dataset.controlEffectiveColumns = String(template === 'stack' ? 1 : columns);
+    }
+    return {
+      role, count, template, columns, columnWidth, density, width:widthName,
+    };
   };
   const hydrate = (scope = document) => {
     const selector = '[data-component-status]';

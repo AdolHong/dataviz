@@ -12,13 +12,14 @@ dataviz gallery --output component-gallery.html
 
 ## 1. 默认方向
 
-Dataviz 的默认方向是 **Modern indigo analytical workbench**：冷静、清晰、可信，先帮助用户理解分析对象和结论，再暴露参数、计算和诊断细节。
+Dataviz 的默认方向是 **Quiet white shell + clean analytical canvas**：稳定的产品外壳与默认画布使用连续白色表面，不再把 Header、Sidebar、Workbench 和 Canvas 各自做成一张强调卡片。Dashboard 先帮助用户理解分析对象和结论，再暴露参数、计算和诊断细节。
 
-- 冷灰页面承载白色分析面板。
-- 靛蓝建立品牌、标题和主要操作层级。
-- 绿色表达数据选择、Ready 或正向语义。
+- Server 与导出 HTML Header、Sidebar 和 Workbench 默认使用白色；只有极浅分割线表达导航与内容边界，它们不跟随 Dashboard Theme 染色。导出 HTML 的 Header 保留紧凑 Dataviz 标识以说明报告来源，但不复制 Server 导航、Reload 和诊断操作。
+- Dashboard 默认使用 `business` 的白色画布、白色分析面板和靛蓝分析强调，也可以独立选择 `plain`、`editorial` 或 `terminal`。
+- Shell 中只有主操作与活动导航使用靛蓝强调；绿色只表达 Ready、成功或正向语义，不能同时承担普通选中态。
 - 黄色表达 Stale/Warning，红色表达 Error/破坏性操作。
-- 低阴影、清晰边框和留白承担层级，不靠大面积渐变或装饰制造重点。
+- 留白是主要层级手段；边框只做结构提示，阴影近乎不可见，不靠大面积色块、渐变或粗边框制造重点。
+- Sidebar 默认 250px，可拖拽调整；目录和 Dashboard 名称保持单行，截断后才显示完整名称 Tooltip，不能用换行扰乱导航节奏。
 
 默认使用 `theme.preset: business`。`plain`、`editorial` 和 `terminal` 是完整的替代语法，不应在同一页面中随意混搭。
 
@@ -31,17 +32,28 @@ Dataviz 的默认方向是 **Modern indigo analytical workbench**：冷静、清
 | Dashboard | 正在分析什么、什么范围、为了什么决策 | Run ID、Source ID、框架说明 |
 | Section | 这一组 View 回答哪个问题 | 与 Dashboard 重复的大标题 |
 | View | 这里展示什么、应该怎样阅读 | 无上下文的“趋势图”“明细表” |
-| Pipeline/Details | 数据从哪里来、SQL 如何解析、哪里失败 | 抢占主画布的诊断细节 |
+| Header / View 状态灯 | Header 看取数层；View 只在活动或失败时显示自身依赖与 Renderer；悬停看名称，点击依赖节点看证据 | 一个长期占位的 Pipeline 大按钮，或每个 View 常驻一排绿色灯 |
 
 标题、subtitle 和 description 是分析内容，不是装饰。Query Parameter 或 Control 决定当前分析对象时，应通过内容插值让上下文可见，而不是要求用户重新打开参数面板确认。
 
-Query Parameters 默认作为 Header 的内联第二行展开，让首次进入页面的用户先确认取数范围；`Run query` 旁的箭头是唯一的开合入口。展开会推动 Canvas，而不是覆盖内容。Dashboard/Section/View Controls 和 Pipeline 才使用临时浮层，并遵循外部点击与 `Esc` 关闭语义。
+Server Header 横跨整个屏幕：左侧的 Dataviz Logo/品牌名同时是 Sidebar disclosure，后接 Source/Dataset 状态灯；右侧依次放 SHARE、Dashboard Controls，最右侧是“查询 + ▼”分段按钮。SHARE 的临时菜单只显示“分享链接”和“导出 HTML”，不附加解释小字；包含 Server Python Interactive Transform 时“导出 HTML”禁用。Sidebar 与 Workbench 都从 Header 下方开始，不再显示独立 Navigation 按钮或重复的 Dashboards 标题。查询主按钮执行 Query，箭头整体显示或隐藏 Workbench 顶部、正常文档流中的圆角 Query Card；不新增独立 Parameters 按钮。Card 首行只写“查询参数”，不放运行按钮；字段按“标题在上、输入在下”排列，不补参数数量或说明文案。Query Card 与 Canvas 共用 `clamp(22px, 3vw, 48px)` 水平 gutter。Server 默认展开，导出 HTML 默认折叠；展开推动 Canvas，不覆盖内容。Dashboard/Section/View Controls 使用临时浮层，并遵循外部点击与 `Esc` 关闭语义。Controls 托盘只呈现业务字段标签与组件；DATA/LOGIC、Selection/Compute、作用域和影响 View 数量属于 Runtime 诊断信息，不作为默认视觉层级。Query Pipeline 不再占用操作位：Source/Dataset 节点在 Dataviz 品牌右侧对应状态灯，悬停只显示任务名，点击进入完整证据。View 的依赖节点和 Renderer 灯位于 `PLOTLY / ECHARTS / TABLE / PERSPECTIVE` 标签左侧，仅在运行、过期或失败时出现，完成后消失；导出 HTML 不重复展示已固化为 Ready 的 Source 灯。
 
 一个 Section 应回答一个问题，并且至多有一个主要 View。其余 View 是解释、比较或明细，应降低视觉重量。
 
 ## 3. 语义 Token
 
 自定义样式应先覆盖 Token，再覆盖组件内部结构。
+
+Shell 与 Dashboard 使用两组边界明确的 Token：`--dv-shell-*` 只控制固定导航、Header、Query/Controls 工具区；`--dv-*` 控制 Dashboard、Section、View、图表与表格。Dashboard CSS 不应重写 Shell Token，避免不同画布切换时导航和操作位置忽明忽暗。
+
+### Stable shell
+
+- `--dv-shell-bg`：白色 Header、工具栏与 Query 托盘背景。
+- `--dv-shell-surface`：按钮、弹层与字段表面。
+- `--dv-shell-line`：低对比边框。
+- `--dv-shell-ink` / `--dv-shell-muted`：Shell 主次文字。
+- `--dv-shell-accent` / `--dv-shell-soft`：活动导航、Control 类型与轻强调。
+- `--dv-shell-shadow`：工具栏的低阴影。
 
 ### Surface
 
@@ -192,7 +204,7 @@ Dashboard 自有 CSS：
 
 ## 8. 完成标准
 
-- 首屏无需打开 Pipeline 即可知道分析对象、范围和主要结论。
+- 首屏只通过状态灯了解 Pipeline 健康度；需要时点击具体节点查看证据。
 - 页面只有一个主要强调色，状态色保持语义。
 - Dashboard、Section、View 标题不重复，脱离上下文仍能理解。
 - 弹层不透明、不越过视口，点击外部与 Escape 可以关闭。

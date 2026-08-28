@@ -1,0 +1,6 @@
+schema: dataviz/component-test/v1
+tests:
+  - id: control.multiple-input.contract
+    component: control.multiple-input
+    kind: browser
+    assertions: [typed-row-inputs, add-remove-values, ordered-json-source-of-truth, max-items, bubbling-change]

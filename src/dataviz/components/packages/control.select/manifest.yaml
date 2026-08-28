@@ -15,7 +15,7 @@ components:
       official: https://ant.design/components/select/
       adopted: [single-and-multiple-mode, search, option-groups, max-tag-count, virtual-list, max-count]
       omitted: [tags-mode, custom-label-render, React-popup-container]
-    logic: {types: [single_select, multi_select], fields: [choices, max_selected, placeholder]}
+    logic: {types: [single_select, multiple_select], value_types: [text, integer, number, boolean, date], fields: [choices, max_selected, placeholder]}
     presentation:
       component: select
       options: [search, virtual, search_threshold, virtual_threshold, max_tag_count, hide_selected, search_placeholder, select_all_label, invert_label, clear_label, show_unavailable, css_class]

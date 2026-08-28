@@ -6,50 +6,83 @@ from dataviz.value_contract import static_control_choices
 from dataviz.workspace.models import PresentationControlComponentDefinition
 
 
-CONTROL_COMPONENT_TYPES: dict[str, frozenset[str]] = {
-    "input": frozenset({"string"}),
-    "input-number": frozenset({"number", "integer"}),
-    "auto-complete": frozenset({"string"}),
-    "checkbox": frozenset({"boolean"}),
-    "switch": frozenset({"boolean"}),
-    "radio-group": frozenset({"single_select"}),
-    "select": frozenset({"single_select", "multi_select"}),
-    "checkbox-group": frozenset({"multi_select"}),
-    "cascader": frozenset({"single_select", "multi_select"}),
-    "date-picker": frozenset({"date"}),
-    "range-picker": frozenset({"date_range"}),
-    "slider": frozenset({"number", "integer"}),
-    "tree-select": frozenset({"single_select", "multi_select"}),
+CONTROL_COMPONENT_CONTRACTS: dict[str, frozenset[tuple[str, str]]] = {
+    "input": frozenset({("single_input", "text")}),
+    "multiple-input": frozenset(
+        ("multiple_input", value_type)
+        for value_type in {"text", "integer", "number", "date"}
+    ),
+    "input-number": frozenset(
+        ("single_input", value_type) for value_type in {"number", "integer"}
+    ),
+    "auto-complete": frozenset({("single_input", "text")}),
+    "checkbox": frozenset({("single_input", "boolean")}),
+    "switch": frozenset({("single_input", "boolean")}),
+    "radio-group": frozenset(
+        ("single_select", value_type)
+        for value_type in {"text", "integer", "number", "boolean", "date"}
+    ),
+    "select": frozenset(
+        (shape, value_type)
+        for shape in {"single_select", "multiple_select"}
+        for value_type in {"text", "integer", "number", "boolean", "date"}
+    ),
+    "checkbox-group": frozenset(
+        ("multiple_select", value_type)
+        for value_type in {"text", "integer", "number", "boolean", "date"}
+    ),
+    "cascader": frozenset(
+        (shape, value_type)
+        for shape in {"single_select", "multiple_select"}
+        for value_type in {"text", "integer", "number", "boolean", "date"}
+    ),
+    "date-picker": frozenset({("single_input", "date")}),
+    "range-picker": frozenset({("range_input", "date")}),
+    "slider": frozenset(
+        (shape, value_type)
+        for shape in {"single_input", "range_input"}
+        for value_type in {"number", "integer"}
+    ),
+    "tree-select": frozenset(
+        (shape, value_type)
+        for shape in {"single_select", "multiple_select"}
+        for value_type in {"text", "integer", "number", "boolean", "date"}
+    ),
 }
 
 
 def _auto_component(definition: Any) -> tuple[str, str]:
-    value_type = getattr(definition, "type", "string")
+    control_type = definition.type
+    value_type = definition.value_type
     path_fields = getattr(definition, "path_fields", []) or []
     choices = static_control_choices(definition)
     suggestions = getattr(definition, "suggestions", []) or []
     if path_fields:
         return "cascader", "hierarchical_path"
-    if value_type == "date_range":
-        return "range-picker", "date_range"
-    if value_type == "date":
+    if control_type == "range_input" and value_type == "date":
+        return "range-picker", "date_range_input"
+    if control_type == "range_input":
+        return "slider", "numeric_range"
+    if control_type == "single_input" and value_type == "date":
         return "date-picker", "date"
-    if value_type in {"number", "integer"}:
+    if control_type == "multiple_input":
+        return "multiple-input", "multiple_values"
+    if control_type == "single_input" and value_type in {"number", "integer"}:
         return "input-number", "numeric"
-    if value_type == "boolean":
+    if control_type == "single_input" and value_type == "boolean":
         return "checkbox", "boolean"
-    if value_type == "string":
+    if control_type == "single_input" and value_type == "text":
         return ("auto-complete", "suggestions") if suggestions else ("input", "free_text")
     # A radio group has no honest empty-state interaction. Optional clearable
     # singles therefore resolve to Select even for a tiny static domain.
     if (
-        value_type == "single_select"
+        control_type == "single_select"
         and not bool(getattr(definition, "clearable", False))
         and 0 < len(choices) <= 4
     ):
         return "radio-group", "small_single_select"
-    if value_type == "multi_select" and 0 < len(choices) <= 8:
-        return "checkbox-group", "small_multi_select"
+    if control_type == "multiple_select" and 2 <= len(choices) <= 5:
+        return "checkbox-group", "small_multiple_select"
     return "select", "flat_select"
 
 
@@ -66,11 +99,15 @@ def resolve_control_component(
         component, reason = _auto_component(definition)
     else:
         component, reason = requested, "explicit"
-    value_type = getattr(definition, "type", "string")
-    if value_type not in CONTROL_COMPONENT_TYPES[component]:
-        supported = ", ".join(sorted(CONTROL_COMPONENT_TYPES[component]))
+    contract = (definition.type, definition.value_type)
+    if contract not in CONTROL_COMPONENT_CONTRACTS[component]:
+        supported = ", ".join(
+            f"{shape}/{value_type}"
+            for shape, value_type in sorted(CONTROL_COMPONENT_CONTRACTS[component])
+        )
         raise ValueError(
-            f"{component} cannot render control type {value_type}; supported types: {supported}"
+            f"{component} cannot render control contract "
+            f"{definition.type}/{definition.value_type}; supported contracts: {supported}"
         )
     path_fields = getattr(definition, "path_fields", []) or []
     if component in {"cascader", "tree-select"} and not path_fields:

@@ -7,7 +7,8 @@ const state = {
   selectionTimer: null,
   computeTimer: null,
   draggedNavigation: null,
-  sidebarWidth: 220,
+  sidebarWidth: 250,
+  sidebarWidthCustomized: false,
   sidebarCollapsed: false,
   workspaceRevision: 0,
   workspaceEventSource: null,
@@ -95,6 +96,80 @@ async function resolveTabSessionId() {
 
 function sessionQuery() {
   return `session_id=${encodeURIComponent(state.sessionId)}`;
+}
+
+function dashboardIdFromLocation(pathname = window.location.pathname) {
+  const match = pathname.match(/^\/dashboards\/([^/]+)\/?$/);
+  if (!match) return null;
+  try { return decodeURIComponent(match[1]); } catch (_) { return null; }
+}
+
+function queryParameterScalar(parameter, raw) {
+  if (raw == null) return null;
+  if (parameter.value_type === 'number' || parameter.value_type === 'integer') {
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : raw;
+  }
+  if (parameter.value_type === 'boolean') {
+    if (raw === 'true' || raw === '1') return true;
+    if (raw === 'false' || raw === '0') return false;
+    return raw;
+  }
+  const choice = (parameter.options?.choices || []).find((item) => {
+    const encoded = typeof item.value === 'object'
+      ? JSON.stringify(item.value)
+      : String(item.value);
+    return encoded === raw;
+  });
+  return choice ? structuredClone(choice.value) : raw;
+}
+
+function queryParameterValuesFromLocation(dashboard, search = window.location.search) {
+  const params = new URLSearchParams(search);
+  const values = {};
+  for (const parameter of dashboard.query_parameters || []) {
+    if (!params.has(parameter.id)) continue;
+    const raw = params.getAll(parameter.id);
+    if (
+      parameter.type === 'multiple_input'
+      || parameter.type === 'multiple_select'
+      || parameter.type === 'range_input'
+      || (parameter.path_fields || []).length > 0
+    ) {
+      values[parameter.id] = raw.map(item => queryParameterScalar(parameter, item));
+    } else {
+      values[parameter.id] = queryParameterScalar(parameter, raw.at(-1));
+    }
+  }
+  return values;
+}
+
+function dashboardLocation(dashboardId, parameters = {}) {
+  const dashboard = state.payload?.dashboards?.find(item => item.id === dashboardId);
+  const search = new URLSearchParams();
+  for (const definition of dashboard?.query_parameters || []) {
+    const value = parameters[definition.id];
+    if (value == null || value === '') continue;
+    const items = Array.isArray(value) ? value : [value];
+    for (const item of items) {
+      if (item == null || item === '') continue;
+      search.append(definition.id, typeof item === 'object' ? JSON.stringify(item) : String(item));
+    }
+  }
+  const query = search.toString();
+  return `/dashboards/${encodeURIComponent(dashboardId)}${query ? `?${query}` : ''}`;
+}
+
+function syncDashboardLocation(mode = 'replace') {
+  if (!state.dashboard || mode === 'none') return;
+  const url = dashboardLocation(state.dashboard.id, queryParameters());
+  const activeLink = document.querySelector(
+    `.nav-button[data-id="${CSS.escape(state.dashboard.id)}"]`,
+  );
+  if (activeLink instanceof HTMLAnchorElement) activeLink.href = url;
+  if (`${window.location.pathname}${window.location.search}` === url) return;
+  const method = mode === 'push' ? 'pushState' : 'replaceState';
+  window.history[method]({dashboardId:state.dashboard.id}, '', url);
 }
 
 function canvasIdentity(frame = $('#canvas-frame')) {
@@ -198,7 +273,11 @@ function saveTabUiState() {
     `dataviz.tab-ui.v3.${state.sessionId}`,
     JSON.stringify({
       activeDashboardId: state.dashboard?.id || state.preferredDashboardId,
-      sidebar: {width: state.sidebarWidth, collapsed: state.sidebarCollapsed},
+      sidebar: {
+        width: state.sidebarWidth,
+        customized: state.sidebarWidthCustomized,
+        collapsed: state.sidebarCollapsed,
+      },
       dashboards,
     }),
   );
@@ -210,12 +289,13 @@ function sidebarWidthBounds() {
 
 function applySidebarState({persist = false} = {}) {
   const bounds = sidebarWidthBounds();
-  state.sidebarWidth = Math.round(Math.min(bounds.max, Math.max(bounds.min, state.sidebarWidth || 220)));
+  state.sidebarWidth = Math.round(Math.min(bounds.max, Math.max(bounds.min, state.sidebarWidth || 250)));
   document.documentElement.style.setProperty('--sidebar-width', `${state.sidebarWidth}px`);
   document.body.classList.toggle('sidebar-collapsed', state.sidebarCollapsed);
   const toggle = $('#sidebar-toggle');
   toggle.setAttribute('aria-expanded', String(!state.sidebarCollapsed));
-  toggle.title = state.sidebarCollapsed ? '展开导航栏' : '收起导航栏';
+  toggle.setAttribute('aria-label', state.sidebarCollapsed ? '展开导航栏' : '收起导航栏');
+  toggle.title = `${state.sidebarCollapsed ? '展开导航栏' : '收起导航栏'} (B)`;
   const resizer = $('#sidebar-resizer');
   resizer.setAttribute('aria-valuemin', String(bounds.min));
   resizer.setAttribute('aria-valuemax', String(bounds.max));
@@ -228,8 +308,13 @@ function restoreTabUiState() {
   try {
     const saved = JSON.parse(sessionStorage.getItem(`dataviz.tab-ui.v3.${state.sessionId}`) || '{}');
     state.preferredDashboardId = saved.activeDashboardId || null;
-    state.sidebarWidth = Number(saved.sidebar?.width) || 220;
-    state.sidebarCollapsed = Boolean(saved.sidebar?.collapsed);
+    state.sidebarWidthCustomized = Boolean(saved.sidebar?.customized);
+    state.sidebarWidth = state.sidebarWidthCustomized
+      ? Number(saved.sidebar?.width) || 250
+      : 250;
+    state.sidebarCollapsed = typeof saved.sidebar?.collapsed === 'boolean'
+      ? saved.sidebar.collapsed
+      : window.innerWidth <= 980;
     for (const [dashboardId, values] of Object.entries(saved.dashboards || {})) {
       Object.assign(runtimeFor(dashboardId), values);
     }
@@ -240,6 +325,70 @@ function restoreTabUiState() {
 function toggleSidebar() {
   state.sidebarCollapsed = !state.sidebarCollapsed;
   applySidebarState({persist: true});
+}
+
+function keyboardTargetIsEditable(target) {
+  if (!(target instanceof Element)) return false;
+  return Boolean(target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]'));
+}
+
+function keyboardShortcutCommand(event) {
+  if (event.defaultPrevented || event.repeat || event.isComposing || event.keyCode === 229) return null;
+  if (document.querySelector('dialog[open]')) return null;
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'Enter') return 'run-query';
+  if (event.ctrlKey || event.metaKey || event.altKey || keyboardTargetIsEditable(event.target)) return null;
+  if (event.key.toLowerCase() === 'q') return 'toggle-query-parameters';
+  if (event.key.toLowerCase() === 'b') return 'toggle-sidebar';
+  if (event.key === '?') return 'show-shortcuts';
+  return null;
+}
+
+let shortcutToastTimer = null;
+function showShortcutToast(message) {
+  const toast = $('#shortcut-toast');
+  window.clearTimeout(shortcutToastTimer);
+  toast.textContent = message;
+  toast.hidden = false;
+  window.requestAnimationFrame(() => toast.classList.add('is-visible'));
+  shortcutToastTimer = window.setTimeout(() => {
+    toast.classList.remove('is-visible');
+    shortcutToastTimer = window.setTimeout(() => { toast.hidden = true; }, 160);
+  }, 1800);
+}
+
+function executeKeyboardShortcut(command) {
+  if (command === 'toggle-query-parameters') {
+    if (Number($('#query-parameters-control').dataset.controlCount || 0) <= 0) {
+      showShortcutToast('当前看板没有查询参数');
+      return true;
+    }
+    closeHeaderPopovers();
+    toggleQueryParameters();
+    return true;
+  }
+  if (command === 'run-query') {
+    if ($('#run-button').disabled) return false;
+    runDashboard();
+    return true;
+  }
+  if (command === 'toggle-sidebar') {
+    closeHeaderPopovers();
+    toggleSidebar();
+    return true;
+  }
+  if (command === 'show-shortcuts') {
+    closeHeaderPopovers();
+    const dialog = $('#keyboard-shortcuts-dialog');
+    if (!dialog.open) dialog.showModal();
+    return true;
+  }
+  return false;
+}
+
+function handleKeyboardShortcut(event) {
+  const command = keyboardShortcutCommand(event);
+  if (!command || !executeKeyboardShortcut(command)) return;
+  event.preventDefault();
 }
 
 function initializeSidebarResize() {
@@ -261,19 +410,22 @@ function initializeSidebarResize() {
   });
   resizer.addEventListener('pointermove', (event) => {
     if (!document.body.classList.contains('sidebar-resizing')) return;
+    state.sidebarWidthCustomized = true;
     state.sidebarWidth = startWidth + event.clientX - startX;
     applySidebarState();
   });
   resizer.addEventListener('pointerup', finish);
   resizer.addEventListener('pointercancel', finish);
   resizer.addEventListener('dblclick', () => {
-    state.sidebarWidth = 220;
+    state.sidebarWidth = 250;
+    state.sidebarWidthCustomized = false;
     applySidebarState({persist: true});
   });
   resizer.addEventListener('keydown', (event) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
     const bounds = sidebarWidthBounds();
+    state.sidebarWidthCustomized = true;
     if (event.key === 'Home') state.sidebarWidth = bounds.min;
     else if (event.key === 'End') state.sidebarWidth = bounds.max;
     else state.sidebarWidth += event.key === 'ArrowRight' ? 16 : -16;
@@ -292,6 +444,630 @@ async function request(url, options = {}) {
     throw new Error(message);
   }
   return response.json();
+}
+
+function editorValueSignature(value) {
+  return JSON.stringify(value);
+}
+
+function editorTypedValue(item, raw, label = '值') {
+  if (item.value_type === 'text') return String(raw);
+  if (item.value_type === 'date') {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(raw))) throw new Error(`${label}必须是 YYYY-MM-DD 日期`);
+    const date = new Date(`${raw}T00:00:00Z`);
+    if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== raw) {
+      throw new Error(`${label}不是有效日期`);
+    }
+    return raw;
+  }
+  if (item.value_type === 'boolean') {
+    if (raw === true || raw === 'true') return true;
+    if (raw === false || raw === 'false') return false;
+    throw new Error(`${label}必须是 true 或 false`);
+  }
+  if (['integer', 'number'].includes(item.value_type)) {
+    if (raw === '') throw new Error(`${label}不能为空`);
+    const value = Number(raw);
+    if (!Number.isFinite(value) || (item.value_type === 'integer' && !Number.isInteger(value))) {
+      throw new Error(`${label}必须是${item.value_type === 'integer' ? '整数' : '数字'}`);
+    }
+    return value;
+  }
+  return raw;
+}
+
+function editorTypedInput(item, value = '', {label = '值'} = {}) {
+  if ((item.path_fields || []).length) {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = JSON.stringify(value ?? []);
+    input.dataset.editorJsonValue = '';
+    input.setAttribute('aria-label', label);
+    return input;
+  }
+  if (item.value_type === 'boolean') {
+    const input = document.createElement('select');
+    input.innerHTML = '<option value="true">True</option><option value="false">False</option>';
+    input.value = String(Boolean(value));
+    input.setAttribute('aria-label', label);
+    return input;
+  }
+  const input = document.createElement('input');
+  input.type = item.value_type === 'date' ? 'date'
+    : ['integer', 'number'].includes(item.value_type) ? 'number' : 'text';
+  input.value = value ?? '';
+  input.setAttribute('aria-label', label);
+  if (item.value_type === 'integer') input.step = String(item.step ?? 1);
+  else if (item.value_type === 'number') input.step = String(item.step ?? 'any');
+  if (item.min != null) input.min = String(item.min);
+  if (item.max != null) input.max = String(item.max);
+  if (item.min_date) input.min = item.min_date;
+  if (item.max_date) input.max = item.max_date;
+  if (item.max_length) input.maxLength = Number(item.max_length);
+  return input;
+}
+
+function editorChoiceValue(row, item) {
+  const input = row.querySelector('[data-choice-value]');
+  const raw = input.value;
+  if (input.dataset.editorJsonValue != null) {
+    try { return JSON.parse(raw); }
+    catch (_) { throw new Error(`候选值“${raw}”不是有效 JSON`); }
+  }
+  return editorTypedValue(item, raw, `候选值“${raw}”`);
+}
+
+function moveEditorNode(node, direction) {
+  const sibling = direction < 0 ? node.previousElementSibling : node.nextElementSibling;
+  if (!sibling) return;
+  if (direction < 0) node.parentElement.insertBefore(node, sibling);
+  else node.parentElement.insertBefore(sibling, node);
+  syncEditorMoveButtons(node.parentElement);
+  notifyEditorChanged(node);
+}
+
+function notifyEditorChanged(node) {
+  node.dispatchEvent(new CustomEvent('dataviz:editor-change', {bubbles:true}));
+}
+
+function syncEditorMoveButtons(container) {
+  const rows = [...container.children].filter(node => node.matches('[data-editor-item], [data-editor-choice]'));
+  rows.forEach((row, index) => {
+    const up = row.querySelector('[data-move="up"]');
+    const down = row.querySelector('[data-move="down"]');
+    if (up) up.disabled = index === 0;
+    if (down) down.disabled = index === rows.length - 1;
+  });
+}
+
+function editorMoveActions(kind, removable = false) {
+  const actions = document.createElement('div');
+  actions.className = `parameter-editor__${kind}-actions`;
+  const up = document.createElement('button');
+  up.type = 'button';
+  up.dataset.move = 'up';
+  up.setAttribute('aria-label', '向前移动');
+  up.textContent = '↑';
+  const down = document.createElement('button');
+  down.type = 'button';
+  down.dataset.move = 'down';
+  down.setAttribute('aria-label', '向后移动');
+  down.textContent = '↓';
+  actions.append(up, down);
+  if (removable) {
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.dataset.remove = '';
+    remove.setAttribute('aria-label', '删除候选项');
+    remove.textContent = '×';
+    actions.append(remove);
+  }
+  return actions;
+}
+
+function editorDateDefault(item) {
+  const root = document.createElement('div');
+  root.className = 'parameter-editor__date-default';
+  const values = item.type === 'range_input'
+    ? (Array.isArray(item.default) ? item.default : ['', ''])
+    : [item.default ?? ''];
+  const parts = item.type === 'range_input'
+    ? [['start', '开始日期'], ['end', '结束日期']]
+    : [['value', '日期']];
+
+  for (const [index, [part, label]] of parts.entries()) {
+    const atom = values[index];
+    const relative = atom?.mode === 'relative' && atom?.anchor === 'today';
+    const row = document.createElement('label');
+    row.className = 'parameter-editor__date-atom';
+    row.dataset.editorDateAtom = part;
+    const name = document.createElement('span');
+    name.textContent = label;
+    const controls = document.createElement('span');
+    controls.className = 'parameter-editor__date-atom-controls';
+    const mode = document.createElement('select');
+    mode.dataset.editorDateMode = part;
+    mode.setAttribute('aria-label', `${label}默认值类型`);
+    mode.innerHTML = '<option value="fixed">固定日期</option><option value="relative">相对今天</option>';
+    mode.value = relative ? 'relative' : 'fixed';
+    const valueHost = document.createElement('div');
+    valueHost.className = 'parameter-editor__date-value-host';
+    const fixedControl = document.createElement('div');
+    fixedControl.className = 'dv-control parameter-editor__date-picker';
+    fixedControl.dataset.controlComponent = 'date-picker';
+    fixedControl.dataset.required = 'false';
+    fixedControl.dataset.clearable = 'true';
+    fixedControl.dataset.minDate = item.min_date || '';
+    fixedControl.dataset.maxDate = item.max_date || '';
+    fixedControl.dataset.clearLabel = '清空';
+    const fixedInput = document.createElement('input');
+    fixedInput.type = 'text';
+    fixedInput.value = relative ? '' : String(atom || '');
+    fixedInput.setAttribute('aria-label', label);
+    const fixedMount = document.createElement('div');
+    fixedMount.dataset.controlMount = '';
+    const fixedError = document.createElement('small');
+    fixedError.className = 'field__error';
+    fixedError.dataset.controlError = '';
+    fixedError.setAttribute('role', 'alert');
+    fixedError.hidden = true;
+    fixedControl.append(fixedMount, fixedError);
+    const datePicker = window.datavizComponents?.createDatePicker?.({
+      control:fixedControl,
+      input:fixedInput,
+      mount:fixedMount,
+    });
+    if (!datePicker) {
+      fixedInput.className = 'parameter-editor__date-text-fallback';
+      fixedInput.placeholder = 'YYYY-MM-DD';
+      fixedInput.addEventListener('input', () => (
+        window.datavizComponents?.calendarPrimitives?.formatIsoEntry?.(fixedInput)
+      ));
+      fixedMount.append(fixedInput);
+    } else datePicker.sync();
+
+    const relativeInput = document.createElement('input');
+    relativeInput.type = 'number';
+    relativeInput.step = '1';
+    relativeInput.value = relative
+      ? String(Number.parseInt(String(atom.offset || '0d').slice(0, -1), 10) || 0)
+      : (part === 'start' ? '-7' : '-1');
+    relativeInput.setAttribute('aria-label', `${label}相对今天的天数`);
+    valueHost.append(fixedControl, relativeInput);
+    const sync = () => {
+      const relativeMode = mode.value === 'relative';
+      fixedControl.hidden = relativeMode;
+      relativeInput.hidden = !relativeMode;
+      delete fixedInput.dataset.editorDateValue;
+      delete relativeInput.dataset.editorDateValue;
+      (relativeMode ? relativeInput : fixedInput).dataset.editorDateValue = part;
+      if (!relativeMode) datePicker?.sync();
+    };
+    mode.addEventListener('change', () => {
+      sync();
+      notifyEditorChanged(root);
+    });
+    controls.append(mode, valueHost);
+    row.append(name, controls);
+    root.append(row);
+    sync();
+  }
+  const hint = document.createElement('p');
+  hint.textContent = '以 Workspace 时区的今天为基准；-1 表示昨天，0 表示今天。';
+  root.append(hint);
+  return root;
+}
+
+function editorDefaultField(item) {
+  const field = document.createElement('label');
+  field.className = 'parameter-editor__default';
+  const caption = document.createElement('span');
+  caption.textContent = '默认值';
+  field.append(caption);
+  if (
+    item.kind === 'query'
+    && item.value_type === 'date'
+    && ['single_input', 'range_input'].includes(item.type)
+  ) {
+    field.classList.add('parameter-editor__default--relative');
+    field.append(editorDateDefault(item));
+    return field;
+  }
+  if (item.type === 'range_input') {
+    field.classList.add('parameter-editor__default--range');
+    const range = document.createElement('div');
+    range.className = 'parameter-editor__date-range';
+    const values = Array.isArray(item.default) ? item.default : ['', ''];
+    for (const [index, part] of ['start', 'end'].entries()) {
+      const input = editorTypedInput(item, values[index] ?? '', {
+        label:part === 'start' ? '开始值' : '结束值',
+      });
+      input.dataset.editorDefaultPart = part;
+      range.append(input);
+    }
+    field.append(range);
+    return field;
+  }
+  if (item.type === 'multiple_input') {
+    const list = document.createElement('div');
+    list.className = 'parameter-editor__multiple-list';
+    list.dataset.editorMultipleValues = '';
+    const append = value => {
+      const row = document.createElement('div');
+      row.className = 'parameter-editor__multiple-row';
+      const input = editorTypedInput(item, value, {label:'列表值'});
+      input.dataset.editorMultipleValue = '';
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = '×';
+      remove.setAttribute('aria-label', '删除该值');
+      remove.addEventListener('click', () => {
+        row.remove();
+        notifyEditorChanged(list);
+      });
+      row.append(input, remove);
+      list.append(row);
+    };
+    (Array.isArray(item.default) ? item.default : []).forEach(append);
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'parameter-editor__add-choice';
+    add.textContent = '＋ 添加值';
+    add.addEventListener('click', () => {
+      append('');
+      notifyEditorChanged(list);
+      list.lastElementChild?.querySelector('input, select')?.focus();
+    });
+    field.append(list, add);
+    return field;
+  }
+  let input = editorTypedInput(item, item.default ?? '', {label:'默认值'});
+  if (item.value_type === 'boolean') {
+    input.insertAdjacentHTML('afterbegin', '<option value="">未设置</option>');
+    input.value = item.default == null ? '' : String(Boolean(item.default));
+  }
+  input.dataset.editorDefault = '';
+  field.append(input);
+  return field;
+}
+
+function editorChoiceRow(item, choice = {label:'', value:''}, selected = false) {
+  const row = document.createElement('div');
+  row.className = 'parameter-editor__choice';
+  row.dataset.editorChoice = '';
+  row._choiceMetadata = {
+    group:choice.group ?? null,
+    description:choice.description || '',
+    keywords:[...(choice.keywords || [])],
+  };
+  const marker = document.createElement('input');
+  marker.type = item.type === 'single_select' ? 'radio' : 'checkbox';
+  marker.name = `default-${item.id}`;
+  marker.dataset.choiceDefault = '';
+  marker.checked = selected;
+  marker.setAttribute('aria-label', '设为默认选项');
+  const label = document.createElement('input');
+  label.type = 'text';
+  label.required = true;
+  label.placeholder = '显示名称';
+  label.value = choice.label || '';
+  label.dataset.choiceLabel = '';
+  const value = editorTypedInput(item, choice.value ?? '', {label:'参数值'});
+  value.required = true;
+  value.placeholder = '参数值';
+  value.dataset.choiceValue = '';
+  const actions = editorMoveActions('choice', true);
+  actions.querySelector('[data-move="up"]').addEventListener('click', () => moveEditorNode(row, -1));
+  actions.querySelector('[data-move="down"]').addEventListener('click', () => moveEditorNode(row, 1));
+  actions.querySelector('[data-remove]').addEventListener('click', () => {
+    const container = row.parentElement;
+    row.remove();
+    syncEditorMoveButtons(container);
+    notifyEditorChanged(container);
+  });
+  row.append(marker, label, value, actions);
+  return row;
+}
+
+function editorItemCard(item) {
+  const card = document.createElement('section');
+  card.className = 'parameter-editor__item';
+  card.dataset.editorItem = item.id;
+  card.dataset.editorType = item.type;
+  card.dataset.editorValueType = item.value_type;
+  card.dataset.defaultEditable = String(item.default_editable);
+  card.dataset.choicesEditable = String(item.choices_editable);
+  const header = document.createElement('header');
+  header.className = 'parameter-editor__item-summary';
+  const drag = document.createElement('button');
+  drag.type = 'button';
+  drag.className = 'parameter-editor__drag-handle';
+  drag.draggable = true;
+  drag.setAttribute('aria-label', `拖动调整 ${item.label} 的顺序`);
+  drag.title = '拖动排序';
+  drag.innerHTML = '<span></span><span></span><span></span><span></span><span></span><span></span>';
+  const title = document.createElement('div');
+  title.className = 'parameter-editor__item-title';
+  title.innerHTML = `<strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.id)} · ${escapeHtml(item.type)} / ${escapeHtml(item.value_type)}</small>`;
+  const disclosure = document.createElement('button');
+  disclosure.type = 'button';
+  disclosure.className = 'parameter-editor__disclosure';
+  disclosure.dataset.editorDisclosure = '';
+  disclosure.setAttribute('aria-expanded', 'false');
+  disclosure.setAttribute('aria-label', `展开 ${item.label} 的参数细节`);
+  disclosure.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>';
+  const detail = document.createElement('div');
+  detail.className = 'parameter-editor__item-detail';
+  detail.hidden = true;
+  disclosure.addEventListener('click', () => {
+    const expanded = disclosure.getAttribute('aria-expanded') !== 'true';
+    disclosure.setAttribute('aria-expanded', String(expanded));
+    disclosure.setAttribute('aria-label', `${expanded ? '折叠' : '展开'} ${item.label} 的参数细节`);
+    detail.hidden = !expanded;
+    card.classList.toggle('is-expanded', expanded);
+  });
+  drag.addEventListener('keydown', event => {
+    if (!['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+    event.preventDefault();
+    moveEditorNode(card, event.key === 'ArrowUp' ? -1 : 1);
+    drag.focus();
+  });
+  drag.addEventListener('dragstart', event => {
+    card.classList.add('is-dragging');
+    card.parentElement._draggedEditorItem = card;
+    card.parentElement._editorOrderBeforeDrag = [...card.parentElement.querySelectorAll(':scope > [data-editor-item]')]
+      .map(node => node.dataset.editorItem).join('\u0000');
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', item.id);
+  });
+  drag.addEventListener('dragend', () => {
+    const container = card.parentElement;
+    card.classList.remove('is-dragging');
+    container?.querySelectorAll('.is-drop-target').forEach(node => node.classList.remove('is-drop-target'));
+    if (container) {
+      const after = [...container.querySelectorAll(':scope > [data-editor-item]')]
+        .map(node => node.dataset.editorItem).join('\u0000');
+      if (after !== container._editorOrderBeforeDrag) notifyEditorChanged(card);
+      container._draggedEditorItem = null;
+      container._editorOrderBeforeDrag = null;
+    }
+  });
+  header.append(drag, title, disclosure);
+  card.append(header, detail);
+
+  if (item.choices_editable) {
+    const selected = item.type === 'multiple_select'
+      ? (Array.isArray(item.default) ? item.default : [])
+      : [item.default];
+    const choiceSection = document.createElement('div');
+    choiceSection.className = 'parameter-editor__choices';
+    const legend = document.createElement('div');
+    legend.className = 'parameter-editor__choices-heading';
+    legend.innerHTML = '<span>默认</span><span>显示名称</span><span>参数值</span><span></span>';
+    const rows = document.createElement('div');
+    rows.className = 'parameter-editor__choice-list';
+    rows.dataset.editorChoices = '';
+    for (const choice of item.choices) {
+      rows.append(editorChoiceRow(
+        item,
+        choice,
+        selected.some(value => editorValueSignature(value) === editorValueSignature(choice.value)),
+      ));
+    }
+    const footer = document.createElement('div');
+    footer.className = 'parameter-editor__choice-footer';
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'parameter-editor__add-choice';
+    add.textContent = '＋ 添加候选项';
+    add.addEventListener('click', () => {
+      const row = editorChoiceRow(item);
+      rows.append(row);
+      syncEditorMoveButtons(rows);
+      notifyEditorChanged(rows);
+      row.querySelector('[data-choice-label]').focus();
+    });
+    footer.append(add);
+    if (item.type === 'single_select' && !item.required) {
+      const clear = document.createElement('button');
+      clear.type = 'button';
+      clear.className = 'parameter-editor__clear-default';
+      clear.textContent = '不设默认值';
+      clear.addEventListener('click', () => {
+        rows.querySelectorAll('[data-choice-default]').forEach(input => { input.checked = false; });
+        notifyEditorChanged(rows);
+      });
+      footer.append(clear);
+    }
+    choiceSection.append(legend, rows, footer);
+    detail.append(choiceSection);
+    syncEditorMoveButtons(rows);
+  } else if (item.default_editable) {
+    detail.append(editorDefaultField(item));
+  } else {
+    const note = document.createElement('p');
+    note.className = 'parameter-editor__readonly';
+    note.textContent = '候选项由数据自动推断；这里只能调整它在当前面板中的顺序。';
+    detail.append(note);
+  }
+  return card;
+}
+
+function initializeEditorItemDrag(container) {
+  container.addEventListener('dragover', event => {
+    const dragged = container._draggedEditorItem;
+    if (!dragged) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    const target = event.target.closest('[data-editor-item]');
+    container.querySelectorAll('.is-drop-target').forEach(node => node.classList.remove('is-drop-target'));
+    if (!target || target === dragged || target.parentElement !== container) return;
+    target.classList.add('is-drop-target');
+    const before = event.clientY < target.getBoundingClientRect().top + target.offsetHeight / 2;
+    container.insertBefore(dragged, before ? target : target.nextElementSibling);
+  });
+  container.addEventListener('drop', event => {
+    const dragged = container._draggedEditorItem;
+    if (!dragged) return;
+    event.preventDefault();
+    container.querySelectorAll('.is-drop-target').forEach(node => node.classList.remove('is-drop-target'));
+    notifyEditorChanged(dragged);
+  });
+}
+
+function serializeEditorDefault(card) {
+  const type = card.dataset.editorType;
+  const valueType = card.dataset.editorValueType;
+  const item = {type, value_type:valueType};
+  const dateAtoms = [...card.querySelectorAll('[data-editor-date-atom]')];
+  if (dateAtoms.length) {
+    const values = dateAtoms.map(row => {
+      const mode = row.querySelector('[data-editor-date-mode]').value;
+      const input = row.querySelector('[data-editor-date-value]');
+      if (mode === 'relative') {
+        if (input.value.trim() === '') {
+          throw new Error(`${card.dataset.editorItem} 的相对日期不能为空`);
+        }
+        const offset = Number(input.value);
+        if (!Number.isInteger(offset)) {
+          throw new Error(`${card.dataset.editorItem} 的相对日期必须是整数天`);
+        }
+        return {
+          mode:'relative',
+          anchor:'today',
+          offset:`${offset > 0 ? '+' : ''}${offset}d`,
+        };
+      }
+      return input.value ? editorTypedValue(item, input.value, '固定日期') : '';
+    });
+    if (type === 'single_input') return values[0] || null;
+    return values.every(value => value === '') ? [] : values;
+  }
+  const range = [...card.querySelectorAll('[data-editor-default-part]:not(:disabled)')];
+  if (range.length) {
+    const values = range.map((input, index) => (
+      input.value === '' ? '' : editorTypedValue(item, input.value, index ? '结束值' : '开始值')
+    ));
+    return type === 'single_input' ? (values[0] || null) : values;
+  }
+  const multiple = [...card.querySelectorAll('[data-editor-multiple-value]')];
+  if (multiple.length || card.querySelector('[data-editor-multiple-values]')) {
+    return multiple.filter(input => input.value !== '').map((input, index) => (
+      editorTypedValue(item, input.value, `第 ${index + 1} 个值`)
+    ));
+  }
+  const input = card.querySelector('[data-editor-default]');
+  if (!input) return null;
+  if (input.value === '') return null;
+  return editorTypedValue(item, input.value, `${card.dataset.editorItem} 的默认值`);
+}
+
+function serializeEditorGroup(group, container) {
+  const cards = [...container.querySelectorAll(':scope > [data-editor-item]')];
+  return {
+    owner:group.owner,
+    order:cards.map(card => card.dataset.editorItem),
+    items:cards.map(card => {
+      const item = group.items.find(candidate => candidate.id === card.dataset.editorItem);
+      if (!item.choices_editable) {
+        return {
+          id:item.id,
+          default:item.default_editable ? serializeEditorDefault(card) : null,
+          choices:[],
+        };
+      }
+      const rows = [...card.querySelectorAll('[data-editor-choice]')];
+      const choices = rows.map(row => {
+        const metadata = row._choiceMetadata || {};
+        return {
+          label:row.querySelector('[data-choice-label]').value.trim(),
+          value:editorChoiceValue(row, item),
+          group:metadata.group ?? null,
+          description:metadata.description || '',
+          keywords:[...(metadata.keywords || [])],
+        };
+      });
+      const selected = rows.filter(row => row.querySelector('[data-choice-default]').checked)
+        .map(row => editorChoiceValue(row, item));
+      return {
+        id:item.id,
+        default:item.type === 'multiple_select' ? selected : selected[0] ?? null,
+        choices,
+      };
+    }),
+  };
+}
+
+async function openParameterEditor(owner) {
+  if (!state.dashboard?.runnable) return;
+  closeHeaderPopovers();
+  const dialog = $('#parameter-editor-dialog');
+  const contract = await request(
+    `/api/dashboards/${encodeURIComponent(state.dashboard.id)}/parameter-editor`,
+  );
+  const group = contract.groups.find(candidate => candidate.owner === owner);
+  if (!group) throw new Error(`当前看板没有 ${owner} 作用域`);
+  dialog.innerHTML = `
+    <form method="dialog" class="parameter-editor__form">
+      <header class="parameter-editor__header">
+        <div><h2 id="parameter-editor-title">${escapeHtml(group.title)}</h2><p>${group.items.length} 个参数</p></div>
+        <button type="button" data-close aria-label="关闭">×</button>
+      </header>
+      <div class="parameter-editor__items" data-editor-items></div>
+      <footer class="parameter-editor__footer">
+        <p class="parameter-editor__error" role="alert"></p>
+        <div><button type="button" class="button button--ghost" data-close>取消</button><button type="submit" class="button button--run" disabled>保存</button></div>
+      </footer>
+    </form>`;
+  const items = dialog.querySelector('[data-editor-items]');
+  if (group.items.length) items.replaceChildren(...group.items.map(editorItemCard));
+  else items.innerHTML = '<p class="parameter-editor__empty">无参数</p>';
+  initializeEditorItemDrag(items);
+  dialog.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => dialog.close()));
+  const form = dialog.querySelector('form');
+  const submit = form.querySelector('[type="submit"]');
+  const baseline = JSON.stringify(serializeEditorGroup(group, items));
+  const syncDirtyState = () => {
+    let dirty = false;
+    let contractError = '';
+    try { dirty = JSON.stringify(serializeEditorGroup(group, items)) !== baseline; }
+    catch (failure) { contractError = failure.message; }
+    const invalid = !form.checkValidity() || Boolean(contractError);
+    submit.disabled = !dirty || invalid;
+    dialog.querySelector('.parameter-editor__error').textContent = contractError;
+  };
+  form.addEventListener('input', syncDirtyState);
+  form.addEventListener('change', syncDirtyState);
+  form.addEventListener('dataviz:editor-change', syncDirtyState);
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (!event.currentTarget.reportValidity()) return;
+    const error = dialog.querySelector('.parameter-editor__error');
+    submit.disabled = true;
+    error.textContent = '';
+    try {
+      const edited = serializeEditorGroup(group, items);
+      await request(
+        `/api/dashboards/${encodeURIComponent(state.dashboard.id)}/parameter-editor`,
+        {
+          method:'PATCH',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({revision:contract.revision, group:edited}),
+        },
+      );
+      dialog.close();
+      await refreshNavigation(state.dashboard.path, {
+        reloadCanvas:true,
+        requestedDashboardId:state.dashboard.id,
+        historyMode:'replace',
+      });
+    } catch (failure) {
+      error.textContent = failure.message;
+      syncDirtyState();
+    }
+  });
+  dialog.showModal();
+  dialog.querySelector('[data-editor-disclosure], [data-close]')?.focus();
 }
 
 function collectCanvasSnapshot(expectedIdentity) {
@@ -344,40 +1120,85 @@ function collectCanvasSnapshot(expectedIdentity) {
   });
 }
 
-async function downloadReport() {
+async function reportRequestContext() {
   if (!state.runId || !state.dashboard) return;
   const identity = canvasIdentity();
   const dashboardId = state.dashboard.id;
   const runId = state.runId;
   const runtime = runtimeFor(dashboardId);
+  if (identity.dashboard_id !== dashboardId || identity.run_id !== runId) {
+    throw new Error('The active Canvas is not synchronized with the selected Query Run');
+  }
+  const snapshot = await collectCanvasSnapshot(identity);
+  if (!sameCanvasIdentity(canvasIdentity(), identity)) {
+    throw new Error('The active Canvas changed while the report snapshot was being prepared');
+  }
+  return {
+    dashboardId,
+    runId,
+    runtime,
+    payload:{
+      session_id:state.sessionId,
+      run_id:runId,
+      // Canvas owns the canonical Section/View Controls and returns them in
+      // the same atomic snapshot as Derived Outputs. Reading the parent's
+      // asynchronous shadow before this handshake races on Firefox.
+      selection_state:snapshot.selectionState,
+      compute_parameters:snapshot.computeParameters,
+      snapshot_outputs:snapshot.outputs,
+    },
+  };
+}
+
+async function copyPlainText(value) {
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch (_) {
+    const fallback = document.createElement('textarea');
+    fallback.value = value;
+    fallback.style.position = 'fixed';
+    fallback.style.opacity = '0';
+    document.body.append(fallback);
+    fallback.select();
+    document.execCommand('copy');
+    fallback.remove();
+  }
+}
+
+function setShareEnabled(enabled) {
+  const active = Boolean(enabled);
+  const hasServerInteractive = (state.dashboard?.nodes || []).some(
+    (node) => node.type === 'interactive_transform' && node.subtype === 'server-python'
+  );
+  $('#share-control').dataset.empty = String(!active);
+  $('#share-button').setAttribute('aria-disabled', String(!active));
+  $('#download-button').disabled = !active || hasServerInteractive;
+  $('#download-button').title = hasServerInteractive
+    ? '包含 Server Python 交互计算，请使用分享链接'
+    : '';
+  $('#copy-share-link').disabled = !active;
+  if (!active) $('#share-control').open = false;
+}
+
+async function downloadReport() {
+  if (!state.runId || !state.dashboard) return;
   const button = $('#download-button');
   button.disabled = true;
   const previous = button.textContent;
-  button.textContent = 'Preparing…';
+  button.textContent = '正在导出…';
+  $('#share-control').open = false;
+  let runtime = activeRuntime();
+  let dashboardId = state.dashboard.id;
   try {
-    if (identity.dashboard_id !== dashboardId || identity.run_id !== runId) {
-      throw new Error('The active Canvas is not synchronized with the selected Query Run');
-    }
-    const snapshot = await collectCanvasSnapshot(identity);
-    if (!sameCanvasIdentity(canvasIdentity(), identity)) {
-      throw new Error('The active Canvas changed while the report snapshot was being prepared');
-    }
+    const context = await reportRequestContext();
+    ({dashboardId, runtime} = context);
     const response = await fetch(
       `/api/dashboards/${encodeURIComponent(dashboardId)}/report`,
       {
         method:'POST',
         cache:'no-store',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          session_id:state.sessionId,
-          run_id:runId,
-          // Canvas owns the canonical Section/View Controls and returns them in
-          // the same atomic snapshot as Derived Outputs. Reading the parent's
-          // asynchronous shadow before this handshake races on Firefox.
-          selection_state:snapshot.selectionState,
-          compute_parameters:snapshot.computeParameters,
-          snapshot_outputs:snapshot.outputs,
-        }),
+        body:JSON.stringify(context.payload),
       },
     );
     if (!response.ok) {
@@ -393,7 +1214,7 @@ async function downloadReport() {
     const blob = await response.blob();
     const disposition = response.headers.get('Content-Disposition') || '';
     const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1]
-      || `${dashboardId}-${runId}.html`;
+      || `${dashboardId}-${context.runId}.html`;
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -407,26 +1228,71 @@ async function downloadReport() {
     if (state.dashboard?.id === dashboardId) $('#run-message').textContent = error.message;
   } finally {
     button.textContent = previous;
-    button.disabled = !state.runId;
+    setShareEnabled(Boolean(state.runId));
+  }
+}
+
+async function createSharedLink() {
+  if (!state.runId || !state.dashboard) return;
+  const button = $('#copy-share-link');
+  const previous = button.textContent;
+  button.disabled = true;
+  button.textContent = '正在创建…';
+  try {
+    const context = await reportRequestContext();
+    const response = await fetch(
+      `/api/dashboards/${encodeURIComponent(context.dashboardId)}/share`,
+      {
+        method:'POST',
+        cache:'no-store',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(context.payload),
+      },
+    );
+    if (!response.ok) {
+      let message = response.statusText;
+      try {
+        const payload = await response.json();
+        message = typeof payload.detail === 'string'
+          ? payload.detail
+          : payload.detail?.message || JSON.stringify(payload.detail || payload);
+      } catch (_) {}
+      throw new Error(message);
+    }
+    const shared = await response.json();
+    const url = new URL(shared.url, window.location.origin).href;
+    await copyPlainText(url);
+    $('#share-control').open = false;
+    showShortcutToast('分享链接已复制');
+  } catch (error) {
+    const runtime = activeRuntime();
+    if (runtime) runtime.message = error.message;
+    showShortcutToast(`创建分享失败：${error.message}`);
+  } finally {
+    button.textContent = previous;
+    setShareEnabled(Boolean(state.runId));
   }
 }
 
 function controlComponent(parameter, presentation = {}) {
   if (presentation.component && presentation.component !== 'auto') return presentation.component;
   if ((parameter.path_fields || []).length) return 'cascader';
-  if (parameter.type === 'date_range') return 'range-picker';
-  if (parameter.type === 'date') return 'date-picker';
-  if (['number', 'integer'].includes(parameter.type)) return 'input-number';
-  if (parameter.type === 'boolean') return 'checkbox';
-  if (parameter.type === 'string') return (parameter.suggestions || []).length ? 'auto-complete' : 'input';
+  if (parameter.type === 'range_input') return parameter.value_type === 'date' ? 'range-picker' : 'slider';
+  if (parameter.type === 'multiple_input') return 'multiple-input';
+  if (parameter.value_type === 'date') return 'date-picker';
+  if (['number', 'integer'].includes(parameter.value_type)) return 'input-number';
+  if (parameter.value_type === 'boolean') return 'checkbox';
+  if (parameter.value_type === 'text' && parameter.type === 'single_input') {
+    return (parameter.suggestions || []).length ? 'auto-complete' : 'input';
+  }
   const count = parameter.options?.mode === 'static'
     ? (parameter.options.choices || []).length
     : 0;
-  if (parameter.type === 'multi_select') return count > 0 && count <= 8 ? 'checkbox-group' : 'select';
+  if (parameter.type === 'multiple_select') return count > 0 && count <= 8 ? 'checkbox-group' : 'select';
   if (parameter.type === 'single_select') {
     return !parameter.clearable && count > 0 && count <= 4 ? 'radio-group' : 'select';
   }
-  throw new Error(`No Data Entry component for ${parameter.type}`);
+  throw new Error(`No Data Entry component for ${parameter.type}/${parameter.value_type}`);
 }
 
 function field(parameter, name = parameter.id, presentation = {}, behavior = {}) {
@@ -442,11 +1308,11 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
   let input;
   const component = controlComponent(parameter, presentation);
   const clearable = parameter.clearable == null
-    ? !parameter.required && ['string', 'single_select', 'multi_select', 'date', 'date_range'].includes(parameter.type)
+    ? !parameter.required && ['single_input', 'multiple_input', 'single_select', 'multiple_select', 'range_input'].includes(parameter.type)
     : Boolean(parameter.clearable);
-  if (['single_select', 'multi_select'].includes(parameter.type)) {
+  if (['single_select', 'multiple_select'].includes(parameter.type)) {
     input = document.createElement('select');
-    if (parameter.type === 'multi_select') {
+    if (parameter.type === 'multiple_select') {
       input.multiple = true;
     }
     const choices = parameter.options?.mode === 'static'
@@ -455,7 +1321,7 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
     const typedChoices = (parameter.path_fields || []).length > 0
       || choices.some(choice => typeof choice.value !== 'string');
     input.dataset.valueEncoding = typedChoices ? 'json' : 'string';
-    if (parameter.type !== 'multi_select') {
+    if (parameter.type !== 'multiple_select') {
       const empty = document.createElement('option');
       empty.value = '';
       empty.hidden = true;
@@ -471,7 +1337,7 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
       if (choice.description) option.dataset.description = choice.description;
       if (choice.keywords?.length) option.dataset.keywords = choice.keywords.join(' ');
       const hierarchicalSingle = parameter.type === 'single_select' && (parameter.path_fields || []).length;
-      const defaults = parameter.type === 'multi_select'
+      const defaults = parameter.type === 'multiple_select'
         ? (Array.isArray(defaultValue) ? defaultValue : [])
         : hierarchicalSingle
         ? [defaultValue]
@@ -487,30 +1353,32 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
       ? document.createElement('textarea')
       : document.createElement('input');
     if (input instanceof HTMLInputElement) {
-      input.type = parameter.type === 'boolean'
+      input.type = parameter.value_type === 'boolean'
         ? 'checkbox'
-        : ['number', 'integer'].includes(parameter.type)
-        ? component === 'slider' ? 'range' : 'number'
-        : parameter.type === 'date'
+        : ['number', 'integer'].includes(parameter.value_type)
+        ? component === 'slider' && parameter.type === 'single_input' ? 'range' : 'number'
+        : parameter.value_type === 'date' && parameter.type === 'single_input'
         ? 'date'
         : 'text';
     }
-    if (parameter.type === 'boolean') input.checked = Boolean(defaultValue);
+    if (parameter.value_type === 'boolean') input.checked = Boolean(defaultValue);
+    else if (parameter.type === 'multiple_input' && Array.isArray(defaultValue)) input.value = JSON.stringify(defaultValue);
     else if (Array.isArray(defaultValue)) input.value = defaultValue.join(',');
     else input.value = defaultValue ?? '';
   }
-  input.required = Boolean(parameter.required && parameter.type !== 'boolean');
+  input.required = Boolean(parameter.required && parameter.value_type !== 'boolean');
   if (parameter.placeholder) input.placeholder = parameter.placeholder;
   if (parameter.min != null) input.min = parameter.min;
   if (parameter.max != null) input.max = parameter.max;
   if (parameter.step != null) input.step = parameter.step;
-  else if (parameter.type === 'integer') input.step = '1';
+  else if (parameter.value_type === 'integer') input.step = '1';
   if (parameter.min_date) input.min = parameter.min_date;
   if (parameter.max_date) input.max = parameter.max_date;
   if (parameter.max_length) input.maxLength = parameter.max_length;
   input.id = inputId;
   input.name = name;
   input.dataset.type = parameter.type;
+  input.dataset.valueType = parameter.value_type;
   input.dataset.controlInput = '';
   if (behavior.selection === true) input.dataset.selectionInput = name;
   if (behavior.compute === true) input.dataset.computeInput = name;
@@ -532,6 +1400,9 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
   control.dataset.virtualThreshold = String(presentation.virtual_threshold ?? 200);
   control.dataset.maxTagCount = String(presentation.max_tag_count ?? 2);
   control.dataset.maxSelected = String(parameter.max_selected || '');
+  control.dataset.maxItems = String(parameter.max_items || '');
+  control.dataset.controlType = parameter.type;
+  control.dataset.valueType = parameter.value_type;
   control.dataset.hideSelected = String(Boolean(presentation.hide_selected));
   control.dataset.searchPlaceholder = presentation.search_placeholder || 'Search options…';
   control.dataset.emptyText = presentation.empty_text || 'No matching options';
@@ -555,7 +1426,6 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
   control.dataset.defaultExpandDepth = String(presentation.default_expand_depth || 0);
   control.dataset.optionType = presentation.option_type || 'default';
   control.dataset.buttonStyle = presentation.button_style || 'outline';
-  control.dataset.bulkActions = String(presentation.bulk_actions !== false);
   control.dataset.checkedLabel = presentation.checked_label || '';
   control.dataset.uncheckedLabel = presentation.unchecked_label || '';
   control.dataset.multiline = String(Boolean(presentation.multiline));
@@ -573,11 +1443,17 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
       field,
       label: presentation.level_labels?.[index] || field,
   })));
-  const hiddenNative = ['select', 'radio-group', 'checkbox-group', 'cascader', 'tree-select', 'range-picker', 'switch'].includes(component);
+  const hiddenNative = ['select', 'radio-group', 'checkbox-group', 'cascader', 'tree-select', 'range-picker', 'multiple-input', 'switch'].includes(component)
+    || (component === 'slider' && parameter.type === 'range_input');
   input.dataset.controlNative = hiddenNative ? 'hidden' : 'visible';
   const mount = document.createElement('div');
   mount.dataset.controlMount = '';
-  control.append(input, mount);
+  const error = document.createElement('small');
+  error.className = 'field__error';
+  error.dataset.controlError = '';
+  error.setAttribute('role', 'alert');
+  error.hidden = true;
+  control.append(input, mount, error);
   wrapper.append(control);
   return wrapper;
 }
@@ -588,9 +1464,8 @@ function selectionField(control) {
   wrapper.dataset.origin = control.origin;
   wrapper.dataset.controlKey = control.key;
   wrapper.dataset.controlSpan = String(control.presentation?.span || 1);
-  const scopeNames = {dashboard: 'All views', section: `Section · ${control.owner_title}`, view: `View · ${control.owner_title}`};
   const impact = activeRuntime()?.controlImpacts?.[control.key];
-  wrapper.innerHTML = `<div class="selection-scope__meta"><span>${escapeHtml(scopeNames[control.origin])}</span><span data-control-impact-count>${escapeHtml(controlImpactLabel(control, impact))}</span></div>`;
+  wrapper.innerHTML = `<span hidden data-control-impact-count>${escapeHtml(controlImpactLabel(control, impact))}</span>`;
   wrapper.append(field(control.definition, control.key, control.presentation || {}, {selection: true}));
   return wrapper;
 }
@@ -661,13 +1536,14 @@ function setQueryParametersOpen(open, {persist = false} = {}) {
   const toggle = $('#query-parameters-toggle');
   const hasParameters = Number(owner.dataset.controlCount || 0) > 0;
   const expanded = hasParameters && Boolean(open);
+  owner.dataset.open = String(expanded);
   panel.hidden = !expanded;
   toggle.setAttribute('aria-expanded', String(expanded));
   toggle.setAttribute(
     'aria-label',
     expanded ? 'Collapse query parameters' : 'Expand query parameters',
   );
-  toggle.title = expanded ? 'Collapse query parameters' : 'Expand query parameters';
+  toggle.title = `${expanded ? 'Collapse query parameters' : 'Expand query parameters'} (Q)`;
   $('#query-run-control').classList.toggle('is-parameters-open', expanded);
   const runtime = activeRuntime();
   if (runtime && hasParameters) runtime.queryParametersOpen = expanded;
@@ -687,8 +1563,8 @@ function selectionControl(key) {
 
 function selectionValueFromState(definition, entry) {
   const values = Array.isArray(entry?.values) ? entry.values : [];
-  if (definition?.type === 'multi_select') return structuredClone(values);
-  if (definition?.type === 'date_range') return values.length ? structuredClone(values[0]) : [];
+  if (['multiple_input', 'multiple_select'].includes(definition?.type)) return structuredClone(values);
+  if (definition?.type === 'range_input') return values.length ? structuredClone(values[0]) : [];
   return values.length ? structuredClone(values[0]) : null;
 }
 
@@ -696,11 +1572,11 @@ function selectionStateFromValue(definition, value, intent = 'explicit') {
   const empty = value == null || value === '' || (Array.isArray(value) && value.length === 0);
   let values;
   if (empty) values = [];
-  else if (definition?.type === 'multi_select') values = structuredClone(value);
-  else if (definition?.type === 'date_range') values = [structuredClone(value)];
+  else if (['multiple_input', 'multiple_select'].includes(definition?.type)) values = structuredClone(value);
+  else if (definition?.type === 'range_input') values = [structuredClone(value)];
   else values = [structuredClone(value)];
   return {
-    intent: intent === 'all_available' && definition?.type === 'multi_select'
+    intent: intent === 'all_available' && definition?.type === 'multiple_select'
       ? 'all_available'
       : 'explicit',
     values,
@@ -814,16 +1690,31 @@ function syncDashboardSelectionOptions(controls = []) {
 function nodeRow(node) {
   const item = document.createElement('button');
   item.type = 'button';
-  item.className = 'node';
+  item.className = 'node pipeline-signal';
   item.dataset.nodeId = node.id;
   item.dataset.status = 'not_run';
-  item.title = `Inspect ${node.title}${node.description ? ` — ${node.description}` : ''}`;
-  item.innerHTML = `<span class="node-light"></span><strong>${escapeHtml(node.title)}</strong><small>${escapeHtml(node.subtype)} <i aria-hidden="true">↗</i></small>`;
-  item.addEventListener('click', () => showNodeInspector(node));
+  item.setAttribute('aria-label', `${node.title}: not run`);
+  item.innerHTML = `<span class="node-light" aria-hidden="true"></span><span class="pipeline-signal__tooltip" role="tooltip"><strong>${escapeHtml(node.title)}</strong></span>`;
+  item.addEventListener('click', () => {
+    item.blur();
+    showNodeInspector(node);
+  });
   return item;
 }
 
-function selectDashboard(id) {
+function setNodeStatus(node, status) {
+  if (!node) return;
+  const labels = {
+    not_run:'Not run', queued:'Queued', loading:'Running', ready:'Ready', empty:'Ready · empty',
+    error:'Failed', cancelled:'Cancelled', unavailable:'Unavailable', stale:'Stale',
+  };
+  node.dataset.status = status || 'not_run';
+  const label = labels[node.dataset.status] || node.dataset.status;
+  const title = state.dashboard?.nodes?.find(item => item.id === node.dataset.nodeId)?.title || node.dataset.nodeId;
+  node.setAttribute('aria-label', `${title}: ${label}`);
+}
+
+function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {}) {
   if (state.dashboard) {
     const previous = activeRuntime();
     previous.queryParameterValues = queryParameters();
@@ -858,9 +1749,6 @@ function selectDashboard(id) {
   const hasQueryParameters = queryParameterCount > 0;
   $('#query-run-control').dataset.empty = String(!hasQueryParameters);
   $('#query-parameters-control').dataset.empty = String(!hasQueryParameters);
-  $('#query-parameter-count').textContent = hasQueryParameters
-    ? `${queryParameterCount} parameter${queryParameterCount === 1 ? '' : 's'} · changes apply on next run`
-    : 'No query parameters';
   if (runtime.queryParametersOpen == null && hasQueryParameters) {
     runtime.queryParametersOpen = true;
   }
@@ -873,6 +1761,12 @@ function selectDashboard(id) {
     }
   }
   window.datavizComponents?.hydrate(document);
+  if (locationSearch != null) {
+    runtime.queryParameterValues = {
+      ...queryParameters(),
+      ...queryParameterValuesFromLocation(state.dashboard, locationSearch),
+    };
+  }
   setFormValues(
     $('#parameter-form'),
     runtime.queryParameterValues || runtime.committedQueryParameters || {},
@@ -895,11 +1789,13 @@ function selectDashboard(id) {
     ])),
   );
   updateDashboardControlSummary();
-  $('#node-list').replaceChildren(...state.dashboard.nodes.map(nodeRow));
+  const queryNodes = (state.dashboard.nodes || []).filter(
+    node => node.type === 'source' || node.type === 'dataset_transform',
+  );
+  $('#node-list').replaceChildren(...queryNodes.map(nodeRow));
   document.querySelectorAll('.node').forEach((node) => {
-    node.dataset.status = runtime.nodeStatuses[node.dataset.nodeId] || 'not_run';
+    setNodeStatus(node, runtime.nodeStatuses[node.dataset.nodeId] || 'not_run');
   });
-  $('#query-diagnostics').open = false;
   $('#query-diagnostics').dataset.status = runnable ? runtime.queryStatus : 'error';
   $('#query-diagnostics-label').textContent = runnable ? runtime.queryLabel : state.dashboard.status;
   $('#run-message').textContent = runnable ? runtime.message : (state.dashboard.message || 'Dashboard unavailable.');
@@ -909,21 +1805,23 @@ function selectDashboard(id) {
   loadCanvasFrame(id, runtime.pendingRunId || runtime.runId);
   $('#run-button').disabled = !runnable;
   $('#run-button').classList.toggle('is-cancelling', Boolean(runtime.pendingRunId));
-  setRunButtonLabel(runtime.pendingRunId ? 'Cancel query' : 'Run query');
-  $('#download-button').disabled = !runtime.runId;
+  setRunButtonLabel(runtime.pendingRunId ? '取消' : '查询');
+  setShareEnabled(Boolean(runtime.runId));
   saveTabUiState();
+  syncDashboardLocation(historyMode);
 }
 
 function setFormValues(form, values) {
   for (const input of form.elements) {
     if (!input.name || !(input.name in values)) continue;
     const value = values[input.name];
-    if (input.dataset.type === 'boolean' && input.tagName === 'SELECT') input.value = value == null ? '' : JSON.stringify(value);
-    else if (input.dataset.type === 'boolean') input.checked = Boolean(value);
+    if (input.dataset.valueType === 'boolean' && input.tagName === 'SELECT') input.value = value == null ? '' : JSON.stringify(value);
+    else if (input.dataset.valueType === 'boolean') input.checked = Boolean(value);
     else if (input.multiple) {
       const selected = new Set((Array.isArray(value) ? value : [value]).map(item => input.dataset.valueEncoding === 'json' ? JSON.stringify(item) : String(item)));
       for (const option of input.options) option.selected = selected.has(option.value);
-    } else if (Array.isArray(value)) input.value = value.join(',');
+    } else if (input.dataset.type === 'multiple_input' && Array.isArray(value)) input.value = JSON.stringify(value);
+    else if (Array.isArray(value)) input.value = value.join(',');
     else input.value = value ?? '';
     input._syncChoiceControl?.();
   }
@@ -935,6 +1833,102 @@ function queryParameters() {
 
 function computeParameters() {
   return formValues($('#compute-parameter-form'));
+}
+
+function formInputDefinition(input) {
+  const control = input.closest('.dv-control');
+  const number = value => value === '' || value == null ? null : Number(value);
+  return {
+    type:input.dataset.type || control?.dataset.controlType || 'single_input',
+    value_type:input.dataset.valueType || control?.dataset.valueType || 'text',
+    required:Boolean(input.required),
+    min:number(input.min),
+    max:number(input.max),
+    step:input.step && input.step !== 'any' ? Number(input.step) : null,
+    min_date:input.type === 'date' ? (input.min || null) : (control?.dataset.minDate || null),
+    max_date:input.type === 'date' ? (input.max || null) : (control?.dataset.maxDate || null),
+    max_length:input.maxLength > 0 ? input.maxLength : null,
+    max_items:number(control?.dataset.maxItems),
+    allow_empty:[
+      control?.dataset.allowEmptyStart === 'true',
+      control?.dataset.allowEmptyEnd === 'true',
+    ],
+  };
+}
+
+function setFormInputError(input, message = '') {
+  input.setCustomValidity?.(message);
+  const output = input.closest('.dv-control')?.querySelector('[data-control-error]');
+  if (output) {
+    output.textContent = message;
+    output.hidden = !message;
+  }
+}
+
+function normalizeFormScalar(definition, raw, label = '值') {
+  const value = editorTypedValue(definition, raw, label);
+  if (['integer', 'number'].includes(definition.value_type)) {
+    if (definition.min != null && value < definition.min) throw new Error(`${label}不能小于 ${definition.min}`);
+    if (definition.max != null && value > definition.max) throw new Error(`${label}不能大于 ${definition.max}`);
+    if (definition.step != null) {
+      const base = definition.min || 0;
+      const quotient = (value - base) / definition.step;
+      if (Math.abs(quotient - Math.round(quotient)) > 1e-9) {
+        throw new Error(`${label}必须按步长 ${definition.step} 递增`);
+      }
+    }
+  }
+  if (definition.value_type === 'date') {
+    if (definition.min_date && value < definition.min_date) throw new Error(`${label}不能早于 ${definition.min_date}`);
+    if (definition.max_date && value > definition.max_date) throw new Error(`${label}不能晚于 ${definition.max_date}`);
+  }
+  return value;
+}
+
+function normalizeFormInput(input) {
+  const decode = value => input.dataset.valueEncoding === 'json' ? JSON.parse(value) : value;
+  const definition = formInputDefinition(input);
+  const {type, value_type:valueType} = definition;
+  if (valueType === 'boolean' && input.tagName === 'SELECT') {
+    return input.value === '' ? null : decode(input.value);
+  }
+  if (valueType === 'boolean') return input.checked;
+  if (input.multiple) return [...input.selectedOptions].map(item => decode(item.value));
+  if (type === 'multiple_input') {
+    let values;
+    try { values = input.value ? JSON.parse(input.value) : []; }
+    catch (_error) { values = input.value.split(',').map(item => item.trim()).filter(Boolean); }
+    if (!Array.isArray(values)) throw new Error('请输入多个值');
+    const normalized = values.map((item, index) => normalizeFormScalar(definition, item, `第 ${index + 1} 个值`));
+    if (definition.required && !normalized.length) throw new Error('至少输入一个值');
+    if (definition.max_items != null && normalized.length > definition.max_items) {
+      throw new Error(`最多输入 ${definition.max_items} 个值`);
+    }
+    if (new Set(normalized.map(editorValueSignature)).size !== normalized.length) {
+      throw new Error('不能输入重复值');
+    }
+    return normalized;
+  }
+  if (type === 'range_input') {
+    const values = input.value ? input.value.split(',', 2).map(item => item.trim()) : [];
+    if (!values.length) {
+      if (definition.required) throw new Error('范围不能为空');
+      return [];
+    }
+    if (values.length !== 2) throw new Error('范围必须包含开始值和结束值');
+    const normalized = values.map((raw, index) => raw === '' ? '' : normalizeFormScalar(
+      definition, raw, index ? '结束值' : '开始值',
+    ));
+    if (normalized[0] === '' && !definition.allow_empty[0]) throw new Error('开始值不能为空');
+    if (normalized[1] === '' && !definition.allow_empty[1]) throw new Error('结束值不能为空');
+    if (normalized[0] !== '' && normalized[1] !== '' && normalized[0] > normalized[1]) {
+      throw new Error('开始值不能大于结束值');
+    }
+    return normalized;
+  }
+  if (input.tagName === 'SELECT') return input.value === '' ? null : decode(input.value);
+  if (input.value === '') return null;
+  return normalizeFormScalar(definition, input.value);
 }
 
 function selectionState() {
@@ -952,17 +1946,17 @@ function formValues(form) {
   const values = {};
   for (const input of form.elements) {
     if (!input.name) continue;
-    const decode = value => input.dataset.valueEncoding === 'json' ? JSON.parse(value) : value;
-    if (input.dataset.type === 'boolean' && input.tagName === 'SELECT') values[input.name] = input.value === '' ? null : decode(input.value);
-    else if (input.dataset.type === 'boolean') values[input.name] = input.checked;
-    else if (input.multiple) values[input.name] = [...input.selectedOptions].map((item) => decode(item.value));
-    else if (input.dataset.type === 'number') values[input.name] = input.value === '' ? null : Number(input.value);
-    // Keep the raw numeric meaning. parseInt("1.5") would silently turn an
-    // invalid integer into 1 before the shared value contract can reject it.
-    else if (input.dataset.type === 'integer') values[input.name] = input.value === '' ? null : Number(input.value);
-    else if (input.dataset.type === 'date_range') values[input.name] = input.value ? input.value.split(',', 2).map((item) => item.trim()) : [];
-    else if (input.tagName === 'SELECT' && input.value !== '') values[input.name] = decode(input.value);
-    else values[input.name] = input.value;
+    setFormInputError(input, '');
+    if (!input.checkValidity()) {
+      setFormInputError(input, input.validationMessage);
+      throw new Error(`${input.name}: ${input.validationMessage}`);
+    }
+    try {
+      values[input.name] = normalizeFormInput(input);
+    } catch (error) {
+      setFormInputError(input, error.message);
+      throw new Error(`${input.name}: ${error.message}`);
+    }
   }
   return values;
 }
@@ -974,14 +1968,14 @@ async function runDashboard() {
   if (runtime.pendingRunId) {
     const runId = runtime.pendingRunId;
     $('#run-button').disabled = true;
-    setRunButtonLabel('Cancelling…');
+    setRunButtonLabel('取消中…');
     try {
       await request(`/api/runs/${encodeURIComponent(runId)}?${sessionQuery()}`, {method:'DELETE'});
       runtime.message = 'Cancelling this Dashboard query…';
       $('#run-message').textContent = runtime.message;
     } catch (error) {
       $('#run-button').disabled = false;
-      setRunButtonLabel('Cancel query');
+      setRunButtonLabel('取消');
       runtime.message = error.message;
       $('#run-message').textContent = error.message;
     }
@@ -989,6 +1983,13 @@ async function runDashboard() {
   }
   if (!$('#parameter-form').checkValidity()) {
     setQueryParametersOpen(true, {persist: true});
+    window.requestAnimationFrame(() => $('#parameter-form').reportValidity());
+    return;
+  }
+  let requestedParameters;
+  try { requestedParameters = queryParameters(); }
+  catch (_error) {
+    setQueryParametersOpen(true, {persist:true});
     window.requestAnimationFrame(() => $('#parameter-form').reportValidity());
     return;
   }
@@ -1007,7 +2008,7 @@ async function runDashboard() {
   $('#run-message').textContent = 'Querying a new dataset…';
   document.querySelectorAll('.node').forEach((node) => node.dataset.status = 'not_run');
   try {
-    runtime.queryParameterValues = queryParameters();
+    runtime.queryParameterValues = requestedParameters;
     const response = await request(`/api/dashboards/${encodeURIComponent(dashboardId)}/runs`, {
       method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({
         session_id: state.sessionId,
@@ -1032,7 +2033,7 @@ async function runDashboard() {
     runtime.message = 'Querying a new dataset…';
     $('#run-button').disabled = false;
     $('#run-button').classList.add('is-cancelling');
-    setRunButtonLabel('Cancel query');
+    setRunButtonLabel('取消');
     if (state.dashboard?.id === dashboardId) {
       loadCanvasFrame(dashboardId, response.run_id);
     }
@@ -1049,7 +2050,7 @@ async function runDashboard() {
       $('#query-diagnostics-label').textContent = 'Failed';
       $('#run-button').disabled = false;
       $('#run-button').classList.remove('is-cancelling');
-      setRunButtonLabel('Run query');
+      setRunButtonLabel('查询');
     }
   }
 }
@@ -1089,7 +2090,7 @@ function updateEvent(event, dashboardId) {
   runtime.message = `${event.message || `${label} — ${statusMap[event.event] || event.event}`}${progress}${event.duration_ms ? ` · ${event.duration_ms}ms` : ''}`;
   if (state.dashboard?.id === dashboardId) {
     const node = document.querySelector(`[data-node-id="${CSS.escape(event.node_id)}"]`);
-    if (node) node.dataset.status = runtime.nodeStatuses[event.node_id];
+    setNodeStatus(node, runtime.nodeStatuses[event.node_id]);
     $('#run-message').textContent = runtime.message;
   }
 }
@@ -1129,8 +2130,8 @@ async function finishRun(runId, dashboardId) {
     $('#run-message').textContent = runtime.message;
     $('#run-button').disabled = false;
     $('#run-button').classList.remove('is-cancelling');
-    setRunButtonLabel('Run query');
-    $('#download-button').disabled = !runtime.runId;
+    setRunButtonLabel('查询');
+    setShareEnabled(Boolean(runtime.runId));
     $('#query-diagnostics').dataset.status = runtime.queryStatus;
     $('#query-diagnostics-label').textContent = runtime.queryLabel;
     setSelectionsEnabled(Boolean(runtime.runId));
@@ -1244,48 +2245,48 @@ function normalized(value) {
 
 function pendingParametersMatchDataset() {
   if (!state.committedQueryParameters) return false;
-  const pending = queryParameters();
+  let pending;
+  try { pending = queryParameters(); }
+  catch (_error) { return false; }
   const keys = new Set([...Object.keys(pending), ...Object.keys(state.committedQueryParameters)]);
   return [...keys].every((key) => JSON.stringify(normalized(pending[key])) === JSON.stringify(normalized(state.committedQueryParameters[key])));
 }
 
 function setQueryState(message = null) {
-  const node = $('#query-state');
+  const owner = $('#query-parameters-control');
   const runtime = activeRuntime();
   const hasQueryParameters = Boolean(state.dashboard?.query_parameters?.length);
+  let stale = false;
+  let detail = '';
+  let label = 'Not applied';
   if (state.dashboard && !state.dashboard.runnable) {
-    node.dataset.stale = 'true';
-    node.textContent = state.dashboard.message || 'Dashboard unavailable.';
-    $('#query-control-meta').textContent = state.dashboard.status;
-    return;
-  }
-  if (runtime?.queryDefinitionStale) {
-    node.dataset.stale = 'true';
-    node.textContent = message || 'Dashboard query definition changed. Run query again to apply it.';
-    $('#query-control-meta').textContent = 'Outdated';
+    stale = true;
+    detail = state.dashboard.message || 'Dashboard unavailable.';
+    label = state.dashboard.status;
+  } else if (runtime?.queryDefinitionStale) {
+    stale = true;
+    detail = message || 'Dashboard query definition changed. Run query again to apply it.';
+    label = 'Outdated';
   } else if (message) {
-    node.dataset.stale = state.runId ? 'true' : 'false';
-    node.textContent = message;
-    $('#query-control-meta').textContent = 'Check values';
+    stale = Boolean(state.runId);
+    detail = message;
+    label = 'Check values';
   } else if (!hasQueryParameters) {
-    node.dataset.stale = 'false';
-    node.textContent = state.runId
-      ? `Loaded dataset · ${state.runId}`
-      : 'This dashboard has no query parameters.';
-    $('#query-control-meta').textContent = 'No parameters';
+    detail = state.runId ? 'Dataset loaded.' : 'This dashboard has no query parameters.';
+    label = 'No parameters';
   } else if (!state.runId) {
-    node.dataset.stale = 'false';
-    node.textContent = 'No dataset loaded. Query parameters are pending.';
-    $('#query-control-meta').textContent = 'Not applied';
+    detail = 'No dataset loaded. Query parameters are pending.';
   } else if (pendingParametersMatchDataset()) {
-    node.dataset.stale = 'false';
-    node.textContent = `Loaded dataset · ${state.runId}`;
-    $('#query-control-meta').textContent = 'Applied';
+    detail = 'Dataset loaded with these values.';
+    label = 'Applied';
   } else {
-    node.dataset.stale = 'true';
-    node.textContent = 'Pending query values differ from the loaded dataset. Query again to apply.';
-    $('#query-control-meta').textContent = 'Changed';
+    stale = true;
+    detail = 'Pending query values differ from the loaded dataset. Query again to apply.';
+    label = 'Changed';
   }
+  owner.dataset.stale = String(stale);
+  owner.title = detail;
+  $('#query-control-meta').textContent = label;
 }
 
 function updateDashboardControlSummary() {
@@ -1555,9 +2556,22 @@ async function showNodeInspector(node) {
 
 function escapeHtml(value) { const node = document.createElement('div'); node.textContent = value; return node.innerHTML; }
 
+function bindOverflowTitle(owner, label, fullName) {
+  const update = () => {
+    const truncated = label.scrollWidth > label.clientWidth + 1;
+    if (truncated) owner.title = fullName;
+    else owner.removeAttribute('title');
+  };
+  owner.setAttribute('aria-label', fullName);
+  owner.addEventListener('mouseenter', update);
+  owner.addEventListener('focus', update);
+  window.requestAnimationFrame(update);
+}
+
 function dashboardButton(dashboard) {
-    const button = document.createElement('button');
+    const button = document.createElement('a');
     button.className = 'nav-button';
+    button.href = dashboardLocation(dashboard.id, runtimeFor(dashboard.id).queryParameterValues || {});
     button.dataset.id = dashboard.id;
     button.dataset.navType = 'dashboard';
     button.dataset.status = dashboard.status;
@@ -1565,8 +2579,12 @@ function dashboardButton(dashboard) {
     button.draggable = true;
     const status = dashboard.status === 'ready' ? '' : `<small>${escapeHtml(dashboard.status)}</small>`;
     button.innerHTML = `<strong>${escapeHtml(dashboard.canvas_name)}</strong>${status}`;
-    button.title = dashboard.message || dashboard.title || dashboard.logical_path || dashboard.path;
-    button.addEventListener('click', () => selectDashboard(dashboard.id));
+    bindOverflowTitle(button, button.querySelector('strong'), dashboard.canvas_name);
+    button.addEventListener('click', (event) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      selectDashboard(dashboard.id, {historyMode:'push'});
+    });
     button.addEventListener('dragstart', (event) => beginNavigationDrag(event, {
       type: 'dashboard', id: dashboard.id, parentId: dashboard.parent_id, path: dashboard.path,
     }));
@@ -1604,6 +2622,7 @@ function renderNavigation() {
       toggle.dataset.parentId = folder.parent_id || '';
       toggle.draggable = true;
       toggle.innerHTML = `<i>›</i><strong>${escapeHtml(folder.title)}</strong>`;
+      bindOverflowTitle(toggle, toggle.querySelector('strong'), folder.title);
       const children = renderLevel(folder.id, depth + 1);
       toggle.addEventListener('click', () => group.classList.toggle('is-collapsed'));
       toggle.addEventListener('dragstart', (event) => beginNavigationDrag(event, {
@@ -1699,6 +2718,8 @@ function trashNode(item, depth = 0) {
   node.className = `nav-trash-item nav-trash-item--${item.kind}`;
   node.style.setProperty('--trash-depth', depth);
   node.innerHTML = `<span>${item.kind === 'folder' ? '◇' : '·'}</span><strong>${escapeHtml(item.title)}</strong>`;
+  const label = node.querySelector('strong');
+  bindOverflowTitle(label, label, item.title);
   if (item.kind === 'folder' && item.children?.length) {
     const children = document.createElement('div');
     children.className = 'nav-trash-item__children';
@@ -1710,7 +2731,14 @@ function trashNode(item, depth = 0) {
 
 function renderTrash() {
   const records = state.payload.trash || [];
-  $('#nav-trash-count').textContent = records.length;
+  const trash = $('#nav-trash');
+  const summary = trash.querySelector('summary');
+  const count = $('#nav-trash-count');
+  count.textContent = records.length;
+  count.hidden = records.length === 0;
+  trash.dataset.empty = records.length === 0 ? 'true' : 'false';
+  summary.setAttribute('aria-disabled', records.length === 0 ? 'true' : 'false');
+  if (!records.length) trash.open = false;
   const list = records.map((record) => {
     const wrapper = document.createElement('div');
     wrapper.className = 'nav-trash-record';
@@ -1720,16 +2748,18 @@ function renderTrash() {
     wrapper.append(trashNode(record.item));
     return wrapper;
   });
-  if (!list.length) {
-    const empty = document.createElement('p');
-    empty.className = 'nav-trash__empty';
-    empty.textContent = '暂无项目';
-    list.push(empty);
-  }
   $('#nav-trash-list').replaceChildren(...list);
 }
 
-async function refreshNavigation(preferredPath = state.dashboard?.path, {reloadCanvas = true} = {}) {
+async function refreshNavigation(
+  preferredPath = state.dashboard?.path,
+  {
+    reloadCanvas = true,
+    requestedDashboardId = null,
+    locationSearch = null,
+    historyMode = 'replace',
+  } = {},
+) {
   const activeId = state.dashboard?.id || null;
   state.payload = await request('/api/workspace');
   state.workspaceRevision = Math.max(
@@ -1737,12 +2767,11 @@ async function refreshNavigation(preferredPath = state.dashboard?.path, {reloadC
     Number(state.payload.hot_reload?.revision || 0),
   );
   state.hotReloadEnabled = Boolean(state.payload.hot_reload?.enabled);
-  $('#workspace-title').textContent = 'Dashboards';
-  $('#workspace-title').title = state.payload.workspace.title;
+  const routed = state.payload.dashboards.find((item) => item.id === requestedDashboardId);
   const preferred = state.payload.dashboards.find((item) => item.path === preferredPath);
   const remembered = state.payload.dashboards.find((item) => item.id === state.preferredDashboardId);
   const fallback = state.payload.dashboards.find((item) => item.runnable) || state.payload.dashboards[0];
-  const selected = preferred || remembered || fallback;
+  const selected = routed || preferred || remembered || fallback;
   if (!selected) {
     state.dashboard = null;
     renderNavigation();
@@ -1757,7 +2786,10 @@ async function refreshNavigation(preferredPath = state.dashboard?.path, {reloadC
     return selected;
   }
   renderNavigation();
-  selectDashboard(selected.id);
+  selectDashboard(selected.id, {
+    historyMode,
+    locationSearch: routed ? locationSearch : null,
+  });
   return selected;
 }
 
@@ -1960,6 +2992,7 @@ function showNavMenu(event, target) {
   if (!target) actions.push(['＋', '新建目录', () => openFolderDialog(null)]);
   if (trashId) {
     actions.push(['↟', '恢复到原位置', () => restoreTrashItem(trashId)]);
+    actions.push(['×', '永久删除…', () => openPurgeTrashDialog(trashId)]);
   }
   if (folderId) {
     actions.push(['＋', '新建子目录', () => openFolderDialog(folderId)]);
@@ -2047,8 +3080,8 @@ function openMoveDialog(dashboardId) {
 function openDeleteDialog(folderId) {
   const folder = state.payload.folders.find((item) => item.id === folderId);
   showNavDialog({
-    eyebrow: 'NAVIGATION / TRASH', title: `把「${folder.title}」移到回收站？`, submitLabel: '移到回收站', danger: true,
-    body: '<p class="nav-dialog__note">所属看板目录会加上 __TRASH__## 前缀并隐藏；内容不会删除，可完整恢复。</p>',
+    eyebrow: 'NAVIGATION / REMOVE', title: `删除「${folder.title}」？`, submitLabel: '继续', danger: true,
+    body: '<p class="nav-dialog__note">若该目录树没有看板，将直接删除；否则所属看板会移入回收站，文件仍可恢复。</p>',
     onSubmit: async () => {
       await request(`/api/navigation/folders/${encodeURIComponent(folderId)}`, {method:'DELETE'});
       await refreshNavigation();
@@ -2078,6 +3111,22 @@ async function restoreTrashItem(trashId) {
       body: `<p class="nav-dialog__note">${escapeHtml(error.message)}</p>`, onSubmit: async () => {},
     });
   }
+}
+
+function openPurgeTrashDialog(trashId) {
+  const record = (state.payload.trash || []).find(item => item.trash_id === trashId);
+  const title = record?.item?.title || '该项目';
+  showNavDialog({
+    eyebrow: 'TRASH / DELETE FOREVER',
+    title: `永久删除「${title}」？`,
+    submitLabel: '永久删除',
+    danger: true,
+    body: '<p class="nav-dialog__note">这会删除磁盘中的看板目录及其文件，操作无法恢复。</p>',
+    onSubmit: async () => {
+      await request(`/api/navigation/trash/${encodeURIComponent(trashId)}`, {method:'DELETE'});
+      await refreshNavigation(null);
+    },
+  });
 }
 
 async function boot() {
@@ -2110,7 +3159,12 @@ async function boot() {
       listen(record.run_id, record.dashboard_id);
     }
   }
-  await refreshNavigation(null);
+  const requestedDashboardId = dashboardIdFromLocation();
+  await refreshNavigation(null, {
+    requestedDashboardId,
+    locationSearch: requestedDashboardId ? window.location.search : null,
+    historyMode:'replace',
+  });
   if (activeRuntime()?.queryDefinitionStale) {
     showWorkspaceUpdate({
       impact:'query',
@@ -2125,36 +3179,44 @@ async function boot() {
 $('#run-button').addEventListener('click', runDashboard);
 $('#query-parameters-toggle').addEventListener('click', toggleQueryParameters);
 $('#download-button').addEventListener('click', downloadReport);
+$('#copy-share-link').addEventListener('click', createSharedLink);
 $('#dashboard-reload').addEventListener('click', reloadDashboardFromDisk);
 $('#workspace-update-dismiss').addEventListener('click', hideWorkspaceUpdate);
 $('#workspace-update-action').addEventListener('click', () => {
   if ($('#workspace-update-action').dataset.action === 'query') runDashboard();
   else reloadDashboardFromDisk();
 });
-$('#parameter-form').addEventListener('input', () => setQueryState());
-$('#parameter-form').addEventListener('input', () => {
-  if (activeRuntime()) activeRuntime().queryParameterValues = queryParameters();
+const onQueryDraft = event => {
+  event.target?.setCustomValidity?.('');
+  let values;
+  try { values = queryParameters(); }
+  catch (_error) {
+    setQueryState();
+    return;
+  }
+  if (activeRuntime()) activeRuntime().queryParameterValues = values;
   saveTabUiState();
-  syncCanvasQueryDraft();
-});
-$('#parameter-form').addEventListener('change', () => {
-  if (activeRuntime()) activeRuntime().queryParameterValues = queryParameters();
-  saveTabUiState();
+  syncDashboardLocation('replace');
   setQueryState();
   syncCanvasQueryDraft();
-});
-$('#dashboard-selection-form').addEventListener('input', event => {
+};
+$('#parameter-form').addEventListener('input', onQueryDraft);
+$('#parameter-form').addEventListener('change', onQueryDraft);
+const onDashboardSelectionDraft = event => {
   if (activeRuntime()) activeRuntime().selectionEpoch += 1;
   captureDashboardSelectionIntent(event);
-  dashboardSelectionState();
+  try { dashboardSelectionState(); }
+  catch (_error) { return; }
   saveTabUiState();
   updateDashboardControlSummary();
   scheduleViewSelections();
-});
+};
+$('#dashboard-selection-form').addEventListener('input', onDashboardSelectionDraft);
 const onComputeDraft = (event) => {
   const runtime = activeRuntime();
   if (!runtime) return;
-  runtime.draftComputeParameters = computeParameters();
+  try { runtime.draftComputeParameters = computeParameters(); }
+  catch (_error) { return; }
   saveTabUiState();
   setComputeState();
   sendCompute(runtime.draftComputeParameters);
@@ -2178,14 +3240,7 @@ const onComputeDraft = (event) => {
 $('#compute-parameter-form').addEventListener('input', onComputeDraft);
 $('#compute-parameter-form').addEventListener('change', onComputeDraft);
 $('#compute-apply').addEventListener('click', applyDashboardControls);
-$('#dashboard-selection-form').addEventListener('change', event => {
-  if (activeRuntime()) activeRuntime().selectionEpoch += 1;
-  captureDashboardSelectionIntent(event);
-  dashboardSelectionState();
-  saveTabUiState();
-  updateDashboardControlSummary();
-  scheduleViewSelections();
-});
+$('#dashboard-selection-form').addEventListener('change', onDashboardSelectionDraft);
 document.addEventListener('click', (event) => {
   if (!event.target.closest('#nav-context-menu')) hideNavMenu();
 });
@@ -2214,6 +3269,22 @@ window.addEventListener('message', (event) => {
   }
   if (event.data?.type === 'dataviz:canvas-interaction') {
     closeHeaderPopovers();
+    return;
+  }
+  if (event.data?.type === 'dataviz:keyboard-shortcut') {
+    executeKeyboardShortcut(String(event.data.command || ''));
+    return;
+  }
+  if (event.data?.type === 'dataviz:open-parameter-editor') {
+    openParameterEditor(String(event.data.owner || '')).catch(error => {
+      console.error('[dataviz:parameter-editor]', error);
+    });
+    return;
+  }
+  if (event.data?.type === 'dataviz:view-pipeline-inspect') {
+    const nodeId = String(event.data.node_id || '');
+    const node = (state.dashboard?.nodes || []).find(item => item.id === nodeId);
+    if (node) showNodeInspector(node);
     return;
   }
   if (event.data?.type === 'dataviz:interactive-status') {
@@ -2281,10 +3352,28 @@ window.addEventListener('message', (event) => {
     saveTabUiState();
   }
 });
-$('#add-root-folder').addEventListener('click', () => openFolderDialog(null));
 $('#sidebar-toggle').addEventListener('click', toggleSidebar);
+document.addEventListener('keydown', handleKeyboardShortcut);
+$('#run-button').addEventListener('contextmenu', event => {
+  event.preventDefault();
+  openParameterEditor('query').catch(error => console.error('[dataviz:parameter-editor]', error));
+});
+$('#dashboard-controls-control > summary').addEventListener('contextmenu', event => {
+  event.preventDefault();
+  openParameterEditor('dashboard').catch(error => console.error('[dataviz:parameter-editor]', error));
+});
 initializeSidebarResize();
 window.addEventListener('resize', () => applySidebarState());
+window.addEventListener('popstate', () => {
+  if (!state.payload) return;
+  const dashboardId = dashboardIdFromLocation();
+  const dashboard = state.payload.dashboards.find(item => item.id === dashboardId);
+  if (!dashboard) return;
+  selectDashboard(dashboard.id, {
+    historyMode:'none',
+    locationSearch:window.location.search,
+  });
+});
 $('#dashboard-nav').addEventListener('contextmenu', (event) => {
   const target = event.target.closest('[data-nav-type]');
   showNavMenu(event, target);
@@ -2292,6 +3381,10 @@ $('#dashboard-nav').addEventListener('contextmenu', (event) => {
 $('#nav-trash-list').addEventListener('contextmenu', (event) => {
   const target = event.target.closest('[data-nav-type="trash"]');
   if (target) showNavMenu(event, target);
+});
+$('#nav-trash > summary').addEventListener('click', (event) => {
+  if ($('#nav-trash').dataset.empty !== 'true') return;
+  event.preventDefault();
 });
 $('#nav-root-drop').addEventListener('dragover', (event) => navigationDragOver(event, null, event.currentTarget));
 $('#nav-root-drop').addEventListener('dragleave', (event) => event.currentTarget.classList.remove('is-drop-target'));

@@ -416,6 +416,49 @@ class RunManager:
             ]
             return [self.records[run_id] for run_id in run_ids if run_id in self.records]
 
+    def restore_shared_result(
+        self,
+        result: RunResult,
+        *,
+        session_id: str,
+        dashboard_id: str,
+    ) -> RunRecord:
+        """Register one persisted Query Result as an interactive, session-owned Run.
+
+        Shared results are immutable Query snapshots. They never re-run Sources,
+        but registering the snapshot lets the existing server-python Interaction
+        protocol operate without creating a second execution implementation.
+        """
+        if result.dashboard != dashboard_id:
+            raise ValueError("Shared Query Result belongs to another Dashboard")
+        with self.lock:
+            existing = self.records.get(result.run_id)
+            if existing is not None:
+                if existing.session_id != session_id:
+                    raise ValueError("Shared Query Run id belongs to another session")
+                return existing
+            dashboard = self.workspace.dashboard(dashboard_id)
+            record = RunRecord(
+                run_id=result.run_id,
+                session_id=session_id,
+                dashboard_id=dashboard_id,
+                requested_parameters=dict(result.query_parameters),
+                query_scope=result.query_scope,
+                query_targets=list(result.query_targets),
+                query_nodes=list(result.query_nodes),
+                server_interactive_inputs=sorted(
+                    dashboard.dependency_contract.server_interactive_base_references()
+                ),
+                query_contract_hash=result.query_contract_hash,
+                status=result.status,
+                snapshot=result,
+                result=result,
+                finished_at=time.time(),
+            )
+            self.records[result.run_id] = record
+            self.latest[(session_id, dashboard_id)] = result.run_id
+            return record
+
     def start_interaction(
         self,
         run_id: str,

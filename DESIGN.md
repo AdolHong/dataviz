@@ -2,7 +2,7 @@
 
 > 快速安装和当前可用命令见 [README](README.md)；后续工作见 [plan.md](plan.md)。安装版本真正接受的字段始终以 `dataviz schemas`、`dataviz docs` 和 `dataviz components` 为准。
 
-本文记录已经落地并可由当前 Schema、CLI、Runtime 和测试证明的契约，以及明确标注的后续目标。当前严格契约是 `dataviz/dashboard/v7`、`dataviz/presentation/v2`、`dataviz/dependency-contract/v4`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v1`、`dataviz/runtime/v5` 与 Component Registry `4.2.0`。统一 Selection State、Control Binding、Layout/Semantic Contract、自动分析状态、Runtime-aware trigger、Chart Service、Renderer 行为矩阵、inspect-layout 与 visual-check 已进入实现；当前代码不保留 Dashboard v6、Presentation v1、旧 `cascade`、Source/Transform v1、`query_params` 或旧 Selector 字段。
+本文记录已经落地并可由当前 Schema、CLI、Runtime 和测试证明的契约，以及明确标注的后续目标。当前严格契约是 `dataviz/dashboard/v8`、`dataviz/presentation/v2`、`dataviz/dependency-contract/v5`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v1`、`dataviz/runtime/v5` 与 Component Registry `5.4.0`。统一 Selection State、Control Binding、Layout/Semantic Contract、自动分析状态、Runtime-aware trigger、Chart Service、Renderer 行为矩阵、inspect-layout 与 visual-check 已进入实现；当前代码不保留 Dashboard v6、Presentation v1、旧 `cascade`、Source/Transform v1、`query_params` 或旧 Selector 字段。
 
 Dataviz 是一个 workspace-first、AI-friendly 的数据看板工具。看板是普通文件，能够被 Git 管理、复制和审查；Server 面向人提供交互页面，CLI 面向 AI 与自动化提供校验、查询和 HTML 导出。
 
@@ -27,6 +27,20 @@ Dataviz 可以支持复杂数据流，但不能要求普通作者理解 Runtime 
 | 调整颜色、容器和局部样式 | 可选 `presentation.yaml` |
 
 普通路径必须满足“一个需求、一种写法、一个状态 owner”。平台不会为 View 联动再创建隐藏 filter，不允许 View 直接调用另一个 View，也不会要求作者手写事件总线。只有字段映射、触发策略或视觉行为确实偏离默认值时才展开高级配置。若一个常见看板必须写回调、复制状态、理解 canonical key 或阅读 Runtime 源码才能完成，应把它视为框架缺口，而不是作者责任。
+
+### AI 开发与人工调参的边界
+
+AI/代码仍然拥有 Dashboard 的结构和逻辑：ID、类型、作用域、依赖、Adapter、Source/Transform、View、Section、布局、Presentation 与自定义资产只能通过文件开发并接受 `validate`。Server 只提供一个受限的人工调参面，不发展成第二套可视化开发器：
+
+- 可编辑 Query Parameter、Dashboard Control、Section Control 和 View Control 的 `default`；
+- 可编辑 `options.mode: static` 的候选项及候选项顺序；
+- 可调整同一作用域内参数/Control 的陈列顺序；
+- `options.mode: infer` 的候选项和默认值只读，因为它们由数据契约决定；
+- 不允许新增/删除参数，不允许修改 ID、type、kind、required、作用域、`depends_on`、输入绑定、布局或样式。
+
+编辑器直接对当前 Dashboard 的 `dashboard.yaml` 做保留注释与格式的 round-trip 更新，不创建数据库或第二份配置。保存使用 revision 乐观锁、进程内写锁、完整 Dashboard Schema 校验和原子替换；若 AI 或其他编辑器在弹窗打开后修改了文件，本次保存必须冲突失败，不能覆盖新内容。编辑器改变的是下一次初始化使用的默认配置，不得悄悄改写当前 tab 已经提交的 Query/Selection/Compute 状态。它只存在于 Server authoring surface，导出 HTML 永远是只读分析报告。
+
+编辑入口复用现有操作对象，不向任何 Control Panel 添加常驻工具条：右键 Run 打开 Query Parameter 编辑，右键 Dashboard/Section/View Controls 触发器打开对应作用域编辑；左键仍只执行 Run 或开合 Controls。没有可编辑项时保留浏览器原生右键菜单。此入口属于熟练用户的低频 authoring 动作，不与高频分析操作争夺视觉注意力。
 
 能力按下面顺序渐进开放，前一层始终可以独立工作：
 
@@ -88,12 +102,12 @@ Source/main → View → 默认 Presentation
 
 ### 单一 Dependency Contract
 
-每次 Workspace 载入或热更新都会创建新的不可变 Dashboard 快照；每个快照只编译一次版本化的 `dataviz/dependency-contract/v4`。同一快照内的执行、交互和渲染层共享同一个契约对象，不能重复编译或各自解释 DSL。它包含：
+每次 Workspace 载入或热更新都会创建新的不可变 Dashboard 快照；每个快照只编译一次版本化的 `dataviz/dependency-contract/v5`。同一快照内的执行、交互和渲染层共享同一个契约对象，不能重复编译或各自解释 DSL。它包含：
 
 - Query 节点的输入 alias、上游节点、Named Output、拓扑顺序、下游 View/option Control，以及每个节点允许读取的 Query Parameter；
 - 每个 Query Parameter 的直接消费者和最终受影响 Query 节点、Interactive 分支、option Control、内容字段与 View；
 - Interactive Transform 的 Base/Derived 输入、Query/Selection/Compute 输入 alias、Runtime、Named Output、直接/完整下游 View 和拓扑顺序；
-- View 的有效输入、继承后的 Control 与 View-specific Selection binding；
+- View 的有效输入、继承后的 Control、View-specific Selection binding，以及按拓扑排序的 Query/Interactive `pipeline_nodes`；
 - Control 的作用域、显式直接父节点、传递祖先/后代、拓扑顺序、候选域 Base Output、直接数据 View、Interactive consumer、派生 View、内容绑定和最终影响上界；
 - Named Output 到直接 View consumer 的反向索引，以及首次水合的固定顺序。
 
@@ -105,6 +119,8 @@ Query Planner / Interactive Planner
 Server Pipeline / AI context / dependencies CLI
 Canvas Runtime / HTML Export / Web Component Adapter
 ```
+
+诊断 UI 也是该契约的只读投影，不维护第二份依赖图：Header 只显示 Source 与 Dataset Transform 的 Query 层状态；每个 View 的标题栏按拓扑序持有自身可达的 Query/Interactive 节点和最终 Renderer 状态。View 信号灯只在 `queued/loading/stale/error/cancelled/unavailable` 时出现，`not_run/ready/empty` 自动隐藏。这样正常阅读没有常驻技术噪音，分支卡住时又能直接定位到具体 Source、Interactive Transform 或 Renderer；导出 HTML 的 Query 节点已经固化为 Ready，因此只会短暂显示端侧计算和渲染状态。
 
 Browser Runtime 注册 Transform 和 View 时会核对 data inputs、Control inputs、Query Parameter inputs 与 Output names；任何注册结果和编译契约不一致都会直接失败，不能静默运行另一张图。注册 payload 只承担 drift assertion，调度器、View 等待态和声明式 Renderer 实际读取的输入都来自 Dependency Contract，不会“校验契约后又执行原始配置”。浏览器不根据 DOM 或作用域层级猜测 Control 依赖，统一使用契约中的 `control_order`、`depends_on` 与 `dependency_ancestors`。
 
@@ -145,18 +161,17 @@ View 点击、框选或表格行选择不是第三个一级入口，也不拥有
 - 进入节点执行上下文和缓存键的是投影后的本地 `context.query_inputs`，未声明的全局参数不可读取。
 - 修改草稿但没有重新查询时，页面仍展示上一次 Run 的已提交值和结果。
 
-`query_inputs` 的 key 是节点本地名称，也是 SQL named placeholder 或 Python/Browser Context 的 key；value 是 canonical Query Parameter id。字符串是直接绑定的简写，结构化绑定可投影 `date_range`：
+`query_inputs` 的 key 是节点本地名称，也是 SQL named placeholder 或 Python/Browser Context 的 key；value 是 canonical Query Parameter id。字符串是直接绑定的简写，结构化绑定可投影 `range_input/date`：
 
 ```yaml
 query_parameters:
   - id: job_date_range
-    type: date_range
+    type: range_input
+    value_type: date
     required: true
     default:
-      mode: relative
-      anchor: today
-      start_offset: -3d
-      end_offset: -1d
+      - {mode: relative, anchor: today, offset: -3d}
+      - {mode: relative, anchor: today, offset: -1d}
 
 sources:
   - id: sales
@@ -174,7 +189,7 @@ where warehouse_id = :warehouse_id
   and job_date between :start_date and :end_date
 ```
 
-相对日期不是自由格式字符串。当前严格语法只接受 `anchor: today` 与整数日偏移 `±Nd`/`0d`；单日期使用 `offset`，日期范围使用 `start_offset/end_offset`。`today` 按 `workspace.context.timezone` 求值，并在 tab 首次构建参数表单或 CLI Run 开始时解析为具体 ISO 日期。Query Run、缓存指纹、SQL 绑定和 HTML Export 保存的都是这个具体值；导出页不会在第二天重新解释“today”。Server 启动时不预计算，避免跨午夜后继续使用旧日期。
+相对日期不是自由格式字符串。当前严格语法只接受 `anchor: today` 与整数日偏移 `offset: ±Nd/0d`。日期范围是两个独立 Date Atom 的有序对，每个端点可以是固定 ISO 日期，也可以是相对表达式，因此可以表达“固定开始日 + 相对结束日”。默认值编辑器也直接编辑这两个 Atom：每个端点只有“固定日期/相对今天”模式和一个随模式切换的值控件，不同时维护隐藏的 fixed/offset 副本，不使用 `start_offset/end_offset` 范围对象；固定模式复用运行界面的 ISO DatePicker 输入、日历与校验，相对模式使用整数 offset。`today` 按 `workspace.context.timezone` 求值，并在 tab 首次构建参数表单或 CLI Run 开始时解析为具体 ISO 日期。Query Run、缓存指纹、SQL 绑定和 HTML Export 保存的都是这个具体值；导出页不会在第二天重新解释“today”。Server 启动时不预计算，避免跨午夜后继续使用旧日期。
 
 ### Selection Control
 
@@ -202,8 +217,8 @@ Selection 的有效状态不能只看 raw value，必须由 `intent + values + c
 | `single_select` | `true` | 只能为 `false` | 始终恰好一个真实值 |
 | `single_select` | `false` | `false` | 可以从空状态开始；选中后 UI 不提供 Clear |
 | `single_select` | `false` | `true` | 可以从空状态开始、选择一个值，并再次 Clear 回明确空状态 |
-| `multi_select` | `true` | 只能为 `false` | 至少一个值，可提供不会产生空集的批量操作 |
-| `multi_select` | `false` | `true/false` | 允许或禁止用户主动进入明确空集；仍可独立使用 `all_available` |
+| `multiple_select` | `true` | 只能为 `false` | 至少一个值，可提供不会产生空集的批量操作 |
+| `multiple_select` | `false` | `true/false` | 允许或禁止用户主动进入明确空集；仍可独立使用 `all_available` |
 
 单选的 Clear 是 `explicit + []`，不是 `All`、不是“未初始化”，也不是恢复默认值。单选不合成 `All`、`Select all` 或 `Invert`；`reset` 才恢复声明的初始状态。Query Parameter/Compute Control 的可空单选对外投影为 scalar 或 `null`，Selection Control 则仍由统一 resolver 保存明确空意图。`required: true` 与 `clearable: true` 在编译期冲突。Radio.Group 本身没有自然的清空手势，因此可清空单选默认使用 Select；作者显式要求 `radio-group + clearable: true` 时，Semantic Validation 必须报错，而不是静默丢掉 Clear。
 
@@ -325,19 +340,21 @@ Base/Derived Output → Selection 选择样本 → Compute 逻辑 → Derived Ou
 controls:
   - id: region
     kind: selection
-    type: multi_select
+    type: multiple_select
     field: region
 
   - id: seed
     kind: compute
     label: 随机种子
-    type: number
+    type: single_input
+    value_type: integer
     default: 42
 
   - id: simulations
     kind: compute
     label: 模拟次数
-    type: number
+    type: single_input
+    value_type: integer
     default: 1000000
 ```
 
@@ -499,8 +516,8 @@ unavailable  → 导出页明确展示该分支不可用
 约束：
 
 - `browser-js`、`browser-python` 可以使用 `interactive`、`snapshot` 或 `unavailable`。
-- `server-python` 只能使用 `snapshot` 或 `unavailable`。
-- `server-python` 在交互 Server 中可以正常运行，但导出的 HTML 没有 Python Server；这是能力边界，不是导出器可以补齐的脚本。必须在导出时固化结果，或明确显示离线不可用。
+- `server-python` 的声明仍需给出离线意图，但只要 Dashboard 的可达 Interactive DAG 中存在 `server-python`，HTML Export 就整体不可用；Runtime 必须引导用户创建分享链接，不能把重型计算伪装成静态分支。
+- 分享链接固定创建时的 Query Parameter 与 Base Output，不允许再次 Run；Browser JS/Pyodide 继续在浏览器执行，`server-python` Interactive Transform 通过 Dataviz Server 执行。这是分享链接相对 HTML Export 唯一增加的计算能力。
 - `snapshot` 必须把影响结果的 selection/compute Controls 以只读上下文展示，不能留下能修改但不会重算的假控件。
 - `unavailable` 必须显示原因和需要 Server 的能力，不能静默留白。
 - `browser-python` 的“支持 HTML”不等于自动得到单文件报告；Pyodide、WASM 和 wheel 必须由明确的 `cdn` 或 `bundle` asset policy 提供。
@@ -512,6 +529,11 @@ unavailable  → 导出页明确展示该分支不可用
 ```text
 workspace/
 ├── workspace.yaml
+├── shared_caches/                 # Server 分享结果，不进入 dashboards/
+│   └── <dashboard>_<timestamp>_<run>/
+│       ├── manifest.json
+│       ├── query-result.json
+│       └── artifacts/
 ├── auth/
 │   ├── adapters.yaml
 │   └── adapters.local.yaml
@@ -527,7 +549,8 @@ workspace/
 ```
 
 - Dashboard 文件夹末级名称是导航显示名，不存在额外导航别名。
-- `##` 前的片段表达逻辑目录；`__TRASH__##` 表示回收站，只改名、不删除文件。
+- `##` 前的片段表达逻辑目录；Dashboard 首次删除只把物理目录改名为 `__TRASH__##原完整名称`，不删除文件。回收站始终显示去掉该前缀后的完整物理名称，例如 `shein##sale_analysis`，而不是只显示叶子名。
+- 空目录树没有可恢复的 Dashboard 资产，删除时直接从 `workspace.yaml` 移除，不进入回收站；Trash Loader 也不展示没有 Dashboard 后代的空目录。回收站右键“永久删除”必须再次确认，确认后才删除对应的 `__TRASH__##` 磁盘目录，且不可恢复。
 - `dashboard.id` 是 CLI、API、DAG、缓存与状态使用的稳定机器 ID。
 - 所有机器 ID 使用同一可移植语法：ASCII 字母或下划线开头，只含字母、数字、点、下划线、连字符，不能以点结尾或使用 Windows 保留设备名。显示语言属于文件夹名、title/label/description；机器 ID 不承担展示职责。
 - `title`、`subtitle`、`description` 是页面内容，可以与文件夹名称不同。
@@ -535,6 +558,8 @@ workspace/
 `workspace.yaml` 只承担 Workspace 元数据、Runtime 配置、空目录和顺序等无法从 Dashboard 文件夹推导的状态。加载 Workspace 时按磁盘发现 Dashboard；单个损坏 Dashboard 不得拖垮整个 Workspace。
 
 Dashboard 只引用逻辑 Adapter 名称，不保存账号、密码或连接 URL。分享 Dashboard 时，同事只需要绑定自己的 Workspace Adapter。Dataviz 自己不会把 Adapter secret 序列化进浏览器、HTML 或查询证据，并会从错误、日志和 traceback 中脱敏；但可信 Python Source 拿到 Adapter 后仍能主动把任意值作为业务 Output 返回，作者必须避免输出凭据。
+
+Server 的 SHARE 菜单只保留“分享链接”和“导出 HTML”两个动作。分享链接为 `/shared/<share-id>`，每次创建都原子写入 `workspace/shared_caches/<dashboard>_<UTC timestamp>_<run>/`；目录保存 Query Result、选择/计算状态、清单和经过哈希验证的 Artifact，不污染 `dashboards/`。打开链接时 Server 为每个浏览器会话恢复一份不可变 Query Run：Query Parameter 只读且不能 Run，Browser Runtime 继续端侧交互，Server Python Interactive Transform 复用现有 Interaction endpoint。Server 重启后仍可从该目录恢复；v1 不自动过期、不随 Dashboard 修改或删除而清理，用户可以直接删除整个子目录。分享页仍依赖当前 Workspace 中兼容的 Dashboard/Transform 定义和正在运行的 Dataviz Server，不是离线文件，也不承诺跨不兼容代码变更继续运行。
 
 Adapter 只有两个权威位置：提交到 Git 的 `auth/adapters.yaml` 保存非敏感定义，本地忽略的 `auth/adapters.local.yaml` 按同名键覆盖凭证。Runtime 不扫描根目录旧文件或 `*.example.yaml`，避免多个隐式来源造成覆盖顺序不确定。
 
@@ -580,7 +605,7 @@ Compiler 为每个 Dashboard 快照生成唯一的 `dataviz/layout-contract/v1`�
 
 模板提供结构默认值，不静默吞掉显式属性：`grid` 中显式 span 覆盖模板默认；`single` 必须恰好包含一个全宽 View，声明多个 View 或额外 span 属于确定性冲突；`split`、`comparison`、`chart-and-table` 等模板声明默认比例，并明确哪些结构属性允许覆盖。任意 View 的最终 span 和行位置都必须能由 `inspect-layout` 解释。
 
-完整自定义 Canvas 是显式逃生口，Layout Contract 只记录 `mode: custom`、声明的挂载点和稳定 View/Section ID，不尝试静态解释任意 HTML/CSS。其真实几何将由浏览器 `visual-check` 检查。Dashboard v7 与 Presentation v2 已删除 Presentation 的全局 layout、Section template/columns 和 View span；旧结构字段直接校验失败。
+完整自定义 Canvas 是显式逃生口，Layout Contract 只记录 `mode: custom`、声明的挂载点和稳定 View/Section ID，不尝试静态解释任意 HTML/CSS。其真实几何将由浏览器 `visual-check` 检查。Dashboard v8 与 Presentation v2 已删除 Presentation 的全局 layout、Section template/columns 和 View span；旧结构字段直接校验失败。
 
 ### 最终配置的 Semantic Validation
 
@@ -592,7 +617,11 @@ Schema 合法不等于配置有效。Semantic Validation 必须在 Dashboard、P
 
 `--strict` 只把 `warning/error` 作为门禁，不能因主观 `advice` 失败。所有诊断必须有稳定 code、文件/字段、最终有效值、冲突来源和最小修复建议；Validator 不得维护第二套 Layout 或 Dependency 推导。
 
-默认 Theme 是 `business`：冷灰页面、白色分析卡片、靛蓝主色、低阴影和紧凑数据表。Server、导出 HTML、Plotly、ECharts、普通 Table、Perspective 与 Data Entry Component 共同消费一组 Theme token，避免每个 Renderer 各带一套视觉。`plain` 是更克制的中性版本，`editorial` 与 `terminal` 分别用于叙事报告和深色技术监控；Dashboard 仍可通过 token、`css_class` 和局部 CSS 覆盖，而不改数据语义。
+产品外壳与分析画布属于两层视觉所有权，但默认不制造两张彼此竞争的“大卡片”。Server 与导出 HTML Header、Sidebar 及 Workbench 使用连续近白表面；Sidebar 只用轻微表面色差、发丝线和近乎不可见的环境阴影确认导航边界，不形成悬浮卡片。靛蓝用于当前项、主操作和默认分析序列，绿色只表示 Ready/成功等语义状态。这些稳定 Shell token 不跟随 Dashboard Theme 染色，因此切换 `business`、`editorial` 或 `terminal` 时操作入口仍保持一致且退居背景。Dashboard 默认 Theme 是 `business`：白色画布、白色分析卡片、靛蓝分析强调、轻边框、极低阴影和紧凑数据表。Plotly、ECharts、普通 Table、Perspective 与 Data Entry Component 共同消费 Dashboard Theme token。`plain` 是更克制的中性版本，`editorial` 与 `terminal` 分别用于叙事报告和深色技术监控；Dashboard 可通过 token、`css_class` 和局部 CSS 覆盖画布视觉，但不得越界重写 Shell。
+
+Server 与 portable HTML 是同一分析 Shell 的两个 Host，而不是两套独立主题。`presentation.shell` 唯一拥有 Header 高度、基础正文字号/行高、操作间距、Query Card、Panel 表面、字段 label 和输入控件尺寸；Server `server.css` 只拥有 Sidebar、导航、编辑器和 Server-only 诊断。Query Card 与 Canvas 使用同一个 `clamp(22px, 3vw, 48px)` 页面 gutter，不得再用独立 `max-width` 在宽屏上二次收窄。两种 Host 可以有不同操作能力，但同一个 Dashboard 从 Server 导出后，Header、Query/Control Panel 与正文排版不能发生视觉跳变。Dashboard 自定义 CSS 最后加载，只可有意覆盖 Canvas 内容，不应复制或重写 Host Shell。
+
+Sidebar 默认宽度是 250px，可拖拽调整并按浏览器 Tab 记忆；双击分隔区恢复默认宽度。目录和 Dashboard 名称始终单行显示，空间不足时使用省略号，并只在确实发生截断时通过悬停或键盘聚焦显示物理目录中的完整名称。导航显示名不得回退到 Dashboard `title` 别名。
 
 视觉语言也是公开 Authoring Contract，而不只是默认 CSS。AI 在编写 Presentation 或 Dashboard 自有样式前，应读取 `dataviz docs design-language --format json`；其中固定了信息层级、语义颜色、空间节奏、图表/表格/Data Entry 规则、渐进扩展顺序与验收清单。人类可阅读版本见 [Dashboard 视觉语言](docs/design-language.md)。品牌化可以改变 accent、字体和构图，但不能破坏状态色、弹层、键盘、滚动、响应式和 Renderer 生命周期语义。
 
@@ -608,7 +637,13 @@ Schema 合法不等于配置有效。Semantic Validation 必须在 Dashboard、P
 
 默认布局是文档流。`grid`、`split`、`chart-and-table` 等只是可编译的语义模板，不是 Mosaic、拖拽坐标或固定画布协议。
 
-Header 把 Query 收敛为一个 split control：主按钮执行 `Run query`，相邻箭头控制 Header 内联的 Query Parameters 区域。参数区默认展开并占据正常文档流，展开时把 Canvas 向下推；它不属于 Overlay Runtime，点击外部或按 `Esc` 不改变状态。折叠状态按浏览器 tab 与 Dashboard 保存；没有 Query Parameter 时退化为普通 Run 按钮。Controls 仍是临时托盘，在同一面板里按 DATA（selection）与 LOGIC（compute）分组，并由外部点击或 `Esc` 关闭。Query 默认最多使用四个具有可读最小宽度的轨道，容器变窄时减少列数而不是继续挤压；`columns` 是响应式最大列数，控件默认 `span: 1`，只有 Presentation 显式声明 `span: 2` 才跨列，RangePicker 等组件不根据类型自动变宽。过高内容在面板内部滚动。Dashboard 可在 `presentation.yaml` 的 `control_panels.query`、`control_panels.dashboard` 中调整布局，Section/View 可在各自 Presentation 条目的 `controls` 中调整局部托盘。Presentation 不得重写值、kind、校验、级联、tab 隔离或执行事件；Query 在导出 HTML 中只是固定快照，scoped Controls 保持交互。
+Server Header 是横跨整个 viewport 的唯一全局栏。左侧依次是可点击的 Dataviz Logo/品牌名和 Query 节点信号灯，右侧依次放 SHARE、Dashboard Controls，最右侧固定为“查询 + ▼”分段按钮；Sidebar 与 Workbench 从 Header 下方开始。Logo 本身拥有 Sidebar disclosure，不再增加独立 Navigation/折叠按钮，Sidebar 也不重复显示 “Dashboards” 标题。查询主按钮执行 Query，右侧箭头整体显示或隐藏 Query Card；不再增加独立 Parameters 按钮，也不把执行入口放进可能被隐藏的 Card。Query Parameters 是 Workbench 正常文档流中的内联 Query Card，而不是浮层或 Header 的附属白条：Card 首行只显示“查询参数”，不保留查询按钮，也不显示参数数量、说明口号、Run ID 或 Dataset 状态。字段区统一采用“业务标题在上、输入在下”的响应式网格。Server 首次进入时默认展开，之后按浏览器 tab 与 Dashboard 记忆；导出 HTML 默认折叠，沿用同一分段按钮几何，其中查询主按钮只表达已固化的查询结果、不可重新取数，箭头用于查看固定参数快照。Card 展开后占据正常文档流并把 Canvas 向下推，滚动时自然离开视口。Server 的 Shell 与隔离 Canvas iframe 组成一个阅读面：向下滚动时先消费外层尚未离开的 Query Card，再滚动 Canvas；向上时先回到 Canvas 顶部，再恢复 Query Card，不能把两者暴露成顺序相反的嵌套滚动区。Query Card 不属于 Overlay Runtime，点击外部或按 `Esc` 不改变状态；没有 Query Parameter 时不显示箭头与 Query Card，但查询和 Dashboard Controls 仍保持可用。Dashboard Controls 的临时托盘才由外部点击或 `Esc` 关闭；Selection/Compute 与影响 View 数量继续存在于 Runtime 契约和诊断信息中，但默认界面只展示业务字段标签与组件，不重复呈现 DATA/LOGIC、Selections/Calculation、作用域或影响计数。Pipeline 也不占用操作区：Compiler 生成的每个节点在 Dataviz 品牌右侧拥有一个状态灯，颜色表达状态，悬停/聚焦只显示任务名，点击进入该节点的 SQL、日志和运行证据；`Ready` 与 `Dataset query completed` 等重复文字不常驻界面。Query Card 使用容器自适应网格：`columns` 是 1–6 的最大列数，`column_width` 是 160–600 px 的目标轨道宽度（默认 280）。Runtime 用 Card body 宽度决定能放下几列，但参数较少时不会用 `1fr` 把少数控件强行拉满整行；轨道保持目标宽度并在右侧留下自然空白，窄屏才收敛为单列满宽。控件默认 `span: 1`，只有 Presentation 显式声明 `span: 2` 才跨列。Dashboard/Section/View Controls 默认单列；局部 Controls 只有显式选择 `grid` 时才并排，当前不继承 Query 的自动密度策略。过高内容在面板内部滚动。Dashboard 可在 `presentation.yaml` 的 `control_panels.query`、`control_panels.dashboard` 中调整布局，Section/View 可在各自 Presentation 条目的 `controls` 中调整局部托盘。Presentation 不得重写值、kind、校验、tab 隔离或执行事件；Query 在导出 HTML 中只是固定快照，scoped Controls 保持交互。
+
+原生 Shell 遵守“分析内容优先”：固定导航和 Header 使用低对比暖中性色，只让主操作、活动导航与语义状态获得强调；默认只生成必要的操作名、状态和错误，不用编号、口号、教学句或重复标题占据视觉中心。Dashboard 自己声明的 title、subtitle、description 属于业务内容，Runtime 不擅自删除；但框架说明应进入帮助、tooltip 或诊断面板，而不是永久铺在画布上。
+
+首次 Query 前的 Canvas 是安静的空状态，不是 Hero、结果卡片或错误页：使用白色连续表面，只显示 Dashboard 标题和一句行动提示，不使用大面积品牌色、阴影、夸张字号或占满视口的居中构图。Warning、Error 与 Query Contract Outdated 才能获得高强调状态样式。
+
+导出 HTML 的便携式 Header 保留紧凑 Dataviz Logo 作为报告来源标识，但不携带 Server 的 Sidebar、导航、Reload 或诊断操作；品牌标识属于 Presentation Shell，不由 Dashboard 自定义 Theme 接管。
 
 ## 8. 内容绑定
 
@@ -628,14 +663,16 @@ Header 把 Query 收敛为一个 split control：主按钮执行 `Run query`，�
 
 ### 自动分析状态
 
-标题插值是作者表达能力，不应成为用户理解当前结果的唯一办法。Runtime 为每个 tab/Dashboard/Run 维护统一的 `dataviz/state-snapshot/v1`，区分 committed Query Parameter、applied Selection、committed Compute、draft Compute 和 stale 状态。Server 与 HTML 从同一快照自动生成可配置的分析状态摘要：
+Runtime 为每个 tab/Dashboard/Run 维护统一的 `dataviz/state-snapshot/v1`，区分 committed Query Parameter、applied Selection、committed Compute、draft Compute 和 stale 状态。该快照是导出、调试、动态文案和可选状态摘要的底层证据，但默认画布不机械复述所有 Query/Control 值。
+
+只有当上下文本身具有分析价值、且无法由简洁标题自然表达时，作者才在 Presentation 中显式启用状态摘要：
 
 ```text
 仓 5740 · 商品 980464683 · 2026-08-18 至 2026-08-24
 周四 · 18:00 及之后 · 3 个日期
 ```
 
-Dashboard Header 默认展示 Query Parameter 与 Dashboard Control；Section/View 在自己的标题附近展示对应局部 Control。长多选使用数量摘要并可展开查看，不把全部值塞进标题。摘要只描述真正产生当前结果的已提交值；存在未应用草稿时单独显示“待应用”，不能提前替换 committed context。作者可以调整 label、顺序、formatter 或隐藏非关键项，但不需要手写 JS 或重复维护状态。
+启用后，Dashboard 可展示 Query Parameter 与 Dashboard Control，Section/View 可展示对应局部 Control。长多选使用数量摘要并可展开查看，不把全部值塞进标题。摘要只描述真正产生当前结果的已提交值；存在未应用草稿时单独显示“待应用”，不能提前替换 committed context。`区县 全部（7）`、`最低值 0` 这类低信息复述不应默认出现；重要上下文优先使用作者编写的动态标题、subtitle 或 description。
 
 ## 9. 渐进执行、局部失败与隔离
 
@@ -664,6 +701,8 @@ dataset:features + dashboard:sales-overview/seed (kind: compute)
 
 浏览器状态以 tab 为边界：
 
+- Server 中每个 Dashboard 拥有可复制的正式路由 `/dashboards/{dashboard_id}`；Query String 只承载该 Dashboard 的 Query Parameter 草稿。路径和参数共同构成可分享入口，不能在无法定位 Dashboard 的 Workspace 根路径上悬挂孤立参数。
+- Dashboard 切换写入浏览器历史，Query Parameter 编辑只替换当前历史项；刷新、前进/后退和新标签页打开同一链接时，都先按 URL 恢复 Dashboard 与参数，再建立 tab-local Run 和交互状态。Selection/Compute、Run ID 与凭据不进入 URL。
 - 同一 tab 可以记住当前 Dashboard 的 Query Parameter，以及 scoped Controls 的草稿/已提交值。
 - 不同 tab、浏览器和用户不共享交互状态、Run 或运行证据。
 - 一个 Dashboard 的查询或交互计算不会触发、中断另一个 Dashboard。
@@ -686,7 +725,7 @@ dataset:features + dashboard:sales-overview/seed (kind: compute)
 
 分类依据是已经解析的声明、依赖图和实际引用资产的语义签名，而不是简单地把 Dashboard 目录中的每个文件都视作页面依赖；编辑器临时文件不会无故重载 Canvas。活动 Query 始终持有启动时的不可变 Workspace 快照。若其运行期间 Query Contract 发生变化，该 Run 即使成功也只能作为历史证据，不能提交为当前结果。保存 Source 后立刻点击 Query 时，Server 会先同步尚在 debounce 窗口内的文件批次，并让 Run 返回它实际捕获的 Workspace revision。页面刷新或 tab 状态恢复时，Server 也会再次核验 Run 与当前 Query Contract，不能只依赖曾经收到过的浏览器事件。
 
-监听只覆盖 Workspace。修改 Dataviz 自身的 Python Server 源码或安装新 package 仍需要重新安装并重启进程；Workspace Runtime 中启动时创建的并发额度也需要重启。`--no-watch` 只关闭主动通知，请求时重新读取与 Header `Reload` 仍是兜底路径。
+监听只覆盖 Workspace。修改 Dataviz 自身的 Python Server 源码或安装新 package 仍需要重新安装并重启进程；Workspace Runtime 中启动时创建的并发额度也需要重启。`--no-watch` 只关闭主动通知，请求时重新读取与 Workspace update 提示中的显式 Reload 仍是兜底路径。
 
 ## 10. 数据执行与可审查性
 
@@ -711,7 +750,11 @@ Dataset Transform 与 `server-python` Interactive Transform 都是可信单机 P
 - Data Entry：Input、InputNumber、AutoComplete、Checkbox、Switch、Radio.Group、Select、Checkbox.Group、Cascader、TreeSelect、DatePicker、RangePicker、Slider。
 - Query Parameter、Selection Control 与 Compute Control 共用这套组件，但保留各自 delta、作用域、提交和执行语义。
 
-值语义、作用域与展示组件是三个正交维度。`dashboard.yaml` 拥有 type/default/required/clearable/options/suggestions/min/max/step/path_fields 等可验证逻辑；Control 的 Dashboard/Section/View 位置拥有作用域；`presentation.yaml.control_components` 只选择 UI 组件及 `span` 等视觉排版。Single Select 只渲染声明的真实选项，不合成 `All`、`Select all` 或 `Invert`，但 optional Single Select 可以显式 `clearable: true`，从一个值回到明确空状态。Multi Select 才拥有批量操作，并由 `required`、`clearable` 与 `max_selected` 决定合法集合。RangePicker 使用一个触发器和一个浮层日历，在同一上下文中依次选择开始、结束日期；宽屏显示相邻双月，窄屏收敛为单月，preset、范围预览、键盘导航与范围边界属于同一个 Component Contract。组件语义不决定网格宽度，因此 RangePicker 默认也只占一轨。
+值语义、作用域与展示组件是三个正交维度。`dashboard.yaml` 拥有 type/default/required/clearable/options/suggestions/min/max/step/path_fields 等可验证逻辑；Control 的 Dashboard/Section/View 位置拥有作用域；`presentation.yaml.control_components` 只选择 UI 组件及 `span` 等视觉排版。Single Select 只渲染声明的真实选项，不合成 `All`、`Select all` 或 `Invert`，但 optional Single Select 可以显式 `clearable: true`，从一个值回到明确空状态。Checkbox Group 只用于 2–5 个少量并列多选：可清空时直接取消最后一项，必选时保留最后一项，不额外显示 All/Invert/Clear 工具栏。更大的平面多选使用 Select，层级多选使用 Cascader 或 TreeSelect。
+
+DatePicker 与 RangePicker 不使用浏览器原生 `date` 外观作为产品界面，因为其日期格式、图标、日历语言和弹层样式会随浏览器漂移。两者统一显示并保存 `YYYY-MM-DD`：输入连续八位数字时按 `yyyy → mm → dd` 自动分段，例如 `20260809` 变为 `2026-08-09`；粘贴和直接编辑 ISO 文本走同一路径，真实日期、min/max 与范围顺序继续按值契约校验。日历按钮只负责打开同款 Dataviz 浮层，不取代文本输入；浮层标题以年、月下拉框支持直接跳转，左右箭头只用于相邻月微调。RangePicker 在一个连续边框内提供两个无独立边框的可编辑端点，宽屏显示相邻双月、窄屏收敛为单月；preset、键盘导航与范围边界属于同一个 Component Contract，没有 preset 时不保留空工具条，没有 Clear/Apply 动作时也不重复显示已在输入框中可见的日期范围。组件语义不决定网格宽度，因此 RangePicker 默认也只占一轨。
+
+Table 默认只呈现列头和数据行，不为 `N rows` 单独占据一条元信息行；作者确实需要显式行数证据时才启用 `options.show_count: true`。空数据仍使用统一 Empty 状态，不能把“0 rows”元信息误当成空状态替代品。
 
 `options.mode=static` 的 `choices` 是封闭候选集合，而不是动态数据域的标签缓存。维度成员来自 Source 时必须使用 `options.mode=infer`，由 `options.source` 或消费 View 的 Base Output 推导；否则 Source 新增但未写入静态枚举的值会被有意排除。候选域来源与初始选择意图分开，避免 Dashboard 同时维护数据和一份易漂移的默认值/白名单。
 
@@ -732,7 +775,7 @@ Dataset Transform 与 `server-python` Interactive Transform 都是可信单机 P
 | `runtime.control` | canonical native value、共享事件、键盘与浮层桥接 |
 | `control.*` | 每个 Data Entry Component 的唯一 controller、adapter、CSS、Story 与测试声明 |
 
-Package 内的 `test.yaml` 是机器可读验收声明，不是测试执行器；`dataviz components --check` 验证 Package 元数据、资产和声明，真实行为由 pytest 与浏览器 E2E 执行。当前 Registry v4 有 20 个 package-owned Package，其中 13 个是独立 `control.*` Data Entry Package，不存在 bridge implementation。
+Package 内的 `test.yaml` 是机器可读验收声明，不是测试执行器；`dataviz components --check` 验证 Package 元数据、资产和声明，真实行为由 pytest 与浏览器 E2E 执行。当前 Registry v5.3 有 21 个 package-owned Package，其中 14 个是独立 `control.*` Data Entry Package，不存在 bridge implementation。
 
 Gallery 是这些契约的可执行说明，而不是截图目录。Control、View、Section 各自拥有 ready/loading/stale/empty/error/cancelled/unavailable 七状态矩阵；Select 另外提供真实含 10、100、1,000 个原生 option 的 Story，验证搜索、自动虚拟化、键盘和有界可视 DOM。
 
@@ -788,15 +831,15 @@ AI 的默认工作应该是选择模板、绑定 Output、填写状态依赖和�
 
 | 契约 | 版本 |
 | --- | --- |
-| Dashboard schema | `dataviz/dashboard/v7` |
+| Dashboard schema | `dataviz/dashboard/v8` |
 | Presentation schema | `dataviz/presentation/v2` |
 | Source schema | `dataviz/source/v2` |
-| Dashboard Dependency Contract | `dataviz/dependency-contract/v4` |
+| Dashboard Dependency Contract | `dataviz/dependency-contract/v5` |
 | Dashboard Layout Contract | `dataviz/layout-contract/v1` |
 | Browser Runtime Manifest/Event | `dataviz/runtime/v5` |
 | Dataset Transform schema | `dataviz/dataset-transform/v2` |
 | Interactive Transform schema | `dataviz/interactive-transform/v2` |
-| Component Registry | `4.2.0` |
+| Component Registry | `5.4.0` |
 
 已经实现：
 
@@ -819,7 +862,7 @@ AI 的默认工作应该是选择模板、绑定 Output、填写状态依赖和�
 17. View 可通过一条 `control_binding` 双向绑定现有 Selection Control。Dependency Contract v4 编译唯一 writer 与普通 consumers；Plotly、ECharts、Table 和 Custom Renderer 只通过类型化 Adapter Action 写 canonical state，并拒绝越界、第二 writer、旧 generation 与反向作用域依赖。
 18. Layout Contract v1 是声明式页面结构的唯一编译结果；Dashboard 拥有顺序、模板、columns 与 span，Presentation v2 只拥有视觉。默认 Renderer、Server、HTML、AI context 与 validate 共用该契约，自定义 Canvas 只暴露稳定 mount points。
 19. Semantic Validation 在最终 Layout/Dependency/Renderer 配置上输出稳定 error/warning/advice；`inspect-layout` 公开编译后的行列与来源，不维护第二张布局图。
-20. `state-snapshot/v1` 是当前分析状态的只读证据；默认画布在 Dashboard/Section/View 三层展示 committed/applied 值，并把 Compute draft 明确标成待应用。
+20. `state-snapshot/v1` 是当前分析状态的只读证据；默认画布不展示状态胶囊。作者显式启用后，Dashboard/Section/View 才展示 committed/applied 值，并把 Compute draft 明确标成待应用。
 21. browser-js/browser-python 默认 `auto`，server-python 默认 `apply`；显式 trigger 仍优先。`query/output/compute` 默认返回紧凑 `dataviz/cli-result/v1`，调试证据通过 `--detail debug|full` 获取。
 22. Custom Renderer 通过 `context.charts.plotly/echarts` 复用平台 Theme、滚轮、Resize、Update 与 Dispose；`visual-check` 对 Server/Report 执行真实浏览器几何和永久 Loading 检查并保存截图。
 
@@ -833,7 +876,7 @@ AI 的默认工作应该是选择模板、绑定 Output、填写状态依赖和�
 6. 当前协调模型是单进程：`dataviz serve` 启动一个进程，Run、Navigation、Cache 与报告发布锁不提供跨进程互斥；多个进程不得同时写同一 Workspace/输出路径。Runtime 并发上限在启动时捕获，修改配置后需重启。
 7. Server 不提供账号体系或 HTTP 鉴权，默认只绑定回环地址；非回环 `--host` 必须显式使用 `--allow-remote`，访问控制由可信网络或外部代理承担。`session_id` 是 tab 状态命名空间，不是身份认证。
 8. Semantic Validation 只判断确定性 no-op 与保守启发式；它不会根据未知真实数据规模判定图表是否适合，也不会替代人工审美判断。
-9. 自动分析状态覆盖默认 Canvas；完整自定义 Canvas 需要显式放置稳定的 state-summary mount，平台不会猜测任意 HTML 的标题区域。
+9. 可选分析状态摘要覆盖默认 Canvas；完整自定义 Canvas 即使启用摘要，也需要显式放置稳定的 state-summary mount，平台不会猜测任意 HTML 的标题区域。
 10. visual-check 判断溢出、裁切、重叠、零尺寸、永久 Loading、Perspective 高度和 Console error，不判断配色、业务图表选择或叙事质量。
 
 Component Registry 独立版本化，只在公共组件契约变化时升级，不跟随 Dashboard schema 机械改号。
@@ -843,7 +886,7 @@ Component Registry 独立版本化，只在公共组件契约变化时升级，�
 以下内容不是待恢复功能：
 
 - 不以中心 Server 数据库保存页面和多人编辑状态；Git/文件夹是协作边界。
-- 不把网页可视化编辑器作为主要开发路径。
+- 不提供可编辑数据逻辑、依赖、布局和样式的通用网页开发器；Server 只保留默认值、静态候选项与同级顺序的受限人工调参面。
 - 不使用 Filter/exclude；Selection 只表达 include。
 - 不把 Selection 与 Compute 的 Runtime 语义抹平成无类型参数；统一入口必须保留显式 `kind`。
 - 不支持任意 Filter Group 或一个 View 同时归属多个组。

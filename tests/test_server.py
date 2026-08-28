@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import shutil
 from datetime import datetime, timedelta
@@ -63,9 +64,295 @@ def test_server_exposes_active_presentation_contract():
         "template": "auto",
         "width": "auto",
         "columns": None,
+        "column_width": None,
         "density": "comfortable",
     }
     assert not [item for item in summary["diagnostics"] if item["level"] == "error"]
+
+
+def test_parameter_editor_updates_only_defaults_static_choices_and_sibling_order(
+    tmp_path: Path,
+):
+    root = tmp_path / "workspace"
+    shutil.copytree(ROOT / "examples" / "feature-showcase", root)
+    path = (
+        root
+        / "dashboards"
+        / "功能示例##parameter-playground"
+        / "dashboard.yaml"
+    )
+    path.write_text("# author note must survive\n" + path.read_text(encoding="utf-8"), encoding="utf-8")
+    client = TestClient(create_app(root, watch=False))
+
+    shell = client.get("/")
+    assert shell.status_code == 200
+    assert 'id="parameter-editor-dialog"' in shell.text
+    assert 'id="run-button"' in shell.text
+    assert 'id="dashboard-controls-control"' in shell.text
+    assert "右键编辑" in shell.text
+
+    contract = client.get(
+        "/api/dashboards/parameter-playground/parameter-editor"
+    )
+    assert contract.status_code == 200
+    editor = contract.json()
+    groups = {group["owner"]: group for group in editor["groups"]}
+    assert {"query", "dashboard", "section:experiment", "view:parameter-line", "view:parameter-table"} == set(groups)
+    assert groups["view:parameter-line"]["items"] == []
+
+    response = client.patch(
+        "/api/dashboards/parameter-playground/parameter-editor",
+        json={
+            "revision": editor["revision"],
+            "group": {
+                "owner": "query",
+                "order": ["row_count", "multiplier"],
+                "items": [
+                    {"id": "row_count", "default": 24},
+                    {"id": "multiplier", "default": 3},
+                ],
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    editor = response.json()["editor"]
+
+    dashboard_group = next(
+        group for group in editor["groups"] if group["owner"] == "dashboard"
+    )
+    response = client.patch(
+        "/api/dashboards/parameter-playground/parameter-editor",
+        json={
+            "revision": editor["revision"],
+            "group": {
+                "owner": "dashboard",
+                "order": ["segment"],
+                "items": [
+                    {
+                        "id": "segment",
+                        "default": ["Alpha", "Delta"],
+                        "choices": [
+                            {"label": "Alpha", "value": "Alpha"},
+                            {"label": "Delta", "value": "Delta"},
+                        ],
+                    }
+                ],
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    source = path.read_text(encoding="utf-8")
+    saved = yaml.safe_load(source)
+    assert source.startswith("# author note must survive")
+    assert [item["id"] for item in saved["query_parameters"]] == [
+        "row_count",
+        "multiplier",
+    ]
+    assert [item["default"] for item in saved["query_parameters"]] == [24, 3]
+    assert saved["controls"][0]["default"] == ["Alpha", "Delta"]
+    assert saved["controls"][0]["options"]["choices"] == [
+        {"label": "Alpha", "value": "Alpha"},
+        {"label": "Delta", "value": "Delta"},
+    ]
+    assert dashboard_group["items"][0]["choices_editable"] is True
+
+
+def test_parameter_editor_exposes_nested_groups_and_rejects_stale_revisions(
+    tmp_path: Path,
+):
+    root = tmp_path / "workspace"
+    shutil.copytree(ROOT / "examples" / "feature-showcase", root)
+    client = TestClient(create_app(root, watch=False))
+    url = "/api/dashboards/cascade-explorer/parameter-editor"
+    editor = client.get(url).json()
+    groups = {group["owner"]: group for group in editor["groups"]}
+
+    assert set(groups) == {
+        "query",
+        "dashboard",
+        "section:geography",
+        "section:files",
+        "view:map-bars",
+        "view:city-detail",
+        "view:uploaded-file",
+        "view:bundled-file",
+    }
+    assert groups["query"]["items"] == []
+    assert groups["section:files"]["items"] == []
+    assert groups["view:map-bars"]["items"] == []
+    assert groups["section:geography"]["items"][0]["option_source"] == "infer"
+    assert groups["section:geography"]["items"][0]["default_editable"] is False
+    view = groups["view:city-detail"]
+
+    response = client.patch(
+        url,
+        json={
+            "revision": editor["revision"],
+            "group": {
+                "owner": "view:city-detail",
+                "order": ["min_value", "district"],
+                "items": [
+                    {"id": "min_value", "default": 10},
+                    {"id": "district", "default": None, "choices": []},
+                ],
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    saved = load_workspace(root).dashboard("cascade-explorer").definition
+    city_detail = next(item for item in saved.views if item.id == "city-detail")
+    assert [item.id for item in city_detail.controls] == ["min_value", "district"]
+    assert city_detail.controls[0].default == 10
+
+    stale = client.patch(
+        url,
+        json={
+            "revision": editor["revision"],
+            "group": {
+                "owner": view["owner"],
+                "order": view["order"],
+                "items": [
+                    {
+                        "id": item["id"],
+                        "default": item["default"],
+                        "choices": item["choices"] if item["choices_editable"] else [],
+                    }
+                    for item in view["items"]
+                ],
+            },
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["details"]["code"] == "parameter_editor_revision_conflict"
+
+
+def test_parameter_editor_round_trips_relative_date_defaults(tmp_path: Path):
+    root = tmp_path / "workspace"
+    shutil.copytree(ROOT / "examples" / "feature-showcase", root)
+    client = TestClient(create_app(root, watch=False))
+    url = "/api/dashboards/date-parameter-lab/parameter-editor"
+    editor = client.get(url).json()
+    query = next(group for group in editor["groups"] if group["owner"] == "query")
+
+    assert query["items"][0]["default"] == {
+        "mode": "relative",
+        "anchor": "today",
+        "offset": "-1d",
+    }
+    assert query["items"][1]["default"] == [
+        {"mode": "relative", "anchor": "today", "offset": "-7d"},
+        {"mode": "relative", "anchor": "today", "offset": "-1d"},
+    ]
+
+    response = client.patch(
+        url,
+        json={
+            "revision": editor["revision"],
+            "group": {
+                "owner": "query",
+                "order": ["report_range", "analysis_date"],
+                "items": [
+                    {
+                        "id": "report_range",
+                        "default": [
+                            {"mode": "relative", "anchor": "today", "offset": "-14d"},
+                            {"mode": "relative", "anchor": "today", "offset": "-2d"},
+                        ],
+                    },
+                    {
+                        "id": "analysis_date",
+                        "default": {
+                            "mode": "relative",
+                            "anchor": "today",
+                            "offset": "-2d",
+                        },
+                    },
+                ],
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    saved = yaml.safe_load(
+        (
+            root
+            / "dashboards"
+            / "功能示例##date-parameter-lab"
+            / "dashboard.yaml"
+        ).read_text(encoding="utf-8")
+    )
+    assert [item["id"] for item in saved["query_parameters"]] == [
+        "report_range",
+        "analysis_date",
+    ]
+    assert saved["query_parameters"][0]["default"][0]["offset"] == "-14d"
+    assert saved["query_parameters"][1]["default"]["offset"] == "-2d"
+
+
+def test_parameter_editor_can_mix_fixed_and_relative_range_endpoints(tmp_path: Path):
+    root = tmp_path / "workspace"
+    shutil.copytree(ROOT / "examples" / "feature-showcase", root)
+    client = TestClient(create_app(root, watch=False))
+    url = "/api/dashboards/date-parameter-lab/parameter-editor"
+    editor = client.get(url).json()
+
+    response = client.patch(
+        url,
+        json={
+            "revision": editor["revision"],
+            "group": {
+                "owner": "query",
+                "order": ["analysis_date", "report_range"],
+                "items": [
+                    {"id": "analysis_date", "default": "2026-08-20"},
+                    {
+                        "id": "report_range",
+                        "default": [
+                            "2026-08-01",
+                            {"mode": "relative", "anchor": "today", "offset": "-1d"},
+                        ],
+                    },
+                ],
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    saved = yaml.safe_load(
+        (
+            root
+            / "dashboards"
+            / "功能示例##date-parameter-lab"
+            / "dashboard.yaml"
+        ).read_text(encoding="utf-8")
+    )
+    assert saved["query_parameters"][0]["default"] == "2026-08-20"
+    assert saved["query_parameters"][1]["default"] == [
+        "2026-08-01",
+        {"mode": "relative", "anchor": "today", "offset": "-1d"},
+    ]
+
+
+def test_nested_parameter_editor_actions_are_server_context_menus_only():
+    renderer = (ROOT / "src" / "dataviz" / "rendering" / "canvas.py").read_text()
+    runtime = (
+        ROOT / "src" / "dataviz" / "server" / "static" / "canvas-runtime.js"
+    ).read_text()
+    server_app = (
+        ROOT / "src" / "dataviz" / "server" / "static" / "app.js"
+    ).read_text()
+
+    assert "data-editor-owner" in renderer
+    assert "右键编辑默认配置" in renderer
+    assert "window.dataviz.asset_mode === 'server'" in runtime
+    assert "addEventListener('contextmenu'" in runtime
+    assert "dataviz:open-parameter-editor" in runtime
+    assert "data-dv-author-control-editor" not in renderer
+    assert "parameter-editor__drag-handle" in server_app
+    assert "dataset.editorDateAtom" in server_app
+    assert "dataset.editorDisclosure" in server_app
+    assert "dataviz:editor-change" in server_app
+    assert '<button type="submit" class="button button--run" disabled>保存</button>' in server_app
+    assert "if (!dashboardControls().length) return" not in server_app
 
 
 def test_workspace_api_resolves_relative_query_defaults_to_concrete_tab_values(
@@ -78,15 +365,13 @@ def test_workspace_api_resolves_relative_query_defaults_to_concrete_tab_values(
     definition["query_parameters"].append(
         {
             "id": "job_date_range",
-            "type": "date_range",
+            "type": "range_input", "value_type": "date",
             "label": "Job date range",
             "required": True,
-            "default": {
-                "mode": "relative",
-                "anchor": "today",
-                "start_offset": "-3d",
-                "end_offset": "-1d",
-            },
+            "default": [
+                {"mode": "relative", "anchor": "today", "offset": "-3d"},
+                {"mode": "relative", "anchor": "today", "offset": "-1d"},
+            ],
         }
     )
     dashboard_path.write_text(
@@ -114,12 +399,10 @@ def test_workspace_api_resolves_relative_query_defaults_to_concrete_tab_values(
     }
 
     assert tuple(parameter["resolved_default"]) in expected
-    assert parameter["default"] == {
-        "mode": "relative",
-        "anchor": "today",
-        "start_offset": "-3d",
-        "end_offset": "-1d",
-    }
+    assert parameter["default"] == [
+        {"mode": "relative", "anchor": "today", "offset": "-3d"},
+        {"mode": "relative", "anchor": "today", "offset": "-1d"},
+    ]
 
     started = client.post(
         "/api/dashboards/sales-overview/runs",
@@ -453,6 +736,246 @@ def test_server_run_and_canvas():
     assert '"dashboard:sales/region": {"intent": "explicit", "values": ["East"]}' in report.text
 
 
+def test_initial_canvas_uses_a_quiet_waiting_state():
+    client = TestClient(create_app(WORKSPACE))
+
+    canvas = client.get(
+        "/api/dashboards/sales/canvas",
+        params={"session_id": SESSION_A},
+    )
+
+    assert canvas.status_code == 200
+    assert "设置参数后，点击 Run。" in canvas.text
+    assert "Canvas waiting" not in canvas.text
+    assert "linear-gradient" not in canvas.text
+    assert "box-shadow" not in canvas.text
+    assert "background:#fff" in canvas.text
+
+
+def test_dashboard_has_a_shareable_shell_route():
+    client = TestClient(create_app(WORKSPACE))
+
+    routed = client.get("/dashboards/sales?target_factor=2")
+    missing = client.get("/dashboards/not-a-dashboard")
+
+    assert routed.status_code == 200
+    assert 'id="canvas-frame"' in routed.text
+    assert routed.headers["cache-control"] == "no-store"
+    assert missing.status_code == 404
+
+
+def test_shared_result_is_persisted_outside_dashboards_and_survives_restart(
+    tmp_path: Path,
+):
+    root = tmp_path / "workspace"
+    shutil.copytree(
+        ROOT / "tests" / "fixtures" / "browser-worker-workspace",
+        root,
+        ignore=shutil.ignore_patterns(".dataviz", "shared_caches"),
+    )
+    session_id = "shared_result_session"
+
+    with TestClient(create_app(root, watch=False)) as client:
+        started = client.post(
+            "/api/dashboards/worker-runtime/runs",
+            json={
+                "session_id": session_id,
+                "query_parameters": {},
+                "refresh": True,
+            },
+        )
+        assert started.status_code == 200, started.text
+        run_id = started.json()["run_id"]
+        record = None
+        for _ in range(200):
+            record = client.get(
+                f"/api/runs/{run_id}", params={"session_id": session_id}
+            ).json()
+            if record["status"] in {"ready", "partial", "error"}:
+                break
+            time.sleep(0.03)
+        assert record and record["status"] == "ready", record
+
+        shared = client.post(
+            "/api/dashboards/worker-runtime/share",
+            json={
+                "session_id": session_id,
+                "run_id": run_id,
+                "selection_state": {},
+                "compute_parameters": {"dashboard:worker-runtime/delay_ms": 5},
+                "snapshot_outputs": {},
+            },
+        )
+        assert shared.status_code == 200, shared.text
+        payload = shared.json()
+
+    cache = root / payload["path"]
+    assert cache.parent == root / "shared_caches"
+    assert payload["share_id"].startswith("worker-runtime_")
+    assert payload["share_id"].endswith(f"_{run_id}")
+    assert not (root / "dashboards" / "shared_caches").exists()
+    assert not (cache / "index.html").exists()
+    assert (cache / "manifest.json").is_file()
+    assert (cache / "query-result.json").is_file()
+    assert (cache / "artifacts").is_dir()
+    manifest = json.loads((cache / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["schema"] == "dataviz/shared-cache/v1"
+    assert manifest["dashboard_id"] == "worker-runtime"
+    assert manifest["run_id"] == run_id
+
+    # A new application instance has no in-memory Run, but the persistent
+    # Query snapshot is rehydrated into an interactive shared page.
+    with TestClient(create_app(root, watch=False)) as restarted:
+        page = restarted.get(payload["url"])
+        assert page.status_code == 200
+        assert "window.datavizRuntime" in page.text
+        assert "browser-js" in page.text
+        assert 'title="导出报告已固化查询结果"' not in page.text
+        assert restarted.get(f'{payload["url"]}/manifest.json').status_code == 200
+        assert restarted.get("/shared/not-a-real-share").status_code == 404
+
+
+def test_shared_result_adds_server_python_interaction_but_html_export_rejects_it(
+    tmp_path: Path,
+):
+    root = tmp_path / "workspace"
+    shutil.copytree(
+        ROOT / "tests" / "fixtures" / "browser-worker-workspace",
+        root,
+        ignore=shutil.ignore_patterns(".dataviz", "shared_caches"),
+    )
+    transform_path = (
+        root
+        / "dashboards"
+        / "worker-runtime"
+        / "transforms"
+        / "scaled.yaml"
+    )
+    transform = yaml.safe_load(transform_path.read_text(encoding="utf-8"))
+    transform["runtime"] = "server-python"
+    transform["code"] = "scaled.py"
+    transform["export"] = {"mode": "snapshot"}
+    transform_path.write_text(
+        yaml.safe_dump(transform, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    transform_path.with_name("scaled.py").write_text(
+        """def transform(context):
+    frame = context.table("rows").copy()
+    frame["value"] = frame["value"] * context.compute_params["delay_ms"]
+    return {"main": frame}
+""",
+        encoding="utf-8",
+    )
+    dashboard_path = root / "dashboards" / "worker-runtime" / "dashboard.yaml"
+    dashboard = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    dashboard["query_parameters"] = [
+        {
+            "id": "batch",
+            "type": "single_input",
+            "value_type": "integer",
+            "label": "Batch",
+            "default": 3,
+        }
+    ]
+    dashboard_path.write_text(
+        yaml.safe_dump(dashboard, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    session_id = "shared_server_python"
+    report_request = None
+    with TestClient(create_app(root, watch=False)) as client:
+        started = client.post(
+            "/api/dashboards/worker-runtime/runs",
+            json={
+                "session_id": session_id,
+                "query_parameters": {"batch": 3},
+                "refresh": True,
+            },
+        )
+        run_id = started.json()["run_id"]
+        record = None
+        for _ in range(200):
+            record = client.get(
+                f"/api/runs/{run_id}", params={"session_id": session_id}
+            ).json()
+            if record["status"] in {"ready", "partial", "error"}:
+                break
+            time.sleep(0.03)
+        assert record and record["status"] == "ready", record
+        report_request = {
+            "session_id": session_id,
+            "run_id": run_id,
+            "selection_state": {},
+            "compute_parameters": {"dashboard:worker-runtime/delay_ms": 5},
+            "snapshot_outputs": {},
+        }
+        exported = client.post(
+            "/api/dashboards/worker-runtime/report", json=report_request
+        )
+        assert exported.status_code == 409
+        assert (
+            exported.json()["detail"]["code"]
+            == "html_export_server_runtime_unavailable"
+        )
+        shared = client.post(
+            "/api/dashboards/worker-runtime/share", json=report_request
+        )
+        assert shared.status_code == 200, shared.text
+        shared_payload = shared.json()
+
+    with TestClient(create_app(root, watch=False)) as restarted:
+        page = restarted.get(shared_payload["url"])
+        assert page.status_code == 200
+        assert "server-python" in page.text
+        assert 'title="导出报告已固化查询结果"' in page.text
+        assert '<output>3</output>' in page.text
+        run_match = re.search(r'"run_id": "(run_shared_[^"]+)"', page.text)
+        session_match = re.search(r'"session_id": "(shared_[^"]+)"', page.text)
+        assert run_match and session_match
+        restored_run_id = run_match.group(1)
+        shared_session = session_match.group(1)
+        started = restarted.post(
+            f"/api/runs/{restored_run_id}/interactions",
+            json={
+                "session_id": shared_session,
+                "transform_id": "scaled",
+                "generation": 1,
+                "compute_parameters": {"dashboard:worker-runtime/delay_ms": 6},
+                "selection_state": {},
+            },
+        )
+        assert started.status_code == 200, started.text
+        interaction_id = started.json()["interaction_id"]
+        interaction = None
+        for _ in range(200):
+            interaction = restarted.get(
+                f"/api/interactions/{interaction_id}",
+                params={"session_id": shared_session},
+            ).json()
+            if interaction["status"] in {"ready", "partial", "error", "cancelled"}:
+                break
+            time.sleep(0.03)
+        assert interaction and interaction["status"] == "ready", interaction
+        output = restarted.get(
+            f"/api/interactions/{interaction_id}/outputs/interactive:scaled/main",
+            params={"session_id": shared_session},
+        )
+        assert output.status_code == 200, output.text
+        assert [row["value"] for row in output.json()["value"]] == [6, 12]
+
+
+def test_server_shell_owns_dashboard_and_query_parameter_url_state():
+    script = (ROOT / "src" / "dataviz" / "server" / "static" / "app.js").read_text()
+
+    assert "function dashboardIdFromLocation" in script
+    assert "function queryParameterValuesFromLocation" in script
+    assert "function dashboardLocation" in script
+    assert "window.history[method]" in script
+    assert "window.addEventListener('popstate'" in script
+    assert "const button = document.createElement('a')" in script
+
+
 def test_server_shell_exposes_source_evidence_inspector():
     client = TestClient(create_app(MINIMAL_WORKSPACE))
 
@@ -559,7 +1082,7 @@ def test_server_app_selections_are_browser_only():
     assert "eventSource.close()" not in select_block
 
 
-def test_query_parameters_are_an_inline_header_tray_owned_by_the_run_control():
+def test_query_parameters_are_an_inline_query_card_toggled_by_the_header_run_control():
     template = (ROOT / "src" / "dataviz" / "server" / "templates" / "index.html").read_text()
     script = (ROOT / "src" / "dataviz" / "server" / "static" / "app.js").read_text()
 
@@ -567,13 +1090,27 @@ def test_query_parameters_are_an_inline_header_tray_owned_by_the_run_control():
     assert 'id="query-parameters-toggle"' in template
     assert 'aria-controls="query-parameters-panel"' in template
     assert 'id="query-parameters-panel"' in template
+    assert 'id="query-parameter-count"' not in template
+    assert 'id="query-state"' not in template
+    assert "Loaded dataset ·" not in script
+    assert 'class="workbench-header"' not in template
+    assert template.index('class="topbar dv-shell-header"') < template.index('id="query-parameters-control"')
+    assert template.index('class="topbar dv-shell-header"') < template.index('id="dashboard-sidebar"')
+    assert template.index('id="dashboard-sidebar"') < template.index('class="workbench"')
+    assert template.index('class="workbench"') < template.index('id="query-parameters-control"')
     query_owner = template[
         template.index('id="query-parameters-control"'):
-        template.index('</section>', template.index('id="query-parameters-control"'))
+        template.index('id="workspace-update"')
     ]
-    assert "data-header-popover" not in query_owner
-    assert "data-overlay-floating" not in query_owner
+    query_owner_tag = query_owner[:query_owner.index(">")]
+    assert "data-header-popover" not in query_owner_tag
+    assert "data-overlay-floating" not in query_owner_tag
     assert "data-control-panel-body" in query_owner
+    assert 'class="dv-query-card"' in query_owner
+    assert '<h2>查询参数</h2>' in query_owner
+    assert 'id="dashboard-controls-control"' not in query_owner
+    assert 'id="query-run-control"' not in query_owner
+    assert 'id="run-button"' not in query_owner
     assert "queryParametersOpen" in script
     assert "toggleQueryParameters" in script
     assert "setQueryParametersOpen(true, {persist: true})" in script
@@ -583,19 +1120,194 @@ def test_query_parameters_are_an_inline_header_tray_owned_by_the_run_control():
     ]
 
 
+def test_control_trays_show_business_fields_without_runtime_taxonomy():
+    template = (ROOT / "src" / "dataviz" / "server" / "templates" / "index.html").read_text()
+    script = (ROOT / "src" / "dataviz" / "server" / "static" / "app.js").read_text()
+    canvas_renderer = (ROOT / "src" / "dataviz" / "rendering" / "canvas.py").read_text()
+    package_style = (
+        ROOT / "src" / "dataviz" / "components" / "packages"
+        / "presentation.shell" / "style.css"
+    ).read_text()
+
+    assert '<header><span>DATA</span>' not in template
+    assert '<header><span>DATA</span>' not in canvas_renderer
+    assert '<header><span>LOGIC</span>' not in canvas_renderer
+    assert "data-control-impact-count hidden" in canvas_renderer
+    assert "<span hidden data-control-impact-count>" in script
+    assert "grid-template-rows: minmax(0, 1fr) auto" in package_style
+    assert "background: transparent;\n  border: 0;" in package_style
+
+
+def test_server_and_portable_html_share_one_shell_visual_contract():
+    package_style = (
+        ROOT
+        / "src"
+        / "dataviz"
+        / "components"
+        / "packages"
+        / "presentation.shell"
+        / "style.css"
+    ).read_text()
+
+    assert '--dv-shell-header-height: 58px' in package_style
+    assert ':where(.topbar, .dv-runtime-header)' in package_style
+    assert ':where(.topbar-actions, .dv-runtime-actions)' in package_style
+    assert ':where(.header-control__popover, .dv-runtime-popover)' in package_style
+    assert (
+        '.dv-runtime-query-tray > .dv-runtime-query-panel,\n'
+        '.query-parameters-control .query-parameters-panel'
+    ) in package_style
+    assert ':where(.field, .dv-report-selection, .dv-compute-control)' in package_style
+    assert '.dv-query-card-host' in package_style
+    assert 'padding: 24px clamp(22px, 3vw, 48px) 0;' in package_style
+    query_card_block = package_style[
+        package_style.index('.dv-query-card {'):
+        package_style.index('.dv-query-card__header {')
+    ]
+    assert 'max-width' not in query_card_block
+
+
+def test_header_uses_node_signal_lights_and_ends_with_share_controls_then_run():
+    template = (ROOT / "src" / "dataviz" / "server" / "templates" / "index.html").read_text()
+    script = (ROOT / "src" / "dataviz" / "server" / "static" / "app.js").read_text()
+    style = (ROOT / "src" / "dataviz" / "server" / "static" / "server.css").read_text()
+    canvas_renderer = (ROOT / "src" / "dataviz" / "rendering" / "canvas.py").read_text()
+
+    brand_end = template.index("</button>", template.index('class="brand dv-shell-brand"'))
+    signals = template.index('id="query-diagnostics"')
+    actions = template.index('class="topbar-actions dv-shell-header-actions"')
+    share = template.index('id="share-control"')
+    controls = template.index('id="dashboard-controls-control"')
+    run = template.index('id="query-run-control"')
+    query_card = template.index('id="query-parameters-control"')
+    assert brand_end < signals < actions < share < controls < run < query_card
+    assert '<strong>SHARE</strong>' in template
+    assert 'id="copy-share-link" type="button">分享链接</button>' in template
+    assert 'id="download-button" type="button" disabled>导出 HTML</button>' in template
+    assert "shared_caches" not in template
+    assert '<strong data-run-label>查询</strong>' in template
+    assert 'class="button-light"' not in template
+    assert ".query-parameters-control{" in style
+    assert ".topbar-actions>.button{width:84px;height:40px;padding:0 14px}" in style
+    assert "min-width:84px;\n  min-height:40px;" in style
+    assert ".query-run-control__copy{display:grid;gap:1px;min-width:0;text-align:center}" in style
+    assert 'class="pipeline-signal-list"' in template
+    assert 'id="query-diagnostics-label" aria-live="polite" hidden' in template
+    assert 'id="run-message" hidden' in template
+    assert "className = 'node pipeline-signal'" in script
+    assert "item.blur();\n    showNodeInspector(node);" in script
+    assert "node.type === 'source' || node.type === 'dataset_transform'" in script
+    assert "dataviz:view-pipeline-inspect" in script
+    assert 'class="pipeline-signal__tooltip"' in script
+    assert "data-node-status-label" not in script
+    assert ".pipeline-signal-list{display:flex;align-items:center;gap:8px" in style
+    assert ".pipeline-signal:hover{background:transparent}" in style
+    assert ".pipeline-signal:focus-visible .pipeline-signal__tooltip" not in style
+    assert 'class="header-control__chevron"' in template
+    assert 'class="header-control__mark" aria-hidden="true">C</span>' in template
+    assert '<strong class="header-control__label">DASHBOARD CONTROLS</strong>' in template
+    assert '<small id="dashboard-control-meta" hidden>' in template
+    assert 'class="dv-control-chevron"' in canvas_renderer
+    assert '<strong>DASHBOARD CONTROLS</strong>' in canvas_renderer
+    assert '#dashboard-controls-control>.header-control__trigger{' in style
+    assert 'background:#fff;\n  border:1px solid #e6e9e5;' in style
+    assert '.button--run{color:#fff;background:#25282d;border-color:#25282d' in style
+    assert 'background:#303a78' not in style[style.index('.query-run-control__toggle{'):style.index('.query-run-control__chevron{')]
+    assert "<i>⌄</i>" not in canvas_renderer
+    assert "PARAMETERS" not in canvas_renderer
+
+
+def test_keyboard_shortcuts_are_cross_platform_guarded_and_cross_frame():
+    template = (ROOT / "src" / "dataviz" / "server" / "templates" / "index.html").read_text()
+    script = (ROOT / "src" / "dataviz" / "server" / "static" / "app.js").read_text()
+    runtime = (
+        ROOT / "src" / "dataviz" / "server" / "static" / "canvas-runtime.js"
+    ).read_text()
+    renderer = (ROOT / "src" / "dataviz" / "rendering" / "canvas.py").read_text()
+
+    assert 'aria-keyshortcuts="B"' in template
+    assert 'aria-keyshortcuts="Q"' in template
+    assert 'aria-keyshortcuts="Control+Enter Meta+Enter"' in template
+    assert 'id="keyboard-shortcuts-dialog"' in template
+    assert 'id="shortcut-toast"' in template
+    assert "event.repeat || event.isComposing || event.keyCode === 229" in script
+    assert "(event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'Enter'" in script
+    assert "event.key.toLowerCase() === 'q'" in script
+    assert "event.key.toLowerCase() === 'b'" in script
+    assert "event.key.toLowerCase() === 'r'" not in script
+    assert "keyboardTargetIsEditable(event.target)" in script
+    assert "showShortcutToast('当前看板没有查询参数')" in script
+    assert "dataviz:keyboard-shortcut" in script
+    assert "dataviz:keyboard-shortcut" in runtime
+    assert "window.parent !== window" in runtime
+    assert 'data-runtime-shortcut-help' in renderer
+    assert 'data-runtime-shortcut-toast' in renderer
+    assert 'aria-keyshortcuts="Q"' in renderer
+    assert "showDatavizRuntimeShortcutToast('当前报告没有查询参数')" in runtime
+
+
 def test_server_sidebar_is_resizable_collapsible_and_tab_local():
     template = (ROOT / "src" / "dataviz" / "server" / "templates" / "index.html").read_text()
     script = (ROOT / "src" / "dataviz" / "server" / "static" / "app.js").read_text()
     style = (ROOT / "src" / "dataviz" / "server" / "static" / "server.css").read_text()
 
     assert 'id="sidebar-toggle"' in template
+    assert '<button id="sidebar-toggle" class="brand dv-shell-brand"' in template
+    assert '<h1 id="workspace-title">Dashboards</h1>' not in template
+    assert 'class="sidebar-toggle"' not in template
+    assert 'id="add-root-folder"' not in template
+    assert "$('#add-root-folder')" not in script
     assert 'id="sidebar-resizer"' in template
     assert 'role="separator"' in template
-    assert "sidebar: {width: state.sidebarWidth, collapsed: state.sidebarCollapsed}" in script
+    assert "width: state.sidebarWidth" in script
+    assert "customized: state.sidebarWidthCustomized" in script
+    assert "sidebarWidth: 250" in script
+    assert "state.sidebarWidth = 250" in script
+    assert "bindOverflowTitle" in script
+    assert "label.scrollWidth > label.clientWidth + 1" in script
+    assert "bindOverflowTitle(label, label, item.title)" in script
     assert "setPointerCapture" in script
     assert "['ArrowLeft', 'ArrowRight', 'Home', 'End']" in script
     assert "body.sidebar-collapsed" in style
+    assert "transform:rotate(-3deg)" not in style
+    assert "button.brand:active .brand-mark" not in style
+    assert "body.sidebar-collapsed #sidebar-toggle span{transform:rotate(180deg)}" not in style
+    assert "body.sidebar-collapsed .brand-mark{transform:rotate(360deg)}" in style
+    assert "@media(prefers-reduced-motion:reduce){.brand-mark{transition:none}}" in style
     assert "--sidebar-width" in style
+    assert "--sidebar-width:250px" in style
+    assert "text-overflow:ellipsis;white-space:nowrap" in style
+    assert ".nav-button:visited,.nav-button:hover,.nav-button:focus,.nav-button:active{text-decoration:none}" in style
+    assert ".rail{padding:0 14px 18px;color:var(--ink);background:#fff" in style
+    assert "border-right:1px solid #eceeea;box-shadow:none" in style
+    assert "--shell-header-height:58px" in style
+    assert "grid-template-rows:var(--shell-header-height) minmax(0,1fr)" in style
+    assert "grid-column:1 / -1" in style
+    assert "top:var(--shell-header-height)" in style
+    assert "height:calc(100vh - var(--shell-header-height))" in style
+    assert "button.brand" in style
+    assert ".workspace-meta" not in style
+    assert ".topbar{min-height:var(--shell-header-height)" in style
+    assert ".nav-button.active{color:#28305e;background:#f0f1f8" in style
+    assert "Quiet white shell" in style
+
+
+def test_empty_trash_is_inert_and_keeps_sidebar_geometry_stable():
+    template = (ROOT / "src" / "dataviz" / "server" / "templates" / "index.html").read_text()
+    script = (ROOT / "src" / "dataviz" / "server" / "static" / "app.js").read_text()
+    style = (ROOT / "src" / "dataviz" / "server" / "static" / "server.css").read_text()
+
+    assert 'class="nav-trash__chevron"' in template
+    assert "<i>›</i>" not in template
+    assert "暂无项目" not in script
+    assert "trash.dataset.empty = records.length === 0 ? 'true' : 'false';" in script
+    assert "if (!records.length) trash.open = false;" in script
+    assert "event.preventDefault();" in script[
+        script.index("$('#nav-trash > summary').addEventListener"):
+        script.index("$('#nav-root-drop').addEventListener")
+    ]
+    assert '.nav-trash[data-empty="true"] .nav-trash__list{display:none}' in style
+    assert ".nav-trash__chevron{display:grid;flex:0 0 16px" in style
 
 
 def test_server_diagnoses_removed_navigation_field_and_exposes_physical_dashboards(tmp_path: Path):
@@ -771,6 +1483,48 @@ def test_navigation_folders_can_be_created_nested_and_removed_safely(tmp_path: P
     assert {item["path"] for item in saved["folders"]} == {"经营分析", "经营分析/月度复盘"}
 
 
+def test_empty_folders_are_deleted_and_trashed_dashboards_can_be_purged(tmp_path: Path):
+    root = tmp_path / "workspace"
+    shutil.copytree(WORKSPACE, root)
+    client = TestClient(create_app(root))
+
+    empty = client.post("/api/navigation/folders", json={"title": "临时空目录"})
+    empty_id = empty.json()["result"]["folder_id"]
+    deleted = client.delete(f"/api/navigation/folders/{empty_id}")
+
+    assert deleted.status_code == 200
+    assert deleted.json()["result"] == {
+        "trash_id": None,
+        "deleted": True,
+        "path": "临时空目录",
+    }
+    assert not client.get("/api/workspace").json()["trash"]
+    saved = yaml.safe_load((root / "workspace.yaml").read_text(encoding="utf-8"))
+    assert "临时空目录" not in {item["path"] for item in saved["folders"]}
+
+    folder = client.post("/api/navigation/folders", json={"title": "shein"})
+    folder_id = folder.json()["result"]["folder_id"]
+    assert client.patch(
+        "/api/navigation/dashboards/sales", json={"parent_id": folder_id}
+    ).status_code == 200
+    trashed = client.delete("/api/navigation/dashboards/sales")
+    trash_id = trashed.json()["result"]["trash_id"]
+    trashed_path = root / "dashboards" / "__TRASH__##shein##sales"
+
+    trash = client.get("/api/workspace").json()["trash"]
+    assert len(trash) == 1
+    assert trash[0]["trash_id"] == trash_id
+    assert trash[0]["item"]["title"] == "shein##sales"
+    assert trashed_path.is_dir()
+
+    purged = client.delete(f"/api/navigation/trash/{trash_id}")
+    assert purged.status_code == 200
+    assert purged.json()["result"] == {"kind": "dashboard", "path": "shein##sales"}
+    assert not trashed_path.exists()
+    assert not client.get("/api/workspace").json()["trash"]
+    assert client.post(f"/api/navigation/trash/{trash_id}/restore").status_code == 409
+
+
 def test_run_ready_is_emitted_after_result_is_available():
     manager = RunManager(load_workspace(WORKSPACE))
     record = manager.start(
@@ -800,7 +1554,7 @@ def test_fast_dag_branch_publishes_output_before_slow_branch_finishes(
         encoding="utf-8",
     )
     (dashboard_root / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v7
+        """schema: dataviz/dashboard/v8
 kind: dashboard
 id: progressive
 title: Progressive branches
@@ -1208,12 +1962,12 @@ def test_query_cancel_is_tab_scoped_and_same_dashboard_run_supersedes(tmp_path: 
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v7
+        """schema: dataviz/dashboard/v8
 kind: dashboard
 id: slow
 title: Slow
 query_parameters:
-  - {id: delay, type: number, default: 2}
+  - {id: delay, type: single_input, value_type: number, default: 2}
 sources: [sources/slow.yaml]
 views:
   - {id: result, title: Result, template: table, input: source:slow/main}

@@ -36,19 +36,17 @@ def static_options(choices):
 def test_relative_date_defaults_resolve_once_in_workspace_timezone_and_project_parts():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v7",
+            "schema": "dataviz/dashboard/v8",
             "id": "relative-dates",
             "query_parameters": [
                 {
                     "id": "job_date_range",
-                    "type": "date_range",
+                    "type": "range_input", "value_type": "date",
                     "required": True,
-                    "default": {
-                        "mode": "relative",
-                        "anchor": "today",
-                        "start_offset": "-3d",
-                        "end_offset": "-1d",
-                    },
+                    "default": [
+                        {"mode": "relative", "anchor": "today", "offset": "-3d"},
+                        {"mode": "relative", "anchor": "today", "offset": "-1d"},
+                    ],
                 }
             ],
         }
@@ -94,19 +92,31 @@ def test_relative_date_default_contract_rejects_ambiguous_or_reversed_expression
         QueryParameterDefinition.model_validate(
             {
                 "id": "date",
-                "type": "date",
+                "type": "single_input", "value_type": "date",
                 "default": {"mode": "relative", "anchor": "today", "offset": "-1week"},
             }
         )
-    with pytest.raises(ValidationError, match="start_offset cannot be after"):
+    with pytest.raises(ValidationError, match="start offset cannot be after"):
         QueryParameterDefinition.model_validate(
             {
                 "id": "dates",
-                "type": "date_range",
+                "type": "range_input", "value_type": "date",
+                "default": [
+                    {"mode": "relative", "anchor": "today", "offset": "+1d"},
+                    {"mode": "relative", "anchor": "today", "offset": "-1d"},
+                ],
+            }
+        )
+    with pytest.raises(ValidationError, match="exactly two fixed or relative Date Atoms"):
+        QueryParameterDefinition.model_validate(
+            {
+                "id": "dates",
+                "type": "range_input",
+                "value_type": "date",
                 "default": {
                     "mode": "relative",
                     "anchor": "today",
-                    "start_offset": "+1d",
+                    "start_offset": "-7d",
                     "end_offset": "-1d",
                 },
             }
@@ -116,24 +126,54 @@ def test_relative_date_default_contract_rejects_ambiguous_or_reversed_expression
             {
                 "id": "date",
                 "kind": "compute",
-                "type": "date",
+                "type": "single_input", "value_type": "date",
                 "default": {"mode": "relative", "anchor": "today", "offset": "-1d"},
             }
         )
 
 
+def test_date_range_default_allows_fixed_and_relative_endpoints():
+    definition = QueryParameterDefinition.model_validate(
+        {
+            "id": "period",
+            "type": "range_input",
+            "value_type": "date",
+            "default": [
+                "2026-08-01",
+                {"mode": "relative", "anchor": "today", "offset": "-1d"},
+            ],
+        }
+    )
+    dashboard = SimpleNamespace(
+        definition=DashboardDefinition.model_validate(
+            {
+                "schema": "dataviz/dashboard/v8",
+                "id": "mixed-date-range",
+                "query_parameters": [definition.model_dump(mode="json")],
+            }
+        )
+    )
+
+    assert resolve_query_parameters(
+        dashboard,
+        None,
+        timezone_name="Asia/Shanghai",
+        current_time=datetime(2026, 8, 24, 8, tzinfo=timezone.utc),
+    ) == {"period": ["2026-08-01", "2026-08-23"]}
+
+
 def test_control_defaults_are_validated_when_the_dsl_is_loaded():
     with pytest.raises(ValidationError, match="value must be an integer"):
-        QueryParameterDefinition(id="count", type="integer", default=1.5)
+        QueryParameterDefinition(id="count", type="single_input", value_type="integer", default=1.5)
     with pytest.raises(ValidationError, match="value must be at least 1"):
         ComputeControlDefinition(
-            id="count", kind="compute", type="integer", default=0, min=1, max=10
+            id="count", kind="compute", type="single_input", value_type="integer", default=0, min=1, max=10
         )
     with pytest.raises(ValidationError, match="not one of the declared choices"):
         SelectionControlDefinition(
             id="region",
             kind="selection",
-            type="single_select",
+            type="single_select", value_type="text",
             default="missing",
             options=static_options([Choice(label="North", value="north")]),
         )
@@ -141,7 +181,7 @@ def test_control_defaults_are_validated_when_the_dsl_is_loaded():
         SelectionControlDefinition(
             id="region",
             kind="selection",
-            type="multi_select",
+            type="multiple_select", value_type="text",
             required=True,
             clearable=True,
             options=static_options([Choice(label="North", value="north")]),
@@ -149,7 +189,7 @@ def test_control_defaults_are_validated_when_the_dsl_is_loaded():
     optional_single = SelectionControlDefinition(
         id="region",
         kind="selection",
-        type="single_select",
+        type="single_select", value_type="text",
         clearable=True,
         options=static_options([Choice(label="North", value="north")]),
     )
@@ -162,7 +202,7 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
             {
                 "id": "city",
                 "kind": "selection",
-                "type": "multi_select",
+                "type": "multiple_select", "value_type": "text",
                 "field": "city",
                 "default": ["Shenzhen"],
                 "options": {"mode": "infer"},
@@ -172,7 +212,7 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
         QueryParameterDefinition.model_validate(
             {
                 "id": "city",
-                "type": "single_select",
+                "type": "single_select", "value_type": "text",
                 "options": {"mode": "infer"},
             }
         )
@@ -181,34 +221,34 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
             {
                 "id": "city",
                 "kind": "selection",
-                "type": "multi_select",
+                "type": "multiple_select", "value_type": "text",
                 "choices": [{"label": "Shenzhen", "value": "Shenzhen"}],
             }
         )
 
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v7",
+            "schema": "dataviz/dashboard/v8",
             "id": "option-intents",
             "controls": [
                 {
                     "id": "city",
                     "kind": "selection",
-                    "type": "multi_select",
+                    "type": "multiple_select", "value_type": "text",
                     "field": "city",
                     "options": {"mode": "infer"},
                 },
                 {
                     "id": "store",
                     "kind": "selection",
-                    "type": "multi_select",
+                    "type": "multiple_select", "value_type": "text",
                     "field": "store",
                     "options": {"mode": "infer", "initial": "empty"},
                 },
                 {
                     "id": "region",
                     "kind": "selection",
-                    "type": "multi_select",
+                    "type": "multiple_select", "value_type": "text",
                     "field": "region",
                     "default": ["north"],
                     "options": {
@@ -237,13 +277,13 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
 
     required_inferred = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v7",
+            "schema": "dataviz/dashboard/v8",
             "id": "required-inferred",
             "controls": [
                 {
                     "id": "city",
                     "kind": "selection",
-                    "type": "single_select",
+                    "type": "single_select", "value_type": "text",
                     "field": "city",
                     "required": True,
                     "options": {"mode": "infer"},
@@ -270,7 +310,7 @@ def test_selection_dependency_authoring_contract_is_explicit_and_strict():
         {
             "id": "dates",
             "kind": "selection",
-            "type": "multi_select",
+            "type": "multiple_select", "value_type": "text",
             "field": "job_date",
             "depends_on": ["dashboard.province", "section.city", "view.dow"],
             "options": {"mode": "infer"},
@@ -287,7 +327,7 @@ def test_selection_dependency_authoring_contract_is_explicit_and_strict():
             {
                 "id": "dates",
                 "kind": "selection",
-                "type": "multi_select",
+                "type": "multiple_select", "value_type": "text",
                 "cascade": True,
                 "options": {"mode": "infer"},
             }
@@ -297,7 +337,7 @@ def test_selection_dependency_authoring_contract_is_explicit_and_strict():
             {
                 "id": "dates",
                 "kind": "selection",
-                "type": "multi_select",
+                "type": "multiple_select", "value_type": "text",
                 "depends_on": ["dow"],
                 "options": {"mode": "infer"},
             }
@@ -307,17 +347,17 @@ def test_selection_dependency_authoring_contract_is_explicit_and_strict():
             {
                 "id": "dates",
                 "kind": "selection",
-                "type": "multi_select",
+                "type": "multiple_select", "value_type": "text",
                 "depends_on": ["view.dow", "view.dow"],
                 "options": {"mode": "infer"},
             }
         )
-    with pytest.raises(ValidationError, match="only valid for single_select or multi_select"):
+    with pytest.raises(ValidationError, match="only valid for single_select or multiple_select"):
         SelectionControlDefinition.model_validate(
             {
                 "id": "threshold",
                 "kind": "selection",
-                "type": "number",
+                "type": "single_input", "value_type": "number",
                 "depends_on": ["view.dow"],
             }
         )
@@ -381,7 +421,7 @@ def test_date_range_empty_and_open_values_have_one_canonical_shape():
     definition = SelectionControlDefinition(
         id="period",
         kind="selection",
-        type="date_range",
+        type="range_input", value_type="date",
         allow_empty=(False, True),
     )
 
@@ -391,7 +431,7 @@ def test_date_range_empty_and_open_values_have_one_canonical_shape():
         "2026-01-01",
         "",
     ]
-    with pytest.raises(Exception, match="requires a start date"):
+    with pytest.raises(Exception, match="requires a start value"):
         normalize_control_value(definition, ["", "2026-01-31"])
     with pytest.raises(Exception, match="start cannot be after end"):
         normalize_control_value(definition, ["2026-02-01", "2026-01-01"])
@@ -400,7 +440,7 @@ def test_date_range_empty_and_open_values_have_one_canonical_shape():
 def test_text_suggestions_remain_open_strings_and_obey_length_contracts():
     definition = QueryParameterDefinition(
         id="scenario",
-        type="string",
+        type="single_input", value_type="text",
         max_length=8,
         suggestions=[
             Choice(label="Base", value="base"),
@@ -414,16 +454,16 @@ def test_text_suggestions_remain_open_strings_and_obey_length_contracts():
     with pytest.raises(ValidationError, match="suggestion values must be unique"):
         QueryParameterDefinition(
             id="duplicate",
-            type="string",
+            type="single_input", value_type="text",
             suggestions=[
                 Choice(label="A", value="same"),
                 Choice(label="B", value="same"),
             ],
         )
-    with pytest.raises(ValidationError, match="suggestions are only valid for string"):
+    with pytest.raises(ValidationError, match="suggestions are only valid for single_input/text"):
         QueryParameterDefinition(
             id="count",
-            type="integer",
+            type="single_input", value_type="integer",
             suggestions=[Choice(label="One", value="1")],
         )
 
@@ -431,7 +471,7 @@ def test_text_suggestions_remain_open_strings_and_obey_length_contracts():
 def test_date_bounds_and_hierarchical_selection_shapes_are_strict():
     day = QueryParameterDefinition(
         id="day",
-        type="date",
+        type="single_input", value_type="date",
         min_date="2026-01-01",
         max_date="2026-12-31",
     )
@@ -442,7 +482,7 @@ def test_date_bounds_and_hierarchical_selection_shapes_are_strict():
     single_path = SelectionControlDefinition(
         id="district",
         kind="selection",
-        type="single_select",
+        type="single_select", value_type="text",
         path_fields=["province", "city", "district"],
         options={"mode": "infer"},
     )
@@ -457,7 +497,7 @@ def test_date_bounds_and_hierarchical_selection_shapes_are_strict():
     multiple_paths = SelectionControlDefinition(
         id="districts",
         kind="selection",
-        type="multi_select",
+        type="multiple_select", value_type="text",
         path_fields=["province", "city", "district"],
         options={"mode": "infer"},
         max_selected=2,
@@ -474,12 +514,58 @@ def test_date_bounds_and_hierarchical_selection_shapes_are_strict():
         )
 
 
-def test_portable_numbers_and_dates_reject_browser_python_ambiguities():
-    number = ComputeControlDefinition(id="ratio", kind="compute", type="number")
-    integer = ComputeControlDefinition(
-        id="identifier", kind="compute", type="integer"
+def test_multiple_input_normalizes_typed_values_and_enforces_list_contracts():
+    identifiers = QueryParameterDefinition(
+        id="identifiers",
+        type="multiple_input",
+        value_type="integer",
+        min=1,
+        max_items=3,
     )
-    day = QueryParameterDefinition(id="day", type="date")
+
+    assert normalize_control_value(identifiers, "1, 2, 3") == [1, 2, 3]
+    with pytest.raises(Exception, match="integer"):
+        normalize_control_value(identifiers, [1, 2.5])
+    with pytest.raises(Exception, match="unique"):
+        normalize_control_value(identifiers, [1, 1])
+    with pytest.raises(Exception, match="at most 3"):
+        normalize_control_value(identifiers, [1, 2, 3, 4])
+
+
+def test_numeric_range_input_uses_one_ordered_typed_pair():
+    integer_range = ComputeControlDefinition(
+        id="integer-range",
+        kind="compute",
+        type="range_input",
+        value_type="integer",
+        min=0,
+        max=10,
+        step=2,
+    )
+    number_range = ComputeControlDefinition(
+        id="number-range",
+        kind="compute",
+        type="range_input",
+        value_type="number",
+        min=0,
+        max=1,
+        step=0.05,
+    )
+
+    assert normalize_control_value(integer_range, "2,8") == [2, 8]
+    assert normalize_control_value(number_range, [0.25, 0.75]) == [0.25, 0.75]
+    with pytest.raises(Exception, match="start cannot be after end"):
+        normalize_control_value(integer_range, [8, 2])
+    with pytest.raises(Exception, match="step 2"):
+        normalize_control_value(integer_range, [1, 8])
+
+
+def test_portable_numbers_and_dates_reject_browser_python_ambiguities():
+    number = ComputeControlDefinition(id="ratio", kind="compute", type="single_input", value_type="number")
+    integer = ComputeControlDefinition(
+        id="identifier", kind="compute", type="single_input", value_type="integer"
+    )
+    day = QueryParameterDefinition(id="day", type="single_input", value_type="date")
 
     for value in (" ", "0x10", "0b10", "1_000"):
         with pytest.raises(Exception, match="must be a number"):
@@ -495,7 +581,7 @@ def test_portable_numbers_and_dates_reject_browser_python_ambiguities():
         SelectionControlDefinition(
             id="unsafe-choice",
             kind="selection",
-            type="single_select",
+            type="single_select", value_type="integer",
             options=static_options(
                 [Choice(label="unsafe", value=9_007_199_254_740_992)]
             ),
@@ -508,16 +594,16 @@ def test_portable_numbers_and_dates_reject_browser_python_ambiguities():
 def test_query_compute_and_selection_resolvers_share_strict_contracts():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v7",
+            "schema": "dataviz/dashboard/v8",
             "id": "contract",
-            "query_parameters": [{"id": "batch", "type": "integer", "default": 7}],
+            "query_parameters": [{"id": "batch", "type": "single_input", "value_type": "integer", "default": 7}],
             "controls": [
-                {"id": "factor", "kind": "compute", "type": "integer", "default": 2},
-                {"id": "delay", "kind": "compute", "type": "number", "default": 0},
+                {"id": "factor", "kind": "compute", "type": "single_input", "value_type": "integer", "default": 2},
+                {"id": "delay", "kind": "compute", "type": "single_input", "value_type": "number", "default": 0},
                 {
                     "id": "region",
                     "kind": "selection",
-                    "type": "multi_select",
+                    "type": "multiple_select", "value_type": "text",
                     "field": "region",
                     "options": {
                         "mode": "static",
@@ -586,17 +672,17 @@ def test_typed_choice_values_round_trip_to_the_declared_json_value():
     definition = ComputeControlDefinition(
         id="mode",
         kind="compute",
-        type="single_select",
+        type="single_select", value_type="integer",
         options=static_options(
             [
                 Choice(label="One", value=1),
-                Choice(label="Enabled", value=True),
+                Choice(label="Two", value=2),
             ]
         ),
     )
 
     assert normalize_control_value(definition, "1") == 1
-    assert normalize_control_value(definition, "true") is True
+    assert normalize_control_value(definition, "2") == 2
 
 
 def test_browser_cache_is_tab_local_while_server_cache_can_be_workspace_scoped():

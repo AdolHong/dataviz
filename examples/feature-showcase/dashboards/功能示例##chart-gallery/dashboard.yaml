@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v7
+schema: dataviz/dashboard/v8
 kind: dashboard
 id: chart-gallery
 title: 多图表陈列室
@@ -8,7 +8,8 @@ controls:
   - id: province
     kind: selection
     field: province
-    type: multi_select
+    type: multiple_select
+    value_type: text
     label: 省份
     default: [广东, 湖南, 福建, 浙江]
     options:
@@ -20,7 +21,8 @@ controls:
         - {label: 浙江, value: 浙江}
   - id: radar_city_count
     kind: compute
-    type: integer
+    type: single_input
+    value_type: integer
     label: 雷达城市数
     default: 5
     min: 1

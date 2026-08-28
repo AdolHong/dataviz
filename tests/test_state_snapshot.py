@@ -46,6 +46,8 @@ def test_default_canvas_embeds_snapshot_and_summary_hosts():
 
     rendered = CanvasRenderer(workspace).render(dashboard, result, asset_mode="inline")
 
+    assert dashboard.presentation is not None
+    assert dashboard.presentation.state_summary.enabled is False
     assert '"schema": "dataviz/state-snapshot/v1"' in rendered
     assert 'data-state-summary-scope="dashboard"' in rendered
     assert 'data-state-summary-scope="section"' in rendered

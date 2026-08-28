@@ -72,9 +72,9 @@ def _mask(
     field = str(binding.get("field") or definition.get("field") or item.get("id"))
     operator = binding.get("operator") or "auto"
     if operator == "auto":
-        if definition.get("type") == "multi_select":
+        if definition.get("type") in {"multiple_input", "multiple_select"}:
             operator = "in"
-        elif definition.get("type") == "date_range":
+        elif definition.get("type") == "range_input":
             operator = "between"
         else:
             operator = "equals"

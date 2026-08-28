@@ -3,5 +3,5 @@ stories:
   - id: control.date-picker.single
     component: control.date-picker
     title: Single date picker
-    summary: One ISO date uses the platform calendar where available and remains fully usable as a native date input.
+    summary: One ISO date stays directly editable while the shared Dataviz calendar provides a consistent visual picker.
     gallery: {dashboard: component-gallery, target: "[data-control-component='date-picker']", anchor: control-date-picker}

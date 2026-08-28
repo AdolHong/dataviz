@@ -35,7 +35,7 @@ def _sql_workspace(
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v7
+        """schema: dataviz/dashboard/v8
 kind: dashboard
 id: sql-test
 title: SQL test
@@ -106,13 +106,12 @@ def test_date_range_query_parameter_projects_to_two_sql_inputs(tmp_path: Path):
         """title: SQL test
 query_parameters:
   - id: job_date_range
-    type: date_range
+    type: range_input
+    value_type: date
     required: true
     default:
-      mode: relative
-      anchor: today
-      start_offset: -3d
-      end_offset: -1d
+      - {mode: relative, anchor: today, offset: -3d}
+      - {mode: relative, anchor: today, offset: -1d}
 """,
     )
     dashboard_path.write_text(dashboard, encoding="utf-8")
@@ -222,7 +221,7 @@ cache: {mode: none}
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v7
+        """schema: dataviz/dashboard/v8
 kind: dashboard
 id: sql-test
 title: SQL test

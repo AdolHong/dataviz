@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from dataviz.workspace.loader import LoadedDashboard
 
 
-DEPENDENCY_CONTRACT_SCHEMA = "dataviz/dependency-contract/v4"
+DEPENDENCY_CONTRACT_SCHEMA = "dataviz/dependency-contract/v5"
 
 
 def _topological_order(
@@ -529,6 +529,25 @@ class DashboardDependencyContract:
                 required.update(base)
         return required
 
+    def view_pipeline_nodes(self, view_id: str) -> tuple[str, ...]:
+        """Return one compiler-owned, topologically ordered View pipeline.
+
+        Authors declare data and View inputs once.  Diagnostics must project that
+        same graph instead of asking a Canvas or Renderer to reconstruct it.
+        """
+
+        query_nodes = (
+            node_id
+            for node_id in self.query_order
+            if view_id in self.query_node_downstream_views.get(node_id, ())
+        )
+        interactive_nodes = (
+            f"interactive:{identifier}"
+            for identifier in self.reachable_interactive_order
+            if view_id in self.transform_downstream_views.get(identifier, ())
+        )
+        return tuple((*query_nodes, *interactive_nodes))
+
     def runtime_manifest(self) -> dict[str, Any]:
         reachable = set(self.reachable_interactive_order)
         output_views = {
@@ -587,6 +606,7 @@ class DashboardDependencyContract:
             "views": {
                 view_id: {
                     "inputs": dict(inputs),
+                    "pipeline_nodes": list(self.view_pipeline_nodes(view_id)),
                     "controls": list(self.view_controls.get(view_id, ())),
                     "selection_contract": list(
                         self.view_selection_contract(view_id)
@@ -671,6 +691,7 @@ class DashboardDependencyContract:
             "views": {
                 key: {
                     "inputs": value,
+                    "pipeline_nodes": list(self.view_pipeline_nodes(key)),
                     "controls": list(self.view_controls.get(key, ())),
                     "control_binding": (
                         self.view_control_bindings[key].as_dict()

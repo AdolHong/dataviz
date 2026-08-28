@@ -1,0 +1,22 @@
+schema: dataviz/component-package/v1
+package: control.multiple-input
+version: 1.0.0
+category: data-entry
+purpose: Enter a typed list without pretending free-form values are a closed choice domain.
+implementation: {mode: package, sources: []}
+dependencies: [runtime.control]
+components:
+  - id: control.multiple-input
+    purpose: Add, remove, and edit an ordered list of text, integer, number, or date values.
+    status: stable
+    alignment:
+      design_system: Ant Design
+      component: Form.List + Input
+      official: https://ant.design/components/form/
+      adopted: [typed-rows, add-remove, native-validation, ordered-values]
+      omitted: [nested-fields, asynchronous-validation]
+    logic: {type: multiple_input, value_types: [text, integer, number, date], fields: [max_items, min, max, step, min_date, max_date]}
+    presentation: {component: multiple-input, options: [prefix, suffix, css_class]}
+    semantic_dom: [.dv-multiple-input, .dv-multiple-input__row, .dv-multiple-input__add]
+    tokens: [--dv-accent, --dv-ink, --dv-line, --dv-panel]
+runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

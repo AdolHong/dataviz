@@ -45,7 +45,7 @@ runtime:{runtime or ' {}'}
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v7
+        """schema: dataviz/dashboard/v8
 kind: dashboard
 id: browser-python
 title: Browser Python
@@ -183,7 +183,7 @@ def test_validate_rejects_query_input_part_for_non_date_range(tmp_path: Path):
 
     assert report["status"] == "invalid"
     assert diagnostic["field"].endswith("query_inputs.min_query_revenue.part")
-    assert "not date_range" in diagnostic["message"]
+    assert "not range_input/date" in diagnostic["message"]
 
 
 def test_validate_rejects_unknown_selection_option_domain(tmp_path: Path):
@@ -222,7 +222,7 @@ def test_validate_reports_control_dependency_cycles_before_runtime(tmp_path: Pat
             "id": "day",
             "kind": "selection",
             "field": "day",
-            "type": "multi_select",
+            "type": "multiple_select", "value_type": "text",
             "depends_on": ["dashboard.region"],
             "options": {
                 "mode": "infer",
@@ -605,7 +605,7 @@ def test_validate_focus_excludes_another_broken_dashboard(tmp_path: Path):
     broken = workspace / "dashboards" / "broken"
     broken.mkdir()
     (broken / "dashboard.yaml").write_text(
-        "schema: dataviz/dashboard/v7\nkind: dashboard\nid: broken\nretired_field: true\n",
+        "schema: dataviz/dashboard/v8\nkind: dashboard\nid: broken\nretired_field: true\n",
         encoding="utf-8",
     )
 

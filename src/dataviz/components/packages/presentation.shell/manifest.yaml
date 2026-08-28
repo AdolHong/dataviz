@@ -1,6 +1,6 @@
 schema: dataviz/component-package/v1
 package: presentation.shell
-version: 1.4.0
+version: 1.9.0
 category: presentation
 purpose: Stable layout, theme and semantic component-state contracts around declarative content.
 implementation:
@@ -16,6 +16,8 @@ components:
   - {id: theme.plain, purpose: Minimal neutral analysis style, status: stable}
   - {id: theme.editorial, purpose: Warm report and narrative style, status: stable}
   - {id: theme.terminal, purpose: Dark technical monitoring style, status: stable}
-  - {id: theme.business, purpose: Modern indigo analytical default, status: stable}
-  - {id: control-panel.adaptive, purpose: Viewport-bound Query and scoped Controls tray with a four-column readable default and explicit one/two-track field spans, status: stable}
+  - {id: theme.business, purpose: Clean neutral analytical default, status: stable}
+  - {id: control-panel.adaptive, purpose: Container-responsive Query grid with bounded readable tracks, trailing whitespace for sparse forms, single-column scoped Controls by default and explicit field spans, status: stable}
+  - {id: report.brand, purpose: Compact Dataviz provenance mark in portable HTML without importing Server navigation or diagnostics, status: stable}
+  - {id: shell.host-parity, purpose: Keep Server and portable HTML Header, controls, Query tray and base typography visually consistent, status: stable}
 runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

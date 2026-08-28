@@ -1,7 +1,7 @@
 
 const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v5';
 const DATAVIZ_INTERACTIVE_WORKER_PROTOCOL = 'dataviz/interactive-worker/v1';
-const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v4';
+const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v5';
 if (window.dataviz.protocol?.schema !== DATAVIZ_RUNTIME_PROTOCOL) {
   throw new Error(`Unsupported Dataviz Runtime protocol: ${window.dataviz.protocol?.schema || 'missing'}`);
 }
@@ -21,6 +21,45 @@ const datavizSameFrameIdentity = value => ['dashboard_id', 'run_id', 'frame_id']
 const datavizPostToParent = payload => {
   if (window.parent === window) return;
   window.parent.postMessage({...payload, ...datavizFrameIdentity()}, window.location.origin);
+};
+const datavizViewPipelineVisibleStatuses = new Set([
+  'queued', 'loading', 'stale', 'error', 'cancelled', 'unavailable',
+]);
+const datavizViewPipelineStatusLabel = status => ({
+  not_run:'Not run',
+  queued:'Queued',
+  loading:'Running',
+  ready:'Ready',
+  empty:'Ready · empty',
+  stale:'Stale',
+  error:'Failed',
+  cancelled:'Cancelled',
+  unavailable:'Unavailable',
+}[status] || status);
+const datavizSetViewPipelineNodeStatus = (nodeId, status) => {
+  const normalized = String(status || 'not_run');
+  document.querySelectorAll(
+    `[data-view-pipeline-node="${CSS.escape(String(nodeId))}"]`,
+  ).forEach(signal => {
+    signal.dataset.status = normalized;
+    signal.hidden = !datavizViewPipelineVisibleStatuses.has(normalized);
+    const title = signal.querySelector('.dv-view-pipeline-tooltip strong')?.textContent
+      || String(nodeId);
+    signal.setAttribute(
+      'aria-label',
+      `${title}: ${datavizViewPipelineStatusLabel(normalized)}`,
+    );
+    if (['queued', 'loading', 'stale'].includes(normalized)) {
+      const root = signal.closest('.dv-view');
+      const rendererSignal = root?.querySelector('[data-view-renderer-signal]');
+      if (rendererSignal) {
+        rendererSignal.dataset.status = 'not_run';
+        rendererSignal.hidden = true;
+        rendererSignal.setAttribute('aria-hidden', 'true');
+      }
+      if (root) delete root.dataset.rendererSignalActive;
+    }
+  });
 };
 const canonicalOutputReference = reference => {
   const raw = String(reference || '').trim();
@@ -160,8 +199,69 @@ const datavizChoiceValue = (definition, value) => {
   }
   throw datavizContractError('unknown_choice', `Value ${JSON.stringify(value)} is not a declared choice`);
 };
+const datavizNormalizeScalarValue = (definition, value, label = 'Value') => {
+  const valueType = definition?.value_type || 'text';
+  if (valueType === 'text') {
+    if (typeof value !== 'string') throw datavizContractError('invalid_type', `${label} must be text`);
+    if (definition.max_length != null && value.length > Number(definition.max_length)) {
+      throw datavizContractError('too_long', `${label} cannot be longer than ${definition.max_length} characters`);
+    }
+    return value;
+  }
+  if (['number', 'integer'].includes(valueType)) {
+    const raw = typeof value === 'string' ? value.trim() : null;
+    if (raw != null && (
+      (valueType === 'integer' && !/^[+-]?\d+$/.test(raw))
+      || (valueType === 'number' && !datavizDecimalNumberPattern.test(raw))
+    )) {
+      throw datavizContractError('invalid_type', `${label} must be a${valueType === 'integer' ? 'n integer' : ' finite number'}`);
+    }
+    const numeric = typeof value === 'number' ? value : Number(raw);
+    if (!Number.isFinite(numeric) || (valueType === 'integer' && !Number.isInteger(numeric))) {
+      throw datavizContractError('invalid_type', `${label} must be a${valueType === 'integer' ? 'n integer' : ' finite number'}`);
+    }
+    if (Number.isInteger(numeric) && !Number.isSafeInteger(numeric)) {
+      throw datavizContractError('unsafe_integer', `${label} exceeds the exact JavaScript integer range`);
+    }
+    if (definition.min != null && numeric < Number(definition.min)) {
+      throw datavizContractError('below_minimum', `${label} must be at least ${definition.min}`);
+    }
+    if (definition.max != null && numeric > Number(definition.max)) {
+      throw datavizContractError('above_maximum', `${label} must be at most ${definition.max}`);
+    }
+    if (definition.step != null) {
+      const base = Number(definition.min || 0);
+      const quotient = (numeric - base) / Number(definition.step);
+      if (Math.abs(quotient - Math.round(quotient)) > 1e-9) {
+        throw datavizContractError('invalid_step', `${label} must follow step ${definition.step} from ${base}`);
+      }
+    }
+    return numeric;
+  }
+  if (valueType === 'boolean') {
+    if (typeof value === 'boolean') return value;
+    if (value === 0 || value === 1) return Boolean(value);
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+      if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+    }
+    throw datavizContractError('invalid_type', `${label} must be a boolean`);
+  }
+  if (valueType === 'date') {
+    const normalized = datavizIsoDate(value, label);
+    if (definition.min_date && normalized < definition.min_date) {
+      throw datavizContractError('before_minimum_date', `${label} cannot be before ${definition.min_date}`);
+    }
+    if (definition.max_date && normalized > definition.max_date) {
+      throw datavizContractError('after_maximum_date', `${label} cannot be after ${definition.max_date}`);
+    }
+    return normalized;
+  }
+  throw datavizContractError('unknown_value_type', `Unsupported value_type: ${valueType}`);
+};
 const datavizNormalizeControlValue = (definition, value, {namespace = 'control', key = ''} = {}) => {
-  const type = definition?.type || 'string';
+  const type = definition?.type || 'single_input';
   const fail = error => {
     if (error?.name === 'DatavizContractError') {
       error.code = `${namespace}_${error.code}`;
@@ -172,86 +272,41 @@ const datavizNormalizeControlValue = (definition, value, {namespace = 'control',
   try {
     if (datavizIsEmptyControlValue(value)) {
       if (definition?.required) throw datavizContractError('required', 'A value is required');
-      return ['multi_select', 'date_range'].includes(type) ? [] : null;
+      return ['multiple_input', 'multiple_select', 'range_input'].includes(type) ? [] : null;
     }
-    if (type === 'string') {
-      if (typeof value !== 'string') throw datavizContractError('invalid_type', 'Value must be a string');
-      if (definition.max_length != null && value.length > Number(definition.max_length)) {
-        throw datavizContractError('too_long', `Value cannot be longer than ${definition.max_length} characters`);
+    if (type === 'single_input') return datavizNormalizeScalarValue(definition, value);
+    if (type === 'multiple_input') {
+      let items = value;
+      if (typeof items === 'string') {
+        try { items = JSON.parse(items); }
+        catch (_error) { items = items.split(',').map(item => item.trim()).filter(Boolean); }
       }
-      return value;
-    }
-    if (['number', 'integer'].includes(type)) {
-      const raw = typeof value === 'string' ? value.trim() : null;
-      if (raw != null && (
-        (type === 'integer' && !/^[+-]?\d+$/.test(raw))
-        || (type === 'number' && !datavizDecimalNumberPattern.test(raw))
-      )) {
-        throw datavizContractError('invalid_type', `Value must be a${type === 'integer' ? 'n integer' : ' finite number'}`);
+      if (!Array.isArray(items)) throw datavizContractError('invalid_type', 'Multiple input requires a list');
+      const normalized = items.map((item, index) => datavizNormalizeScalarValue(definition, item, `Item ${index + 1}`));
+      if (definition.max_items != null && normalized.length > Number(definition.max_items)) {
+        throw datavizContractError('too_many_values', `At most ${definition.max_items} values may be entered`);
       }
-      const numeric = typeof value === 'number' ? value : Number(raw);
-      if (!Number.isFinite(numeric) || (type === 'integer' && !Number.isInteger(numeric))) {
-        throw datavizContractError('invalid_type', `Value must be a${type === 'integer' ? 'n integer' : ' finite number'}`);
-      }
-      if (Number.isInteger(numeric) && !Number.isSafeInteger(numeric)) {
-        throw datavizContractError('unsafe_integer', 'Integer exceeds the exact JavaScript range; model identifiers as strings');
-      }
-      if (definition.min != null && numeric < Number(definition.min)) {
-        throw datavizContractError('below_minimum', `Value must be at least ${definition.min}`);
-      }
-      if (definition.max != null && numeric > Number(definition.max)) {
-        throw datavizContractError('above_maximum', `Value must be at most ${definition.max}`);
-      }
-      if (definition.step != null) {
-        const base = Number(definition.min || 0);
-        const quotient = (numeric - base) / Number(definition.step);
-        if (Math.abs(quotient - Math.round(quotient)) > 1e-9) {
-          throw datavizContractError('invalid_step', `Value must follow step ${definition.step} from ${base}`);
-        }
-      }
-      return numeric;
-    }
-    if (type === 'boolean') {
-      if (typeof value === 'boolean') return value;
-      if (value === 0 || value === 1) return Boolean(value);
-      if (typeof value === 'string') {
-        const normalized = value.trim().toLowerCase();
-        if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
-        if (['false', '0', 'no', 'off'].includes(normalized)) return false;
-      }
-      throw datavizContractError('invalid_type', 'Value must be a boolean');
-    }
-    if (type === 'date') {
-      const normalized = datavizIsoDate(value, 'Value');
-      if (definition.min_date && normalized < definition.min_date) {
-        throw datavizContractError('before_minimum_date', `Value cannot be before ${definition.min_date}`);
-      }
-      if (definition.max_date && normalized > definition.max_date) {
-        throw datavizContractError('after_maximum_date', `Value cannot be after ${definition.max_date}`);
+      const signatures = normalized.map(datavizValueSignature);
+      if (new Set(signatures).size !== signatures.length) {
+        throw datavizContractError('duplicate_value', 'Multiple input values must be unique');
       }
       return normalized;
     }
-    if (type === 'date_range') {
+    if (type === 'range_input') {
       const range = typeof value === 'string' ? value.split(',', 2).map(item => item.trim()) : value;
       if (!Array.isArray(range) || range.length !== 2) {
-        throw datavizContractError('invalid_shape', 'Date range must contain exactly [start, end]');
+        throw datavizContractError('invalid_shape', 'Range input must contain exactly [start, end]');
       }
-      const start = range[0] ? datavizIsoDate(range[0], 'Date range start') : '';
-      const end = range[1] ? datavizIsoDate(range[1], 'Date range end') : '';
-      if (!start && !end) return [];
+      const start = range[0] !== '' && range[0] != null
+        ? datavizNormalizeScalarValue(definition, range[0], 'Range start') : '';
+      const end = range[1] !== '' && range[1] != null
+        ? datavizNormalizeScalarValue(definition, range[1], 'Range end') : '';
+      if (start === '' && end === '') return [];
       const allowEmpty = Array.isArray(definition.allow_empty) ? definition.allow_empty : [false, false];
-      if (!start && !allowEmpty[0]) throw datavizContractError('missing_range_start', 'Date range requires a start date');
-      if (!end && !allowEmpty[1]) throw datavizContractError('missing_range_end', 'Date range requires an end date');
-      if (start && end && start > end) {
-        throw datavizContractError('invalid_range', 'Date range start cannot be after end');
-      }
-      for (const [label, item] of [['start', start], ['end', end]]) {
-        if (item && definition.min_date && item < definition.min_date) {
-          throw datavizContractError('before_minimum_date', `Date range ${label} cannot be before ${definition.min_date}`);
-        }
-        if (item && definition.max_date && item > definition.max_date) {
-          throw datavizContractError('after_maximum_date', `Date range ${label} cannot be after ${definition.max_date}`);
-        }
+      if (start === '' && !allowEmpty[0]) throw datavizContractError('missing_range_start', 'Range input requires a start value');
+      if (end === '' && !allowEmpty[1]) throw datavizContractError('missing_range_end', 'Range input requires an end value');
+      if (start !== '' && end !== '' && start > end) {
+        throw datavizContractError('invalid_range', 'Range input start cannot be after end');
       }
       return [start, end];
     }
@@ -261,27 +316,27 @@ const datavizNormalizeControlValue = (definition, value, {namespace = 'control',
         if (!Array.isArray(value) || value.length !== pathFields.length || value.some(item => item == null)) {
           throw datavizContractError('invalid_path', `Single select hierarchy requires one ${pathFields.length}-level path`);
         }
-        return [...value];
+        return value.map((item, index) => datavizNormalizeScalarValue(definition, item, pathFields[index]));
       }
       if (Array.isArray(value) || (value && typeof value === 'object')) {
         throw datavizContractError('invalid_type', 'Single select requires one value');
       }
-      return datavizChoiceValue(definition, value);
+      return datavizChoiceValue(definition, datavizNormalizeScalarValue(definition, value));
     }
-    if (type === 'multi_select') {
-      if (!Array.isArray(value)) throw datavizContractError('invalid_type', 'Multi select requires a list');
+    if (type === 'multiple_select') {
+      if (!Array.isArray(value)) throw datavizContractError('invalid_type', 'Multiple select requires a list');
       const pathFields = definition.path_fields || [];
       const normalized = pathFields.length
         ? value.map(item => {
             if (!Array.isArray(item) || item.length !== pathFields.length || item.some(child => child == null)) {
-              throw datavizContractError('invalid_path', `Multi select hierarchy values require ${pathFields.length}-level paths`);
+              throw datavizContractError('invalid_path', `Multiple select hierarchy values require ${pathFields.length}-level paths`);
             }
-            return [...item];
+            return item.map((child, index) => datavizNormalizeScalarValue(definition, child, pathFields[index]));
           })
-        : value.map(item => datavizChoiceValue(definition, item));
+        : value.map(item => datavizChoiceValue(definition, datavizNormalizeScalarValue(definition, item)));
       const signatures = normalized.map(datavizValueSignature);
       if (new Set(signatures).size !== signatures.length) {
-        throw datavizContractError('duplicate_value', 'Multi select values must be unique');
+        throw datavizContractError('duplicate_value', 'Multiple select values must be unique');
       }
       if (definition?.required && !normalized.length) {
         throw datavizContractError('required', 'At least one value is required');
@@ -912,6 +967,7 @@ const datavizRuntime = window.datavizRuntime = {
     this.publishTransformStatus(id, 'ready');
   },
   publishTransformStatus(id, status, details = {}) {
+    datavizSetViewPipelineNodeStatus(`interactive:${id}`, status);
     datavizPostToParent({
       type:'dataviz:interactive-status',
       node_id:`interactive:${id}`,
@@ -1503,18 +1559,18 @@ const datavizNormalizeSelectionState = (key, candidate = null) => {
     intent:'explicit', values:[],
   };
   const source = candidate && typeof candidate === 'object' ? candidate : initial;
-  const intent = source.intent === 'all_available' && definition.type === 'multi_select'
+  const intent = source.intent === 'all_available' && definition.type === 'multiple_select'
     ? 'all_available'
     : 'explicit';
   const values = Array.isArray(source.values) ? structuredClone(source.values) : [];
-  if (!['multi_select', 'date_range'].includes(definition.type) && values.length > 1) {
+  if (!['multiple_input', 'multiple_select', 'range_input'].includes(definition.type) && values.length > 1) {
     throw datavizContractError(
       'selection_state_cardinality_invalid',
       `Selection ${key} contains more than one value`,
       {key},
     );
   }
-  if (definition.type === 'date_range' && values.length > 1) {
+  if (definition.type === 'range_input' && values.length > 1) {
     throw datavizContractError(
       'selection_state_cardinality_invalid',
       `Selection ${key} contains more than one date range`,
@@ -1530,8 +1586,8 @@ const datavizSelectionEntry = key => {
 };
 const datavizSelectionValueFromState = (definition, entry) => {
   const values = Array.isArray(entry?.values) ? entry.values : [];
-  if (definition?.type === 'multi_select') return structuredClone(values);
-  if (definition?.type === 'date_range') return values.length ? structuredClone(values[0]) : [];
+  if (['multiple_input', 'multiple_select'].includes(definition?.type)) return structuredClone(values);
+  if (definition?.type === 'range_input') return values.length ? structuredClone(values[0]) : [];
   return values.length ? structuredClone(values[0]) : null;
 };
 const datavizSelectionValue = key => datavizSelectionValueFromState(
@@ -1540,8 +1596,8 @@ const datavizSelectionValue = key => datavizSelectionValueFromState(
 );
 const datavizSelectionLogicalValues = (definition, value) => {
   if (datavizIsEmptyControlValue(value)) return [];
-  if (definition?.type === 'multi_select') return structuredClone(value);
-  if (definition?.type === 'date_range') return [structuredClone(value)];
+  if (['multiple_input', 'multiple_select'].includes(definition?.type)) return structuredClone(value);
+  if (definition?.type === 'range_input') return [structuredClone(value)];
   return [structuredClone(value)];
 };
 const datavizSetSelectionValue = (key, value, {intent = null} = {}) => {
@@ -1587,7 +1643,7 @@ const datavizSelectionMatches = (row, item, state) => {
   const field = item.binding?.field || item.id;
   const actual = row[field];
   const operator = item.binding?.operator === 'auto'
-    ? (item.definition?.type === 'multi_select' ? 'in' : item.definition?.type === 'date_range' ? 'between' : 'equals')
+    ? (['multiple_input', 'multiple_select'].includes(item.definition?.type) ? 'in' : item.definition?.type === 'range_input' ? 'between' : 'equals')
     : item.binding?.operator;
   let matched;
   if (operator === 'in') matched = (Array.isArray(value) ? value : [value]).map(String).includes(String(actual));
@@ -1691,14 +1747,14 @@ const datavizDispatchControlAction = event => {
     const definition = datavizSelectionDefinition(binding.control);
     const current = datavizSelectionEntry(binding.control);
     let value;
-    if (event.action === 'clear') value = definition.type === 'date_range' ? [] : (
-      definition.type === 'multi_select' ? [] : null
+    if (event.action === 'clear') value = definition.type === 'range_input' ? [] : (
+      ['multiple_input', 'multiple_select'].includes(definition.type) ? [] : null
     );
     else if (event.action === 'select_many') {
       value = (event.data || []).map(datum => datavizControlBindingValue(binding, datum));
     } else if (event.action === 'select') {
       const selected = datavizControlBindingValue(binding, event.data);
-      value = definition.type === 'multi_select' ? [selected] : selected;
+      value = ['multiple_input', 'multiple_select'].includes(definition.type) ? [selected] : selected;
     } else {
       throw datavizContractError(
         'control_action_unknown',
@@ -1862,7 +1918,7 @@ const refreshSelectionOptionDomains = () => {
       if (!input) return;
       const definition = targets[0]?.item?.definition || {};
       const dependency = window.dataviz.dependency_contract?.controls?.[key] || {};
-      if (definition.type === 'boolean') {
+      if (definition.value_type === 'boolean') {
         control.dataset.optionDomainState = 'static';
         syncPortableChoices(control);
         return;
@@ -1946,13 +2002,9 @@ const readSelectionInputs = ({keys = null} = {}) => {
   document.querySelectorAll('[data-selection-key]').forEach(control => {
     const key = control.dataset.selectionKey;
     if (keys && !keys.has(key)) return;
-    const type = control.dataset.selectionType;
     const input = control.querySelector('[data-selection-input]');
     if (!input) return;
-    const item = Object.values(window.dataviz.dependency_contract?.views || {})
-      .flatMap(view => view.selection_contract || [])
-      .find(candidate => candidate.key === key);
-    const definition = item?.definition || {type};
+    const definition = datavizSelectionDefinition(key);
     if (
       input.tagName === 'SELECT'
       && control.dataset.optionDomainState === 'pending'
@@ -1961,18 +2013,23 @@ const readSelectionInputs = ({keys = null} = {}) => {
     const decode = raw => datavizDecodeControlValue(input, raw, {
       path:control.dataset.selectionPath === 'true',
     });
+    const type = definition.type;
+    const valueType = definition.value_type;
     let value;
-    if (type === 'boolean' && input.tagName === 'SELECT') value = input.value === '' ? null : decode(input.value);
-    else if (type === 'boolean') value = input.checked;
-    else if (type === 'multi_select') value = input.options.length
+    if (valueType === 'boolean' && input.tagName === 'SELECT') value = input.value === '' ? null : decode(input.value);
+    else if (valueType === 'boolean') value = input.checked;
+    else if (type === 'multiple_select') value = input.options.length
       ? Array.from(input.selectedOptions).map(option => decode(option.value))
       : (datavizSelectionValue(key) || []);
-    else if (type === 'number') value = input.value === '' ? null : Number(input.value);
-    else if (type === 'integer') value = input.value === '' ? null : Number(input.value);
-    else if (type === 'date_range') value = input.value
+    else if (type === 'multiple_input') {
+      try { value = input.value ? JSON.parse(input.value) : []; }
+      catch (_error) { value = input.value.split(',').map(item => item.trim()).filter(Boolean); }
+    }
+    else if (type === 'range_input') value = input.value
       ? input.value.split(',', 2).map(item => item.trim())
       : [];
     else if (input.tagName === 'SELECT') value = input.value === '' ? null : decode(input.value);
+    else if (valueType === 'number' || valueType === 'integer') value = input.value === '' ? null : Number(input.value);
     else value = input.value;
     try {
       const intent = input.multiple
@@ -1980,8 +2037,18 @@ const readSelectionInputs = ({keys = null} = {}) => {
         : 'explicit';
       datavizSetSelectionValue(key, value, {intent});
       input.setCustomValidity?.('');
+      const output = control.querySelector('[data-control-error]');
+      if (output) {
+        output.textContent = '';
+        output.hidden = true;
+      }
     } catch (error) {
       input.setCustomValidity?.(error.message);
+      const output = control.querySelector('[data-control-error]');
+      if (output) {
+        output.textContent = error.message;
+        output.hidden = false;
+      }
       throw error;
     }
   });
@@ -2040,7 +2107,7 @@ const datavizFormatContentReference = reference => {
   if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) {
     return isCompute ? '' : datavizContentAllLabel();
   }
-  if (definition.type === 'date_range') {
+  if (definition.type === 'range_input') {
     const range = Array.isArray(value) ? value : String(value).split(',', 2);
     return range.filter(item => item != null && item !== '').join(' 至 ');
   }
@@ -2113,7 +2180,7 @@ window.dataviz.syncContentBindings = syncDatavizContentBindings;
  * canonical snapshot drives Server canvases and exported reports.
  */
 const datavizStateSummaryConfig = window.dataviz.state_summary || {
-  enabled:true, max_values:3, items:{},
+  enabled:false, max_values:3, items:{},
 };
 const datavizStateItemConfig = item => (
   datavizStateSummaryConfig.items?.[item.key]
@@ -2189,8 +2256,8 @@ const datavizStateValueParts = (item, rawValue, formatter = 'auto') => {
     return [String(Array.isArray(rawValue) ? rawValue.length : 1)];
   }
   const isDateRange = formatter === 'date_range'
-    || item.type === 'date_range'
-    || item.definition?.type === 'date_range';
+    || item.type === 'range_input'
+    || item.definition?.type === 'range_input';
   if (isDateRange && Array.isArray(rawValue)) return [rawValue.join(' ～ ')];
   const values = Array.isArray(rawValue) ? rawValue : [rawValue];
   return values.map(value => datavizStateChoiceLabel(item.definition, value));
@@ -2263,19 +2330,26 @@ const readComputeInputs = () => {
     const key = control.dataset.computeKey;
     const input = control.querySelector('[data-compute-input]');
     if (!input || input.disabled || control.dataset.computeFrozen === 'true') return;
-    const type = input.dataset.computeType;
-    const definition = window.dataviz.compute_definitions?.[key] || {type};
+    const definition = window.dataviz.compute_definitions?.[key] || {
+      type:input.dataset.computeType,
+      value_type:input.dataset.valueType || 'text',
+    };
+    const type = definition.type;
+    const valueType = definition.value_type;
     const decode = raw => datavizDecodeControlValue(input, raw);
-    if (type === 'date_range') {
+    if (type === 'range_input') {
       const range = input.value
         ? input.value.split(',', 2).map(item => item.trim())
         : [];
       values[key] = range.some(Boolean) ? range : [];
-    } else if (type === 'boolean') values[key] = Boolean(input.checked);
-    else if (type === 'multi_select') values[key] = Array.from(input.selectedOptions).map(option => decode(option.value));
-    else if (type === 'number') values[key] = input.value === '' ? null : Number(input.value);
-    else if (type === 'integer') values[key] = input.value === '' ? null : Number(input.value);
+    } else if (valueType === 'boolean') values[key] = Boolean(input.checked);
+    else if (type === 'multiple_select') values[key] = Array.from(input.selectedOptions).map(option => decode(option.value));
+    else if (type === 'multiple_input') {
+      try { values[key] = input.value ? JSON.parse(input.value) : []; }
+      catch (_error) { values[key] = input.value.split(',').map(item => item.trim()).filter(Boolean); }
+    }
     else if (input.tagName === 'SELECT') values[key] = input.value === '' ? null : decode(input.value);
+    else if (valueType === 'number' || valueType === 'integer') values[key] = input.value === '' ? null : Number(input.value);
     else values[key] = input.value;
     try {
       values[key] = datavizNormalizeControlValue(
@@ -2284,8 +2358,18 @@ const readComputeInputs = () => {
         {namespace:'compute_parameter', key},
       );
       input.setCustomValidity?.('');
+      const output = control.querySelector('[data-control-error]');
+      if (output) {
+        output.textContent = '';
+        output.hidden = true;
+      }
     } catch (error) {
       input.setCustomValidity?.(error.message);
+      const output = control.querySelector('[data-control-error]');
+      if (output) {
+        output.textContent = error.message;
+        output.hidden = false;
+      }
       throw error;
     }
   });
@@ -2471,6 +2555,10 @@ window.dataviz.connectLive = () => {
       })
       .catch(error => {
         fetched.delete(reference);
+        datavizSetViewPipelineNodeStatus(
+          canonicalOutputReference(reference).split('/')[0],
+          'error',
+        );
         console.error(`[dataviz:live:${reference}]`, error);
       });
     fetched.set(reference, promise);
@@ -2483,6 +2571,23 @@ window.dataviz.connectLive = () => {
       window.dataviz.interaction.query_snapshot_available = true;
     }
     fetchOutput(event.data.reference);
+  });
+  const queryNodeStatuses = {
+    node_queued:'queued',
+    node_started:'loading',
+    node_progress:'loading',
+    node_retrying:'loading',
+    node_ready:'ready',
+    node_error:'error',
+    node_cancelled:'cancelled',
+    node_unavailable:'unavailable',
+  };
+  Object.entries(queryNodeStatuses).forEach(([name, status]) => {
+    source.addEventListener(name, message => {
+      const event = JSON.parse(message.data);
+      if (event.run_id !== live.run_id || !event.node_id) return;
+      datavizSetViewPipelineNodeStatus(event.node_id, status);
+    });
   });
   ['node_error', 'node_cancelled', 'node_unavailable'].forEach(name => source.addEventListener(name, message => {
     const event = JSON.parse(message.data);
@@ -2531,10 +2636,11 @@ const setSelectionInputs = states => {
     const encode = item => datavizEncodeControlValue(input, item, {
       path:control.dataset.selectionPath === 'true',
     });
-    if (control.dataset.selectionType === 'boolean' && input.tagName === 'SELECT') {
+    const definition = datavizSelectionDefinition(key);
+    if (definition.value_type === 'boolean' && input.tagName === 'SELECT') {
       input.value = value == null ? '' : encode(value);
     }
-    else if (control.dataset.selectionType === 'boolean') input.checked = Boolean(value);
+    else if (definition.value_type === 'boolean') input.checked = Boolean(value);
     else if (input.multiple) {
       const selected = new Set((value || []).map(encode));
       Array.from(input.options).forEach(option => {
@@ -2542,10 +2648,11 @@ const setSelectionInputs = states => {
       });
       syncPortableChoices(control);
     }
-    else if (control.dataset.selectionType === 'date_range' && Array.isArray(value)) {
+    else if (definition.type === 'range_input' && Array.isArray(value)) {
       input.value = value.length ? value.join(',') : '';
     }
     else if (input.tagName === 'SELECT') input.value = value == null ? '' : encode(value);
+    else if (definition.type === 'multiple_input' && Array.isArray(value)) input.value = JSON.stringify(value);
     else if (Array.isArray(value)) input.value = value.join(',');
     else input.value = value ?? '';
     input._syncChoiceControl?.();
@@ -2562,17 +2669,22 @@ const setComputeInputs = values => {
     const input = control.querySelector('[data-compute-input]');
     if (!input || input.disabled) return;
     const value = values[key];
-    const type = input.dataset.computeType;
-    if (type === 'date_range') {
+    const definition = window.dataviz.compute_definitions?.[key] || {
+      type:input.dataset.computeType,
+      value_type:input.dataset.valueType || 'text',
+    };
+    const type = definition.type;
+    if (type === 'range_input') {
       const range = Array.isArray(value) ? value : String(value || '').split(',', 2);
       input.value = range.some(Boolean) ? `${range[0] || ''},${range[1] || ''}` : '';
-    } else if (type === 'boolean') input.checked = Boolean(value);
+    } else if (definition.value_type === 'boolean') input.checked = Boolean(value);
     else if (input.multiple) {
       const selected = new Set((value || []).map(item => datavizEncodeControlValue(input, item)));
       Array.from(input.options).forEach(option => { option.selected = selected.has(option.value); });
     } else if (input.tagName === 'SELECT') {
       input.value = value == null ? '' : datavizEncodeControlValue(input, value);
-    } else input.value = value ?? '';
+    } else if (type === 'multiple_input') input.value = JSON.stringify(value || []);
+    else input.value = value ?? '';
   });
   syncComputeDirtyState();
 };
@@ -2687,7 +2799,124 @@ const scheduleDatavizSelection = event => {
 const datavizEscape = value => String(value ?? '')
   .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
   .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
+
+// The Server shell and Canvas iframe form one vertical reading surface. While
+// the shell still has scrollable Header content (for example an expanded Query
+// tray), consume downward wheel movement there before scrolling the iframe.
+// On the way back, reveal the Header only after the Canvas has reached its top.
+// Portable reports run at the top level and therefore bypass this bridge.
+const routeDatavizCanvasWheelToShell = event => {
+  if (window.parent === window || event.ctrlKey || !event.deltaY) return;
+  let parentWindow;
+  let parentDocument;
+  try {
+    parentWindow = window.parent;
+    parentDocument = parentWindow.document;
+    const frame = parentDocument.querySelector('#canvas-frame');
+    if (frame?.contentWindow !== window) return;
+  } catch (_) {
+    return;
+  }
+  const shellScroller = parentDocument.scrollingElement;
+  const canvasScroller = document.scrollingElement;
+  if (!shellScroller || !canvasScroller) return;
+  const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+    ? 16
+    : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+      ? parentWindow.innerHeight
+      : 1;
+  const delta = event.deltaY * unit;
+  const shellMax = Math.max(0, shellScroller.scrollHeight - parentWindow.innerHeight);
+  const shellTop = shellScroller.scrollTop;
+  const canvasTop = canvasScroller.scrollTop;
+  const routeDown = delta > 0 && shellTop < shellMax - 1;
+  const routeUp = delta < 0 && canvasTop <= 1 && shellTop > 1;
+  if (!routeDown && !routeUp) return;
+  event.preventDefault();
+  parentWindow.scrollBy({top: delta, left: 0, behavior: 'auto'});
+};
+window.addEventListener('wheel', routeDatavizCanvasWheelToShell, {
+  capture: true,
+  passive: false,
+});
+
 const syncPortableChoices = control => control.querySelector('.dv-control')?._syncControl?.();
+const datavizRuntimeQueryToggle = document.querySelector('[data-runtime-query-toggle]');
+const datavizRuntimeQueryPanel = document.querySelector('#dv-runtime-query-panel');
+const datavizRuntimeShortcutHelp = document.querySelector('[data-runtime-shortcut-help]');
+const datavizRuntimeShortcutToast = document.querySelector('[data-runtime-shortcut-toast]');
+let datavizRuntimeShortcutToastTimer;
+const showDatavizRuntimeShortcutToast = message => {
+  if (!datavizRuntimeShortcutToast) return;
+  clearTimeout(datavizRuntimeShortcutToastTimer);
+  datavizRuntimeShortcutToast.textContent = message;
+  datavizRuntimeShortcutToast.hidden = false;
+  requestAnimationFrame(() => datavizRuntimeShortcutToast.classList.add('is-visible'));
+  datavizRuntimeShortcutToastTimer = setTimeout(() => {
+    datavizRuntimeShortcutToast.classList.remove('is-visible');
+    datavizRuntimeShortcutToastTimer = setTimeout(() => {
+      datavizRuntimeShortcutToast.hidden = true;
+    }, 160);
+  }, 1800);
+};
+const setDatavizRuntimeQueryOpen = open => {
+  if (!datavizRuntimeQueryToggle || !datavizRuntimeQueryPanel) return false;
+  const expanded = Boolean(open);
+  const tray = datavizRuntimeQueryPanel.closest('.dv-runtime-query-tray');
+  datavizRuntimeQueryToggle.setAttribute('aria-expanded', String(expanded));
+  datavizRuntimeQueryToggle.setAttribute(
+    'aria-label',
+    expanded ? 'Collapse query parameters' : 'Expand query parameters',
+  );
+  datavizRuntimeQueryToggle.title = `${expanded ? 'Collapse query parameters' : 'Expand query parameters'} (Q)`;
+  if (tray) tray.dataset.open = String(expanded);
+  datavizRuntimeQueryPanel.hidden = !expanded;
+  return expanded;
+};
+datavizRuntimeQueryToggle?.addEventListener('click', () => {
+  setDatavizRuntimeQueryOpen(
+    datavizRuntimeQueryToggle.getAttribute('aria-expanded') !== 'true',
+  );
+});
+const datavizKeyboardTargetIsEditable = target => target instanceof Element && Boolean(
+  target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]')
+);
+const datavizKeyboardShortcutCommand = event => {
+  if (event.defaultPrevented || event.repeat || event.isComposing || event.keyCode === 229) return null;
+  if (document.querySelector('dialog[open]')) return null;
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'Enter') return 'run-query';
+  if (event.ctrlKey || event.metaKey || event.altKey || datavizKeyboardTargetIsEditable(event.target)) return null;
+  if (event.key.toLowerCase() === 'q') return 'toggle-query-parameters';
+  if (event.key.toLowerCase() === 'b') return 'toggle-sidebar';
+  if (event.key === '?') return 'show-shortcuts';
+  return null;
+};
+document.addEventListener('keydown', event => {
+  const command = datavizKeyboardShortcutCommand(event);
+  if (!command) return;
+  if (window.parent !== window) {
+    window.datavizComponents?.overlay.closeAll({group:'popover'});
+    event.preventDefault();
+    datavizPostToParent({type:'dataviz:keyboard-shortcut', command});
+    return;
+  }
+  if (command === 'toggle-query-parameters' && datavizRuntimeQueryToggle) {
+    event.preventDefault();
+    window.datavizComponents?.overlay.closeAll({group:'popover'});
+    const tray = datavizRuntimeQueryPanel?.closest('.dv-runtime-query-tray');
+    if (Number(tray?.dataset.controlCount || 0) <= 0) {
+      showDatavizRuntimeShortcutToast('当前报告没有查询参数');
+      return;
+    }
+    setDatavizRuntimeQueryOpen(
+      datavizRuntimeQueryToggle.getAttribute('aria-expanded') !== 'true',
+    );
+  } else if (command === 'show-shortcuts' && datavizRuntimeShortcutHelp) {
+    event.preventDefault();
+    window.datavizComponents?.overlay.closeAll({group:'popover'});
+    datavizRuntimeShortcutHelp.showModal();
+  }
+});
 window.datavizComponents?.hydrate(document);
 document.querySelectorAll('[data-selection-input]').forEach(input => {
   input.addEventListener('input', scheduleDatavizSelection);
@@ -2725,11 +2954,37 @@ document.querySelectorAll('[data-compute-apply]').forEach(button => {
   }));
 });
 syncComputeDirtyState();
+if (window.dataviz.asset_mode === 'server') {
+  document.querySelectorAll('.dv-context-controls[data-editor-owner] > summary').forEach(trigger => {
+    trigger.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      datavizPostToParent({
+        type:'dataviz:open-parameter-editor',
+        owner:trigger.parentElement.dataset.editorOwner,
+      });
+    });
+  });
+}
 document.addEventListener('pointerdown', () => {
   if (window.parent !== window) {
     datavizPostToParent({type: 'dataviz:canvas-interaction'});
   }
 }, {capture: true});
+document.addEventListener('click', event => {
+  const signal = event.target.closest('[data-view-pipeline-signal]');
+  if (!signal) return;
+  signal.blur();
+  const title = signal.getAttribute('title');
+  signal.removeAttribute('title');
+  signal.addEventListener('pointerleave', () => {
+    if (title) signal.setAttribute('title', title);
+  }, {once:true});
+  datavizPostToParent({
+    type:'dataviz:view-pipeline-inspect',
+    node_id:signal.dataset.viewPipelineNode,
+  });
+});
 window.addEventListener('pagehide', () => datavizRuntime.dispose(), {once:true});
 Object.entries(window.dataviz.portable?.outputs || {}).forEach(([reference, value]) => {
   datavizRuntime.outputSignatures.set(

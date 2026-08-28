@@ -40,12 +40,34 @@
       charts:chartService,
       controlBinding:bindingContext(root, key, descriptor, generation),
     });
+    const setRendererSignal = (root, status, {active = null} = {}) => {
+      if (!root) return;
+      const signal = root.querySelector('[data-view-renderer-signal]');
+      if (!signal) return;
+      const normalized = String(status || 'not_run');
+      signal.dataset.status = normalized;
+      signal.hidden = ![
+        'queued', 'loading', 'stale', 'error', 'cancelled', 'unavailable',
+      ].includes(normalized);
+      signal.setAttribute('aria-hidden', String(signal.hidden));
+      if (active === true) root.dataset.rendererSignalActive = 'true';
+      else if (active === false) delete root.dataset.rendererSignalActive;
+    };
     const applyStatus = (root, status, label = status) => {
       if (!root) return;
       root.dataset.viewStatus = status;
       components.state?.apply(root, status, {label});
       const statusNode = root.querySelector('[data-view-status-label]');
       if (statusNode) statusNode.textContent = label;
+      if (root.dataset.rendererSignalActive === 'true') {
+        if (['ready', 'empty'].includes(status)) {
+          setRendererSignal(root, status, {active:false});
+        } else if (['error', 'cancelled', 'unavailable'].includes(status)) {
+          setRendererSignal(root, status, {active:false});
+        } else {
+          setRendererSignal(root, status);
+        }
+      }
     };
     const releaseWheelAtBoundary = host => {
       if (!host || host.__datavizWheelBoundary) return;
@@ -308,7 +330,7 @@
       const options = descriptor.options || {};
       const visibleRows = rows.slice(0, limit || rows.length);
       const fragment = document.createDocumentFragment();
-      if (options.show_count !== false) {
+      if (options.show_count === true) {
         const meta = document.createElement('div');
         meta.className = 'dv-table-meta';
         meta.innerHTML = `<strong>${rows.length}</strong><span>rows${
@@ -737,6 +759,7 @@
     };
     const renderInto = (root, key, producer) => {
       const previousStatus = root?.dataset.viewStatus || null;
+      setRendererSignal(root, 'loading', {active:true});
       applyStatus(root, 'loading', 'rendering');
       if (root) {
         delete root.dataset.rendererError;

@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v7
+schema: dataviz/dashboard/v8
 kind: dashboard
 id: sales
 title: 销售脉搏
@@ -12,14 +12,16 @@ assumptions:
   - 预测值为历史收入乘以 1.08，仅用于演示 Dataset Transform
 query_parameters:
   - id: target_factor
-    type: number
+    type: single_input
+    value_type: number
     label: 目标系数
     default: 1.0
 controls:
   - id: region
     kind: selection
     field: region
-    type: multi_select
+    type: multiple_select
+    value_type: text
     label: 区域
     default: [North, South, East, West]
     options:
@@ -81,7 +83,8 @@ views:
       - id: min_orders
         kind: selection
         field: orders
-        type: number
+        type: single_input
+        value_type: number
         label: 最低订单数
         default: 0
     selection_bindings:
@@ -94,7 +97,8 @@ sections:
       - id: min_revenue
         kind: selection
         field: revenue
-        type: number
+        type: single_input
+        value_type: number
         label: 最低单期收入
         default: 0
     views: [revenue, target, distribution]

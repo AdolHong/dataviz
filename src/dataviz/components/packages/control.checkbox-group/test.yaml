@@ -3,7 +3,7 @@ tests:
   - id: control.checkbox-group.include-state
     component: control.checkbox-group
     kind: browser
-    assertions: [empty values show no checked options and a Select all action, Select all checks every available option without normalization, the action becomes Invert, one option can be removed from the explicit full set, Invert from the full set returns to empty]
+    assertions: [two to five choices render without a bulk toolbar, every selected value remains visible, clearable groups can reach an explicit empty array by unchecking, required groups preserve the final selected value]
   - id: control.checkbox-group.cascade
     component: control.checkbox-group
     kind: browser

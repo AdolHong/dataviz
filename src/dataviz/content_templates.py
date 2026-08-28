@@ -271,13 +271,13 @@ def format_parameter_value(
     """Format committed Query Parameter values for human-facing content."""
     if value is None:
         return ""
-    if definition.type == "date_range":
+    if definition.type == "range_input" and definition.value_type == "date":
         items = value.split(",", 1) if isinstance(value, str) else value
         if isinstance(items, (list, tuple)):
             return " 至 ".join(
                 str(item) for item in items if item is not None and item != ""
             )
-    if definition.type == "multi_select" and isinstance(value, str):
+    if definition.type in {"multiple_input", "multiple_select"} and isinstance(value, str):
         value = [item.strip() for item in value.split(",") if item.strip()]
     if isinstance(value, (list, tuple, set)):
         return _format_sequence(value, definition)
@@ -295,7 +295,7 @@ def format_selection_value(value: Any, definition: SelectionControlDefinition) -
     """Format browser Selection state as compact human-facing context."""
     if value is None or value == "" or value == []:
         return "全部"
-    if definition.type == "date_range":
+    if definition.type == "range_input" and definition.value_type == "date":
         items = value.split(",", 1) if isinstance(value, str) else value
         if isinstance(items, (list, tuple)):
             return " 至 ".join(
@@ -312,7 +312,7 @@ def format_selection_value(value: Any, definition: SelectionControlDefinition) -
             for path in paths
             if isinstance(path, (list, tuple))
         )
-    if definition.type == "multi_select" and isinstance(value, str):
+    if definition.type in {"multiple_input", "multiple_select"} and isinstance(value, str):
         value = [item.strip() for item in value.split(",") if item.strip()]
     if isinstance(value, (list, tuple, set)):
         items = list(value)

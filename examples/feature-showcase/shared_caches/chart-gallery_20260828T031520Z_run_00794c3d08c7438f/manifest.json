@@ -1,0 +1,32 @@
+{
+  "schema": "dataviz/shared-cache/v1",
+  "share_id": "chart-gallery_20260828T031520Z_run_00794c3d08c7438f",
+  "dashboard_id": "chart-gallery",
+  "run_id": "run_00794c3d08c7438f",
+  "created_at": "2026-08-28T03:15:20.269055+00:00",
+  "url": "/shared/chart-gallery_20260828T031520Z_run_00794c3d08c7438f",
+  "query_parameters": {},
+  "compute_parameters": {
+    "dashboard:chart-gallery/radar_city_count": 5
+  },
+  "selection_state": {
+    "dashboard:chart-gallery/province": {
+      "intent": "explicit",
+      "values": [
+        "广东",
+        "湖南",
+        "福建",
+        "浙江"
+      ]
+    }
+  },
+  "artifacts": [
+    {
+      "artifact_id": "source_metrics--ea7ed51cf3ef",
+      "path": "artifacts/source_metrics--ea7ed51cf3ef_55f5c3d7df06.parquet",
+      "content_hash": "55f5c3d7df06c1fe7dfd1d496a9eeb39d9e91598481caa2b997e825223ae663b",
+      "kind": "table",
+      "format": "parquet"
+    }
+  ]
+}

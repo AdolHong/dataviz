@@ -52,6 +52,7 @@ from dataviz.workspace.naming import (
     dashboard_trash_id,
     decode_dashboard_name,
     decode_dashboard_path,
+    encode_dashboard_name,
     folder_id,
     folder_trash_id,
     normalize_logical_path,
@@ -911,6 +912,13 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
     trash_roots = [
         segments
         for segments in trashed_folders
+        if any(
+            _is_logical_prefix(
+                segments,
+                locations_by_path[dashboard_path].folder_segments,
+            )
+            for dashboard_path in trashed_paths
+        )
         if not any(
             other != segments and _is_logical_prefix(other, segments)
             for other in trashed_folders
@@ -926,6 +934,13 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
             candidate
             for candidate in folder_paths
             if len(candidate) == len(path) + 1 and candidate[:-1] == path
+            if any(
+                _is_logical_prefix(
+                    candidate,
+                    locations_by_path[dashboard_path].folder_segments,
+                )
+                for dashboard_path in grouped_dashboard_paths
+            )
         )
         dashboard_items = []
         for dashboard_path in grouped_dashboard_paths:
@@ -937,7 +952,7 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
                 NavigationItem(
                     kind="dashboard",
                     id=dashboard.definition.id if dashboard else location.leaf,
-                    title=location.leaf,
+                    title=encode_dashboard_name(location.segments),
                 )
             )
         return NavigationItem(
@@ -984,7 +999,7 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
     for selected in sorted(set(trashed_paths) - covered_trashed_paths):
         location = locations_by_path[selected]
         dashboard = loaded_by_path.get(selected)
-        title = location.leaf
+        title = encode_dashboard_name(location.segments)
         item = NavigationItem(
             kind="dashboard",
             id=dashboard.definition.id if dashboard else location.leaf,
@@ -1850,7 +1865,7 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                 definition = item.definition
                 dynamic_select = (
                     item.kind == "selection"
-                    and definition.type in {"single_select", "multi_select"}
+                    and definition.type in {"single_select", "multiple_select"}
                     and isinstance(definition.options, InferredOptionDomainDefinition)
                 )
                 references = option_domains.get(control_key, [])
@@ -2076,12 +2091,13 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         )
                     )
                 elif not isinstance(binding, str) and binding.part is not None and (
-                    parameter_definitions[parameter].type != "date_range"
+                    parameter_definitions[parameter].type != "range_input"
+                    or parameter_definitions[parameter].value_type != "date"
                 ):
                     diagnostics.append(
                         Diagnostic(
                             "error",
-                            f"Query input {alias} uses part={binding.part}, but {parameter} is not date_range",
+                            f"Query input {alias} uses part={binding.part}, but {parameter} is not range_input/date",
                             str(source_path),
                             f"query_inputs.{alias}.part",
                             "query_input_part_invalid",
@@ -2291,12 +2307,13 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         )
                     )
                 elif not isinstance(binding, str) and binding.part is not None and (
-                    parameter_definitions[parameter].type != "date_range"
+                    parameter_definitions[parameter].type != "range_input"
+                    or parameter_definitions[parameter].value_type != "date"
                 ):
                     diagnostics.append(
                         Diagnostic(
                             "error",
-                            f"Query input {alias} uses part={binding.part}, but {parameter} is not date_range",
+                            f"Query input {alias} uses part={binding.part}, but {parameter} is not range_input/date",
                             str(transform_path),
                             f"query_inputs.{alias}.part",
                             "query_input_part_invalid",
@@ -2453,12 +2470,13 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         )
                     )
                 elif not isinstance(binding, str) and binding.part is not None and (
-                    parameter_definitions[parameter].type != "date_range"
+                    parameter_definitions[parameter].type != "range_input"
+                    or parameter_definitions[parameter].value_type != "date"
                 ):
                     diagnostics.append(
                         Diagnostic(
                             "error",
-                            f"Query input {alias} uses part={binding.part}, but {parameter} is not date_range",
+                            f"Query input {alias} uses part={binding.part}, but {parameter} is not range_input/date",
                             str(transform_path),
                             f"query_inputs.{alias}.part",
                             "query_input_part_invalid",

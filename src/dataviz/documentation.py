@@ -137,12 +137,17 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
         },
         "execution": {
             "compiled_contract": (
-                "每个 Dashboard load snapshot 以并发安全方式只编译并缓存一份 dataviz/dependency-contract/v4；"
+                "每个 Dashboard load snapshot 以并发安全方式只编译并缓存一份 dataviz/dependency-contract/v5；"
                 "Query planner、Interactive executor、Canvas、Server API 与浏览器 Runtime 都消费同一个对象。"
             ),
             "query_dag": "Source 与 Dataset Transform；完成的独立分支立即发布 Base Output。",
             "interactive_dag": "三种 Runtime 共用 Named Output、依赖、状态、缓存和局部失效协议。",
             "view_isolation": "View 只因自己的 Selection、内容绑定或输入 Output 变化而更新。",
+            "diagnostic_projection": (
+                "Header 只显示 Query DAG 的 Source/Dataset 节点；每个 View 使用编译后的 pipeline_nodes "
+                "在类型标签左侧显示自己的上游与 Renderer。View 灯只在活动、过期或失败时出现，Ready/Not run 隐藏；"
+                "导出 HTML 因 Base Output 已固化，只显示端侧 Interactive/Renderer 的瞬时状态。"
+            ),
             "identity": "Interaction 以 tab、Dashboard、Query Run、Transform、generation 隔离。",
             "server_interactive_cache": (
                 "Query 计划显式标记 server_interactive_inputs；Server Compute 只读取该 tab Query Run 的 Artifact，"
@@ -157,7 +162,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "dataviz dependencies <workspace> <dashboard-id>",
             "dataviz dependencies <workspace> <dashboard-id> --format json",
         ],
-        "schema": "dataviz/dependency-contract/v4",
+        "schema": "dataviz/dependency-contract/v5",
         "graphs": {
             "query": (
                 "Query Parameter → Source/Dataset Transform → immutable Base Named Output；"
@@ -240,24 +245,24 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
     },
     "dashboard": {
         "summary": "dashboard.yaml 是分析逻辑；presentation.yaml 是可删除的视觉覆盖。",
-        "schema": "dataviz/dashboard/v7",
+        "schema": "dataviz/dashboard/v8",
         "state_summary": {
             "schema": "dataviz/state-snapshot/v1",
-            "behavior": "默认画布在 Dashboard/Section/View 标题附近展示当前已提交 Query、applied Selection 与 committed Compute；草稿只标记待应用。",
-            "presentation": "presentation.state_summary.items 可按 canonical Control key 调整 label/order/hidden/formatter；不允许改写状态值。",
+            "behavior": "Runtime 始终维护已提交 Query、applied Selection、committed/draft Compute；默认不把它们机械复述到画布。",
+            "presentation": "仅在确有分析价值时设置 presentation.state_summary.enabled: true；items 可按 canonical Control key 调整 label/order/hidden/formatter，且不允许改写状态值。",
         },
         "identity": {
             "folder": "导航显示名及 ## 目录位置；复制、重命名和打包时所见即所得。",
             "id": "CLI、DAG、API 与 Presentation 使用的稳定程序身份。",
             "title": "页面内容，可与文件夹名不同；为空时回退到文件夹末级名称。",
         },
-        "minimal_example": """schema: dataviz/dashboard/v7
+        "minimal_example": """schema: dataviz/dashboard/v8
 kind: dashboard
 id: sales-overview
 title: 销售概览
 subtitle: "仓 {{ parameters.warehouse_id }}"
 query_parameters:
-  - {id: warehouse_id, type: integer, label: 仓, default: 5740}
+  - {id: warehouse_id, type: single_input, value_type: integer, label: 仓, default: 5740}
 sources:
   - id: sales
     kind: source
@@ -316,13 +321,12 @@ sections:
         "summary": "Query Parameter 创建不可变 Query Run；节点通过 query_inputs 使用本地别名和显式投影。",
         "date_range": {
             "definition": """- id: job_date_range
-  type: date_range
+  type: range_input
+  value_type: date
   required: true
-  default:
-    mode: relative
-    anchor: today
-    start_offset: -3d
-    end_offset: -1d
+    default:
+      - {mode: relative, anchor: today, offset: -3d}
+      - {mode: relative, anchor: today, offset: -1d}
 """,
             "binding": """query_inputs:
   start_date: {parameter: job_date_range, part: start}
@@ -330,7 +334,7 @@ sections:
 """,
         },
         "relative_defaults": [
-            "date 使用 offset；date_range 使用 start_offset/end_offset。",
+            "range_input/date 由两个独立 Date Atom 组成，每个端点可用固定 ISO 日期或 {mode: relative, anchor: today, offset: -1d}。",
             "v0.6 只接受 anchor=today 与整数日偏移 ±Nd/0d。",
             "today 按 workspace.context.timezone 计算，不使用 Server 操作系统时区。",
             "Run 创建时固化为 ISO 日期；缓存、SQL、HTML Export 均使用固化值，不在导出文件中重新求值。",
@@ -338,7 +342,7 @@ sections:
         "query_inputs": [
             "key 是节点本地别名，也是 SQL named placeholder 或 context.query_inputs 的 key。",
             "字符串值是 {parameter: <id>} 的简写。",
-            "part=start/end 仅允许投影 date_range；validate 在查询前拒绝错误类型。",
+            "part=start/end 仅允许投影 range_input/date；validate 在查询前拒绝错误类型。",
         ],
         "related": ["sources", "dataset-transforms", "interactive-transforms"],
     },
@@ -506,7 +510,8 @@ timeout_seconds: 120
         "dashboard_example": """controls:
   - id: region
     kind: selection
-    type: multi_select
+    type: multiple_select
+    value_type: text
     field: region
     options:
       mode: static
@@ -515,7 +520,8 @@ timeout_seconds: 120
         - {label: 华南, value: south}
   - id: simulations
     kind: compute
-    type: integer
+    type: single_input
+    value_type: integer
     default: 100000
     min: 1000
     max: 1000000
@@ -534,7 +540,7 @@ selection_inputs:
             "switch": "立即发出 input/change 的 boolean；执行策略仍由外层工作流决定。",
             "radio-group": "少量可见单选；不合成 All/Clear。",
             "select": "平面单选或多选；search/virtual 支持 auto/always/never。单选不提供批量操作。",
-            "checkbox-group": "少量多选；可配置全选、反选和清空。",
+            "checkbox-group": "2–5 个并列选项的直接多选；不显示全选、反选或清空工具栏。",
             "cascader": "用 path_fields 逐级浏览并选择完整路径。",
             "tree-select": "在窄弹层中搜索、展开和选择层级路径。",
             "date-picker": "选择一个 ISO 日期，遵守 min_date/max_date。",
@@ -587,13 +593,15 @@ selection_inputs:
   - id: dow
     kind: selection
     type: single_select
+    value_type: text
     field: dow
     options:
       mode: infer
       source: source:forecast-series/main
   - id: job_date
     kind: selection
-    type: multi_select
+    type: multiple_select
+    value_type: text
     field: job_date
     depends_on: [view.dow]
     options:
@@ -621,12 +629,13 @@ selection_inputs:
                 "control.switch": "Ant Switch；一个 immediate boolean。",
                 "control.radio-group": "Ant Radio.Group；一个真实 scalar choice，无 All/Clear。",
                 "control.select": "Ant Select；单/多选、分组、搜索、max tag、虚拟列表。",
-                "control.checkbox-group": "Ant Checkbox.Group；小规模显式多选与可选批量操作。",
+                "control.checkbox-group": "Ant Checkbox.Group；2–5 个小规模显式多选，无批量工具栏。",
                 "control.cascader": "Ant Cascader；完整层级 path，单选或多选。",
                 "control.tree-select": "Ant TreeSelect；可搜索、展开的层级 path。",
                 "control.date-picker": "Ant DatePicker；单个 ISO date。",
                 "control.range-picker": "Ant DatePicker.RangePicker；一个弹层编辑两个日期。",
-                "control.slider": "Ant Slider；有界数值、marks、tooltip 和可选同步输入框。",
+                "control.multiple-input": "开放的有序值列表；支持 text/integer/number/date。",
+                "control.slider": "Ant Slider；单值或双端 numeric range、marks、tooltip 和可选同步输入框。",
             },
             "composition": {
                 "Form": "不是 value component；由 control_panels 和 Query/Selection/Compute 工作流组合 label、description、validation、layout 与 submit/apply。",
@@ -644,11 +653,12 @@ selection_inputs:
         },
         "auto_resolution": [
             "path_fields → cascader",
-            "date_range → range-picker；date → date-picker",
-            "number/integer → input-number；boolean → checkbox",
-            "string + suggestions → auto-complete；其余 string → input",
+            "range_input/date → range-picker；single_input/date → date-picker",
+            "range_input/number|integer → slider；single_input/number|integer → input-number",
+            "single_input/boolean → checkbox；multiple_input → multiple-input",
+            "single_input/text + suggestions → auto-complete；其余 single_input/text → input",
             "不超过 4 个 static choices 的 single_select → radio-group",
-            "不超过 8 个 static choices 的 multi_select → checkbox-group",
+            "2–5 个 static choices 的 multiple_select → checkbox-group",
             "其余 flat select → select",
         ],
         "dynamic_option_domains": [
@@ -661,6 +671,7 @@ controls:
   - id: model
     kind: compute
     type: single_select
+    value_type: text
     required: true
     default: baseline
     options:
@@ -740,30 +751,45 @@ control_components:
         "file": "dashboard 文件夹中的 presentation.yaml；删除后仍使用 Dashboard Layout Contract，只退化为默认视觉样式。",
         "forbidden_structure": ["layout", "section.template", "section.columns", "view.span"],
         "themes": {
-            "default": "business：冷灰页面、白色卡片、靛蓝主色、低阴影；图表与控件自动继承同一组 token。",
+            "default": "business：白色画布、白色卡片、靛蓝分析强调、轻边框与极低阴影；绿色只保留给 Ready/成功语义，Dashboard 内图表与控件自动继承同一组 token。",
             "presets": {
-                "business": "现代靛蓝分析工作台（默认）",
+                "business": "简洁中性分析工作台（默认）",
                 "plain": "最小中性分析样式",
                 "editorial": "暖色叙事报告",
                 "terminal": "深色技术监控",
             },
-            "boundary": "Theme 只改变 Presentation；Renderer 显式 options/config 仍优先于默认主题。",
+            "boundary": "Theme 只改变 Dashboard Presentation；稳定 Shell 不随 Theme 染色。Renderer 显式 options/config 仍优先于默认主题。",
+        },
+        "shell": {
+            "summary": "Server 与导出 HTML 默认使用连续白色 Shell；Server Header 横跨屏幕，Dataviz 品牌按钮控制其下方 Sidebar，Query 信号灯紧随品牌。Header、Sidebar 与 Workbench 只用极浅分割线区分，稳定 Shell 不跟随 Dashboard Theme 染色。",
+            "tokens": [
+                "--dv-shell-bg",
+                "--dv-shell-surface",
+                "--dv-shell-line",
+                "--dv-shell-ink",
+                "--dv-shell-muted",
+                "--dv-shell-accent",
+                "--dv-shell-soft",
+                "--dv-shell-shadow",
+            ],
+            "boundary": "Dashboard Theme 只拥有 Canvas、Section、View 与 Renderer；Dashboard CSS 不应重写 Shell token。",
         },
         "control_panels": {
-            "default": "Query Parameters 是 Header 内联面板，由 Run query split control 显式开合；Dashboard Controls 使用临时托盘，并在内部按 DATA 与 LOGIC 分组。",
+            "default": "Query Parameters 是正常文档流中的 Query Card；Header 最右侧的 Run query split control 负责执行与开合，Card 内不重复运行按钮。Dashboard/Section/View Controls 使用临时托盘，默认只展示业务字段与组件，Selection/Compute 分组及影响范围保留在 Runtime 契约中。",
             "path": "control_panels.<query|dashboard>；Section/View 可在各自 presentation 条目中设置 controls",
             "options": {
                 "template": ["auto", "stack", "grid"],
                 "width": ["auto", "compact", "regular", "wide"],
-                "columns": "1–4，表示响应式最大列数；Query 默认最多 4 列并按可用宽度降为 3/2/1 列",
+                "columns": "1–6，表示最大列数；Query 的实际列数由 Panel 自身宽度动态计算",
+                "column_width": "160–600 px；Query 每轨目标宽度，默认 280；稀疏表单不拉满整行",
                 "density": ["compact", "comfortable"],
             },
             "control_span": "control_components.<canonical-key>.span 可显式设为 1 或 2；默认 1，RangePicker 等组件不会自动跨列，窄容器会安全退化为单列。",
             "boundary": "这些字段只调整排版；值、校验、级联、tab 状态和执行仍由共享 Runtime 管理。导出 HTML 中 Query 为只读快照，Controls 保持交互。",
             "example": {
                 "control_panels": {
-                    "query": {"template": "grid", "width": "wide", "columns": 3, "density": "compact"},
-                    "dashboard": {"template": "grid", "width": "regular", "columns": 2},
+                    "query": {"columns": 6, "column_width": 280, "density": "compact"},
+                    "dashboard": {"template": "stack"},
                 }
             },
         },
@@ -774,13 +800,13 @@ control_components:
     "design-language": {
         "summary": "AI 自定义 Dashboard 样式时应遵循的统一视觉语言、Token 契约与验收清单。",
         "default_direction": {
-            "name": "Modern indigo analytical workbench",
+            "name": "Quiet white shell + clean analytical canvas",
             "intent": "冷静、清晰、可信；先让人理解分析对象和结论，再展示交互与实现细节。",
             "signature": [
-                "冷灰页面承载白色分析面板",
-                "靛蓝建立品牌、标题和主要操作层级",
-                "绿色只表达数据选择、Ready 或正向语义",
-                "低阴影、清晰边框和充足留白代替装饰性渐变",
+                "白色 Header、Sidebar、Workbench 与默认 Canvas 形成连续表面，只用极浅分割线确认边界",
+                "Dashboard 画布可独立使用 business、plain、editorial 或 terminal Theme，但默认 business 不与 Shell 争夺注意力",
+                "靛蓝表达当前项、主操作和默认分析序列；绿色只表达 Ready、成功或正向语义",
+                "留白是主要层级手段；轻边框和近乎不可见的阴影只做辅助",
             ],
             "default_preset": "business",
             "alternatives": {
@@ -793,17 +819,27 @@ control_components:
             "Insight first：首屏先说明当前分析对象、关键结果和可采取的下一步。",
             "One section, one question：一个 Section 回答一个问题；View title 描述内容，description 说明读法。",
             "Semantic before decorative：颜色、容器和层级表达语义，不用装饰制造虚假重点。",
-            "Progressive disclosure：Query Parameters 首次默认展开并参与 Header 文档流；Controls、Pipeline 和诊断细节默认折叠，需要时再展开。",
+            "Progressive disclosure：Query Parameters 首次默认展开并参与页面文档流；Controls 位于最右侧 Run split control 左侧并按需展开；Pipeline 以品牌旁逐节点状态灯呈现，悬停看任务名、点击看证据。",
             "Stable interaction：自定义 CSS 不改变 Control 级联、焦点、弹层几何、滚动或 Renderer 生命周期。",
-            "One token system：Server、HTML、Plotly、ECharts、Table、Perspective 和 Data Entry Component 使用同一语义 Token。",
+            "Two bounded token layers：稳定 Shell token 管理导航和操作；Dashboard Theme token 管理 Canvas 与 Renderer。",
         ],
         "information_hierarchy": {
             "dashboard": "title 说明分析主题；subtitle/description 交代对象、范围和目的。不要重复 Run ID、Source ID 或实现口径。",
             "section": "短标题 + 一句决策问题；局部 Controls 放在 Section header，避免漂浮在图表内容上。",
             "view": "标题应能脱离页面独立理解；可选 description 说明指标口径或交互结果，不重复 Section 文案。",
-            "detail": "诊断、SQL、技术假设和运行状态进入 Pipeline/详情面板，不抢占分析画布。",
+            "detail": "诊断、SQL 和日志由节点状态灯的点击证据承载，不使用常驻 Pipeline 按钮抢占分析画布。",
         },
         "core_tokens": {
+            "shell": {
+                "--dv-shell-bg": "Header、导出工具栏与 Query 托盘的白色背景",
+                "--dv-shell-surface": "Shell 按钮和弹层表面",
+                "--dv-shell-line": "Shell 低对比边框",
+                "--dv-shell-ink": "Shell 主要文字",
+                "--dv-shell-muted": "Shell 辅助文字",
+                "--dv-shell-accent": "活动导航、主操作与 Control 轻强调",
+                "--dv-shell-soft": "Shell 弱强调背景",
+                "--dv-shell-shadow": "Shell 工具栏低阴影",
+            },
             "surfaces": {
                 "--dv-paper": "页面背景",
                 "--dv-panel": "卡片、表格与图表面板",
@@ -914,10 +950,10 @@ assets:
             "选择一个明确方向；默认沿用 business，不同时混合 business/editorial/terminal 的视觉语法。",
             "先写 Presentation YAML，再写最少量 Dashboard 自有 CSS；不修改数据逻辑。",
             "运行 dataviz validate，并在 Gallery/真实数据/窄视口下检查 Ready、Empty、Error 和弹层状态。",
-            "确认 Server 与导出 HTML 一致，Plotly/ECharts/Table/Perspective 均继承 Token。",
+            "确认 Server 与导出 HTML 的 Shell 一致，Plotly/ECharts/Table/Perspective 均继承 Dashboard Theme Token。",
         ],
         "acceptance_checklist": [
-            "首屏无需打开 Pipeline 即可知道分析对象、范围和主要结论。",
+            "首屏通过状态灯知道 Pipeline 健康度，需要时点击具体节点查看证据。",
             "页面只有一个主要强调色，状态色保持原有语义。",
             "标题层级不重复，Section 和 View 在脱离上下文时仍可理解。",
             "控件弹层不透明、不越过视口，点击外部与 Escape 可关闭。",
@@ -1029,10 +1065,10 @@ assets:
     "strict-schema": {
         "summary": "只接受当前 DSL；不提供 deprecated 层、字段别名、自动迁移或双协议 Runtime。",
         "current": {
-            "dashboard": "dataviz/dashboard/v7",
+            "dashboard": "dataviz/dashboard/v8",
             "source": "dataviz/source/v2",
             "runtime": "dataviz/runtime/v5",
-            "dependency_contract": "dataviz/dependency-contract/v4",
+            "dependency_contract": "dataviz/dependency-contract/v5",
             "dataset_transform": "dataviz/dataset-transform/v2",
             "interactive_transform": "dataviz/interactive-transform/v2",
         },

@@ -34,11 +34,11 @@ def _isolate_repository_workspaces(isolated_workspace):
 
 
 def test_parameter_content_templates_format_human_facing_values():
-    period = QueryParameterDefinition(id="period", type="date_range")
+    period = QueryParameterDefinition(id="period", type="range_input", value_type="date")
     stores = QueryParameterDefinition.model_validate(
         {
             "id": "stores",
-            "type": "multi_select",
+            "type": "multiple_select", "value_type": "integer",
             "options": {
                 "mode": "static",
                 "choices": [
@@ -64,14 +64,14 @@ def test_parameter_content_templates_format_human_facing_values():
 def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v7",
+            "schema": "dataviz/dashboard/v8",
             "id": "hourly-sales",
             "title": "小时销售",
             "controls": [
                 {
                     "id": "region",
                     "kind": "selection",
-                    "type": "single_select",
+                    "type": "single_select", "value_type": "text",
                     "default": "south",
                     "options": {
                         "mode": "static",
@@ -88,7 +88,7 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
                         {
                             "id": "dow",
                             "kind": "selection",
-                            "type": "single_select",
+                            "type": "single_select", "value_type": "integer",
                             "default": 5,
                             "options": {
                                 "mode": "static",
@@ -135,7 +135,7 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
         {
             "id": "dow",
             "kind": "selection",
-            "type": "multi_select",
+                "type": "multiple_select", "value_type": "integer",
             "options": {
                 "mode": "static",
                 "choices": [
@@ -151,16 +151,16 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
 def test_interpolation_is_limited_to_declarative_content_fields():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v7",
+            "schema": "dataviz/dashboard/v8",
             "id": "hourly-sales",
             "title": "商品 {{ parameters.product_id }}",
             "subtitle": "{{ parameters.period }}",
             "description": "仓 {{ parameters.store_id }}",
             "assumptions": ["当前商品：{{ parameters.product_id }}"],
             "query_parameters": [
-                {"id": "store_id", "type": "integer", "default": 5740},
-                {"id": "product_id", "default": "980464683"},
-                {"id": "period", "type": "date_range", "default": []},
+                {"id": "store_id", "type": "single_input", "value_type": "integer", "default": 5740},
+                {"id": "product_id", "type": "single_input", "value_type": "text", "default": "980464683"},
+                {"id": "period", "type": "range_input", "value_type": "date", "default": []},
             ],
             "sections": [
                 {
@@ -258,7 +258,7 @@ def test_custom_canvas_content_helper_keeps_selection_binding(tmp_path: Path):
             "id": "dow",
             "kind": "selection",
             "field": "region",
-            "type": "single_select",
+            "type": "single_select", "value_type": "text",
             "default": "华东",
             "options": {
                 "mode": "static",
@@ -301,7 +301,7 @@ def test_validate_rejects_unknown_and_executable_content_expressions(tmp_path: P
         {
             "id": "dow",
             "kind": "selection",
-            "type": "single_select",
+            "type": "single_select", "value_type": "integer",
             "options": {
                 "mode": "static",
                 "choices": [{"label": "周五", "value": 5}],

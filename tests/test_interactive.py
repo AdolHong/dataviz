@@ -75,18 +75,19 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v7
+        """schema: dataviz/dashboard/v8
 kind: dashboard
 id: interactive
 title: Interactive contract
 query_parameters:
-  - {id: batch, type: integer, default: 7}
+  - {id: batch, type: single_input, value_type: integer, default: 7}
 controls:
-  - {id: factor, kind: compute, type: integer, default: 2}
-  - {id: delay, kind: compute, type: number, default: 0}
+  - {id: factor, kind: compute, type: single_input, value_type: integer, default: 2}
+  - {id: delay, kind: compute, type: single_input, value_type: number, default: 0}
   - id: region
     kind: selection
-    type: multi_select
+    type: multiple_select
+    value_type: text
     field: region
     options:
       mode: static
@@ -703,7 +704,7 @@ def _start_query(client: TestClient, *, session_id: str = SESSION_A) -> str:
     return run_id
 
 
-def test_server_report_materializes_server_python_snapshot(tmp_path: Path):
+def test_server_report_rejects_server_python_and_recommends_share(tmp_path: Path):
     root = build_interactive_workspace(tmp_path / "workspace")
     client = TestClient(create_app(root))
     run_id = _start_query(client)
@@ -718,11 +719,11 @@ def test_server_report_materializes_server_python_snapshot(tmp_path: Path):
         },
     )
 
-    assert report.status_code == 200, report.text
-    assert '"snapshot_interactions": ["summary"]' in report.text
-    assert '"interactive:summary/main": [' in report.text
-    assert '"value": 6' in report.text
-    assert 'data-compute-frozen="true"' in report.text
+    assert report.status_code == 409, report.text
+    detail = report.json()["detail"]
+    assert detail["code"] == "html_export_server_runtime_unavailable"
+    assert detail["transforms"] == ["summary"]
+    assert "shared link" in detail["message"]
 
 
 def test_interaction_api_rejects_out_of_order_generation_without_cancelling_latest(

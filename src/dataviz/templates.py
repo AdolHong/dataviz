@@ -43,7 +43,7 @@ THEME_PRESETS: dict[str, dict[str, str]] = {
     "plain": {"purpose": "Minimal neutral analysis style"},
     "editorial": {"purpose": "Warm report and narrative style"},
     "terminal": {"purpose": "Dark technical monitoring style"},
-    "business": {"purpose": "Modern indigo analytical default"},
+    "business": {"purpose": "Clean neutral analytical default"},
 }
 
 THEME_TOKENS = [
@@ -80,12 +80,13 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
         "use_when": "A Dashboard has enough controls to need a responsive grid or a bounded scrolling tray",
         "presentation": {
             "path": "controls.<query|dashboard>; sections.<id>.controls; views.<id>.controls",
-            "options": ["template", "width", "columns", "density"],
+            "options": ["template", "width", "columns", "column_width", "density"],
             "templates": ["auto", "stack", "grid"],
             "widths": ["auto", "compact", "regular", "wide"],
         },
         "behavior": {
-            "auto": "One control stacks; multiple controls use a responsive grid",
+            "auto": "Query uses a width-derived responsive grid; scoped Controls stack unless grid is explicit",
+            "query_columns": "columns is a maximum and column_width is the bounded target track width; sparse forms keep trailing whitespace",
             "viewport": "The tray never exceeds the viewport and scrolls its fields internally",
             "ownership": "Presentation changes composition only; shared Runtime owns values, validation, cascade and execution",
             "export": "Scoped Controls stay interactive in Server and exported HTML; Query is a fixed snapshot after export",
@@ -314,7 +315,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
 }
 
 
-COMPONENT_REGISTRY_VERSION = "4.2.0"
+COMPONENT_REGISTRY_VERSION = "5.4.0"
 RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v5"
 
 

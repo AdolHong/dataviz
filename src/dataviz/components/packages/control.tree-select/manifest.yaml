@@ -15,7 +15,7 @@ components:
       official: https://ant.design/components/tree-select/
       adopted: [single-and-multiple-mode, searchable-tree, tree-checkable, show-checked-strategy, default-expanded-levels]
       omitted: [async-load-data, custom-tree-title-render, semantic-DOM-React-hooks]
-    logic: {types: [single_select, multi_select], fields: [path_fields], value_shape: {single: [level-1, level-2, leaf], multiple: [[level-1, level-2, leaf]]}}
+    logic: {types: [single_select, multiple_select], value_types: [text, integer, number, boolean, date], fields: [path_fields], value_shape: {single: [level-1, level-2, leaf], multiple: [[level-1, level-2, leaf]]}}
     presentation: {component: tree-select, options: [level_labels, search, search_placeholder, path_separator, default_expand_depth, selection_strategy, show_checked_strategy, max_tag_count, show_unavailable, clear_label, css_class]}
     behavior: {selection: leaves, parent_context: persistent, search: full-path, branch_selection: optional_descendant_toggle, checked_summary: [child, parent, all]}
     semantic_dom: [.dv-tree-select, .dv-control-panel, .dv-tree-panel, .dv-tree-list, .dv-tree-option]

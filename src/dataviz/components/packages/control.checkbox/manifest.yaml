@@ -15,7 +15,7 @@ components:
       official: https://ant.design/components/checkbox/
       adopted: [checked-state, disabled-state, native-checkbox-semantics]
       omitted: [indeterminate-as-value, Checkbox.Group]
-    logic: {type: boolean, value_shape: boolean}
+    logic: {type: single_input, value_type: boolean, value_shape: scalar}
     presentation: {component: checkbox, options: [css_class]}
     behavior: {commit_semantics: surrounding-workflow, immediate_side_effect: false}
     semantic_dom: [.dv-checkbox, .dv-checkbox__mark]

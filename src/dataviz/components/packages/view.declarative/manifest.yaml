@@ -1,6 +1,6 @@
 schema: dataviz/component-package/v1
 package: view.declarative
-version: 1.3.0
+version: 1.5.0
 category: view
 purpose: Declarative View descriptors, Renderer adapters and lifecycle state boundaries.
 implementation:
@@ -25,4 +25,5 @@ components:
   - {id: view.echarts-category, purpose: ECharts category legend interaction contract, status: stable}
   - {id: view.state, purpose: Semantic View lifecycle states and scoped failure boundaries, status: stable}
   - {id: view.renderer-lifecycle, purpose: Managed Renderer behavioral matrix across live Canvas and portable HTML, status: stable}
+  - {id: view.pipeline-status, purpose: Compiler-owned upstream and Renderer diagnostic signals shown only while active or failed, status: stable}
 runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

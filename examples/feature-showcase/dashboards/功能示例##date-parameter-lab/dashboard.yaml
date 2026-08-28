@@ -1,0 +1,44 @@
+schema: dataviz/dashboard/v8
+kind: dashboard
+id: date-parameter-lab
+title: 日期参数实验室
+description: 演示单日期与 Range Picker 的相对默认值、SQL 投影和参数编辑。
+adapters: {warehouse: demo-duckdb}
+
+query_parameters:
+  - id: analysis_date
+    type: single_input
+    value_type: date
+    label: 分析日期
+    required: true
+    default:
+      mode: relative
+      anchor: today
+      offset: -1d
+
+  - id: report_range
+    type: range_input
+    value_type: date
+    label: 报告日期范围
+    required: true
+    default:
+      - {mode: relative, anchor: today, offset: -7d}
+      - {mode: relative, anchor: today, offset: -1d}
+
+sources: [sources/date-window.yaml]
+
+views:
+  - id: resolved-dates
+    title: 本次查询的日期参数
+    description: 相对日期会在创建 Query Run 时固化为 ISO 日期。
+    input: source:date-window/main
+    template: table
+    columns: [analysis_date, range_start, range_end, range_days]
+    limit: 10
+
+sections:
+  - id: result
+    title: 解析结果
+    views: [resolved-dates]
+
+layout: {columns: 12, gap: 16}

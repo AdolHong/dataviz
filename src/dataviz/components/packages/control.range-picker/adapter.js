@@ -1,26 +1,14 @@
 /* One trigger and one floating calendar own the complete range interaction. */
 (function registerRangePicker(global) {
   'use strict';
-  const api = global.datavizComponents?.controls;
-  if (!api) return;
-
-  const DAY_MS = 86_400_000;
-  const parseIso = value => {
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
-    if (!match) return null;
-    const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
-    return Number.isNaN(date.getTime()) ? null : date;
-  };
-  const iso = date => [
-    date.getUTCFullYear(),
-    String(date.getUTCMonth() + 1).padStart(2, '0'),
-    String(date.getUTCDate()).padStart(2, '0'),
-  ].join('-');
-  const monthStart = date => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
-  const addMonths = (date, amount) => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + amount, 1));
-  const addDays = (date, amount) => new Date(date.getTime() + amount * DAY_MS);
-  const daysInMonth = date => new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
-  const mondayIndex = date => (date.getUTCDay() + 6) % 7;
+  const root = global.datavizComponents;
+  const api = root?.controls;
+  const dates = root?.calendarPrimitives;
+  if (!api || !dates) return;
+  const {
+    parseIso, iso, monthStart, addMonths, addDays, daysInMonth, mondayIndex,
+    formatIsoEntry, createMonthSelector,
+  } = dates;
 
   api.register('range-picker', ({control, input, mount}) => {
     const required = control.dataset.required === 'true';
@@ -34,7 +22,6 @@
     const endLabel = control.dataset.endLabel || 'End';
     const locale = document.documentElement.lang || navigator.language || 'en';
     const today = iso(new Date());
-    const monthFormatter = new Intl.DateTimeFormat(locale, {year: 'numeric', month: 'long', timeZone: 'UTC'});
     const dayFormatter = new Intl.DateTimeFormat(locale, {year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC'});
     const weekdayFormatter = new Intl.DateTimeFormat(locale, {weekday: 'short', timeZone: 'UTC'});
     const weekdays = Array.from({length: 7}, (_item, index) => weekdayFormatter.format(
@@ -53,15 +40,33 @@
     picker.className = 'dv-date-range';
     picker.dataset.controlPicker = '';
 
+    const field = document.createElement('div');
+    field.className = 'dv-date-range__field';
+    const startEditor = document.createElement('input');
+    startEditor.type = 'text';
+    startEditor.inputMode = 'numeric';
+    startEditor.autocomplete = 'off';
+    startEditor.className = 'dv-date-range__endpoint';
+    startEditor.placeholder = startLabel;
+    startEditor.setAttribute('aria-label', startLabel);
+    const separator = document.createElement('span');
+    separator.className = 'dv-date-range__separator';
+    separator.textContent = '→';
+    separator.setAttribute('aria-hidden', 'true');
+    const endEditor = document.createElement('input');
+    endEditor.type = 'text';
+    endEditor.inputMode = 'numeric';
+    endEditor.autocomplete = 'off';
+    endEditor.className = 'dv-date-range__endpoint';
+    endEditor.placeholder = endLabel;
+    endEditor.setAttribute('aria-label', endLabel);
     const trigger = document.createElement('button');
     trigger.type = 'button';
     trigger.className = 'dv-date-range__trigger';
     trigger.dataset.controlTrigger = '';
-    trigger.innerHTML = `
-      <span class="dv-date-range__value">
-        <span data-range-start></span><i aria-hidden="true">→</i><span data-range-end></span>
-      </span>
-      <span class="dv-date-range__calendar-icon" aria-hidden="true"></span>`;
+    trigger.setAttribute('aria-label', `${startLabel} – ${endLabel}`);
+    trigger.innerHTML = '<span class="dv-date-range__calendar-icon" aria-hidden="true"></span>';
+    field.append(startEditor, separator, endEditor, trigger);
 
     const panel = document.createElement('div');
     panel.className = 'dv-control-panel dv-date-range__panel';
@@ -97,7 +102,7 @@
     actions.append(clear, apply);
     footer.append(hint, actions);
     panel.append(presetHost, calendarHost, footer);
-    picker.append(trigger, panel);
+    picker.append(field, panel);
     mount.replaceChildren(picker);
 
     const readValue = () => {
@@ -112,24 +117,45 @@
     };
 
     function renderSummary() {
-      const start = trigger.querySelector('[data-range-start]');
-      const end = trigger.querySelector('[data-range-end]');
-      start.textContent = committedStart || startLabel;
-      end.textContent = committedEnd || endLabel;
-      start.classList.toggle('is-placeholder', !committedStart);
-      end.classList.toggle('is-placeholder', !committedEnd);
-      trigger.classList.toggle('has-value', Boolean(committedStart || committedEnd));
+      if (document.activeElement !== startEditor) startEditor.value = committedStart;
+      if (document.activeElement !== endEditor) endEditor.value = committedEnd;
+      startEditor.disabled = input.disabled;
+      endEditor.disabled = input.disabled;
       trigger.disabled = input.disabled;
+    }
+
+    function setEditorError(message = '', editor = null) {
+      input.setCustomValidity(message);
+      [startEditor, endEditor].forEach(item => {
+        item.setAttribute('aria-invalid', String(Boolean(message && (!editor || editor === item))));
+      });
+      const output = control.querySelector('[data-control-error]');
+      if (output) {
+        output.textContent = message;
+        output.hidden = !message;
+      }
+    }
+
+    function editorValue(editor, label, allowEmpty) {
+      const value = editor.value.trim();
+      if (!value) {
+        if (allowEmpty) return '';
+        throw new Error(`${label} must use YYYY-MM-DD`);
+      }
+      if (!parseIso(value)) throw new Error(`${label} must use a real YYYY-MM-DD date`);
+      if (!inBounds(value)) throw new Error(`${label} is outside the allowed date range`);
+      return value;
     }
 
     function commit(start, end, {close = true} = {}) {
       let nextStart = start || '';
       let nextEnd = end || '';
       if (nextStart && nextEnd && nextStart > nextEnd) [nextStart, nextEnd] = [nextEnd, nextStart];
-      if (!nextStart && nextEnd && !allowEmptyStart) return;
-      if (nextStart && !nextEnd && !allowEmptyEnd) return;
-      if (nextStart && !inBounds(nextStart)) return;
-      if (nextEnd && !inBounds(nextEnd)) return;
+      if (!nextStart && nextEnd && !allowEmptyStart) return false;
+      if (nextStart && !nextEnd && !allowEmptyEnd) return false;
+      if (nextStart && !inBounds(nextStart)) return false;
+      if (nextEnd && !inBounds(nextEnd)) return false;
+      setEditorError('');
       committedStart = nextStart;
       committedEnd = nextEnd;
       draftStart = nextStart;
@@ -141,6 +167,22 @@
       renderSummary();
       renderCalendars();
       if (close) overlay.close({returnFocus: true});
+      return true;
+    }
+
+    function commitEditors({close = false} = {}) {
+      try {
+        const start = editorValue(startEditor, startLabel, allowEmptyStart || clearable);
+        const end = editorValue(endEditor, endLabel, allowEmptyEnd || clearable);
+        if (!start && !end && clearable) return commit('', '', {close});
+        if (start && end && start > end) throw new Error(`${startLabel} cannot be after ${endLabel}`);
+        return commit(start, end, {close});
+      } catch (error) {
+        const editor = /start/i.test(error.message) ? startEditor
+          : /end/i.test(error.message) ? endEditor : null;
+        setEditorError(error.message, editor);
+        return false;
+      }
     }
 
     function choose(value) {
@@ -181,8 +223,16 @@
         cursor = addMonths(cursor, -1);
         renderCalendars();
       });
-      const heading = document.createElement('strong');
-      heading.textContent = monthFormatter.format(date);
+      const period = createMonthSelector({
+        date,
+        locale,
+        minimum,
+        maximum,
+        onChange: value => {
+          cursor = addMonths(value, -index);
+          renderCalendars();
+        },
+      });
       const next = document.createElement('button');
       next.type = 'button';
       next.className = 'dv-date-range__nav';
@@ -193,7 +243,7 @@
         cursor = addMonths(cursor, 1);
         renderCalendars();
       });
-      header.append(previous, heading, next);
+      header.append(previous, period, next);
 
       const grid = document.createElement('div');
       grid.className = 'dv-date-range__grid';
@@ -255,17 +305,14 @@
     function renderCalendars() {
       calendarHost.replaceChildren(calendar(cursor, 0), calendar(addMonths(cursor, 1), 1));
       const [rangeStart, rangeEnd] = visibleRange();
-      if (phase === 'end' && draftStart && !draftEnd) {
-        hint.textContent = `Choose an end date after ${draftStart}`;
-      } else if (rangeStart && rangeEnd) {
-        hint.textContent = `${rangeStart} → ${rangeEnd}`;
-      } else {
-        hint.textContent = 'Choose a start date';
-      }
+      hint.textContent = phase === 'end' && draftStart && !draftEnd
+        ? `Choose an end date after ${draftStart}`
+        : '';
       clear.hidden = !clearable;
       clear.disabled = input.disabled || (!committedStart && !committedEnd);
       apply.hidden = !allowOpen;
       apply.disabled = input.disabled || (!draftStart && !draftEnd);
+      footer.hidden = clear.hidden && apply.hidden;
       panel.dataset.rangePhase = phase;
       if (overlay.isOpen()) overlay.reposition();
     }
@@ -308,6 +355,25 @@
       commit('', '');
     });
     apply.addEventListener('click', () => commit(draftStart, draftEnd));
+    [startEditor, endEditor].forEach(editor => {
+      editor.addEventListener('input', event => {
+        if (!event.isComposing) formatIsoEntry(editor);
+        const value = editor.value.trim();
+        if (!value || parseIso(value)) setEditorError('');
+        else setEditorError('Use YYYY-MM-DD', editor);
+      });
+      editor.addEventListener('change', () => commitEditors());
+      editor.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          commitEditors({close: true});
+        } else if (event.key === 'Escape') {
+          editor.value = editor === startEditor ? committedStart : committedEnd;
+          setEditorError('');
+          overlay.close();
+        }
+      });
+    });
 
     function sync() {
       [committedStart, committedEnd] = readValue();

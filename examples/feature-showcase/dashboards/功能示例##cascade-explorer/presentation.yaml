@@ -5,9 +5,5 @@ dashboard: cascade-explorer
 control_components:
   dashboard:cascade-explorer/province:
     component: checkbox-group
-    select_all_label: 全选
-    invert_label: 反选
   section:geography/city:
     component: checkbox-group
-    select_all_label: 全选
-    invert_label: 反选

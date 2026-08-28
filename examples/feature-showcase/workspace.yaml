@@ -12,5 +12,7 @@ runtime:
   echarts_js: https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js
   perspective_version: 5.2.0
 folders:
-  - path: 功能示例
-    order: 10
+- path: __TRASH__/aa
+  order: 20
+- path: 功能示例
+  order: 10

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataviz.errors import Diagnostic
+from dataviz.value_contract import static_control_choices
 from dataviz.view_contracts import VIEW_TEMPLATE_CONTRACTS
+from dataviz.workspace.controls import scoped_control_registry
 from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace
 
 
@@ -75,6 +77,34 @@ def validate_dashboard_semantics(dashboard: LoadedDashboard) -> list[Diagnostic]
         )
 
     if presentation:
+        control_definitions = {
+            f"query:{item.id}": item for item in definition.query_parameters
+        }
+        control_definitions.update(
+            {
+                key: control.definition
+                for key, control in scoped_control_registry(definition).items()
+            }
+        )
+        for control_key, visual in presentation.control_components.items():
+            if visual.component != "checkbox-group":
+                continue
+            definition_for_control = control_definitions.get(control_key)
+            if definition_for_control is None:
+                continue
+            choices = static_control_choices(definition_for_control)
+            if choices and not 2 <= len(choices) <= 5:
+                diagnostics.append(
+                    _diagnostic(
+                        dashboard,
+                        "warning",
+                        "semantic_checkbox_group_option_count",
+                        f"Checkbox Group {control_key} has {len(choices)} static options; use it only for 2–5 peer choices and use Select for larger flat domains",
+                        f"presentation.control_components.{control_key}.component",
+                        {"control": control_key, "option_count": len(choices)},
+                    )
+                )
+
         views = {view.id: view for view in definition.views}
         for view_id, visual in presentation.views.items():
             view = views.get(view_id)

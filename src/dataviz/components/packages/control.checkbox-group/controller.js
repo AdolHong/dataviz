@@ -12,43 +12,13 @@
 
     const maxSelected = Number(control.dataset.maxSelected || 0);
     const allowEmpty = control.dataset.clearable === 'true';
-    const selectAllLabel = control.dataset.selectAllLabel || 'Select all';
-    const invertLabel = control.dataset.invertLabel || 'Invert';
-    const bulkActions = control.dataset.bulkActions !== 'false';
-
-    const toolbar = document.createElement('div');
-    toolbar.className = 'dv-checkbox-group__toolbar';
-    const all = document.createElement('button');
-    all.type = 'button';
-    all.className = 'dv-checkbox-group__action';
-    const count = document.createElement('span');
-    count.className = 'dv-checkbox-group__count';
-    count.setAttribute('aria-live', 'polite');
-    toolbar.append(all, count);
-
     const optionsHost = document.createElement('div');
     optionsHost.className = 'dv-checkbox-group__options';
-    group.append(toolbar, optionsHost);
-    toolbar.hidden = !bulkActions;
+    group.append(optionsHost);
 
     function sync() {
       const options = api.options(input);
-      const available = api.availableOptions(input);
       const selected = api.selectedOptions(input);
-      const allSelected = available.length > 0 && selected.length === available.length;
-      const canSelectAll = !maxSelected || maxSelected >= available.length;
-
-      all.textContent = allSelected ? invertLabel : selectAllLabel;
-      all.dataset.action = allSelected ? 'invert' : 'select-all';
-      all.disabled = input.disabled
-        || available.length === 0
-        || (!allSelected && !canSelectAll)
-        || (allSelected && !allowEmpty);
-      all.title = !allSelected && !canSelectAll
-        ? `Selection limit is ${maxSelected}; select values individually.`
-        : '';
-      count.textContent = `${selected.length} / ${available.length}`;
-      count.setAttribute('aria-label', `${selected.length} of ${available.length} selected`);
 
       optionsHost.replaceChildren();
       options.forEach(option => {
@@ -78,17 +48,6 @@
         optionsHost.append(button);
       });
     }
-
-    all.addEventListener('click', () => {
-      if (all.disabled) return;
-      const available = api.availableOptions(input);
-      const allSelected = available.length > 0 && available.every(option => option.selected);
-      if (allSelected && !allowEmpty) return;
-      available.forEach(option => { option.selected = !allSelected; });
-      api.markSelectionIntent(input, allSelected ? 'explicit' : 'all_available');
-      sync();
-      api.emitChange(input);
-    });
 
     mount.replaceChildren(group);
     return {sync};

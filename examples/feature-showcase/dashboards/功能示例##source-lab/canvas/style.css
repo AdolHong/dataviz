@@ -1,1 +1,14 @@
-:root{--lab-blue:#244b63;--lab-mint:#a7e8d1;--lab-paper:#f3f0e8}.dv-canvas{background:var(--lab-paper);color:#17252c}.lab-hero{display:grid;grid-template-columns:1.2fr .8fr;gap:32px;align-items:end;border-bottom:3px solid #17252c;padding:10px 0 26px;margin-bottom:22px}.lab-hero span{font:11px "DM Mono",monospace;letter-spacing:.16em;color:#39765f}.lab-hero h1{font-size:clamp(44px,7vw,92px);line-height:.88;margin:12px 0 0}.lab-hero p{max-width:38ch;font-size:16px;line-height:1.7}.lab-pulse{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(280px,.7fr);gap:18px;margin-bottom:18px}.lab-main,.lab-side{min-height:420px}.lab-table{min-height:360px}.lab-pulse .dv-view,.lab-table .dv-view{height:100%;border-color:#9aa7a1;box-shadow:none}.lab-side .dv-view{background:var(--lab-blue);color:white}.lab-side .dv-view-header{border-color:#6e8795}.lab-side .dv-view-body{background:transparent}@media(max-width:900px){.lab-hero,.lab-pulse{grid-template-columns:1fr}.lab-main,.lab-side{min-height:340px}}
+:root { --lab-accent: #4451a3; --lab-line: #e8e9ed; }
+.dv-canvas { color: #202622; background: #fff; }
+.lab-hero { display: grid; grid-template-columns: 1.2fr .8fr; gap: 32px; align-items: end; margin-bottom: 22px; padding: 10px 0 24px; border-bottom: 1px solid var(--lab-line); }
+.lab-hero span { color: var(--lab-accent); font: 11px "DM Mono", monospace; letter-spacing: .16em; }
+.lab-hero h1 { margin: 12px 0 0; font-size: clamp(40px, 5vw, 58px); line-height: .96; }
+.lab-hero p { max-width: 38ch; color: #68716c; font-size: 15px; line-height: 1.7; }
+.lab-pulse { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(280px, .7fr); gap: 18px; margin-bottom: 18px; }
+.lab-main, .lab-side { min-height: 420px; }
+.lab-table { min-height: 360px; }
+.lab-pulse .dv-view, .lab-table .dv-view { height: 100%; border-color: var(--lab-line); box-shadow: none; }
+.lab-side .dv-view { color: #20242b; background: #f7f8fc; }
+.lab-side .dv-view-header { border-color: var(--lab-line); }
+.lab-side .dv-view-body { background: transparent; }
+@media (max-width: 900px) { .lab-hero, .lab-pulse { grid-template-columns: 1fr; } .lab-main, .lab-side { min-height: 340px; } }

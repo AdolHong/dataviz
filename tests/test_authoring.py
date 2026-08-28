@@ -101,7 +101,7 @@ def test_template_catalog_matches_strict_model_enums():
 
 def test_business_is_the_default_theme_preset():
     assert ThemeDefinition().preset == "business"
-    assert THEME_PRESETS["business"]["purpose"] == "Modern indigo analytical default"
+    assert THEME_PRESETS["business"]["purpose"] == "Clean neutral analytical default"
     tokens = component_catalog()["theme.business"]["tokens"]
     assert {"--dv-overlay-surface", "--dv-chart-8", "--dv-shadow-float"} <= set(tokens)
 
@@ -141,7 +141,7 @@ def test_machine_readable_component_examples_use_canonical_output_references():
 
 def test_machine_readable_documentation_examples_match_current_schemas():
     providers = {
-        "dataviz/dashboard/v7": DashboardDefinition,
+        "dataviz/dashboard/v8": DashboardDefinition,
         "dataviz/source/v2": SOURCE_DEFINITION_ADAPTER,
         "dataviz/dataset-transform/v2": DatasetTransformDefinition,
         "dataviz/interactive-transform/v2": InteractiveTransformDefinition,
@@ -197,7 +197,7 @@ def test_component_registry_reports_package_owned_implementations():
     catalog = component_catalog()
     report = validate_component_packages(catalog)
 
-    assert COMPONENT_REGISTRY_VERSION == "4.2.0"
+    assert COMPONENT_REGISTRY_VERSION == "5.4.0"
     assert set(component_packages()) == {
         "control.auto-complete",
         "control.cascader",
@@ -206,6 +206,7 @@ def test_component_registry_reports_package_owned_implementations():
         "control.date-picker",
         "control.input",
         "control.input-number",
+        "control.multiple-input",
         "control.radio-group",
         "control.range-picker",
         "control.select",
@@ -228,6 +229,7 @@ def test_component_registry_reports_package_owned_implementations():
         "control.date-picker",
         "control.input",
         "control.input-number",
+        "control.multiple-input",
         "control.radio-group",
         "control.range-picker",
         "control.select",
@@ -241,12 +243,12 @@ def test_component_registry_reports_package_owned_implementations():
         "scope": "package-metadata-and-test-declarations",
         "behavior_tests_executed": False,
         "valid": True,
-        "packages": 20,
-        "package_implemented": 20,
+        "packages": 21,
+        "package_implemented": 21,
         "bridge_implemented": 0,
-        "components": 60,
-        "stories": 38,
-        "test_declarations": 72,
+        "components": 64,
+        "stories": 39,
+        "test_declarations": 76,
         "errors": [],
     }
     assert set(component_index()) == set(catalog)
@@ -304,9 +306,10 @@ def test_component_package_cli_check_and_data_entry_scaffolds():
     tree_selection = yaml.safe_load(tree_files["dashboard.control.snippet.yaml"])[0]
     assert tree_selection["path_fields"] == ["province", "city", "district"]
     date_selection = yaml.safe_load(json.loads(date.stdout)["files"]["dashboard.control.snippet.yaml"])[0]
-    assert date_selection["type"] == "date_range"
+    assert date_selection["type"] == "range_input"
+    assert date_selection["value_type"] == "date"
     flat_selection = yaml.safe_load(json.loads(flat.stdout)["files"]["dashboard.control.snippet.yaml"])[0]
-    assert flat_selection["type"] == "multi_select"
+    assert flat_selection["type"] == "multiple_select"
     assert flat_selection["options"]["mode"] == "static"
     assert [item["value"] for item in flat_selection["options"]["choices"]] == [
         "alpha",
@@ -320,7 +323,7 @@ def test_component_package_cli_check_and_data_entry_scaffolds():
     )[0]
     assert radio_control["type"] == "single_select"
     assert radio_control["default"] == "alpha"
-    assert checkbox_selection["type"] == "multi_select"
+    assert checkbox_selection["type"] == "multiple_select"
     assert yaml.safe_load(
         json.loads(checkbox.stdout)["files"]["presentation.control-component.snippet.yaml"]
     )["control_components"]["view:view-id/channel"]["component"] == "checkbox-group"
@@ -628,7 +631,7 @@ def test_coordinate_layout_fields_are_strictly_rejected(layout):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v7",
+                "schema": "dataviz/dashboard/v8",
                 "kind": "dashboard",
                 "id": "strict",
                 "layout": layout,

@@ -20,6 +20,7 @@ from dataviz.workspace.models import (
     DashboardDefinition,
     InteractiveTransformDefinition,
     PresentationDefinition,
+    PresentationControlPanelDefinition,
     PresentationControlComponentDefinition,
     QueryParameterDefinition,
     SelectionControlDefinition,
@@ -195,6 +196,7 @@ def test_cli_docs_publish_machine_readable_design_language_contract():
     topic = json.loads(result.stdout)
     assert topic["topic"] == "design-language"
     assert topic["default_direction"]["default_preset"] == "business"
+    assert topic["core_tokens"]["shell"]["--dv-shell-bg"].startswith("Header")
     assert topic["core_tokens"]["surfaces"]["--dv-overlay-surface"].startswith(
         "必须不透明"
     )
@@ -458,6 +460,7 @@ def test_control_component_presentation_is_visual_only():
                     "template": "grid",
                     "width": "wide",
                     "columns": 3,
+                    "column_width": 280,
                     "density": "compact",
                 },
                 "dashboard": {
@@ -479,8 +482,19 @@ def test_control_component_presentation_is_visual_only():
     assert product.css_class == "product-picker"
     assert presentation.control_panels.query.template == "grid"
     assert presentation.control_panels.query.columns == 3
+    assert presentation.control_panels.query.column_width == 280
     assert presentation.control_panels.query.density == "compact"
     assert presentation.control_panels.dashboard.template == "stack"
+
+    assert PresentationControlPanelDefinition(columns=6).columns == 6
+    assert PresentationControlPanelDefinition(column_width=160).column_width == 160
+    assert PresentationControlPanelDefinition(column_width=600).column_width == 600
+    with pytest.raises(ValidationError):
+        PresentationControlPanelDefinition(columns=7)
+    with pytest.raises(ValidationError):
+        PresentationControlPanelDefinition(column_width=159)
+    with pytest.raises(ValidationError):
+        PresentationControlPanelDefinition(column_width=601)
 
     with pytest.raises(ValidationError):
         PresentationDefinition.model_validate(
@@ -499,20 +513,20 @@ def test_control_component_auto_resolution_is_deterministic_and_unknown_names_ar
     choices = [{"label": str(index), "value": index} for index in range(9)]
     assert resolve_control_component(
         SelectionControlDefinition(
-            id="status", kind="selection", type="single_select",
+            id="status", kind="selection", type="single_select", value_type="integer",
             options={"mode": "static", "choices": choices[:4]},
         )
     )["component"] == "radio-group"
     assert resolve_control_component(
         SelectionControlDefinition(
-            id="region", kind="selection", type="multi_select",
-            options={"mode": "static", "choices": choices[:8]},
+            id="region", kind="selection", type="multiple_select", value_type="integer",
+            options={"mode": "static", "choices": choices[:5]},
         )
     )["component"] == "checkbox-group"
     flat = resolve_control_component(
         SelectionControlDefinition(
-            id="store", kind="selection", type="multi_select",
-            options={"mode": "static", "choices": choices},
+            id="store", kind="selection", type="multiple_select", value_type="integer",
+            options={"mode": "static", "choices": choices[:6]},
         )
     )
     assert flat["component"] == "select"
@@ -521,7 +535,7 @@ def test_control_component_auto_resolution_is_deterministic_and_unknown_names_ar
         SelectionControlDefinition(
             id="district",
             kind="selection",
-            type="multi_select",
+            type="multiple_select", value_type="text",
             path_fields=["province", "city", "district"],
             options={"mode": "infer"},
         )
@@ -541,20 +555,20 @@ def test_control_component_auto_resolution_is_deterministic_and_unknown_names_ar
 @pytest.mark.parametrize(
     ("definition", "configured", "expected"),
     [
-        (QueryParameterDefinition(id="note", type="string"), None, "input"),
+        (QueryParameterDefinition(id="note", type="single_input", value_type="text"), None, "input"),
         (
             QueryParameterDefinition(
                 id="scenario",
-                type="string",
+                type="single_input", value_type="text",
                 suggestions=[{"label": "Base", "value": "base"}],
             ),
             None,
             "auto-complete",
         ),
-        (ComputeControlDefinition(id="count", kind="compute", type="integer"), None, "input-number"),
-        (ComputeControlDefinition(id="enabled", kind="compute", type="boolean"), None, "checkbox"),
+        (ComputeControlDefinition(id="count", kind="compute", type="single_input", value_type="integer"), None, "input-number"),
+        (ComputeControlDefinition(id="enabled", kind="compute", type="single_input", value_type="boolean"), None, "checkbox"),
         (
-            ComputeControlDefinition(id="live", kind="compute", type="boolean"),
+            ComputeControlDefinition(id="live", kind="compute", type="single_input", value_type="boolean"),
             PresentationControlComponentDefinition(component="switch"),
             "switch",
         ),
@@ -562,7 +576,7 @@ def test_control_component_auto_resolution_is_deterministic_and_unknown_names_ar
             SelectionControlDefinition(
                 id="mode",
                 kind="selection",
-                type="single_select",
+                type="single_select", value_type="text",
                 options={"mode": "static", "choices": [{"label": "A", "value": "a"}, {"label": "B", "value": "b"}]},
             ),
             None,
@@ -572,7 +586,7 @@ def test_control_component_auto_resolution_is_deterministic_and_unknown_names_ar
             SelectionControlDefinition(
                 id="store",
                 kind="selection",
-                type="single_select",
+                type="single_select", value_type="integer",
                 options={"mode": "static", "choices": [{"label": str(index), "value": index} for index in range(5)]},
             ),
             None,
@@ -582,7 +596,7 @@ def test_control_component_auto_resolution_is_deterministic_and_unknown_names_ar
             SelectionControlDefinition(
                 id="regions",
                 kind="selection",
-                type="multi_select",
+                type="multiple_select", value_type="text",
                 options={"mode": "static", "choices": [{"label": "A", "value": "a"}, {"label": "B", "value": "b"}]},
             ),
             None,
@@ -592,7 +606,7 @@ def test_control_component_auto_resolution_is_deterministic_and_unknown_names_ar
             SelectionControlDefinition(
                 id="district",
                 kind="selection",
-                type="multi_select",
+                type="multiple_select", value_type="text",
                 path_fields=["province", "city", "district"],
                 options={"mode": "infer"},
             ),
@@ -603,17 +617,21 @@ def test_control_component_auto_resolution_is_deterministic_and_unknown_names_ar
             SelectionControlDefinition(
                 id="tree",
                 kind="selection",
-                type="multi_select",
+                type="multiple_select", value_type="text",
                 path_fields=["province", "city"],
                 options={"mode": "infer"},
             ),
             PresentationControlComponentDefinition(component="tree-select"),
             "tree-select",
         ),
-        (QueryParameterDefinition(id="day", type="date"), None, "date-picker"),
-        (QueryParameterDefinition(id="period", type="date_range"), None, "range-picker"),
+        (QueryParameterDefinition(id="day", type="single_input", value_type="date"), None, "date-picker"),
+        (QueryParameterDefinition(id="period", type="range_input", value_type="date"), None, "range-picker"),
+        (QueryParameterDefinition(id="tags", type="multiple_input", value_type="text"), None, "multiple-input"),
+        (QueryParameterDefinition(id="days", type="multiple_input", value_type="date"), None, "multiple-input"),
+        (ComputeControlDefinition(id="count", kind="compute", type="range_input", value_type="integer"), None, "slider"),
+        (ComputeControlDefinition(id="band", kind="compute", type="range_input", value_type="number"), None, "slider"),
         (
-            ComputeControlDefinition(id="threshold", kind="compute", type="number"),
+            ComputeControlDefinition(id="threshold", kind="compute", type="single_input", value_type="number"),
             PresentationControlComponentDefinition(component="slider"),
             "slider",
         ),
@@ -628,14 +646,14 @@ def test_every_data_entry_component_has_one_strict_value_semantics(
 
 
 def test_data_entry_components_reject_semantically_incompatible_configuration():
-    with pytest.raises(ValueError, match="select cannot render control type string"):
+    with pytest.raises(ValueError, match="select cannot render control contract single_input/text"):
         resolve_control_component(
-            QueryParameterDefinition(id="note", type="string"),
+            QueryParameterDefinition(id="note", type="single_input", value_type="text"),
             PresentationControlComponentDefinition(component="select"),
         )
     with pytest.raises(ValueError, match="auto-complete requires suggestions"):
         resolve_control_component(
-            QueryParameterDefinition(id="scenario", type="string"),
+            QueryParameterDefinition(id="scenario", type="single_input", value_type="text"),
             PresentationControlComponentDefinition(component="auto-complete"),
         )
     with pytest.raises(ValueError, match="require cascader or tree-select"):
@@ -643,7 +661,7 @@ def test_data_entry_components_reject_semantically_incompatible_configuration():
             SelectionControlDefinition(
                 id="district",
                 kind="selection",
-                type="multi_select",
+                type="multiple_select", value_type="text",
                 path_fields=["province", "city", "district"],
                 options={"mode": "infer"},
             ),
@@ -684,7 +702,7 @@ def test_portable_cascader_declares_data_driven_path_levels():
         id="district",
         kind="selection",
         label="District",
-        type="multi_select",
+        type="multiple_select", value_type="text",
         path_fields=["province", "city", "district"],
         options={"mode": "infer"},
     )
@@ -893,7 +911,7 @@ def test_removed_schema_fields_are_rejected(removed_fragment):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v7",
+                "schema": "dataviz/dashboard/v8",
                 "kind": "dashboard",
                 "id": "strict",
                 **removed_fragment,
@@ -954,7 +972,7 @@ def test_layout_and_view_bounds_are_enforced(fragment, location):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v7",
+                "schema": "dataviz/dashboard/v8",
                 "kind": "dashboard",
                 "id": "strict",
                 **fragment,
@@ -966,7 +984,7 @@ def test_layout_and_view_bounds_are_enforced(fragment, location):
 def test_selection_contract_is_include_only():
     with pytest.raises(ValidationError):
         SelectionControlDefinition.model_validate(
-            {"id": "region", "kind": "selection", "type": "multi_select", "mode": "exclude"}
+            {"id": "region", "kind": "selection", "type": "multiple_select", "value_type": "text", "mode": "exclude"}
         )
 
 
@@ -999,6 +1017,17 @@ def test_default_renderer_builds_templates_and_portable_report(tmp_path: Path):
     assert "min-height:420px" in report
     assert "global.dataviz?.view_specs" in report
     assert '"schema": "dataviz/runtime/v5"' in report
+    assert '"schema": "dataviz/dependency-contract/v5"' in report
+    assert 'data-view-pipeline-node="source:sales"' in report
+    assert 'data-view-renderer-signal data-status="not_run" hidden' in report
+    assert 'class="dv-view-type-label">plotly</small>' in report
+    assert 'data-view-status-label hidden' in report
+    assert 'class="dv-runtime-brand dv-shell-brand" aria-label="Dataviz"' in report
+    assert 'class="dv-runtime-brand__mark" aria-hidden="true">D/V</span>' in report
+    assert '<strong>DATAVIZ</strong>' in report
+    assert "datavizSetViewPipelineNodeStatus(`interactive:${id}`, status)" in report
+    assert "setRendererSignal(root, 'loading', {active:true})" in report
+    assert "signal.hidden = ![" in report
     assert "runtime.registerView(view.id" in report
     assert "window.datavizClient" not in report
     assert '"source:sales/main": [' in report

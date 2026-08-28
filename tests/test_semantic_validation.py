@@ -50,7 +50,7 @@ def test_unused_control_is_a_strict_warning(tmp_path: Path):
         {
             "id": "unused_note",
             "kind": "compute",
-            "type": "string",
+            "type": "single_input", "value_type": "text",
             "label": "Unused",
             "default": "x",
         }
@@ -84,3 +84,42 @@ def test_current_examples_have_no_semantic_warnings():
     dashboard = load_workspace(MINIMAL).dashboard("sales-overview")
     diagnostics = validate_dashboard_semantics(dashboard)
     assert not [item for item in diagnostics if item.level in {"error", "warning"}]
+
+
+def test_checkbox_group_with_large_static_domain_is_a_semantic_warning(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    import shutil
+
+    shutil.copytree(MINIMAL, workspace)
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    definition["controls"][0]["options"] = {
+        "mode": "static",
+        "choices": [
+            {"label": f"Region {index}", "value": f"r{index}"}
+            for index in range(1, 7)
+        ],
+    }
+    definition["controls"][0]["default"] = ["r1"]
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    presentation_path = workspace / "dashboards" / "sales-overview" / "presentation.yaml"
+    presentation = yaml.safe_load(presentation_path.read_text(encoding="utf-8"))
+    presentation.setdefault("control_components", {})[
+        "dashboard:sales-overview/region"
+    ] = {"component": "checkbox-group"}
+    presentation_path.write_text(
+        yaml.safe_dump(presentation, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    diagnostics = validate_dashboard_semantics(load_workspace(workspace).dashboard("sales-overview"))
+
+    assert any(
+        item.level == "warning"
+        and item.code == "semantic_checkbox_group_option_count"
+        and item.details["option_count"] == 6
+        for item in diagnostics
+    )

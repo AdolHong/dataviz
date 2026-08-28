@@ -816,7 +816,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         files = {
             "dashboard.yaml": _yaml(
                 {
-                    "schema": "dataviz/dashboard/v7",
+                    "schema": "dataviz/dashboard/v8",
                     "kind": "dashboard",
                     "id": item_id,
                     "title": item_id.replace("-", " ").title(),
@@ -988,7 +988,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                     "id": "groups",
                     "kind": "selection",
                     "field": "entity_id",
-                    "type": "multi_select",
+                    "type": "multiple_select", "value_type": "text",
                     "label": "Groups",
                     "options": {"mode": "infer", "initial": "empty"},
                 }
@@ -1003,12 +1003,21 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         control: dict[str, Any] = {
             "id": item_id,
             "kind": "compute",
-            "type": "string",
+            "type": "single_input", "value_type": "text",
             "label": label,
             "default": "",
         }
         if component == "input":
             control.update({"placeholder": "Enter text", "max_length": 120})
+        elif component == "multiple-input":
+            control.update(
+                {
+                    "type": "multiple_input",
+                    "value_type": "text",
+                    "default": ["alpha", "beta"],
+                    "max_items": 8,
+                }
+            )
         elif component == "auto-complete":
             control.update(
                 {
@@ -1020,13 +1029,13 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                 }
             )
         elif component in {"input-number", "slider"}:
-            control.update({"type": "integer", "default": 50, "min": 0, "max": 100, "step": 5})
+            control.update({"type": "single_input", "value_type": "integer", "default": 50, "min": 0, "max": 100, "step": 5})
         elif component in {"checkbox", "switch"}:
-            control.update({"type": "boolean", "default": False})
+            control.update({"type": "single_input", "value_type": "boolean", "default": False})
         elif component == "date-picker":
             control.update(
                 {
-                    "type": "date",
+                    "type": "single_input", "value_type": "date",
                     "default": "2026-01-15",
                     "min_date": "2026-01-01",
                     "max_date": "2026-12-31",
@@ -1035,7 +1044,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         elif component == "range-picker":
             control.update(
                 {
-                    "type": "date_range",
+                    "type": "range_input", "value_type": "date",
                     "default": ["2026-01-01", "2026-01-31"],
                     "min_date": "2026-01-01",
                     "max_date": "2026-12-31",
@@ -1044,7 +1053,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         elif component == "radio-group":
             control.update(
                 {
-                    "type": "single_select",
+                    "type": "single_select", "value_type": "text",
                     "default": "alpha",
                     "required": True,
                     "options": {
@@ -1059,7 +1068,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         elif component in {"select", "checkbox-group"}:
             control.update(
                 {
-                    "type": "multi_select",
+                    "type": "multiple_select", "value_type": "text",
                     "default": ["alpha"],
                     "options": {
                         "mode": "static",
@@ -1075,7 +1084,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
             control.update(
                 {
                     "kind": "selection",
-                    "type": "multi_select",
+                    "type": "multiple_select", "value_type": "text",
                     "field": "district",
                     "path_fields": ["province", "city", "district"],
                     "options": {"mode": "infer"},

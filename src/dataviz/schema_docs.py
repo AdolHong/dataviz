@@ -69,7 +69,7 @@ SCHEMA_MODELS: OrderedDict[str, SchemaProvider] = OrderedDict(
 
 CURRENT_SCHEMAS = {
     "workspace": "dataviz/workspace/v1",
-    "dashboard": "dataviz/dashboard/v7",
+    "dashboard": "dataviz/dashboard/v8",
     "presentation": "dataviz/presentation/v2",
     "source": "dataviz/source/v2",
     "dataset_transform": "dataviz/dataset-transform/v2",

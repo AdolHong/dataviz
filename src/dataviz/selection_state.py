@@ -42,9 +42,9 @@ def _logical_values(
 ) -> list[Any]:
     if is_empty_control_value(normalized):
         return []
-    if definition.type == "multi_select":
+    if definition.type in {"multiple_input", "multiple_select"}:
         return list(normalized)
-    if definition.type == "date_range":
+    if definition.type == "range_input":
         return [list(normalized)]
     return [normalized]
 
@@ -56,9 +56,9 @@ def project_selection_value(
     """Project canonical Selection state into the value exposed to user code."""
 
     values = list(state.values if isinstance(state, ResolvedSelection) else state.get("values", []))
-    if definition.type == "multi_select":
+    if definition.type in {"multiple_input", "multiple_select"}:
         return values
-    if definition.type == "date_range":
+    if definition.type == "range_input":
         return list(values[0]) if values else []
     return values[0] if values else None
 
@@ -90,7 +90,7 @@ def initial_selection_state(
 ) -> ResolvedSelection:
     intent: SelectionIntent = (
         "all_available"
-        if definition.type == "multi_select"
+        if definition.type == "multiple_select"
         and isinstance(definition.options, InferredOptionDomainDefinition)
         and definition.options.initial == "auto"
         else "explicit"
@@ -127,9 +127,9 @@ def normalize_selection_state_entry(
             "Selection intent must be all_available or explicit",
             details={"code": "selection_intent_invalid", "intent": intent},
         )
-    if intent == "all_available" and definition.type != "multi_select":
+    if intent == "all_available" and definition.type != "multiple_select":
         raise ExecutionFailure(
-            "all_available is only valid for multi_select",
+            "all_available is only valid for multiple_select",
             details={"code": "selection_intent_cardinality_invalid"},
         )
     values = payload.get("values")
@@ -139,12 +139,12 @@ def normalize_selection_state_entry(
             details={"code": "selection_state_values_invalid"},
         )
 
-    if definition.type == "multi_select":
+    if definition.type in {"multiple_input", "multiple_select"}:
         projected = values
-    elif definition.type == "date_range":
+    elif definition.type == "range_input":
         if len(values) > 1:
             raise ExecutionFailure(
-                "date_range Selection state contains more than one range",
+                "range_input Selection state contains more than one range",
                 details={"code": "selection_state_cardinality_invalid"},
             )
         projected = values[0] if values else []

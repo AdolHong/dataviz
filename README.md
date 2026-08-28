@@ -8,7 +8,9 @@ Dataviz 是一套 **workspace-first、AI-friendly** 的 Python 看板工具。
 - AI 与自动化使用 CLI 校验、查数、计算、调试和导出 HTML。
 - 普通看板只写声明式 YAML、SQL/Python/JavaScript 逻辑和简单布局。
 - 特殊页面可以逐级覆盖 Theme、Component、Renderer、CSS/JS，完整 Canvas 是最后的逃生口。
-- 默认提供统一的现代靛蓝主题；Server、HTML、图表、表格和交互控件共享设计 Token。
+- Server 与导出 HTML 默认使用连续白色 Shell；Server Header 横跨屏幕，左侧 Dataviz 品牌按钮负责展开/收起其下方 Sidebar，Query 状态灯紧随品牌。Header、Sidebar、Workbench 和 `business` Canvas 不再各自争夺注意力；靛蓝用于交互与默认分析序列，绿色只用于 Ready/成功状态。
+- Server Header 把 Controls 放在 Run 左侧；Query Pipeline 不再是操作按钮，而是 Dataviz 品牌旁的一组取数节点状态灯，悬停显示任务名、点击查看执行证据。每个 View 在类型标签左侧投影自己的依赖链与 Renderer 灯，但仅在 Running/Stale/Error 等需要注意的状态出现；Ready 与 Not run 自动隐藏。
+- Server 提供受限的参数编辑入口：右键 Run 编辑 Query Parameter，右键 Dashboard/Section/View Controls 编辑对应作用域。人可以修改默认值、静态候选项和同级顺序；面板内不常驻额外编辑按钮。它只原子写回 `dashboard.yaml`，不允许修改 ID、类型、依赖、数据逻辑、布局或样式；数据推断的候选项保持只读。编辑默认配置不会覆盖当前分析状态，新默认值在下一次初始化该 Dashboard 时生效。导出 HTML 不包含编辑能力。
 
 ## 核心模型
 
@@ -38,7 +40,7 @@ Query Parameter → Adapter → Source → Dataset Transform（可选）
 - Interactive Transform 一旦通过 `selection_inputs` 声明依赖，Runtime 会先对其表输入应用 include Selection，再把已选样本交给 Compute 逻辑；业务代码不应再手写一遍相同筛选。
 - 三种 Interactive Runtime 使用相同 Named Output 契约；图、表和文本统一由 JavaScript Renderer 呈现。
 
-每次载入或热更新后的 Dashboard 快照会以并发安全方式只编译一次 `dataviz/dependency-contract/v4`。Query Planner、Server、Browser Runtime、HTML Export 和 AI context 都消费同一个对象；浏览器注册配置只用于检查漂移，Transform 调度、Control 候选域和 View 输入仍以契约为准，不会再次猜测拓扑或按 DOM 重建依赖。契约会直接拒绝环、未知 Output、非法跨 Runtime 依赖、越界 Control consumer 和非法 Control 依赖。可以在运行前直接检查：
+每次载入或热更新后的 Dashboard 快照会以并发安全方式只编译一次 `dataviz/dependency-contract/v5`。Query Planner、Server、Browser Runtime、HTML Export 和 AI context 都消费同一个对象；浏览器注册配置只用于检查漂移，Transform 调度、Control 候选域、View 输入和 View 诊断信号仍以契约为准，不会再次猜测拓扑或按 DOM 重建依赖。契约会直接拒绝环、未知 Output、非法跨 Runtime 依赖、越界 Control consumer 和非法 Control 依赖。可以在运行前直接检查：
 
 ```bash
 dataviz dependencies myworkspace sales-overview
@@ -91,7 +93,7 @@ controls:
   - id: dates
     kind: selection
     field: job_date
-    type: multi_select
+    type: multiple_select
     depends_on: [view.dow]
     options: {mode: infer, source: source:hourly_sales/main}
 ```
@@ -104,7 +106,7 @@ Query Run 的可达 Base Output 会写入 Workspace 的 `.dataviz/runs/<run-id>/
 
 未显式填写 `trigger` 时，`browser-js`/`browser-python` 默认 `auto`，`server-python` 默认 `apply`。CLI 的 `query`、`output`、`compute` 默认返回紧凑摘要；排错时再加 `--detail debug`，只有确实需要完整执行信封时才使用 `--detail full`。
 
-当前契约是 `dataviz/dashboard/v7`、`dataviz/dependency-contract/v4` 与 `dataviz/runtime/v5`。项目处于 `0.x` 阶段，不兼容更早的实验性 Dashboard/Transform 字段，也不在 Runtime 中保留迁移分支。
+当前契约是 `dataviz/dashboard/v8`、`dataviz/dependency-contract/v5` 与 `dataviz/runtime/v5`。项目处于 `0.x` 阶段，不兼容更早的实验性 Dashboard/Transform 字段，也不在 Runtime 中保留迁移分支。
 
 ## Query Parameter 与日期范围
 
@@ -118,14 +120,13 @@ context:
 # dashboard.yaml
 query_parameters:
   - id: job_date_range
-    type: date_range
+    type: range_input
+    value_type: date
     label: 日期范围
     required: true
     default:
-      mode: relative
-      anchor: today
-      start_offset: -3d
-      end_offset: -1d
+      - {mode: relative, anchor: today, offset: -3d}
+      - {mode: relative, anchor: today, offset: -1d}
 
 # sources/sales.yaml
 schema: dataviz/source/v2
@@ -146,9 +147,9 @@ from sales
 where job_date between :start_date and :end_date
 ```
 
-`query_inputs` 的 key 是节点私有 alias，也是 SQL placeholder 或 `context.query_inputs` 的 key。字符串值可简写直接绑定，例如 `warehouse_id: warehouse_id`；`part: start | end` 只允许用于 `date_range`。
+`query_inputs` 的 key 是节点私有 alias，也是 SQL placeholder 或 `context.query_inputs` 的 key。字符串值可简写直接绑定，例如 `warehouse_id: warehouse_id`；`part: start | end` 只允许用于 `range_input/date`。
 
-相对日期只允许用于 Query Parameter 的 `date`/`date_range` 默认值。`today` 按 `workspace.context.timezone` 解析；页面首次载入或 CLI Run 创建时会转换为具体 ISO 日期，之后 Run、缓存和 HTML 都保存该具体值。不同浏览器 tab 各自初始化并记忆自己的值，不会在报告打开时重新计算“今天”。
+相对日期只允许用于 Query Parameter 的 `single_input/date` 与 `range_input/date` 默认值。`today` 按 `workspace.context.timezone` 解析；页面首次载入或 CLI Run 创建时会转换为具体 ISO 日期，之后 Run、缓存和 HTML 都保存该具体值。不同浏览器 tab 各自初始化并记忆自己的值，不会在报告打开时重新计算“今天”。
 
 ## 快速开始
 
@@ -173,9 +174,11 @@ uv run --no-editable dataviz serve myworkspace --port 8080
 
 然后打开 <http://127.0.0.1:8080>。
 
+进入看板后，地址会规范化为 `/dashboards/{dashboard_id}?参数=值`。该链接同时定位 Dashboard 与 Query Parameter 草稿，可以直接复制到新标签页或发给同事；Selection、Compute、Run ID 和凭据不会写入 URL。
+
 Server 不提供账号体系或 HTTP 鉴权，默认只监听本机回环地址。只有已经放在可信网络边界后时，才可显式使用 `--host 0.0.0.0 --allow-remote`；`session_id` 只隔离浏览器 tab 状态，不是访问凭证。
 
-`dataviz serve` 默认监听 Workspace 文件并热更新已经打开的页面。Title、Presentation、CSS 和 View 改动只重载 Canvas；Browser/Server Interactive Transform 改动会基于当前 Base Output 重算；SQL、Source、Dataset Transform、Adapter 或 Query Parameter 改动只把当前结果标记为 `Query outdated`，不会自动执行昂贵查询。连续保存会先防抖并合并为一个 revision，配置无效时保留当前 Canvas 并展示诊断；Workspace Runtime 等进程级配置则明确提示重启。必要时可点击 Header 的 `Reload`，或用 `--no-watch` 关闭监听。
+`dataviz serve` 默认监听 Workspace 文件并热更新已经打开的页面。Title、Presentation、CSS 和 View 改动只重载 Canvas；Browser/Server Interactive Transform 改动会基于当前 Base Output 重算；SQL、Source、Dataset Transform、Adapter 或 Query Parameter 改动只把当前结果标记为 `Query outdated`，不会自动执行昂贵查询。连续保存会先防抖并合并为一个 revision，配置无效时保留当前 Canvas 并展示诊断；Workspace Runtime 等进程级配置则明确提示重启。需要人工确认的重载通过 Workspace update 提示执行；`--no-watch` 可关闭主动文件通知。
 
 这个源码流程故意使用 non-editable 安装，避免部分 macOS/Python 组合跳过带 `UF_HIDDEN` 标记的 editable `.pth`。修改 Dataviz 自身的 `src/` 后需要重新执行上面的 `uv sync ... --reinstall-package`；只修改 Workspace/Dashboard 不需要重装。若出现 `ModuleNotFoundError: dataviz`，也执行同一条命令修复入口。
 
@@ -187,7 +190,7 @@ uv sync --python 3.12 --extra dev --no-editable \
 从发行 ZIP 安装时：
 
 ```bash
-python -m pip install ./ai-dataviz-0.8.0.zip
+python -m pip install ./ai-dataviz-0.9.1.zip
 dataviz version
 dataviz serve /path/to/workspace --port 8080
 ```
@@ -246,7 +249,7 @@ dataviz gallery --output component-gallery.html
 dataviz context myworkspace sales-overview --focus view:revenue --format json
 ```
 
-Component Registry 当前包含 20 个 package-owned Package，其中 13 个 `control.*` Data Entry Package 分别对齐 Ant Design 的 Input、InputNumber、AutoComplete、Checkbox、Switch、Radio.Group、Select、Checkbox.Group、Cascader、TreeSelect、DatePicker、RangePicker 与 Slider 语义。每个 Package 都有独立 controller、Runtime Adapter、功能 CSS、Story 与测试声明；详见 [Data Entry Component 语义契约](docs/data-entry-components.md)。内置 Gallery 还提供 Control、View、Section 的 `ready / loading / stale / empty / error / cancelled / unavailable` 状态矩阵，以及真实 10、100、1,000 选项的 Select Story。
+Component Registry 当前包含 21 个 package-owned Package，其中 14 个 `control.*` Data Entry Package 分别对齐 Ant Design 的 Input、InputNumber、AutoComplete、Checkbox、Switch、Radio.Group、Select、Checkbox.Group、Cascader、TreeSelect、DatePicker、RangePicker、Slider 与 Form.List + Input 语义。每个 Package 都有独立 controller、Runtime Adapter、功能 CSS、Story 与测试声明；详见 [Data Entry Component 语义契约](docs/data-entry-components.md)。内置 Gallery 还提供 Control、View、Section 的 `ready / loading / stale / empty / error / cancelled / unavailable` 状态矩阵，以及真实 10、100、1,000 选项的 Select Story。
 
 项目也内置了 Dataviz 与 standalone HTML 的成对 AI 开发评测协议；它只记录客户端提供的真实 Token，不按文本大小估算：
 
@@ -286,17 +289,17 @@ myworkspace/
         └── assets/
 ```
 
-Dashboard 文件夹末级名称就是导航显示名；`##` 表达逻辑目录，`__TRASH__##` 表示回收站。`dashboard.id` 是 CLI/DAG 使用的稳定机器 ID，使用可跨 Windows/Linux/macOS 的 ASCII 字母、数字、点、下划线和连字符；中文等展示内容放在文件夹名、`title`、`subtitle` 和 `description`。
+Dashboard 文件夹末级名称就是导航显示名；`##` 表达逻辑目录，`__TRASH__##` 表示回收站。回收站显示删除前的完整物理名称；空目录直接删除，Dashboard 只有在回收站右键并再次确认后才会从磁盘永久删除。`dashboard.id` 是 CLI/DAG 使用的稳定机器 ID，使用可跨 Windows/Linux/macOS 的 ASCII 字母、数字、点、下划线和连字符；中文等展示内容放在文件夹名、`title`、`subtitle` 和 `description`。
 
-Header 用一个 split control 合并 Query 操作：主按钮执行 `Run query`，右侧箭头显式展开或收起 Query Parameters。参数区默认展开，是 Header 的内联第二行，会在正常文档流中把 Canvas 向下推；它不是浮层，因此点击其他区域或按 `Esc` 都不会收起。没有 Query Parameter 时自动退化为普通 Run 按钮。`Controls` 负责 Query 后的选择与计算，并在临时托盘内按 DATA（selection）和 LOGIC（compute）分组；参数多时自动分栏，面板过高时在内部滚动，不会击穿屏幕。各 Dashboard 可在可选的 `presentation.yaml` 中只改视觉编排，而不复制交互逻辑：
+Header 用一个 split control 合并 Query 操作：主按钮执行 `Run query`，右侧箭头显式展开或收起 Query Parameters。参数区默认展开，是 Header 的内联第二行，会在正常文档流中把 Canvas 向下推；它不是浮层，因此点击其他区域或按 `Esc` 都不会收起。没有 Query Parameter 时自动退化为普通 Run 按钮。`Controls` 负责 Query 后的选择与计算；托盘只展示业务字段标签和组件，不重复显示 DATA/LOGIC、Selection/Compute、作用域或受影响 View 数量。参数多时自动分栏，面板过高时在内部滚动，不会击穿屏幕。各 Dashboard 可在可选的 `presentation.yaml` 中只改视觉编排，而不复制交互逻辑：
 
 ```yaml
 control_panels:
-  query: {template: grid, width: wide, columns: 4, density: compact}
-  dashboard: {template: grid, width: regular, columns: 2}
+  query: {columns: 6, column_width: 280, density: compact}
+  dashboard: {template: stack}
 ```
 
-`template` 支持 `auto | stack | grid`，`columns` 支持 1–4，并表示响应式最大列数。Query Parameters 默认在宽屏最多显示 4 列，空间变窄时自动降为 3/2/1 列；每个控件默认一列，确有需要时可在 `control_components.<key>.span` 显式设为 `2`，RangePicker 不会自动跨列。Section/View 还可通过各自 Presentation 条目的 `controls` 覆盖局部托盘。值、校验、级联、tab 状态和 Query/Interactive 执行仍由共享 Runtime 管理；导出 HTML 中 Query 变为固定快照，Controls 继续可交互。
+Query Panel 的 `columns` 是 1–6 的最大列数，`column_width` 是每轨目标宽度（160–600 px，默认 280）。Runtime 依据面板自身可用宽度计算实际列数，因此同一份配置会自然降为 1、2、3……列；参数较少时轨道不会用 `1fr` 拉满整行，而是在右侧保留空白，窄屏才降为单列满宽。每个控件默认 `span: 1`，确有需要时可在 `control_components.<key>.span` 显式设为 `2`。Dashboard/Section/View Controls 默认单列；只有明确需要并排时才显式选择 `template: grid` 与 `columns`，暂不把 Query 的自适应密度规则扩散到局部 Controls。值、校验、级联、tab 状态和 Query/Interactive 执行仍由共享 Runtime 管理；导出 HTML 中 Query 变为固定快照，Controls 继续可交互。
 
 `auth/adapters.yaml` 保存可提交的非敏感连接定义，`auth/adapters.local.yaml` 以同名 Adapter 覆盖本地凭证且必须被 Git 忽略。只有这两个位置会被加载，避免根目录旧文件或“示例文件”意外覆盖实际配置。Dashboard 只引用 Workspace Adapter 的逻辑名称，不保存账号密码。内置数据入口包括本地文件、DuckDB、MySQL、StarRocks 和可信 Python Source。
 

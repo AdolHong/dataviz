@@ -46,6 +46,14 @@ from dataviz.workspace.control_components import resolve_control_component
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+VIEW_PIPELINE_VISIBLE_STATUSES = {
+    "queued",
+    "loading",
+    "stale",
+    "error",
+    "cancelled",
+    "unavailable",
+}
 
 
 def _scrub_portable_paths(value: Any, workspace_root: Path) -> Any:
@@ -304,6 +312,21 @@ class CanvasRenderer:
     ) -> str:
         ensure_query_run_compatible(dashboard, result)
         dependency_contract = dependency_contract or dashboard.dependency_contract
+        server_interactions = sorted(
+            identifier
+            for identifier in dependency_contract.reachable_interactive_order
+            if dashboard.interactive_transforms[identifier][1].runtime
+            == "server-python"
+        )
+        if asset_mode == "inline" and interaction is None and server_interactions:
+            raise ExecutionFailure(
+                "HTML Export cannot execute Server Python Interactive Transforms; "
+                "create a shared link from Dataviz Server instead",
+                details={
+                    "code": "html_export_server_runtime_unavailable",
+                    "transforms": server_interactions,
+                },
+            )
         compute_values = resolve_compute_values(
             dashboard.definition,
             compute_parameters,
@@ -505,7 +528,7 @@ class CanvasRenderer:
         state_summary = (
             dashboard.presentation.state_summary.model_dump(mode="json")
             if dashboard.presentation
-            else {"enabled": True, "max_values": 3, "items": {}}
+            else {"enabled": False, "max_values": 3, "items": {}}
         )
         state_snapshot = build_state_snapshot(
             dashboard,
@@ -614,6 +637,14 @@ class CanvasRenderer:
         title = (declarative.title or declarative.id) if declarative else view_id
         description = (declarative.description or "") if declarative else ""
         status = declarative.template if declarative else "browser"
+        chart_templates = {
+            "line", "bar", "stacked-bar", "pie", "scatter", "heatmap", "radar"
+        }
+        renderer_label = (
+            declarative.engine
+            if declarative and declarative.template in chart_templates
+            else status
+        )
         controls = self._context_controls(dashboard, result, "view", view_id)
         binding_fields = binding_fields or set()
         title_field = f"views.{view_id}.title"
@@ -633,17 +664,80 @@ class CanvasRenderer:
             if description or description_binding
             else ""
         )
+        pipeline = self._view_pipeline_signals(
+            dashboard, view_id, result, renderer_label
+        )
         return (
             f'<article class="dv-view dv-view--client" data-view-id="{html.escape(view_id)}" '
             'data-view-status="loading">'
             '<header class="dv-view-header"><div class="dv-view-heading">'
             f'<span class="dv-view-title" role="heading" aria-level="3"{title_binding}>{html.escape(title)}</span>'
             f'{description_html}</div>'
-            f'<div class="dv-view-actions">{controls}<small data-view-status-label>{html.escape(status)}</small></div></header>'
+            f'<div class="dv-view-actions">{controls}{pipeline}'
+            f'<small class="dv-view-type-label">{html.escape(renderer_label)}</small>'
+            f'<small data-view-status-label hidden>{html.escape(status)}</small></div></header>'
             f'<div class="dv-state-summary dv-state-summary--view" data-state-summary-scope="view" '
             f'data-state-summary-owner="{html.escape(view_id, quote=True)}" hidden></div>'
             '<div class="dv-view-body"><div class="dv-view-placeholder">Waiting for dataset</div></div>'
             '</article>'
+        )
+
+    @staticmethod
+    def _pipeline_node_title(dashboard: LoadedDashboard, node_id: str) -> str:
+        kind, _, identifier = node_id.partition(":")
+        if kind == "source" and identifier in dashboard.sources:
+            definition = dashboard.sources[identifier][1]
+            return definition.name or identifier
+        if kind == "dataset" and identifier in dashboard.dataset_transforms:
+            definition = dashboard.dataset_transforms[identifier][1]
+            return definition.name or identifier
+        if kind == "interactive" and identifier in dashboard.interactive_transforms:
+            definition = dashboard.interactive_transforms[identifier][1]
+            return definition.name or identifier
+        return identifier or node_id
+
+    def _view_pipeline_signals(
+        self,
+        dashboard: LoadedDashboard,
+        view_id: str,
+        result: RunResult | SimpleNamespace,
+        renderer: str,
+    ) -> str:
+        nodes = getattr(result, "nodes", {}) or {}
+        signals: list[str] = []
+        for node_id in dashboard.dependency_contract.view_pipeline_nodes(view_id):
+            node_result = nodes.get(node_id)
+            if isinstance(node_result, dict):
+                node_status = str(node_result.get("status") or "not_run")
+            else:
+                node_status = str(getattr(node_result, "status", "not_run"))
+            title = self._pipeline_node_title(dashboard, node_id)
+            hidden = "" if node_status in VIEW_PIPELINE_VISIBLE_STATUSES else " hidden"
+            signals.append(
+                '<button type="button" class="dv-view-pipeline-signal" '
+                'data-view-pipeline-signal '
+                f'data-view-pipeline-node="{html.escape(node_id, quote=True)}" '
+                f'data-status="{html.escape(node_status, quote=True)}"{hidden} '
+                f'title="{html.escape(title, quote=True)}" '
+                f'aria-label="{html.escape(f"{title}: {node_status}", quote=True)}">'
+                '<span class="dv-view-pipeline-light" aria-hidden="true"></span>'
+                '<span class="dv-view-pipeline-tooltip" role="tooltip">'
+                f'<strong>{html.escape(title)}</strong></span></button>'
+            )
+        renderer_title = f"{renderer} renderer"
+        signals.append(
+            '<span class="dv-view-pipeline-signal dv-view-renderer-signal" '
+            f'data-view-renderer-signal data-status="not_run" hidden aria-hidden="true" '
+            f'title="{html.escape(renderer_title, quote=True)}">'
+            '<span class="dv-view-pipeline-light" aria-hidden="true"></span>'
+            '<span class="dv-view-pipeline-tooltip" role="tooltip">'
+            f'<strong>{html.escape(renderer_title)}</strong></span></span>'
+        )
+        return (
+            '<span class="dv-view-pipeline" data-view-pipeline '
+            'aria-label="View pipeline status">'
+            + "".join(signals)
+            + "</span>"
         )
 
     def _control_consumers(
@@ -736,13 +830,11 @@ class CanvasRenderer:
         if selection_fields:
             groups.append(
                 '<section class="dv-context-controls__group" data-control-kind="selection">'
-                '<header><span>DATA</span><strong>Data selection</strong></header>'
                 f'<div>{"".join(selection_fields)}</div></section>'
             )
         if compute_fields:
             groups.append(
                 '<section class="dv-context-controls__group" data-control-kind="compute">'
-                '<header><span>LOGIC</span><strong>Calculation settings</strong></header>'
                 f'<div>{"".join(compute_fields)}</div></section>'
             )
         footer = ""
@@ -768,11 +860,16 @@ class CanvasRenderer:
             len(controls),
             owner_id,
         )
+        editor_owner = f"{origin}:{owner_id}"
         return (
             f'<details class="dv-context-controls" data-control-origin="{html.escape(origin)}" '
+            f'data-editor-owner="{html.escape(editor_owner, quote=True)}" '
             f'data-overlay-floating="true" {panel_attributes}>'
-            '<summary><span class="dv-context-controls__mark">C</span>'
-            f'<strong>{scope} controls</strong><small>{len(controls)}</small><i>⌄</i></summary>'
+            '<summary title="左键打开控件，右键编辑默认配置">'
+            '<span class="dv-context-controls__mark">C</span>'
+            f'<strong>{scope} controls</strong>'
+            '<span class="dv-control-chevron" aria-hidden="true"><svg viewBox="0 0 16 16">'
+            '<path d="m4 6 4 4 4-4"/></svg></span></summary>'
             f'<div class="dv-context-controls__panel">{"".join(groups)}{footer}</div></details>'
         )
 
@@ -1142,9 +1239,9 @@ class CanvasRenderer:
                 config = view.controls if view is not None else None
         requested_template = config.template if config is not None else "auto"
         template = (
-            "stack"
-            if requested_template == "auto" and count <= 1
-            else "grid"
+            ("stack" if count <= 1 else "grid")
+            if requested_template == "auto" and role == "query"
+            else "stack"
             if requested_template == "auto"
             else requested_template
         )
@@ -1158,17 +1255,30 @@ class CanvasRenderer:
             width = 680
         else:
             width = 880
-        columns = 1 if template == "stack" else (config.columns if config else None) or "auto"
+        columns = (
+            1
+            if template == "stack"
+            else (config.columns if config else None) or (6 if role == "query" else 1)
+        )
+        column_width = (
+            (config.column_width if config is not None else None)
+            or (280 if role == "query" else 240)
+        )
         density = config.density if config is not None else "comfortable"
+        effective_columns = 1 if template == "stack" else max(1, min(count or 1, columns))
         return (
             'data-dv-control-panel '
             f'data-control-role="{html.escape(role, quote=True)}" '
             f'data-control-count="{count}" '
             f'data-control-template="{html.escape(template, quote=True)}" '
             f'data-control-columns="{columns}" '
+            f'data-control-column-width="{column_width}" '
+            f'data-control-effective-columns="{effective_columns}" '
             f'data-control-density="{html.escape(density, quote=True)}" '
             f'data-control-width="{html.escape(width_name, quote=True)}" '
-            f'data-overlay-width="{width}"'
+            f'data-overlay-width="{width}" '
+            f'style="--dv-control-column-width:{column_width}px;'
+            f'--dv-control-columns:{effective_columns}"'
         )
 
     def _portable_controls(
@@ -1229,9 +1339,8 @@ class CanvasRenderer:
                     f'<div class="dv-report-selection" data-selection-key="{html.escape(key)}" '
                     f'data-selection-type="{html.escape(definition.type)}" '
                     f'data-control-span="{int(presentation.get("span", 1))}">'
-                    '<div class="dv-report-selection__scope"><span>Data selection</span>'
                     f'<small data-control-impact-key="{html.escape(key, quote=True)}" '
-                    f'data-control-impact-count>{html.escape(affected_label)}</small></div>'
+                    f'data-control-impact-count hidden>{html.escape(affected_label)}</small>'
                     f'<strong>{html.escape(definition.label or definition.id)}</strong>{field}</div>'
                 )
                 continue
@@ -1252,11 +1361,21 @@ class CanvasRenderer:
                     frozen=frozen,
                 )
             )
+        def query_value_text(value: Any) -> str:
+            if isinstance(value, list):
+                separator = " → " if len(value) == 2 else "、"
+                return separator.join(str(item) for item in value)
+            if value is None:
+                return "—"
+            return str(value)
+
         query_items = "".join(
-            f'<div class="dv-query-value"><span>{html.escape(item.label or item.id)}</span>'
-            f'<strong>{html.escape(json.dumps(result.query_parameters.get(item.id), ensure_ascii=False, default=str))}</strong></div>'
+            '<div class="dv-query-value field">'
+            f'<label>{html.escape(item.label or item.id)}</label>'
+            f'<output>{html.escape(query_value_text(result.query_parameters.get(item.id)))}</output>'
+            '</div>'
             for item in dashboard.definition.query_parameters
-        ) or '<div class="dv-query-value"><span>Query parameters</span><strong>None</strong></div>'
+        )
         actionable = [
             transform_id
             for transform_id in dependency_contract.reachable_interactive_order
@@ -1294,14 +1413,12 @@ class CanvasRenderer:
         )
         selection_group = (
             '<section class="dv-runtime-control-group" data-control-kind="selection">'
-            '<header><span>DATA</span><div><strong>Data selection</strong><small>Choose included rows</small></div></header>'
             f'<div class="dv-report-selection-group__fields">{"".join(selection_items)}</div></section>'
             if selection_items
             else ""
         )
         compute_group = (
             '<section class="dv-runtime-control-group" data-control-kind="compute">'
-            '<header><span>LOGIC</span><div><strong>Calculation settings</strong><small>Recompute selected data</small></div></header>'
             f'<div class="dv-compute-fields">{"".join(compute_items)}</div></section>'
             if compute_items
             else ""
@@ -1328,24 +1445,56 @@ class CanvasRenderer:
                 f'<details class="dv-runtime-control" name="dv-runtime-header-control" '
                 f'data-runtime-popover data-overlay-group="runtime-header" data-control-origin="dashboard" '
                 f'data-overlay-floating="true" {control_panel_attributes}>'
-                '<summary><span>02</span><div><strong>Controls</strong>'
-                f'<small>{len(dashboard_control_keys)} control{"" if len(dashboard_control_keys) == 1 else "s"}</small>'
-                '</div><i>⌄</i></summary><div class="dv-runtime-popover dv-runtime-popover--controls">'
-                '<header><span>02</span><div><strong>Dashboard controls</strong>'
-                '<small>Selection → calculation → rendering</small></div></header>'
+                '<summary><span class="dv-context-controls__mark">C</span>'
+                '<strong>DASHBOARD CONTROLS</strong>'
+                '<span class="dv-control-chevron" aria-hidden="true"><svg viewBox="0 0 16 16">'
+                '<path d="m4 6 4 4 4-4"/></svg></span></summary>'
+                '<div class="dv-runtime-popover dv-runtime-popover--controls">'
                 f'<div class="dv-runtime-control-groups">{selection_group}{compute_group}</div>{footer}'
                 '</div></details>'
             )
+        card_is_present = bool(dashboard.definition.query_parameters)
+        card_hidden = "" if card_is_present else " hidden"
+        query_control = ""
+        if card_is_present:
+            query_control = (
+                '<div class="query-run-control dv-runtime-query-run-control">'
+                '<button class="query-run-control__primary" type="button" disabled '
+                'aria-disabled="true" title="导出报告已固化查询结果">'
+                '<span class="query-run-control__copy"><strong>查询</strong></span></button>'
+                '<button class="query-run-control__toggle" type="button" '
+                'data-runtime-query-toggle aria-controls="dv-runtime-query-panel" '
+                'aria-expanded="false" aria-keyshortcuts="Q" title="展开查询参数 (Q)" '
+                'aria-label="展开查询参数">'
+                '<span class="query-run-control__chevron" aria-hidden="true"></span>'
+                '</button></div>'
+            )
         return (
-            '<header class="dv-runtime-header" aria-label="Report controls">'
-            '<div class="dv-runtime-brand"><span>PORTABLE ANALYSIS</span><strong>Dataset fixed. Views live.</strong></div>'
-            '<nav class="dv-runtime-actions" aria-label="Dataset and analysis controls">'
-            f'<details class="dv-runtime-control" name="dv-runtime-header-control" '
-            f'data-runtime-popover data-overlay-group="runtime-header" '
-            f'data-overlay-floating="true" {query_panel_attributes}>'
-            '<summary><span>01</span><div><strong>Parameters</strong><small>Fixed snapshot</small></div><i>⌄</i></summary>'
-            f'<div class="dv-runtime-popover dv-runtime-popover--query"><header><span>01</span><div><strong>Query snapshot</strong><small>Values embedded in this HTML</small></div></header><div class="dv-runtime-query-values">{query_items}</div></div></details>'
-            f'{control_block}</nav></header>'
+            '<header class="dv-runtime-header dv-shell-header" aria-label="Report controls">'
+            '<div class="dv-runtime-brand dv-shell-brand" aria-label="Dataviz">'
+            '<span class="dv-runtime-brand__mark" aria-hidden="true">D/V</span>'
+            '<strong>DATAVIZ</strong></div>'
+            '<nav class="dv-runtime-actions dv-shell-header-actions" '
+            'aria-label="Dataset and analysis controls">'
+            f'{control_block}{query_control}</nav></header>'
+            f'<section class="dv-runtime-query-tray dv-query-card-host" '
+            f'{query_panel_attributes} data-open="false"{card_hidden}>'
+            '<div class="dv-query-card">'
+            '<header class="dv-query-card__header"><h2>查询参数</h2></header>'
+            '<div id="dv-runtime-query-panel" class="dv-runtime-popover '
+            'dv-runtime-popover--query dv-runtime-query-panel dv-query-card__body" '
+            'data-control-panel-body hidden>'
+            f'<div class="dv-runtime-query-values">{query_items}</div></div></div></section>'
+            '<div class="dv-runtime-shortcut-toast" data-runtime-shortcut-toast role="status" '
+            'aria-live="polite" aria-atomic="true" hidden></div>'
+            '<dialog class="dv-runtime-shortcuts" data-runtime-shortcut-help '
+            'aria-labelledby="dv-runtime-shortcuts-title"><form method="dialog">'
+            '<header><h2 id="dv-runtime-shortcuts-title">快捷键</h2>'
+            '<button type="submit" aria-label="关闭">×</button></header><dl>'
+            '<div><dt><kbd>Q</kbd></dt><dd>查询参数</dd></div>'
+            '<div><dt><kbd>Esc</kbd></dt><dd>关闭临时面板</dd></div>'
+            '<div><dt><kbd>?</kbd></dt><dd>快捷键帮助</dd></div>'
+            '</dl><footer><button type="submit">关闭</button></footer></form></dialog>'
         )
 
     def _compute_control_html(
@@ -1420,11 +1569,14 @@ class CanvasRenderer:
             )
         )
         common_native = (
-            f'aria-label="{label}" data-control-input {role_attributes}'
+            f'aria-label="{label}" data-control-input '
+            f'data-control-type="{html.escape(definition.type, quote=True)}" '
+            f'data-value-type="{html.escape(definition.value_type, quote=True)}" '
+            f'{role_attributes}'
             + (" disabled" if disabled else "")
             + (
                 " required"
-                if definition.required and definition.type != "boolean"
+                if definition.required and definition.value_type != "boolean"
                 else ""
             )
         )
@@ -1435,7 +1587,7 @@ class CanvasRenderer:
             constraints += f' max="{html.escape(str(definition.max), quote=True)}"'
         if definition.step is not None:
             constraints += f' step="{html.escape(str(definition.step), quote=True)}"'
-        elif definition.type == "integer":
+        elif definition.value_type == "integer":
             constraints += ' step="1"'
         if definition.min_date:
             constraints += f' min="{html.escape(definition.min_date, quote=True)}"'
@@ -1444,7 +1596,7 @@ class CanvasRenderer:
         if definition.max_length:
             constraints += f' maxlength="{int(definition.max_length)}"'
 
-        if definition.type in {"single_select", "multi_select"}:
+        if definition.type in {"single_select", "multiple_select"}:
             choices = static_control_choices(definition)
             typed_choices = bool(path_fields) or any(
                 not isinstance(choice.value, str) for choice in choices
@@ -1456,7 +1608,7 @@ class CanvasRenderer:
                 if typed_choices
                 else str(item)
             )
-            if definition.type == "multi_select":
+            if definition.type == "multiple_select":
                 selected_values = value if isinstance(value, list) else []
             elif path_fields:
                 selected_values = [value] if isinstance(value, (list, tuple)) else []
@@ -1492,13 +1644,13 @@ class CanvasRenderer:
                     f'{" selected" if serialized in selected else ""}>'
                     f'{html.escape(choice.label)}</option>'
                 )
-            multiple = " multiple" if definition.type == "multi_select" else ""
+            multiple = " multiple" if definition.type == "multiple_select" else ""
             native = (
                 f'<select {common_native} data-value-encoding="'
                 f'{"json" if typed_choices else "string"}"{multiple}>{options}</select>'
             )
         else:
-            if definition.type == "boolean":
+            if definition.value_type == "boolean":
                 native = (
                     f'<input type="checkbox" {common_native}'
                     f'{" checked" if bool(value) else ""}>'
@@ -1506,11 +1658,11 @@ class CanvasRenderer:
             else:
                 input_type = (
                     "range"
-                    if component == "slider"
+                    if component == "slider" and definition.type == "single_input"
                     else "number"
-                    if definition.type in {"number", "integer"}
+                    if definition.value_type in {"number", "integer"}
                     else "date"
-                    if definition.type == "date"
+                    if definition.type == "single_input" and definition.value_type == "date"
                     else "text"
                 )
                 display = (
@@ -1539,7 +1691,8 @@ class CanvasRenderer:
             else (
                 not definition.required
                 and definition.type in {
-                    "string", "single_select", "multi_select", "date", "date_range"
+                    "single_input", "multiple_input", "single_select",
+                    "multiple_select", "range_input",
                 }
             )
         )
@@ -1565,13 +1718,16 @@ class CanvasRenderer:
             "cascader",
             "tree-select",
             "range-picker",
+            "multiple-input",
             "switch",
-        }
+        } or (component == "slider" and definition.type == "range_input")
         attrs = (
             f'data-control-component="{html.escape(component, quote=True)}" '
             f'data-requested-component="{html.escape(presentation.get("requested_component", "auto"), quote=True)}" '
             f'data-auto-reason="{html.escape(presentation.get("auto_reason", ""), quote=True)}" '
             f'data-required="{str(bool(definition.required)).lower()}" '
+            f'data-control-type="{html.escape(definition.type, quote=True)}" '
+            f'data-value-type="{html.escape(definition.value_type, quote=True)}" '
             f'data-clearable="{str(bool(clearable)).lower()}" '
             f'data-show-unavailable="{str(bool(presentation.get("show_unavailable", False))).lower()}" '
             f'data-search-mode="{html.escape(presentation.get("search", "auto"), quote=True)}" '
@@ -1580,6 +1736,7 @@ class CanvasRenderer:
             f'data-virtual-threshold="{int(presentation.get("virtual_threshold", 200))}" '
             f'data-max-tag-count="{int(presentation.get("max_tag_count", 2))}" '
             f'data-max-selected="{definition.max_selected or ""}" '
+            f'data-max-items="{definition.max_items or ""}" '
             f'data-hide-selected="{str(bool(presentation.get("hide_selected", False))).lower()}" '
             f'data-search-placeholder="{html.escape(presentation.get("search_placeholder", "Search options…"), quote=True)}" '
             f'data-empty-text="{html.escape(presentation.get("empty_text", "No matching options"), quote=True)}" '
@@ -1603,7 +1760,6 @@ class CanvasRenderer:
             f'data-default-expand-depth="{int(presentation.get("default_expand_depth", 0))}" '
             f'data-option-type="{html.escape(presentation.get("option_type", "default"), quote=True)}" '
             f'data-button-style="{html.escape(presentation.get("button_style", "outline"), quote=True)}" '
-            f'data-bulk-actions="{str(bool(presentation.get("bulk_actions", True))).lower()}" '
             f'data-checked-label="{html.escape(presentation.get("checked_label", ""), quote=True)}" '
             f'data-unchecked-label="{html.escape(presentation.get("unchecked_label", ""), quote=True)}" '
             f'data-min-rows="{int(presentation.get("min_rows", 2))}" '
@@ -1627,7 +1783,9 @@ class CanvasRenderer:
         )
         return (
             f'<div class="dv-control {css_class}" {attrs}>{native}'
-            '<div data-control-mount></div></div>'
+            '<div data-control-mount></div>'
+            '<small class="dv-control__error" data-control-error role="alert" hidden></small>'
+            '</div>'
         )
 
     def write_report(

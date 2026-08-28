@@ -1,8 +1,35 @@
 # Changelog
 
-Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本化。这里记录使用者可观察到的变化；字段细节以 `dataviz schemas` 和 `dataviz components` 为准。
-
 ## Unreleased
+
+## 0.9.1 — 2026-08-28
+
+- 默认 Table 不再为行数单独占用一条元信息行；确实需要时可显式启用 `options.show_count: true`。
+- DatePicker/RangePicker 改用统一的可编辑 ISO 日期输入和 Dataviz 日历；连续八位数字自动分段，年/月可直接跳转，Range 不再重复显示已选范围。
+- Query Parameters 使用有界目标轨道；参数较少时不再被 `1fr` 强行拉满整行，窄屏仍自适应为单列。
+- 日期默认值统一为独立 Date Atom：单日期编辑器只显示“固定/相对”模式与一个当前值；Range 的开始、结束各自选择模式，因此支持固定开始日与相对结束日混用。旧 `start_offset/end_offset` 范围对象不再接受。
+- Server 与导出 HTML 通过 `presentation.shell` 共用 Header 高度、基础字体、Query/Control Panel 表面、字段标签和输入尺寸；两个 Host 保留能力差异，但不再呈现两套默认视觉。
+- Server Shell 的 Header 现在横跨整个屏幕，统一承载可点击的 Dataviz Logo、品牌名、Query 节点信号灯和操作区；点击 Logo 即可展开/收起其下方 Sidebar。删除独立 Navigation 按钮和 Sidebar 内重复的 “Dashboards” 标题。
+- Sidebar 删除重复的 `+` 新建目录按钮及其空工具栏；在 Sidebar 空白处右键仍可新建目录。
+- Query Parameters 改为按 Panel 自身宽度计算列数：`columns` 只定义 1–6 的最大列数，新增 `column_width` 定义 160–600 px 的最小轨道宽度（默认 280）；Dashboard/Section/View Controls 默认保持单列，只有显式配置才并排。
+- 导出 HTML 的便携式 Header 现在保留紧凑的 Dataviz Logo 与品牌名；它属于 `presentation.shell/report.brand`，不会把 Server 的 Sidebar、导航、Reload 或诊断操作复制进报告。
+- Dependency Contract 升级为 v5，并为每个 View 编译唯一拓扑序 `pipeline_nodes`。Header 信号灯只表示 Source/Dataset Query 层；View 在 Renderer 类型标签左侧按需显示自身上游节点与 Renderer 状态，Ready/Not run 自动隐藏，Running/Stale/Error 等状态可直接定位分支故障；导出 HTML 不重复展示已固化的 Source Ready 灯。
+- Dashboard/Section/View Controls 托盘移除重复的 Controls 标题、DATA/LOGIC 标签、Selections/Calculation 分组标题、彩色竖线和影响 View 计数；Runtime 仍保留完整类型与影响契约，默认界面只展示业务字段和组件。
+- Server 与导出 HTML 收敛为安静白色 Shell：Header、Sidebar、Workbench 与默认 Canvas 形成连续表面，移除 Canvas 外层卡片、灰色沟槽与强阴影；默认 `business` Theme 改为白色画布、轻边框和靛蓝分析强调，绿色只保留给 Ready/成功状态。
+- Feature Showcase 保留自定义布局能力，但统一为中性白色底、轻边框和靛蓝分析强调，不再以紫色画布、黑粗边与多色大块作为项目第一印象。
+- 导出 HTML 的 Parameters 默认折叠，打开报告时直接展示分析内容；Server 仍首次默认展开并记忆当前 tab/Dashboard 状态。
+- Query Parameters 托盘移除重复的参数数量、Run ID 状态和内部分割线，只保留字段；宽屏默认上限从四列调整为六列，并响应式降为 5/4/3/2/1 列。`control_panels.*.columns` 同步扩展为 1–6。
+- Server 与导出 HTML 的 Parameters 从固定/浮动弹层改为 Header 文档流托盘：展开时推开 Canvas，滚动时自然离开视口，不再持续遮挡看板上半部分。
+- Server Canvas 增加 Shell Scroll Bridge：滚轮先滚走外层 Parameters，再进入 iframe 看板；反向滚动按相反顺序恢复，消除两个纵向滚动区的顺序错乱。
+- 保留紧凑 sticky 操作栏；Query 参数仍由 split control 显式开合，外部点击与 `Esc` 不会误收起。
+- 精简原生 Shell 的重复编号、口号和教学文案，保留必要操作、状态以及 Dashboard 自己声明的业务内容。
+
+## 0.9.0 — 2026-08-27
+
+- Query Parameters 在宽屏使用占满可用宽度的四等分轨道，不再以 1396px 封顶表单并留下大片空白；窄屏逐级降为 3/2/1 列。
+- Checkbox Group 收紧为 2–5 个并列选项的直接多选，移除默认 All/Invert/Clear 工具栏；6 个及以上的平面候选域自动使用 Select，显式将超限静态候选域绑定到 Checkbox Group 会产生 Semantic Validation warning。
+
+Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本化。这里记录使用者可观察到的变化；字段细节以 `dataviz schemas` 和 `dataviz components` 为准。
 
 ## 0.8.0 — 2026-08-26
 
@@ -51,7 +78,7 @@ Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本
 
 ### Breaking Selection, Control Binding and Layout contracts
 
-- Dashboard 升级为 `dataviz/dashboard/v7`、Presentation 升级为 v2、Dependency Contract 升级为 v4、Browser Runtime 升级为 v5，并新增 Layout Contract v1；不提供兼容分支。
+- Dashboard 升级为 `dataviz/dashboard/v8`、Presentation 升级为 v2、Dependency Contract 升级为 v4、Browser Runtime 升级为 v5，并新增 Layout Contract v1；不提供兼容分支。
 - Selection 统一保存 `{intent, values}`；`explicit + []` 是明确空集，`all_available` 随候选域扩张。optional Single Select 支持 Clear，required Single 禁止 clearable。
 - View 可用一条 `control_binding` 双向绑定现有 Selection Control；一个 Control 最多一个 writer View，Plotly/ECharts/Table/Custom 共用类型化 Action 和 canonical commit。
 - Section/View 顺序、模板、columns 与 span 全部属于 Dashboard；Presentation v2 删除结构布局字段。默认 Renderer、Server/HTML、AI context 与 validate 共用 `dataviz/layout-contract/v1`。

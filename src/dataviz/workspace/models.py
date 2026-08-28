@@ -170,15 +170,13 @@ class ViewControlBindingDefinition(Model):
 class _ValueControlDefinition(Model):
     id: StableId
     type: Literal[
-        "string",
-        "number",
-        "integer",
-        "boolean",
-        "date",
-        "date_range",
+        "single_input",
+        "multiple_input",
         "single_select",
-        "multi_select",
-    ] = "string"
+        "multiple_select",
+        "range_input",
+    ]
+    value_type: Literal["text", "integer", "number", "boolean", "date"]
     label: str | None = None
     description: str = ""
     default: Any = None
@@ -193,6 +191,7 @@ class _ValueControlDefinition(Model):
     max_date: str | None = None
     max_length: int | None = Field(None, ge=1)
     max_selected: int | None = Field(None, ge=1)
+    max_items: int | None = Field(None, ge=1)
     allow_empty: tuple[bool, bool] = (False, False)
     placeholder: str = ""
 
@@ -206,7 +205,7 @@ class QueryParameterDefinition(_ValueControlDefinition):
 
     @model_validator(mode="after")
     def validate_static_choices(self):
-        if self.type in {"single_select", "multi_select"} and not isinstance(
+        if self.type in {"single_select", "multiple_select"} and not isinstance(
             self.options, StaticOptionDomainDefinition
         ):
             raise ValueError(
@@ -224,7 +223,7 @@ class ComputeControlDefinition(_ValueControlDefinition):
     def validate_static_choices(self):
         if is_relative_date_default(self.default):
             raise ValueError("relative defaults are only valid for Query Parameters")
-        if self.type in {"single_select", "multi_select"} and not isinstance(
+        if self.type in {"single_select", "multiple_select"} and not isinstance(
             self.options, StaticOptionDomainDefinition
         ):
             raise ValueError(
@@ -246,13 +245,13 @@ class SelectionControlDefinition(_ValueControlDefinition):
     def validate_option_domain_contract(self):
         if is_relative_date_default(self.default):
             raise ValueError("relative defaults are only valid for Query Parameters")
-        if self.type in {"single_select", "multi_select"} and self.options is None:
+        if self.type in {"single_select", "multiple_select"} and self.options is None:
             raise ValueError(
                 "Selection select controls require options.mode=static or options.mode=infer"
             )
-        if self.depends_on and self.type not in {"single_select", "multi_select"}:
+        if self.depends_on and self.type not in {"single_select", "multiple_select"}:
             raise ValueError(
-                "Selection depends_on is only valid for single_select or multi_select controls"
+                "Selection depends_on is only valid for single_select or multiple_select controls"
             )
         if len(self.depends_on) != len(set(self.depends_on)):
             raise ValueError("Selection depends_on cannot contain duplicate references")
@@ -398,6 +397,7 @@ class PresentationControlComponentDefinition(Model):
     component: Literal[
         "auto",
         "input",
+        "multiple-input",
         "input-number",
         "auto-complete",
         "checkbox",
@@ -426,7 +426,6 @@ class PresentationControlComponentDefinition(Model):
     unchecked_label: str = ""
     option_type: Literal["default", "button"] = "default"
     button_style: Literal["outline", "solid"] = "outline"
-    bulk_actions: bool = True
     show_unavailable: bool = False
     search: Literal["auto", "always", "never"] = "auto"
     virtual: Literal["auto", "always", "never"] = "auto"
@@ -458,6 +457,7 @@ class PresentationControlComponentDefinition(Model):
         options = {
             "auto": set(),
             "input": {"multiline", "min_rows", "max_rows", "show_count", "prefix", "suffix"},
+            "multiple-input": {"prefix", "suffix"},
             "input-number": {"prefix", "suffix", "number_controls"},
             "auto-complete": {"search_placeholder", "empty_text"},
             "checkbox": set(),
@@ -470,8 +470,7 @@ class PresentationControlComponentDefinition(Model):
                 "clear_label", "item_height", "viewport_height", "overscan",
             },
             "checkbox-group": {
-                "bulk_actions", "show_unavailable", "select_all_label",
-                "invert_label",
+                "show_unavailable",
             },
             "cascader": {
                 "show_unavailable", "search", "search_placeholder", "empty_text",
@@ -519,7 +518,8 @@ class PresentationControlPanelDefinition(Model):
 
     template: Literal["auto", "stack", "grid"] = "auto"
     width: Literal["auto", "compact", "regular", "wide"] = "auto"
-    columns: int | None = Field(None, ge=1, le=4)
+    columns: int | None = Field(None, ge=1, le=6)
+    column_width: int | None = Field(None, ge=160, le=600)
     density: Literal["compact", "comfortable"] = "comfortable"
 
     @model_validator(mode="after")
@@ -542,7 +542,7 @@ class PresentationStateSummaryItemDefinition(Model):
 
 
 class PresentationStateSummaryDefinition(Model):
-    enabled: bool = True
+    enabled: bool = False
     max_values: int = Field(3, ge=1, le=20)
     items: dict[str, PresentationStateSummaryItemDefinition] = Field(default_factory=dict)
 
@@ -623,7 +623,7 @@ class DeclarativeViewDefinition(Model):
 
 
 class DashboardDefinition(Model):
-    schema_: Literal["dataviz/dashboard/v7"] = Field(alias="schema")
+    schema_: Literal["dataviz/dashboard/v8"] = Field(alias="schema")
     kind: Literal["dashboard"] = "dashboard"
     id: StableId
     title: str = ""

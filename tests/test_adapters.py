@@ -32,6 +32,7 @@ def test_adapter_bindings_and_all_example_dashboards_run():
         "source-lab",
         "chart-gallery",
         "cascade-explorer",
+        "date-parameter-lab",
         "parameter-playground",
     }
     executor = Executor(workspace)
@@ -285,7 +286,7 @@ title: Adapter refresh
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v7
+        """schema: dataviz/dashboard/v8
 kind: dashboard
 id: adapter-refresh
 adapters: {data: files}
@@ -354,7 +355,7 @@ title: Adapter tests
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v7
+        """schema: dataviz/dashboard/v8
 kind: dashboard
 id: adapter-source
 title: Adapter source

@@ -148,7 +148,7 @@ function galleryScaleControl(count) {
 
 function galleryThemeMatrix() {
   const definitions = [
-    ['business', 'Business', 'Modern indigo default'],
+    ['business', 'Business', 'Clean neutral default'],
     ['plain', 'Plain', 'Minimal neutral analysis'],
     ['editorial', 'Editorial', 'Warm narrative report'],
     ['terminal', 'Terminal', 'Dark technical monitoring'],

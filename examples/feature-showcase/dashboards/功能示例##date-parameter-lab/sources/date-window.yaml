@@ -1,0 +1,14 @@
+schema: dataviz/source/v2
+kind: source
+id: date-window
+name: 日期参数解析
+type: sql
+adapter: warehouse
+code: date-window.sql
+query_inputs:
+  analysis_date: analysis_date
+  range_start: {parameter: report_range, part: start}
+  range_end: {parameter: report_range, part: end}
+outputs: {main: {kind: table}}
+cache: {mode: session}
+

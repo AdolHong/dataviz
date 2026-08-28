@@ -1,6 +1,6 @@
 # Dataviz 实施计划
 
-更新时间：2026-08-26
+更新时间：2026-08-28
 
 稳定设计见 [DESIGN](DESIGN.md)，代码入口见 [当前实现索引](docs/product-architecture.md)，使用者入口见 [README](README.md)。本文件只保留当前结论和仍需完成的工作，不重复记录历史迁移过程。
 
@@ -11,15 +11,16 @@
 | P0 数据执行架构 | 已完成 | Query DAG、Interactive DAG、Control/View 影响关系、Named Output、三种 Interactive Runtime、状态隔离和导出边界已统一为一份版本化 Dependency Contract。 |
 | P0 Selection 状态一致性 | 已完成 | `{intent, values}` 是唯一 canonical state；明确空集、动态全选、optional Single Clear、tab/HTML/三种 Interactive Runtime 使用同一 resolver。 |
 | P0 Control Binding / Linked Views | 已完成 | 一个 Selection Control 最多绑定一个可读写 View Adapter；Plotly/ECharts/Table/Custom 与面板共用 canonical state。 |
-| P0 Layout Contract | 已完成 | Dashboard v7 拥有结构；Layout Contract v1 统一确定性行列、span、custom mount、Renderer、Server/HTML、AI context 与 validate。 |
+| P0 Layout Contract | 已完成 | Dashboard v8 拥有结构；Layout Contract v1 统一确定性行列、span、custom mount、Renderer、Server/HTML、AI context 与 validate。 |
 | P0 最终配置有效性 | 已完成 | Semantic Validation、inspect-layout、状态摘要、Runtime-aware trigger、紧凑 CLI、Chart Service 与 visual-check 已统一消费最终契约。 |
 | P0 Renderer 生命周期 | 已完成 | Plotly、ECharts、Perspective 在 Server/HTML 共用 mount→update→empty→restore→interaction→resize→dispose→export 行为矩阵；首屏 bootstrap 也进入 View ID 状态表。 |
-| P1 Component Package | 当前范围已完成 | Registry v4 已覆盖常用 Data Entry、View、Section、Renderer、Repeat 和 Presentation 组件；继续扩张必须由真实场景触发。 |
+| P1 Component Package | 当前范围已完成 | Registry v5 已覆盖常用 Data Entry、View、Section、Renderer、Repeat 和 Presentation 组件；继续扩张必须由真实场景触发。 |
+| P1 人工参数编辑 | 已完成 | Server 可编辑 Query/Dashboard/Section/View 的默认值、静态候选项和同级顺序；revision、round-trip YAML、Schema 校验与原子写入保证只修改 `dashboard.yaml` 的受限子集。 |
 | P1 AI 开发效率评测 | 工具已完成，真实试验暂缓 | 成对任务、输入完整性、逐项验收和真实 Token 记录均已实现；试验方案尚未决定，不用仓库测试伪造结论。 |
 | P2 规模与浏览器矩阵 | 当前范围已完成 | 固定 10K/100K/1M 基准、流式 groupBy 优化，以及 Chromium/Firefox/WebKit 的窄屏与 Perspective 恢复组合矩阵均已有可复现证据。 |
-| 开源发布 | 本地发行完成 | `0.8.0` Renderer 生命周期矩阵已通过本地发行门禁；正式对外授权仍等待许可证决定。 |
+| 开源发布 | 本地发行完成 | `0.9.1` 日期交互、参数编辑、Server/HTML 样式与分享契约已通过本地发行门禁；正式对外授权仍等待许可证决定。 |
 
-当前开发基线：Package `0.8.0`、Python 3.11–3.14、Dashboard `dataviz/dashboard/v7`、Presentation `dataviz/presentation/v2`、Source/Dataset/Interactive Transform `v2`、Dependency Contract `v4`、Layout Contract `v1`、State Snapshot `v1`、Browser Runtime `dataviz/runtime/v5`、Component Registry `4.2.0`。这些破坏式契约只接受当前严格字段，不保留旧 alias、自动迁移或第二套 Runtime。
+当前开发基线：Package `0.9.1`、Python 3.11–3.14、Dashboard `dataviz/dashboard/v8`、Presentation `dataviz/presentation/v2`、Source/Dataset/Interactive Transform `v2`、Dependency Contract `v5`、Layout Contract `v1`、State Snapshot `v1`、Browser Runtime `dataviz/runtime/v5`、Component Registry `5.4.0`。这些破坏式契约只接受当前严格字段，不保留旧 alias、自动迁移或第二套 Runtime。
 
 Authoring P0 的 A–G 已进入当前 Schema/Compiler/Runtime，并由 0.7.0 统一发行。复杂实现必须留在 Compiler/Runtime：普通 Dashboard 不手写依赖图、事务、revision 或回调；常见跨图联动最多新增一条声明。
 
@@ -27,10 +28,10 @@ Authoring P0 的 A–G 已进入当前 Schema/Compiler/Runtime，并由 0.7.0 �
 
 ### 数据、计算与状态
 
-- [x] Dashboard v7 只有 Query Parameter 与 scoped Controls 两个入口；Control 在 Dashboard/Section/View 统一声明，并以 `kind: selection | compute` 保留不同 delta、提交周期和失效路径。
+- [x] Dashboard v8 只有 Query Parameter 与 scoped Controls 两个入口；Control 在 Dashboard/Section/View 统一声明，并以 `kind: selection | compute` 保留不同 delta、提交周期和失效路径。
 - [x] Source、Dataset Transform 与 Interactive Transform 统一使用 `query_inputs` 将 canonical Query Parameter 映射到节点本地 alias；删除节点级 `query_params`。SQL placeholder 与三种 Python/Browser Context 只能读取本节点声明的 alias。
-- [x] `date_range` 可通过 `{parameter, part: start|end}` 投影为两个标量；Dependency Contract、Planner、Server/Browser Runtime、缓存证据、Resolved SQL、CLI Context 和 HTML Export 使用同一映射。
-- [x] Query Parameter 的 `date`/`date_range` 支持基于 Workspace IANA 时区的严格相对默认值；Run 创建前解析为具体 ISO 日期并固化，Compute/Selection 不接受相对默认值。
+- [x] `range_input/date` 可通过 `{parameter, part: start|end}` 投影为两个标量；Dependency Contract、Planner、Server/Browser Runtime、缓存证据、Resolved SQL、CLI Context 和 HTML Export 使用同一映射。
+- [x] Query Parameter 的 `single_input/date` 与 `range_input/date` 支持基于 Workspace IANA 时区的严格相对默认值；Range 由两个独立 Date Atom 组成，固定/相对端点可混用。编辑器每个端点只显示模式与当前值，Run 创建前解析为具体 ISO 日期并固化，Compute/Selection 不接受相对默认值。
 - [x] Select 候选域用严格的 `options.mode=static|infer` 区分封闭枚举与 Source 推导；`infer` 禁止值列表 `default`，多选初始状态由 `all_available`/`explicit` 意图驱动。
 - [x] `selection_inputs` 是 Runtime 数据边界而非普通参数；三种 Interactive Runtime 都先对字段契约匹配的表输入应用 include Selection，再进入 Compute 逻辑。
 - [x] Source/Dataset Transform 与 Interactive Transform 使用两个 DAG、显式 Named Output、Schema Contract、provenance 和分支级并发。
@@ -39,7 +40,7 @@ Authoring P0 的 A–G 已进入当前 Schema/Compiler/Runtime，并由 0.7.0 �
 - [x] 同一 tab 可恢复状态；不同 tab、Dashboard、用户、Run 和 Interaction generation 相互隔离。
 - [x] Query Run Artifact 统一保存在 Workspace `.dataviz/`；可达 Server Interactive 输入在计划阶段显式分类，按 tab + Dashboard + Run + canonical Output 复用且绝不重查 Source。
 - [x] SQL 默认 120 秒超时并立即额外重试一次；Dashboard 可覆盖 timeout/retry。
-- [x] `dataviz/dependency-contract/v4` 成为 Query、Interactive、Control、Output 与 View 关系的唯一编译结果；Planner、Loader、Server、Browser、Export、CLI 和 AI context 不再各自推导 DAG。
+- [x] `dataviz/dependency-contract/v5` 成为 Query、Interactive、Control、Output 与 View 关系的唯一编译结果；Planner、Loader、Server、Browser、Export、CLI 和 AI context 不再各自推导 DAG。v5 还为每个 View 编译拓扑序 `pipeline_nodes`，Header 只投影 Query 层，View 在类型标签左侧按需显示活动/失败的上游节点与 Renderer 灯；Ready/Not run 不制造常驻噪音。
 - [x] 每个不可变 Dashboard load snapshot 以并发安全方式只编译并缓存一个 Dependency Contract；热更新创建新快照，并行首访也只返回同一个对象。
 - [x] Query Parameter 契约给出直接消费者及最终受影响 Query 节点、Interactive 分支、option Control、内容字段和 View；Query 节点同时给出下游 View/Control。
 - [x] Dependency Contract 以“可执行才存在”为不变量：环、未知 Output、browser → server-python 非法依赖和越界 Control consumer 在编译期拒绝；Loader 仅对无效图做 recovery diagnostics。
@@ -54,21 +55,31 @@ Authoring P0 的 A–G 已进入当前 Schema/Compiler/Runtime，并由 0.7.0 �
 - [x] View 具有 ready/loading/stale/empty/error/cancelled/unavailable 终态；取消或失败的 Run 可重新打开检查，不再因缺失 Output 返回 500。
 - [x] View 空 descriptor 进入 `empty`，不再永久停在 rendering；Arrow Table 的 Metric 聚合不再显示 `[object Object]`。
 - [x] 浏览器聚合改为线性 reducer，150K 行上的 min/max/mean/sum 不再使用会触发 JavaScript 参数上限的 spread。
-- [x] HTML Export 明确 `interactive | snapshot | unavailable`；server-python 不伪装成离线交互。
+- [x] HTML Export 明确 `interactive | snapshot | unavailable`；可达 Interactive DAG 只要包含 `server-python` 就拒绝导出，并引导使用分享链接，绝不伪装成离线交互。
 - [x] browser-python 支持 Pyodide CDN 与 `HTML + assets + manifest` bundle；未使用 Pyodide 时不携带相关 Runtime。
+- [x] Server Header 将 Export 收敛为简洁 SHARE 菜单，只保留“分享链接 / 导出 HTML”。分享结果原子落盘到 `workspace/shared_caches/<dashboard>_<timestamp>_<run>/`，保存 manifest、Query Result 和哈希校验 Artifact，不污染 Dashboard 目录。
+- [x] `/shared/<share-id>` 固定 Query Parameter 和 Base Output、禁止 Run；Browser JS/Pyodide 继续端侧执行，Server Python Interactive Transform 复用 Server Interaction 协议。Server 重启后按分享目录恢复会话；v1 暂不自动过期或联动清理。
+- [x] Server 与 HTML/分享页共用 `presentation.shell` 的 Header、Query Card、字段字体和输入尺寸；浏览器回归比较最终 computed style，而非仅比较 CSS 文本。
 
 ### 模板、验证与 AI 入口
 
-- [x] Component Registry v4 提供物理 Package、机器可读 manifest、Story、测试声明、语义 DOM 和 CSS token；`components --check` 检查包结构，行为由 pytest/E2E 实际执行。
-- [x] 20 个 Component Package 全部为 package-owned；`data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 已迁出 Runtime bridge，删除 `declarative-runtime.js` 和重复实现。
-- [x] 13 个独立 `control.*` Data Entry Package 对齐 Ant Design 的 Input、InputNumber、AutoComplete、Checkbox、Switch、Radio.Group、Select、Checkbox.Group、Cascader、TreeSelect、DatePicker、RangePicker 与 Slider；Query/Selection/Compute 共用 Registry 和 Renderer，单选不生成批量 All/Invert，多选批量操作受 required/clearable/max_selected 约束，RangePicker 使用单触发器范围日历。optional Single Select 的 Clear 仍是下面 Selection P0 的明确缺口。
-- [x] Query 与 Dashboard/Section/View Controls 使用 `control-panel.adaptive`：同一面板按 DATA/LOGIC 分组、视口内滚动；Query 默认最多四个可读轨道并响应式降列，`columns` 表达最大列数，控件可显式 `span: 2` 但不会按组件类型自动变宽。Presentation 覆盖排版时不分叉状态逻辑。
-- [x] Server Header 将 `Run query` 与 Query Parameters 合并为 split control；参数区默认展开、参与文档流并按 tab/Dashboard 记忆，只有箭头可开合，外部点击与 `Esc` 仅关闭临时 Controls/诊断浮层。
+- [x] Component Registry v5.3 提供物理 Package、机器可读 manifest、Story、测试声明、语义 DOM 和 CSS token；`components --check` 检查包结构，行为由 pytest/E2E 实际执行。
+- [x] 21 个 Component Package 全部为 package-owned；`data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 已迁出 Runtime bridge，删除 `declarative-runtime.js` 和重复实现。
+- [x] 14 个独立 `control.*` Data Entry Package 对齐 Ant Design 的 Input、InputNumber、AutoComplete、Checkbox、Switch、Radio.Group、Select、Checkbox.Group、Cascader、TreeSelect、DatePicker、RangePicker、Slider 与 Form.List + Input；Query/Selection/Compute 共用 Registry 和 Renderer。Checkbox Group 只承担 2–5 个并列选项的直接多选，不显示 All/Invert/Clear 工具栏；更大的平面候选域交给 Select，层级域交给 Cascader/TreeSelect。DatePicker/RangePicker 统一使用可编辑 `YYYY-MM-DD` 文本、同款图标和 Dataviz 日历；连续八位数字自动按 yyyy/mm/dd 分段，标题区可直接选年/月，Range 两端位于一个连续边框内，空 preset 与无动作 footer 都不产生占位或重复文字。
+- [x] 默认 Table 不显示独占一行的行数元信息；`options.show_count: true` 作为显式证据开关保留，空数据继续进入统一 Empty 状态。
+- [x] Query 与 Dashboard/Section/View Controls 使用 `control-panel.adaptive`：Selection/Compute 在 Runtime 内保持语义分组，但默认托盘只展示业务字段与组件，不重复显示 DATA/LOGIC、作用域和影响 View 数量；面板保持视口内滚动。Query 托盘只保留字段，宽屏最多六轨并响应式降列；每轨默认保持 280 px 目标宽度，参数较少时右侧自然留白，不用 `1fr` 拉满整行，控件可显式 `span: 2`。Presentation 覆盖排版时不分叉状态逻辑。
+- [x] Server 与导出 HTML 将 Query Parameters 收敛为同一内联 Query Card：Header 最右侧固定为“查询 + ▼”分段按钮，查询执行与 Card disclosure 分离；不新增 Parameters 按钮，Card 内也不重复运行按钮。Card 只保留紧凑的“查询参数”标题和标题在上、输入在下的有界网格，移除标题分割线；Server 默认展开并按 tab/Dashboard 记忆，导出 HTML 默认折叠。Card 与 Canvas 共用 `clamp(22px, 3vw, 48px)` 水平 gutter，不再用独立 `max-width` 造成宽屏错位；展开后参与文档流并推开 Canvas，滚动时自然离开视口，外部点击与 `Esc` 仅关闭临时 Controls/诊断浮层。
+- [x] Server Shell Scroll Bridge 统一外层 Header 与 Canvas iframe 的滚动优先级：向下先隐藏 Header、向上先回到 Canvas 顶部，避免参数区必须等 Canvas 滚到底后才离开视口。
+- [x] 原生 Shell 文案收敛为必要的操作名和状态；删除重复编号、口号及教学句，业务 title/subtitle/description 仍由 Dashboard 自己决定。
+- [x] Server 与导出 HTML 使用安静白色 Shell：Header、Sidebar、Workbench 与默认 Canvas 形成连续表面，去掉 Canvas 外层卡片、灰色沟槽和强边框；`presentation.shell` 统一 Header 高度、基础字体、Query/Control Panel、字段和输入尺寸，避免导出后发生 Host 样式跳变。Shell token 与 Dashboard Theme token 分离，靛蓝负责当前导航与主操作，绿色只负责 Ready/成功状态。
+- [x] Server Header 将 Controls 作为明确按钮紧邻 Run 左侧；Query Pipeline 从操作区迁为品牌右侧的 Source/Dataset 状态灯。View 通过 Dependency Contract v5 的 `pipeline_nodes` 在类型标签左侧按需显示自己的上游与 Renderer，完成后自动隐藏，失败节点可点击查看执行证据。
 - [x] Gallery 提供 Control、View、Section 的七状态矩阵，以及实际包含 10、100、1,000 个原生选项的 Select Story；1,000 选项搜索覆盖全量且增强 DOM 有界。
 - [x] Table/Perspective、Plotly/ECharts、Repeat Small Multiples/Selection Gallery 和自定义 Renderer 都走统一 Runtime 边界。
 - [x] `validate` 是零查询静态门禁；`docs`、`schemas`、`components`、`context`、`scaffold` 为新 AI 会话提供当前契约。
 - [x] Sources 面板提供参数化 statement、Resolved SQL、bound parameters、Adapter、timeout/retry、hash、日志和结构化错误，不暴露凭证。
 - [x] `authoring prepare/verify/assess/start/finish/compare` 固定任务身份、输入哈希、验收证据和真实 Token；缺失 Token 保持 unmeasured。
+- [x] Server 提供统一的受限参数编辑器：右键 Run 或 Dashboard/Section/View Controls 打开对应作用域；面板不常驻编辑工具条。编辑器只修改默认值、静态候选项和同级顺序；推断候选项只读，当前分析状态不被覆盖，导出 HTML 不暴露编辑入口。
+- [x] 参数编辑使用 Dashboard 文件 revision、进程内写锁、保留注释/顺序的 YAML round-trip、完整 Schema 校验和原子替换；AI 或外部编辑造成 revision 漂移时拒绝覆盖。
 
 ### 2026-08-24 核心审计与加固
 
@@ -132,7 +143,7 @@ P0 不是以“底层支持了更多边”为完成，而以作者复杂度没�
 - [x] 默认 Renderer、Server、HTML Export、AI context 与 Validator 消费 Layout Contract；结构不再由 Python、CSS、Component 和 DOM 重复推导。
 - [x] `single`、`grid`、`split`、`comparison`、`chart-and-table`、`band` 与 Repeat 模板拥有明确 cardinality 和默认 span；显式 span 不被模板静默吞掉。
 - [x] 自定义 Canvas 使用 `mode: custom` 并只暴露稳定挂载点，不伪造任意 CSS 的静态布局。
-- [x] 示例、Gallery、Scaffold、内置文档和测试夹具已迁移；Dashboard v7 / Presentation v2 删除旧 Presentation 结构字段且无兼容 alias。
+- [x] 示例、Gallery、Scaffold、内置文档和测试夹具已迁移；Dashboard v8 / Presentation v2 删除旧 Presentation 结构字段且无兼容 alias。
 
 #### D. Semantic Validation 与静态布局检查
 
@@ -145,7 +156,7 @@ P0 不是以“底层支持了更多边”为完成，而以作者复杂度没�
 #### E. 可见的当前分析状态
 
 - [x] 定义 `dataviz/state-snapshot/v1`，统一 committed Query Parameter、applied Selection、committed/draft Compute、stale 和作用域信息。
-- [x] Dashboard Header 自动摘要 Query + Dashboard Controls；Section/View 标题附近摘要本作用域 Controls；长多选显示数量并可展开。
+- [x] 状态摘要改为 Presentation 显式启用；默认画布不再机械复述 Query/Control 值。启用后可在 Dashboard/Section/View 对应作用域展示并展开长多选。
 - [x] 明确区分“产生当前结果的已提交值”和“待应用草稿”，避免标题、摘要和报告证据提前使用 draft。
 - [x] Server 与导出 HTML 共用同一摘要组件、formatter、事件和状态快照；允许作者调整 label/顺序/隐藏项，不要求手写 JS。
 
@@ -172,6 +183,8 @@ P0 不是以“底层支持了更多边”为完成，而以作者复杂度没�
 
 评测工具已经完成，但真实成对试验按产品决定暂缓；这不阻塞 Runtime 工程工作，也不允许预设 Token 节省结论。
 
+- [ ] 把架构上的封装转化为真正傻瓜式的作者体验：CLI 文档与 Scaffold 按任务渐进披露能力。普通声明式看板默认只提供 `Adapter → Source → View → Layout` 最小路径；只有任务实际需要时，才加载 Control、Interactive Transform、Custom Renderer 及其传递依赖契约，避免 AI 或人类为简单看板阅读完整 Runtime 上下文。
+- [ ] 为渐进披露建立机器可读路由与回归：CLI 能根据任务/组件返回最小闭包，Scaffold 提供 minimal、interactive、custom-renderer 等明确层级；每条路径独立通过 `validate → report → visual-check`，并检查文档没有引用未进入当前层级的内部概念。
 - [ ] 使用相同模型、客户端、权限和时间预算，对五类固定任务执行多次 Dataviz / standalone HTML 随机顺序成对试验。
 - [ ] 发布原始 JSONL、环境说明、逐项验收证据、真实 input/output Token、首次成功率、修正轮次和耗时。
 - [ ] 根据真实 friction 压缩 focused context、CLI docs 和 Scaffold；不预设固定 Token 上限或节省比例。
@@ -215,6 +228,7 @@ P0 不是以“底层支持了更多边”为完成，而以作者复杂度没�
 - [x] 完成 `0.6.1` 布局修复发行门禁：Query Parameter 最多四轨的响应式布局与显式 `span` 通过 312 项 Python 契约测试、Chromium/Firefox/WebKit 各 26 项回归、全部示例 Workspace 严格校验，以及 wheel/sdist/pip ZIP 的内容审计和独立 Python 3.12 安装冒烟。
 - [x] 完成 `0.7.0` P0 A–G 发行门禁：335 项 Python 契约测试、Chromium 32 项及 Firefox/WebKit 各 31 项真实浏览器回归、5 个代表性 Workspace 严格校验、20 个 Component Package 检查，以及 wheel/sdist/pip ZIP 独立安装与 Python 3.11–3.14 兼容冒烟。
 - [x] 完成 `0.8.0` Renderer 生命周期发行门禁：统一 Plotly/ECharts/Perspective 的八阶段 Server/HTML 矩阵；373 项当前测试契约、完整 Chromium 与 Firefox/WebKit 核心 Perspective 生命周期、全部示例 Workspace strict validate、三种归档审计及独立 Python 3.12 安装冒烟通过。Perspective Worker/Table/Viewer 归属单个 Renderer 实例，异步阶段超时会进入 Table Fallback，不会永久 Loading。
+- [x] 完成 `0.9.0` Data Entry 语义收敛发行门禁：Query Parameter 默认四等分轨道并响应式降为三/二/一列；Checkbox Group 固定为 2–5 个紧凑选项且移除冗余批量操作，大规模/层级候选分别交给 Select 与 Cascader/TreeSelect。336 项非浏览器测试、Chromium/Firefox/WebKit 各 37 项完整 Runtime 回归、20 个 Component Package 检查、四个示例 Workspace strict validate、wheel/sdist/pip ZIP 内容审计，以及三套独立 Python 3.12 安装与报告导出全部通过。
 - [ ] 维护者决定许可证并添加正式 `LICENSE`；许可证未定不阻塞开发，但阻塞正式对外授权。
 - [ ] 添加 `CONTRIBUTING.md`，说明安装、validate/test、Runtime/Component 变更和 PR 验收。
 - [ ] 正式 GitHub Release 发布 wheel、sdist、pip ZIP、SHA-256 和远端 CI 记录。
@@ -230,7 +244,7 @@ P0 不是以“底层支持了更多边”为完成，而以作者复杂度没�
 ## 明确非目标
 
 - 旧实验契约兼容层、自动迁移或双协议 Runtime。
-- 可视化编辑器、Mosaic/坐标布局和旧 Widget 协议。
+- 可编辑数据逻辑、依赖、布局或样式的通用可视化开发器；Mosaic/坐标布局和旧 Widget 协议。
 - 让 Pyodide/Python 直接操作 DOM 或成为第二套 View Renderer。
 - Interactive Transform 隐式访问 Adapter 或重新查询 Source。
 - 在没有真实需求和评测证据前增加空接口、Runtime 或重复组件。

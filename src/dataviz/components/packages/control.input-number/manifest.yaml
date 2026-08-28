@@ -15,7 +15,7 @@ components:
       official: https://ant.design/components/input-number/
       adopted: [min, max, step, keyboard, controls, prefix, suffix]
       omitted: [custom-parser, string-mode, locale-decimal-separator]
-    logic: {types: [integer, number], fields: [min, max, step]}
+    logic: {type: single_input, value_types: [integer, number], fields: [min, max, step]}
     presentation: {component: input-number, options: [number_controls, prefix, suffix, css_class]}
     semantic_dom: [.dv-input-number, .dv-input-number__control, .dv-input-number__step]
     tokens: [--dv-accent, --dv-ink, --dv-line, --dv-panel]

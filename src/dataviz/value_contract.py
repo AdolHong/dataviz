@@ -8,6 +8,7 @@ from typing import Any
 
 from dataviz.relative_dates import (
     is_relative_date_default,
+    is_relative_date_expression,
     normalize_relative_date_default,
 )
 
@@ -200,6 +201,58 @@ def _number(definition: Any, value: Any, *, integer: bool) -> int | float:
     return numeric
 
 
+def _scalar_value(definition: Any, value: Any, *, label: str = "value") -> Any:
+    """Normalize one atom independently from the Control's input shape."""
+
+    value_type = definition.value_type
+    if value_type == "text":
+        if not isinstance(value, str):
+            raise ValueContractViolation("invalid_type", f"{label} must be text")
+        maximum = getattr(definition, "max_length", None)
+        if maximum is not None and len(value) > maximum:
+            raise ValueContractViolation(
+                "too_long", f"{label} cannot be longer than {maximum} characters"
+            )
+        return value
+    if value_type == "integer":
+        return _number(definition, value, integer=True)
+    if value_type == "number":
+        return _number(definition, value, integer=False)
+    if value_type == "boolean":
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int) and value in {0, 1}:
+            return bool(value)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "on"}:
+                return True
+            if normalized in {"false", "0", "no", "off"}:
+                return False
+        raise ValueContractViolation("invalid_type", f"{label} must be a boolean")
+    if value_type == "date":
+        normalized = _date_string(value, label=label)
+        minimum = getattr(definition, "min_date", None)
+        maximum = getattr(definition, "max_date", None)
+        if minimum and normalized < minimum:
+            raise ValueContractViolation(
+                "before_minimum_date", f"{label} cannot be before {minimum}"
+            )
+        if maximum and normalized > maximum:
+            raise ValueContractViolation(
+                "after_maximum_date", f"{label} cannot be after {maximum}"
+            )
+        return normalized
+    raise ValueContractViolation(
+        "unknown_value_type", f"unsupported value_type: {value_type}"
+    )
+
+
+def _typed_choice_value(definition: Any, value: Any, *, label: str = "value") -> Any:
+    normalized = _scalar_value(definition, value, label=label)
+    return _choice_value(definition, normalized)
+
+
 def normalize_control_value(
     definition: Any,
     value: Any,
@@ -212,83 +265,56 @@ def normalize_control_value(
     if is_empty_control_value(value):
         if enforce_required and getattr(definition, "required", False):
             raise ValueContractViolation("required", "a value is required")
-        return [] if kind in {"multi_select", "date_range"} else None
+        return [] if kind in {"multiple_input", "multiple_select", "range_input"} else None
 
-    if kind == "string":
-        if not isinstance(value, str):
-            raise ValueContractViolation("invalid_type", "value must be a string")
-        maximum = getattr(definition, "max_length", None)
-        if maximum is not None and len(value) > maximum:
-            raise ValueContractViolation(
-                "too_long", f"value cannot be longer than {maximum} characters"
-            )
-        return value
-    if kind == "number":
-        return _number(definition, value, integer=False)
-    if kind == "integer":
-        return _number(definition, value, integer=True)
-    if kind == "boolean":
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, int) and value in {0, 1}:
-            return bool(value)
+    if kind == "single_input":
+        return _scalar_value(definition, value)
+    if kind == "multiple_input":
         if isinstance(value, str):
-            normalized = value.strip().lower()
-            if normalized in {"true", "1", "yes", "on"}:
-                return True
-            if normalized in {"false", "0", "no", "off"}:
-                return False
-        raise ValueContractViolation("invalid_type", "value must be a boolean")
-    if kind == "date":
-        normalized = _date_string(value, label="value")
-        minimum = getattr(definition, "min_date", None)
-        maximum = getattr(definition, "max_date", None)
-        if minimum and normalized < minimum:
+            value = [item.strip() for item in value.split(",") if item.strip()]
+        if not isinstance(value, (list, tuple)):
             raise ValueContractViolation(
-                "before_minimum_date", f"value cannot be before {minimum}"
+                "invalid_type", "multiple_input requires a list"
             )
-        if maximum and normalized > maximum:
+        normalized = [
+            _scalar_value(definition, item, label=f"item {index + 1}")
+            for index, item in enumerate(value)
+        ]
+        maximum = getattr(definition, "max_items", None)
+        if maximum is not None and len(normalized) > maximum:
             raise ValueContractViolation(
-                "after_maximum_date", f"value cannot be after {maximum}"
+                "too_many_values", f"at most {maximum} values may be entered"
+            )
+        signatures = [json_value_signature(item) for item in normalized]
+        if len(signatures) != len(set(signatures)):
+            raise ValueContractViolation(
+                "duplicate_value", "multiple_input values must be unique"
             )
         return normalized
-    if kind == "date_range":
+    if kind == "range_input":
         if isinstance(value, str):
             value = [item.strip() for item in value.split(",", 1)]
         if not isinstance(value, (list, tuple)) or len(value) != 2:
             raise ValueContractViolation(
-                "invalid_shape", "date_range must contain exactly [start, end]"
+                "invalid_shape", "range_input must contain exactly [start, end]"
             )
-        start = _date_string(value[0], label="date_range start") if value[0] else ""
-        end = _date_string(value[1], label="date_range end") if value[1] else ""
-        if not start and not end:
+        start = _scalar_value(definition, value[0], label="range start") if value[0] not in (None, "") else ""
+        end = _scalar_value(definition, value[1], label="range end") if value[1] not in (None, "") else ""
+        if start == "" and end == "":
             return []
         allow_start, allow_end = getattr(definition, "allow_empty", (False, False))
-        if not start and not allow_start:
+        if start == "" and not allow_start:
             raise ValueContractViolation(
-                "missing_range_start", "date_range requires a start date"
+                "missing_range_start", "range_input requires a start value"
             )
-        if not end and not allow_end:
+        if end == "" and not allow_end:
             raise ValueContractViolation(
-                "missing_range_end", "date_range requires an end date"
+                "missing_range_end", "range_input requires an end value"
             )
-        if start and end and start > end:
+        if start != "" and end != "" and start > end:
             raise ValueContractViolation(
-                "invalid_range", "date_range start cannot be after end"
+                "invalid_range", "range_input start cannot be after end"
             )
-        minimum = getattr(definition, "min_date", None)
-        maximum = getattr(definition, "max_date", None)
-        for label, item in (("start", start), ("end", end)):
-            if item and minimum and item < minimum:
-                raise ValueContractViolation(
-                    "before_minimum_date",
-                    f"date_range {label} cannot be before {minimum}",
-                )
-            if item and maximum and item > maximum:
-                raise ValueContractViolation(
-                    "after_maximum_date",
-                    f"date_range {label} cannot be after {maximum}",
-                )
         return [start, end]
     if kind == "single_select":
         path_fields = list(getattr(definition, "path_fields", []) or [])
@@ -302,15 +328,19 @@ def normalize_control_value(
                 raise ValueContractViolation(
                     "invalid_path", "hierarchy paths cannot contain null values"
                 )
-            return json_compatible_value(list(value))
+            normalized_path = [
+                _scalar_value(definition, item, label=path_fields[index])
+                for index, item in enumerate(value)
+            ]
+            return _choice_value(definition, normalized_path)
         if isinstance(value, (list, tuple, set, dict)):
             raise ValueContractViolation("invalid_type", "single_select requires one value")
-        return _choice_value(definition, value)
-    if kind == "multi_select":
+        return _typed_choice_value(definition, value)
+    if kind == "multiple_select":
         if isinstance(value, str):
             value = [item.strip() for item in value.split(",") if item.strip()]
         if not isinstance(value, (list, tuple)):
-            raise ValueContractViolation("invalid_type", "multi_select requires a list")
+            raise ValueContractViolation("invalid_type", "multiple_select requires a list")
         path_fields = list(getattr(definition, "path_fields", []) or [])
         if path_fields:
             normalized = []
@@ -318,18 +348,26 @@ def normalize_control_value(
                 if not isinstance(item, (list, tuple)) or len(item) != len(path_fields):
                     raise ValueContractViolation(
                         "invalid_path",
-                        f"multi_select hierarchy values require {len(path_fields)}-level paths",
+                        f"multiple_select hierarchy values require {len(path_fields)}-level paths",
                     )
                 if any(child is None for child in item):
                     raise ValueContractViolation(
                         "invalid_path", "hierarchy paths cannot contain null values"
                     )
-                normalized.append(json_compatible_value(list(item)))
+                normalized.append(
+                    _choice_value(
+                        definition,
+                        [
+                            _scalar_value(definition, child, label=path_fields[index])
+                            for index, child in enumerate(item)
+                        ],
+                    )
+                )
         else:
-            normalized = [_choice_value(definition, item) for item in value]
+            normalized = [_typed_choice_value(definition, item) for item in value]
         signatures = [json_value_signature(item) for item in normalized]
         if len(signatures) != len(set(signatures)):
-            raise ValueContractViolation("duplicate_value", "multi_select values must be unique")
+            raise ValueContractViolation("duplicate_value", "multiple_select values must be unique")
         if enforce_required and getattr(definition, "required", False) and not normalized:
             raise ValueContractViolation("required", "at least one value is required")
         maximum = getattr(definition, "max_selected", None)
@@ -350,14 +388,14 @@ def validate_control_definition(definition: Any) -> Any:
         raise ValueError("min cannot be greater than max")
     if definition.step is not None and definition.step <= 0:
         raise ValueError("step must be greater than zero")
-    if definition.type not in {"number", "integer"} and any(
+    if definition.value_type not in {"number", "integer"} and any(
         item is not None for item in (definition.min, definition.max, definition.step)
     ):
         raise ValueError("min, max and step are only valid for number or integer")
-    if definition.type not in {"date", "date_range"} and any(
+    if definition.value_type != "date" and any(
         item is not None for item in (definition.min_date, definition.max_date)
     ):
-        raise ValueError("min_date and max_date are only valid for date or date_range")
+        raise ValueError("min_date and max_date are only valid for value_type=date")
     if definition.min_date is not None:
         definition.min_date = _date_string(definition.min_date, label="min_date")
     if definition.max_date is not None:
@@ -368,21 +406,41 @@ def validate_control_definition(definition: Any) -> Any:
         and definition.min_date > definition.max_date
     ):
         raise ValueError("min_date cannot be after max_date")
-    if definition.type != "string" and definition.max_length is not None:
-        raise ValueError("max_length is only valid for string")
-    if definition.type != "multi_select" and definition.max_selected is not None:
-        raise ValueError("max_selected is only valid for multi_select")
-    if definition.type != "date_range" and definition.allow_empty != (False, False):
-        raise ValueError("allow_empty is only valid for date_range")
-    if definition.type not in {"single_select", "multi_select"} and definition.options is not None:
-        raise ValueError("options are only valid for single_select or multi_select")
-    if definition.type in {"single_select", "multi_select"} and definition.options is None:
+    if definition.value_type != "text" and definition.max_length is not None:
+        raise ValueError("max_length is only valid for value_type=text")
+    if definition.type != "multiple_select" and definition.max_selected is not None:
+        raise ValueError("max_selected is only valid for multiple_select")
+    if definition.type != "multiple_input" and definition.max_items is not None:
+        raise ValueError("max_items is only valid for multiple_input")
+    if definition.type != "range_input" and definition.allow_empty != (False, False):
+        raise ValueError("allow_empty is only valid for range_input")
+    if definition.type not in {"single_select", "multiple_select"} and definition.options is not None:
+        raise ValueError("options are only valid for single_select or multiple_select")
+    if definition.type in {"single_select", "multiple_select"} and definition.options is None:
         raise ValueError("select controls require options.mode=static or options.mode=infer")
-    if definition.type != "string" and definition.suggestions:
-        raise ValueError("suggestions are only valid for string")
+    if definition.suggestions and not (
+        definition.type == "single_input" and definition.value_type == "text"
+    ):
+        raise ValueError("suggestions are only valid for single_input/text")
+    if definition.type == "range_input" and definition.value_type not in {
+        "date", "integer", "number"
+    }:
+        raise ValueError(
+            "range_input only supports value_type=date, integer, or number"
+        )
+    if definition.type == "multiple_input" and definition.value_type == "boolean":
+        raise ValueError("multiple_input does not support value_type=boolean")
     choices = static_control_choices(definition)
     for choice in choices:
-        choice.value = json_compatible_value(choice.value)
+        if getattr(definition, "path_fields", []):
+            if not isinstance(choice.value, (list, tuple)) or len(choice.value) != len(definition.path_fields):
+                raise ValueError("hierarchical choice values must match path_fields")
+            choice.value = [
+                _scalar_value(definition, item, label=definition.path_fields[index])
+                for index, item in enumerate(choice.value)
+            ]
+        else:
+            choice.value = _scalar_value(definition, choice.value, label="choice value")
     signatures = [json_value_signature(choice.value) for choice in choices]
     if len(signatures) != len(set(signatures)):
         raise ValueError("choice values must be unique")
@@ -397,13 +455,31 @@ def validate_control_definition(definition: Any) -> Any:
     if len(suggestion_signatures) != len(set(suggestion_signatures)):
         raise ValueError("suggestion values must be unique")
     if is_relative_date_default(definition.default):
+        if not (
+            definition.value_type == "date"
+            and definition.type in {"single_input", "range_input"}
+        ):
+            raise ValueError(
+                "relative defaults require single_input/date or range_input/date"
+            )
         definition.default = normalize_relative_date_default(
             definition.default, definition.type
         )
+        if definition.type == "range_input":
+            definition.default = [
+                item
+                if is_relative_date_expression(item)
+                else _scalar_value(
+                    definition,
+                    item,
+                    label=f"range {'start' if index == 0 else 'end'}",
+                )
+                for index, item in enumerate(definition.default)
+            ]
     elif not is_empty_control_value(definition.default):
         definition.default = normalize_control_value(
             definition, definition.default, enforce_required=False
         )
-    elif definition.type in {"multi_select", "date_range"} and definition.default in ([], ()):
+    elif definition.type in {"multiple_input", "multiple_select", "range_input"} and definition.default in ([], ()):
         definition.default = []
     return definition

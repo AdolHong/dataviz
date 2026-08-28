@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v7
+schema: dataviz/dashboard/v8
 kind: dashboard
 id: sales-overview
 title: 销售概览
@@ -12,7 +12,8 @@ adapters:
 
 query_parameters:
   - id: min_query_revenue
-    type: number
+    type: single_input
+    value_type: number
     label: 取数最低收入
     default: 0
 
@@ -29,7 +30,8 @@ controls:
   - id: region
     kind: selection
     field: region
-    type: multi_select
+    type: multiple_select
+    value_type: text
     label: 区域
     default: [华东, 华南, 华北]
     options:

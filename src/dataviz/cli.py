@@ -720,7 +720,7 @@ title: My Analysis
 description: A workspace-first dashboard project
 folders: []
 """,
-        ".gitignore": "auth/adapters.local.yaml\n.dataviz/\ndist/\n",
+        ".gitignore": "auth/adapters.local.yaml\n.dataviz/\nshared_caches/\ndist/\n",
         "auth/adapters.yaml": "adapters: {}\n",
         "README.md": """# My Analysis
 
@@ -737,7 +737,7 @@ Finish the returned session with `dataviz authoring finish`. Commit the generate
 `dataviz-authoring.jsonl` when its task text and notes contain no sensitive data;
 sharing that file gives the Dataviz author real retry, time and documentation-friction data.
 """,
-        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v7
+        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v8
 kind: dashboard
 id: hello
 title: Hello dashboard
@@ -745,7 +745,8 @@ description: A minimal self-contained canvas
 controls:
   - id: category
     kind: selection
-    type: multi_select
+    type: multiple_select
+    value_type: text
     default: [A, B, C]
     options:
       mode: static

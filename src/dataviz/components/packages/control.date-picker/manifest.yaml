@@ -1,10 +1,10 @@
 schema: dataviz/component-package/v1
 package: control.date-picker
-version: 1.0.0
+version: 2.0.0
 category: data-entry
-purpose: Choose one calendar date with browser-native fallback and reviewable ISO state.
+purpose: Choose or type one ISO calendar date through the shared Dataviz calendar surface.
 implementation: {mode: package, sources: []}
-dependencies: [runtime.control]
+dependencies: [control.range-picker]
 components:
   - id: control.date-picker
     purpose: Edit one ISO date while respecting declared min and max dates.
@@ -13,10 +13,10 @@ components:
       design_system: Ant Design
       component: DatePicker
       official: https://ant.design/components/date-picker/
-      adopted: [single-date-value, min-max-bounds, clearability, calendar-trigger]
+      adopted: [single-date-value, min-max-bounds, clearability, editable-iso-input, shared-calendar-trigger]
       omitted: [multiple-mode, time-picker, week-quarter-year-picker]
-    logic: {type: date, fields: [min_date, max_date, placeholder]}
+    logic: {type: single_input, value_type: date, fields: [min_date, max_date, placeholder]}
     presentation: {component: date-picker, options: [clear_label, css_class]}
-    semantic_dom: [.dv-date-picker, .dv-date-picker__control, .dv-date-picker__calendar]
+    semantic_dom: [.dv-date-picker, .dv-date-picker__control, .dv-date-picker__trigger, .dv-date-picker__panel]
     tokens: [--dv-accent, --dv-ink, --dv-line, --dv-panel]
 runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

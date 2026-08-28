@@ -9,4 +9,6 @@ tests:
   - {id: theme.editorial.tokens, component: theme.editorial, kind: visual, assertions: [contrast, token-overrides]}
   - {id: theme.terminal.tokens, component: theme.terminal, kind: visual, assertions: [contrast, token-overrides]}
   - {id: theme.business.tokens, component: theme.business, kind: visual, assertions: [default-preset, contrast, token-overrides, plotly-inheritance, echarts-inheritance, table-inheritance, perspective-surface]}
-  - {id: control-panel.adaptive.contract, component: control-panel.adaptive, kind: interaction, assertions: [viewport-bound, four-column-maximum, responsive-grid, explicit-field-span, internal-scroll, shared-state-owner]}
+  - {id: control-panel.adaptive.contract, component: control-panel.adaptive, kind: interaction, assertions: [viewport-bound, container-derived-query-columns, bounded-query-track, sparse-form-trailing-space, single-column-scoped-default, explicit-field-span, internal-scroll, shared-state-owner]}
+  - {id: report.brand.contract, component: report.brand, kind: contract, assertions: [portable-html, dataviz-mark, no-server-navigation, no-server-diagnostics]}
+  - {id: shell.host-parity.contract, component: shell.host-parity, kind: visual, assertions: [shared-header-height, shared-font-scale, shared-control-surface, shared-query-tray]}

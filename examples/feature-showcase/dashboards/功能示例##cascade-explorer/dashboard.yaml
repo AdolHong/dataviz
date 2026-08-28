@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v7
+schema: dataviz/dashboard/v8
 kind: dashboard
 id: cascade-explorer
 title: 级联选择器
@@ -10,7 +10,8 @@ controls:
   - id: province
     kind: selection
     field: province
-    type: multi_select
+    type: multiple_select
+    value_type: text
     label: 省份
     default: [广东, 福建]
     options:
@@ -40,19 +41,21 @@ views:
     columns: [province, city, district, val]
     limit: 40
     controls:
+      - id: min_value
+        kind: selection
+        field: val
+        type: single_input
+        value_type: number
+        label: 最低值
+        default: 0
       - id: district
         kind: selection
-        type: multi_select
+        type: multiple_select
+        value_type: text
         label: 区县
         path_fields: [province, city, district]
         depends_on: [section.city]
         options: {mode: infer}
-      - id: min_value
-        kind: selection
-        field: val
-        type: number
-        label: 最低值
-        default: 0
     selection_bindings:
       min_value: {field: val, operator: gte}
 
@@ -79,7 +82,8 @@ sections:
       - id: city
         kind: selection
         field: city
-        type: multi_select
+        type: multiple_select
+        value_type: text
         label: 城市
         depends_on: [dashboard.province]
         options: {mode: infer}

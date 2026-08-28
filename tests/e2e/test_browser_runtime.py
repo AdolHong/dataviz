@@ -126,7 +126,7 @@ folders: []
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v7
+        """schema: dataviz/dashboard/v8
 kind: dashboard
 id: same-view-controls
 title: Same View Controls
@@ -143,12 +143,14 @@ views:
         kind: selection
         field: dow
         type: single_select
+        value_type: text
         label: Weekday
         options: {mode: infer, source: source:daily/main}
       - id: dates
         kind: selection
         field: job_date
-        type: multi_select
+        type: multiple_select
+        value_type: text
         label: Dates
         depends_on: [view.dow]
         options: {mode: infer, source: source:daily/main}
@@ -217,7 +219,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v7
+        """schema: dataviz/dashboard/v8
 kind: dashboard
 id: scale
 title: Scale Runtime
@@ -321,18 +323,19 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v7
+        """schema: dataviz/dashboard/v8
 kind: dashboard
 id: runtime-matrix
 title: Interactive Runtime Matrix
 query_parameters:
-  - {id: batch, type: integer, label: Batch, default: 3}
+  - {id: batch, type: single_input, value_type: integer, label: Batch, default: 3}
 controls:
-  - {id: factor, kind: compute, label: Factor, type: number, default: 2}
+  - {id: factor, kind: compute, label: Factor, type: single_input, value_type: number, default: 2}
   - id: name
     kind: selection
     field: name
-    type: multi_select
+    type: multiple_select
+    value_type: text
     default: [alpha, beta]
     options:
       mode: static
@@ -530,7 +533,8 @@ def _open_dashboard(page: Page, base_url: str, dashboard_id: str) -> None:
     page.goto(base_url, wait_until="domcontentloaded")
     dashboard = page.locator(f'[data-nav-type="dashboard"][data-id="{dashboard_id}"]')
     expect(dashboard).to_be_visible(timeout=10_000)
-    dashboard.click()
+    if "active" not in (dashboard.get_attribute("class") or "").split():
+        dashboard.click()
     expect(page.locator("#run-button")).to_be_enabled(timeout=10_000)
 
 
@@ -540,6 +544,77 @@ def _run_and_wait(page: Page, expected: str = "Ready") -> None:
         expected,
         timeout=30_000,
     )
+
+
+def _export_html(page: Page) -> None:
+    share = page.locator("#share-control")
+    if share.get_attribute("open") is None:
+        page.locator("#share-button").click()
+    page.locator("#download-button").click()
+
+
+@pytest.mark.e2e
+def test_date_parameter_inputs_share_iso_text_and_calendar_contract(
+    page: Page, tmp_path: Path,
+):
+    workspace = _copy_workspace(SHOWCASE, tmp_path / "date-parameter-contract")
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "date-parameter-lab")
+
+        form = page.locator("#parameter-form")
+        date_control = form.locator('[data-control-component="date-picker"]')
+        date_input = date_control.locator('.dv-date-picker__control[type="text"]')
+        expect(date_input).to_have_value(re.compile(r"^\d{4}-\d{2}-\d{2}$"))
+        date_input.fill("20260809")
+        expect(date_input).to_have_value("2026-08-09")
+        expect(date_input).to_have_attribute("aria-invalid", "false")
+        date_input.fill("20260231")
+        expect(date_input).to_have_value("2026-02-31")
+        expect(date_input).to_have_attribute("aria-invalid", "true")
+        date_input.fill("20260809")
+        date_input.press("Enter")
+        expect(date_input).to_have_value("2026-08-09")
+        expect(date_input).to_have_attribute("aria-invalid", "false")
+
+        range_control = form.locator('[data-control-component="range-picker"]')
+        endpoints = range_control.locator('.dv-date-range__endpoint[type="text"]')
+        expect(endpoints).to_have_count(2)
+        expect(endpoints.nth(0)).to_have_value(re.compile(r"^\d{4}-\d{2}-\d{2}$"))
+        expect(endpoints.nth(1)).to_have_value(re.compile(r"^\d{4}-\d{2}-\d{2}$"))
+        assert endpoints.evaluate_all(
+            "items => items.map(item => getComputedStyle(item).borderWidth)"
+        ) == ["0px", "0px"]
+
+        range_control.locator('[data-control-trigger]').click()
+        panel = range_control.locator('[data-control-panel]')
+        expect(panel).to_be_visible()
+        presets = panel.locator('.dv-date-range__presets')
+        expect(presets).to_have_attribute("hidden", "")
+        expect(presets).not_to_be_visible()
+        assert presets.evaluate("node => getComputedStyle(node).display") == "none"
+        expect(panel.locator('.dv-date-range__month')).to_have_count(2)
+        expect(panel.locator('.dv-date-range__footer')).to_be_hidden()
+        first_month = panel.locator('.dv-date-range__month').first
+        first_month.locator('.dv-date-range__year-select').select_option("2025")
+        first_month.locator('.dv-date-range__month-select').select_option("11")
+        expect(
+            panel.locator('.dv-date-range__month').nth(0).locator(
+                '.dv-date-range__year-select'
+            )
+        ).to_have_value("2025")
+        expect(
+            panel.locator('.dv-date-range__month').nth(1).locator(
+                '.dv-date-range__year-select'
+            )
+        ).to_have_value("2026")
+        panel.press("Escape")
+
+        endpoints.nth(0).fill("20260810")
+        endpoints.nth(1).fill("20260820")
+        endpoints.nth(1).press("Enter")
+        expect(range_control.locator('input[name="report_range"]')).to_have_value(
+            "2026-08-10,2026-08-20"
+        )
 
 
 @pytest.mark.e2e
@@ -556,13 +631,10 @@ def test_header_overlays_stay_in_viewport_and_query_parameters_are_discoverable(
         expect(page.locator("#query-parameters-control")).to_be_hidden()
         expect(page.locator("#query-control-meta")).to_have_text("No parameters")
 
-        for trigger, panel_selector in (
-            (
-                "#dashboard-controls-control > summary",
-                ".header-control__popover--controls",
-            ),
-            ("#query-diagnostics > summary", ".query-diagnostics__popover"),
-        ):
+        for trigger, panel_selector in ((
+            "#dashboard-controls-control > summary",
+            ".header-control__popover--controls",
+        ),):
             page.locator(trigger).click()
             panel = page.locator(panel_selector)
             expect(panel).to_be_visible()
@@ -591,73 +663,117 @@ def test_header_overlays_stay_in_viewport_and_query_parameters_are_discoverable(
             "aria-expanded", "true"
         )
         expect(page.locator("#query-parameters-panel")).to_be_visible()
-        expect(page.locator("#query-parameter-count")).to_contain_text("2 parameters")
+        expect(page.locator("#parameter-form .field")).to_have_count(2)
 
 
 @pytest.mark.e2e
-def test_portable_header_controls_normalize_restored_open_state(
+def test_portable_query_tray_uses_document_flow_and_leaves_the_viewport(
     page: Page, tmp_path: Path
 ):
     report_path = tmp_path / "portable-header-controls.html"
     with _running_server(MINIMAL) as base_url:
         _open_dashboard(page, base_url, "sales-overview")
         _run_and_wait(page)
+        server_visual = page.evaluate(
+            """() => {
+              const header = document.querySelector('.topbar');
+              const card = document.querySelector('.dv-query-card');
+              const title = card.querySelector('h2');
+              const field = card.querySelector('.field');
+              const value = field.querySelector('input, select, output');
+              const pick = (node, properties) => Object.fromEntries(
+                properties.map(name => [name, getComputedStyle(node)[name]])
+              );
+              return {
+                headerHeight:header.getBoundingClientRect().height,
+                body:pick(document.body, ['fontFamily', 'fontSize', 'backgroundColor']),
+                card:pick(card, ['backgroundColor', 'borderColor', 'borderRadius', 'boxShadow']),
+                title:pick(title, ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight']),
+                label:pick(field.querySelector(':scope > label'), ['fontFamily', 'fontSize', 'fontWeight']),
+                value:pick(value, ['fontFamily', 'fontSize', 'minHeight']),
+              };
+            }"""
+        )
         with page.expect_download(timeout=20_000) as download_info:
-            page.locator("#download-button").click()
+            _export_html(page)
         download_info.value.save_as(report_path)
-
-    # Simulate a browser restoring both native Details elements before the
-    # component controller hydrates. Remove the native exclusive name so this
-    # fixture specifically verifies Runtime normalization as a second defence.
-    report = report_path.read_text(encoding="utf-8")
-    report = report.replace(' name="dv-runtime-header-control"', "", 2)
-    report = report.replace(
-        '<details class="dv-runtime-control"',
-        '<details open class="dv-runtime-control"',
-        2,
-    )
-    report_path.write_text(report, encoding="utf-8")
 
     with _running_static_server(report_path.parent) as report_url:
         page.goto(f"{report_url}/{report_path.name}", wait_until="domcontentloaded")
-        controls = page.locator("details.dv-runtime-control")
-        expect(controls).to_have_count(2)
-        expect(page.locator("details.dv-runtime-control[open]")).to_have_count(1)
-
-        # Opening the other Header tray must atomically transfer ownership;
-        # Parameters and Controls may never occupy the floating layer together.
-        closed_index = controls.evaluate_all(
-            "nodes => nodes.findIndex(node => !node.open)"
-        )
-        geometry = controls.evaluate_all(
-            """nodes => nodes.map(node => {
-              const summary = node.querySelector(':scope > summary').getBoundingClientRect();
-              const panel = node.querySelector(':scope > summary + *').getBoundingClientRect();
+        toggle = page.locator("[data-runtime-query-toggle]")
+        panel = page.locator("#dv-runtime-query-panel")
+        canvas = page.locator(".dv-canvas")
+        expect(toggle).to_have_attribute("aria-expanded", "false")
+        expect(panel).to_be_hidden()
+        toggle.click()
+        expect(toggle).to_have_attribute("aria-expanded", "true")
+        expect(panel).to_be_visible()
+        portable_visual = page.evaluate(
+            """() => {
+              const header = document.querySelector('.dv-runtime-header');
+              const card = document.querySelector('.dv-query-card');
+              const title = card.querySelector('h2');
+              const field = card.querySelector('.dv-query-value');
+              const value = field.querySelector('output');
+              const pick = (node, properties) => Object.fromEntries(
+                properties.map(name => [name, getComputedStyle(node)[name]])
+              );
               return {
-                open:node.open,
-                summary:{top:summary.top, bottom:summary.bottom, left:summary.left, right:summary.right},
-                panel:{top:panel.top, bottom:panel.bottom, left:panel.left, right:panel.right},
-                maxHeight:getComputedStyle(node.querySelector(':scope > summary + *')).maxHeight,
+                headerHeight:header.getBoundingClientRect().height,
+                body:pick(document.body, ['fontFamily', 'fontSize', 'backgroundColor']),
+                card:pick(card, ['backgroundColor', 'borderColor', 'borderRadius', 'boxShadow']),
+                title:pick(title, ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight']),
+                label:pick(field.querySelector('label'), ['fontFamily', 'fontSize', 'fontWeight']),
+                value:pick(value, ['fontFamily', 'fontSize', 'minHeight']),
               };
+            }"""
+        )
+        assert abs(portable_visual.pop("headerHeight") - server_visual.pop("headerHeight")) <= 1
+        assert portable_visual == server_visual
+        geometry = page.evaluate(
+            """() => {
+              const toolbar = document.querySelector('.dv-runtime-header').getBoundingClientRect();
+              const panel = document.querySelector('#dv-runtime-query-panel').getBoundingClientRect();
+              const canvas = document.querySelector('.dv-canvas').getBoundingClientRect();
+              const card = document.querySelector('.dv-query-card').getBoundingClientRect();
+              const canvasPadding = parseFloat(getComputedStyle(document.querySelector('.dv-canvas')).paddingLeft);
+              return {
+                toolbar:{top:toolbar.top,bottom:toolbar.bottom},
+                panel:{top:panel.top,bottom:panel.bottom,position:getComputedStyle(document.querySelector('#dv-runtime-query-panel')).position},
+                canvas:{top:canvas.top},
+                horizontal:{cardLeft:card.left,cardRight:card.right,canvasLeft:canvas.left,canvasRight:canvas.right,canvasPadding},
+              };
+            }"""
+        )
+        assert geometry["panel"]["position"] == "relative", geometry
+        assert geometry["panel"]["top"] >= geometry["toolbar"]["bottom"] - 1, geometry
+        assert geometry["canvas"]["top"] >= geometry["panel"]["bottom"] - 1, geometry
+        horizontal = geometry["horizontal"]
+        assert abs(horizontal["cardLeft"] - horizontal["canvasLeft"] - horizontal["canvasPadding"]) <= 1, geometry
+        assert abs(horizontal["canvasRight"] - horizontal["cardRight"] - horizontal["canvasPadding"]) <= 1, geometry
+
+        # Query evidence is Header content, not an Overlay. Escape and outside
+        # clicks do not close it, and scrolling naturally moves it away while
+        # the compact toolbar remains available.
+        page.keyboard.press("Escape")
+        expect(panel).to_be_visible()
+        canvas.click(position={"x": 4, "y": 4})
+        expect(panel).to_be_visible()
+        page.evaluate(
+            """() => {
+              const card = document.querySelector('.dv-query-card');
+              window.scrollTo(0, card.offsetTop + card.offsetHeight + 100);
+            }"""
+        )
+        page.wait_for_timeout(100)
+        scrolled = page.evaluate(
+            """() => ({
+              toolbarTop:document.querySelector('.dv-runtime-header').getBoundingClientRect().top,
+              panelBottom:document.querySelector('#dv-runtime-query-panel').getBoundingClientRect().bottom,
             })"""
         )
-        open_geometry = next(item for item in geometry if item["open"])
-        closed_geometry = geometry[closed_index]
-        assert (
-            closed_geometry["summary"]["right"]
-            <= open_geometry["summary"]["left"]
-            or open_geometry["summary"]["right"]
-            <= closed_geometry["summary"]["left"]
-        ), geometry
-        assert (
-            open_geometry["panel"]["top"] >= closed_geometry["summary"]["bottom"]
-            or open_geometry["panel"]["bottom"] <= closed_geometry["summary"]["top"]
-        ), geometry
-        controls.nth(closed_index).locator(":scope > summary").click(timeout=5_000)
-        expect(page.locator("details.dv-runtime-control[open]")).to_have_count(1)
-        states = controls.evaluate_all("nodes => nodes.map(node => node.open)")
-        assert states[closed_index] is True
-        assert sum(bool(value) for value in states) == 1
+        assert abs(scrolled["toolbarTop"]) <= 1, scrolled
+        assert scrolled["panelBottom"] <= 1, scrolled
 
 
 @pytest.mark.e2e
@@ -798,7 +914,7 @@ def test_committed_parameter_content_and_stale_selection_export(
             timeout=20_000,
         ) as request_info:
             with page.expect_download(timeout=20_000) as download_info:
-                page.locator("#download-button").click()
+                _export_html(page)
         download = download_info.value
         supplied = request_info.value.post_data_json["selection_state"]
         assert "view:deleted/value" not in supplied
@@ -886,7 +1002,7 @@ def test_section_selection_updates_bound_title_without_redrawing_siblings(
             "id": "focus_region",
             "kind": "selection",
             "field": "region",
-            "type": "single_select",
+            "type": "single_select", "value_type": "text",
             "default": "华东",
             "options": {
                 "mode": "static",
@@ -946,7 +1062,7 @@ def test_section_selection_updates_bound_title_without_redrawing_siblings(
         )
 
         with page.expect_download(timeout=20_000) as download_info:
-            page.locator("#download-button").click()
+            _export_html(page)
         report_path = tmp_path / "selection-content-report.html"
         download_info.value.save_as(report_path)
         report = report_path.read_text(encoding="utf-8")
@@ -971,7 +1087,6 @@ def test_sources_inspector_exposes_resolved_and_parameterized_sql(
         page.locator('#parameter-form input[name="min_query_revenue"]').fill("150000")
         _run_and_wait(page)
 
-        page.locator("#query-diagnostics > summary").click()
         source = page.locator('[data-node-id="source:sales"]')
         expect(source).to_be_visible()
         source.click()
@@ -1013,7 +1128,7 @@ def test_selection_impact_count_resolves_against_loaded_output_schemas(
         )
 
         with page.expect_download(timeout=20_000) as download_info:
-            page.locator("#download-button").click()
+            _export_html(page)
         report_path = tmp_path / "source-lab-impact.html"
         download_info.value.save_as(report_path)
 
@@ -1034,7 +1149,6 @@ def test_sources_inspector_loads_structured_python_execution_log(
         _open_dashboard(page, base_url, "sales")
         _run_and_wait(page)
 
-        page.locator("#query-diagnostics > summary").click()
         transform = page.locator('[data-node-id="dataset:sales-metrics"]')
         expect(transform).to_be_visible()
         transform.click()
@@ -1061,7 +1175,7 @@ def test_web_component_reference_adapter_consumes_runtime_v2_without_canvas_runt
         },
         "view_specs": [{"id": "detail", "inputs": {"main": "source:data/main"}}],
         "dependency_contract": {
-            "schema": "dataviz/dependency-contract/v4",
+            "schema": "dataviz/dependency-contract/v5",
             "views": {
                 "detail": {
                     "inputs": {"main": "source:data/main"},
@@ -1071,7 +1185,7 @@ def test_web_component_reference_adapter_consumes_runtime_v2_without_canvas_runt
                             "id": "region",
                             "origin": "dashboard",
                             "owner_id": "probe",
-                            "definition": {"type": "multi_select", "path_fields": []},
+                            "definition": {"type": "multiple_select", "value_type": "text", "path_fields": []},
                             "binding": {"field": "region", "operator": "auto"},
                         }
                     ],
@@ -1170,46 +1284,46 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         expect(switch.get_by_role("switch")).to_have_attribute("aria-checked", "false")
 
         date_picker = header.locator('[data-control-component="date-picker"]')
-        date_picker.locator('input[type="date"]').fill("2026-03-02")
-        expect(date_picker.locator('input[type="date"]')).to_have_value("2026-03-02")
+        date_input = date_picker.locator('.dv-date-picker__control[type="text"]')
+        expect(date_input).to_have_value(re.compile(r"^\d{4}-\d{2}-\d{2}$"))
+        date_picker.locator('[data-control-trigger]').click()
+        date_panel = date_picker.locator('[data-control-panel]')
+        expect(date_panel).to_be_visible()
+        expect(date_panel.locator(".dv-date-range__month")).to_have_count(1)
+        date_input.fill("2026-02-31")
+        expect(date_input).to_have_attribute("aria-invalid", "true")
+        date_input.fill("2026-03-02")
+        date_input.press("Enter")
+        expect(date_input).to_have_value("2026-03-02")
+        expect(date_input).to_have_attribute("aria-invalid", "false")
+        expect(date_panel).to_be_hidden()
 
-        slider = header.locator('[data-control-component="slider"]')
-        slider.locator('input[type="range"]').fill("0.85")
-        expect(slider.locator(".dv-slider__input")).to_have_value("0.85")
+        slider = header.locator(
+            'input[type="range"][name="dashboard:component-gallery/confidence"]'
+        )
+        slider.fill("0.85")
+        expect(slider.locator("xpath=..").locator(".dv-slider__input")).to_have_value(
+            "0.85"
+        )
 
         checkbox = header.locator('[data-control-component="checkbox-group"]')
         expect(checkbox).to_be_visible()
-        action = checkbox.locator(".dv-checkbox-group__action")
-        expect(action).to_have_text("Invert")
+        expect(checkbox.locator(".dv-checkbox-group__toolbar")).to_have_count(0)
+        options = checkbox.locator(".dv-checkbox-option")
+        expect(options).to_have_count(3)
         assert checkbox.locator("select").evaluate(
             "select => select.selectedOptions.length"
         ) == 3
-        checkbox.locator("button", has_text="East").click()
+        options.nth(0).click()
         assert "East" not in checkbox.locator("select").evaluate(
             "select => [...select.selectedOptions].map(option => option.value)"
         )
-        expect(action).to_have_text("Select all")
-        action.click()
+        options.nth(0).click()
         assert checkbox.locator("select").evaluate(
             "select => select.selectedOptions.length"
         ) == 3
-        expect(action).to_have_text("Invert")
-        checkbox.locator("button", has_text="East").click()
-        assert checkbox.locator("select").evaluate(
-            "select => select.selectedOptions.length"
-        ) == 2
-        expect(action).to_have_text("Select all")
-        action.click()
-        action.click()
-        assert checkbox.locator("select").evaluate(
-            "select => select.selectedOptions.length"
-        ) == 0
-        checkbox.locator("button", has_text="South").click()
-        assert checkbox.locator("select").evaluate(
-            "select => [...select.selectedOptions].map(option => option.value)"
-        ) == ["South"]
-        action.click()
-        action.click()
+        for index in range(3):
+            options.nth(index).click()
         assert checkbox.locator("select").evaluate(
             "select => select.selectedOptions.length"
         ) == 0
@@ -1218,7 +1332,8 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         # synchronize on the compiled Control state; Chromium used to reach the
         # following tree assertions before the queued empty-domain update, while
         # Firefox exposed that accidental ordering dependency.
-        action.click()
+        for index in range(3):
+            options.nth(index).click()
         assert checkbox.locator("select").evaluate(
             "select => select.selectedOptions.length"
         ) == 3
@@ -1227,7 +1342,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
 
         story_index = frame.locator(".gallery-story-index")
         expect(story_index).to_be_visible()
-        expect(story_index.locator("summary")).to_contain_text("38 runtime specimens")
+        expect(story_index.locator("summary")).to_contain_text("39 runtime specimens")
 
         expected_states = {
             "ready", "loading", "stale", "empty", "error", "cancelled", "unavailable"
@@ -1357,6 +1472,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         range_picker = selections.locator('[data-control-component="range-picker"]')
         expect(range_picker.locator('[data-control-trigger]')).to_have_count(1)
         expect(range_picker.locator('input[type="date"]')).to_have_count(0)
+        expect(range_picker.locator('.dv-date-range__endpoint[type="text"]')).to_have_count(2)
         range_picker.locator('[data-control-trigger]').click()
         date_panel = range_picker.locator('[data-control-panel]')
         expect(date_panel).to_be_visible()
@@ -1367,6 +1483,13 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
             "2026-01-01,2026-03-31"
         )
         expect(date_panel).to_be_hidden()
+        endpoints = range_picker.locator('.dv-date-range__endpoint')
+        endpoints.nth(0).fill("2026-01-05")
+        endpoints.nth(1).fill("2026-01-12")
+        endpoints.nth(1).press("Enter")
+        expect(range_picker.locator("input[data-selection-input]")).to_have_value(
+            "2026-01-05,2026-01-12"
+        )
         range_picker.locator('[data-control-trigger]').click()
         date_panel.locator('[data-date="2026-01-10"]').click()
         expect(date_panel).to_be_visible()
@@ -1456,17 +1579,17 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
 
 
 @pytest.mark.e2e
-def test_default_query_grid_caps_at_four_without_oversizing_range_picker(
+def test_default_query_grid_uses_up_to_six_bounded_tracks_without_oversizing_range_picker(
     page: Page, tmp_path: Path
 ):
-    workspace = _copy_workspace(MINIMAL, tmp_path / "four-column-query-grid")
+    workspace = _copy_workspace(MINIMAL, tmp_path / "six-column-query-grid")
     dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
     definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
     definition["query_parameters"].insert(
         0,
         {
             "id": "job_date_range",
-            "type": "date_range",
+            "type": "range_input", "value_type": "date",
             "label": "Analysis window",
             "required": True,
             "default": ["2026-08-17", "2026-08-23"],
@@ -1475,7 +1598,7 @@ def test_default_query_grid_caps_at_four_without_oversizing_range_picker(
     definition["query_parameters"].extend(
         {
             "id": f"scenario_{index:02d}",
-            "type": "number",
+            "type": "single_input", "value_type": "number",
             "label": f"Scenario {index:02d}",
             "default": index,
         }
@@ -1507,26 +1630,37 @@ def test_default_query_grid_caps_at_four_without_oversizing_range_picker(
             """form => ({
               columns:getComputedStyle(form).gridTemplateColumns.split(' ').length,
               width:form.getBoundingClientRect().width,
+              ownerWidth:form.parentElement.getBoundingClientRect().width,
             })"""
         )
-        assert wide["columns"] == 4, wide
-        assert wide["width"] <= 1397, wide
+        assert wide["columns"] == 5, wide
+        assert wide["columns"] <= 6, wide
+        assert wide["width"] >= wide["ownerWidth"] * 0.94, wide
         range_box = range_field.bounding_box()
         wide_box = wide_field.bounding_box()
         assert range_box is not None and wide_box is not None
-        assert range_box["width"] < 400, range_box
+        assert range_box["width"] < 500, range_box
         assert wide_box["width"] > range_box["width"] * 1.8, (range_box, wide_box)
-        assert range_field.locator(".dv-date-range__value").evaluate(
-            """value => [...value.querySelectorAll(':scope > span')]
-              .every(item => item.scrollWidth <= item.clientWidth)"""
+        assert range_field.locator(".dv-date-range__field").evaluate(
+            """field => {
+              const owner = field.closest('.field').getBoundingClientRect();
+              const rect = field.getBoundingClientRect();
+              return rect.left >= owner.left - 1 && rect.right <= owner.right + 1;
+            }"""
         )
 
         page.set_viewport_size({"width": 760, "height": 700})
+        expect(page.locator("#query-parameters-control")).to_have_attribute(
+            "data-control-effective-columns", "2"
+        )
         assert form.evaluate(
             "form => getComputedStyle(form).gridTemplateColumns.split(' ').length"
         ) == 2
 
         page.set_viewport_size({"width": 480, "height": 700})
+        expect(page.locator("#query-parameters-control")).to_have_attribute(
+            "data-control-effective-columns", "1"
+        )
         narrow = form.evaluate(
             """form => ({
               columns:getComputedStyle(form).gridTemplateColumns.split(' ').length,
@@ -1548,7 +1682,7 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(
     definition["query_parameters"].extend(
         {
             "id": f"scenario_{index:02d}",
-            "type": "number",
+            "type": "single_input", "value_type": "number",
             "label": f"Scenario {index:02d}",
             "default": index,
         }
@@ -1557,7 +1691,7 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(
     definition["query_parameters"].append(
         {
             "id": "model_list",
-            "type": "multi_select",
+            "type": "multiple_select", "value_type": "text",
             "label": "Model list",
             "default": ["model-01"],
             "options": {
@@ -1579,7 +1713,7 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(
         "query": {
             "template": "grid",
             "width": "wide",
-            "columns": 3,
+                "columns": 4,
             "density": "compact",
         }
     }
@@ -1588,7 +1722,7 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(
         encoding="utf-8",
     )
 
-    page.set_viewport_size({"width": 900, "height": 360})
+    page.set_viewport_size({"width": 1800, "height": 720})
     with _running_server(workspace) as base_url:
         _open_dashboard(page, base_url, "sales-overview")
         control = page.locator("#query-parameters-control")
@@ -1600,30 +1734,81 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(
         expect(toggle).to_have_attribute("aria-expanded", "true")
         expect(panel).not_to_have_attribute("data-overlay-placement", re.compile(".+"))
 
+        wide_geometry = panel.evaluate(
+            """panel => {
+              const form = panel.querySelector('#parameter-form');
+              const card = panel.closest('.dv-query-card').getBoundingClientRect();
+              const frame = document.querySelector('#canvas-frame').getBoundingClientRect();
+              return {
+                panelWidth: panel.getBoundingClientRect().width,
+                formWidth: form.getBoundingClientRect().width,
+                columns: getComputedStyle(form).gridTemplateColumns.split(' ').length,
+                cardLeft:card.left,
+                cardRight:card.right,
+                frameLeft:frame.left,
+                frameRight:frame.right,
+              };
+            }"""
+        )
+        assert wide_geometry["columns"] == 4, wide_geometry
+        assert wide_geometry["formWidth"] >= wide_geometry["panelWidth"] * 0.94, wide_geometry
+        assert abs((wide_geometry["cardLeft"] - wide_geometry["frameLeft"]) - 48) <= 1, wide_geometry
+        assert abs((wide_geometry["frameRight"] - wide_geometry["cardRight"]) - 48) <= 1, wide_geometry
+
+        page.set_viewport_size({"width": 900, "height": 360})
+        expect(control).to_have_attribute("data-control-effective-columns", "1")
+
         geometry = panel.evaluate(
             """panel => {
               const form = panel.querySelector('#parameter-form');
               const rect = panel.getBoundingClientRect();
+              const owner = panel.closest('[data-control-role="query"]');
+              const card = panel.closest('.dv-query-card');
               return {
                 position:getComputedStyle(panel).position,
                 width:rect.width,
-                ownerWidth:panel.parentElement.getBoundingClientRect().width,
-                configuredColumns:panel.parentElement.dataset.controlColumns,
+                cardWidth:card.getBoundingClientRect().width,
+                configuredColumns:owner.dataset.controlColumns,
+                effectiveColumns:owner.dataset.controlEffectiveColumns,
+                columnWidth:Number(owner.dataset.controlColumnWidth),
                 columns: getComputedStyle(form).gridTemplateColumns.split(' ').length,
-                formClientHeight: form.clientHeight,
-                formScrollHeight: form.scrollHeight,
+                formWidth:form.getBoundingClientRect().width,
+                panelClientHeight: panel.clientHeight,
+                panelScrollHeight: panel.scrollHeight,
                 panelOverflow: getComputedStyle(panel).overflow,
-                formOverflow: getComputedStyle(form).overflow,
               };
             }"""
         )
         assert geometry["position"] == "relative", geometry
-        assert abs(geometry["width"] - geometry["ownerWidth"]) <= 1, geometry
-        assert geometry["configuredColumns"] == "3"
-        assert geometry["columns"] == 2
-        assert geometry["panelOverflow"] == "hidden"
-        assert geometry["formOverflow"] == "auto"
-        assert geometry["formScrollHeight"] > geometry["formClientHeight"]
+        # The panel occupies the Card content box; the two-pixel delta is the
+        # Card's left and right border.
+        assert abs(geometry["width"] - geometry["cardWidth"]) <= 2, geometry
+        assert geometry["configuredColumns"] == "4"
+        expected_columns = max(
+            1,
+            min(4, int((geometry["formWidth"] + 10) // (geometry["columnWidth"] + 10))),
+        )
+        assert geometry["columns"] == expected_columns
+        assert geometry["effectiveColumns"] == str(expected_columns)
+        assert geometry["panelOverflow"] == "auto"
+        assert geometry["panelScrollHeight"] > geometry["panelClientHeight"]
+
+        page.evaluate(
+            """() => {
+              const card = document.querySelector('.dv-query-card');
+              window.scrollTo(0, card.offsetTop + card.offsetHeight + 100);
+            }"""
+        )
+        page.wait_for_timeout(100)
+        flow_geometry = page.evaluate(
+            """() => ({
+              topbarTop:document.querySelector('.topbar').getBoundingClientRect().top,
+              panelBottom:document.querySelector('#query-parameters-panel').getBoundingClientRect().bottom,
+            })"""
+        )
+        assert abs(flow_geometry["topbarTop"]) <= 1, flow_geometry
+        assert flow_geometry["panelBottom"] <= 1, flow_geometry
+        page.evaluate("window.scrollTo(0, 0)")
 
         expanded_canvas_top = canvas.bounding_box()["y"]
         page.keyboard.press("Escape")
@@ -1637,7 +1822,11 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(
         expect(panel).to_be_visible()
         expect(toggle).to_have_attribute("aria-expanded", "true")
 
-        form.evaluate("form => { form.scrollTop = form.scrollHeight; }")
+        # At tablet width the open Sidebar is intentionally an overlay. Close
+        # it before exercising controls underneath that overlay.
+        page.locator("#sidebar-toggle").click()
+        expect(page.locator("body")).to_have_class(re.compile(r"\bsidebar-collapsed\b"))
+        panel.evaluate("panel => { panel.scrollTop = panel.scrollHeight; }")
         model_field = form.locator(".field", has=page.locator("#input-model_list"))
         trigger = model_field.locator("[data-control-trigger]")
         expect(trigger).to_be_visible()
@@ -1682,7 +1871,7 @@ def test_cross_browser_narrow_control_overlay_keyboard_scroll_and_aria(
     definition["query_parameters"].extend(
         {
             "id": f"scenario_{index:02d}",
-            "type": "number",
+            "type": "single_input", "value_type": "number",
             "label": f"Scenario {index:02d}",
             "default": index,
         }
@@ -1691,7 +1880,7 @@ def test_cross_browser_narrow_control_overlay_keyboard_scroll_and_aria(
     definition["query_parameters"].append(
         {
             "id": "model_list",
-            "type": "multi_select",
+            "type": "multiple_select", "value_type": "text",
             "label": "Model list",
             "default": ["model-01"],
             "options": {
@@ -1741,9 +1930,9 @@ def test_cross_browser_narrow_control_overlay_keyboard_scroll_and_aria(
                 height:rect.height,
                 viewport:[innerWidth, innerHeight],
                 columns:getComputedStyle(form).gridTemplateColumns.split(' ').length,
-                formClientHeight:form.clientHeight,
-                formScrollHeight:form.scrollHeight,
-                formOverflow:getComputedStyle(form).overflowY,
+                panelClientHeight:panel.clientHeight,
+                panelScrollHeight:panel.scrollHeight,
+                panelOverflow:getComputedStyle(panel).overflowY,
               };
             }"""
         )
@@ -1752,10 +1941,10 @@ def test_cross_browser_narrow_control_overlay_keyboard_scroll_and_aria(
         assert geometry["right"] <= geometry["viewport"][0] - 8, geometry
         assert geometry["height"] <= geometry["viewport"][1] * 0.52 + 1, geometry
         assert geometry["columns"] == 1, geometry
-        assert geometry["formScrollHeight"] > geometry["formClientHeight"], geometry
-        assert geometry["formOverflow"] == "auto", geometry
+        assert geometry["panelScrollHeight"] > geometry["panelClientHeight"], geometry
+        assert geometry["panelOverflow"] == "auto", geometry
 
-        form.evaluate("form => { form.scrollTop = form.scrollHeight; }")
+        panel.evaluate("panel => { panel.scrollTop = panel.scrollHeight; }")
         model_field = form.locator(".field", has=page.locator("#input-model_list"))
         trigger = model_field.locator("[data-control-trigger]")
         expect(trigger).to_be_visible()
@@ -1896,7 +2085,7 @@ def test_unified_dashboard_controls_drive_browser_named_output(
             timeout=15_000,
         )
         expect(radial).to_have_attribute("data-view-status", "ready")
-        page.locator("#query-diagnostics > summary").click()
+        page.locator("#sidebar-toggle").click()
         expect(control).not_to_have_attribute("open", "")
 
 
@@ -1918,25 +2107,24 @@ def test_selection_cascade_popovers_view_isolation_and_table_wheel(
         header.locator("summary").click()
         expect(header).to_have_attribute("open", "")
         province = header.locator('[data-control-component="checkbox-group"]')
-        province_action = province.locator(".dv-checkbox-group__action")
-        expect(province_action).to_have_text("反选")
-        province_action.click()
-        expect(province_action).to_have_text("全选")
+        expect(province.locator(".dv-checkbox-group__toolbar")).to_have_count(0)
+        guangdong = province.locator("button", has_text="广东")
+        fujian = province.locator("button", has_text="福建")
+        guangdong.click()
+        fujian.click()
         assert province.locator("select").evaluate(
             "select => select.selectedOptions.length"
         ) == 0
-        province_action.click()
-        expect(province_action).to_have_text("反选")
+        guangdong.click()
+        fujian.click()
         assert province.locator("select").evaluate(
             "select => [...select.selectedOptions].map(option => option.value)"
         ) == ["广东", "福建"]
-        province.locator("button", has_text="广东").click()
-        expect(province_action).to_have_text("全选")
+        guangdong.click()
         assert province.locator("select").evaluate(
             "select => [...select.selectedOptions].map(option => option.value)"
         ) == ["福建"]
-        province_action.click()
-        expect(province_action).to_have_text("反选")
+        guangdong.click()
         frame.locator('[data-view-id="map-bars"] .dv-view-body').click()
         expect(header).not_to_have_attribute("open", "")
 
@@ -2159,7 +2347,7 @@ def test_echarts_legend_filter_prunes_categories_on_mount_update_and_export(
         assert "鲤城区" in legend_action(frame, True)
 
         with page.expect_download(timeout=20_000) as download_info:
-            page.locator("#download-button").click()
+            _export_html(page)
         download_info.value.save_as(report_path)
 
     with _running_static_server(report_path.parent) as report_url:
@@ -2374,7 +2562,7 @@ def test_managed_renderer_lifecycle_matrix_in_server_and_export(
         # Server host is explicitly disposed.
         page.locator("#dashboard-controls-control > summary").click()
         with page.expect_download(timeout=20_000) as download_info:
-            page.locator("#download-button").click()
+            _export_html(page)
         download_info.value.save_as(report_path)
 
         # dispose
@@ -2487,7 +2675,7 @@ def test_same_view_control_dependency_reconciles_in_server_and_export(
         expect(detail.locator("tbody tr")).to_have_count(2)
 
         with page.expect_download(timeout=20_000) as download_info:
-            page.locator("#download-button").click()
+            _export_html(page)
         download_info.value.save_as(report_path)
 
     with _running_static_server(report_path.parent) as report_url:
@@ -2681,7 +2869,7 @@ def test_perspective_enters_empty_state_immediately_after_last_selection_is_clea
         expect(perspective.locator("perspective-viewer")).to_have_count(1)
 
         with page.expect_download(timeout=20_000) as download_info:
-            page.locator("#download-button").click()
+            _export_html(page)
         download_info.value.save_as(report_path)
 
     # Portable reports use the same View Package lifecycle. Clearing the last
@@ -2761,7 +2949,7 @@ def test_cross_browser_perspective_repeated_dispose_and_restore(
             )
             assert disposed["created"] >= 1
             assert disposed["disposed"] == disposed["created"]
-            page.locator("#dashboard-reload").click()
+            page.locator("#dashboard-reload").evaluate("button => button.click()")
             page.wait_for_function(
                 "previous => document.querySelector('#canvas-frame')?.dataset.frameId !== previous",
                 arg=frame_id,
@@ -2781,7 +2969,7 @@ def test_required_dynamic_view_selection_bootstraps_from_base_output_and_exports
         {
             "id": "focus_name",
             "kind": "selection",
-            "type": "single_select",
+            "type": "single_select", "value_type": "text",
             "field": "name",
             "required": True,
             "options": {"mode": "infer"},
@@ -2830,9 +3018,11 @@ def test_required_dynamic_view_selection_bootstraps_from_base_output_and_exports
         expect(selector.locator("option")).to_have_count(2)
         expect(selector.locator('option[data-empty-option="true"]')).to_have_count(0)
         assert selector.input_value() == "alpha"
-        expect(page.locator('[data-node-id="interactive:scaled"]')).to_have_attribute(
-            "data-status", "ready", timeout=10_000
+        view_signal = table.locator(
+            '[data-view-pipeline-node="interactive:scaled"]'
         )
+        expect(view_signal).to_have_attribute("data-status", "ready", timeout=10_000)
+        expect(view_signal).to_be_hidden()
         assert not [message for message in console_errors if "[dataviz:init]" in message]
 
         # A delayed parent shadow must never override the canonical Canvas
@@ -2850,7 +3040,7 @@ def test_required_dynamic_view_selection_bootstraps_from_base_output_and_exports
 
         try:
             with page.expect_download(timeout=30_000) as download_info:
-                page.locator("#download-button").click()
+                _export_html(page)
         except PlaywrightTimeoutError as error:
             raise AssertionError(
                 {
@@ -2871,6 +3061,90 @@ def test_required_dynamic_view_selection_bootstraps_from_base_output_and_exports
 
 
 @pytest.mark.e2e
+def test_date_default_editor_uses_one_mode_and_one_value_per_endpoint(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(SHOWCASE, tmp_path / "date-editor")
+    dashboard_path = (
+        workspace
+        / "dashboards"
+        / "功能示例##date-parameter-lab"
+        / "dashboard.yaml"
+    )
+
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "date-parameter-lab")
+        query_geometry = page.locator("#parameter-form").evaluate(
+            """form => ({
+              formWidth:form.getBoundingClientRect().width,
+              fieldWidths:[...form.children].map(item => item.getBoundingClientRect().width),
+              usedWidth:Math.max(...[...form.children].map(
+                item => item.getBoundingClientRect().right
+              )) - form.getBoundingClientRect().left,
+            })"""
+        )
+        assert query_geometry["fieldWidths"]
+        assert max(query_geometry["fieldWidths"]) <= 282, query_geometry
+        assert query_geometry["usedWidth"] < query_geometry["formWidth"] * 0.72, query_geometry
+
+        page.locator("#run-button").click(button="right")
+        dialog = page.locator("#parameter-editor-dialog")
+        expect(dialog).to_be_visible()
+
+        single = dialog.locator('[data-editor-item="analysis_date"]')
+        single.locator("[data-editor-disclosure]").click()
+        expect(single.locator("[data-editor-date-atom]")).to_have_count(1)
+        expect(single.locator("[data-editor-date-mode]")).to_have_count(1)
+        expect(single.locator("[data-editor-date-value]")).to_have_count(1)
+        expect(single.locator("[data-editor-date-value]")).to_have_attribute(
+            "type", "number"
+        )
+
+        date_range = dialog.locator('[data-editor-item="report_range"]')
+        date_range.locator("[data-editor-disclosure]").click()
+        expect(date_range.locator("[data-editor-date-atom]")).to_have_count(2)
+        expect(date_range.locator("[data-editor-date-mode]")).to_have_count(2)
+        expect(date_range.locator("[data-editor-date-value]")).to_have_count(2)
+
+        start = date_range.locator('[data-editor-date-atom="start"]')
+        end = date_range.locator('[data-editor-date-atom="end"]')
+        start.locator("[data-editor-date-mode]").select_option("fixed")
+        expect(start.locator("[data-editor-date-value]")).to_have_attribute(
+            "type", "text"
+        )
+        start.locator("[data-editor-date-value]").fill("20260801")
+        expect(start.locator("[data-editor-date-value]")).to_have_value(
+            "2026-08-01"
+        )
+        start.locator("[data-control-trigger]").click()
+        expect(start.locator("[data-control-panel]")).to_be_visible()
+        expect(start.locator(".dv-date-range__month")).to_have_count(1)
+        expect(start.locator(".dv-date-range__year-select")).to_have_count(1)
+        expect(start.locator(".dv-date-range__month-select")).to_have_count(1)
+        start.locator("[data-control-panel]").press("Escape")
+        expect(end.locator("[data-editor-date-value]")).to_have_attribute(
+            "type", "number"
+        )
+        end.locator("[data-editor-date-value]").fill("-1")
+
+        save = dialog.locator('button[type="submit"]')
+        expect(save).to_be_enabled()
+        save.click()
+        expect(dialog).not_to_be_visible(timeout=10_000)
+
+    saved = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    report_range = next(
+        item
+        for item in saved["query_parameters"]
+        if item["id"] == "report_range"
+    )
+    assert report_range["default"] == [
+        "2026-08-01",
+        {"mode": "relative", "anchor": "today", "offset": "-1d"},
+    ]
+
+
+@pytest.mark.e2e
 def test_browser_query_inputs_project_date_range_parts(page: Page, tmp_path: Path):
     workspace = _copy_workspace(WORKER, tmp_path / "query-input-parts")
     dashboard_path = workspace / "dashboards" / "worker-runtime" / "dashboard.yaml"
@@ -2878,15 +3152,13 @@ def test_browser_query_inputs_project_date_range_parts(page: Page, tmp_path: Pat
     definition["query_parameters"] = [
         {
             "id": "job_date_range",
-            "type": "date_range",
+            "type": "range_input", "value_type": "date",
             "label": "Job date range",
             "required": True,
-            "default": {
-                "mode": "relative",
-                "anchor": "today",
-                "start_offset": "-3d",
-                "end_offset": "-1d",
-            },
+            "default": [
+                {"mode": "relative", "anchor": "today", "offset": "-3d"},
+                {"mode": "relative", "anchor": "today", "offset": "-1d"},
+            ],
         }
     ]
     dashboard_path.write_text(
@@ -2949,6 +3221,63 @@ def test_browser_query_inputs_project_date_range_parts(page: Page, tmp_path: Pat
             "start_date": {"parameter": "job_date_range", "part": "start"},
             "end_date": {"parameter": "job_date_range", "part": "end"},
         }
+
+
+@pytest.mark.e2e
+def test_share_link_keeps_browser_interactions_and_uses_workspace_cache(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(WORKER, tmp_path / "shared-browser-runtime")
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "worker-runtime")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        table = frame.locator('[data-view-id="scaled-table"]')
+        expect(table).to_have_attribute("data-view-status", "ready", timeout=15_000)
+
+        page.locator("#share-button").click()
+        expect(page.locator("#copy-share-link")).to_be_visible()
+        with page.expect_response(
+            lambda response: response.url.endswith(
+                "/api/dashboards/worker-runtime/share"
+            ),
+            timeout=30_000,
+        ) as share_response:
+            page.locator("#copy-share-link").click()
+        response = share_response.value
+        assert response.status == 200
+        shared = response.json()
+        cache = workspace / shared["path"]
+        assert cache.parent == workspace / "shared_caches"
+        assert (cache / "manifest.json").is_file()
+        assert (cache / "query-result.json").is_file()
+        expect(page.locator("#shortcut-toast")).to_have_text(
+            "分享链接已复制", timeout=10_000
+        )
+
+        page.goto(f'{base_url}{shared["url"]}', wait_until="domcontentloaded")
+        shared_table = page.locator('[data-view-id="scaled-table"]')
+        expect(shared_table).to_have_attribute(
+            "data-view-status", "ready", timeout=15_000
+        )
+        completed = page.locator("body").evaluate(
+            "() => window.datavizRuntime.metrics.interactiveTransforms.completed"
+        )
+        page.locator(
+            'details[data-control-origin="dashboard"] > summary'
+        ).click()
+        delay = page.locator(
+            '[data-compute-input="dashboard:worker-runtime/delay_ms"]'
+        )
+        delay.evaluate(
+            "input => { input.value = '6'; input.dispatchEvent(new Event('change', {bubbles:true})); }"
+        )
+        page.wait_for_function(
+            "before => window.datavizRuntime.metrics.interactiveTransforms.completed > before",
+            arg=completed,
+            timeout=10_000,
+        )
+        expect(shared_table).to_have_attribute("data-view-status", "ready")
 
 
 @pytest.mark.e2e
@@ -3041,7 +3370,7 @@ def test_browser_js_interactive_worker_cancellation_timeout_and_serializable_err
 
 
 @pytest.mark.e2e
-def test_server_and_browser_python_share_output_contract_and_export_runtime(
+def test_server_and_browser_python_share_output_contract_and_blocks_html_export(
     page: Page, tmp_path: Path
 ):
     workspace = _build_interactive_runtime_workspace(tmp_path / "runtime-matrix")
@@ -3124,30 +3453,26 @@ def test_server_and_browser_python_share_output_contract_and_export_runtime(
         )
         assert runtime_state == {"committed": 3, "browserWorkers": 2, "active": 0}
 
-        with page.expect_download(timeout=30_000) as download_info:
-            page.locator("#download-button").click()
-        download = download_info.value
-        assert download.suggested_filename.endswith(".zip")
-        archive = tmp_path / "runtime-report.zip"
-        download.save_as(archive)
-        extracted = tmp_path / "runtime-report"
-        with zipfile.ZipFile(archive) as bundle:
-            bundle.extractall(extracted)
-            names = set(bundle.namelist())
-        html_name = next(name for name in names if name.endswith(".html"))
-        assert any(name.endswith(".assets/pyodide/pyodide.mjs") for name in names)
+        export = page.locator("#download-button")
+        expect(export).to_be_disabled()
+        expect(export).to_have_attribute("title", re.compile("Server Python"))
 
-    with _running_static_server(extracted) as report_url:
-        page.goto(f"{report_url}/{html_name}", wait_until="domcontentloaded")
-        exported_server = page.locator('[data-view-id="server-table"]')
-        exported_browser = page.locator('[data-view-id="browser-table"]')
-        expect(exported_server).to_have_attribute("data-view-status", "ready", timeout=20_000)
-        expect(exported_browser).to_have_attribute("data-view-status", "ready", timeout=20_000)
-        expect(exported_server).to_contain_text("103")
-        expect(exported_browser).to_contain_text("3")
-        assert page.locator("body").evaluate(
-            "() => window.datavizRuntime.metrics.interactiveTransforms.completed"
-        ) >= 1
+        page.locator("#share-button").click()
+        with page.expect_response(
+            lambda response: response.url.endswith(
+                "/api/dashboards/runtime-matrix/share"
+            ),
+            timeout=30_000,
+        ) as share_response:
+            page.locator("#copy-share-link").click()
+        shared = share_response.value.json()
+        page.goto(f'{base_url}{shared["url"]}', wait_until="domcontentloaded")
+        shared_server = page.locator('[data-view-id="server-table"]')
+        shared_browser = page.locator('[data-view-id="browser-table"]')
+        expect(shared_server).to_have_attribute("data-view-status", "ready", timeout=20_000)
+        expect(shared_browser).to_have_attribute("data-view-status", "ready", timeout=20_000)
+        expect(shared_server).to_contain_text("103")
+        expect(shared_browser).to_contain_text("3")
 
 
 @pytest.mark.e2e
@@ -3239,7 +3564,7 @@ def test_plotly_control_binding_commits_once_and_keeps_bound_candidates(
               points:[{customdata:node.data[0].customdata[0]}],
             })"""
         )
-        expect(consumer.locator(".dv-table-meta strong")).to_have_text("4")
+        expect(consumer.locator("tbody tr")).to_have_count(4)
         assert chart.evaluate("node => node.data[0].x.length") == 3
         state = frame.locator("body").evaluate(
             """() => ({
@@ -3293,7 +3618,7 @@ def test_plotly_control_binding_commits_once_and_keeps_bound_candidates(
         assert chart.evaluate("node => node.data[0].x.length") == 3
 
         with page.expect_download(timeout=20_000) as download_info:
-            page.locator("#download-button").click()
+            _export_html(page)
         download_info.value.save_as(report_path)
 
     # The portable report uses the same View Adapter and canonical commit path;
@@ -3310,7 +3635,45 @@ def test_plotly_control_binding_commits_once_and_keeps_bound_candidates(
               points:[{customdata:node.data[0].customdata[0]}],
             })"""
         )
-        expect(consumer.locator(".dv-table-meta strong")).to_have_text("4")
+        expect(consumer.locator("tbody tr")).to_have_count(4)
+
+
+@pytest.mark.e2e
+def test_table_row_count_is_opt_in_instead_of_a_default_metadata_row(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(MINIMAL, tmp_path / "table-count-visibility")
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    detail = next(item for item in definition["views"] if item["id"] == "sales-detail")
+    counted = dict(detail)
+    counted["id"] = "sales-detail-counted"
+    counted["title"] = "Sales detail with count"
+    counted["options"] = {**counted.get("options", {}), "show_count": True}
+    definition["views"].append(counted)
+    definition["sections"].append(
+        {
+            "id": "counted-detail",
+            "title": "Explicit row count",
+            "template": "single",
+            "views": ["sales-detail-counted"],
+        }
+    )
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        default_table = frame.locator('[data-view-id="sales-detail"]')
+        counted_table = frame.locator('[data-view-id="sales-detail-counted"]')
+        expect(default_table).to_have_attribute("data-view-status", "ready")
+        expect(counted_table).to_have_attribute("data-view-status", "ready")
+        expect(default_table.locator(".dv-table-meta")).to_have_count(0)
+        expect(counted_table.locator(".dv-table-meta strong")).to_have_text("12")
 
 
 @pytest.mark.e2e
@@ -3381,7 +3744,7 @@ def test_echarts_control_binding_normalizes_click_events(page: Page, tmp_path: P
             }"""
         )
         assert event_result == "华东"
-        expect(consumer.locator(".dv-table-meta strong")).to_have_text("4")
+        expect(consumer.locator("tbody tr")).to_have_count(4)
         assert frame.locator("body").evaluate(
             "() => window.dataviz.selection.state('dashboard:sales-overview/region')"
         ) == {"intent": "explicit", "values": ["华东"]}
@@ -3555,7 +3918,7 @@ def test_cancelled_query_branch_reaches_a_terminal_view_state(
             "() => sessionStorage.getItem('dataviz.tab-session.v2')"
         )
         assert cancelled_run_id and session_id
-        expect(page.locator("#run-button")).to_contain_text("Cancel query")
+        expect(page.locator("#run-button")).to_contain_text("取消")
         page.locator("#run-button").click()
         expect(page.locator("#run-message")).to_contain_text(
             "Query cancelled", timeout=20_000

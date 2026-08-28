@@ -1,0 +1,9 @@
+.dv-multiple-input { display: grid; gap: .5rem; min-width: 0; }
+.dv-multiple-input__rows { display: grid; gap: .42rem; }
+.dv-multiple-input__row { display: grid; grid-template-columns: minmax(0, 1fr) 2.5rem; gap: .35rem; }
+.dv-multiple-input__row input { box-sizing: border-box; width: 100%; min-height: 2.5rem; padding: .5rem .65rem; color: var(--dv-ink, #202536); background: var(--dv-panel, #fff); border: 1px solid var(--dv-line, #d9e0ec); border-radius: 7px; }
+.dv-multiple-input__row input:focus { outline: 0; border-color: var(--dv-accent, #3949ab); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dv-accent, #3949ab) 14%, transparent); }
+.dv-multiple-input__remove, .dv-multiple-input__add { min-height: 2.5rem; color: var(--dv-muted, #667085); background: var(--dv-panel, #fff); border: 1px solid var(--dv-line, #d9e0ec); border-radius: 7px; cursor: pointer; }
+.dv-multiple-input__add { justify-self: start; padding: 0 .8rem; }
+.dv-multiple-input__remove:hover:not(:disabled), .dv-multiple-input__add:hover:not(:disabled) { color: var(--dv-accent, #3949ab); border-color: var(--dv-accent, #3949ab); }
+.dv-multiple-input__remove:disabled, .dv-multiple-input__add:disabled { opacity: .45; cursor: not-allowed; }

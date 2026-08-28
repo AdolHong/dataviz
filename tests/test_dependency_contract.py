@@ -181,7 +181,7 @@ def test_view_control_binding_rejects_narrower_candidate_selection(tmp_path: Pat
         {
             "id": "city",
             "kind": "selection",
-            "type": "single_select",
+            "type": "single_select", "value_type": "text",
             "field": "city",
             "options": {"mode": "infer", "initial": "empty"},
         }
@@ -206,7 +206,7 @@ def test_same_view_dependencies_compile_direct_edges_transitive_closure_and_orde
             "id": "dow",
             "kind": "selection",
             "field": "city",
-            "type": "single_select",
+            "type": "single_select", "value_type": "text",
             "depends_on": ["section.city"],
             "options": {
                 "mode": "static",
@@ -220,7 +220,7 @@ def test_same_view_dependencies_compile_direct_edges_transitive_closure_and_orde
             "id": "dates",
             "kind": "selection",
             "field": "district",
-            "type": "multi_select",
+            "type": "multiple_select", "value_type": "text",
             "depends_on": ["view.dow"],
             "options": {"mode": "infer", "source": "source:cities/main"},
         },
@@ -285,12 +285,12 @@ def test_control_dependencies_reject_compute_parent_and_report_full_cycle(
     controls = _city_detail(definition)["controls"]
     controls.extend(
         [
-            {"id": "seed", "kind": "compute", "type": "integer", "default": 42},
+            {"id": "seed", "kind": "compute", "type": "single_input", "value_type": "integer", "default": 42},
             {
                 "id": "dow",
                 "kind": "selection",
                 "field": "city",
-                "type": "multi_select",
+                "type": "multiple_select", "value_type": "text",
                 "depends_on": ["view.seed"],
                 "options": {"mode": "infer", "source": "source:cities/main"},
             },
@@ -314,7 +314,7 @@ def test_control_dependencies_reject_compute_parent_and_report_full_cycle(
                 "id": "first",
                 "kind": "selection",
                 "field": "city",
-                "type": "multi_select",
+                "type": "multiple_select", "value_type": "text",
                 "depends_on": ["view.second"],
                 "options": {"mode": "infer", "source": "source:cities/main"},
             },
@@ -322,7 +322,7 @@ def test_control_dependencies_reject_compute_parent_and_report_full_cycle(
                 "id": "second",
                 "kind": "selection",
                 "field": "district",
-                "type": "multi_select",
+                "type": "multiple_select", "value_type": "text",
                 "depends_on": ["view.first"],
                 "options": {"mode": "infer", "source": "source:cities/main"},
             },
@@ -388,6 +388,14 @@ def test_runtime_manifest_is_a_projection_of_the_same_contract():
     assert manifest["views"]["scaled-table"]["inputs"] == {
         "main": "interactive:scaled/main"
     }
+    assert manifest["views"]["scaled-table"]["pipeline_nodes"] == [
+        "source:raw",
+        "interactive:scaled",
+    ]
+    assert contract.view_pipeline_nodes("scaled-table") == (
+        "source:raw",
+        "interactive:scaled",
+    )
     compute = manifest["controls"]["dashboard:worker-runtime/delay_ms"]
     assert compute["direct_views"] == []
     assert compute["derived_views"] == ["scaled-table"]
@@ -444,7 +452,7 @@ def test_dependency_contract_is_directly_inspectable_by_ai_and_humans():
 
     assert machine.exit_code == 0, machine.stdout
     assert machine.stdout.lstrip().startswith("{")
-    assert '"schema": "dataviz/dependency-contract/v4"' in machine.stdout
+    assert '"schema": "dataviz/dependency-contract/v5"' in machine.stdout
     assert human.exit_code == 0, human.stdout
     assert "Query DAG" in human.stdout
     assert "Query Parameters" in human.stdout
@@ -503,7 +511,7 @@ def test_dependency_contract_rejects_control_consumed_outside_its_scope(
   - id: hidden-controls
     title: Hidden controls
     controls:
-      - {id: rogue, kind: compute, type: integer, default: 1}
+      - {id: rogue, kind: compute, type: single_input, value_type: integer, default: 1}
 """,
         encoding="utf-8",
     )

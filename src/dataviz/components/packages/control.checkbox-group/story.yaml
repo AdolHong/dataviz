@@ -3,5 +3,5 @@ stories:
   - id: control.checkbox-group.small-multi
     component: control.checkbox-group
     title: Small visible multi-selection
-    summary: Select all keeps every checkbox explicit; the action becomes Invert so users can remove a few or return to an unconstrained empty state.
+    summary: Two to five peer choices stay visible and editable directly, without a redundant Select all, Invert or Clear toolbar.
     gallery: {dashboard: component-gallery, target: "[data-control-component='checkbox-group']", anchor: control-checkbox-group}

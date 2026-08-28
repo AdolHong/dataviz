@@ -15,7 +15,7 @@ components:
       official: https://ant.design/components/radio/
       adopted: [mutually-exclusive-value, radio-group-role, button-option-type, roving-keyboard-focus]
       omitted: [React-context, Form.Item-integration]
-    logic: {type: single_select, fields: [choices], value_shape: scalar}
+    logic: {type: single_select, value_types: [text, integer, number, boolean, date], fields: [choices], value_shape: scalar}
     presentation: {component: radio-group, options: [option_type, button_style, show_unavailable, css_class]}
     behavior: {cardinality: at_most_one_until_first_choice, synthetic_options: false, bulk_actions: false}
     semantic_dom: [.dv-radio-group, .dv-radio-group__option]

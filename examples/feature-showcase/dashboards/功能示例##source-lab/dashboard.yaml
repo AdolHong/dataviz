@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v7
+schema: dataviz/dashboard/v8
 kind: dashboard
 id: source-lab
 title: 数据源实验室
@@ -9,17 +9,28 @@ controls:
   - id: day
     kind: selection
     field: day
-    type: multi_select
+    type: multiple_select
+    value_type: text
     label: 日期
-    default: [2025-10-01, 2025-10-02, 2025-10-03, 2025-10-04, 2025-10-05]
+    default:
+      - '2025-10-01'
+      - '2025-10-02'
+      - '2025-10-03'
+      - '2025-10-04'
+      - '2025-10-05'
     options:
       mode: static
       choices:
-        - {label: 10月1日, value: 2025-10-01}
-        - {label: 10月2日, value: 2025-10-02}
-        - {label: 10月3日, value: 2025-10-03}
-        - {label: 10月4日, value: 2025-10-04}
-        - {label: 10月5日, value: 2025-10-05}
+        - label: 10月1日
+          value: '2025-10-01'
+        - label: 10月2日
+          value: '2025-10-02'
+        - label: 10月3日
+          value: '2025-10-03'
+        - label: 10月4日
+          value: '2025-10-04'
+        - label: 10月5日
+          value: '2025-10-05'
 sources:
   - sources/sql-grid.yaml
   - sources/forecast.yaml

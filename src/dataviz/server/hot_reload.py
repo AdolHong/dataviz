@@ -37,6 +37,7 @@ _IGNORED_PARTS = {
     "build",
     "dist",
     "node_modules",
+    "shared_caches",
 }
 
 

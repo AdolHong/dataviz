@@ -1,6 +1,6 @@
 # Dataviz 实施计划
 
-更新时间：2026-08-28
+更新时间：2026-08-29
 
 稳定设计见 [DESIGN](DESIGN.md)，代码入口见 [当前实现索引](docs/product-architecture.md)，使用者入口见 [README](README.md)。本文件只保留当前结论和仍需完成的工作，不重复记录历史迁移过程。
 
@@ -11,16 +11,17 @@
 | P0 数据执行架构 | 已完成 | Query DAG、Interactive DAG、Control/View 影响关系、Named Output、三种 Interactive Runtime、状态隔离和导出边界已统一为一份版本化 Dependency Contract。 |
 | P0 Selection 状态一致性 | 已完成 | `{intent, values}` 是唯一 canonical state；明确空集、动态全选、optional Single Clear、tab/HTML/三种 Interactive Runtime 使用同一 resolver。 |
 | P0 Control Binding / Linked Views | 已完成 | 一个 Selection Control 最多绑定一个可读写 View Adapter；Plotly/ECharts/Table/Custom 与面板共用 canonical state。 |
-| P0 Layout Contract | 已完成 | Dashboard v8 拥有结构；Layout Contract v1 统一确定性行列、span、custom mount、Renderer、Server/HTML、AI context 与 validate。 |
+| P0 Layout Contract | 已完成 | Dashboard v9 拥有结构；Layout Contract v1 统一确定性行列、span、custom mount、Renderer、Server/HTML、AI context 与 validate。 |
 | P0 最终配置有效性 | 已完成 | Semantic Validation、inspect-layout、状态摘要、Runtime-aware trigger、紧凑 CLI、Chart Service 与 visual-check 已统一消费最终契约。 |
 | P0 Renderer 生命周期 | 已完成 | Plotly、ECharts、Perspective 在 Server/HTML 共用 mount→update→empty→restore→interaction→resize→dispose→export 行为矩阵；首屏 bootstrap 也进入 View ID 状态表。 |
 | P1 Component Package | 当前范围已完成 | Registry v5 已覆盖常用 Data Entry、View、Section、Renderer、Repeat 和 Presentation 组件；继续扩张必须由真实场景触发。 |
 | P1 人工参数编辑 | 已完成 | Server 可编辑 Query/Dashboard/Section/View 的默认值、静态候选项和同级顺序；revision、round-trip YAML、Schema 校验与原子写入保证只修改 `dashboard.yaml` 的受限子集。 |
-| P1 AI 开发效率评测 | 工具已完成，真实试验暂缓 | 成对任务、输入完整性、逐项验收和真实 Token 记录均已实现；试验方案尚未决定，不用仓库测试伪造结论。 |
-| P2 规模与浏览器矩阵 | 当前范围已完成 | 固定 10K/100K/1M 基准、流式 groupBy 优化，以及 Chromium/Firefox/WebKit 的窄屏与 Perspective 恢复组合矩阵均已有可复现证据。 |
-| 开源发布 | 本地发行完成 | `0.9.1` 日期交互、参数编辑、Server/HTML 样式与分享契约已通过本地发行门禁；正式对外授权仍等待许可证决定。 |
+| P1 AI Analysis Plane | A–E 已完成 | Output 语义、可信度、机器契约、使用统计、精确折叠、Evidence/Promote、批量执行、Arrow/Parquet 与 Browser/Pyodide 边界均已落地，并通过完整发行门禁。 |
+| P2 AI 开发效率评测 | 工具已完成，真实试验暂缓 | 成对任务、输入完整性、逐项验收和真实 Token 记录均已实现；试验方案尚未决定，不用仓库测试伪造结论。 |
+| P3 规模与浏览器矩阵 | 当前范围已完成 | 固定 10K/100K/1M 基准、流式 groupBy 优化，以及 Chromium/Firefox/WebKit 的窄屏与 Perspective 恢复组合矩阵均已有可复现证据。 |
+| 开源发布 | 本地发行完成 | `0.10.0` AI Analysis Plane A–E 已通过本地发行门禁；正式对外授权仍等待许可证决定。 |
 
-当前开发基线：Package `0.9.1`、Python 3.11–3.14、Dashboard `dataviz/dashboard/v8`、Presentation `dataviz/presentation/v2`、Source/Dataset/Interactive Transform `v2`、Dependency Contract `v5`、Layout Contract `v1`、State Snapshot `v1`、Browser Runtime `dataviz/runtime/v5`、Component Registry `5.4.0`。这些破坏式契约只接受当前严格字段，不保留旧 alias、自动迁移或第二套 Runtime。
+当前开发基线：Package `0.10.0`、Python 3.11–3.14、Dashboard `dataviz/dashboard/v9`、Presentation `dataviz/presentation/v2`、Source/Dataset/Interactive Transform `v2`、Dependency Contract `v5`、Layout Contract `v1`、State Snapshot `v1`、Browser Runtime `dataviz/runtime/v5`、Component Registry `5.4.0`。这些破坏式契约只接受当前严格字段，不保留旧 alias、自动迁移或第二套 Runtime。
 
 Authoring P0 的 A–G 已进入当前 Schema/Compiler/Runtime，并由 0.7.0 统一发行。复杂实现必须留在 Compiler/Runtime：普通 Dashboard 不手写依赖图、事务、revision 或回调；常见跨图联动最多新增一条声明。
 
@@ -28,11 +29,11 @@ Authoring P0 的 A–G 已进入当前 Schema/Compiler/Runtime，并由 0.7.0 �
 
 ### 数据、计算与状态
 
-- [x] Dashboard v8 只有 Query Parameter 与 scoped Controls 两个入口；Control 在 Dashboard/Section/View 统一声明，并以 `kind: selection | compute` 保留不同 delta、提交周期和失效路径。
+- [x] Dashboard v9 只有 Query Parameter 与 scoped Controls 两个入口；Control 在 Dashboard/Section/View 统一声明，并以 `kind: selection | compute` 保留不同 delta、提交周期和失效路径。
 - [x] Source、Dataset Transform 与 Interactive Transform 统一使用 `query_inputs` 将 canonical Query Parameter 映射到节点本地 alias；删除节点级 `query_params`。SQL placeholder 与三种 Python/Browser Context 只能读取本节点声明的 alias。
 - [x] `range_input/date` 可通过 `{parameter, part: start|end}` 投影为两个标量；Dependency Contract、Planner、Server/Browser Runtime、缓存证据、Resolved SQL、CLI Context 和 HTML Export 使用同一映射。
 - [x] Query Parameter 的 `single_input/date` 与 `range_input/date` 支持基于 Workspace IANA 时区的严格相对默认值；Range 由两个独立 Date Atom 组成，固定/相对端点可混用。编辑器每个端点只显示模式与当前值，Run 创建前解析为具体 ISO 日期并固化，Compute/Selection 不接受相对默认值。
-- [x] Select 候选域用严格的 `options.mode=static|infer` 区分封闭枚举与 Source 推导；`infer` 禁止值列表 `default`，多选初始状态由 `all_available`/`explicit` 意图驱动。
+- [x] Select 候选域用严格的 `options.mode=static|infer` 区分封闭枚举与 Source 推导；Query/Selection/Compute Select 统一使用 `initial`，动态候选优先保留有效交集，完全失效才回退初始策略。
 - [x] `selection_inputs` 是 Runtime 数据边界而非普通参数；三种 Interactive Runtime 都先对字段契约匹配的表输入应用 include Selection，再进入 Compute 逻辑。
 - [x] Source/Dataset Transform 与 Interactive Transform 使用两个 DAG、显式 Named Output、Schema Contract、provenance 和分支级并发。
 - [x] 独立分支完成后立即发布；局部失败、超时或取消不会等待或覆盖无关分支。
@@ -143,7 +144,7 @@ P0 不是以“底层支持了更多边”为完成，而以作者复杂度没�
 - [x] 默认 Renderer、Server、HTML Export、AI context 与 Validator 消费 Layout Contract；结构不再由 Python、CSS、Component 和 DOM 重复推导。
 - [x] `single`、`grid`、`split`、`comparison`、`chart-and-table`、`band` 与 Repeat 模板拥有明确 cardinality 和默认 span；显式 span 不被模板静默吞掉。
 - [x] 自定义 Canvas 使用 `mode: custom` 并只暴露稳定挂载点，不伪造任意 CSS 的静态布局。
-- [x] 示例、Gallery、Scaffold、内置文档和测试夹具已迁移；Dashboard v8 / Presentation v2 删除旧 Presentation 结构字段且无兼容 alias。
+- [x] 示例、Gallery、Scaffold、内置文档和测试夹具已迁移；Dashboard v9 / Presentation v2 删除旧 Presentation 结构字段且无兼容 alias。
 
 #### D. Semantic Validation 与静态布局检查
 
@@ -179,19 +180,78 @@ P0 不是以“底层支持了更多边”为完成，而以作者复杂度没�
 
 排序原因是：Selection resolver 决定“当前到底选了什么”；Linked Views 只是增加同一状态的 writer；Layout/Semantic Validation 决定作者写的结构是否真的生效；State Snapshot 让用户看见当前上下文；CLI、Chart Service 与浏览器视觉检查最后再压缩试错成本。这样每一步都建立在前一份唯一契约上，而不是用 UI 补丁掩盖状态问题。
 
-### P1：验证 AI 开发效率
+### P1：AI Analysis Plane（当前范围已完成）
+
+目标不是增加一套“给 AI 用的查询引擎”，而是让 AI 能搜索、理解并执行现有 Dashboard 的 Named Output，再把经过人审阅的试验结果晋升为普通 Workspace 资产。Dashboard Schema、Compiler 与 Dependency Contract 仍是事实来源；Catalog 只是可重建索引，Evidence 不变成第二个知识数据库。
+
+当前已完成“发现 → 执行 → 临时试验 → Evidence → Promote dry-run”，并完成使用统计、搜索概览压缩、批量/二进制输出、Browser/Pyodide 边界与发行门禁。A–E 均已完成。
+
+#### A. Output 语义、可见性与可信度
+
+- [x] 在每个 Base/Derived Named Output 附近增加 Output 级 `semantics`：`visibility: public|internal`、`title`、`purpose`、`grain`、`caveats`；不再从 Dashboard context 统一继承 grain，也不再把所有 Output 默认当作 public。
+- [x] 增加独立 `assurance.status: draft|reviewed|certified|deprecated`；visibility 只表示可发现性，不冒充可信度。reviewed/certified 必须记录 owner、reviewed_at 和可定位 evidence，deprecated 必须说明原因或替代 Output。
+- [x] 按适用性补充时间字段/时区/口径、指标单位与聚合语义、可关联字段与 cardinality；不强迫不含这些概念的 Output 填写空表单。
+- [x] public Output 缺少 title/purpose/grain 时不进入默认 Catalog 搜索；draft/deprecated 不进入 AI 默认的可信复用结果，但可通过精确引用检查。
+- [x] 作者文档、Scaffold 和示例 SQL 在每个阶段显式列出 Output 字段；对 public 或 reviewed/certified SQL Output 中的 `SELECT *` / `table.*` 提供稳定诊断，不误伤 `count(*)`。
+- [x] 更新 Scaffold、focused docs、示例与 validate；存量 Dashboard 先给出稳定迁移诊断，不因缺少新语义破坏原执行路径。
+
+#### 使用统计与搜索概览压缩
+
+- [x] 在 `.dataviz/usage.sqlite` 实现通用聚合表，以 `subject_kind + subject_ref + action_kind + actor_kind` 为主键，只保存 `use_count` 和 `last_used_at`。行为类型不做成专用列，以后增加行为无需迁移表结构。
+- [x] 当前只统计两种成功行为：人明确执行 Dashboard Query 成功后累加 `dashboard/query_succeeded/human`；AI 执行 `analyze run @output` 成功后累加 `output/analyze_run_succeeded/ai`。`all/search/show`、打开/刷新、失败与取消暂不记录。
+- [x] 使用 SQLite WAL、每进程独立 connection、单条 UPSERT、有界 `busy_timeout` 和短事务保证 Server/CLI 多进程不丢计数。统计写入是 best-effort，失败只记 warning，不得改变 Query/Analysis 成功结果；该库不进入 fingerprint 或 hot reload。
+- [x] Catalog 结果只按实现资产 hash、Source/Runtime、Adapter 逻辑引用、Query bindings 和 Output Contract 的完全一致性做精确折叠，返回 representative、occurrence count 和可展开 references；不做 SQL 语义等价推断。
+- [x] `top N` 在折叠后输出。当前先继续使用稳定确定性顺序，只暴露使用次数和最后使用时间；等累积真实数据后再决定排序公式。
+
+#### B. 机器契约与 provenance
+
+- [x] 为已使用的 `dataviz/analysis-entry/v1`、`dataviz/analysis-catalog/v1`、`dataviz/analysis-result/v1` 补齐可发布 JSON Schema、稳定错误码和 summary/debug/full 边界。
+- [x] 结果完整记录 reference/definition hash、Query Parameter、effective Controls、输入 Artifact/hash、Output kind/schema/rows/hash、duration、lineage、truncation 与可复制下一步；大结果默认只预览。
+- [x] 不同 detail 只改变证据量，不改变执行逻辑；Base/server-python/browser-js/browser-python 失败使用同一错误包络和可机器判断的恢复建议。
+
+#### 已落地的执行基础
+
+- [x] generation Catalog 使用 `CURRENT.json`、跨进程 lock 和不可变 SQLite generation；以 Workspace 相对路径 + SHA-256 定义闭包检查 freshness，可删除后重建。
+- [x] `analyze all/search/show/run` 支持稳定短别名、结构化过滤、grep-like 搜索、最小 Query DAG、Base/Derived/View 目标与三种 Interactive Runtime；不复制 Runtime。
+- [x] `dataviz/analysis-overlay/v1` 支持 SQL/File/Python/JS 实现替换、dry-run、不可变 Analysis Variant、独立 cache salt 与 run manifest；不写回 Dashboard/Catalog。
+- [x] Overlay 只允许契约不变时的 what-if；新增 DAG、组合多 Output 或改变 Schema 进入 Analysis Draft，不继续扩张 Overlay。
+
+#### C. Analysis Result/Evidence 与 Promote
+
+- [x] 定义 `dataviz/analysis-evidence/v1`，记录问题/假设、结论或断言、Result hash、lineage、生成者、审阅者和审阅状态；不默认复制大型结果。
+- [x] 提供 Promote dry-run/explain，把一次 Result/Evidence 转为可预览、可 validate、可 Git diff 审查的 Workspace 补丁；未经人确认不写入正式资产。
+- [x] Promote 支持三类结果：新的 Transform/Named Output、现有 semantics/caveat/deprecation 修订、契约测试/数据断言/小型证据 snapshot。
+- [x] 新 Output 一律从 draft 开始；Promote 不自动 certified，不绕开 owner/reviewer/evidence，不建立第二份 DAG 或知识库。
+
+#### D. Arrow/Parquet 与批量执行
+
+- [x] `analyze run` 补齐 Parquet/Arrow 文件输出；stdout 不直接打印二进制大结果，JSON summary 返回路径、hash、Schema、rows 和 truncation。
+- [x] 支持一次请求执行/提取多个 Output，共用 Query 闭包、Artifact 和浏览器会话；结果仍逐 Output 保留 reference、hash 和 lineage。
+- [x] browser-js/browser-python 按需加载 Pyodide、优先 Arrow 传输；先记录 cold start、Runtime ready、transform 和 extraction 分段耗时，再决定 browser pool 策略。
+
+#### E. 回归与交付门禁
+
+- [x] 覆盖 Catalog 增删改、并发写/读、构建失败回退、稳定快照重试、搜索/别名碰撞和 hash 精确折叠，并验证 Catalog 可删除重建。
+- [x] 用并发 Server/CLI 进程验证 usage UPSERT 不丢计数、`last_used_at` 单调保留较晚值、busy 有界退让和统计故障不污染成功执行。
+- [x] 端到端覆盖 SQL/File Base Output、Dataset Transform、三种 Interactive Runtime、默认/覆盖 Control、Overlay、Evidence/Promote、Arrow/Parquet、失败/超时/取消和无网络 Pyodide 提示。
+- [x] 用 feature-showcase 提供 reviewed/certified/deprecated 口径示例，通过 `validate → analyze search → analyze run → evidence → promote --dry-run`。
+- [x] 更新 README、DESIGN、focused docs、CLI `--help` 和 CHANGELOG；完成 Python/三浏览器套件、全部示例 strict validate、归档构建与干净安装冒烟后再发布。
+
+HTML Analysis Capsule、HTML Output 提取和远程分享链接分析不在当前路线图，也不预埋对应 Manifest、执行协议或安全层。现有 HTML 导出和分享链接仍只作为人类消费看板的已有能力；未来如有真实需求，再重新立项。
+
+### P2：验证 AI 开发效率
 
 评测工具已经完成，但真实成对试验按产品决定暂缓；这不阻塞 Runtime 工程工作，也不允许预设 Token 节省结论。
 
-- [ ] 把架构上的封装转化为真正傻瓜式的作者体验：CLI 文档与 Scaffold 按任务渐进披露能力。普通声明式看板默认只提供 `Adapter → Source → View → Layout` 最小路径；只有任务实际需要时，才加载 Control、Interactive Transform、Custom Renderer 及其传递依赖契约，避免 AI 或人类为简单看板阅读完整 Runtime 上下文。
-- [ ] 为渐进披露建立机器可读路由与回归：CLI 能根据任务/组件返回最小闭包，Scaffold 提供 minimal、interactive、custom-renderer 等明确层级；每条路径独立通过 `validate → report → visual-check`，并检查文档没有引用未进入当前层级的内部概念。
+- [x] 把架构上的封装转化为真正傻瓜式的作者体验：CLI 文档与 Scaffold 按任务渐进披露能力。普通声明式看板默认只提供 `Adapter → Source → View → Layout` 最小路径；只有任务实际需要时，才加载 Control、Interactive Transform、Custom Renderer 及其传递依赖契约，避免 AI 或人类为简单看板阅读完整 Runtime 上下文。
+- [x] 为渐进披露建立机器可读路由与回归：CLI 能根据任务/组件返回最小闭包，Scaffold 提供 minimal、interactive、custom-renderer 等明确层级；每条路径独立通过 `validate → report → visual-check`，并检查文档没有引用未进入当前层级的内部概念。
 - [ ] 使用相同模型、客户端、权限和时间预算，对五类固定任务执行多次 Dataviz / standalone HTML 随机顺序成对试验。
 - [ ] 发布原始 JSONL、环境说明、逐项验收证据、真实 input/output Token、首次成功率、修正轮次和耗时。
 - [ ] 根据真实 friction 压缩 focused context、CLI docs 和 Scaffold；不预设固定 Token 上限或节省比例。
 
 评测协议见 [AI Authoring 成对评测](docs/authoring-evaluation.md)。
 
-### P2：规模与性能证据
+### P3：规模与性能证据
 
 - [x] Arrow 传输记录行数、字节和耗时；Renderer 记录 mount/update/empty/failure/耗时。
 - [x] `benchmark --browser-runtime` 等待传输、Interactive Transform、Repeat reconciliation 和已挂载 View 进入稳定状态，并分别记录 Query、报告生成和页面就绪时间。
@@ -199,14 +259,14 @@ P0 不是以“底层支持了更多边”为完成，而以作者复杂度没�
 - [x] 固定并运行 10K、100K、1M 行 Query → Arrow → Interactive → Renderer 基准，记录 CLI 峰值 RSS、浏览器进程树 RSS、页面耗时和三轮 dispose 回落；原始结果见 `benchmarks/results/`。
 - [x] 依据 1M 证据把 Worker/Data API 的 groupBy 改为单遍流式聚合：页面就绪中位数约降低 23%，浏览器峰值增量约降低 20%。当前不实现通用服务端分页或 Record Batch DSL；原始明细 View 另行基准触发。
 
-### P2：浏览器可靠性
+### P3：浏览器可靠性
 
 - [x] Chromium 覆盖独立分支渐进发布、失败隔离、取消后终态、空 View、大数据 Arrow 和局部重绘。
 - [x] 当前完整 E2E 契约套件在 Chromium、Firefox、WebKit 通过，覆盖渐进 Query/Interactive 分支、Selection 级联、局部更新、Perspective 与 HTML Export。
 - [x] Chromium、Firefox、WebKit 均通过 390×520 Query Header 内联面板、显式开合、单列响应式、内部滚动、Select 键盘/ARIA，以及 Perspective 三轮 dispose/reload/wheel 恢复矩阵。
 - [x] Control、View、Section 七状态矩阵和 Select 10/100/1,000 真实选项 Story 已进入 Gallery 与 Chromium 契约测试。
 
-### P2：内部归属与可维护性
+### P3：内部归属与可维护性
 
 这些工作不改变当前 DSL，但会降低下一次替换前端框架或拆分 Runtime 的迁移成本。
 
@@ -235,7 +295,7 @@ P0 不是以“底层支持了更多边”为完成，而以作者复杂度没�
 
 ## 按真实需求触发
 
-以下能力不进入当前承诺：`number-range`、month/quarter/year 日期控件、Transfer/Entity Picker/Drawer、单文件内联 Pyodide 和多套命名 Presentation。只有真实 Dashboard 或框架替换证明现有边界不足时才实现。
+以下能力不进入当前承诺：`number-range`、month/quarter/year 日期控件、Transfer/Entity Picker/Drawer、单文件内联 Pyodide 和多套命名 Presentation。只有真实 Dashboard 或框架替换证明现有边界不足时才实现。Analysis Plane 的范围单独以 P1 末尾的本地 Workspace 闭环为准。
 
 当前是可信单机工具，不做多租户 CPU/内存配额或不可信代码沙箱。
 
@@ -247,8 +307,11 @@ P0 不是以“底层支持了更多边”为完成，而以作者复杂度没�
 - 可编辑数据逻辑、依赖、布局或样式的通用可视化开发器；Mosaic/坐标布局和旧 Widget 协议。
 - 让 Pyodide/Python 直接操作 DOM 或成为第二套 View Renderer。
 - Interactive Transform 隐式访问 Adapter 或重新查询 Source。
+- 为 Analysis Plane 复制 Dependency Contract、Query Executor、InteractionExecutor 或 Browser Runtime。
+- 让 AI 通过图像像素反推本可直接读取的 Base/Derived Output。
+- 为 HTML Analysis Capsule 或远程分析预埋空 Manifest、执行协议、安全层或第二套 Runtime。
 - 在没有真实需求和评测证据前增加空接口、Runtime 或重复组件。
 
 ## Definition of Done
 
-公开能力必须同时具备：严格 Schema 与稳定错误码、`validate` 提前发现、机器可读 CLI 文档、默认样式和扩展 hook、契约与真实浏览器测试、Server/HTML 一致行为、局部更新与状态隔离，以及准确的 README/DESIGN/CHANGELOG。计划项只有在实现、测试和文档都完成后才能勾选。
+公开能力必须同时具备：严格 Schema 与稳定错误码、`validate` 提前发现、机器可读 CLI 文档、默认样式和扩展 hook、契约与真实浏览器测试、Server/HTML 一致行为、局部更新与状态隔离，以及准确的 README/DESIGN/CHANGELOG。Analysis Plane 还必须证明 Output 语义和可信度可审查、Catalog 可重建且并发安全、CLI 复用 Server/Browser Runtime 的同一执行语义、Result/Evidence 携带可验证 provenance，且 Promote 只产生可 validate 和 Git 审查的普通 Workspace 变更。计划项只有在实现、测试和文档都完成后才能勾选。

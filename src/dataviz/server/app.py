@@ -28,6 +28,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.background import BackgroundTask
 
 from dataviz.artifacts import ArtifactDescriptor, ArtifactStore
+from dataviz.analysis import refresh_analysis_catalog_async
 from dataviz.components import component_runtime_assets
 from dataviz.content_templates import (
     interpolate_dashboard_content,
@@ -119,6 +120,7 @@ class ParameterEditorChoiceRequest(ApiRequest):
 class ParameterEditorItemRequest(ApiRequest):
     id: str
     default: Any = None
+    initial: dict[str, Any] | None = None
     choices: list[ParameterEditorChoiceRequest] | None = None
 
 
@@ -292,6 +294,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 changed_paths=changed_paths,
                 message="Workspace changes loaded.",
             )
+            refresh_analysis_catalog_async(workspace_root)
 
     workspace_watcher = WorkspaceFileWatcher(workspace_root, publish_workspace_change)
     app.state.workspace_change_journal = change_journal

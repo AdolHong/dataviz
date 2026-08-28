@@ -69,12 +69,21 @@
         }
       }
     };
-    const releaseWheelAtBoundary = host => {
-      if (!host || host.__datavizWheelBoundary) return;
+    const releaseWheelAtBoundary = (
+      host,
+      enabled = () => true,
+      ignoreNestedScroll = false,
+    ) => {
+      if (!host) return;
+      host.__datavizWheelBoundaryEnabled = enabled;
+      host.__datavizWheelBoundaryIgnoreNestedScroll = ignoreNestedScroll;
+      if (host.__datavizWheelBoundary) return;
       host.__datavizWheelBoundary = true;
       host.addEventListener('wheel', wheelEvent => {
         if (
-          wheelEvent.ctrlKey
+          wheelEvent.defaultPrevented
+          || !host.__datavizWheelBoundaryEnabled?.()
+          || wheelEvent.ctrlKey
           || !wheelEvent.deltaY
           || Math.abs(wheelEvent.deltaX) > Math.abs(wheelEvent.deltaY)
         ) return;
@@ -87,15 +96,16 @@
             && item.scrollHeight > item.clientHeight + 1;
         });
         const direction = Math.sign(wheelEvent.deltaY);
-        const canConsume = candidates.some(item => direction > 0
-          ? item.scrollTop + item.clientHeight < item.scrollHeight - 1
-          : item.scrollTop > 1);
+        const canConsume = !host.__datavizWheelBoundaryIgnoreNestedScroll
+          && candidates.some(item => direction > 0
+            ? item.scrollTop + item.clientHeight < item.scrollHeight - 1
+            : item.scrollTop > 1);
         if (canConsume) return;
         const page = document.scrollingElement || document.documentElement;
         const pageCanConsume = page
-          && page.scrollHeight > page.clientHeight + 1
+          && page.scrollHeight > global.innerHeight + 1
           && (direction > 0
-            ? page.scrollTop + page.clientHeight < page.scrollHeight - 1
+            ? page.scrollTop + global.innerHeight < page.scrollHeight - 1
             : page.scrollTop > 1);
         if (!pageCanConsume) return;
         const multiplier = wheelEvent.deltaMode === WheelEvent.DOM_DELTA_LINE
@@ -234,11 +244,17 @@
       plotly:Object.freeze({
         async mount(host, specification = {}, root = host?.closest?.('.dv-view')) {
           if (!global.Plotly) throw new Error('Plotly.js is not loaded');
+          const config = plotlyConfig(specification.config || {});
+          releaseWheelAtBoundary(
+            host,
+            () => host?._context?.scrollZoom !== true,
+            true,
+          );
           await global.Plotly.newPlot(
             host,
             specification.data || [],
             plotlyTheme(root, specification.layout || {}),
-            plotlyConfig(specification.config || {}),
+            config,
           );
           const state = {engine:'plotly', node:host, specification, observer:null};
           state.observer = new ResizeObserver(() => {

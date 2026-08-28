@@ -1,8 +1,10 @@
-schema: dataviz/dashboard/v8
+schema: dataviz/dashboard/v9
 kind: dashboard
 id: parameter-playground
 title: 参数试验场
 description: Query Parameter 决定重新取数；Selection-kind Control 只改变已经拿到的数据样本。
+context:
+  grain: 每个生成序号一行，记录分组、数值和派生分数
 adapters: {warehouse: demo-duckdb}
 query_parameters:
   - {id: multiplier, type: single_input, value_type: number, label: 数值倍率, default: 2}
@@ -14,7 +16,7 @@ controls:
     type: multiple_select
     value_type: text
     label: 分组
-    default: [Alpha, Beta, Gamma]
+    initial: {mode: values, values: [Alpha, Beta, Gamma]}
     options:
       mode: static
       choices:

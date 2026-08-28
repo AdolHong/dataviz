@@ -1,8 +1,10 @@
-schema: dataviz/dashboard/v8
+schema: dataviz/dashboard/v9
 kind: dashboard
 id: date-parameter-lab
 title: 日期参数实验室
 description: 演示单日期与 Range Picker 的相对默认值、SQL 投影和参数编辑。
+context:
+  grain: 每次 Query Run 一行，记录解析后的单日与日期范围
 adapters: {warehouse: demo-duckdb}
 
 query_parameters:

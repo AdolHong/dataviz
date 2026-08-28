@@ -21,6 +21,7 @@ from dataviz.errors import DatavizError, ExecutionFailure
 from dataviz.maintenance import cleanup_workspace_storage
 from dataviz.workspace.loader import LoadedWorkspace
 from dataviz.workspace.controls import resolve_compute_values, resolve_selection_states
+from dataviz.analysis.usage import dashboard_query_usage, record_usage_best_effort
 
 
 @dataclass
@@ -360,6 +361,11 @@ class RunManager:
                         event_limit,
                     )
                     record.condition.notify_all()
+                if result.status == "ready":
+                    record_usage_best_effort(
+                        workspace.root,
+                        dashboard_query_usage(dashboard_id),
+                    )
             except Exception as exc:
                 with record.condition:
                     record.status = "error"

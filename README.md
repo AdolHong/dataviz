@@ -1,16 +1,60 @@
 # Dataviz
 
-Dataviz 是一套 **workspace-first、AI-friendly** 的 Python 看板工具。
+**让一个 Workspace 同时成为人类可交互的看板，以及 AI 可发现、可执行、可验证的分析空间。**
 
-它不把分析锁在中心服务或可视化编辑器里。一个 Dashboard 就是一个普通文件夹，可以进入 Git、复制给同事并接受代码审查；数据连接和凭证留在每个人自己的 Workspace 中。
+Dataviz 是一套 **workspace-first、AI-friendly** 的本地分析应用工具。Dashboard 不是机器不可读的交付终点：人通过 Presentation Plane 看图、查询和交互；AI 通过 Analysis Plane 搜索已有口径、执行真实 Named Output、观察结果并继续探索。两者共用同一份 Dependency Contract、Runtime 和 Workspace 资产。
 
-- 人使用 `dataviz serve` 浏览、查询和交互。
-- AI 与自动化使用 CLI 校验、查数、计算、调试和导出 HTML。
-- 普通看板只写声明式 YAML、SQL/Python/JavaScript 逻辑和简单布局。
-- 特殊页面可以逐级覆盖 Theme、Component、Renderer、CSS/JS，完整 Canvas 是最后的逃生口。
-- Server 与导出 HTML 默认使用连续白色 Shell；Server Header 横跨屏幕，左侧 Dataviz 品牌按钮负责展开/收起其下方 Sidebar，Query 状态灯紧随品牌。Header、Sidebar、Workbench 和 `business` Canvas 不再各自争夺注意力；靛蓝用于交互与默认分析序列，绿色只用于 Ready/成功状态。
-- Server Header 把 Controls 放在 Run 左侧；Query Pipeline 不再是操作按钮，而是 Dataviz 品牌旁的一组取数节点状态灯，悬停显示任务名、点击查看执行证据。每个 View 在类型标签左侧投影自己的依赖链与 Renderer 灯，但仅在 Running/Stale/Error 等需要注意的状态出现；Ready 与 Not run 自动隐藏。
-- Server 提供受限的参数编辑入口：右键 Run 编辑 Query Parameter，右键 Dashboard/Section/View Controls 编辑对应作用域。人可以修改默认值、静态候选项和同级顺序；面板内不常驻额外编辑按钮。它只原子写回 `dashboard.yaml`，不允许修改 ID、类型、依赖、数据逻辑、布局或样式；数据推断的候选项保持只读。编辑默认配置不会覆盖当前分析状态，新默认值在下一次初始化该 Dashboard 时生效。导出 HTML 不包含编辑能力。
+传统的 AI 看板开发往往是一条开环生产线：
+
+```text
+AI 写 SQL / HTML → 人类看图 → 分析停在页面里
+```
+
+Dataviz 把它变成可积累的分析闭环：
+
+```text
+Workspace → Named Outputs ─┬→ Presentation Plane → 人类使用 / Review ─┐
+                           └→ Analysis Plane → AI Explore / Overlay / Result ─┤
+                                                                          ↓
+Workspace ←────────────── Promote ← Evidence ←───────────────────────┘
+```
+
+AI 不需要从页面像素反推数据，也不必每次重新猜表、粒度和 SQL：
+
+```bash
+dataviz analyze search myworkspace '收入|利润'
+dataviz analyze show myworkspace @base_ABCD123456
+dataviz analyze run myworkspace @base_ABCD123456 --query-param region=华东
+```
+
+一次探索可以使用 Overlay 替换实现而不污染正式资产；结果可以沉淀为带 hash、lineage 和审阅状态的 Evidence，再通过 Promote 生成可 `validate`、可 Git diff 的 Workspace 变更。人类已经验证的分析工作，因此会成为下一次 AI 探索的起点。
+
+## 设计信念
+
+- **一个事实来源**：Workspace 是可执行分析资产的唯一正式来源；Catalog 只是可删除重建的索引。
+- **两种消费界面**：人类消费 Dashboard/HTML，AI 消费同一份 Base/Derived Named Output。
+- **闭环 AI 探索**：`search → show → run → observe → overlay → verify`，不停在盲写分析语句。
+- **可审查的知识沉淀**：Evidence 不复制大结果，Promote 不自动写回或认证 Output。
+- **复杂度下沉**：作者只声明参数、数据节点、Controls、Views/Sections 和布局；Compiler/Runtime 拥有依赖图、状态事务、缓存和 Renderer 生命周期。
+- **文件即资产**：Dashboard 是普通文件夹，可进入 Git、复制和代码审查；数据连接与凭证留在本地 Workspace。
+
+## 人负责问题，AI 负责实现
+
+使用 Dataviz 不应要求人先学会完整 Schema、Runtime 或前端框架。人负责说清业务问题、数据边界和验收标准，并审阅最终分析；AI 负责发现当前版本的最小契约、复用已有 Output、实现 Dashboard/Transform，再用真实执行和浏览器结果验证交付。
+
+AI 不必读取 Runtime 源码或一次性装载全部文档。它可以从机器可读入口获取任务的最小上下文，然后完成闭环：
+
+```text
+理解需求
+  → docs/context 发现最小契约
+  → analyze search/show/run 复用已有分析资产
+  → scaffold/编辑 Workspace
+  → validate/report/visual-check
+  → 读取真实结果并修正
+  → 交给人审阅
+```
+
+这些命令是 AI 的工作面，不是人使用 Dataviz 之前的必修课。完整的精确命令和字段仍由当前安装版本的 `dataviz docs`、`dataviz schemas`、`dataviz components` 和 `dataviz scaffold` 提供。
 
 ## 核心模型
 
@@ -30,7 +74,9 @@ Query Parameter → Adapter → Source → Dataset Transform（可选）
                               ↓
                       Derived Named Output
                               ↓
-                   View Renderer → Presentation
+                  Base / Derived Named Output
+                    ├─→ View Renderer → Presentation Plane → 人类看图
+                    └─→ Analysis Catalog / CLI → Analysis Plane → AI 探索
 ```
 
 - Query Parameter 决定取什么数据，提交后创建新的 Query Run。
@@ -49,7 +95,7 @@ dataviz dependencies myworkspace sales-overview --format json
 
 输出会列出 Query Parameter 最终需要重跑的节点、受影响的动态 option Control 和 View，并区分 Control 的结构 scope、直接父节点、传递祖先/后代、直接数据 View、Interactive consumer、派生 View与内容绑定。若表格 Output 没有声明足以保证字段存在的 Schema，直接筛选关系会明确标记为 runtime field check，而不是伪装成静态精确关系。
 
-Selection 使用唯一的 `{intent, values}` 状态：`all_available` 会随候选域扩张，`explicit` 保留用户指定子集，`explicit + []` 明确表示不选择任何样本。普通 Control、Repeat、View 筛选、三种 Interactive Runtime、tab 恢复与导出 HTML 不再各自猜测空数组语义。optional Single Select 可声明 `clearable: true`；required Single 始终恰好一个值。
+Selection 使用唯一的 `{intent, values}` 状态：`all_available` 会随候选域扩张，`explicit` 保留用户指定子集，`explicit + []` 明确表示不选择任何样本。候选域变化时优先保留有效交集；原非空选择完全失效时才恢复 `initial`，用户主动选择的空集始终保留。optional Single Select 可声明 `clearable: true`；required Single 始终恰好一个值。
 
 图表点选或表格行选中通过 View 侧的一条 `control_binding` 写回现有 Selection Control，而不是连接两个 View callback：
 
@@ -72,14 +118,49 @@ views:
 `validate` 会在最终 Layout/Dependency/Renderer 配置上继续做 Semantic Validation，并区分阻塞发布的 error/warning 与非阻塞 advice。`inspect-layout` 输出编译后的 rows、span 和来源；`visual-check` 会真正打开 Server 与导出 HTML，保存截图并检查溢出、遮挡、零高度、弹层裁切和永久 Loading：
 
 ```bash
+pip install "ai-dataviz[visual-check]"
+python -m playwright install chromium
 dataviz validate myworkspace --dashboard sales-overview --strict
 dataviz inspect-layout myworkspace sales-overview --format json
 dataviz visual-check myworkspace sales-overview --target both
 ```
 
-默认画布还会从 `dataviz/state-snapshot/v1` 自动展示当前已提交 Query、applied Selection 和 committed Compute；未提交 Compute 只显示为“待应用”，不会冒充当前结果。Custom Renderer 绘图优先使用 `context.charts.plotly/echarts`，由平台统一 Theme、页面滚轮、Resize、Update 和 Dispose。
+AI 或脚本需要复用看板取数口径时，不必解析页面或复制 Dashboard。Analysis Plane 会从可重建 Catalog 中列出、正则搜索并执行现有 Named Output；短别名在定义修改后保持稳定：
 
-Select 必须显式声明候选域来源：`options.mode: static` 表示由 Dashboard 维护封闭 `choices`，`options.mode: infer` 表示从数据推导。`infer` 不写随维度成员漂移的 `default` 值列表；多选默认跟随全部可用项，需要初始为空时使用 `initial: empty`。动态域不会从依赖当前 Selection 的 Derived Output 反推；Runtime 会追溯不可变 Base Output，复杂或多输入场景可显式写 `options.source: source:<id>/<output>`。`dataviz validate` 会提前拒绝未知、非表格、Interactive Output 或无法提供字段的 option domain。
+```bash
+dataviz analyze all myworkspace
+dataviz analyze search myworkspace '收入|工资|年入|月入'
+dataviz analyze all myworkspace --top 20
+dataviz analyze search myworkspace '收入|利润' --expand-occurrences
+dataviz analyze show myworkspace @base_ABCD123456 --detail full
+dataviz analyze run myworkspace @base_ABCD123456 --query-param region=华东
+dataviz analyze run myworkspace @drv_ABCD123456 --also @drv_EFGH567890
+dataviz analyze run myworkspace @base_ABCD123456 \
+  --format arrow --destination result.arrow
+```
+
+Base/Derived Output 可声明 `semantics.visibility/title/purpose/grain/caveats`、独立 `assurance`，以及按需的 time/measures/relationships。默认发现只返回 public 且 reviewed/certified 的可信口径；internal、draft、deprecated 仍可按精确 alias 检查和执行，也可用 `--include-internal --include-untrusted` 审计。`all/search` 默认只对实现与契约 hash 完全一致的 occurrence 做精确折叠，可展开 references 或关闭折叠；本地 `usage.sqlite` 的成功次数/最近时间只是 best-effort 排序证据，不影响执行。Arrow/Parquet 写入文件，stdout 返回带路径与 hash 的标准 JSON summary。
+
+`show --include-code` 只在同时使用 `--detail full` 时返回目标闭包内已脱敏的 SQL/JS/Python 文本；大型数据文件只返回路径、大小与 hash。临时实验使用一次性 Overlay，不修改原 Dashboard、Catalog 或正式缓存：
+
+```bash
+dataviz analyze run myworkspace @drv_ABCD123456 \
+  --overlay experiment.yaml --dry-run
+dataviz analyze run myworkspace @drv_ABCD123456 \
+  --overlay experiment.yaml
+dataviz analyze evidence myworkspace result.json \
+  --question '口径是否可复用？' --conclusion '结论' \
+  --status reviewed --reviewer alice
+dataviz analyze promote myworkspace evidence_... proposal.yaml --dry-run
+```
+
+Evidence 只保存 Result hash、lineage、结论/断言与可选小 snapshot；Promote 只生成经过临时 Workspace validate 的 Git diff 预览，不自动写回或认证 Output。Analysis CLI 复用 Server Query、Interaction 和 Browser Runtime，只面向本地可信 Workspace 代码，不是不可信代码沙箱。完整契约见 [AI Analysis Plane](docs/analysis-plane.md)。
+
+Runtime 会用 `dataviz/state-snapshot/v1` 维护已提交 Query、applied Selection、committed/draft Compute 和 stale 状态，但默认画布不机械复述这些值；只有 Presentation 显式启用分析状态摘要时才展示，未提交 Compute 会标记为“待应用”，不会冒充当前结果。Custom Renderer 绘图优先使用 `context.charts.plotly/echarts`，由平台统一 Theme、页面滚轮、Resize、Update 和 Dispose。
+
+Select 必须显式声明候选域来源：`options.mode: static` 表示由 Dashboard 维护封闭 `choices`，`options.mode: infer` 表示从数据推导。Query、Selection 和 Compute 的 Select 统一使用 `initial`：多选支持 `all/empty/values`，单选支持 `first/empty/value`；未声明时分别默认 `all` 和 `first`。非 Select 输入继续使用 `default`。动态域不会从依赖当前 Selection 的 Derived Output 反推；Runtime 会追溯不可变 Base Output，复杂或多输入场景可显式写 `options.source: source:<id>/<output>`。`dataviz validate` 会提前拒绝未知、非表格、Interactive Output 或无法提供字段的 option domain。
+
+非 Select 输入没有候选池恢复问题：`single_input`、`multiple_input`、`range_input` 的 `default` 会按 text / boolean / integer / number / date 及 min/max/step/date bounds 校验；用户修改后的值会稳定保留。Slider、DatePicker、Checkbox 等仅选择呈现方式，不会从 `min`、`false` 或“今天”隐式生成业务默认值。
 
 Selection 候选项之间的联动通过 `depends_on` 显式声明直接父节点。作用域前缀不会填写 owner id：`dashboard.province` 指当前 Dashboard，`section.city` 指当前所在 Section，`view.dow` 指当前 View。每项只写直接父节点；Compiler 计算传递闭包与拓扑顺序，因此 `dates → dow → city → province` 不需要把所有祖先重复写在 `dates` 上：
 
@@ -106,7 +187,7 @@ Query Run 的可达 Base Output 会写入 Workspace 的 `.dataviz/runs/<run-id>/
 
 未显式填写 `trigger` 时，`browser-js`/`browser-python` 默认 `auto`，`server-python` 默认 `apply`。CLI 的 `query`、`output`、`compute` 默认返回紧凑摘要；排错时再加 `--detail debug`，只有确实需要完整执行信封时才使用 `--detail full`。
 
-当前契约是 `dataviz/dashboard/v8`、`dataviz/dependency-contract/v5` 与 `dataviz/runtime/v5`。项目处于 `0.x` 阶段，不兼容更早的实验性 Dashboard/Transform 字段，也不在 Runtime 中保留迁移分支。
+当前契约是 `dataviz/dashboard/v9`、`dataviz/dependency-contract/v5` 与 `dataviz/runtime/v5`。项目处于 `0.x` 阶段，不兼容更早的实验性 Dashboard/Transform 字段，也不在 Runtime 中保留迁移分支。
 
 ## Query Parameter 与日期范围
 
@@ -142,12 +223,18 @@ outputs: {main: {kind: table}}
 ```
 
 ```sql
-select *
+select
+  order_id,
+  customer_id,
+  revenue,
+  job_date
 from sales
 where job_date between :start_date and :end_date
 ```
 
 `query_inputs` 的 key 是节点私有 alias，也是 SQL placeholder 或 `context.query_inputs` 的 key。字符串值可简写直接绑定，例如 `warehouse_id: warehouse_id`；`part: start | end` 只允许用于 `range_input/date`。
+
+可复用 SQL Output 应在每个查询阶段显式列出字段，避免 `SELECT *` 或 `table.*`。否则上游表新增字段会在无代码修改时改变 Output Schema、脱敏边界、hash 和下游行为。`count(*)` 不属于通配字段投影。
 
 相对日期只允许用于 Query Parameter 的 `single_input/date` 与 `range_input/date` 默认值。`today` 按 `workspace.context.timezone` 解析；页面首次载入或 CLI Run 创建时会转换为具体 ISO 日期，之后 Run、缓存和 HTML 都保存该具体值。不同浏览器 tab 各自初始化并记忆自己的值，不会在报告打开时重新计算“今天”。
 
@@ -190,7 +277,7 @@ uv sync --python 3.12 --extra dev --no-editable \
 从发行 ZIP 安装时：
 
 ```bash
-python -m pip install ./ai-dataviz-0.9.1.zip
+python -m pip install ./ai-dataviz-0.10.0.zip
 dataviz version
 dataviz serve /path/to/workspace --port 8080
 ```
@@ -301,11 +388,13 @@ control_panels:
 
 Query Panel 的 `columns` 是 1–6 的最大列数，`column_width` 是每轨目标宽度（160–600 px，默认 280）。Runtime 依据面板自身可用宽度计算实际列数，因此同一份配置会自然降为 1、2、3……列；参数较少时轨道不会用 `1fr` 拉满整行，而是在右侧保留空白，窄屏才降为单列满宽。每个控件默认 `span: 1`，确有需要时可在 `control_components.<key>.span` 显式设为 `2`。Dashboard/Section/View Controls 默认单列；只有明确需要并排时才显式选择 `template: grid` 与 `columns`，暂不把 Query 的自适应密度规则扩散到局部 Controls。值、校验、级联、tab 状态和 Query/Interactive 执行仍由共享 Runtime 管理；导出 HTML 中 Query 变为固定快照，Controls 继续可交互。
 
+Server 还提供受限的人工调参入口：右键 Run 编辑 Query Parameter，右键 Dashboard/Section/View Controls 编辑对应作用域。编辑器只允许修改默认值、静态候选项和同级顺序，并以 revision、完整 Schema 校验和原子替换写回 `dashboard.yaml`；ID、类型、依赖、数据逻辑、布局和样式仍只通过文件开发。导出 HTML 永远是只读报告。
+
 `auth/adapters.yaml` 保存可提交的非敏感连接定义，`auth/adapters.local.yaml` 以同名 Adapter 覆盖本地凭证且必须被 Git 忽略。只有这两个位置会被加载，避免根目录旧文件或“示例文件”意外覆盖实际配置。Dashboard 只引用 Workspace Adapter 的逻辑名称，不保存账号密码。内置数据入口包括本地文件、DuckDB、MySQL、StarRocks 和可信 Python Source。
 
 当前 `dataviz serve` 的受支持部署方式是：一个 Workspace 对应一个 Dataviz Server 进程。Server 没有账号体系或 HTTP 鉴权，默认只允许回环地址；远程监听必须显式传入 `--allow-remote`，并由可信网络、反向代理或其他外部边界负责访问控制。Run、Navigation 和持久缓存的协调锁是进程内锁；不要让多个 Server 进程同时写同一个 Workspace 或同一个报告路径。修改 Runtime 并发上限后需重启 Server。
 
-需要生成配置时，先运行 `dataviz scaffold --list --format json` 获取当前安装版本真正支持的 Recipe；Component ID 与 Scaffold Recipe 不是同一套名字。生成或修改后始终运行 `dataviz validate <workspace>`。Custom Renderer 若直接调用 Plotly，必须默认传入 `scrollZoom: false`，避免图表截获 Dashboard 页面滚轮；只有用户明确要求图内滚轮缩放时才设为 `true`。
+新建普通看板先运行 `dataviz docs --task minimal --format json`，只读取 `Adapter → Source → View → Layout` 最小路径，再用 `dataviz scaffold minimal --id <dashboard> --output <workspace>` 生成完整 Workspace。只有任务确实需要 Query 后交互或自定义渲染时，才切换到 `interactive` 或 `custom-renderer`；机器可读约定见 [渐进式作者入口](docs/progressive-authoring.md)。`dataviz scaffold --list --format json` 会列出当前安装版本支持的完整 profile 与片段 Recipe。生成或修改后始终运行 `validate → report → visual-check`。Custom Renderer 若直接调用 Plotly，必须默认传入 `scrollZoom: false`，避免图表截获 Dashboard 页面滚轮；只有用户明确要求图内滚轮缩放时才设为 `true`。
 
 ## 文档
 
@@ -316,6 +405,8 @@ Query Panel 的 `columns` 是 1–6 的最大列数，`column_width` 是每轨�
 - [代码实现索引](docs/product-architecture.md)
 - [版本与发布流程](docs/versioning-and-release.md)
 - [AI 开发效率评测协议](docs/authoring-evaluation.md)
+- [渐进式作者入口](docs/progressive-authoring.md)
+- [AI Analysis Plane](docs/analysis-plane.md)
 - [Runtime 性能基线](docs/runtime-performance.md)
 - [变更记录](CHANGELOG.md)
 

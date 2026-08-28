@@ -158,6 +158,9 @@ class LoadedDashboard:
     presentation: PresentationDefinition | None = None
     presentation_diagnostics: list[Diagnostic] | None = None
     readme: str = ""
+    # Internal execution metadata for an immutable, one-run Analysis Variant.
+    # This is never populated by Workspace loading and is not part of the DSL.
+    analysis_overlay: dict[str, Any] | None = None
     _dependency_contract: DashboardDependencyContract | None = dataclass_field(
         default=None,
         init=False,

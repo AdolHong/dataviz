@@ -1,10 +1,37 @@
 from __future__ import annotations
 
+import re
+
 from dataviz.errors import Diagnostic
 from dataviz.value_contract import static_control_choices
 from dataviz.view_contracts import VIEW_TEMPLATE_CONTRACTS
 from dataviz.workspace.controls import scoped_control_registry
 from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace
+
+
+def _sql_projects_wildcard(statement: str) -> bool:
+    without_comments_or_strings = re.sub(
+        r"--[^\n]*|/\*.*?\*/|'(?:''|[^'])*'",
+        " ",
+        statement,
+        flags=re.DOTALL,
+    )
+    for match in re.finditer(
+        r"\bselect\b(?P<projection>.*?)\bfrom\b",
+        without_comments_or_strings,
+        flags=re.IGNORECASE | re.DOTALL,
+    ):
+        projection = re.sub(
+            r"^\s*(?:distinct|all)\b", "", match.group("projection"), flags=re.IGNORECASE
+        )
+        for item in projection.split(","):
+            expression = item.strip()
+            if expression == "*" or re.fullmatch(
+                r"(?:[A-Za-z_][A-Za-z0-9_]*|\"[^\"]+\")\s*\.\s*\*",
+                expression,
+            ):
+                return True
+    return False
 
 
 def _diagnostic(
@@ -188,6 +215,121 @@ def validate_dashboard_semantics(dashboard: LoadedDashboard) -> list[Diagnostic]
                     f"Browser Transform {transform_id} uses apply; use auto unless the calculation is intentionally expensive",
                     f"interactive_transforms.{transform_id}.trigger",
                     {"transform": transform_id, "runtime": transform.runtime},
+                )
+            )
+
+    analysis_outputs = [
+        (f"source:{identifier}/{name}", output, source.description)
+        for identifier, (_, source) in dashboard.sources.items()
+        for name, output in source.outputs.items()
+    ]
+    analysis_outputs.extend(
+        (f"dataset:{identifier}/{name}", output, transform.description)
+        for identifier, (_, transform) in dashboard.dataset_transforms.items()
+        for name, output in transform.outputs.items()
+    )
+    analysis_outputs.extend(
+        (f"interactive:{identifier}/{name}", output, transform.description)
+        for identifier, (_, transform) in dashboard.interactive_transforms.items()
+        for name, output in transform.outputs.items()
+    )
+    legacy_outputs = sorted(
+        reference
+        for reference, output, _owner_description in analysis_outputs
+        if output.semantics is None
+    )
+    missing_purpose = sorted(
+        reference
+        for reference, output, owner_description in analysis_outputs
+        if output.semantics is None and not (output.description or owner_description).strip()
+    )
+    missing_grain = not str(definition.context.get("grain") or "").strip()
+    if legacy_outputs:
+        diagnostics.append(
+            _diagnostic(
+                dashboard,
+                "advice",
+                "analysis_output_semantics_incomplete",
+                "Reusable Named Outputs should declare output.semantics for AI discovery",
+                "outputs",
+                {
+                    "missing_purpose": missing_purpose,
+                    "missing_grain": missing_grain,
+                    "legacy_outputs": legacy_outputs,
+                    "action": (
+                        "Add output.semantics with visibility, title, purpose, grain and optional caveats. "
+                        "Use visibility=internal for implementation-only Outputs."
+                    ),
+                },
+            )
+        )
+    for source_id, (definition_path, source) in dashboard.sources.items():
+        if source.type != "sql":
+            continue
+        output = source.outputs["main"]
+        semantics = output.semantics
+        if semantics is None or not (
+            semantics.visibility == "public"
+            or semantics.assurance.status in {"reviewed", "certified"}
+        ):
+            continue
+        code_path = (definition_path.parent / source.code).resolve()
+        try:
+            statement = code_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if _sql_projects_wildcard(statement):
+            diagnostics.append(
+                _diagnostic(
+                    dashboard,
+                    "warning",
+                    "analysis_sql_wildcard_output",
+                    f"Reusable SQL Output source:{source_id}/main must list projected fields explicitly",
+                    f"sources.{source_id}.code",
+                    {
+                        "reference": f"source:{source_id}/main",
+                        "code": str(code_path),
+                        "action": "Replace SELECT * or table.* with an explicit field list; count(*) is allowed.",
+                    },
+                )
+            )
+    for reference, output, _owner_description in analysis_outputs:
+        semantics = output.semantics
+        if semantics is None:
+            continue
+        declared_columns = {column.name for column in output.schema_}
+        semantic_fields = set(semantics.measures)
+        if semantics.time is not None:
+            semantic_fields.add(semantics.time.field)
+        for relationship in semantics.relationships:
+            semantic_fields.update(relationship.fields)
+        unknown_fields = sorted(semantic_fields - declared_columns) if declared_columns else []
+        if unknown_fields:
+            diagnostics.append(
+                _diagnostic(
+                    dashboard,
+                    "error",
+                    "analysis_semantics_field_unknown",
+                    f"Output {reference} semantics references undeclared fields",
+                    f"outputs.{reference}.semantics",
+                    {"reference": reference, "fields": unknown_fields},
+                )
+            )
+        missing_evidence = []
+        for evidence in semantics.assurance.evidence:
+            evidence_path = (dashboard.root / evidence).resolve()
+            if not evidence_path.is_relative_to(dashboard.root.resolve()) or not evidence_path.is_file():
+                missing_evidence.append(evidence)
+        missing_evidence.sort()
+        if missing_evidence:
+            diagnostics.append(
+                _diagnostic(
+                    dashboard,
+                    "error",
+                    "analysis_assurance_evidence_missing",
+                    f"Output {reference} assurance evidence cannot be located",
+                    f"outputs.{reference}.semantics.assurance.evidence",
+                    {"reference": reference, "paths": missing_evidence},
                 )
             )
     return diagnostics

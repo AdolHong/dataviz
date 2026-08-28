@@ -2,8 +2,13 @@ schema: dataviz/source/v2
 kind: source
 id: metrics
 name: 城市经营指标
+description: 提供城市季度收入、订单和客户规模，供多种图表使用同一经营口径。
 type: sql
 adapter: warehouse
 code: metrics.sql
-outputs: {main: {kind: table}}
+outputs:
+  main:
+    kind: table
+    description: 城市季度收入、订单与客户指标
+    semantics: {visibility: public, title: 城市季度经营指标, purpose: 比较城市季度收入、订单与客户表现。, grain: 每行代表一个城市的一个季度。, caveats: [], assurance: {status: certified, owner: analytics, reviewed_at: 2026-08-28, evidence: [evidence/analysis-contract.md]}}
 cache: {mode: session}

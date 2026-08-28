@@ -64,7 +64,7 @@ def test_parameter_content_templates_format_human_facing_values():
 def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v8",
+            "schema": "dataviz/dashboard/v9",
             "id": "hourly-sales",
             "title": "小时销售",
             "controls": [
@@ -72,7 +72,7 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
                     "id": "region",
                     "kind": "selection",
                     "type": "single_select", "value_type": "text",
-                    "default": "south",
+                    "initial": {"mode": "value", "value": "south"},
                     "options": {
                         "mode": "static",
                         "choices": [{"label": "华南", "value": "south"}],
@@ -89,7 +89,7 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
                             "id": "dow",
                             "kind": "selection",
                             "type": "single_select", "value_type": "integer",
-                            "default": 5,
+                            "initial": {"mode": "value", "value": 5},
                             "options": {
                                 "mode": "static",
                                 "choices": [
@@ -151,7 +151,7 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
 def test_interpolation_is_limited_to_declarative_content_fields():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v8",
+            "schema": "dataviz/dashboard/v9",
             "id": "hourly-sales",
             "title": "商品 {{ parameters.product_id }}",
             "subtitle": "{{ parameters.period }}",
@@ -259,7 +259,7 @@ def test_custom_canvas_content_helper_keeps_selection_binding(tmp_path: Path):
             "kind": "selection",
             "field": "region",
             "type": "single_select", "value_type": "text",
-            "default": "华东",
+            "initial": {"mode": "value", "value": "华东"},
             "options": {
                 "mode": "static",
                 "choices": [{"label": "周五", "value": "华东"}],

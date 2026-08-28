@@ -782,6 +782,22 @@ def _yaml(value: Any) -> str:
     return yaml.safe_dump(value, allow_unicode=True, sort_keys=False).rstrip() + "\n"
 
 
+def _scaffold_output(title: str, purpose: str, grain: str) -> dict[str, Any]:
+    return {
+        "kind": "table",
+        "semantics": {
+            "visibility": "public",
+            "title": title,
+            "purpose": purpose,
+            "grain": grain,
+            "caveats": [],
+        },
+    }
+
+
+SCAFFOLD_PROFILES = ("minimal", "interactive", "custom-renderer")
+
+
 def scaffold_recipes() -> tuple[str, ...]:
     """Return every recipe accepted by the current generator."""
     controls = sorted(
@@ -790,6 +806,7 @@ def scaffold_recipes() -> tuple[str, ...]:
         if identifier.startswith("control.")
     )
     return (
+        *SCAFFOLD_PROFILES,
         "dashboard",
         "source.file",
         "source.sql",
@@ -805,6 +822,200 @@ def scaffold_recipes() -> tuple[str, ...]:
     )
 
 
+def _scaffold_route(recipe: str) -> str:
+    if recipe in SCAFFOLD_PROFILES:
+        return recipe
+    if recipe.startswith("control.") or recipe.startswith("interactive-transform."):
+        return "interactive"
+    if recipe in {"renderer.custom", "view.custom"}:
+        return "custom-renderer"
+    if recipe == "section.selection-gallery":
+        return "interactive"
+    return "minimal"
+
+
+def scaffold_catalog() -> dict[str, Any]:
+    """Describe profile and fragment recipes without requiring prose parsing."""
+    return {
+        "schema": "dataviz/scaffold-catalog/v2",
+        "default": "minimal",
+        "profiles": list(SCAFFOLD_PROFILES),
+        "recipes": [
+            {
+                "id": recipe,
+                "route": _scaffold_route(recipe),
+                "scope": "workspace" if recipe in SCAFFOLD_PROFILES else "fragment",
+            }
+            for recipe in scaffold_recipes()
+        ],
+    }
+
+
+def _profile_files(profile: str, item_id: str) -> dict[str, str]:
+    dashboard_root = f"dashboards/{item_id}"
+    workspace = {
+        "schema": "dataviz/workspace/v1",
+        "kind": "workspace",
+        "id": f"{item_id}-workspace",
+        "title": item_id.replace("-", " ").title(),
+        # Profiles use tiny fixture data and must remain independently visual-checkable
+        # without downloading the Apache Arrow browser bundle.
+        "runtime": {"browser_table_transport": "json"},
+    }
+    dashboard: dict[str, Any] = {
+        "schema": "dataviz/dashboard/v9",
+        "kind": "dashboard",
+        "id": item_id,
+        "title": item_id.replace("-", " ").title(),
+        "sources": [
+            {
+                "id": "data",
+                "type": "file",
+                "path": "data/data.csv",
+                "format": "csv",
+                "outputs": {
+                    "main": _scaffold_output(
+                        "Sample rows",
+                        "Provide the reusable input rows for this Dashboard.",
+                        "One row per category.",
+                    )
+                },
+            }
+        ],
+    }
+    files = {
+        "workspace.yaml": _yaml(workspace),
+        f"{dashboard_root}/data/data.csv": "category,value\nAlpha,12\nBeta,19\n",
+    }
+
+    if profile == "minimal":
+        dashboard.update(
+            {
+                "views": [
+                    {
+                        "id": "overview",
+                        "title": "Overview",
+                        "template": "table",
+                        "input": "source:data/main",
+                    }
+                ],
+                "sections": [
+                    {"id": "main", "title": "Main", "views": ["overview"]}
+                ],
+            }
+        )
+    elif profile == "interactive":
+        dashboard.update(
+            {
+                "controls": [
+                    {
+                        "id": "factor",
+                        "kind": "compute",
+                        "label": "Factor",
+                        "type": "single_input",
+                        "value_type": "number",
+                        "default": 2,
+                    }
+                ],
+                "interactive_transforms": ["transforms/scaled.yaml"],
+                "views": [
+                    {
+                        "id": "scaled",
+                        "title": "Scaled values",
+                        "template": "table",
+                        "input": "interactive:scaled/main",
+                        "columns": ["category", "value"],
+                    }
+                ],
+                "sections": [
+                    {"id": "main", "title": "Main", "views": ["scaled"]}
+                ],
+            }
+        )
+        files[f"{dashboard_root}/transforms/scaled.yaml"] = _yaml(
+            {
+                "schema": "dataviz/interactive-transform/v2",
+                "kind": "interactive_transform",
+                "id": "scaled",
+                "runtime": "browser-js",
+                "code": "scaled.js",
+                "inputs": {"rows": "source:data/main"},
+                "compute_inputs": {"factor": f"dashboard:{item_id}/factor"},
+                "trigger": "auto",
+                "export": {"mode": "interactive"},
+                "outputs": {
+                    "main": _scaffold_output(
+                        "Scaled rows",
+                        "Compare category values after applying the selected factor.",
+                        "One row per category.",
+                    )
+                },
+            }
+        )
+        files[f"{dashboard_root}/transforms/scaled.js"] = (
+            "function transform(context) {\n"
+            "  const factor = Number(context.compute_params.factor ?? 1);\n"
+            "  return {main: context.inputs.rows.map(row => ({\n"
+            "    ...row, value: Number(row.value) * factor,\n"
+            "  }))};\n"
+            "}\n"
+        )
+    elif profile == "custom-renderer":
+        renderer_id = f"{item_id}.renderer"
+        dashboard.update(
+            {
+                "views": [
+                    {
+                        "id": "custom-view",
+                        "title": "Custom renderer",
+                        "template": "custom",
+                        "renderer": renderer_id,
+                        "input": "source:data/main",
+                    }
+                ],
+                "sections": [
+                    {"id": "main", "title": "Main", "views": ["custom-view"]}
+                ],
+            }
+        )
+        files[f"{dashboard_root}/presentation.yaml"] = _yaml(
+            {
+                "schema": "dataviz/presentation/v2",
+                "kind": "presentation",
+                "dashboard": item_id,
+                "assets": {
+                    "css": ["assets/renderer.css"],
+                    "js": ["assets/renderer.js"],
+                },
+            }
+        )
+        files[f"{dashboard_root}/assets/renderer.js"] = (
+            f"window.datavizRuntime.registerRenderer({json.dumps(renderer_id)}, {{\n"
+            "  validate(_descriptor) {},\n"
+            "  mount(context, descriptor) {\n"
+            "    const node = document.createElement('pre');\n"
+            "    node.className = 'profile-custom-renderer';\n"
+            "    context.body.append(node);\n"
+            "    this.update(context, descriptor, {node});\n"
+            "    return {node};\n"
+            "  },\n"
+            "  update(_context, descriptor, state) {\n"
+            "    state.node.textContent = JSON.stringify(descriptor.rows || [], null, 2);\n"
+            "    return state;\n"
+            "  },\n"
+            "  dispose(_context, state) { state.node.remove(); },\n"
+            "});\n"
+        )
+        files[f"{dashboard_root}/assets/renderer.css"] = (
+            ".profile-custom-renderer { margin: 0; min-height: 12rem; white-space: pre-wrap; }\n"
+        )
+    else:  # pragma: no cover - caller limits this helper to known profiles.
+        raise ValidationFailure(f"Unknown scaffold profile: {profile}")
+
+    files[f"{dashboard_root}/dashboard.yaml"] = _yaml(dashboard)
+    return files
+
+
 def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
     """Return a copyable, deterministic recipe without mutating a Workspace."""
     recipe = name.strip()
@@ -812,11 +1023,13 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
     if not is_stable_id(item_id):
         raise ValidationFailure(stable_id_help("Scaffold id"))
 
-    if recipe == "dashboard":
+    if recipe in SCAFFOLD_PROFILES:
+        files = _profile_files(recipe, item_id)
+    elif recipe == "dashboard":
         files = {
             "dashboard.yaml": _yaml(
                 {
-                    "schema": "dataviz/dashboard/v8",
+                    "schema": "dataviz/dashboard/v9",
                     "kind": "dashboard",
                     "id": item_id,
                     "title": item_id.replace("-", " ").title(),
@@ -828,7 +1041,13 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                             "type": "file",
                             "path": "data/data.csv",
                             "format": "csv",
-                            "outputs": {"main": {"kind": "table"}},
+                            "outputs": {
+                                "main": _scaffold_output(
+                                    "Dashboard rows",
+                                    "Provide the reusable rows rendered by this Dashboard.",
+                                    "One row per category.",
+                                )
+                            },
                         }
                     ],
                     "views": [
@@ -853,7 +1072,13 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
             "kind": "source",
             "id": item_id,
             "type": source_type,
-            "outputs": {"main": {"kind": "table"}},
+            "outputs": {
+                "main": _scaffold_output(
+                    item_id.replace("-", " ").title(),
+                    "Describe the business question answered by this Source.",
+                    "Describe what one row represents.",
+                )
+            },
         }
         files = {}
         if source_type == "file":
@@ -861,7 +1086,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
             files[f"data/{item_id}.csv"] = "category,value\nA,1\n"
         elif source_type == "sql":
             definition.update({"adapter": "warehouse", "code": f"{item_id}.sql"})
-            files[f"{item_id}.sql"] = "select * from your_table\n"
+            files[f"{item_id}.sql"] = "select category, value from your_table\n"
         else:
             definition.update({"code": f"{item_id}.py", "entrypoint": "load"})
             files[f"{item_id}.py"] = (
@@ -880,7 +1105,13 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                     "runtime": "server-python",
                     "code": f"{item_id}.py",
                     "inputs": {"data": "source:data/main"},
-                    "outputs": {"main": {"kind": "table"}},
+                    "outputs": {
+                        "main": _scaffold_output(
+                            item_id.replace("-", " ").title(),
+                            "Describe the reusable business result of this Dataset Transform.",
+                            "Describe what one row represents.",
+                        )
+                    },
                 }
             ),
             f"{item_id}.py": (
@@ -915,7 +1146,13 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                         if runtime == "browser-js"
                         else {"mode": "snapshot"}
                     ),
-                    "outputs": {"main": {"kind": "table"}},
+                    "outputs": {
+                        "main": _scaffold_output(
+                            item_id.replace("-", " ").title(),
+                            "Describe the interactive analysis result produced by this Transform.",
+                            "Describe what one row represents.",
+                        )
+                    },
                 }
             ),
             f"{item_id}.{suffix}": (
@@ -990,7 +1227,8 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                     "field": "entity_id",
                     "type": "multiple_select", "value_type": "text",
                     "label": "Groups",
-                    "options": {"mode": "infer", "initial": "empty"},
+                    "initial": {"mode": "empty"},
+                    "options": {"mode": "infer"},
                 }
             ]
             definition["repeat"]["selection"] = "groups"
@@ -1051,10 +1289,11 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                 }
             )
         elif component == "radio-group":
+            control.pop("default")
             control.update(
                 {
                     "type": "single_select", "value_type": "text",
-                    "default": "alpha",
+                    "initial": {"mode": "value", "value": "alpha"},
                     "required": True,
                     "options": {
                         "mode": "static",
@@ -1066,10 +1305,11 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                 }
             )
         elif component in {"select", "checkbox-group"}:
+            control.pop("default")
             control.update(
                 {
                     "type": "multiple_select", "value_type": "text",
-                    "default": ["alpha"],
+                    "initial": {"mode": "values", "values": ["alpha"]},
                     "options": {
                         "mode": "static",
                         "choices": [
@@ -1173,11 +1413,20 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
             details={"available": list(scaffold_recipes())},
         )
 
+    route = _scaffold_route(recipe)
+    scope = "workspace" if recipe in SCAFFOLD_PROFILES else "fragment"
     return {
         "schema": "dataviz/scaffold/v1",
         "recipe": recipe,
         "id": item_id,
+        "route": route,
+        "scope": scope,
         "files": files,
+        "verify": [
+            f"dataviz validate <workspace> --dashboard {item_id} --format json",
+            f"dataviz report <workspace> {item_id} --output report.html",
+            f"dataviz visual-check <workspace> {item_id} --target both",
+        ],
         "notes": [
             "Snippets are strict current-schema examples; no legacy aliases are emitted.",
             "Run dataviz validate after placing or merging the files.",

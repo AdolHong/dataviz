@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import builtins
+import tomllib
 
 import pytest
 from pydantic import ValidationError
@@ -43,6 +45,31 @@ def test_unauthenticated_server_requires_explicit_remote_bind_opt_in():
     _require_remote_bind_opt_in("localhost", allow_remote=False)
     _require_remote_bind_opt_in("::1", allow_remote=False)
     _require_remote_bind_opt_in("0.0.0.0", allow_remote=True)
+
+
+def test_visual_check_has_a_dedicated_extra_and_copyable_missing_dependency_hint(
+    monkeypatch,
+):
+    metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert metadata["project"]["optional-dependencies"]["visual-check"] == [
+        "playwright>=1.55"
+    ]
+    original_import = builtins.__import__
+
+    def without_playwright(name, *args, **kwargs):
+        if name == "playwright.sync_api":
+            raise ImportError("simulated missing Playwright")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_playwright)
+    result = CliRunner().invoke(
+        app,
+        ["visual-check", str(MINIMAL_WORKSPACE), "sales-overview"],
+    )
+
+    assert result.exit_code != 0
+    assert "pip install" in result.output
+    assert "ai-dataviz[visual-check]" in result.output
 
 
 def _init_workspace(path: Path) -> Path:
@@ -134,7 +161,7 @@ def test_generated_schema_cli_uses_strict_installed_models():
 
 def test_dsl_schema_versions_are_literals_not_descriptive_strings():
     assert DashboardDefinition.model_validate(
-        {"schema": "dataviz/dashboard/v8", "kind": "dashboard", "id": "current"}
+        {"schema": "dataviz/dashboard/v9", "kind": "dashboard", "id": "current"}
     ).id == "current"
     with pytest.raises(ValidationError):
         DashboardDefinition.model_validate(
@@ -166,7 +193,7 @@ def test_machine_identifiers_are_portable_and_unambiguous(identifier: str):
     with pytest.raises(ValidationError):
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v8",
+                "schema": "dataviz/dashboard/v9",
                 "kind": "dashboard",
                 "id": identifier,
             }
@@ -188,7 +215,7 @@ def test_old_dashboard_is_rejected_and_no_migration_command_is_exposed(tmp_path:
     entry = next(item for item in workspace.catalog if item.id == "hello")
     assert entry.status == "invalid"
     assert any(
-        "dataviz/dashboard/v8" in str(item.details)
+        "dataviz/dashboard/v9" in str(item.details)
         for item in workspace.load_diagnostics
         if item.code == "dashboard_invalid"
     )

@@ -36,7 +36,7 @@ def static_options(choices):
 def test_relative_date_defaults_resolve_once_in_workspace_timezone_and_project_parts():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v8",
+            "schema": "dataviz/dashboard/v9",
             "id": "relative-dates",
             "query_parameters": [
                 {
@@ -147,7 +147,7 @@ def test_date_range_default_allows_fixed_and_relative_endpoints():
     dashboard = SimpleNamespace(
         definition=DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v8",
+                "schema": "dataviz/dashboard/v9",
                 "id": "mixed-date-range",
                 "query_parameters": [definition.model_dump(mode="json")],
             }
@@ -174,7 +174,7 @@ def test_control_defaults_are_validated_when_the_dsl_is_loaded():
             id="region",
             kind="selection",
             type="single_select", value_type="text",
-            default="missing",
+            initial={"mode": "value", "value": "missing"},
             options=static_options([Choice(label="North", value="north")]),
         )
     with pytest.raises(ValidationError, match="required controls cannot be clearable"):
@@ -197,7 +197,7 @@ def test_control_defaults_are_validated_when_the_dsl_is_loaded():
 
 
 def test_select_option_domains_separate_static_values_from_inferred_intent():
-    with pytest.raises(ValidationError, match="cannot declare default"):
+    with pytest.raises(ValidationError, match="use initial instead of default"):
         SelectionControlDefinition.model_validate(
             {
                 "id": "city",
@@ -228,7 +228,7 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
 
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v8",
+            "schema": "dataviz/dashboard/v9",
             "id": "option-intents",
             "controls": [
                 {
@@ -243,14 +243,15 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
                     "kind": "selection",
                     "type": "multiple_select", "value_type": "text",
                     "field": "store",
-                    "options": {"mode": "infer", "initial": "empty"},
+                    "initial": {"mode": "empty"},
+                    "options": {"mode": "infer"},
                 },
                 {
                     "id": "region",
                     "kind": "selection",
                     "type": "multiple_select", "value_type": "text",
                     "field": "region",
-                    "default": ["north"],
+                    "initial": {"mode": "values", "values": ["north"]},
                     "options": {
                         "mode": "static",
                         "choices": [{"label": "North", "value": "north"}],
@@ -277,7 +278,7 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
 
     required_inferred = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v8",
+            "schema": "dataviz/dashboard/v9",
             "id": "required-inferred",
             "controls": [
                 {
@@ -303,6 +304,146 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
             "values": [],
         }
     }
+
+
+def test_select_initial_policies_are_shared_by_query_selection_and_compute():
+    choices = [
+        {"label": "Alpha", "value": "alpha"},
+        {"label": "Beta", "value": "beta"},
+    ]
+    definition = DashboardDefinition.model_validate(
+        {
+            "schema": "dataviz/dashboard/v9",
+            "id": "select-initials",
+            "query_parameters": [
+                {
+                    "id": "models",
+                    "type": "multiple_select",
+                    "value_type": "text",
+                    "options": {"mode": "static", "choices": choices},
+                },
+                {
+                    "id": "primary",
+                    "type": "single_select",
+                    "value_type": "text",
+                    "options": {"mode": "static", "choices": choices},
+                },
+            ],
+            "controls": [
+                {
+                    "id": "comparison",
+                    "kind": "compute",
+                    "type": "multiple_select",
+                    "value_type": "text",
+                    "initial": {"mode": "values", "values": ["beta"]},
+                    "options": {"mode": "static", "choices": choices},
+                },
+                {
+                    "id": "focus",
+                    "kind": "selection",
+                    "field": "model",
+                    "type": "single_select",
+                    "value_type": "text",
+                    "initial": {"mode": "empty"},
+                    "options": {"mode": "infer"},
+                },
+            ],
+        }
+    )
+
+    assert resolve_query_parameters(
+        SimpleNamespace(definition=definition),
+        None,
+        timezone_name="Asia/Shanghai",
+    ) == {"models": ["alpha", "beta"], "primary": "alpha"}
+    assert resolve_compute_values(definition, None) == {
+        "dashboard:select-initials/comparison": ["beta"]
+    }
+    assert initial_selection_states(definition)[
+        "dashboard:select-initials/focus"
+    ] == {"intent": "explicit", "values": []}
+
+
+def test_non_select_inputs_share_typed_defaults_without_select_reconciliation():
+    definition = DashboardDefinition.model_validate(
+        {
+            "schema": "dataviz/dashboard/v9",
+            "id": "typed-input-defaults",
+            "query_parameters": [
+                {
+                    "id": "count",
+                    "type": "single_input",
+                    "value_type": "integer",
+                    "default": "3",
+                    "min": 1,
+                    "max": 9,
+                },
+                {
+                    "id": "tags",
+                    "type": "multiple_input",
+                    "value_type": "text",
+                    "default": ["alpha", "beta"],
+                },
+            ],
+            "controls": [
+                {
+                    "id": "window",
+                    "kind": "compute",
+                    "type": "range_input",
+                    "value_type": "number",
+                    "default": [0.25, 0.75],
+                    "min": 0,
+                    "max": 1,
+                    "step": 0.05,
+                },
+                {
+                    "id": "enabled",
+                    "kind": "selection",
+                    "field": "enabled",
+                    "type": "single_input",
+                    "value_type": "boolean",
+                    "default": False,
+                },
+                {
+                    "id": "period",
+                    "kind": "selection",
+                    "field": "day",
+                    "type": "range_input",
+                    "value_type": "date",
+                    "default": ["2026-08-01", "2026-08-28"],
+                },
+            ],
+        }
+    )
+
+    assert resolve_query_parameters(
+        SimpleNamespace(definition=definition),
+        None,
+        timezone_name="Asia/Shanghai",
+    ) == {"count": 3, "tags": ["alpha", "beta"]}
+    assert resolve_compute_values(definition, None) == {
+        "dashboard:typed-input-defaults/window": [0.25, 0.75]
+    }
+    assert initial_selection_states(definition) == {
+        "dashboard:typed-input-defaults/enabled": {
+            "intent": "explicit",
+            "values": [False],
+        },
+        "dashboard:typed-input-defaults/period": {
+            "intent": "explicit",
+            "values": [["2026-08-01", "2026-08-28"]],
+        },
+    }
+
+    with pytest.raises(ValidationError, match="initial is only valid"):
+        QueryParameterDefinition.model_validate(
+            {
+                "id": "count",
+                "type": "single_input",
+                "value_type": "integer",
+                "initial": {"mode": "value", "value": 3},
+            }
+        )
 
 
 def test_selection_dependency_authoring_contract_is_explicit_and_strict():
@@ -500,6 +641,7 @@ def test_date_bounds_and_hierarchical_selection_shapes_are_strict():
         type="multiple_select", value_type="text",
         path_fields=["province", "city", "district"],
         options={"mode": "infer"},
+        initial={"mode": "empty"},
         max_selected=2,
     )
     values = [
@@ -594,7 +736,7 @@ def test_portable_numbers_and_dates_reject_browser_python_ambiguities():
 def test_query_compute_and_selection_resolvers_share_strict_contracts():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v8",
+            "schema": "dataviz/dashboard/v9",
             "id": "contract",
             "query_parameters": [{"id": "batch", "type": "single_input", "value_type": "integer", "default": 7}],
             "controls": [

@@ -2,8 +2,13 @@ schema: dataviz/source/v2
 kind: source
 id: forecast
 name: Python 预测数据
+description: 由 Python Source 生成日期级预测样本，用于检查自定义取数与执行证据。
 type: python
 code: forecast.py
 entrypoint: load
-outputs: {main: {kind: table}}
+outputs:
+  main:
+    kind: table
+    description: 日期级 Python 预测样本
+    semantics: {visibility: public, title: 日期级预测样本, purpose: 演示 Python Source 生成的日期级预测数据。, grain: 每行代表一个日期。, caveats: [示例预测，不代表真实模型结果。], assurance: {status: reviewed, owner: analytics, reviewed_at: 2026-08-28, evidence: [evidence/analysis-contract.md]}}
 cache: {mode: session}

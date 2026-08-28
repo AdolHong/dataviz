@@ -2,7 +2,7 @@
 
 > 快速安装和当前可用命令见 [README](README.md)；后续工作见 [plan.md](plan.md)。安装版本真正接受的字段始终以 `dataviz schemas`、`dataviz docs` 和 `dataviz components` 为准。
 
-本文记录已经落地并可由当前 Schema、CLI、Runtime 和测试证明的契约，以及明确标注的后续目标。当前严格契约是 `dataviz/dashboard/v8`、`dataviz/presentation/v2`、`dataviz/dependency-contract/v5`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v1`、`dataviz/runtime/v5` 与 Component Registry `5.4.0`。统一 Selection State、Control Binding、Layout/Semantic Contract、自动分析状态、Runtime-aware trigger、Chart Service、Renderer 行为矩阵、inspect-layout 与 visual-check 已进入实现；当前代码不保留 Dashboard v6、Presentation v1、旧 `cascade`、Source/Transform v1、`query_params` 或旧 Selector 字段。
+本文记录已经落地并可由当前 Schema、CLI、Runtime 和测试证明的契约，以及明确标注的后续目标。当前严格契约是 `dataviz/dashboard/v9`、`dataviz/presentation/v2`、`dataviz/dependency-contract/v5`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v1`、`dataviz/runtime/v5` 与 Component Registry `5.4.0`。统一 Selection State、Control Binding、Layout/Semantic Contract、自动分析状态、Runtime-aware trigger、Chart Service、Renderer 行为矩阵、inspect-layout 与 visual-check 已进入实现；当前代码不保留 Dashboard v6、Presentation v1、旧 `cascade`、Source/Transform v1、`query_params` 或旧 Selector 字段。
 
 Dataviz 是一个 workspace-first、AI-friendly 的数据看板工具。看板是普通文件，能够被 Git 管理、复制和审查；Server 面向人提供交互页面，CLI 面向 AI 与自动化提供校验、查询和 HTML 导出。
 
@@ -27,6 +27,18 @@ Dataviz 可以支持复杂数据流，但不能要求普通作者理解 Runtime 
 | 调整颜色、容器和局部样式 | 可选 `presentation.yaml` |
 
 普通路径必须满足“一个需求、一种写法、一个状态 owner”。平台不会为 View 联动再创建隐藏 filter，不允许 View 直接调用另一个 View，也不会要求作者手写事件总线。只有字段映射、触发策略或视觉行为确实偏离默认值时才展开高级配置。若一个常见看板必须写回调、复制状态、理解 canonical key 或阅读 Runtime 源码才能完成，应把它视为框架缺口，而不是作者责任。
+
+### 作者文档也必须渐进披露
+
+完整 Runtime 架构是平台实现契约，不是每个作者任务的必读前置。CLI 以 `dataviz/authoring-route/v1` 返回任务最小闭包，默认 `minimal` 只披露：
+
+```text
+Adapter → Source → View → Layout
+```
+
+只有需求包含 Query 后状态或计算时才加入 `Control → Interactive Transform → Named Output`；只有内置 View 无法表达视觉时才加入 Renderer Contract 与生命周期。`interactive` 和 `custom-renderer` 都继承 minimal，但互不强制继承，避免一个高级能力把另一套无关契约带入上下文。
+
+`dataviz scaffold minimal|interactive|custom-renderer` 分别生成完整可运行 Workspace。Scaffold Catalog v2 为每项声明 route 与 `workspace|fragment` scope；任务文档显式声明 `requires`，回归检查这些引用必须属于当前路由闭包。每个 profile 独立通过 `validate → report → visual-check`，但这类确定性工程回归不等于 AI 效率证据；Token、首次成功率、轮次和耗时仍只接受真实成对试验。
 
 ### AI 开发与人工调参的边界
 
@@ -225,10 +237,11 @@ Selection 的有效状态不能只看 raw value，必须由 `intent + values + c
 Select 型 Selection 的“选项域”和“被筛选 View 数据”是两个不同契约：
 
 - 封闭业务枚举使用 `options.mode: static` 并声明 `options.choices`。
-- 数据维度使用 `options.mode: infer`；不得用 `default` 复制一份会随 Source 漂移的成员列表。
+- 数据维度使用 `options.mode: infer`；Select 统一用 `initial` 声明初始意图，不使用 `default`。
 - `infer` 默认沿消费 View 的输入向上穿过 Interactive DAG，追溯到不可变 Base Named Output；多输入或需要消除歧义时使用 `options.source` 显式指定。
 - `options.source` 只允许表格 Base Output，不允许 Interactive Output。后者可能依赖当前 Selection，会形成 `options → Selection → Interactive Transform → options` 的启动环。
-- `infer` 多选的 `initial: auto` 编译为 `all_available` 意图；需要初始不选时使用 `initial: empty`，而不是列举具体默认值。
+- Query、Selection 和 Compute Select 共用一套 `initial`：多选为 `all/empty/values`，单选为 `first/empty/value`；未声明时分别默认 `all` 和 `first`。
+- 非 Select 的 `single_input`、`multiple_input` 与 `range_input` 继续使用类型化 `default`；Slider、DatePicker、Checkbox 等展示组件不另造初始化策略。Runtime 不从 `min`、布尔类型或当前日期猜测业务默认值，也不会因展示或约束变化自动重置用户输入。
 
 Runtime 的首次启动顺序固定为：
 
@@ -243,7 +256,7 @@ hydrate Base Output → reconcile Selection option domains
 
 父页面与 Canvas 的双向同步遵守字段所有权，而不是互相发送可能过期的全量影子：首次握手允许父页面恢复完整 tab snapshot；之后 Header 只向 Canvas 发送它拥有的 Dashboard Control patch，Canvas 负责合并、按 `control_order` 协调 Section/View 候选域，再回传完整 canonical snapshot。消息携带 parent selection epoch，并同时校验 dashboard/run/frame identity。这样延迟到达的 Header 消息既不能覆盖 Canvas 刚提交的 Section/View 值，旧 Canvas 消息也不能恢复更新前的 Dashboard 值。
 
-动态多选的 canonical value 与选择意图是两类状态。Runtime 用 `all_available` 表达“始终包含当前可用域”，用 `explicit` 表达“用户指定的有限集合”：上游收缩再扩张时，前者自动纳入重新可用的项，后者只保留有效交集且不会因暂时覆盖整个小域而被误判为全选。该意图由共享 Control Runtime 协调，并随 tab 恢复、Canvas 握手和 HTML 导出保存；Checkbox Group、Select、Cascader 与 Tree Select 不得各自实现不同的级联规则。
+动态多选的 canonical value 与选择意图是两类状态。Runtime 用 `all_available` 表达“始终包含当前可用域”，用 `explicit` 表达“用户指定的有限集合”。候选域变化时，`all_available` 跟随全部新候选；`explicit` 优先保留有效交集，原非空选择完全失效才恢复 `initial`，用户主动空集不回退。该意图由共享 Control Runtime 协调，并随 tab 恢复、Canvas 握手和 HTML 导出保存；Checkbox Group、Select、Cascader 与 Tree Select 不得各自实现不同的级联规则。
 
 #### Control Binding / Linked Views
 
@@ -281,11 +294,11 @@ sections:
         field: store_id
         required: false
         clearable: true
+        initial: {mode: empty}
         depends_on: [section.city]
         options:
           mode: infer
           source: source:stores/main
-          initial: empty
     views:
       - id: store_map
         template: scatter
@@ -605,7 +618,7 @@ Compiler 为每个 Dashboard 快照生成唯一的 `dataviz/layout-contract/v1`�
 
 模板提供结构默认值，不静默吞掉显式属性：`grid` 中显式 span 覆盖模板默认；`single` 必须恰好包含一个全宽 View，声明多个 View 或额外 span 属于确定性冲突；`split`、`comparison`、`chart-and-table` 等模板声明默认比例，并明确哪些结构属性允许覆盖。任意 View 的最终 span 和行位置都必须能由 `inspect-layout` 解释。
 
-完整自定义 Canvas 是显式逃生口，Layout Contract 只记录 `mode: custom`、声明的挂载点和稳定 View/Section ID，不尝试静态解释任意 HTML/CSS。其真实几何将由浏览器 `visual-check` 检查。Dashboard v8 与 Presentation v2 已删除 Presentation 的全局 layout、Section template/columns 和 View span；旧结构字段直接校验失败。
+完整自定义 Canvas 是显式逃生口，Layout Contract 只记录 `mode: custom`、声明的挂载点和稳定 View/Section ID，不尝试静态解释任意 HTML/CSS。其真实几何将由浏览器 `visual-check` 检查。Dashboard v9 与 Presentation v2 已删除 Presentation 的全局 layout、Section template/columns 和 View span；旧结构字段直接校验失败。
 
 ### 最终配置的 Semantic Validation
 
@@ -739,6 +752,8 @@ SQL Source 还要展示：
 
 Resolved SQL 只用于解释；真实执行始终使用参数化 statement。默认 SQL 单次超时 120 秒，明确超时后立即额外重试一次；SQL Source 可以覆盖 timeout 与 retry。连接、权限和语法错误不盲目重试。
 
+可复用 SQL Output 应在每个查询阶段显式列出输出字段，避免 `SELECT *` 和 `table.*`。显式投影使 Output Schema、脱敏边界、content hash、下游依赖和 Catalog 精确折叠不会因上游表偶然新增字段而漂移。`count(*)` 是聚合语义，不属于该限制。作者文档和 Scaffold 必须使用显式字段示例；Semantic Validation 对 public 或 reviewed/certified SQL Output 中可确定的通配投影给出稳定诊断，但不用脆弱的字符串匹配代替 SQL parser。
+
 Dataset Transform 与 `server-python` Interactive Transform 都是可信单机 Python，使用独立子进程、timeout、traceback、依赖指纹、结构化日志、多输入和多 Named Output。当前产品不把 Workspace Python 当作不可信多租户沙箱，也不设计 CPU/内存配额。
 
 ## 11. View、Section 与 Component
@@ -812,6 +827,8 @@ Server 页面与导出 HTML 必须使用同一组件实现。
 - **CLI** 面向 AI/自动化：validate、query、run、compute、output、report、docs、schemas、components、context、scaffold 和 benchmark。
 - **HTML** 是一次 Query Run 的可移植快照：Query Parameter 固定；Browser Interactive Transform 可以继续执行；Server Interactive Transform 只能保留 snapshot 或 unavailable。
 
+AI 新建任务先调用 `dataviz docs --task minimal|interactive|custom-renderer --format json`；已知目标 Component 时可调用 `dataviz docs --component <id> --format json` 自动路由。修改既有看板时再使用 `context --focus` 获取目标组件的真实依赖闭包。前者控制“这类任务应阅读哪些概念”，后者控制“这个具体实例应读取哪些文件和依赖”，两者不能互相替代。
+
 AI 默认 JSON 紧凑且稳定。`query/output/compute` 默认只输出状态、行列数、耗时、Schema 摘要和有限预览；完整 Node、Artifact、Resolved SQL、bindings、provenance 和 diagnostics 通过 `--detail debug|full` 请求。精简不能删除失败所需的稳定错误 code 和下一步建议，也不能让 summary/full 使用两套执行逻辑。
 
 目标布局与视觉检查分为两层：
@@ -825,13 +842,252 @@ AI 的默认工作应该是选择模板、绑定 Output、填写状态依赖和�
 
 `validate` 不执行查询或计算；静态通过后，再按 Source、Base Output、Interactive Output、View 的顺序动态验证。框架是否节省 Token 必须通过相同任务与完整 HTML 对照，不能由模板数量自行推断。当前安装包提供五类固定任务、严格的 `authoring-event/v3` 日志和 identity/quality-gated 成对比较。Trial 会固定任务契约与输入 SHA-256；每条验收条件必须记录 human/automation/mixed assessor 和证据，只有两种方案均保持输入完整并通过全部验收时才进入聚合。在积累真实重复 trial 前，不发布节省比例。
 
-## 13. 当前实现边界
+## 13. AI Analysis Plane
+
+Dashboard 不只是给浏览器渲染的一张页面，也是一份可执行、可搜索的数据分析定义。AI 不应先识别图像像素或反向解析 Renderer 才能理解看板；平台应直接向 AI 暴露看板已经声明的数据口径、分析口径、依赖闭包和结构化结果。
+
+Analysis Plane 与 Server 页面共用同一 Compiler、Dependency Contract、Executor、Interaction Runtime 和 Named Output Store。它是现有执行面的机器可读投影，不是第二套 DAG、第二套计算框架或绕开权限边界的查询入口。
+
+Analysis Plane 分两个逐步闭合的循环：
+
+```text
+已落地：正式 Named Output → Catalog 发现 → 执行 → Overlay 临时试验
+待完成：试验结果 → 人审阅结论与证据 → Promote 为正式 Output / 测试 / caveat → Catalog
+```
+
+前者是“可执行分析资产”的复用闭环；后者才使资产成为经过验证的数据知识。Catalog 不能因为对象可搜索、可执行，就默认它具有可信的业务语义。
+
+### 13.1 三层可分析对象
+
+| 层级 | 稳定对象 | 含义 | AI 默认消费方式 |
+| --- | --- | --- | --- |
+| 取数口径 | Base Named Output | Query Parameter → Adapter → Source → 可选 Dataset Transform 的结果 | 结构化表、Schema、语义、参数闭包与 provenance |
+| 分析口径 | Derived Named Output | Base Named Output + resolved Controls → Interactive Transform 的结果 | 结构化表、有效 Control、Runtime 与 lineage |
+| 呈现口径 | View | Named Output 到 title、x/y、series、columns、aggregation 等视觉编码的映射 | View spec 与输入引用；Screenshot 只用于视觉 QA |
+
+Source 是取数节点和 lineage 起点，不是最终复用单位。Catalog 以 Named Output 为主记录；没有 Dataset Transform 时，Source Output 自然就是 Base Named Output。所有 Base Named Output 都应可独立检查和导出为表。Derived Named Output 也应保持数据结果，不把 Plotly、ECharts、Perspective 或 DOM 实例当作分析结果。
+
+View 图像适合人快速识别模式，但 AI 通常更适合读取结构化 Output 与 View mapping。只有判断布局、裁切、视觉层级或图形是否误导时，才启动浏览器并读取 Screenshot/geometry；不能把视觉识别作为数据分析的必经路径。
+
+### 13.2 Output 语义、可见性与可信度
+
+AI 作者在定义可复用 Output 时，应同时记录它为什么存在，而不仅是技术名称。Dashboard schema 在每个 Base/Derived Named Output 附近提供 Output 级 `semantics` 契约；不再用 Dashboard 级 grain 代替不同 Output 的行粒度。P1 的最小契约为：
+
+```yaml
+semantics:
+  visibility: public
+  title: 区域收入明细
+  purpose: 按区域和统计周期提供收入、订单和客户规模，供经营分析复用。
+  grain: 每个区域、每个统计周期一行
+  caveats: [退款在次日批处理后回写]
+  assurance:
+    status: reviewed
+    owner: finance-analytics
+    reviewed_at: 2026-08-28
+    evidence: [evidence/revenue-contract.md]
+  time: {field: period, timezone: Asia/Shanghai, meaning: 自然月}
+  measures:
+    revenue: {unit: CNY, aggregation: sum}
+  relationships:
+    - {fields: [region_id], cardinality: many-to-one, target: dim_region}
+```
+
+`visibility: public | internal` 只决定默认可发现性，不代表可信度。显式 public Output 必须提供非空 `title`、`purpose` 和 `grain`；internal Output 仍保留 lineage，并可按精确引用或 `--include-internal` 检查。`assurance.status: draft | reviewed | certified | deprecated` 独立表达可信度：reviewed/certified 必须记录 owner、reviewed_at 和 Dashboard 内可定位 evidence；deprecated 必须给出 reason 或 replacement。默认可信发现只返回 reviewed/certified，维护者可用 `--include-untrusted` 审计 draft/deprecated。`purpose` 是 Catalog 搜索和 AI 选数的首要证据；`grain` 用于防止错误 join 或重复聚合；`caveats` 记录数据延迟、过滤边界和已知限制。字段 Schema 仍由现有 Output Contract 管理。存量未声明 semantics 的 Output 保持可执行并给出稳定迁移 advice；Scaffold 和新示例直接生成显式 semantics。
+
+P1 不强制 tag，也不建立全局 tag 词典。时间字段/时区/口径、指标单位/聚合语义和关联字段/cardinality 是可选结构，只在 Output 确实包含这些概念时声明，不让最小作者路径填写空表单。
+
+Catalog 每个 Base/Derived Named Output 至少投影：
+
+- Dashboard ID、Output 引用、Base/Derived 阶段与人类语义；
+- 编译得到的 Query Parameter 最小闭包、上游 Source/Dataset/Interactive lineage；
+- Source 类型、Adapter/Auth 引用，但绝不写入凭据；
+- Output kind、Schema、grain、下游 View 与 Derived Output；
+- Output 的 visibility、title、purpose、grain 与 caveats；
+- Derived Runtime：`server-python | browser-python | browser-js`；
+- Workspace 相对的定义与代码路径，避免绝对路径泄露和无谓 Token；
+- 定义指纹、Catalog generation 与更新时间。
+
+Catalog 同时为可执行对象生成短别名，作为 AI 的低 Token 句柄：
+
+```text
+src_7K3M9Q2D   # Source 节点
+base_C8J4W6NP  # Base Named Output
+drv_M2R5T9AX   # Derived Named Output
+view_F4N7Q3BZ  # View 呈现映射
+```
+
+短别名由 canonical logical reference（kind + Dashboard ID + node/output identity）确定性生成，不使用定义内容 hash，因此修改 SQL、Python 或语义说明后仍可指向同一个逻辑对象；重命名或删除对象才会使旧别名失效。定义版本、缓存失效和执行证据使用独立的 `definition_hash`，不能拿短别名冒充版本号。Catalog 构建时检测截断 hash 冲突并按需延长；任何别名都必须唯一解析，否则返回稳定 ambiguity error，绝不猜测。机器结果始终同时返回短别名和完整 canonical reference。别名只是方便引用，不是权限凭证。
+
+Dashboard YAML 只声明作者无法可靠推导的语义。参数闭包、lineage、代码路径、下游 View 等都由 Compiler 和 Dependency Contract 计算，不能要求作者重复维护。
+
+搜索覆盖 title、purpose、Dashboard/Source/Output 名称、Query Parameter、字段、类型、相对路径、Adapter 和下游 View；默认支持不区分大小写、类似 grep 的正则表达式，例如 `收入|工资|年入|月入`，避免单一关键词召回不足。`--literal` 用于按原文搜索包含正则符号的内容；无效或过长正则返回稳定诊断。同时保留 `--dashboard`、`--kind`、`--source-type`、`--parameter` 等确定性过滤，并先过滤再匹配文本。搜索结果必须返回稳定引用，供后续 `show` 和 `run` 直接消费。
+
+搜索默认是低 Token 概览，不承诺解决语义等价性。Catalog 为每个定义和代码资产保留 content hash；在文本匹配和结构化过滤之后，只对“实现资产 hash、Source/Runtime、Adapter 逻辑引用、Query bindings 与 Output Contract 完全一致”的 occurrence 做精确折叠。折叠结果返回一个稳定 representative、`occurrence_count` 和可按需展开的 canonical references；任何 hash 或契约差异都保留为独立结果。这是概览压缩，不是语义去重，也不会删除 Dashboard 文件中为了独立分享而保留的 SQL/代码副本。`top N` 在折叠后输出；排序策略尚未用真实数据验证前，继续使用稳定确定性顺序，不预设使用次数权重。
+
+### 13.3 Catalog 一致性与并发
+
+Catalog 是可重建的派生索引，不是事实来源。Workspace 内建议使用：
+
+```text
+.dataviz/catalog/
+├── CURRENT.json
+├── catalog.lock
+└── generations/
+    └── catalog-000001.sqlite
+```
+
+每个 Dashboard 的定义指纹由排序后的 Workspace 相对路径和文件 SHA-256 闭包组成，闭包包含 `dashboard.yaml`、被引用的 Source/Dataset/Interactive 定义及代码；大型业务数据文件的内容不进入定义指纹，因为 Catalog 描述的是口径定义，不承诺数据此刻是否变化。
+
+重建遵循以下规则：
+
+1. 写者获取跨进程独占锁，等待者拿锁后必须重新检查 freshness；读者继续读取 `CURRENT.json` 指向的不可变 generation，不获取写锁。
+2. 只重新编译指纹发生变化的 Dashboard，并从新 generation 删除已经不存在的 Dashboard。
+3. 在临时 generation 中完成构建和完整性校验，再原子切换 `CURRENT.json`；失败时旧 generation 始终可读，不能暴露半份索引。
+4. 构建期间若定义文件再次变化，丢弃本次结果并基于稳定快照重试。
+5. Generation 文件避免在 Windows 上替换仍被读者打开的 SQLite 文件；过期 generation 延迟清理。
+6. CLI 在查询 Catalog 前惰性检查 freshness；Server 文件监听经 debounce 后异步刷新。两条路径共用同一 builder 和锁协议。
+
+### 13.4 使用统计
+
+使用统计是本地排序证据，不是 Dashboard 契约或 Catalog 事实。Workspace 使用独立的 `.dataviz/usage.sqlite`，只保存每类行为的累计次数和最后一次成功时间；删除该文件只会使统计归零，不影响执行、Catalog 或 Dashboard 可移植性。
+
+表结构不把当前两种行为固化为专用列，而是保留可扩展的统计维度：
+
+```sql
+CREATE TABLE usage_stats (
+    subject_kind TEXT NOT NULL,
+    subject_ref TEXT NOT NULL,
+    action_kind TEXT NOT NULL,
+    actor_kind TEXT NOT NULL,
+    use_count INTEGER NOT NULL DEFAULT 0,
+    last_used_at TEXT NOT NULL,
+    PRIMARY KEY (subject_kind, subject_ref, action_kind, actor_kind)
+);
+```
+
+`subject_kind` 可在未来扩展 dashboard/output/view 等对象，`action_kind` 和 `actor_kind` 也是由应用层校验的稳定字符串，新行为只增加新行，不需要修改表结构。当前只写入两种成功行为：
+
+| 触发点 | subject | action | actor | 更新 |
+| --- | --- | --- | --- | --- |
+| 人明确执行 Dashboard Query 并成功 | `dashboard` + Dashboard ID | `query_succeeded` | `human` | `use_count + 1`，记录完成时间 |
+| AI 执行 `analyze run @output` 并成功 | `output` + canonical Output reference | `analyze_run_succeeded` | `ai` | `use_count + 1`，记录完成时间 |
+
+`all/search/show`、页面打开/刷新、失败、取消和其他行为当前都不记录。是否将它们加入、以及统计如何参与搜索排序，都等真实使用数据出现后再决定。
+
+多线程/多进程不读取后在 Python 中执行 `count + 1`，而是使用单条 `INSERT ... ON CONFLICT DO UPDATE SET use_count = use_count + 1`原子更新，并将 `last_used_at` 取为已存值和新值中较晚者。每个进程创建自己的 SQLite connection，使用 WAL、有界 `busy_timeout` 和短事务；统计更新是 best-effort，最终失败只写 warning，绝不使已成功的 Query/Analysis 变为失败。`usage.sqlite` 不进入 Dashboard/Catalog fingerprint，也不触发 Workspace hot reload。
+
+### 13.5 Python CLI 分析协议
+
+统一的 AI 入口规划为：
+
+```text
+dataviz analyze all WORKSPACE [--kind base|derived|source|view|all] --format json
+dataviz analyze search WORKSPACE QUERY [filters...] --format json
+dataviz analyze show WORKSPACE REFERENCE --format json
+dataviz analyze run WORKSPACE REFERENCE \
+  [--query-param NAME=VALUE] [--control NAME=VALUE] \
+  [--output NAME] \
+  [--runtime auto|server|browser] \
+  [--format json|csv|markdown|parquet|arrow] \
+  [--destination FILE|DIRECTORY] [--also REFERENCE] \
+  [--detail summary|debug|full]
+dataviz analyze evidence WORKSPACE RESULT --question TEXT --conclusion TEXT
+dataviz analyze promote WORKSPACE EVIDENCE PROPOSAL --dry-run
+```
+
+`REFERENCE` 接受完整 canonical reference 或 Catalog 返回的 `@src_...`、`@base_...`、`@drv_...`、`@view_...` 短别名。`all` 默认只返回 public Base 取数口径的 title、purpose、grain、Dashboard、参数和短别名，不返回 SQL、bindings 或代码。典型 AI 流程是 `all/search → show @alias → run @alias`，不需要再次传 Dashboard ID 或复述长路径。`show` 返回语义、参数闭包、Schema、lineage、代码位置、下游对象与可复制的执行命令。
+
+`run` 按引用种类解释目标：Source alias 执行该 Source 的最小闭包并返回其全部声明 Output，或用 `--output` 选择一个；Base alias 直接返回该 Named Output；Derived alias 自动运行 Base 闭包和对应 Interactive Runtime；View alias 解析到 View 当前消费的 Named Output，并额外返回呈现映射。这样 AI 可以从一个搜索结果直接跑数，同时不把 Control UI 当作必须理解的中间步骤。
+
+现有 `query`、`output`、`compute` 仍是低层精确命令；`analyze` 在它们之上提供发现、短引用、最小依赖闭包、Runtime dispatch 和统一结果契约。默认 JSON 应紧凑，适合 AI 直接读取；CSV/Markdown 适合人查看；Parquet/Arrow 适合较大结果和下游程序。二进制结果原子写入文件，stdout 继续返回包含路径、文件 hash、Schema、rows 与 truncation 的 `analysis-result/v1`，不向终端倾倒二进制流。
+
+执行必须复用现有 Runtime：
+
+- Base Source/Dataset Output：由现有 Executor 只运行该 Output 的最小 Query DAG 闭包；
+- `server-python` Derived Output：在不可变 Query Run 上调用现有 InteractionExecutor；
+- `browser-js` / `browser-python` Derived Output：启动无头浏览器，加载现有 Dataviz HTML/Browser Runtime，再从 Named Output Store 提取结果；不得在 Python 中重写 JavaScript/Pyodide 语义。
+
+未显式传入 `--control` 时，使用契约解析后的默认 Control。CLI 不需要呈现 Control UI，但 provenance 必须保留最终 Selection/Compute 值。浏览器执行应使用隔离临时 profile，默认限制非必要网络；只有依赖 CDN 等显式场景才允许 `--allow-network`。初版只执行本地可信 Workspace 代码，不把它描述为不可信代码沙箱。
+
+Browser Runtime 冷启动成本需要实测而非承诺。实现应支持一次浏览器会话批量提取多个 Output、Server 侧复用受控 browser pool、按需而非无条件加载 Pyodide，并优先使用 Arrow 传输。Derived 缓存键至少包含 Base Artifact hash、resolved Control snapshot、Transform code hash 和 Runtime version。
+
+### 13.6 稳定结果与 provenance
+
+Analysis Plane 独立版本化机器契约：
+
+- `dataviz/analysis-entry/v1`：Catalog 单条口径；
+- `dataviz/analysis-catalog/v1`：搜索与列表结果；
+- `dataviz/analysis-result/v1`：实际执行结果与证据。
+
+执行结果至少记录 reference 与 definition hash、stage、runtime、Query Parameter、effective Controls、输入 Artifact/hash、输出 kind/schema/rows/hash、duration、lineage、truncation 和稳定错误 code。`summary` 提供有限预览和下一步命令；`debug/full` 才展开节点、代码路径、完整 provenance 和诊断。不同 detail 只能改变证据量，不能改变执行逻辑。JSON Schema、错误协议和 summary/debug/full 边界是发布契约，不能只由 CLI 当前实现隐式决定。
+
+为了支持审阅与后续沉淀，`dataviz/analysis-evidence/v1` 在一个 Analysis Result 之上记录问题/假设、结论或断言、结果 hash、来源 lineage、生成者、审阅者和审阅状态。Evidence 不复制整份大结果；它通过 hash 和可选小型 snapshot 使结论可核验，并明确标记原始数据已变化时的不可重现性。
+
+### 13.7 临时分析覆盖层
+
+AI 分析经常需要回答“如果这段 SQL、输入文件或计算逻辑换成另一版，结果会怎样”。复制完整 Dashboard 会制造无意义分支和过期副本，因此 Analysis Plane 应支持只作用于一次 Analysis Run 的 Overlay：
+
+```yaml
+schema: dataviz/analysis-overlay/v1
+replacements:
+  source:orders:
+    code: ./experiments/orders.sql
+  source:exchange-rates:
+    path: ./fixtures/new-rates.csv
+  dataset:customer-score:
+    code: ./experiments/customer_score.py
+  interactive:scenario:
+    code: ./experiments/scenario.js
+```
+
+调用形式为 `dataviz analyze run WORKSPACE @alias --overlay experiment.yaml`；`--overlay -` 从 stdin 接收临时 JSON/YAML，方便 AI 不创建长期配置文件。Overlay 解析相对于自身文件位置的资产，构建一个不可变的 in-memory Analysis Variant，然后仍由原 Compiler、Dependency Contract 和 Runtime 执行。
+
+第一版 Overlay 遵守“接口不变、实现可替换”：
+
+- SQL Source 只替换 statement 文件；Adapter、query inputs、timeout 和 Named Outputs 不变；
+- File Source 只替换同类数据文件，可显式确认 format，但必须通过原 Output Schema；
+- Python Source、Dataset Transform 与三种 Interactive Transform 只替换代码和显式 code dependencies；Runtime、输入、Control/Query bindings 和 Named Output Contract 不变；
+- 不允许修改 node/output ID、DAG 边、Adapter/Auth、Control scope 或 Named Output Contract；需要这些变化时应进入显式 Analysis Draft。
+
+`analyze show @alias --detail full` 应能返回目标闭包内所有定义/代码的 Workspace 相对路径、content hash，并在显式 `--include-code` 后返回已脱敏的文本内容；SQL/JS/Python 代码可以读取，Adapter secret 和大型数据文件不能混入上下文。Overlay 的 `explain/dry-run` 先列出替换点、受影响节点和最终目标，不执行数据。
+
+Overlay 不写回 Dashboard，也不进入 Catalog。每次执行生成独立 `analysis_run_id`；结果 provenance 记录原资产 hash、替代资产 hash、Overlay hash、调用参数、有效 Controls 和最终 lineage。Node/Derived cache namespace 必须包含 Overlay hash，不能污染或命中正式 Dashboard 的同名缓存。默认只持久化 manifest、hash 和结果证据到 `.dataviz/analysis-runs/`；是否复制可能很大的替代数据文件由显式 snapshot 选项决定。
+
+Overlay 仍执行本地可信代码，不是沙箱。Overlay 只解决“契约不变时替换实现”的 what-if；新增 DAG 节点、组合多个 Output 或改变 Output Schema 必须进入显式 Analysis Draft，不继续扩张 Overlay 使其变成另一套开发系统。
+
+### 13.8 Analysis Evidence 与 Promote
+
+`.dataviz/analysis-runs/` 中的 manifest 是临时运行证据，不自动成为组织知识。一次分析只有经过明确审阅和 Promote，才能产生以下一种或多种正式变更：
+
+- 新的 Source / Dataset Transform / Interactive Transform 与 Named Output；
+- 对现有 Output semantics、caveat 或 deprecation 的修订；
+- 可重现的契约测试、数据断言或小型证据 snapshot；
+- 引用 Analysis Result hash 和 lineage 的审阅记录。
+
+Promote 不直接修改原 Dashboard，不自动把 Output 标成 certified，也不建立独立知识数据库。`analyze promote ... --dry-run` 只生成统一 diff，在排除 `.dataviz` 临时状态的 Workspace 副本中执行 Schema、Dependency 与 Semantic Validation，并返回稳定 diagnostics；人确认后才按普通 Git/文件工作流写入正式资产。三种 proposal 是：新 Transform/Named Output、现有 semantics/caveat/deprecation 修订、以及契约断言/小型 snapshot。新建 Output 从 `draft` 开始，reviewed/certified 修订必须基于 reviewed Evidence，并继续满足 owner、reviewed_at 与 evidence 路径约束。
+
+Analysis Draft 是普通 Workspace 定义的临时分支或生成补丁，继续使用现有 Schema、Compiler、Runtime 和 validate。它不需要另一套 Draft DAG、隐藏状态或网页开发器。
+
+### 13.9 当前范围与顺序
+
+Analysis Plane 当前只做 Workspace 内的本地分析资产闭环。P1 A–D 已完成：
+
+1. Output 级 semantics、public/internal visibility、独立 assurance 和按需的时间/指标/关系语义；
+2. 稳定 JSON Schema、错误协议、summary/debug/full 与分层 provenance；
+3. compact Evidence、人工 reviewed 状态和三类 Promote dry-run/validate/Git diff；
+4. Arrow/Parquet 文件产物，以及 Base/server-python/Browser 多 Output 批量执行与提取。
+
+Catalog generation、并发/失败回退与 Server 异步刷新是这些能力共用的已落地执行基础。Promote 故意不提供自动 apply 或自动 certified；正式资产变更仍要求人审阅 patch。
+
+HTML 导出和现有分享链接继续作为人类消费看板的已有能力；当前不设计 HTML Analysis Capsule、HTML Output 提取或远程分享链接分析，也不为它们预埋 Manifest、执行协议或安全层。未来只在真实需求证明本地 Workspace 闭环不足时重新立项。
+
+## 14. 当前实现边界
 
 当前执行契约：
 
 | 契约 | 版本 |
 | --- | --- |
-| Dashboard schema | `dataviz/dashboard/v8` |
+| Dashboard schema | `dataviz/dashboard/v9` |
 | Presentation schema | `dataviz/presentation/v2` |
 | Source schema | `dataviz/source/v2` |
 | Dashboard Dependency Contract | `dataviz/dependency-contract/v5` |
@@ -865,6 +1121,7 @@ AI 的默认工作应该是选择模板、绑定 Output、填写状态依赖和�
 20. `state-snapshot/v1` 是当前分析状态的只读证据；默认画布不展示状态胶囊。作者显式启用后，Dashboard/Section/View 才展示 committed/applied 值，并把 Compute draft 明确标成待应用。
 21. browser-js/browser-python 默认 `auto`，server-python 默认 `apply`；显式 trigger 仍优先。`query/output/compute` 默认返回紧凑 `dataviz/cli-result/v1`，调试证据通过 `--detail debug|full` 获取。
 22. Custom Renderer 通过 `context.charts.plotly/echarts` 复用平台 Theme、滚轮、Resize、Update 与 Dispose；`visual-check` 对 Server/Report 执行真实浏览器几何和永久 Loading 检查并保存截图。
+23. AI Analysis Plane 初版已提供可重建 Catalog、稳定短别名、`analyze all/search/show/run`、Base/Derived/View 调度、三种 Interactive Runtime 与本地 Analysis Overlay；它们复用现有 Dependency Contract 与 Runtime。
 
 仍属于后续优化，而不是隐藏的兼容工作：
 
@@ -878,10 +1135,12 @@ AI 的默认工作应该是选择模板、绑定 Output、填写状态依赖和�
 8. Semantic Validation 只判断确定性 no-op 与保守启发式；它不会根据未知真实数据规模判定图表是否适合，也不会替代人工审美判断。
 9. 可选分析状态摘要覆盖默认 Canvas；完整自定义 Canvas 即使启用摘要，也需要显式放置稳定的 state-summary mount，平台不会猜测任意 HTML 的标题区域。
 10. visual-check 判断溢出、裁切、重叠、零尺寸、永久 Loading、Perspective 高度和 Console error，不判断配色、业务图表选择或叙事质量。
+11. Analysis Plane P1 A–D 已完成 Output semantics/assurance、六份机器 JSON Schema、稳定错误 envelope、generation Catalog、完整执行 provenance、compact Evidence、三类 Promote dry-run、Arrow/Parquet 文件产物和多 Runtime 批量 Output；Promote 不自动 apply/certified，正式知识仍以人审阅后的普通 Workspace/Git 变更为准。
+12. HTML Analysis Capsule、HTML Output 提取和远程分享链接分析不在当前路线图中；现有 HTML 导出和分享链接仍只是人类消费看板的产品能力。
 
 Component Registry 独立版本化，只在公共组件契约变化时升级，不跟随 Dashboard schema 机械改号。
 
-## 14. 已明确放弃的旧方向
+## 15. 已明确放弃的旧方向
 
 以下内容不是待恢复功能：
 
@@ -895,8 +1154,10 @@ Component Registry 独立版本化，只在公共组件契约变化时升级，�
 - 不把凭证写进 Dashboard，也不让 Dataset/Interactive Transform 获得隐式 Adapter。
 - 不为已经移除的实验性字段、Schema 或 Runtime 保留 alias、自动迁移或双协议分支。
 - 不要求普通 Dashboard 编写自定义 HTML/CSS/JS；完整 Canvas 只是最后逃生口。
+- 不为 AI Analysis Plane 复制 Dependency Contract、Query Executor、InteractionExecutor 或 Browser Runtime。
+- 不把 Renderer 像素识别当作 AI 获取分析数据的默认路径。
 
-## 15. 演进规则
+## 16. 演进规则
 
 1. 先固定状态与执行语义，再实现 Runtime，最后扩展 UI 模板。
 2. 阶段和执行位置必须正交；不能再以 Server/Browser 命名业务阶段。
@@ -905,3 +1166,5 @@ Component Registry 独立版本化，只在公共组件契约变化时升级，�
 5. Schema、Runtime protocol、Component Registry 和 Package 独立版本化。
 6. 0.x 阶段不为未投入生产的旧设计保留兼容分支。
 7. 文档声明必须能由当前 Schema、CLI、Runtime 或测试证明；尚未实现的目标必须明确标记。
+8. Catalog 只能投影当前契约并可随时重建；它不能成为 Dashboard、依赖或权限的第二事实来源。
+9. 不为当前目标预埋 HTML 分析提取、远程执行或另一套知识存储；未来能力由真实需求重新立项。

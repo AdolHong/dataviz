@@ -6,7 +6,11 @@ from typing import Any
 
 from dataviz.errors import ExecutionFailure
 from dataviz.relative_dates import is_relative_date_default, resolve_relative_date_default
-from dataviz.value_contract import ValueContractViolation, normalize_control_value
+from dataviz.value_contract import (
+    ValueContractViolation,
+    initial_control_value,
+    normalize_control_value,
+)
 
 
 def query_input_parameter(binding: Any) -> str:
@@ -31,7 +35,7 @@ def resolve_parameter_default(
     current_time: datetime | None = None,
     enforce_required: bool = False,
 ) -> Any:
-    value = definition.default
+    value = initial_control_value(definition)
     if is_relative_date_default(value):
         value = resolve_relative_date_default(
             value,

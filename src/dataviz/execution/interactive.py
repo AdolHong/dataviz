@@ -148,9 +148,14 @@ class InteractionExecutor:
         *,
         cache: NodeCache | None = None,
         cache_namespace: str | None = None,
+        cache_salt: str | None = None,
     ):
         self.workspace = workspace
-        self.cache = cache or NodeCache(workspace.root, namespace=cache_namespace)
+        self.cache = cache or NodeCache(
+            workspace.root,
+            namespace=cache_namespace,
+            key_salt=cache_salt,
+        )
         try:
             self.redaction_values = AdapterResolver(
                 workspace.root

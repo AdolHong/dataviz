@@ -1,8 +1,10 @@
-schema: dataviz/dashboard/v8
+schema: dataviz/dashboard/v9
 kind: dashboard
 id: source-lab
 title: 数据源实验室
 description: 同一张画布检查 SQL 与 Python 取数结果，并把执行证据组织成可阅读的数据叙事。
+context:
+  grain: 每个日期或业务实体一行，具体字段由对应 Source Output 定义
 adapters:
   warehouse: demo-duckdb
 controls:
@@ -12,12 +14,14 @@ controls:
     type: multiple_select
     value_type: text
     label: 日期
-    default:
-      - '2025-10-01'
-      - '2025-10-02'
-      - '2025-10-03'
-      - '2025-10-04'
-      - '2025-10-05'
+    initial:
+      mode: values
+      values:
+        - '2025-10-01'
+        - '2025-10-02'
+        - '2025-10-03'
+        - '2025-10-04'
+        - '2025-10-05'
     options:
       mode: static
       choices:

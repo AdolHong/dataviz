@@ -1,8 +1,10 @@
-schema: dataviz/dashboard/v8
+schema: dataviz/dashboard/v9
 kind: dashboard
 id: cascade-explorer
 title: 级联选择器
 description: 对照 SQL、Workspace 文件 Adapter 与看板内置 CSV，验证三级 Selection 只在浏览器选择样本。
+context:
+  grain: 每个区县一行，记录所属省市及当前指标值
 adapters:
   warehouse: demo-duckdb
   uploads: shared-files
@@ -13,7 +15,7 @@ controls:
     type: multiple_select
     value_type: text
     label: 省份
-    default: [广东, 福建]
+    initial: {mode: values, values: [广东, 福建]}
     options:
       mode: static
       choices:

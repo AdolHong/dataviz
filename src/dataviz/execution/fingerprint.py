@@ -30,6 +30,14 @@ def _relative(path: Path, root: Path) -> str:
         ) from error
 
 
+def _analysis_asset_reference(dashboard: LoadedDashboard, path: Path) -> str | None:
+    overlay = dashboard.analysis_overlay or {}
+    for asset in overlay.get("assets", ()):
+        if Path(asset.get("resolved_path", "")).resolve() == path.resolve():
+            return f"@analysis-overlay/{asset['target']}/{asset['field']}"
+    return None
+
+
 def _asset_fingerprints(
     dashboard: LoadedDashboard,
     definition_path: Path,
@@ -43,7 +51,12 @@ def _asset_fingerprints(
     result: dict[str, str] = {}
     for value in values:
         path = (definition_path.parent / value).resolve()
-        relative = _relative(path, dashboard.root)
+        try:
+            relative = _relative(path, dashboard.root)
+        except ExecutionFailure:
+            relative = _analysis_asset_reference(dashboard, path)
+            if relative is None:
+                raise
         try:
             result[relative] = hash_path(path)
         except (OSError, ValueError) as error:

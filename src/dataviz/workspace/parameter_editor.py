@@ -12,6 +12,7 @@ from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
 from dataviz.errors import WorkspaceError
 from dataviz.filesystem import atomic_write_text
+from dataviz.value_contract import select_initial_contract
 from dataviz.workspace.loader import LoadedDashboard
 from dataviz.workspace.models import DashboardDefinition, StaticOptionDomainDefinition
 
@@ -49,6 +50,7 @@ def _minimal_choice(value: dict[str, Any]) -> dict[str, Any]:
 def _control_payload(control) -> dict[str, Any]:
     static = isinstance(control.options, StaticOptionDomainDefinition)
     inferred = getattr(control.options, "mode", None) == "infer"
+    select = control.type in {"single_select", "multiple_select"}
     return {
         "id": control.id,
         "label": control.label or control.id,
@@ -66,7 +68,9 @@ def _control_payload(control) -> dict[str, Any]:
         "required": control.required,
         "clearable": control.clearable,
         "default": control.default,
-        "default_editable": not inferred,
+        "default_editable": not select,
+        "initial": select_initial_contract(control) if select else None,
+        "initial_editable": select,
         "option_source": "static" if static else "infer" if inferred else None,
         "choices_editable": static,
         "choices": [_choice_payload(choice) for choice in control.options.choices]
@@ -208,21 +212,25 @@ class ParameterEditor:
             for identifier, update in updates.items():
                 node = nodes_by_id[identifier]
                 definition = definitions_by_id[identifier]
-                inferred = getattr(definition.options, "mode", None) == "infer"
                 static = isinstance(definition.options, StaticOptionDomainDefinition)
+                select = definition.type in {"single_select", "multiple_select"}
 
-                if not inferred:
+                if select:
+                    initial = update.get("initial")
+                    if not isinstance(initial, dict):
+                        raise WorkspaceError(
+                            "Select controls require an initial policy",
+                            file=path,
+                            details={
+                                "code": "parameter_editor_initial_missing",
+                                "owner": owner,
+                                "control": identifier,
+                            },
+                        )
+                    node["initial"] = CommentedMap(initial)
+                    node.pop("default", None)
+                else:
                     node["default"] = update.get("default")
-                elif "default" in update and update.get("default") not in (None, [], ""):
-                    raise WorkspaceError(
-                        "Inferred option controls cannot declare a default",
-                        file=path,
-                        details={
-                            "code": "parameter_editor_inferred_default",
-                            "owner": owner,
-                            "control": identifier,
-                        },
-                    )
 
                 choices = update.get("choices")
                 if static:

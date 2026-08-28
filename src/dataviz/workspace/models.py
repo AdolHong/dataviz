@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -135,7 +136,6 @@ class InferredOptionDomainDefinition(Model):
     """An option domain inferred from immutable query-stage table outputs."""
 
     mode: Literal["infer"]
-    initial: Literal["auto", "empty"] = "auto"
     source: str | None = Field(
         default=None,
         description=(
@@ -150,6 +150,30 @@ OptionDomainDefinition = Annotated[
     StaticOptionDomainDefinition | InferredOptionDomainDefinition,
     Field(discriminator="mode"),
 ]
+
+
+class SelectInitialDefinition(Model):
+    """Initial value policy shared by Query, Selection and Compute selects."""
+
+    mode: Literal["all", "empty", "values", "first", "value"]
+    values: list[Any] | None = None
+    value: Any = None
+
+    @model_validator(mode="after")
+    def validate_shape(self):
+        if self.mode == "values":
+            if not self.values:
+                raise ValueError("initial mode=values requires a non-empty values list")
+            if "value" in self.model_fields_set:
+                raise ValueError("initial mode=values does not accept value")
+        elif self.mode == "value":
+            if "value" not in self.model_fields_set or self.value is None:
+                raise ValueError("initial mode=value requires value")
+            if self.values is not None:
+                raise ValueError("initial mode=value does not accept values")
+        elif self.values is not None or "value" in self.model_fields_set:
+            raise ValueError(f"initial mode={self.mode} does not accept value or values")
+        return self
 
 
 ControlDependencyReference = Annotated[
@@ -180,6 +204,7 @@ class _ValueControlDefinition(Model):
     label: str | None = None
     description: str = ""
     default: Any = None
+    initial: SelectInitialDefinition | None = None
     required: bool = False
     clearable: bool | None = None
     options: OptionDomainDefinition | None = None
@@ -255,17 +280,6 @@ class SelectionControlDefinition(_ValueControlDefinition):
             )
         if len(self.depends_on) != len(set(self.depends_on)):
             raise ValueError("Selection depends_on cannot contain duplicate references")
-        if isinstance(self.options, InferredOptionDomainDefinition) and "default" in self.model_fields_set:
-            raise ValueError(
-                "Inferred Selection options cannot declare default; the Runtime derives "
-                "the initial value from the available option domain"
-            )
-        if (
-            isinstance(self.options, InferredOptionDomainDefinition)
-            and self.required
-            and self.options.initial == "empty"
-        ):
-            raise ValueError("required inferred Selection options cannot use initial=empty")
         return self
 
 
@@ -623,7 +637,7 @@ class DeclarativeViewDefinition(Model):
 
 
 class DashboardDefinition(Model):
-    schema_: Literal["dataviz/dashboard/v8"] = Field(alias="schema")
+    schema_: Literal["dataviz/dashboard/v9"] = Field(alias="schema")
     kind: Literal["dashboard"] = "dashboard"
     id: StableId
     title: str = ""
@@ -652,6 +666,99 @@ class ColumnDefinition(Model):
     nullable: bool | None = None
 
 
+class OutputSemanticsDefinition(Model):
+    """Business meaning attached to one reusable Named Output.
+
+    Runtime fields continue to describe how data is stored.  This contract
+    describes why an AI or another author should reuse it.
+    """
+
+    class AssuranceDefinition(Model):
+        status: Literal["draft", "reviewed", "certified", "deprecated"] = "draft"
+        owner: str = ""
+        reviewed_at: date | None = None
+        evidence: list[str] = Field(default_factory=list)
+        reason: str = ""
+        replacement: str = ""
+
+        @model_validator(mode="after")
+        def validate_assurance(self):
+            if self.status in {"reviewed", "certified"}:
+                missing = [
+                    name
+                    for name, value in (
+                        ("owner", self.owner),
+                        ("reviewed_at", self.reviewed_at),
+                        ("evidence", self.evidence),
+                    )
+                    if not value
+                ]
+                if missing:
+                    raise ValueError(
+                        f"assurance.status={self.status} requires " + ", ".join(missing)
+                    )
+            if self.status == "deprecated" and not (
+                self.reason.strip() or self.replacement.strip()
+            ):
+                raise ValueError(
+                    "assurance.status=deprecated requires reason or replacement"
+                )
+            return self
+
+    class TimeDefinition(Model):
+        field: str
+        timezone: str = ""
+        meaning: str = ""
+
+        @model_validator(mode="after")
+        def validate_timezone(self):
+            if self.timezone:
+                try:
+                    ZoneInfo(self.timezone)
+                except ZoneInfoNotFoundError as error:
+                    raise ValueError(
+                        f"unknown IANA timezone: {self.timezone}"
+                    ) from error
+            return self
+
+    class MeasureDefinition(Model):
+        unit: str = ""
+        aggregation: Literal[
+            "sum", "mean", "min", "max", "count", "distinct_count", "none"
+        ] = "none"
+
+    class RelationshipDefinition(Model):
+        fields: list[str] = Field(min_length=1)
+        cardinality: Literal[
+            "one-to-one", "one-to-many", "many-to-one", "many-to-many"
+        ]
+        target: str = ""
+
+    visibility: Literal["public", "internal"] = "internal"
+    title: str = ""
+    purpose: str = ""
+    grain: str = ""
+    caveats: list[str] = Field(default_factory=list)
+    assurance: AssuranceDefinition = Field(default_factory=AssuranceDefinition)
+    time: TimeDefinition | None = None
+    measures: dict[str, MeasureDefinition] = Field(default_factory=dict)
+    relationships: list[RelationshipDefinition] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def require_public_meaning(self):
+        if self.visibility == "public":
+            missing = [
+                name
+                for name in ("title", "purpose", "grain")
+                if not str(getattr(self, name)).strip()
+            ]
+            if missing:
+                raise ValueError(
+                    "public Output semantics require non-empty " + ", ".join(missing)
+                )
+        return self
+
+
 class OutputDefinition(Model):
     """Declared contract for one stable, named node output."""
 
@@ -661,6 +768,7 @@ class OutputDefinition(Model):
     format: str | None = None
     mime_type: str | None = None
     description: str = ""
+    semantics: OutputSemanticsDefinition | None = None
     schema_: list[ColumnDefinition] = Field(default_factory=list, alias="schema")
     required: bool = True
 

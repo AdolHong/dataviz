@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v8
+schema: dataviz/dashboard/v9
 kind: dashboard
 id: component-gallery
 title: Component Gallery
@@ -23,7 +23,7 @@ controls:
     type: multiple_select
     value_type: text
     label: Region tags
-    default: [East, South, North]
+    initial: {mode: values, values: [East, South, North]}
     options:
       mode: static
       choices:
@@ -128,6 +128,7 @@ views:
         type: multiple_select
         value_type: text
         label: Search products
+        initial: {mode: empty}
         options:
           mode: static
           choices:
@@ -141,7 +142,7 @@ views:
         type: single_select
         value_type: text
         label: Category focus
-        default: Hardware
+        initial: {mode: value, value: Hardware}
         options:
           mode: static
           choices:
@@ -176,7 +177,7 @@ views:
         type: multiple_select
         value_type: text
         label: Virtualized stores
-        default: [S01, S02, S03, S04]
+        initial: {mode: values, values: [S01, S02, S03, S04]}
         options:
           mode: static
           choices:
@@ -217,7 +218,7 @@ sections:
         type: multiple_select
         value_type: text
         label: Category select
-        default: [Hardware, Software]
+        initial: {mode: values, values: [Hardware, Software]}
         options:
           mode: static
           choices:
@@ -264,7 +265,7 @@ sections:
         type: multiple_select
         value_type: text
         label: Stores
-        default: [S01, S03]
+        initial: {mode: values, values: [S01, S03]}
         options:
           mode: static
           choices:

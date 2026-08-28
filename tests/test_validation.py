@@ -45,7 +45,7 @@ runtime:{runtime or ' {}'}
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v8
+        """schema: dataviz/dashboard/v9
 kind: dashboard
 id: browser-python
 title: Browser Python
@@ -190,7 +190,7 @@ def test_validate_rejects_unknown_selection_option_domain(tmp_path: Path):
     workspace = _copy_workspace(tmp_path)
     dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
     definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
-    definition["controls"][0].pop("default")
+    definition["controls"][0].pop("initial")
     definition["controls"][0]["options"] = {
         "mode": "infer",
         "source": "source:missing/main",
@@ -605,7 +605,7 @@ def test_validate_focus_excludes_another_broken_dashboard(tmp_path: Path):
     broken = workspace / "dashboards" / "broken"
     broken.mkdir()
     (broken / "dashboard.yaml").write_text(
-        "schema: dataviz/dashboard/v8\nkind: dashboard\nid: broken\nretired_field: true\n",
+        "schema: dataviz/dashboard/v9\nkind: dashboard\nid: broken\nretired_field: true\n",
         encoding="utf-8",
     )
 

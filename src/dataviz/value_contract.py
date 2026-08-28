@@ -94,6 +94,51 @@ def static_control_choices(definition: Any) -> list[Any]:
     return list(getattr(options, "choices", []) or [])
 
 
+def select_initial_contract(definition: Any) -> dict[str, Any]:
+    """Return the explicit initial policy for any Select control."""
+
+    if definition.type not in {"single_select", "multiple_select"}:
+        raise ValueError("initial policies are only valid for select controls")
+    initial = getattr(definition, "initial", None)
+    if initial is None:
+        return {
+            "mode": "all" if definition.type == "multiple_select" else "first"
+        }
+    return initial.model_dump(mode="json", exclude_none=True)
+
+
+def select_initial_value(
+    definition: Any,
+    available_values: list[Any] | None = None,
+) -> Any:
+    """Materialize one Select initial policy against the available domain."""
+
+    policy = select_initial_contract(definition)
+    values = (
+        list(available_values)
+        if available_values is not None
+        else [choice.value for choice in static_control_choices(definition)]
+    )
+    mode = policy["mode"]
+    if mode == "all":
+        return values
+    if mode == "empty":
+        return [] if definition.type == "multiple_select" else None
+    if mode == "values":
+        return list(policy["values"])
+    if mode == "first":
+        return values[0] if values else None
+    return policy["value"]
+
+
+def initial_control_value(definition: Any) -> Any:
+    """Return the canonical initial value for Query/Compute/non-dynamic controls."""
+
+    if definition.type in {"single_select", "multiple_select"}:
+        return select_initial_value(definition)
+    return definition.default
+
+
 def _date_string(value: Any, *, label: str) -> str:
     if isinstance(value, datetime):
         value = value.date()
@@ -418,6 +463,11 @@ def validate_control_definition(definition: Any) -> Any:
         raise ValueError("options are only valid for single_select or multiple_select")
     if definition.type in {"single_select", "multiple_select"} and definition.options is None:
         raise ValueError("select controls require options.mode=static or options.mode=infer")
+    is_select = definition.type in {"single_select", "multiple_select"}
+    if not is_select and definition.initial is not None:
+        raise ValueError("initial is only valid for single_select or multiple_select")
+    if is_select and "default" in definition.model_fields_set:
+        raise ValueError("select controls use initial instead of default")
     if definition.suggestions and not (
         definition.type == "single_input" and definition.value_type == "text"
     ):
@@ -444,6 +494,42 @@ def validate_control_definition(definition: Any) -> Any:
     signatures = [json_value_signature(choice.value) for choice in choices]
     if len(signatures) != len(set(signatures)):
         raise ValueError("choice values must be unique")
+    if is_select:
+        policy = select_initial_contract(definition)
+        mode = policy["mode"]
+        allowed = (
+            {"all", "empty", "values"}
+            if definition.type == "multiple_select"
+            else {"first", "empty", "value"}
+        )
+        if mode not in allowed:
+            choices_label = ", ".join(sorted(allowed))
+            raise ValueError(
+                f"{definition.type} initial mode must be one of: {choices_label}"
+            )
+        if definition.required and mode == "empty":
+            raise ValueError("required select controls cannot use initial mode=empty")
+        try:
+            if mode == "values":
+                definition.initial.values = normalize_control_value(
+                    definition,
+                    policy["values"],
+                    enforce_required=True,
+                )
+            elif mode == "value":
+                definition.initial.value = normalize_control_value(
+                    definition,
+                    policy["value"],
+                    enforce_required=True,
+                )
+            elif mode == "all" and definition.max_selected is not None:
+                if not choices or len(choices) > definition.max_selected:
+                    raise ValueError(
+                        "initial mode=all is incompatible with max_selected when the "
+                        "complete option domain may exceed that limit"
+                    )
+        except ValueContractViolation as error:
+            raise ValueError(f"invalid select initial value: {error.message}") from error
     for suggestion in definition.suggestions:
         suggestion.value = json_compatible_value(suggestion.value)
         if not isinstance(suggestion.value, str):
@@ -454,7 +540,9 @@ def validate_control_definition(definition: Any) -> Any:
     ]
     if len(suggestion_signatures) != len(set(suggestion_signatures)):
         raise ValueError("suggestion values must be unique")
-    if is_relative_date_default(definition.default):
+    if is_select:
+        definition.default = None
+    elif is_relative_date_default(definition.default):
         if not (
             definition.value_type == "date"
             and definition.type in {"single_input", "range_input"}
@@ -480,6 +568,6 @@ def validate_control_definition(definition: Any) -> Any:
         definition.default = normalize_control_value(
             definition, definition.default, enforce_required=False
         )
-    elif definition.type in {"multiple_input", "multiple_select", "range_input"} and definition.default in ([], ()):
+    elif definition.type in {"multiple_input", "range_input"} and definition.default in ([], ()):
         definition.default = []
     return definition

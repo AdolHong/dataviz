@@ -6,7 +6,7 @@ import yaml
 from typer.testing import CliRunner
 
 from dataviz.cli import app
-from dataviz.semantic_validation import validate_dashboard_semantics
+from dataviz.semantic_validation import _sql_projects_wildcard, validate_dashboard_semantics
 from dataviz.validation import validate_preflight
 from dataviz.workspace import load_workspace
 
@@ -86,6 +86,23 @@ def test_current_examples_have_no_semantic_warnings():
     assert not [item for item in diagnostics if item.level in {"error", "warning"}]
 
 
+def test_reusable_sql_output_warns_for_wildcard_but_not_count(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    import shutil
+
+    shutil.copytree(MINIMAL, workspace)
+    sql_path = workspace / "dashboards" / "sales-overview" / "sources" / "sales.sql"
+    sql_path.write_text("SELECT sales.* FROM read_csv_auto('{{ sales_file }}') AS sales\n", encoding="utf-8")
+
+    diagnostics = validate_dashboard_semantics(load_workspace(workspace).dashboard("sales-overview"))
+
+    assert any(item.code == "analysis_sql_wildcard_output" for item in diagnostics)
+    assert _sql_projects_wildcard("SELECT * FROM sales") is True
+    assert _sql_projects_wildcard("SELECT sales.* FROM sales") is True
+    assert _sql_projects_wildcard("SELECT count(*) AS rows FROM sales") is False
+    assert _sql_projects_wildcard("SELECT '*' AS marker, id FROM sales") is False
+
+
 def test_checkbox_group_with_large_static_domain_is_a_semantic_warning(tmp_path: Path):
     workspace = tmp_path / "workspace"
     import shutil
@@ -100,7 +117,10 @@ def test_checkbox_group_with_large_static_domain_is_a_semantic_warning(tmp_path:
             for index in range(1, 7)
         ],
     }
-    definition["controls"][0]["default"] = ["r1"]
+    definition["controls"][0]["initial"] = {
+        "mode": "values",
+        "values": ["r1"],
+    }
     dashboard_path.write_text(
         yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
         encoding="utf-8",

@@ -1685,10 +1685,23 @@ const datavizReconcileSelectionOptionDomain = (
   }
   const key = datavizSelectionIntentKey(input);
   const state = key ? datavizSelectionEntry(key) : {intent:'explicit', values:[]};
+  const definition = key ? datavizSelectionDefinition(key) : {};
+  const policy = definition.initial || {
+    mode:definition.type === 'multiple_select' ? 'all' : 'first',
+  };
+  const rawInitialValues = policy.mode === 'values'
+    ? (policy.values || [])
+    : policy.mode === 'value'
+      ? [policy.value]
+      : [];
+  const initialValues = rawInitialValues.map(value => datavizEncodeControlValue(input, value, {
+    path:input.closest('[data-selection-key]')?.dataset.selectionPath === 'true',
+  }));
   const result = reconcile(input, nextOptions, {
     selectedValues,
     intent:state.intent,
     required,
+    initial:{mode:policy.mode, values:initialValues},
   });
   if (key && result.intent) state.intent = result.intent;
   return result;

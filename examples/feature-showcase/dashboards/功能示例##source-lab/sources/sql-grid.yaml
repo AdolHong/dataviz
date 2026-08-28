@@ -2,8 +2,13 @@ schema: dataviz/source/v2
 kind: source
 id: sql-grid
 name: DuckDB 数据矩阵
+description: 从 DuckDB 读取业务实体矩阵，用于和 Python Source 的结果并列检查。
 type: sql
 adapter: warehouse
 code: grid.sql
-outputs: {main: {kind: table}}
+outputs:
+  main:
+    kind: table
+    description: DuckDB 业务实体指标矩阵
+    semantics: {visibility: public, title: 业务实体指标矩阵, purpose: 查询 DuckDB 中用于横向比较的业务实体指标。, grain: 每行代表一个业务实体。, caveats: [], assurance: {status: certified, owner: analytics, reviewed_at: 2026-08-28, evidence: [evidence/analysis-contract.md]}}
 cache: {mode: session}

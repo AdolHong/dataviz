@@ -33,7 +33,7 @@ from dataviz.execution.fingerprint import ensure_query_run_compatible
 from dataviz.filesystem import atomic_write_bytes, atomic_write_text
 from dataviz.state_snapshot import build_state_snapshot
 from dataviz.templates import COMPONENT_REGISTRY_VERSION, RUNTIME_PROTOCOL_SCHEMA
-from dataviz.value_contract import static_control_choices
+from dataviz.value_contract import initial_control_value, static_control_choices
 from dataviz.workspace.models import DashboardDefinition, DeclarativeViewDefinition
 from dataviz.workspace.controls import (
     project_selection_values,
@@ -796,7 +796,7 @@ class CanvasRenderer:
                 if item.definition.trigger == "manual"
             )
             if item.kind == "selection":
-                value = result.selections.get(key, definition.default)
+                value = result.selections.get(key, initial_control_value(definition))
                 presentation = self._control_component_presentation(
                     dashboard, key, definition
                 )
@@ -820,7 +820,7 @@ class CanvasRenderer:
                     dashboard,
                     key,
                     definition,
-                    result.compute_parameters.get(key, definition.default),
+                    result.compute_parameters.get(key, initial_control_value(definition)),
                     trigger=trigger,
                     frozen=frozen,
                 )
@@ -1313,7 +1313,7 @@ class CanvasRenderer:
             dashboard_control_keys.append(key)
             definition = item.definition
             if item.kind == "selection":
-                value = result.selections.get(key, definition.default)
+                value = result.selections.get(key, initial_control_value(definition))
                 dependency = dependency_contract.controls.get(key)
                 affected_count = len(dependency.affected_views) if dependency else 0
                 affected_noun = "view" if affected_count == 1 else "views"
@@ -1356,7 +1356,7 @@ class CanvasRenderer:
                     dashboard,
                     key,
                     definition,
-                    result.compute_parameters.get(key, definition.default),
+                    result.compute_parameters.get(key, initial_control_value(definition)),
                     trigger=trigger,
                     frozen=frozen,
                 )

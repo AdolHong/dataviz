@@ -30,11 +30,18 @@ def _cache_lock(workspace_root: Path) -> threading.RLock:
 
 
 class NodeCache:
-    def __init__(self, workspace_root: Path, namespace: str | None = None):
+    def __init__(
+        self,
+        workspace_root: Path,
+        namespace: str | None = None,
+        *,
+        key_salt: str | None = None,
+    ):
         self.workspace_root = workspace_root.resolve()
         self.root = self.workspace_root / ".dataviz" / "cache"
         self.root.mkdir(parents=True, exist_ok=True)
         self.namespace = namespace
+        self.key_salt = key_salt
         self.memory: dict[str, tuple[float, OutputBundle]] = {}
         self.lock = _cache_lock(self.workspace_root)
 
@@ -46,7 +53,12 @@ class NodeCache:
         return self.root / "tabs" / digest
 
     def key(self, payload: dict[str, Any]) -> str:
-        raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+        effective = (
+            {"analysis_cache_salt": self.key_salt, "payload": payload}
+            if self.key_salt is not None
+            else payload
+        )
+        raw = json.dumps(effective, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
         return hashlib.sha256(raw).hexdigest()
 
     @staticmethod

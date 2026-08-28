@@ -2,8 +2,13 @@ schema: dataviz/source/v2
 kind: source
 id: cities
 name: 城市 SQL
+description: 从演示仓库读取省、市、区县及指标值，作为级联选择的主要业务口径。
 type: sql
 adapter: warehouse
 code: cities.sql
-outputs: {main: {kind: table}}
+outputs:
+  main:
+    kind: table
+    description: 省市区县层级及当前指标值
+    semantics: {visibility: public, title: 省市区县指标, purpose: 查询省市区县层级及当前业务指标值。, grain: 每行代表一个区县。, caveats: [], assurance: {status: certified, owner: data-platform, reviewed_at: 2026-08-28, evidence: [evidence/analysis-contract.md]}}
 cache: {mode: none}

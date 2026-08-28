@@ -130,7 +130,10 @@ def test_parameter_editor_updates_only_defaults_static_choices_and_sibling_order
                 "items": [
                     {
                         "id": "segment",
-                        "default": ["Alpha", "Delta"],
+                        "initial": {
+                            "mode": "values",
+                            "values": ["Alpha", "Delta"],
+                        },
                         "choices": [
                             {"label": "Alpha", "value": "Alpha"},
                             {"label": "Delta", "value": "Delta"},
@@ -150,7 +153,10 @@ def test_parameter_editor_updates_only_defaults_static_choices_and_sibling_order
         "multiplier",
     ]
     assert [item["default"] for item in saved["query_parameters"]] == [24, 3]
-    assert saved["controls"][0]["default"] == ["Alpha", "Delta"]
+    assert saved["controls"][0]["initial"] == {
+        "mode": "values",
+        "values": ["Alpha", "Delta"],
+    }
     assert saved["controls"][0]["options"]["choices"] == [
         {"label": "Alpha", "value": "Alpha"},
         {"label": "Delta", "value": "Delta"},
@@ -194,7 +200,11 @@ def test_parameter_editor_exposes_nested_groups_and_rejects_stale_revisions(
                 "order": ["min_value", "district"],
                 "items": [
                     {"id": "min_value", "default": 10},
-                    {"id": "district", "default": None, "choices": []},
+                    {
+                        "id": "district",
+                        "initial": {"mode": "all"},
+                        "choices": [],
+                    },
                 ],
             },
         },
@@ -216,6 +226,7 @@ def test_parameter_editor_exposes_nested_groups_and_rejects_stale_revisions(
                     {
                         "id": item["id"],
                         "default": item["default"],
+                        "initial": item["initial"],
                         "choices": item["choices"] if item["choices_editable"] else [],
                     }
                     for item in view["items"]
@@ -1554,7 +1565,7 @@ def test_fast_dag_branch_publishes_output_before_slow_branch_finishes(
         encoding="utf-8",
     )
     (dashboard_root / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v8
+        """schema: dataviz/dashboard/v9
 kind: dashboard
 id: progressive
 title: Progressive branches
@@ -1962,7 +1973,7 @@ def test_query_cancel_is_tab_scoped_and_same_dashboard_run_supersedes(tmp_path: 
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v8
+        """schema: dataviz/dashboard/v9
 kind: dashboard
 id: slow
 title: Slow

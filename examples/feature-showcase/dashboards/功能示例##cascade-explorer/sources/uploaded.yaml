@@ -2,9 +2,14 @@ schema: dataviz/source/v2
 kind: source
 id: uploaded-file
 name: Workspace 文件 Adapter
+description: 读取 Workspace 共享文件中的区县指标，用于验证可替换文件数据源。
 type: file
 adapter: uploads
 path: uploaded.csv
 format: csv
-outputs: {main: {kind: table}}
+outputs:
+  main:
+    kind: table
+    description: Workspace 上传文件中的区县指标
+    semantics: {visibility: public, title: 上传区县指标, purpose: 分析 Workspace 上传文件提供的区县指标。, grain: 每行代表一个区县。, caveats: [结果取决于当前上传文件。], assurance: {status: reviewed, owner: data-platform, reviewed_at: 2026-08-28, evidence: [evidence/analysis-contract.md]}}
 cache: {mode: persistent}

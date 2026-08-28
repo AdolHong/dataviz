@@ -285,6 +285,34 @@
       legend:legendOptions = {},
       ...chartOptions
     } = view.options || {};
+    const series = groups.flatMap(group => measures.map(measure => ({
+      name:[group, measures.length > 1 ? measure : null].filter(Boolean).join(' · ') || view.title,
+      type:view.template === 'line' ? 'line' : 'bar',
+      stack:view.template === 'stacked-bar' ? 'total' : undefined,
+      data:categories.map(category => {
+        const row = rows.find(candidate => (
+          candidate[view.x] === category
+          && (group == null || candidate[view.series] === group)
+        ));
+        return row ? echartsPoint(binding, row, row[measure]) : null;
+      }),
+    })));
+    const centerDisjointBars = (
+      view.template === 'bar'
+      && series.length > 1
+      && measures.length === 1
+      && categories.every((_category, index) => (
+        series.filter(item => item.data[index] != null).length <= 1
+      ))
+    );
+    if (centerDisjointBars) {
+      // ECharts reserves one horizontal slot per bar series even when every
+      // category belongs to exactly one series. Overlap those otherwise empty
+      // slots so each lone bar remains centered on its category label. Keep the
+      // option on every series because legend filtering can change which series
+      // is the last active one used to resolve the shared bar gap.
+      series.forEach(item => { item.barGap = '-100%'; });
+    }
     return {
       type:'echarts',
       legendInteraction,
@@ -299,18 +327,7 @@
         },
         xAxis:{type:'category', data:categories},
         yAxis:{type:'value'},
-        series:groups.flatMap(group => measures.map(measure => ({
-          name:[group, measures.length > 1 ? measure : null].filter(Boolean).join(' · ') || view.title,
-          type:view.template === 'line' ? 'line' : 'bar',
-          stack:view.template === 'stacked-bar' ? 'total' : undefined,
-          data:categories.map(category => {
-            const row = rows.find(candidate => (
-              candidate[view.x] === category
-              && (group == null || candidate[view.series] === group)
-            ));
-            return row ? echartsPoint(binding, row, row[measure]) : null;
-          }),
-        }))),
+        series,
         ...chartOptions,
       },
     };

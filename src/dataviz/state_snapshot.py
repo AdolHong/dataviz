@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, TYPE_CHECKING
 
+from dataviz.value_contract import initial_control_value
 from dataviz.workspace.controls import scoped_control_registry
 if TYPE_CHECKING:
     from dataviz.workspace.loader import LoadedDashboard
@@ -51,7 +52,7 @@ def build_state_snapshot(
             stale = False
         else:
             committed = deepcopy(
-                compute_parameters.get(key, control.definition.default)
+                compute_parameters.get(key, initial_control_value(control.definition))
             )
             draft = deepcopy(drafts.get(key, committed))
             stale = committed != draft

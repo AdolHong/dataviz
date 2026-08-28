@@ -2,8 +2,13 @@ schema: dataviz/source/v2
 kind: source
 id: bundled-file
 name: 看板内置 CSV
+description: 提供随看板版本固定的区县指标基准，用于与 Workspace 文件和 SQL 结果对照。
 type: file
 path: ../data/fixed.csv
 format: csv
-outputs: {main: {kind: table}}
+outputs:
+  main:
+    kind: table
+    description: 随看板发布的区县指标基准表
+    semantics: {visibility: public, title: 区县指标基准, purpose: 对照看板内置的省市区县指标基准值。, grain: 每行代表一个区县。, caveats: [随看板发布的静态样本。], assurance: {status: deprecated, reason: 请使用 source:cities/main 的动态查询口径。, replacement: source:cities/main}}
 cache: {mode: persistent}

@@ -6,8 +6,10 @@ from typing import Any, Literal, Mapping
 from dataviz.errors import ExecutionFailure
 from dataviz.value_contract import (
     ValueContractViolation,
+    initial_control_value,
     is_empty_control_value,
     normalize_control_value,
+    select_initial_contract,
 )
 from dataviz.workspace.models import (
     InferredOptionDomainDefinition,
@@ -88,12 +90,13 @@ def initial_selection_state(
     *,
     allow_unresolved_inferred: bool = False,
 ) -> ResolvedSelection:
+    policy = (
+        select_initial_contract(definition)
+        if definition.type in {"single_select", "multiple_select"}
+        else None
+    )
     intent: SelectionIntent = (
-        "all_available"
-        if definition.type == "multiple_select"
-        and isinstance(definition.options, InferredOptionDomainDefinition)
-        and definition.options.initial == "auto"
-        else "explicit"
+        "all_available" if policy and policy["mode"] == "all" else "explicit"
     )
     enforce_required = not (
         allow_unresolved_inferred
@@ -101,7 +104,7 @@ def initial_selection_state(
     )
     state = explicit_selection_state(
         definition,
-        definition.default,
+        initial_control_value(definition),
         enforce_required=enforce_required,
     )
     return ResolvedSelection(intent, state.values)

@@ -1,9 +1,10 @@
-schema: dataviz/dashboard/v8
+schema: dataviz/dashboard/v9
 kind: dashboard
 id: sales-overview
 title: 销售概览
 subtitle: "当前取数下限：{{ parameters.min_query_revenue }}"
 description: 收入、订单与区域表现。
+context: {grain: 每行代表一天、一个区域的销售汇总}
 
 layout: {template: overview, columns: 12, gap: 18}
 
@@ -20,11 +21,21 @@ query_parameters:
 sources:
   - id: sales
     name: 销售数据
+    description: 按最低收入阈值获取每日区域收入与订单汇总。
     type: sql
     adapter: warehouse
     code: sources/sales.sql
     query_inputs: {min_query_revenue: min_query_revenue}
-    outputs: {main: {kind: table}}
+    outputs:
+      main:
+        kind: table
+        description: 每日区域销售汇总
+        semantics:
+          visibility: public
+          title: 每日区域销售汇总
+          purpose: 分析最低收入阈值以上的区域收入与订单表现。
+          grain: 每行代表一天、一个区域的销售汇总。
+          caveats: []
 
 controls:
   - id: region
@@ -33,7 +44,7 @@ controls:
     type: multiple_select
     value_type: text
     label: 区域
-    default: [华东, 华南, 华北]
+    initial: {mode: values, values: [华东, 华南, 华北]}
     options:
       mode: static
       choices:

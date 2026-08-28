@@ -2,9 +2,14 @@ schema: dataviz/source/v2
 kind: source
 id: parameterized
 name: 参数化 DuckDB 查询
+description: 根据倍率和行数生成分组样本，用于验证 Query Parameter 对取数结果的影响。
 type: sql
 adapter: warehouse
 code: parameterized.sql
 query_inputs: {multiplier: multiplier, row_count: row_count}
-outputs: {main: {kind: table}}
+outputs:
+  main:
+    kind: table
+    description: 参数生成的分组数值与派生分数
+    semantics: {visibility: public, title: 参数化分组数值, purpose: 检查倍率与行数参数如何改变分组数值和派生分数。, grain: 每行代表一个生成序号。, caveats: [仅用于参数组件演示。], assurance: {status: draft}}
 cache: {mode: session}

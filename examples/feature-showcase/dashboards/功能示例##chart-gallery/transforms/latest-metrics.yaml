@@ -16,4 +16,6 @@ selection_inputs:
 trigger: auto
 export: {mode: interactive}
 outputs:
-  main: {kind: table}
+  main:
+    kind: table
+    semantics: {visibility: public, title: 当前筛选经营指标, purpose: 返回当前省份选择下用于图表联动的经营指标。, grain: 每行代表一个城市的一个季度。, caveats: [受当前省份 Control 影响。], assurance: {status: reviewed, owner: analytics, reviewed_at: 2026-08-28, evidence: [evidence/analysis-contract.md]}}

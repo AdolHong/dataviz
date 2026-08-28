@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v8
+schema: dataviz/dashboard/v9
 kind: dashboard
 id: sales
 title: 销售脉搏
@@ -23,7 +23,7 @@ controls:
     type: multiple_select
     value_type: text
     label: 区域
-    default: [North, South, East, West]
+    initial: {mode: values, values: [North, South, East, West]}
     options:
       mode: static
       choices:

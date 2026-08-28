@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 0.10.0 — 2026-08-29
+
+- 新增 AI Analysis Plane 初版：`dataviz analyze all/search/show/run` 可通过稳定短别名搜索并执行 Source、Base Output、Derived Output 与 View 输入；Base/server-python/browser-js/browser-python 共用现有 Runtime 和机器可读 provenance。
+- P1 Analysis Plane A–E 完成：新增 Output `semantics`/`assurance`、六份版本化机器 JSON Schema、public/internal 与可信发现边界、稳定 Analysis 错误 envelope、Evidence 和 Promote dry-run。
+- Workspace Catalog 补齐并发 refresh 去重、构建失败回退旧 generation、Server watcher 异步刷新和 stale diagnostics。
+- 新增 `.dataviz/usage.sqlite` 成功行为统计；Server Query 与 AI `analyze run` 使用 WAL、原子 UPSERT、首次初始化的有界锁重试和 best-effort 故障隔离，统计文件不影响 fingerprint、Hot Reload 或成功结果。
+- `analyze all/search` 对实现资产、Runtime、Adapter 引用、Query bindings 与 Output Contract 完全一致的口径做精确折叠，支持 occurrence 展开、关闭折叠和折叠后的 Top N；不推断 SQL 语义等价。
+- public 或 reviewed/certified SQL Output 的 `SELECT *`/`table.*` 产生稳定 warning，`count(*)` 不误报；Scaffold 与示例改用显式字段投影。
+- `analyze run` 新增 Parquet/Arrow、输入 Artifact provenance、summary/debug/full 分层、View presentation mapping，以及 `--also` 单浏览器会话批量 Derived 提取。
+- Browser Analysis 默认使用隔离 Context 并阻止非本地网络，按需加载 Pyodide，记录 launch/page-ready/runtime-ready/transform/extraction 分段耗时；可复用 Arrow Output 优先通过 Arrow IPC 提取。
+- 新增 `dataviz/analysis-overlay/v1`：`analyze run --overlay FILE|-` 可一次性替换 SQL、File Source、Python/JS Transform 及 code dependencies；`--dry-run` 先检查影响范围，正式执行不写回 Dashboard/Catalog，并使用独立缓存 salt 与 Analysis Run manifest。
+- `analyze show --detail full --include-code` 可查看目标闭包的定义、路径、hash 与已脱敏的小型代码资产；大型数据文件不内联。
+- Dashboard Contract 升级为 v9：Query Parameter、Selection 与 Compute 的所有 Select 统一使用 `initial`。多选支持 `all | empty | values`，单选支持 `first | empty | value`；非 Select 输入继续使用 `default`。
+- 动态 Selection 候选域采用混合协调策略：优先保留仍有效的用户选择；原非空选择完全失效时恢复 `initial`；用户主动清空始终保留；`all` 意图继续跟随完整候选域。
+- `visual-check` 提供独立可选依赖 `pip install "ai-dataviz[visual-check]"`；缺少 Playwright 包或浏览器时，CLI 直接返回可复制的安装命令。
+- `dataviz docs --task` 新增 `cascading-selection`、`view-filter` 与 `browser-compute` 聚焦入口，分别返回最小示例、允许字段、常见错误和验证命令。
+
+## 0.9.2 — 2026-08-28
+
+- CLI 文档新增按任务/Component 的机器可读作者路由；默认 minimal 只披露 `Adapter → Source → View → Layout`，interactive 与 custom-renderer 按需加入各自的传递契约。
+- Scaffold Catalog 升级为 v2，并新增可直接运行的 minimal、interactive、custom-renderer Workspace profiles；三条路径分别回归 `validate → report → visual-check`。
+- `visual-check` 不再要求已设计为隐藏的 Query 状态文案可见，只等待其 Runtime 状态进入 Ready。
+
 ## 0.9.1 — 2026-08-28
 
 - 默认 Table 不再为行数单独占用一条元信息行；确实需要时可显式启用 `options.show_count: true`。

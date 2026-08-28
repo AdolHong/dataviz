@@ -183,7 +183,8 @@ def test_view_control_binding_rejects_narrower_candidate_selection(tmp_path: Pat
             "kind": "selection",
             "type": "single_select", "value_type": "text",
             "field": "city",
-            "options": {"mode": "infer", "initial": "empty"},
+            "initial": {"mode": "empty"},
+            "options": {"mode": "infer"},
         }
     ]
     dashboard_path.write_text(

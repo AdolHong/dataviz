@@ -1,4 +1,4 @@
-select *
+select day, region, revenue, orders
 from (
   values
     ('2026-08-01', '华东', 128000, 410),
@@ -16,4 +16,3 @@ from (
 ) as sales(day, region, revenue, orders)
 where revenue >= $min_query_revenue
 order by day, region
-

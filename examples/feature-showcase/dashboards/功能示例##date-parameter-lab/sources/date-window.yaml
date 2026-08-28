@@ -2,6 +2,7 @@ schema: dataviz/source/v2
 kind: source
 id: date-window
 name: 日期参数解析
+description: 把相对日期参数固化为本次 Query Run 使用的单日、起止日与区间天数。
 type: sql
 adapter: warehouse
 code: date-window.sql
@@ -9,6 +10,9 @@ query_inputs:
   analysis_date: analysis_date
   range_start: {parameter: report_range, part: start}
   range_end: {parameter: report_range, part: end}
-outputs: {main: {kind: table}}
+outputs:
+  main:
+    kind: table
+    description: 本次查询实际采用的日期参数
+    semantics: {visibility: public, title: 查询日期参数快照, purpose: 核对单日与日期范围参数最终解析出的日期。, grain: 每次查询一行。, caveats: [仅用于日期参数演示。], assurance: {status: certified, owner: dataviz, reviewed_at: 2026-08-28, evidence: [evidence/analysis-contract.md]}}
 cache: {mode: session}
-

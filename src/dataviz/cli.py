@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import ipaddress
 import os
 import platform
@@ -18,13 +19,29 @@ from typing import Any
 
 import typer
 import yaml
+import click
 
 from dataviz import __version__
+from dataviz.analysis import (
+    analysis_reference_closure,
+    build_analysis_variant,
+    build_promotion_preview,
+    create_analysis_evidence,
+    ensure_analysis_catalog,
+    inspect_analysis_closure,
+    load_analysis_evidence,
+    load_promotion_proposal,
+    output_analysis_usage,
+    record_usage_best_effort,
+    validate_analysis_catalog,
+    validate_analysis_result,
+)
+from dataviz.analysis.browser import run_browser_outputs
 from dataviz.authoring import (
     build_authoring_benchmark,
     build_context_payload,
+    scaffold_catalog,
     scaffold_recipe,
-    scaffold_recipes,
 )
 from dataviz.authoring_log import (
     AUTHORING_LOG_NAME,
@@ -46,8 +63,20 @@ from dataviz.artifacts import ArtifactStore
 from dataviz.components import component_story_catalog, validate_component_packages
 from dataviz.errors import DatavizError, ExecutionFailure
 from dataviz.frontend_adapters import frontend_adapter_catalog, frontend_adapter_source
-from dataviz.filesystem import atomic_write_text, transactional_write_texts
-from dataviz.documentation import DOC_TOPICS, docs_catalog, resolve_doc_topic
+from dataviz.filesystem import (
+    atomic_copy_file,
+    atomic_write_bytes,
+    atomic_write_text,
+    sha256_file,
+    transactional_write_texts,
+)
+from dataviz.documentation import (
+    DOC_TOPICS,
+    authoring_route_catalog,
+    docs_catalog,
+    resolve_authoring_route,
+    resolve_doc_topic,
+)
 from dataviz.execution import Executor, InteractionExecutor
 from dataviz.execution.dependencies import (
     DEPENDENCY_CONTRACT_SCHEMA,
@@ -67,6 +96,7 @@ from dataviz.semantic_validation import validate_dashboard_semantics
 from dataviz.workspace.controls import (
     project_selection_values,
     resolve_compute_values,
+    scoped_control_registry,
 )
 
 
@@ -82,7 +112,13 @@ authoring_app = typer.Typer(
     help="Record real AI authoring cost and friction in the Workspace.",
     no_args_is_help=True,
 )
+analysis_app = typer.Typer(
+    name="analyze",
+    help="Search and execute Dashboard data contracts for AI analysis.",
+    no_args_is_help=True,
+)
 app.add_typer(authoring_app, name="authoring")
+app.add_typer(analysis_app, name="analyze")
 GALLERY_WORKSPACE = Path(__file__).resolve().parent / "gallery"
 
 
@@ -529,6 +565,29 @@ def handle_error(exc: Exception) -> None:
     error = exc.as_dict() if isinstance(exc, DatavizError) else {
         "type": type(exc).__name__, "message": str(exc)
     }
+    context = click.get_current_context(silent=True)
+    is_analysis = bool(context and " analyze " in f" {context.command_path} ")
+    if is_analysis:
+        if not error.get("code"):
+            error["code"] = (
+                "analysis_argument_invalid"
+                if isinstance(exc, typer.BadParameter)
+                else "analysis_internal_error"
+            )
+        print_json(
+            validate_analysis_result(
+                {
+                    "schema": "dataviz/analysis-result/v1",
+                    "status": "error",
+                    "error": error,
+                    "next_actions": [
+                        "dataviz analyze --help",
+                        "dataviz docs workflow --format json",
+                    ],
+                }
+            )
+        )
+        raise typer.Exit(1)
     print_json({
         "status": "error",
         "error": error,
@@ -737,7 +796,7 @@ Finish the returned session with `dataviz authoring finish`. Commit the generate
 `dataviz-authoring.jsonl` when its task text and notes contain no sensitive data;
 sharing that file gives the Dataviz author real retry, time and documentation-friction data.
 """,
-        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v8
+        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v9
 kind: dashboard
 id: hello
 title: Hello dashboard
@@ -747,7 +806,7 @@ controls:
     kind: selection
     type: multiple_select
     value_type: text
-    default: [A, B, C]
+    initial: {mode: values, values: [A, B, C]}
     options:
       mode: static
       choices:
@@ -761,7 +820,15 @@ sources:
     type: file
     path: data/sample.csv
     format: csv
-    outputs: {main: {kind: table}}
+    outputs:
+      main:
+        kind: table
+        semantics:
+          visibility: public
+          title: Sample category values
+          purpose: Compare the sample value for each category.
+          grain: One row per category.
+          caveats: [Demonstration data only.]
 views:
   - id: summary
     title: Sample values
@@ -902,6 +969,44 @@ def _print_doc_topic(name: str, definition: dict[str, Any]) -> None:
             typer.echo("```\n")
 
 
+def _print_authoring_route(payload: dict[str, Any]) -> None:
+    typer.echo(f"# Dataviz authoring route · {payload['task']}\n")
+    typer.echo(f"{payload['summary']}\n")
+    typer.echo(f"Concept closure: {' → '.join(payload['concepts'])}\n")
+    for identifier, document in payload["documents"].items():
+        typer.echo(f"## {identifier}\n")
+        typer.echo(f"{document['purpose']}\n")
+        typer.echo(f"Path: {document['path']}\n")
+        for step in document["steps"]:
+            typer.echo(f"- {step}")
+        typer.echo()
+        for key in (
+            "minimal_example",
+            "allowed_fields",
+            "common_errors",
+            "validation_commands",
+        ):
+            if key not in document:
+                continue
+            typer.echo(f"### {_doc_heading(key)}\n")
+            value = document[key]
+            if key == "minimal_example":
+                typer.echo("```yaml")
+                typer.echo(value.rstrip())
+                typer.echo("```\n")
+            elif isinstance(value, list):
+                for item in value:
+                    typer.echo(f"- {item}")
+                typer.echo()
+            else:
+                typer.echo("```yaml")
+                typer.echo(yaml.safe_dump(value, allow_unicode=True, sort_keys=False).rstrip())
+                typer.echo("```\n")
+    typer.echo("## Commands\n")
+    for command in payload["commands"]:
+        typer.echo(f"- `{command}`")
+
+
 @app.command("docs")
 def documentation(
     topic: str | None = typer.Argument(
@@ -909,11 +1014,39 @@ def documentation(
         help="Topic, for example quickstart, design-language, charts, or troubleshooting",
     ),
     search: str | None = typer.Option(None, "--search", help="Search all built-in documentation"),
+    task: str | None = typer.Option(
+        None,
+        "--task",
+        help=(
+            "Return the minimum authoring closure for a route such as minimal, "
+            "cascading-selection, view-filter, browser-compute, or custom-renderer"
+        ),
+    ),
+    component: str | None = typer.Option(
+        None,
+        "--component",
+        help="Route from one Component id, for example control.select or view.custom",
+    ),
     output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
 ) -> None:
     """Read the built-in AI development manual, recipes and troubleshooting guide."""
     if output_format not in {"markdown", "json"}:
         raise typer.BadParameter("--format must be markdown or json")
+    selectors = [topic is not None, search is not None, task is not None, component is not None]
+    if sum(selectors) > 1:
+        raise typer.BadParameter(
+            "Choose only one of TOPIC, --search, --task, or --component"
+        )
+    if task is not None or component is not None:
+        try:
+            payload = resolve_authoring_route(task, component=component)
+        except ValueError as error:
+            raise typer.BadParameter(str(error)) from error
+        if output_format == "json":
+            print_json(payload)
+        else:
+            _print_authoring_route(payload)
+        return
     if topic is not None:
         resolved = resolve_doc_topic(topic)
         definition = DOC_TOPICS.get(resolved)
@@ -930,13 +1063,15 @@ def documentation(
     catalog = docs_catalog(search)
     if output_format == "json":
         print_json({
-            "start_here": "quickstart",
+            "start_here": {"task": "minimal", "topic": "quickstart"},
             "recommended_workflow": "workflow",
+            "authoring_routes": authoring_route_catalog(),
             "topics": catalog,
         })
         return
     typer.echo("# Dataviz CLI development manual\n")
-    typer.echo("AI should begin with `dataviz docs quickstart`, then follow `dataviz docs workflow`.\n")
+    typer.echo("Start with `dataviz docs --task minimal`; expand the route only when the task requires it.\n")
+    typer.echo("For the full manual, continue with `dataviz docs quickstart` and `dataviz docs workflow`.\n")
     typer.echo("Before custom Presentation/CSS, read `dataviz docs design-language`.\n")
     if search:
         typer.echo(f"Search: `{search}`\n")
@@ -1076,7 +1211,9 @@ def visual_check(
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as error:
-        raise typer.BadParameter("visual-check requires: uv sync --extra dev") from error
+        raise typer.BadParameter(
+            'visual-check is not installed; run: pip install "ai-dataviz[visual-check]"'
+        ) from error
     if browser not in {"chromium", "firefox", "webkit"}:
         raise typer.BadParameter("--browser must be chromium, firefox, or webkit")
     if target not in {"report", "server", "both"}:
@@ -1114,7 +1251,9 @@ def visual_check(
                 browser_instance = getattr(playwright, browser).launch(headless=True)
             except Exception as error:
                 raise typer.BadParameter(
-                    f"{browser} is unavailable; run: playwright install {browser}"
+                    f"{browser} is unavailable; run: python -m playwright install {browser}. "
+                    f"On Linux, install browser system libraries with: "
+                    f"python -m playwright install --with-deps {browser}"
                 ) from error
 
             def inspect_url(url: str, mode: str, *, server_shell: bool = False) -> None:
@@ -1136,7 +1275,7 @@ def visual_check(
                         dashboard_item.click()
                         page.locator("#run-button").click()
                         page.locator("#query-diagnostics-label").wait_for(
-                            state="visible", timeout=int(timeout_seconds * 1000)
+                            state="attached", timeout=int(timeout_seconds * 1000)
                         )
                         page.wait_for_function(
                             "() => document.querySelector('#query-diagnostics-label')?.textContent?.trim() === 'Ready'",
@@ -2045,16 +2184,19 @@ def scaffold(
         if list_recipes:
             if output is not None:
                 raise typer.BadParameter("--output cannot be used with --list")
-            catalog = {
-                "schema": "dataviz/scaffold-catalog/v1",
-                "recipes": list(scaffold_recipes()),
-            }
+            catalog = scaffold_catalog()
             if output_format == "json":
                 print_json(catalog)
             else:
-                typer.echo("# Dataviz scaffold recipes\n")
-                for name in catalog["recipes"]:
+                typer.echo("# Dataviz scaffold profiles\n")
+                for name in catalog["profiles"]:
                     typer.echo(f"- `{name}`")
+                typer.echo("\n# Fragment recipes\n")
+                for definition in catalog["recipes"]:
+                    if definition["scope"] == "fragment":
+                        typer.echo(
+                            f"- `{definition['id']}` · {definition['route']}"
+                        )
             return
         if recipe is None:
             raise typer.BadParameter("Provide a recipe, or use --list")
@@ -2076,7 +2218,7 @@ def scaffold(
                     "id": identifier,
                     "output": str(root),
                     "files": [str(path) for path in written],
-                    "next": "dataviz validate <workspace>",
+                    "next": payload["verify"],
                 }
             )
             return
@@ -2084,6 +2226,7 @@ def scaffold(
             print_json(payload)
             return
         typer.echo(f"# Dataviz scaffold · {recipe}\n")
+        typer.echo(f"Route: `{payload['route']}` · scope: `{payload['scope']}`\n")
         for relative, content in payload["files"].items():
             language = {
                 ".yaml": "yaml",
@@ -2095,7 +2238,9 @@ def scaffold(
                 ".html": "html",
             }.get(Path(relative).suffix.lower(), "text")
             typer.echo(f"## {relative}\n\n```{language}\n{content.rstrip()}\n```\n")
-        typer.echo("Run `dataviz validate <workspace>` after merging these files.")
+        typer.echo("Verification chain:\n")
+        for command in payload["verify"]:
+            typer.echo(f"- `{command}`")
     except Exception as exc:
         handle_error(exc)
 
@@ -2209,6 +2354,1239 @@ def benchmark(
         )
         typer.echo(f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```")
     except Exception as exc:
+        handle_error(exc)
+
+
+def _analysis_entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: entry.get(key)
+        for key in (
+            "schema",
+            "alias",
+            "reference",
+            "kind",
+            "stage",
+            "title",
+            "purpose",
+            "grain",
+            "caveats",
+            "visibility",
+            "assurance",
+            "time",
+            "measures",
+            "relationships",
+            "semantic_source",
+            "semantic_status",
+            "semantic_missing",
+            "trust_status",
+            "runtime",
+            "source_type",
+            "query_parameters",
+            "controls",
+            "equivalence_hash",
+            "representative",
+            "occurrence_count",
+            "references",
+            "usage",
+        )
+        if entry.get(key) not in (None, "", (), [])
+    } | {"dashboard": entry["dashboard"]}
+
+
+def _analysis_catalog_payload(catalog, entries: list[dict[str, Any]]) -> dict[str, Any]:
+    incomplete = [
+        entry["alias"]
+        for entry in entries
+        if entry.get("semantic_status") == "incomplete"
+    ]
+    return validate_analysis_catalog({
+        "schema": "dataviz/analysis-catalog/v1",
+        "generation": catalog.generation,
+        "count": len(entries),
+        "entries": [_analysis_entry_summary(entry) for entry in entries],
+        "diagnostics": list(getattr(catalog, "diagnostics", [])) + (
+            [
+                {
+                    "level": "advice",
+                    "code": "analysis_output_semantics_incomplete",
+                    "message": (
+                        f"{len(incomplete)} public Output(s) need purpose/grain metadata "
+                        "before the Analysis Catalog can be treated as self-explanatory."
+                    ),
+                    "aliases": incomplete,
+                }
+            ]
+            if incomplete
+            else []
+        ),
+        "stale": bool(getattr(catalog, "stale", False)),
+    })
+
+
+def _analysis_local_reference(entry: dict[str, Any]) -> str:
+    return entry["reference"].split("::", 1)[1]
+
+
+def _analysis_validate_kind(kind: str | None) -> str | None:
+    if kind in {None, "all"}:
+        return None
+    aliases = {
+        "source": "source",
+        "base": "base_output",
+        "base_output": "base_output",
+        "derived": "derived_output",
+        "derived_output": "derived_output",
+        "view": "view",
+    }
+    normalized = aliases.get(kind)
+    if normalized is None:
+        raise typer.BadParameter(
+            "--kind must be base, derived, source, view, or all"
+        )
+    return normalized
+
+
+def _analysis_reachable_nodes(dashboard, entry: dict[str, Any]) -> set[str]:
+    references = (
+        entry.get("inputs", {}).values()
+        if entry.get("kind") == "view"
+        else [entry["reference"]]
+    )
+    return analysis_reference_closure(dashboard, references)
+
+
+def _analysis_overlay_payload(variant) -> dict[str, Any]:
+    return {
+        "schema": "dataviz/analysis-overlay-result/v1",
+        "analysis_run_id": variant.analysis_run_id,
+        "overlay_hash": variant.overlay_hash,
+        "manifest": str(variant.manifest_path),
+        "changes": variant.manifest["changes"],
+    }
+
+
+def _print_analysis_result(payload: dict[str, Any]) -> None:
+    """Validate every successful/error Analysis result at the CLI boundary."""
+
+    print_json(validate_analysis_result(payload))
+
+
+@analysis_app.command("evidence")
+def analyze_evidence(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    result: str = typer.Argument(..., help="Analysis Result JSON file, or - for stdin"),
+    question: str = typer.Option(..., "--question"),
+    conclusion: list[str] = typer.Option(..., "--conclusion"),
+    assertion: list[str] | None = typer.Option(None, "--assertion"),
+    generated_by: str = typer.Option("ai", "--generated-by"),
+    status: str = typer.Option("draft", "--status", help="draft or reviewed"),
+    reviewer: str = typer.Option("", "--reviewer"),
+    snapshot_rows: int = typer.Option(0, "--snapshot-rows", min=0, max=100),
+) -> None:
+    """Persist a compact, hash-linked Evidence Artifact from an Analysis Result."""
+
+    try:
+        if status not in {"draft", "reviewed"}:
+            raise typer.BadParameter("--status must be draft or reviewed")
+        if result == "-":
+            payload = json.load(sys.stdin)
+            source = "stdin"
+        else:
+            result_path = Path(result).resolve()
+            payload = json.loads(result_path.read_text(encoding="utf-8"))
+            try:
+                source = result_path.relative_to(workspace.resolve()).as_posix()
+            except ValueError:
+                source = result_path.name
+        evidence, destination = create_analysis_evidence(
+            workspace,
+            payload,
+            result_source=source,
+            question=question,
+            conclusions=conclusion,
+            assertions=assertion,
+            generated_by=generated_by,
+            reviewer=reviewer,
+            status=status,
+            snapshot_rows=snapshot_rows,
+        )
+        output = evidence.model_dump(mode="json", by_alias=True)
+        output["artifact"] = destination.relative_to(workspace.resolve()).as_posix()
+        output["next_actions"] = [
+            f"dataviz analyze promote {shlex.quote(str(workspace))} {evidence.evidence_id} proposal.yaml --dry-run"
+        ]
+        print_json(output)
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        handle_error(exc)
+
+
+@analysis_app.command("promote")
+def analyze_promote(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    evidence_reference: str = typer.Argument(..., help="Evidence id or JSON path"),
+    proposal: Path = typer.Argument(..., exists=True, dir_okay=False),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    output: Path | None = typer.Option(None, "--output", help="Write the unified patch preview"),
+) -> None:
+    """Validate and explain a Promotion patch without mutating the Workspace."""
+
+    try:
+        if not dry_run:
+            raise typer.BadParameter(
+                "Promotion is review-only in P1; pass --dry-run to generate a patch preview"
+            )
+        evidence, _evidence_path = load_analysis_evidence(workspace, evidence_reference)
+        parsed = load_promotion_proposal(proposal)
+        promotion = build_promotion_preview(workspace, evidence, parsed)
+        payload = promotion.model_dump(mode="json", by_alias=True)
+        patch_text = "".join(
+            operation.get("diff", "") for operation in payload["operations"]
+        )
+        payload["patch_sha256"] = hashlib.sha256(
+            patch_text.encode("utf-8")
+        ).hexdigest()
+        payload["mutated_workspace"] = False
+        if output is not None:
+            atomic_write_text(output, patch_text)
+            payload["patch_file"] = str(output.resolve())
+        print_json(payload)
+        if promotion.status != "ready":
+            raise typer.Exit(1)
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        handle_error(exc)
+
+
+@analysis_app.command("list", hidden=True)
+@analysis_app.command("all")
+def analyze_list(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    kind: str | None = typer.Option("base", "--kind", help="base, derived, source, view, or all"),
+    dashboard: str | None = typer.Option(None, "--dashboard", help="Filter by Dashboard id"),
+    source_type: str | None = typer.Option(None, "--source-type", help="Filter by Source type"),
+    parameter: str | None = typer.Option(None, "--parameter", help="Require a Query Parameter id"),
+    output_format: str = typer.Option("json", "--format", help="json or text"),
+    refresh_catalog: bool = typer.Option(False, "--refresh-catalog", help="Force a safe Catalog rebuild"),
+    include_internal: bool = typer.Option(False, "--include-internal", help="Include internal Outputs"),
+    include_untrusted: bool = typer.Option(
+        False, "--include-untrusted", help="Include draft and deprecated Outputs"
+    ),
+    fold: bool = typer.Option(
+        True, "--fold/--no-fold", help="Fold only exactly identical Output implementations"
+    ),
+    expand_occurrences: bool = typer.Option(
+        False,
+        "--expand-occurrences",
+        help="Include every folded alias/reference and its own usage",
+    ),
+    top: int | None = typer.Option(
+        None, "--top", min=1, help="Return N results after exact folding"
+    ),
+) -> None:
+    """Show a compact overview of all reusable data contracts."""
+    try:
+        if output_format not in {"json", "text"}:
+            raise typer.BadParameter("--format must be json or text")
+        catalog = ensure_analysis_catalog(workspace, refresh=refresh_catalog)
+        entries = catalog.select(
+            kind=_analysis_validate_kind(kind),
+            dashboard=dashboard,
+            source_type=source_type,
+            parameter=parameter,
+            include_internal=include_internal,
+            include_untrusted=include_untrusted,
+        )
+        entries = catalog.overview(
+            entries,
+            fold=fold,
+            expand_occurrences=expand_occurrences,
+            top=top,
+        )
+        if output_format == "json":
+            print_json(_analysis_catalog_payload(catalog, entries))
+            return
+        for entry in entries:
+            typer.echo(
+                f"@{entry['alias']}  {entry['kind']}  "
+                f"{entry['dashboard']['id']}  {entry['title']}"
+            )
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        handle_error(exc)
+
+
+@analysis_app.command("search")
+def analyze_search(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    query_text: str = typer.Argument(..., help="Words describing the desired data contract"),
+    kind: str | None = typer.Option(None, "--kind", help="source, base, derived, or view"),
+    dashboard: str | None = typer.Option(None, "--dashboard", help="Filter by Dashboard id"),
+    source_type: str | None = typer.Option(None, "--source-type", help="Filter by Source type"),
+    parameter: str | None = typer.Option(None, "--parameter", help="Require a Query Parameter id"),
+    output_format: str = typer.Option("json", "--format", help="json or text"),
+    regex: bool = typer.Option(
+        True,
+        "--regex/--literal",
+        help="Use case-insensitive grep-like regular expressions, or literal all-word matching.",
+    ),
+    refresh_catalog: bool = typer.Option(False, "--refresh-catalog", help="Force a safe Catalog rebuild"),
+    include_internal: bool = typer.Option(False, "--include-internal", help="Include internal Outputs"),
+    include_untrusted: bool = typer.Option(
+        False, "--include-untrusted", help="Include draft and deprecated Outputs"
+    ),
+    fold: bool = typer.Option(
+        True, "--fold/--no-fold", help="Fold only exactly identical Output implementations"
+    ),
+    expand_occurrences: bool = typer.Option(
+        False,
+        "--expand-occurrences",
+        help="Include every folded alias/reference and its own usage",
+    ),
+    top: int | None = typer.Option(
+        None, "--top", min=1, help="Return N results after exact folding"
+    ),
+) -> None:
+    """Search Output meaning, fields, parameters, lineage, and View consumers."""
+    try:
+        if output_format not in {"json", "text"}:
+            raise typer.BadParameter("--format must be json or text")
+        catalog = ensure_analysis_catalog(workspace, refresh=refresh_catalog)
+        entries = catalog.select(
+            query=query_text,
+            kind=_analysis_validate_kind(kind),
+            dashboard=dashboard,
+            source_type=source_type,
+            parameter=parameter,
+            regex=regex,
+            include_internal=include_internal,
+            include_untrusted=include_untrusted,
+        )
+        entries = catalog.overview(
+            entries,
+            fold=fold,
+            expand_occurrences=expand_occurrences,
+            top=top,
+        )
+        if output_format == "json":
+            print_json(_analysis_catalog_payload(catalog, entries))
+            return
+        for entry in entries:
+            typer.echo(
+                f"@{entry['alias']}  {entry['kind']}  "
+                f"{entry['dashboard']['id']}  {entry['title']}"
+            )
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        handle_error(exc)
+
+
+@analysis_app.command("show")
+def analyze_show(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    reference: str = typer.Argument(..., help="@short-alias or full canonical reference"),
+    refresh_catalog: bool = typer.Option(False, "--refresh-catalog"),
+    detail: str = typer.Option("summary", "--detail", help="summary, debug, or full"),
+    include_code: bool = typer.Option(
+        False,
+        "--include-code",
+        help="Include redacted SQL/JS/Python text for the target closure",
+    ),
+) -> None:
+    """Show one Analysis contract and its directly executable command."""
+    try:
+        detail = _result_detail(detail)
+        if include_code and detail != "full":
+            raise typer.BadParameter("--include-code requires --detail full")
+        catalog = ensure_analysis_catalog(workspace, refresh=refresh_catalog)
+        resolved = dict(catalog.resolve(reference))
+        entry = (
+            _analysis_entry_summary(resolved)
+            if detail == "summary"
+            else resolved
+        )
+        entry["generation"] = catalog.generation
+        entry["next_actions"] = [
+            f"dataviz analyze run {shlex.quote(str(workspace))} @{resolved['alias']} --format json",
+            f"dataviz analyze search {shlex.quote(str(workspace))} {shlex.quote(resolved['dashboard']['id'])} --format json",
+        ]
+        if detail == "full":
+            loaded = load_workspace(workspace)
+            dashboard = loaded.dashboard(resolved["dashboard"]["id"])
+            references = (
+                resolved.get("inputs", {}).values()
+                if resolved["kind"] == "view"
+                else [resolved["reference"]]
+            )
+            entry["closure"] = inspect_analysis_closure(
+                loaded,
+                dashboard,
+                references,
+                include_code=include_code,
+            )
+        print_json(entry)
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        handle_error(exc)
+
+
+def _analysis_artifact_value(store: ArtifactStore, artifact, limit: int) -> tuple[Any, bool]:
+    value = store.read_value(artifact)
+    truncated = False
+    if artifact.kind == "table":
+        frame = value.head(limit)
+        truncated = int(artifact.metadata.get("row_count", 0)) > limit
+        value = json.loads(frame.to_json(orient="records", date_format="iso"))
+    return value, truncated
+
+
+def _analysis_emit_non_json(store: ArtifactStore, artifact, output_format: str, limit: int) -> None:
+    value = store.read_value(artifact)
+    if artifact.kind == "table":
+        _analysis_emit_frame(value.head(limit), output_format)
+        return
+    typer.echo(str(value))
+
+
+def _analysis_emit_frame(frame, output_format: str) -> None:
+    if output_format == "csv":
+        typer.echo(frame.to_csv(index=False), nl=False)
+    elif output_format == "markdown":
+        typer.echo(frame.to_markdown(index=False))
+    elif output_format == "text":
+        typer.echo(frame.to_string(index=False))
+    else:  # pragma: no cover - validated by the command boundary.
+        raise typer.BadParameter(f"Unsupported Analysis format: {output_format}")
+
+
+def _analysis_export_path(
+    workspace: Path,
+    entry: dict[str, Any],
+    run_id: str,
+    output_format: str,
+    destination: Path | None,
+    *,
+    output_count: int,
+) -> Path:
+    suffix = f".{output_format}"
+    filename = f"{entry['alias']}{suffix}"
+    if destination is None:
+        return workspace.resolve() / ".dataviz" / "analysis-exports" / run_id / filename
+    resolved = destination.expanduser().resolve()
+    if output_count > 1:
+        if resolved.suffix:
+            raise typer.BadParameter(
+                "--destination must be a directory when exporting multiple Outputs"
+            )
+        return resolved / filename
+    if resolved.is_dir() or not resolved.suffix:
+        return resolved / filename
+    if resolved.suffix.casefold() != suffix:
+        raise typer.BadParameter(
+            f"--destination must end with {suffix} for --format {output_format}"
+        )
+    return resolved
+
+
+def _analysis_export_metadata(workspace: Path, path: Path, output_format: str) -> dict[str, Any]:
+    try:
+        display_path = path.relative_to(workspace.resolve()).as_posix()
+    except ValueError:
+        display_path = str(path)
+    return {
+        "format": output_format,
+        "path": display_path,
+        "size_bytes": path.stat().st_size,
+        "sha256": sha256_file(path),
+    }
+
+
+def _analysis_export_artifact(
+    workspace: Path,
+    store: ArtifactStore,
+    artifact,
+    entry: dict[str, Any],
+    output_format: str,
+    destination: Path | None,
+    *,
+    output_count: int,
+) -> dict[str, Any]:
+    if artifact.kind != "table":
+        raise typer.BadParameter(f"--format {output_format} requires a table Output")
+    path = _analysis_export_path(
+        workspace,
+        entry,
+        store.run_id,
+        output_format,
+        destination,
+        output_count=output_count,
+    )
+    if output_format == "parquet" and artifact.format == "parquet":
+        atomic_copy_file(
+            store.resolve(artifact),
+            path,
+            expected_sha256=artifact.content_hash,
+        )
+    else:
+        import pyarrow as pa
+
+        table = store.read_arrow_table(artifact)
+        sink = pa.BufferOutputStream()
+        with pa.ipc.new_stream(sink, table.schema) as writer:
+            writer.write_table(table)
+        atomic_write_bytes(path, sink.getvalue().to_pybytes())
+    return _analysis_export_metadata(workspace, path, output_format)
+
+
+def _analysis_export_frame(
+    workspace: Path,
+    frame,
+    entry: dict[str, Any],
+    run_id: str,
+    output_format: str,
+    destination: Path | None,
+    *,
+    output_count: int,
+) -> dict[str, Any]:
+    path = _analysis_export_path(
+        workspace,
+        entry,
+        run_id,
+        output_format,
+        destination,
+        output_count=output_count,
+    )
+    if output_format == "arrow":
+        import pyarrow as pa
+
+        table = pa.Table.from_pandas(frame, preserve_index=False)
+        sink = pa.BufferOutputStream()
+        with pa.ipc.new_stream(sink, table.schema) as writer:
+            writer.write_table(table)
+        atomic_write_bytes(path, sink.getvalue().to_pybytes())
+    else:
+        with TemporaryDirectory(prefix="dataviz-analysis-export-") as directory:
+            temporary = Path(directory) / path.name
+            frame.to_parquet(temporary, index=False)
+            atomic_copy_file(temporary, path)
+    return _analysis_export_metadata(workspace, path, output_format)
+
+
+def _analysis_artifact_evidence(reference: str, artifact) -> dict[str, Any]:
+    return {
+        "reference": reference,
+        "artifact_id": artifact.artifact_id,
+        "kind": artifact.kind,
+        "rows": artifact.metadata.get("row_count"),
+        "content_hash": artifact.content_hash,
+    }
+
+
+def _analysis_next_actions(workspace: Path, entry: dict[str, Any]) -> list[str]:
+    quoted_workspace = shlex.quote(str(workspace))
+    return [
+        f"dataviz analyze show {quoted_workspace} @{entry['alias']} --detail debug",
+        f"dataviz analyze run {quoted_workspace} @{entry['alias']} --format arrow --destination output.arrow",
+    ]
+
+
+def _analysis_record_success(
+    workspace: Path,
+    entries: list[dict[str, Any]],
+) -> None:
+    """Best-effort usage projection; never changes Analysis command success."""
+
+    references = {
+        entry["reference"]
+        for entry in entries
+        if entry.get("kind") in {"base_output", "derived_output"}
+    }
+    for reference in sorted(references):
+        record_usage_best_effort(workspace, output_analysis_usage(reference))
+
+
+def _analysis_target_payload(
+    requested: dict[str, Any], executed: dict[str, Any]
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"target": _analysis_entry_summary(requested)}
+    if requested["reference"] != executed["reference"]:
+        payload["resolved_target"] = _analysis_entry_summary(executed)
+        payload["presentation"] = requested.get("presentation", {})
+        payload["view_input"] = {
+            name: reference
+            for name, reference in requested.get("inputs", {}).items()
+            if reference == executed["reference"]
+        }
+    return payload
+
+
+def _analysis_artifact_payload(
+    *,
+    entry: dict[str, Any],
+    artifact,
+    value: Any,
+    truncated: bool,
+    run_id: str,
+    duration_ms: int | None,
+) -> dict[str, Any]:
+    return {
+        "alias": entry["alias"],
+        "reference": entry["reference"],
+        "kind": artifact.kind,
+        "rows": artifact.metadata.get("row_count"),
+        "schema": artifact.schema_ or [],
+        "content_hash": artifact.content_hash,
+        "duration_ms": duration_ms,
+        "preview": value,
+        "truncated": truncated,
+        "run_id": run_id,
+    }
+
+
+@analysis_app.command("run")
+def analyze_run(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    reference: str = typer.Argument(..., help="@src_, @base_, @drv_, @view_ alias or full reference"),
+    also: list[str] | None = typer.Option(
+        None,
+        "--also",
+        help="Repeat to extract compatible Outputs in one shared execution",
+    ),
+    query_param: list[str] | None = typer.Option(None, "--query-param", help="Repeat key=value"),
+    control: list[str] | None = typer.Option(None, "--control", help="Repeat canonical-control-key=value"),
+    output_name: str | None = typer.Option(None, "--output", help="Source Output name"),
+    runtime: str = typer.Option("auto", "--runtime", help="auto, server, or browser"),
+    output_format: str = typer.Option(
+        "json", "--format", help="json, csv, markdown, text, parquet, or arrow"
+    ),
+    destination: Path | None = typer.Option(
+        None,
+        "--destination",
+        help="File or directory for Parquet/Arrow exports; defaults to .dataviz/analysis-exports",
+    ),
+    limit: int = typer.Option(100, "--limit", min=1),
+    refresh: bool = typer.Option(False, "--refresh"),
+    refresh_catalog: bool = typer.Option(False, "--refresh-catalog"),
+    allow_network: bool = typer.Option(
+        False,
+        "--allow-network",
+        help="Allow external HTTP(S), for example CDN Pyodide; disabled by default",
+    ),
+    timeout_seconds: float = typer.Option(60.0, "--timeout", min=1.0, help="Browser execution timeout in seconds"),
+    detail: str = typer.Option("summary", "--detail", help="summary, debug, or full"),
+    overlay: str | None = typer.Option(
+        None,
+        "--overlay",
+        help="One-run Analysis Overlay YAML/JSON file, or - for stdin",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Validate and explain an Analysis Overlay without executing data",
+    ),
+) -> None:
+    """Execute one Source, Base/Derived Output, or View data contract."""
+    variant = None
+    try:
+        if output_format not in {"json", "csv", "markdown", "text", "parquet", "arrow"}:
+            raise typer.BadParameter(
+                "--format must be json, csv, markdown, text, parquet, or arrow"
+            )
+        if runtime not in {"auto", "server", "browser"}:
+            raise typer.BadParameter("--runtime must be auto, server, or browser")
+        detail = _result_detail(detail)
+        catalog = ensure_analysis_catalog(workspace, refresh=refresh_catalog)
+        entry = catalog.resolve(reference)
+        requested_entry = entry
+        additional_entries = [catalog.resolve(value) for value in (also or [])]
+
+        if entry["kind"] == "view":
+            inputs = entry.get("inputs", {})
+            selected_name = output_name or ("main" if "main" in inputs else None)
+            if selected_name is None and len(inputs) == 1:
+                selected_name = next(iter(inputs))
+            if selected_name not in inputs:
+                raise typer.BadParameter(
+                    "This View has multiple inputs; choose one with --output "
+                    + "|".join(sorted(inputs))
+                )
+            entry = catalog.resolve(inputs[selected_name])
+            output_name = None
+
+        if additional_entries:
+            batch = [entry, *additional_entries]
+            if len({item["dashboard"]["id"] for item in batch}) != 1:
+                raise typer.BadParameter("--also targets must belong to the same Dashboard")
+            kinds = {item["kind"] for item in batch}
+            if kinds == {"base_output"}:
+                pass
+            elif kinds == {"derived_output"}:
+                runtime_groups = {
+                    "server" if item["runtime"] == "server-python" else "browser"
+                    for item in batch
+                }
+                if len(runtime_groups) != 1:
+                    raise typer.BadParameter(
+                        "--also cannot mix top-level Server and Browser Derived Outputs"
+                    )
+            else:
+                raise typer.BadParameter(
+                    "--also requires all targets to be Base Outputs or all to be Derived Outputs"
+                )
+            if output_format not in {"json", "parquet", "arrow"}:
+                raise typer.BadParameter(
+                    "Batch Browser extraction requires --format json, parquet, or arrow"
+                )
+        if destination is not None and output_format not in {"parquet", "arrow"}:
+            raise typer.BadParameter("--destination requires --format parquet or arrow")
+
+        loaded = load_workspace(workspace)
+        dashboard_id = entry["dashboard"]["id"]
+        dashboard = loaded.dashboard(dashboard_id)
+        if dry_run and overlay is None:
+            raise typer.BadParameter("--dry-run requires --overlay")
+        if overlay is not None:
+            reachable_nodes = set().union(
+                *(
+                    _analysis_reachable_nodes(dashboard, item)
+                    for item in [entry, *additional_entries]
+                )
+            )
+            variant = build_analysis_variant(
+                loaded,
+                dashboard,
+                overlay,
+                reachable_nodes=reachable_nodes,
+            )
+            dashboard = variant.dashboard
+            if dry_run:
+                variant.write_manifest(
+                    status="explained",
+                    evidence={"target": entry["reference"], "reachable_nodes": sorted(reachable_nodes)},
+                )
+                print_json(
+                    {
+                        "schema": "dataviz/analysis-overlay-explanation/v1",
+                        "status": "ready",
+                        **_analysis_target_payload(requested_entry, entry),
+                        "reachable_nodes": sorted(reachable_nodes),
+                        "overlay": _analysis_overlay_payload(variant),
+                    }
+                )
+                return
+            variant.write_manifest(
+                status="running",
+                evidence={"target": entry["reference"], "reachable_nodes": sorted(reachable_nodes)},
+            )
+        query_values = parse_params(query_param)
+        control_values = parse_params(control)
+        executor_options = (
+            {
+                "cache_namespace": variant.cache_namespace,
+                "cache_salt": variant.overlay_hash,
+            }
+            if variant is not None
+            else {}
+        )
+
+        if entry["kind"] in {"source", "base_output"}:
+            if control_values:
+                raise typer.BadParameter("Base execution does not accept --control")
+            if runtime == "browser":
+                raise typer.BadParameter("Source and Base Outputs execute on the server")
+            if entry["kind"] == "source":
+                source_outputs = {
+                    value.rsplit("/", 1)[1]: value.split("::", 1)[1]
+                    for value in entry.get("outputs", ())
+                }
+                if output_name:
+                    if output_name not in source_outputs:
+                        raise typer.BadParameter(
+                            f"Unknown Source Output {output_name}; choose "
+                            + "|".join(sorted(source_outputs))
+                        )
+                    target_references = [source_outputs[output_name]]
+                else:
+                    target_references = list(source_outputs.values())
+            else:
+                if output_name:
+                    raise typer.BadParameter("Base Output aliases already identify one output")
+                target_references = [
+                    _analysis_local_reference(item)
+                    for item in [entry, *additional_entries]
+                ]
+            query_started = time.perf_counter()
+            result = Executor(loaded, **executor_options).run(
+                dashboard_id,
+                query_parameters=query_values,
+                targets=target_references,
+                refresh=refresh,
+                run_id=variant.analysis_run_id if variant is not None else None,
+                _dashboard=dashboard,
+            )
+            query_ms = round((time.perf_counter() - query_started) * 1000, 2)
+            artifacts = [
+                (target, result.outputs.get(target)) for target in target_references
+            ]
+            missing = [target for target, artifact in artifacts if artifact is None]
+            if missing:
+                node = result.nodes.get(missing[0].split("/", 1)[0])
+                if variant is not None:
+                    variant.write_manifest(
+                        status="error",
+                        evidence={"run_id": result.run_id, "missing_outputs": missing},
+                    )
+                _print_analysis_result(
+                    {
+                        "schema": "dataviz/analysis-result/v1",
+                        "status": result.status,
+                        "generation": catalog.generation,
+                        **_analysis_target_payload(requested_entry, entry),
+                        "query_parameters": result.query_parameters,
+                        "error": node.error
+                        if node
+                        else {
+                            "code": "analysis_output_unavailable",
+                            "message": "Named Output was not produced",
+                        },
+                        "next_actions": [
+                            f"dataviz analyze show {shlex.quote(str(workspace))} @{entry['alias']} --detail full",
+                            f"dataviz validate {shlex.quote(str(workspace))} --dashboard {dashboard_id} --format json",
+                        ],
+                    }
+                )
+                raise typer.Exit(1)
+            store = ArtifactStore(loaded.root, result.run_id)
+            if output_format not in {"json", "parquet", "arrow"}:
+                if len(artifacts) != 1:
+                    raise typer.BadParameter(
+                        "Non-JSON Source output requires --output to select one Named Output"
+                    )
+                _analysis_emit_non_json(store, artifacts[0][1], output_format, limit)
+                if variant is not None:
+                    variant.write_manifest(status="ready", evidence={"run_id": result.run_id})
+                _analysis_record_success(workspace, [entry, *additional_entries])
+                return
+            outputs = []
+            for local_reference, artifact in artifacts:
+                assert artifact is not None
+                value, truncated = _analysis_artifact_value(store, artifact, limit)
+                target_entry = catalog.resolve(
+                    f"{dashboard_id}::{local_reference}"
+                )
+                node = result.nodes.get(local_reference.split("/", 1)[0])
+                outputs.append(
+                    _analysis_artifact_payload(
+                        entry=target_entry,
+                        artifact=artifact,
+                        value=value,
+                        truncated=truncated,
+                        run_id=result.run_id,
+                        duration_ms=node.duration_ms if node else None,
+                    )
+                )
+                if output_format in {"parquet", "arrow"}:
+                    outputs[-1]["export"] = _analysis_export_artifact(
+                        workspace,
+                        store,
+                        artifact,
+                        target_entry,
+                        output_format,
+                        destination,
+                        output_count=len(artifacts),
+                    )
+                    outputs[-1]["truncated"] = False
+            payload: dict[str, Any] = {
+                "schema": "dataviz/analysis-result/v1",
+                "status": result.status,
+                "generation": catalog.generation,
+                **_analysis_target_payload(requested_entry, entry),
+                "query_parameters": result.query_parameters,
+                "effective_controls": {},
+                "outputs": outputs,
+                "lineage": {
+                    "query_nodes": result.query_nodes,
+                    "query_targets": result.query_targets,
+                },
+                "provenance": {
+                    "catalog_generation": catalog.generation,
+                    "definition_hash": entry.get("definition_hash"),
+                    "query_contract_hash": result.query_contract_hash,
+                    "artifacts": [
+                        _analysis_artifact_evidence(reference, artifact)
+                        for reference, artifact in sorted(result.outputs.items())
+                    ],
+                },
+                "timing": {"query_ms": query_ms},
+                "next_actions": _analysis_next_actions(workspace, requested_entry),
+            }
+            if variant is not None:
+                payload["overlay"] = _analysis_overlay_payload(variant)
+            if detail == "debug":
+                payload["nodes"] = {
+                    key: value.model_dump(mode="json", by_alias=True)
+                    for key, value in result.nodes.items()
+                }
+            elif detail == "full":
+                payload["execution"] = result.model_dump(mode="json", by_alias=True)
+            if variant is not None:
+                variant.write_manifest(status="ready", evidence={"run_id": result.run_id})
+            _analysis_record_success(workspace, [entry, *additional_entries])
+            _print_analysis_result(payload)
+            return
+
+        if entry["kind"] != "derived_output":
+            raise typer.BadParameter(f"Analysis target cannot be executed: {entry['kind']}")
+        declared_runtime = entry["runtime"]
+        if runtime == "server" and declared_runtime != "server-python":
+            raise typer.BadParameter(
+                f"{declared_runtime} requires --runtime browser or auto"
+            )
+        if runtime == "browser" and declared_runtime == "server-python":
+            raise typer.BadParameter(
+                "server-python requires --runtime server or auto"
+            )
+        execution_entries = [entry, *additional_entries]
+        base_targets = list(
+            dict.fromkeys(
+                value.split("::", 1)[1]
+                for item in execution_entries
+                for value in item.get("base_inputs", ())
+            )
+        )
+        query_started = time.perf_counter()
+        run_result = Executor(loaded, **executor_options).run(
+            dashboard_id,
+            query_parameters=query_values,
+            targets=base_targets,
+            refresh=refresh,
+            run_id=variant.analysis_run_id if variant is not None else None,
+            _dashboard=dashboard,
+        )
+        query_ms = round((time.perf_counter() - query_started) * 1000, 2)
+        controls = scoped_control_registry(dashboard.definition)
+        unknown_controls = sorted(set(control_values) - set(controls))
+        if unknown_controls:
+            raise typer.BadParameter(
+                "Unknown Control key: " + ", ".join(unknown_controls)
+            )
+        selection_values = {
+            key: value
+            for key, value in control_values.items()
+            if controls[key].kind == "selection"
+        }
+        compute_values = {
+            key: value
+            for key, value in control_values.items()
+            if controls[key].kind == "compute"
+        }
+        selection_state = state_from_explicit_values(
+            dashboard.definition,
+            selection_values,
+            phase=(
+                "canvas-hydration"
+                if declared_runtime != "server-python"
+                else "execution"
+            ),
+        )
+        if declared_runtime != "server-python":
+            browser_batch = run_browser_outputs(
+                loaded,
+                dashboard,
+                run_result,
+                targets=[
+                    (item["node_id"].split(":", 1)[1], item["output_name"])
+                    for item in execution_entries
+                ],
+                compute_parameters=compute_values,
+                selection_state=selection_state,
+                refresh=refresh,
+                allow_network=allow_network,
+                timeout_seconds=timeout_seconds,
+                cache_salt=variant.overlay_hash if variant is not None else None,
+            )
+            browser_results = browser_batch["outputs"]
+            browser_result = browser_results[0]
+            raw_value = browser_result["value"]
+            rows = browser_result["rows"]
+            truncated = bool(rows is not None and rows > limit)
+            preview = raw_value[:limit] if browser_result["kind"] == "table" else raw_value
+            if output_format not in {"json", "parquet", "arrow"}:
+                if browser_result["kind"] == "table":
+                    import pandas as pd
+
+                    frame = pd.DataFrame(preview)
+                    _analysis_emit_frame(frame, output_format)
+                else:
+                    typer.echo(str(raw_value))
+                if variant is not None:
+                    variant.write_manifest(status="ready", evidence={"run_id": run_result.run_id})
+                _analysis_record_success(workspace, execution_entries)
+                return
+            output_payloads = []
+            for target_entry, extracted in zip(
+                execution_entries, browser_results, strict=True
+            ):
+                extracted_rows = extracted["rows"]
+                extracted_value = extracted["value"]
+                output_payloads.append(
+                    {
+                        "alias": target_entry["alias"],
+                        "reference": target_entry["reference"],
+                        "kind": extracted["kind"],
+                        "rows": extracted_rows,
+                        "schema": extracted["schema"],
+                        "content_hash": extracted["content_hash"],
+                        "transport": extracted.get("transport", "json"),
+                        "duration_ms": browser_batch["duration_ms"],
+                        "preview": (
+                            extracted_value[:limit]
+                            if extracted["kind"] == "table"
+                            else extracted_value
+                        ),
+                        "truncated": bool(
+                            extracted_rows is not None and extracted_rows > limit
+                        ),
+                        "run_id": run_result.run_id,
+                    }
+                )
+                if output_format in {"parquet", "arrow"}:
+                    if extracted["kind"] != "table":
+                        raise typer.BadParameter(
+                            f"--format {output_format} requires a table Output"
+                        )
+                    import pandas as pd
+
+                    output_payloads[-1]["export"] = _analysis_export_frame(
+                        workspace,
+                        pd.DataFrame(extracted_value),
+                        target_entry,
+                        run_result.run_id,
+                        output_format,
+                        destination,
+                        output_count=len(execution_entries),
+                    )
+                    output_payloads[-1]["truncated"] = False
+            payload = {
+                "schema": "dataviz/analysis-result/v1",
+                "status": "ready",
+                "generation": catalog.generation,
+                **_analysis_target_payload(requested_entry, entry),
+                "query_parameters": run_result.query_parameters,
+                "effective_controls": {
+                    "selection": selection_state,
+                    "compute": resolve_compute_values(
+                        dashboard.definition, compute_values
+                    ),
+                },
+                "outputs": output_payloads,
+                "lineage": {
+                    "query_nodes": run_result.query_nodes,
+                    "interactive_nodes": entry.get("upstream_outputs", [])
+                    + [entry["reference"]],
+                    "base_inputs": entry.get("base_inputs", []),
+                    "server_interactions": browser_batch["server_interactions"],
+                },
+                "provenance": {
+                    "catalog_generation": catalog.generation,
+                    "definition_hash": entry.get("definition_hash"),
+                    "query_contract_hash": run_result.query_contract_hash,
+                    "base_artifacts": [
+                        _analysis_artifact_evidence(reference, artifact)
+                        for reference, artifact in sorted(run_result.outputs.items())
+                    ],
+                    "runtime": declared_runtime,
+                },
+                "timing": {
+                    "query_ms": query_ms,
+                    **browser_batch["timing"],
+                },
+                "next_actions": _analysis_next_actions(workspace, requested_entry),
+            }
+            if variant is not None:
+                payload["overlay"] = _analysis_overlay_payload(variant)
+            if detail in {"debug", "full"}:
+                payload["browser"] = {
+                    "timing": browser_batch["timing"],
+                    "metrics": browser_batch["metrics"],
+                    "console_errors": browser_batch["console_errors"],
+                    "network_allowed": allow_network,
+                    "pyodide_loaded": browser_batch["pyodide_loaded"],
+                }
+            if detail == "full":
+                payload["execution"] = {
+                    "query": run_result.model_dump(mode="json", by_alias=True),
+                }
+            if variant is not None:
+                variant.write_manifest(status="ready", evidence={"run_id": run_result.run_id})
+            _analysis_record_success(workspace, execution_entries)
+            _print_analysis_result(payload)
+            return
+        interaction_started = time.perf_counter()
+        interaction_executor = InteractionExecutor(loaded, **executor_options)
+        interactions = []
+        for target_entry in execution_entries:
+            target_transform_id = target_entry["node_id"].split(":", 1)[1]
+            interaction = interaction_executor.execute(
+                run_result,
+                target_transform_id,
+                compute_parameters=compute_values,
+                selection_state=selection_state,
+                refresh=refresh,
+                _dashboard=dashboard,
+            )
+            local_reference = _analysis_local_reference(target_entry)
+            artifact = interaction.outputs.get(local_reference)
+            if artifact is None:
+                node = interaction.nodes.get(target_entry["node_id"])
+                if variant is not None:
+                    variant.write_manifest(
+                        status="error",
+                        evidence={
+                            "run_id": run_result.run_id,
+                            "interaction_status": interaction.status,
+                            "target": target_entry["reference"],
+                        },
+                    )
+                _print_analysis_result(
+                    {
+                        "schema": "dataviz/analysis-result/v1",
+                        "status": interaction.status,
+                        **_analysis_target_payload(requested_entry, entry),
+                        "error": node.error
+                        if node
+                        else {"code": "analysis_output_unavailable"},
+                    }
+                )
+                raise typer.Exit(1)
+            interactions.append((target_entry, interaction, artifact))
+        interaction_ms = round((time.perf_counter() - interaction_started) * 1000, 2)
+        store = ArtifactStore(loaded.root, run_result.run_id)
+        if output_format not in {"json", "parquet", "arrow"}:
+            if len(interactions) != 1:
+                raise typer.BadParameter("Batch extraction requires a structured format")
+            _analysis_emit_non_json(store, interactions[0][2], output_format, limit)
+            if variant is not None:
+                variant.write_manifest(status="ready", evidence={"run_id": run_result.run_id})
+            _analysis_record_success(workspace, execution_entries)
+            return
+        output_payloads = []
+        for target_entry, interaction, artifact in interactions:
+            value, truncated = _analysis_artifact_value(store, artifact, limit)
+            node = interaction.nodes.get(target_entry["node_id"])
+            output_payload = _analysis_artifact_payload(
+                entry=target_entry,
+                artifact=artifact,
+                value=value,
+                truncated=truncated,
+                run_id=run_result.run_id,
+                duration_ms=node.duration_ms if node else None,
+            )
+            if output_format in {"parquet", "arrow"}:
+                output_payload["export"] = _analysis_export_artifact(
+                    workspace,
+                    store,
+                    artifact,
+                    target_entry,
+                    output_format,
+                    destination,
+                    output_count=len(interactions),
+                )
+                output_payload["truncated"] = False
+            output_payloads.append(output_payload)
+        last_interaction = interactions[-1][1]
+        interactive_nodes = list(
+            dict.fromkeys(
+                node_id
+                for _target_entry, interaction, _artifact in interactions
+                for node_id in interaction.nodes
+            )
+        )
+        payload = {
+            "schema": "dataviz/analysis-result/v1",
+            "status": "ready",
+            "generation": catalog.generation,
+            **_analysis_target_payload(requested_entry, entry),
+            "query_parameters": run_result.query_parameters,
+            "effective_controls": {
+                "selection": last_interaction.selection_state,
+                "compute": last_interaction.compute_parameters,
+            },
+            "outputs": output_payloads,
+            "lineage": {
+                "query_nodes": run_result.query_nodes,
+                "interactive_nodes": interactive_nodes,
+                "base_inputs": list(
+                    dict.fromkeys(
+                        value
+                        for target_entry in execution_entries
+                        for value in target_entry.get("base_inputs", [])
+                    )
+                ),
+            },
+            "provenance": {
+                "catalog_generation": catalog.generation,
+                "definition_hashes": {
+                    target_entry["reference"]: target_entry.get("definition_hash")
+                    for target_entry in execution_entries
+                },
+                "query_contract_hash": run_result.query_contract_hash,
+                "base_artifacts": [
+                    _analysis_artifact_evidence(reference, artifact)
+                    for reference, artifact in sorted(run_result.outputs.items())
+                ],
+                "runtime": "server-python",
+            },
+            "timing": {
+                "query_ms": query_ms,
+                "interactive_ms": interaction_ms,
+            },
+            "next_actions": _analysis_next_actions(workspace, requested_entry),
+        }
+        if variant is not None:
+            payload["overlay"] = _analysis_overlay_payload(variant)
+        if detail == "debug":
+            payload["nodes"] = {
+                "query": {
+                    key: value.model_dump(mode="json", by_alias=True)
+                    for key, value in run_result.nodes.items()
+                },
+                "interactive": [
+                    {
+                        "target": target_entry["reference"],
+                        "nodes": {
+                            key: value.model_dump(mode="json", by_alias=True)
+                            for key, value in interaction.nodes.items()
+                        },
+                    }
+                    for target_entry, interaction, _artifact in interactions
+                ],
+            }
+        elif detail == "full":
+            payload["execution"] = {
+                "query": run_result.model_dump(mode="json", by_alias=True),
+                "interactions": [
+                    interaction.model_dump(mode="json", by_alias=True)
+                    for _target_entry, interaction, _artifact in interactions
+                ],
+            }
+        if variant is not None:
+            variant.write_manifest(status="ready", evidence={"run_id": run_result.run_id})
+        _analysis_record_success(workspace, execution_entries)
+        _print_analysis_result(payload)
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        if variant is not None:
+            variant.write_manifest(
+                status="error",
+                evidence={"error_type": type(exc).__name__, "message": str(exc)},
+            )
         handle_error(exc)
 
 

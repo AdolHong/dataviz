@@ -6,7 +6,7 @@ import json
 import re
 from typing import TYPE_CHECKING, Any, Literal
 
-from dataviz.value_contract import static_control_choices
+from dataviz.value_contract import initial_control_value, static_control_choices
 from dataviz.workspace.controls import canonical_control_key
 
 if TYPE_CHECKING:
@@ -374,7 +374,9 @@ def render_content_template(
         if parameter:
             parameter_id = parameter.group(1)
             parameter_definition = parameter_definitions[parameter_id]
-            resolved = parameter_values.get(parameter_id, parameter_definition.default)
+            resolved = parameter_values.get(
+                parameter_id, initial_control_value(parameter_definition)
+            )
             return format_parameter_value(resolved, parameter_definition)
         control = control_contract[expression]
         if preserve_dynamic:
@@ -384,7 +386,9 @@ def render_content_template(
             if control.definition.kind == "selection"
             else compute_values
         )
-        resolved = values.get(control.key, control.definition.default)
+        resolved = values.get(
+            control.key, initial_control_value(control.definition)
+        )
         if control.definition.kind == "selection":
             return format_selection_value(resolved, control.definition)
         return format_parameter_value(resolved, control.definition)

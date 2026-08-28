@@ -5,6 +5,410 @@ from typing import Any
 from dataviz.view_contracts import VIEW_TEMPLATE_CONTRACTS
 
 
+AUTHORING_ROUTE_ALIASES = {
+    "dashboard": "minimal",
+    "simple": "minimal",
+    "controls": "interactive",
+    "control": "interactive",
+    "interaction": "interactive",
+    "renderer": "custom-renderer",
+    "custom": "custom-renderer",
+}
+
+AUTHORING_DOCUMENTS: dict[str, dict[str, Any]] = {
+    "minimal-dashboard": {
+        "requires": ["adapter", "source", "view", "layout"],
+        "purpose": "Build a declarative Dashboard without browser-side state or custom code.",
+        "path": "Adapter → Source → View → Layout",
+        "steps": [
+            "Create a minimal Workspace scaffold.",
+            "Bind each Source to a Workspace Adapter or a local file.",
+            "Point each View at one complete Source output reference.",
+            "Arrange Views with Sections and the default Layout contract.",
+            "Run validate, report, then visual-check.",
+        ],
+    },
+    "interactive-dashboard": {
+        "requires": [
+            "adapter", "source", "view", "layout", "named-output",
+            "control", "interactive-transform", "dependency-closure",
+        ],
+        "purpose": "Add selection or compute state and recompute only affected outputs.",
+        "path": "Base Named Output + Control → Interactive Transform → Derived Named Output → View",
+        "steps": [
+            "Choose selection for data filtering or compute for calculation settings.",
+            "Declare only the inputs consumed by the Interactive Transform.",
+            "Inspect the compiled dependency closure before debugging Runtime behavior.",
+            "Run validate, report, then visual-check.",
+        ],
+    },
+    "custom-renderer": {
+        "requires": [
+            "adapter", "source", "view", "layout", "named-output",
+            "renderer-contract", "renderer-lifecycle",
+        ],
+        "purpose": "Use trusted JavaScript only when built-in declarative Views cannot express the visual.",
+        "path": "Named Output → Renderer Contract → validate/mount/update/dispose",
+        "steps": [
+            "Start from a working declarative Source and Named Output.",
+            "Register one Renderer with validate, mount, update and dispose hooks.",
+            "Let the platform own empty, restore, interaction, resize and export behavior.",
+            "Run validate, report, then visual-check.",
+        ],
+    },
+    "cascading-selection": {
+        "requires": ["view", "control", "option-domain", "dependency-closure"],
+        "purpose": "Filter a child Selection's candidates from one or more direct parent Selections.",
+        "path": "Base option domain → parent Selection → child depends_on → affected Views",
+        "steps": [
+            "Put every candidate and parent field in one immutable Base table output.",
+            "Declare only the child's direct parent in depends_on.",
+            "Use initial for Select startup behavior; do not use default.",
+            "Inspect the compiled control order before opening a browser.",
+        ],
+        "minimal_example": """controls:
+  - id: province
+    kind: selection
+    field: province
+    type: multiple_select
+    value_type: text
+    initial: {mode: all}
+    options: {mode: infer, source: source:stores/main}
+sections:
+  - id: geography
+    title: Geography
+    controls:
+      - id: city
+        kind: selection
+        field: city
+        type: multiple_select
+        value_type: text
+        initial: {mode: all}
+        depends_on: [dashboard.province]
+        options: {mode: infer, source: source:stores/main}
+    views: [stores]""",
+        "allowed_fields": {
+            "selection": [
+                "id", "kind", "field", "path_fields", "type", "value_type",
+                "label", "initial", "required", "clearable", "depends_on", "options",
+            ],
+            "options": ["mode", "source"],
+            "depends_on_prefixes": ["dashboard.", "section.", "view."],
+        },
+        "common_errors": [
+            "Putting initial under options; initial belongs to the Select control.",
+            "Listing transitive ancestors instead of only direct parents.",
+            "Using an Interactive Output as an option domain; candidates must come from Base table outputs.",
+            "Omitting a parent field from the child option-domain rows.",
+        ],
+        "validation_commands": [
+            "dataviz validate <workspace> --dashboard <dashboard> --strict",
+            "dataviz dependencies <workspace> <dashboard> --format json",
+            "dataviz visual-check <workspace> <dashboard> --target both",
+        ],
+    },
+    "view-filter": {
+        "requires": ["view", "control", "option-domain"],
+        "purpose": "Filter one View directly with a View-scoped Selection and no Interactive Transform.",
+        "path": "Base Named Output → View Selection → filtered View",
+        "steps": [
+            "Place the Selection under the target View's controls list.",
+            "Bind field to a column in that View's table input.",
+            "Use a static closed enum or infer candidates from the immutable Base output.",
+            "Keep the View input unchanged; the Runtime applies the include filter.",
+        ],
+        "minimal_example": """views:
+  - id: orders
+    title: Orders
+    template: table
+    input: source:orders/main
+    controls:
+      - id: region
+        kind: selection
+        field: region
+        type: multiple_select
+        value_type: text
+        initial: {mode: all}
+        options: {mode: infer, source: source:orders/main}""",
+        "allowed_fields": {
+            "selection": [
+                "id", "kind", "field", "path_fields", "type", "value_type",
+                "label", "initial", "required", "clearable", "options",
+            ],
+            "binding_operators": ["auto", "equals", "in", "between", "contains", "gte", "lte", "gt", "lt"],
+        },
+        "common_errors": [
+            "Adding an Interactive Transform for a direct include filter.",
+            "Filtering on a field absent from the View's table input.",
+            "Using default on a Select instead of initial.",
+            "Treating explicit empty as All; an explicit empty Selection produces zero rows.",
+        ],
+        "validation_commands": [
+            "dataviz validate <workspace> --dashboard <dashboard> --strict",
+            "dataviz inspect-layout <workspace> <dashboard> --format json",
+            "dataviz visual-check <workspace> <dashboard> --target both",
+        ],
+    },
+    "browser-compute": {
+        "requires": [
+            "view", "control", "named-output", "interactive-transform", "dependency-closure",
+        ],
+        "purpose": "Recompute a Derived Named Output in a browser Worker after a Compute Control changes.",
+        "path": "Base Named Output + Compute Control → browser-js Transform → Derived Named Output → View",
+        "steps": [
+            "Use browser-js unless the calculation genuinely requires Python.",
+            "Declare data_inputs and compute_inputs with node-local aliases.",
+            "Return the exact Named Output declared by outputs.",
+            "Point the View at interactive:<transform>/<output>.",
+        ],
+        "minimal_example": """# dashboard.yaml
+controls:
+  - id: factor
+    kind: compute
+    type: single_input
+    value_type: number
+    default: 2
+interactive_transforms:
+  - transforms/scale.yaml
+views:
+  - {id: scaled, title: Scaled values, template: table, input: interactive:scale/main}
+
+# transforms/scale.yaml
+schema: dataviz/interactive-transform/v2
+id: scale
+runtime: browser-js
+code: scale.js
+data_inputs: {rows: source:data/main}
+compute_inputs: {factor: "dashboard:example/factor"}
+outputs:
+  main: {kind: table}
+export: {mode: interactive}""",
+        "allowed_fields": {
+            "compute_control": [
+                "id", "kind", "type", "value_type", "label", "default",
+                "required", "min", "max", "step",
+            ],
+            "interactive_transform": [
+                "schema", "id", "runtime", "code", "data_inputs", "query_inputs",
+                "selection_inputs", "compute_inputs", "outputs", "trigger", "timeout_seconds", "export",
+            ],
+        },
+        "common_errors": [
+            "Reading a global Control id directly instead of declaring a compute_inputs alias.",
+            "Pointing a View at the Transform id without an output name.",
+            "Returning a shape that disagrees with the declared output kind.",
+            "Choosing server-python for code that must remain interactive in portable HTML.",
+        ],
+        "validation_commands": [
+            "dataviz validate <workspace> --dashboard <dashboard> --strict",
+            "dataviz dependencies <workspace> <dashboard> --format json",
+            "dataviz report <workspace> <dashboard> --output report.html",
+            "dataviz visual-check <workspace> <dashboard> --target both",
+        ],
+    },
+}
+
+AUTHORING_ROUTES: dict[str, dict[str, Any]] = {
+    "minimal": {
+        "summary": "Default path for a simple declarative Dashboard.",
+        "inherits": [],
+        "documents": ["minimal-dashboard"],
+        "scaffolds": [
+            "minimal", "source.file", "source.sql", "source.python",
+            "view.metric", "view.line", "view.bar", "view.table",
+        ],
+        "commands": [
+            "dataviz scaffold minimal --id <dashboard> --output <workspace>",
+            "dataviz validate <workspace> --dashboard <dashboard> --format json",
+            "dataviz report <workspace> <dashboard> --output report.html",
+            "dataviz visual-check <workspace> <dashboard> --target both",
+        ],
+        "excludes": ["control", "interactive-transform", "renderer-contract"],
+    },
+    "interactive": {
+        "summary": "Use only when browser-side state or post-query computation is required.",
+        "inherits": ["minimal"],
+        "documents": ["interactive-dashboard"],
+        "scaffolds": [
+            "interactive", "interactive-transform.browser-js",
+            "interactive-transform.browser-python", "interactive-transform.server-python",
+        ],
+        "commands": [
+            "dataviz scaffold interactive --id <dashboard> --output <workspace>",
+            "dataviz dependencies <workspace> <dashboard> --format json",
+        ],
+        "excludes": ["renderer-contract"],
+    },
+    "custom-renderer": {
+        "summary": "Use only when no built-in View can express the required visual.",
+        "inherits": ["minimal"],
+        "documents": ["custom-renderer"],
+        "scaffolds": ["custom-renderer", "renderer.custom", "view.custom"],
+        "commands": [
+            "dataviz scaffold custom-renderer --id <dashboard> --output <workspace>",
+            "dataviz components renderer.custom --format json",
+            "dataviz gallery --output component-gallery.html",
+        ],
+        "excludes": ["control", "interactive-transform"],
+    },
+    "cascading-selection": {
+        "summary": "Build a parent-child Selection candidate cascade.",
+        "inherits": ["minimal"],
+        "documents": ["cascading-selection"],
+        "scaffolds": ["control.select", "control.cascader", "control.tree-select"],
+        "commands": [
+            "dataviz dependencies <workspace> <dashboard> --format json",
+        ],
+        "excludes": ["interactive-transform", "renderer-contract"],
+    },
+    "view-filter": {
+        "summary": "Apply a direct include-only Selection to one View.",
+        "inherits": ["minimal"],
+        "documents": ["view-filter"],
+        "scaffolds": ["control.select", "control.checkbox-group"],
+        "commands": [
+            "dataviz inspect-layout <workspace> <dashboard> --format json",
+        ],
+        "excludes": ["interactive-transform", "renderer-contract"],
+    },
+    "browser-compute": {
+        "summary": "Compute a Derived Named Output in a browser Worker.",
+        "inherits": ["minimal"],
+        "documents": ["browser-compute"],
+        "scaffolds": ["interactive", "interactive-transform.browser-js"],
+        "commands": [
+            "dataviz dependencies <workspace> <dashboard> --format json",
+            "dataviz report <workspace> <dashboard> --output report.html",
+        ],
+        "excludes": ["renderer-contract"],
+    },
+}
+
+
+def _authoring_route_closure(route: str) -> list[str]:
+    ordered: list[str] = []
+
+    def visit(identifier: str) -> None:
+        if identifier in ordered:
+            return
+        for parent in AUTHORING_ROUTES[identifier]["inherits"]:
+            visit(parent)
+        ordered.append(identifier)
+
+    visit(route)
+    return ordered
+
+
+def resolve_authoring_route(
+    task: str | None = None,
+    *,
+    component: str | None = None,
+) -> dict[str, Any]:
+    """Return the smallest documented concept closure for one authoring task."""
+    if bool(task) == bool(component):
+        raise ValueError("Choose exactly one of task or component")
+    selected_component = None
+    selected_definition = None
+    if component:
+        from dataviz.templates import component_catalog
+
+        selected_component = component.strip()
+        selected_definition = component_catalog().get(selected_component)
+        if selected_definition is None:
+            raise ValueError(f"Unknown Component: {selected_component}")
+        if selected_component in {
+            "view.custom", "renderer.custom", "service.charts", "view.renderer-lifecycle"
+        }:
+            route = "custom-renderer"
+        elif (
+            selected_component.startswith(("control.", "interactive-transform."))
+            or selected_component in {"compute.control", "runtime.control"}
+        ):
+            route = "interactive"
+        else:
+            route = "minimal"
+    else:
+        normalized = str(task).strip().lower()
+        route = AUTHORING_ROUTE_ALIASES.get(normalized, normalized)
+        if route not in AUTHORING_ROUTES:
+            raise ValueError(
+                f"Unknown authoring task: {task}. Available: {', '.join(AUTHORING_ROUTES)}"
+            )
+
+    closure = _authoring_route_closure(route)
+    document_ids = list(dict.fromkeys(
+        document
+        for identifier in closure
+        for document in AUTHORING_ROUTES[identifier]["documents"]
+    ))
+    documents = {
+        identifier: AUTHORING_DOCUMENTS[identifier]
+        for identifier in document_ids
+    }
+    concepts = list(dict.fromkeys(
+        concept
+        for document in documents.values()
+        for concept in document["requires"]
+    ))
+    if selected_component == "output.named":
+        concepts.append("named-output")
+    elif selected_component and selected_component.startswith("dataset-transform."):
+        concepts.append("dataset-transform")
+    scaffolds = list(dict.fromkeys(
+        recipe
+        for identifier in closure
+        for recipe in AUTHORING_ROUTES[identifier]["scaffolds"]
+    ))
+    if selected_component and selected_component.startswith(
+        ("view.", "section.", "control.", "dataset-transform.", "interactive-transform.")
+    ):
+        if selected_component not in scaffolds:
+            scaffolds.append(selected_component)
+    if selected_component == "renderer.custom" and selected_component not in scaffolds:
+        scaffolds.append(selected_component)
+    commands = list(dict.fromkeys(
+        command
+        for identifier in closure
+        for command in AUTHORING_ROUTES[identifier]["commands"]
+    ))
+    for identifier, document in documents.items():
+        missing = sorted(set(document["requires"]) - set(concepts))
+        if missing:
+            raise RuntimeError(f"Authoring document {identifier} has missing concepts: {missing}")
+    return {
+        "schema": "dataviz/authoring-route/v1",
+        "task": route,
+        "component": selected_component,
+        "component_definition": selected_definition,
+        "summary": AUTHORING_ROUTES[route]["summary"],
+        "closure": closure,
+        "concepts": concepts,
+        "documents": documents,
+        "scaffolds": scaffolds,
+        "commands": commands,
+        "excluded_concepts": AUTHORING_ROUTES[route]["excludes"],
+    }
+
+
+def authoring_route_catalog() -> dict[str, Any]:
+    return {
+        "schema": "dataviz/authoring-route-catalog/v1",
+        "default": "minimal",
+        "routes": {
+            identifier: {
+                "summary": definition["summary"],
+                "inherits": definition["inherits"],
+                "scaffold": identifier,
+            }
+            for identifier, definition in AUTHORING_ROUTES.items()
+        },
+        "commands": {
+            "task": "dataviz docs --task <route> --format json",
+            "component": "dataviz docs --component <component-id> --format json",
+        },
+    }
+
+
 _CHART_TEMPLATES = (
     "line",
     "bar",
@@ -65,6 +469,8 @@ DOC_ALIASES = {
     "component": "components",
     "compact": "ai-authoring",
     "context": "ai-authoring",
+    "progressive": "progressive-authoring",
+    "authoring-route": "progressive-authoring",
     "benchmark": "runtime-performance",
     "export": "html-export",
     "html": "html-export",
@@ -94,8 +500,8 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
         "summary": "从空环境到可验证 Dashboard 和 HTML 报告的最短 v5 路径。",
         "commands": [
             "dataviz version",
-            "dataviz docs pipeline --format json",
-            "dataviz schemas dashboard --format json",
+            "dataviz docs --task minimal --format json",
+            "dataviz scaffold minimal --id <dashboard-id> --output <workspace>",
             "dataviz list <workspace>",
             "dataviz context <workspace> <dashboard-id> --focus view:<view-id> --format json",
             "dataviz dependencies <workspace> <dashboard-id> --format json",
@@ -108,7 +514,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
         "rules": [
             "不要从自定义 HTML/CSS/JS 开始；先用默认 Renderer 证明数据契约。",
             "Adapter 只在 Workspace 定义；Dashboard 只写逻辑别名，不保存账号密码。",
-            "Query Parameter 创建新的 Query Run；Control 在取数后工作，并以 kind: selection 或 kind: compute 声明语义。",
+            "简单看板不要提前加载 Control、Interactive Transform 或 Custom Renderer 契约。",
             "所有 Output 引用必须写完整，例如 source:sales/main、dataset:model/trend、interactive:simulation/result。",
             "每次修改后运行 validate；未知字段、旧 schema 和不完整引用直接失败。",
             "serve 默认热更新 Workspace；Query Contract 改动只标记 Outdated，不会自动执行查询。",
@@ -119,7 +525,27 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "Query Run 的目标节点为 ready 或 empty。",
             "HTML report 生成，同时写出 report manifest。",
         ],
-        "related": ["pipeline", "workflow", "design-language", "validation", "troubleshooting"],
+        "related": ["progressive-authoring", "workflow", "design-language", "validation", "troubleshooting"],
+    },
+    "progressive-authoring": {
+        "summary": "按任务返回最小作者概念闭包，简单看板不需要阅读完整 Runtime 架构。",
+        "default": "minimal",
+        "routes": authoring_route_catalog(),
+        "commands": [
+            "dataviz docs --task minimal --format json",
+            "dataviz docs --task interactive --format json",
+            "dataviz docs --task custom-renderer --format json",
+            "dataviz docs --component control.select --format json",
+            "dataviz scaffold --list --format json",
+        ],
+        "rules": [
+            "minimal 只披露 Adapter → Source → View → Layout。",
+            "只有任务需要查询后交互状态或计算时才进入 interactive。",
+            "只有内置 View 无法表达视觉时才进入 custom-renderer。",
+            "每条 Scaffold profile 都是完整 Workspace，并声明 validate → report → visual-check 验证链。",
+            "任务路由控制作者上下文，不改变 Runtime 的严格 Schema 或执行语义。",
+        ],
+        "related": ["quickstart", "workflow", "components", "ai-authoring"],
     },
     "pipeline": {
         "summary": "稳定主链分成不可变取数阶段与可重复交互计算阶段。",
@@ -245,7 +671,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
     },
     "dashboard": {
         "summary": "dashboard.yaml 是分析逻辑；presentation.yaml 是可删除的视觉覆盖。",
-        "schema": "dataviz/dashboard/v8",
+        "schema": "dataviz/dashboard/v9",
         "state_summary": {
             "schema": "dataviz/state-snapshot/v1",
             "behavior": "Runtime 始终维护已提交 Query、applied Selection、committed/draft Compute；默认不把它们机械复述到画布。",
@@ -256,7 +682,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "id": "CLI、DAG、API 与 Presentation 使用的稳定程序身份。",
             "title": "页面内容，可与文件夹名不同；为空时回退到文件夹末级名称。",
         },
-        "minimal_example": """schema: dataviz/dashboard/v8
+        "minimal_example": """schema: dataviz/dashboard/v9
 kind: dashboard
 id: sales-overview
 title: 销售概览
@@ -558,10 +984,10 @@ selection_inputs:
             "Multi Select 和 Date Range 用 required 控制是否允许空值；clearable 可显式关闭清空操作，required: true 与 clearable: true 会被 validate 拒绝。",
             "候选依赖用 depends_on 声明直接 Selection 父节点；Compiler 计算传递闭包和拓扑顺序。",
             "Dashboard Control 只可依赖 dashboard.*；Section 可再依赖本 section.*；View 可再依赖自身 view.*。",
-            "上游域改变时，下游 all_available 意图跟随全部新候选；explicit 意图只保留有效交集。",
+            "上游域改变时，下游 all_available 跟随全部新候选；explicit 优先保留有效交集，原非空选择完全失效才恢复 initial，用户主动空集保留。",
             "Select 必须显式声明 options.mode；static 表示封闭业务枚举，infer 表示从数据推导候选域。",
             "options.mode=static 的 choices 是权威白名单；Source 中未声明的成员会被有意排除。",
-            "options.mode=infer 不允许 default 值列表；多选默认跟随全部可用项，initial: empty 可用于初始不选择。",
+            "Query/Selection/Compute Select 统一使用 initial：多选为 all/empty/values，单选为 first/empty/value；非 Select 使用 default。",
             "infer 未写 source 时，Runtime 从消费 View 背后的 Base Output 建立选项域；不会从依赖该 Selection 的 Derived Output 反推。",
             "多输入或需要明确数据域时使用 options.source: source:<id>/<name> 或 dataset:<id>/<name>；Interactive Output 会被 validate 拒绝。",
             "View Control 不重绘无关 View。",
@@ -664,7 +1090,7 @@ selection_inputs:
         "dynamic_option_domains": [
             "options.mode=static 的 choices 是权威白名单，只用于真正封闭或需要主动限制的候选集合。",
             "数据成员来自 Source 且可能变化时使用 options.mode=infer，由 options.source 或消费 View 的 Base Output 推导完整选项域。",
-            "infer 多选使用 all_available 初始意图，不写随数据漂移的 default 值列表；需要初始为空时写 initial: empty。",
+            "多选未声明 initial 时默认 all_available，需要空集或指定值时分别使用 initial.mode=empty/values。",
         ],
         "example": """# dashboard.yaml: value and behavior contract
 controls:
@@ -673,7 +1099,7 @@ controls:
     type: single_select
     value_type: text
     required: true
-    default: baseline
+    initial: {mode: value, value: baseline}
     options:
       mode: static
       choices:
@@ -1065,7 +1491,7 @@ assets:
     "strict-schema": {
         "summary": "只接受当前 DSL；不提供 deprecated 层、字段别名、自动迁移或双协议 Runtime。",
         "current": {
-            "dashboard": "dataviz/dashboard/v8",
+            "dashboard": "dataviz/dashboard/v9",
             "source": "dataviz/source/v2",
             "runtime": "dataviz/runtime/v5",
             "dependency_contract": "dataviz/dependency-contract/v5",

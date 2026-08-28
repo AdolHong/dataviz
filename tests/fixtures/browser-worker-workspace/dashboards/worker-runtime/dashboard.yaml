@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v8
+schema: dataviz/dashboard/v9
 kind: dashboard
 id: worker-runtime
 title: Browser JS Interactive Worker

@@ -38,7 +38,13 @@
   const reconcileOptionDomain = (
     input,
     nextOptions,
-    {selectedValues = [], intent = null, required = input?.required === true} = {},
+    {
+      selectedValues = [],
+      intent = null,
+      required = input?.required === true,
+      initial = null,
+      initialHydration = input?.dataset.optionDomainHydrated !== 'true',
+    } = {},
   ) => {
     const nodes = Array.from(nextOptions || []);
     const selected = new Set((selectedValues || []).map(value => String(value)));
@@ -61,16 +67,41 @@
       resolvedIntent = 'explicit';
     }
 
+    const selectable = nodes.filter(
+      option => option.dataset.emptyOption !== 'true' && !option.disabled,
+    );
+    const retained = new Set(
+      selectable.filter(option => selected.has(option.value)).map(option => option.value),
+    );
+    const applyInitial = () => {
+      const mode = initial?.mode || (input.multiple ? 'all' : 'first');
+      const values = new Set((initial?.values || []).map(value => String(value)));
+      if (mode === 'all' && input.multiple) {
+        resolvedIntent = 'all_available';
+        return new Set(selectable.map(option => option.value));
+      }
+      resolvedIntent = 'explicit';
+      if (mode === 'first') return new Set(selectable.slice(0, 1).map(option => option.value));
+      if (mode === 'values' || mode === 'value') {
+        return new Set(selectable.filter(option => values.has(option.value)).map(option => option.value));
+      }
+      return new Set();
+    };
+    let resolved = retained;
+    if (input.multiple && resolvedIntent === 'all_available') {
+      resolved = new Set(selectable.map(option => option.value));
+    } else if (initialHydration || (selected.size > 0 && retained.size === 0)) {
+      // Preserve every still-valid explicit choice. Only a completely invalidated
+      // non-empty choice falls back; an explicit empty chosen by the user remains empty.
+      resolved = retained.size > 0 ? retained : applyInitial();
+    }
+
     nodes.forEach(option => {
       if (option.dataset.emptyOption === 'true') {
-        option.selected = !input.multiple && selected.size === 0;
+        option.selected = !input.multiple && resolved.size === 0;
         return;
       }
-      option.selected = !option.disabled && (
-        input.multiple && resolvedIntent === 'all_available'
-          ? true
-          : selected.has(option.value)
-      );
+      option.selected = !option.disabled && resolved.has(option.value);
     });
     if (required && !nodes.some(option => option.selected && !option.disabled)) {
       const fallback = nodes.find(
@@ -79,6 +110,7 @@
       if (fallback) fallback.selected = true;
     }
     input.replaceChildren(...nodes);
+    input.dataset.optionDomainHydrated = 'true';
     if (input.multiple && resolvedIntent == null) {
       resolvedIntent = inferSelectionIntent(input) || 'explicit';
     }

@@ -95,9 +95,14 @@ class Executor:
         *,
         cache: NodeCache | None = None,
         cache_namespace: str | None = None,
+        cache_salt: str | None = None,
     ):
         self.workspace = workspace
-        self.cache = cache or NodeCache(workspace.root, namespace=cache_namespace)
+        self.cache = cache or NodeCache(
+            workspace.root,
+            namespace=cache_namespace,
+            key_salt=cache_salt,
+        )
         self._event_lock = threading.Lock()
 
     def ensure_valid(self, dashboard_id: str) -> LoadedDashboard:

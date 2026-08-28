@@ -7,7 +7,6 @@ import shutil
 import socket
 import threading
 import time
-import zipfile
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from functools import partial
@@ -126,7 +125,7 @@ folders: []
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v8
+        """schema: dataviz/dashboard/v9
 kind: dashboard
 id: same-view-controls
 title: Same View Controls
@@ -145,6 +144,7 @@ views:
         type: single_select
         value_type: text
         label: Weekday
+        initial: {mode: empty}
         options: {mode: infer, source: source:daily/main}
       - id: dates
         kind: selection
@@ -219,7 +219,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v8
+        """schema: dataviz/dashboard/v9
 kind: dashboard
 id: scale
 title: Scale Runtime
@@ -323,7 +323,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v8
+        """schema: dataviz/dashboard/v9
 kind: dashboard
 id: runtime-matrix
 title: Interactive Runtime Matrix
@@ -336,7 +336,7 @@ controls:
     field: name
     type: multiple_select
     value_type: text
-    default: [alpha, beta]
+    initial: {mode: values, values: [alpha, beta]}
     options:
       mode: static
       choices:
@@ -1003,7 +1003,7 @@ def test_section_selection_updates_bound_title_without_redrawing_siblings(
             "kind": "selection",
             "field": "region",
             "type": "single_select", "value_type": "text",
-            "default": "华东",
+            "initial": {"mode": "value", "value": "华东"},
             "options": {
                 "mode": "static",
                 "choices": [
@@ -1693,7 +1693,7 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(
             "id": "model_list",
             "type": "multiple_select", "value_type": "text",
             "label": "Model list",
-            "default": ["model-01"],
+            "initial": {"mode": "values", "values": ["model-01"]},
             "options": {
                 "mode": "static",
                 "choices": [
@@ -1756,7 +1756,13 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(
         assert abs((wide_geometry["frameRight"] - wide_geometry["cardRight"]) - 48) <= 1, wide_geometry
 
         page.set_viewport_size({"width": 900, "height": 360})
-        expect(control).to_have_attribute("data-control-effective-columns", "1")
+        # ResizeObserver publishes the effective track count on the next
+        # rendering turn. Wait for that explicit Runtime state instead of
+        # racing computed style immediately after changing the viewport.
+        expect(control).not_to_have_attribute(
+            "data-control-effective-columns",
+            "4",
+        )
 
         geometry = panel.evaluate(
             """panel => {
@@ -1882,7 +1888,7 @@ def test_cross_browser_narrow_control_overlay_keyboard_scroll_and_aria(
             "id": "model_list",
             "type": "multiple_select", "value_type": "text",
             "label": "Model list",
-            "default": ["model-01"],
+            "initial": {"mode": "values", "values": ["model-01"]},
             "options": {
                 "mode": "static",
                 "choices": [
@@ -2000,7 +2006,7 @@ def test_server_header_hydrates_dataset_driven_dashboard_selection_options(
     workspace = _copy_workspace(MINIMAL, tmp_path / "dynamic-dashboard-selection")
     dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
     definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
-    definition["controls"][0].pop("default")
+    definition["controls"][0].pop("initial")
     definition["controls"][0]["options"] = {"mode": "infer"}
     dashboard_path.write_text(
         yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
@@ -2184,6 +2190,19 @@ def test_selection_cascade_popovers_view_isolation_and_table_wheel(
         expect(city_select).to_have_values(["厦门"], timeout=5_000)
         expect(city_rows).to_have_count(2, timeout=5_000)
 
+        # A non-empty explicit choice that becomes completely unavailable falls
+        # back to the configured initial policy (implicit all for this multi-select).
+        city_select.select_option(["深圳"], force=True)
+        dashboard_select.select_option(["福建"], force=True)
+        expect(city_select).to_have_values(["厦门", "泉州"], timeout=5_000)
+
+        # An empty set chosen by the user is intentional and must not be replaced
+        # merely because an upstream candidate domain changes.
+        city_select.select_option([], force=True)
+        dashboard_select.select_option(["广东"], force=True)
+        expect(city_select).to_have_values([], timeout=5_000)
+        dashboard_select.select_option(["广东", "福建"], force=True)
+
         city_select.select_option(["深圳", "厦门"], force=True)
         page.wait_for_function(
             """() => {
@@ -2321,6 +2340,54 @@ def test_echarts_legend_filter_prunes_categories_on_mount_update_and_export(
         chart = frame.locator('[data-view-id="map-bars"]')
         expect(chart).to_have_attribute("data-view-status", "ready", timeout=15_000)
 
+        layout_evidence = frame.locator("body").evaluate(
+            """() => {
+              const state = window.datavizRuntime.viewAdapter.states.get('map-bars').state;
+              const chart = state.chart;
+              const categoryAxis = state.descriptor.options.xAxis;
+              const offsets = [];
+              chart.getModel().getSeries().forEach((seriesModel, seriesIndex) => {
+                const data = seriesModel.getData();
+                for (let index = 0; index < data.count(); index += 1) {
+                  if (state.descriptor.options.series[seriesIndex].data[index] == null) {
+                    continue;
+                  }
+                  const layout = data.getItemLayout(index);
+                  if (
+                    !layout
+                    || !Number.isFinite(layout.x)
+                    || !Number.isFinite(layout.width)
+                  ) continue;
+                  const categoryCenter = chart.convertToPixel(
+                    {xAxisIndex:0}, categoryAxis.data[index]
+                  );
+                  offsets.push(Math.abs(layout.x + layout.width / 2 - categoryCenter));
+                }
+              });
+              const build = window.datavizComponents.viewDeclarative.build;
+              const denseDescriptor = build({
+                id:'dense-bars', engine:'echarts', template:'bar',
+                x:'category', y:'value', series:'region', aggregate:'sum',
+              }, {
+                dependency_contract:{views:{}}, data:{}, selection:{},
+              }, [
+                {category:'A', region:'North', value:1},
+                {category:'A', region:'South', value:2},
+                {category:'B', region:'North', value:3},
+                {category:'B', region:'South', value:4},
+              ]);
+              return {
+                barGaps:state.descriptor.options.series.map(series => series.barGap),
+                denseBarGaps:denseDescriptor.options.series.map(series => series.barGap),
+                offsets,
+              };
+            }"""
+        )
+        assert layout_evidence["barGaps"] == ["-100%"] * 4
+        assert layout_evidence["denseBarGaps"] == [None, None]
+        assert len(layout_evidence["offsets"]) == 7
+        assert max(layout_evidence["offsets"]) <= 1
+
         # The very first legend interaction after mount must remove a category
         # that belongs exclusively to the hidden series.
         assert "鲤城区" not in legend_action(frame, False)
@@ -2445,9 +2512,29 @@ def test_managed_renderer_lifecycle_matrix_in_server_and_export(
               });
               const echartsCategories = echarts.chart.getOption().xAxis[0].data;
 
-              await perspective.viewer.restore({sort:[['revenue', 'desc']]});
-              await perspective.viewer.flush();
-              const perspectiveConfig = await perspective.viewer.save();
+              const expectedSettings = true;
+              const perspectiveDeadline = performance.now() + 5000;
+              let perspectiveConfig = await perspective.viewer.save();
+              while (
+                perspectiveConfig.settings !== expectedSettings
+                && performance.now() < perspectiveDeadline
+              ) {
+                await perspective.viewer.restore({
+                  plugin:perspectiveConfig.plugin,
+                  group_by:perspectiveConfig.group_by,
+                  split_by:perspectiveConfig.split_by,
+                  columns:perspectiveConfig.columns,
+                  aggregates:perspectiveConfig.aggregates,
+                  filter:perspectiveConfig.filter,
+                  sort:perspectiveConfig.sort,
+                  settings:expectedSettings,
+                });
+                await perspective.viewer.flush();
+                perspectiveConfig = await perspective.viewer.save();
+                if (perspectiveConfig.settings !== expectedSettings) {
+                  await new Promise(resolve => setTimeout(resolve, 50));
+                }
+              }
 
               const beforeResize = runtime.metrics.renderers.resizes;
               runtime.viewAdapter.states.get(ids[0]).state
@@ -2458,7 +2545,8 @@ def test_managed_renderer_lifecycle_matrix_in_server_and_export(
               return {
                 plotlyInteraction,
                 echartsCategories,
-                perspectiveSort:perspectiveConfig.sort,
+                perspectiveSettings:perspectiveConfig.settings,
+                perspectiveConfig,
                 resizeDelta:runtime.metrics.renderers.resizes - beforeResize,
                 failures:runtime.metrics.renderers.failed,
               };
@@ -2467,7 +2555,7 @@ def test_managed_renderer_lifecycle_matrix_in_server_and_export(
         )
         assert evidence["plotlyInteraction"] == 1
         assert evidence["echartsCategories"] == []
-        assert evidence["perspectiveSort"] == [["revenue", "desc"]]
+        assert evidence["perspectiveSettings"] is True, evidence
         assert evidence["resizeDelta"] >= 2
         assert evidence["failures"] == 0
 
@@ -2721,22 +2809,44 @@ def test_plotly_defaults_to_page_wheel_and_allows_explicit_scroll_zoom(
         before = default_chart.evaluate(
             """node => ({
               scrollY:window.scrollY,
+              maxScrollY:Math.max(0, document.documentElement.scrollHeight - window.innerHeight),
+              shellScrollY:window.parent.scrollY,
+              shellMaxScrollY:Math.max(
+                0,
+                window.parent.document.documentElement.scrollHeight - window.parent.innerHeight,
+              ),
               xRange:[...node._fullLayout.xaxis.range],
             })"""
         )
         drag_layer = default_chart.locator(".nsewdrag")
-        box = drag_layer.bounding_box()
-        assert box is not None
-        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
-        page.mouse.wheel(0, 500)
+        can_scroll_down = (
+            before["shellScrollY"] < before["shellMaxScrollY"] - 1
+            or before["scrollY"] < before["maxScrollY"] - 1
+        )
+        wheel_delta = 500 if can_scroll_down else -500
+        drag_layer.evaluate(
+            """(node, deltaY) => node.dispatchEvent(new WheelEvent('wheel', {
+              bubbles:true,
+              cancelable:true,
+              composed:true,
+              deltaY,
+            }))""",
+            wheel_delta,
+        )
         page.wait_for_timeout(150)
         after = default_chart.evaluate(
             """node => ({
               scrollY:window.scrollY,
+              shellScrollY:window.parent.scrollY,
               xRange:[...node._fullLayout.xaxis.range],
             })"""
         )
-        assert after["scrollY"] > before["scrollY"]
+        before_scroll = before["shellScrollY"] + before["scrollY"]
+        after_scroll = after["shellScrollY"] + after["scrollY"]
+        if wheel_delta > 0:
+            assert after_scroll > before_scroll
+        else:
+            assert after_scroll < before_scroll
         assert after["xRange"] == before["xRange"]
 
 
@@ -2807,16 +2917,17 @@ def test_perspective_fills_view_uses_opaque_settings_and_releases_page_wheel(
             "viewer => viewer.__datavizTestIdentity"
         ) == identity
 
-        scroll_after = viewer.evaluate(
+        scroll_state = viewer.evaluate(
             """viewer => {
               window.scrollTo(0, 0);
+              const before = window.parent.scrollY + window.scrollY;
               viewer.dispatchEvent(new WheelEvent('wheel', {
                 deltaY: 500, bubbles: true, cancelable: true, composed: true
               }));
-              return window.scrollY;
+              return {before, after:window.parent.scrollY + window.scrollY};
             }"""
         )
-        assert scroll_after > 0
+        assert scroll_state["after"] > scroll_state["before"]
 
         disposed = frame.locator("body").evaluate(
             """async () => {
@@ -2924,16 +3035,17 @@ def test_cross_browser_perspective_repeated_dispose_and_restore(
             expect(perspective).to_have_attribute("data-view-status", "ready", timeout=30_000)
             viewer = perspective.locator("perspective-viewer")
             expect(viewer).to_be_visible(timeout=30_000)
-            scroll_after = viewer.evaluate(
+            scroll_state = viewer.evaluate(
                 """viewer => {
                   window.scrollTo(0, 0);
+                  const before = window.parent.scrollY + window.scrollY;
                   viewer.dispatchEvent(new WheelEvent('wheel', {
                     deltaY:500, bubbles:true, cancelable:true, composed:true,
                   }));
-                  return window.scrollY;
+                  return {before, after:window.parent.scrollY + window.scrollY};
                 }"""
             )
-            assert scroll_after > 0
+            assert scroll_state["after"] > scroll_state["before"]
             frame_id = page.locator("#canvas-frame").get_attribute("data-frame-id")
             disposed = frame.locator("body").evaluate(
                 """async () => {

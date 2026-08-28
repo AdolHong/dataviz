@@ -4,8 +4,8 @@
 
 Dataviz 同时维护六类版本：
 
-- Python package：当前 `ai-dataviz 0.9.1`。
-- 文件 DSL：Workspace v1、Dashboard v8、Presentation v2、Source v2、Dataset/Interactive Transform v2。
+- Python package：当前 `ai-dataviz 0.10.0`。
+- 文件 DSL：Workspace v1、Dashboard v9、Presentation v2、Source v2、Dataset/Interactive Transform v2。
 - Dashboard 依赖协议：`dataviz/dependency-contract/v5`。
 - Dashboard 布局协议：`dataviz/layout-contract/v1`。
 - 浏览器协议：`dataviz/runtime/v5`。

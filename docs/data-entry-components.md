@@ -76,7 +76,7 @@ Server 默认值编辑器也按 Atom 呈现。单日期只有“类型 + 值”�
 级联多选不能只保存当前可见的 value，还必须保存用户的选择意图：
 
 - `all_available`：原本选中了全部可用项；上级范围扩大时，新出现的可用项继续被选中。
-- `explicit`：用户指定了部分项；上级变化时只保留有效交集，不擅自增加其他项。
+- `explicit`：用户指定了部分项；上级变化时优先保留有效交集，原非空选择完全失效时恢复 `initial`，用户主动空集继续保留。
 
 这项规则由 `runtime.control` 统一实现，适用于 Checkbox Group、Select、Cascader 和 Tree Select。意图会随同一 tab 状态和导出的 HTML 保存，因此父级范围临时缩小后，不会把“显式子集”误判成“全部可用”。Presentation 只能改变组件外观，不能改写这项协调语义。
 
@@ -85,7 +85,19 @@ Select 必须明确候选域由谁拥有：
 - `options.mode: static`：Dashboard 维护封闭 `choices`；Source 中未列出的值不会进入控件。
 - `options.mode: infer`：Runtime 从 `options.source` 或消费该 Selection 的 Base Output 推导完整选项域。
 
-`infer` 不允许写具体值列表 `default`。多选默认 `initial: auto`，编译为 `all_available` 意图，因此 Source 从 4 个城市增加到 10 个时无需修改 Dashboard；Selection Gallery 等需要初始不选择的场景使用 `initial: empty`。这不是候选值副本，不会随数据漂移。
+Select 不使用 `default`，而是统一使用 `initial`。多选支持 `all/empty/values`，单选支持 `first/empty/value`；未声明时分别默认 `all` 和 `first`。`all` 编译为 `all_available` 意图，因此 Source 从 4 个城市增加到 10 个时无需修改 Dashboard。
+
+其他输入组件不具有候选池，因此不套用 Select 的恢复策略：
+
+| 逻辑类型 | 初始值 | 后续协调 |
+| --- | --- | --- |
+| `single_input` | `default` 或空值 | 保留用户输入；按 text / bool / integer / number / date 类型与边界校验 |
+| `multiple_input` | `default` 列表或空列表 | 保留完整列表；校验元素类型、去重和 `max_items` |
+| `range_input` | `default: [start, end]` 或空范围 | 两个端点作为一个值提交；校验类型、顺序、边界和 `allow_empty` |
+| `single_select` | `initial: first | empty | value` | 动态候选变化时执行交集保留与回退 |
+| `multiple_select` | `initial: all | empty | values` | 动态候选变化时执行意图跟随、交集保留与回退 |
+
+`Slider`、`InputNumber`、`DatePicker`、`Checkbox` 等只是上述逻辑类型的展示组件，不另造初始化语义。`min` 不是默认值，`false` 和“今天”也不会被 Runtime 擅自推断；如果必填输入未声明 `default`，它会保持空值并在提交时提示补充。这样修改候选域只协调 Select，修改展示组件或约束不会悄悄重置用户已经输入的业务值。
 
 候选项依赖属于值/数据契约，不属于 Component。下游 Selection 只用 `depends_on` 声明直接父节点：
 
@@ -140,7 +152,7 @@ controls:
     value_type: text
     label: 模型
     required: true
-    default: baseline
+    initial: {mode: value, value: baseline}
     options:
       mode: static
       choices:

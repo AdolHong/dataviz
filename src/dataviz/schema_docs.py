@@ -6,6 +6,14 @@ from typing import Any
 from pydantic import BaseModel, TypeAdapter
 
 from dataviz import __version__
+from dataviz.analysis.contracts import (
+    AnalysisCatalog as AnalysisCatalogContract,
+    AnalysisEvidence,
+    AnalysisEntry,
+    AnalysisPromotion,
+    ANALYSIS_PROMOTE_ADAPTER,
+    AnalysisResult,
+)
 from dataviz.adapter_contracts import ADAPTER_CONTRACTS
 from dataviz.errors import ValidationFailure
 from dataviz.view_contracts import VIEW_TEMPLATE_CONTRACTS
@@ -18,6 +26,7 @@ from dataviz.workspace.models import (
     DeclarativeViewDefinition,
     LayoutDefinition,
     OutputDefinition,
+    OutputSemanticsDefinition,
     InteractiveExportDefinition,
     InteractiveTransformDefinition,
     PresentationDefinition,
@@ -59,17 +68,24 @@ SCHEMA_MODELS: OrderedDict[str, SchemaProvider] = OrderedDict(
         ("repeat", RepeatDefinition),
         ("view", DeclarativeViewDefinition),
         ("output", OutputDefinition),
+        ("output-semantics", OutputSemanticsDefinition),
         ("cache", CacheDefinition),
         ("layout", LayoutDefinition),
         ("theme", ThemeDefinition),
         ("control-component-presentation", PresentationControlComponentDefinition),
+        ("analysis-entry", AnalysisEntry),
+        ("analysis-catalog", AnalysisCatalogContract),
+        ("analysis-result", AnalysisResult),
+        ("analysis-evidence", AnalysisEvidence),
+        ("analysis-promotion", AnalysisPromotion),
+        ("analysis-promote-proposal", ANALYSIS_PROMOTE_ADAPTER),
     ]
 )
 
 
 CURRENT_SCHEMAS = {
     "workspace": "dataviz/workspace/v1",
-    "dashboard": "dataviz/dashboard/v8",
+    "dashboard": "dataviz/dashboard/v9",
     "presentation": "dataviz/presentation/v2",
     "source": "dataviz/source/v2",
     "dataset_transform": "dataviz/dataset-transform/v2",

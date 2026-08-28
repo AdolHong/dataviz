@@ -14,6 +14,7 @@ from dataviz.authoring import (
     build_authoring_benchmark,
     build_context_payload,
     context_size,
+    scaffold_catalog,
     scaffold_recipe,
     scaffold_recipes,
 )
@@ -24,7 +25,11 @@ from dataviz.components import (
     component_story_catalog,
     validate_component_packages,
 )
-from dataviz.documentation import DOC_TOPICS
+from dataviz.documentation import (
+    DOC_TOPICS,
+    authoring_route_catalog,
+    resolve_authoring_route,
+)
 from dataviz.execution import Executor
 from dataviz.execution.references import parse_output_reference
 from dataviz.rendering import CanvasRenderer
@@ -141,7 +146,7 @@ def test_machine_readable_component_examples_use_canonical_output_references():
 
 def test_machine_readable_documentation_examples_match_current_schemas():
     providers = {
-        "dataviz/dashboard/v8": DashboardDefinition,
+        "dataviz/dashboard/v9": DashboardDefinition,
         "dataviz/source/v2": SOURCE_DEFINITION_ADAPTER,
         "dataviz/dataset-transform/v2": DatasetTransformDefinition,
         "dataviz/interactive-transform/v2": InteractiveTransformDefinition,
@@ -322,8 +327,12 @@ def test_component_package_cli_check_and_data_entry_scaffolds():
         json.loads(checkbox.stdout)["files"]["dashboard.control.snippet.yaml"]
     )[0]
     assert radio_control["type"] == "single_select"
-    assert radio_control["default"] == "alpha"
+    assert radio_control["initial"] == {"mode": "value", "value": "alpha"}
     assert checkbox_selection["type"] == "multiple_select"
+    assert checkbox_selection["initial"] == {
+        "mode": "values",
+        "values": ["alpha"],
+    }
     assert yaml.safe_load(
         json.loads(checkbox.stdout)["files"]["presentation.control-component.snippet.yaml"]
     )["control_components"]["view:view-id/channel"]["component"] == "checkbox-group"
@@ -350,7 +359,10 @@ def test_every_scaffold_recipe_matches_the_current_strict_models():
         files = payload["files"]
         assert payload["schema"] == "dataviz/scaffold/v1"
 
-        if recipe == "dashboard":
+        if recipe in {"minimal", "interactive", "custom-renderer"}:
+            assert files["workspace.yaml"]
+            assert files["dashboards/sample/dashboard.yaml"]
+        elif recipe == "dashboard":
             DashboardDefinition.model_validate(yaml.safe_load(files["dashboard.yaml"]))
         elif recipe.startswith("source."):
             SOURCE_DEFINITION_ADAPTER.validate_python(
@@ -472,10 +484,11 @@ def test_scaffold_catalog_is_machine_readable_and_dashboard_recipe_runs(tmp_path
         app, ["scaffold", "--list", "--format", "json"]
     )
     assert catalog_result.exit_code == 0, catalog_result.stdout
-    assert json.loads(catalog_result.stdout) == {
-        "schema": "dataviz/scaffold-catalog/v1",
-        "recipes": list(scaffold_recipes()),
-    }
+    assert json.loads(catalog_result.stdout) == scaffold_catalog()
+    assert scaffold_catalog()["default"] == "minimal"
+    assert scaffold_catalog()["profiles"] == [
+        "minimal", "interactive", "custom-renderer"
+    ]
 
     root = tmp_path / "workspace"
     dashboard_root = root / "dashboards" / "generated"
@@ -497,6 +510,115 @@ def test_scaffold_catalog_is_machine_readable_and_dashboard_recipe_runs(tmp_path
     )
     assert result.status == "ready"
     assert report.is_file()
+
+
+def test_authoring_routes_expose_only_the_required_document_closure():
+    catalog = authoring_route_catalog()
+    minimal = resolve_authoring_route("minimal")
+    interactive = resolve_authoring_route("interactive")
+    renderer = resolve_authoring_route(component="view.custom")
+    transform = resolve_authoring_route(component="interactive-transform.browser-js")
+
+    assert catalog["default"] == "minimal"
+    assert set(catalog["routes"]) == {
+        "minimal",
+        "interactive",
+        "custom-renderer",
+        "cascading-selection",
+        "view-filter",
+        "browser-compute",
+    }
+    assert minimal["closure"] == ["minimal"]
+    assert minimal["concepts"] == [
+        "adapter", "source", "view", "layout"
+    ]
+    minimal_documents = json.dumps(minimal["documents"], ensure_ascii=False).lower()
+    assert "control" not in minimal_documents
+    assert "interactive-transform" not in minimal_documents
+    assert "renderer-contract" not in minimal_documents
+    assert interactive["closure"] == ["minimal", "interactive"]
+    assert "control" in interactive["concepts"]
+    assert "interactive-transform" in interactive["concepts"]
+    assert renderer["task"] == "custom-renderer"
+    assert renderer["component"] == "view.custom"
+    assert "renderer-contract" in renderer["concepts"]
+    assert transform["task"] == "interactive"
+    assert transform["component_definition"]["id"] == "interactive-transform.browser-js"
+    for payload in (minimal, interactive, renderer):
+        for document in payload["documents"].values():
+            assert set(document["requires"]) <= set(payload["concepts"])
+
+
+def test_cli_docs_routes_tasks_and_components_without_loading_every_topic():
+    minimal_result = CliRunner().invoke(
+        app, ["docs", "--task", "minimal", "--format", "json"]
+    )
+    control_result = CliRunner().invoke(
+        app, ["docs", "--component", "control.select", "--format", "json"]
+    )
+
+    assert minimal_result.exit_code == 0, minimal_result.stdout
+    assert control_result.exit_code == 0, control_result.stdout
+    minimal = json.loads(minimal_result.stdout)
+    control = json.loads(control_result.stdout)
+    assert minimal["task"] == "minimal"
+    assert list(minimal["documents"]) == ["minimal-dashboard"]
+    assert control["task"] == "interactive"
+    assert control["component"] == "control.select"
+    assert control["component_definition"]["id"] == "control.select"
+
+
+@pytest.mark.parametrize(
+    ("task", "document", "required_concept"),
+    [
+        ("cascading-selection", "cascading-selection", "option-domain"),
+        ("view-filter", "view-filter", "control"),
+        ("browser-compute", "browser-compute", "interactive-transform"),
+    ],
+)
+def test_cli_docs_exposes_focused_interaction_task_contracts(
+    task: str,
+    document: str,
+    required_concept: str,
+):
+    result = CliRunner().invoke(
+        app, ["docs", "--task", task, "--format", "json"]
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    focused = payload["documents"][document]
+    assert payload["task"] == task
+    assert required_concept in payload["concepts"]
+    assert focused["minimal_example"]
+    assert focused["allowed_fields"]
+    assert focused["common_errors"]
+    assert focused["validation_commands"][-1].startswith("dataviz visual-check")
+
+
+@pytest.mark.parametrize("profile", ["minimal", "interactive", "custom-renderer"])
+def test_scaffold_profiles_run_validate_and_report(profile: str, tmp_path: Path):
+    item_id = f"{profile}-example"
+    root = tmp_path / profile
+    payload = scaffold_recipe(profile, item_id)
+    for relative, content in payload["files"].items():
+        destination = root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(content, encoding="utf-8")
+
+    workspace = load_workspace(root)
+    assert validate_workspace(workspace) == []
+    result = Executor(workspace).run(item_id, refresh=True)
+    report = CanvasRenderer(workspace).write_report(
+        workspace.dashboard(item_id), result, tmp_path / f"{profile}.html"
+    )
+
+    assert result.status == "ready"
+    assert report.is_file()
+    assert payload["scope"] == "workspace"
+    assert [command.split()[1] for command in payload["verify"]] == [
+        "validate", "report", "visual-check"
+    ]
 
 
 def test_focused_context_contains_only_the_view_dependency_closure():
@@ -631,7 +753,7 @@ def test_coordinate_layout_fields_are_strictly_rejected(layout):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v8",
+                "schema": "dataviz/dashboard/v9",
                 "kind": "dashboard",
                 "id": "strict",
                 "layout": layout,

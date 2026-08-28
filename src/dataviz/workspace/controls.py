@@ -6,6 +6,7 @@ from typing import Any, Literal
 from dataviz.errors import ExecutionFailure
 from dataviz.value_contract import (
     ValueContractViolation,
+    initial_control_value,
     normalize_control_value,
 )
 from dataviz.selection_state import (
@@ -203,7 +204,7 @@ def resolve_compute_values(
         try:
             normalized[key] = normalize_control_value(
                 control.definition,
-                supplied.get(key, control.definition.default),
+                supplied.get(key, initial_control_value(control.definition)),
             )
         except ValueContractViolation as error:
             raise ExecutionFailure(

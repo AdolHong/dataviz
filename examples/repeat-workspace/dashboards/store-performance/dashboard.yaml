@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v8
+schema: dataviz/dashboard/v9
 kind: dashboard
 id: store-performance
 title: 百店业绩巡检
@@ -58,7 +58,8 @@ sections:
         field: store_id
         path_fields: [region, city, store_id]
         placeholder: 搜索或选择门店
-        options: {mode: infer, initial: empty}
+        initial: {mode: empty}
+        options: {mode: infer}
     views: [selected-store-trend]
     repeat:
       view: selected-store-trend

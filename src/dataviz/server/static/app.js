@@ -769,6 +769,45 @@ function editorChoiceRow(item, choice = {label:'', value:''}, selected = false) 
   return row;
 }
 
+function editorSelectInitialField(item, card, {staticChoices = false} = {}) {
+  const field = document.createElement('label');
+  field.className = 'parameter-editor__default';
+  const caption = document.createElement('span');
+  caption.textContent = '初始选择';
+  const mode = document.createElement('select');
+  mode.dataset.editorInitialMode = '';
+  const modes = item.type === 'multiple_select'
+    ? [['all', '全部候选'], ['empty', '空集'], ['values', '指定值']]
+    : [['first', '第一个候选'], ['empty', '空值'], ['value', '指定值']];
+  modes.forEach(([value, label]) => mode.append(new Option(label, value)));
+  mode.value = item.initial?.mode || (item.type === 'multiple_select' ? 'all' : 'first');
+  field.append(caption, mode);
+  if (!staticChoices) {
+    const value = document.createElement('input');
+    value.type = 'text';
+    value.dataset.editorInitialValue = '';
+    value.placeholder = item.type === 'multiple_select' ? '使用逗号分隔多个值' : '参数值';
+    value.value = item.type === 'multiple_select'
+      ? (item.initial?.values || []).join(', ')
+      : (item.initial?.value ?? '');
+    field.append(value);
+  }
+  const sync = () => {
+    const explicit = ['values', 'value'].includes(mode.value);
+    card.querySelectorAll('[data-choice-default]').forEach(input => {
+      input.disabled = !explicit;
+    });
+    const value = field.querySelector('[data-editor-initial-value]');
+    if (value) value.hidden = !explicit;
+  };
+  mode.addEventListener('change', () => {
+    sync();
+    notifyEditorChanged(card);
+  });
+  queueMicrotask(sync);
+  return field;
+}
+
 function editorItemCard(item) {
   const card = document.createElement('section');
   card.className = 'parameter-editor__item';
@@ -776,6 +815,7 @@ function editorItemCard(item) {
   card.dataset.editorType = item.type;
   card.dataset.editorValueType = item.value_type;
   card.dataset.defaultEditable = String(item.default_editable);
+  card.dataset.initialEditable = String(item.initial_editable);
   card.dataset.choicesEditable = String(item.choices_editable);
   const header = document.createElement('header');
   header.className = 'parameter-editor__item-summary';
@@ -837,8 +877,8 @@ function editorItemCard(item) {
 
   if (item.choices_editable) {
     const selected = item.type === 'multiple_select'
-      ? (Array.isArray(item.default) ? item.default : [])
-      : [item.default];
+      ? (item.initial?.values || [])
+      : [item.initial?.value];
     const choiceSection = document.createElement('div');
     choiceSection.className = 'parameter-editor__choices';
     const legend = document.createElement('div');
@@ -868,20 +908,11 @@ function editorItemCard(item) {
       row.querySelector('[data-choice-label]').focus();
     });
     footer.append(add);
-    if (item.type === 'single_select' && !item.required) {
-      const clear = document.createElement('button');
-      clear.type = 'button';
-      clear.className = 'parameter-editor__clear-default';
-      clear.textContent = '不设默认值';
-      clear.addEventListener('click', () => {
-        rows.querySelectorAll('[data-choice-default]').forEach(input => { input.checked = false; });
-        notifyEditorChanged(rows);
-      });
-      footer.append(clear);
-    }
-    choiceSection.append(legend, rows, footer);
+    choiceSection.append(editorSelectInitialField(item, card, {staticChoices:true}), legend, rows, footer);
     detail.append(choiceSection);
     syncEditorMoveButtons(rows);
+  } else if (item.initial_editable) {
+    detail.append(editorSelectInitialField(item, card));
   } else if (item.default_editable) {
     detail.append(editorDefaultField(item));
   } else {
@@ -969,10 +1000,24 @@ function serializeEditorGroup(group, container) {
     order:cards.map(card => card.dataset.editorItem),
     items:cards.map(card => {
       const item = group.items.find(candidate => candidate.id === card.dataset.editorItem);
+      const initialMode = card.querySelector('[data-editor-initial-mode]')?.value || null;
       if (!item.choices_editable) {
+        let initial = null;
+        if (item.initial_editable) {
+          initial = {mode:initialMode};
+          if (initialMode === 'values') {
+            const raw = card.querySelector('[data-editor-initial-value]').value;
+            initial.values = raw.split(',').map(value => value.trim()).filter(Boolean)
+              .map(value => editorTypedValue(item, value, '初始值'));
+          } else if (initialMode === 'value') {
+            const raw = card.querySelector('[data-editor-initial-value]').value.trim();
+            initial.value = editorTypedValue(item, raw, '初始值');
+          }
+        }
         return {
           id:item.id,
           default:item.default_editable ? serializeEditorDefault(card) : null,
+          initial,
           choices:[],
         };
       }
@@ -989,9 +1034,13 @@ function serializeEditorGroup(group, container) {
       });
       const selected = rows.filter(row => row.querySelector('[data-choice-default]').checked)
         .map(row => editorChoiceValue(row, item));
+      const initial = {mode:initialMode};
+      if (initialMode === 'values') initial.values = selected;
+      else if (initialMode === 'value') initial.value = selected[0] ?? null;
       return {
         id:item.id,
-        default:item.type === 'multiple_select' ? selected : selected[0] ?? null,
+        default:null,
+        initial,
         choices,
       };
     }),
@@ -1645,6 +1694,16 @@ function syncDashboardSelectionOptions(controls = []) {
     const selectedValues = previousValues
       .filter(value => value != null && value !== '')
       .map(encode);
+    const initialPolicy = definition?.initial || {
+      mode:definition?.type === 'multiple_select' ? 'all' : 'first',
+    };
+    const initialValues = (
+      initialPolicy.mode === 'values'
+        ? initialPolicy.values || []
+        : initialPolicy.mode === 'value'
+          ? [initialPolicy.value]
+          : []
+    ).map(encode);
     const nodes = [];
     if (!input.multiple) {
       const empty = document.createElement('option');
@@ -1670,6 +1729,7 @@ function syncDashboardSelectionOptions(controls = []) {
         selectedValues,
         intent:previousState.intent,
         required:Boolean(definition?.required),
+        initial:{mode:initialPolicy.mode, values:initialValues},
       },
     );
     if (!reconciled) input.replaceChildren(...nodes);

@@ -1,8 +1,10 @@
-schema: dataviz/dashboard/v8
+schema: dataviz/dashboard/v9
 kind: dashboard
 id: chart-gallery
 title: 多图表陈列室
 description: 用同一份声明式数据契约展示浏览器端 Plotly 与 ECharts 图形语法。
+context:
+  grain: 每个城市、每个季度一行经营指标
 adapters: {warehouse: demo-duckdb}
 controls:
   - id: province
@@ -11,7 +13,7 @@ controls:
     type: multiple_select
     value_type: text
     label: 省份
-    default: [广东, 湖南, 福建, 浙江]
+    initial: {mode: values, values: [广东, 湖南, 福建, 浙江]}
     options:
       mode: static
       choices:

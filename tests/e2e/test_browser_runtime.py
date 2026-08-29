@@ -1291,11 +1291,14 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         expect(date_panel).to_be_visible()
         expect(date_panel.locator(".dv-date-range__month")).to_have_count(1)
         date_input.fill("2026-02-31")
+        expect(date_input).to_have_value("2026-02-31")
         expect(date_input).to_have_attribute("aria-invalid", "true")
         date_input.fill("2026-03-02")
         date_input.press("Enter")
         expect(date_input).to_have_value("2026-03-02")
         expect(date_input).to_have_attribute("aria-invalid", "false")
+        if date_panel.is_visible():
+            date_picker.locator('[data-control-trigger]').click()
         expect(date_panel).to_be_hidden()
 
         slider = header.locator(
@@ -1311,22 +1314,14 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         expect(checkbox.locator(".dv-checkbox-group__toolbar")).to_have_count(0)
         options = checkbox.locator(".dv-checkbox-option")
         expect(options).to_have_count(3)
-        assert checkbox.locator("select").evaluate(
-            "select => select.selectedOptions.length"
-        ) == 3
+        expect(checkbox.locator("select option:checked")).to_have_count(3)
         options.nth(0).click()
-        assert "East" not in checkbox.locator("select").evaluate(
-            "select => [...select.selectedOptions].map(option => option.value)"
-        )
+        expect(checkbox.locator('select option[value="East"]:checked')).to_have_count(0)
         options.nth(0).click()
-        assert checkbox.locator("select").evaluate(
-            "select => select.selectedOptions.length"
-        ) == 3
+        expect(checkbox.locator("select option:checked")).to_have_count(3)
         for index in range(3):
             options.nth(index).click()
-        assert checkbox.locator("select").evaluate(
-            "select => select.selectedOptions.length"
-        ) == 0
+        expect(checkbox.locator("select option:checked")).to_have_count(0)
         # The remaining component specimens derive their inferred option domains
         # from the selected Dataset. Restore the dashboard domain explicitly and
         # synchronize on the compiled Control state; Chromium used to reach the
@@ -1334,9 +1329,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(
         # Firefox exposed that accidental ordering dependency.
         for index in range(3):
             options.nth(index).click()
-        assert checkbox.locator("select").evaluate(
-            "select => select.selectedOptions.length"
-        ) == 3
+        expect(checkbox.locator("select option:checked")).to_have_count(3)
         page.keyboard.press("Escape")
         expect(header).not_to_have_attribute("open", "")
 

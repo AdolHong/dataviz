@@ -69,7 +69,7 @@ def test_unused_control_is_a_strict_warning(tmp_path: Path):
 def test_inspect_layout_emits_compiled_rows_and_sources():
     result = CliRunner().invoke(
         app,
-        ["inspect-layout", str(MINIMAL), "sales-overview", "--format", "json"],
+        ["inspect", "layout", str(MINIMAL), "sales-overview", "--format", "json"],
     )
 
     assert result.exit_code == 0, result.stdout

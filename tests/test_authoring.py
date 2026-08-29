@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -11,7 +12,6 @@ import yaml
 
 import dataviz.filesystem as filesystem
 from dataviz.authoring import (
-    build_authoring_benchmark,
     build_context_payload,
     context_size,
     scaffold_catalog,
@@ -26,6 +26,10 @@ from dataviz.components import (
     validate_component_packages,
 )
 from dataviz.documentation import (
+    AUTHORING_DOCUMENTS,
+    AUTHORING_ROUTES,
+    DOC_CATALOG_SCHEMA,
+    DOC_PATHS,
     DOC_TOPICS,
     authoring_route_catalog,
     resolve_authoring_route,
@@ -188,6 +192,140 @@ def test_machine_readable_documentation_examples_match_current_schemas():
             raise AssertionError(f"Invalid built-in documentation example: {path}") from error
 
 
+def test_every_documented_yaml_snippet_is_parseable():
+    yaml_keys = {
+        "minimal_example",
+        "definition",
+        "binding",
+        "example",
+        "dashboard_example",
+        "interactive_input_example",
+        "dynamic_option_example",
+        "presentation_example",
+    }
+    snippets: list[tuple[str, str]] = []
+
+    def collect(path: tuple[str, ...], value: object) -> None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                collect((*path, str(key)), item)
+            return
+        if isinstance(value, list):
+            for index, item in enumerate(value):
+                collect((*path, str(index)), item)
+            return
+        if isinstance(value, str) and path[-1] in yaml_keys and "\n" in value:
+            snippets.append((".".join(path), value))
+
+    collect(("topics",), DOC_TOPICS)
+    collect(("authoring",), AUTHORING_DOCUMENTS)
+
+    assert snippets
+    for path, snippet in snippets:
+        try:
+            parsed = yaml.safe_load(snippet)
+        except yaml.YAMLError as error:  # pragma: no cover - assertion adds docs context
+            raise AssertionError(f"Invalid YAML documentation snippet: {path}") from error
+        assert parsed is not None, f"Empty YAML documentation snippet: {path}"
+
+
+def test_documented_dataviz_commands_use_the_current_cli_tree():
+    root_commands = {
+        item.name or item.callback.__name__.replace("_", "-")
+        for item in app.registered_commands
+    }
+    group_commands = {
+        group.name: {
+            item.name or item.callback.__name__.replace("_", "-")
+            for item in group.typer_instance.registered_commands
+        }
+        for group in app.registered_groups
+    }
+    root_commands.update(group_commands)
+    documented: list[tuple[str, str]] = []
+
+    def collect(path: tuple[str, ...], value: object) -> None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                collect((*path, str(key)), item)
+            return
+        if isinstance(value, list):
+            for index, item in enumerate(value):
+                collect((*path, str(index)), item)
+            return
+        if isinstance(value, str) and "dataviz " in value:
+            documented.append((".".join(path), value))
+
+    collect(("topics",), DOC_TOPICS)
+    collect(("authoring_documents",), AUTHORING_DOCUMENTS)
+    collect(("authoring_routes",), AUTHORING_ROUTES)
+    collect(("paths",), DOC_PATHS)
+
+    assert documented
+    pattern = re.compile(r"\bdataviz\s+([a-z][a-z0-9-]*)(?:\s+([a-z][a-z0-9-]*))?")
+    for path, value in documented:
+        for root, child in pattern.findall(value):
+            assert root in root_commands, f"Unknown documented command at {path}: {root}"
+            if root in group_commands:
+                assert child in group_commands[root], (
+                    f"Unknown documented subcommand at {path}: {root} {child}"
+                )
+
+    corpus = "\n".join(value for _, value in documented)
+    for stale in (
+        "dataviz analyze ",
+        "dataviz inspect-layout",
+        "dataviz components --check",
+        "dataviz clean ",
+    ):
+        assert stale not in corpus
+
+
+def test_docs_catalog_exposes_both_progressive_product_paths():
+    result = CliRunner().invoke(app, ["docs", "--format", "json"])
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["schema"] == DOC_CATALOG_SCHEMA
+    assert payload["start_here"] == {
+        "build_dashboard": "quickstart",
+        "explore_data": "analysis-quickstart",
+    }
+    assert set(payload["paths"]) == {
+        "build-and-verify", "explore-and-execute", "operate-and-extend"
+    }
+    analysis_path = payload["paths"]["explore-and-execute"]
+    assert analysis_path["workflow"] == [
+        "analysis-quickstart",
+        "catalog-discovery",
+        "target-references",
+        "results",
+        "analysis-overlays",
+        "evidence-promotion",
+        "troubleshooting",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("alias", "topic"),
+    [
+        ("analysis", "analysis-quickstart"),
+        ("catalog", "catalog-discovery"),
+        ("target", "target-references"),
+        ("result", "results"),
+        ("evidence", "evidence-promotion"),
+        ("overlay", "analysis-overlays"),
+    ],
+)
+def test_cli_docs_resolves_analysis_plane_topics(alias: str, topic: str):
+    result = CliRunner().invoke(app, ["docs", alias, "--format", "json"])
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["topic"] == topic
+    assert payload["summary"]
+
+
 def test_plotly_wheel_docs_distinguish_declarative_and_custom_renderers():
     wheel = DOC_TOPICS["charts"]["plotly_wheel"]
     service = DOC_TOPICS["renderers"]["chart_service"]
@@ -284,7 +422,7 @@ def test_component_registry_reports_package_owned_implementations():
 
 
 def test_component_package_cli_check_and_data_entry_scaffolds():
-    check = CliRunner().invoke(app, ["components", "--check", "--format", "json"])
+    check = CliRunner().invoke(app, ["components", "check", "--format", "json"])
     tree = CliRunner().invoke(
         app, ["scaffold", "control.tree-select", "--id", "location", "--format", "json"]
     )
@@ -302,7 +440,7 @@ def test_component_package_cli_check_and_data_entry_scaffolds():
     )
     docs = CliRunner().invoke(app, ["docs", "controls", "--format", "json"])
     component = CliRunner().invoke(
-        app, ["components", "control.select", "--format", "json"]
+        app, ["components", "show", "control.select", "--format", "json"]
     )
 
     assert check.exit_code == 0, check.stdout
@@ -672,6 +810,7 @@ def test_component_focus_and_scaffold_are_machine_readable(tmp_path: Path):
     context_result = CliRunner().invoke(
         app,
         [
+            "inspect",
             "context",
             str(MINIMAL_WORKSPACE),
             "sales-overview",
@@ -709,34 +848,14 @@ def test_component_focus_and_scaffold_are_machine_readable(tmp_path: Path):
     assert dashboard.views[0].template == "table"
 
 
-def test_authoring_benchmark_is_deterministic_and_does_not_guess_tokens():
-    workspace = load_workspace(MINIMAL_WORKSPACE)
-    dashboard = workspace.dashboard("sales-overview")
-
-    first = build_authoring_benchmark(workspace, dashboard)
-    second = build_authoring_benchmark(workspace, dashboard)
-
-    assert first == second
-    assert first["validation"]["valid"] is True
-    assert first["context"]["focused_summary"]["median_reduction_percent"] > 0
-    assert "estimated_tokens" not in json.dumps(first)
-    assert "model-specific input/output tokens" in first["not_measured"]
-
-    help_result = CliRunner().invoke(app, ["benchmark", "--help"])
+def test_product_benchmark_exposes_only_the_runtime_contract():
+    help_result = CliRunner().invoke(app, ["benchmark", "runtime", "--help"])
     assert help_result.exit_code == 0
-    assert "--browser-runtime" in help_result.stdout
+    assert "--browser-runtime" not in help_result.stdout
     assert "--browser" in help_result.stdout
     assert "--repeat" in help_result.stdout
     assert "--query-param" in help_result.stdout
     assert "--timeout-seconds" in help_result.stdout
-
-    docs_result = CliRunner().invoke(
-        app, ["docs", "ai-authoring", "--format", "json"]
-    )
-    assert docs_result.exit_code == 0
-    docs = json.loads(docs_result.stdout)
-    assert docs["runtime_benchmark"]["schema"] == "dataviz/browser-runtime-benchmark/v3"
-    assert any("--browser-runtime" in command for command in docs["commands"])
 
 
 @pytest.mark.parametrize(
@@ -842,7 +961,7 @@ def test_gallery_cli_never_writes_runtime_artifacts_into_the_installed_package(
     before = {path.relative_to(GALLERY_WORKSPACE) for path in GALLERY_WORKSPACE.rglob("*")}
     output = tmp_path / "gallery.html"
 
-    result = CliRunner().invoke(app, ["gallery", "--output", str(output)])
+    result = CliRunner().invoke(app, ["components", "gallery", "--output", str(output)])
 
     after = {path.relative_to(GALLERY_WORKSPACE) for path in GALLERY_WORKSPACE.rglob("*")}
     assert result.exit_code == 0, result.stdout

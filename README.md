@@ -22,9 +22,9 @@ Workspace ←────────────── Promote ← Evidence ←
 AI 不需要从页面像素反推数据，也不必每次重新猜表、粒度和 SQL：
 
 ```bash
-dataviz analyze search myworkspace '收入|利润'
-dataviz analyze show myworkspace @base_ABCD123456
-dataviz analyze run myworkspace @base_ABCD123456 --query-param region=华东
+dataviz catalog search myworkspace '收入|利润'
+dataviz catalog describe myworkspace 'sales::source:orders/main'
+dataviz run myworkspace 'sales::source:orders/main' --query-param region=华东
 ```
 
 一次探索可以使用 Overlay 替换实现而不污染正式资产；结果可以沉淀为带 hash、lineage 和审阅状态的 Evidence，再通过 Promote 生成可 `validate`、可 Git diff 的 Workspace 变更。人类已经验证的分析工作，因此会成为下一次 AI 探索的起点。
@@ -33,7 +33,7 @@ dataviz analyze run myworkspace @base_ABCD123456 --query-param region=华东
 
 - **一个事实来源**：Workspace 是可执行分析资产的唯一正式来源；Catalog 只是可删除重建的索引。
 - **两种消费界面**：人类消费 Dashboard/HTML，AI 消费同一份 Base/Derived Named Output。
-- **闭环 AI 探索**：`search → show → run → observe → overlay → verify`，不停在盲写分析语句。
+- **闭环 AI 探索**：`search → describe → run → result show → overlay → verify`，不停在盲写分析语句，也不为翻页重复执行取数。
 - **可审查的知识沉淀**：Evidence 不复制大结果，Promote 不自动写回或认证 Output。
 - **复杂度下沉**：作者只声明参数、数据节点、Controls、Views/Sections 和布局；Compiler/Runtime 拥有依赖图、状态事务、缓存和 Renderer 生命周期。
 - **文件即资产**：Dashboard 是普通文件夹，可进入 Git、复制和代码审查；数据连接与凭证留在本地 Workspace。
@@ -47,7 +47,7 @@ AI 不必读取 Runtime 源码或一次性装载全部文档。它可以从机�
 ```text
 理解需求
   → docs/context 发现最小契约
-  → analyze search/show/run 复用已有分析资产
+  → catalog search/describe → run 复用已有分析资产
   → scaffold/编辑 Workspace
   → validate/report/visual-check
   → 读取真实结果并修正
@@ -89,8 +89,8 @@ Query Parameter → Adapter → Source → Dataset Transform（可选）
 每次载入或热更新后的 Dashboard 快照会以并发安全方式只编译一次 `dataviz/dependency-contract/v5`。Query Planner、Server、Browser Runtime、HTML Export 和 AI context 都消费同一个对象；浏览器注册配置只用于检查漂移，Transform 调度、Control 候选域、View 输入和 View 诊断信号仍以契约为准，不会再次猜测拓扑或按 DOM 重建依赖。契约会直接拒绝环、未知 Output、非法跨 Runtime 依赖、越界 Control consumer 和非法 Control 依赖。可以在运行前直接检查：
 
 ```bash
-dataviz dependencies myworkspace sales-overview
-dataviz dependencies myworkspace sales-overview --format json
+dataviz inspect dependencies myworkspace sales-overview
+dataviz inspect dependencies myworkspace sales-overview --format json
 ```
 
 输出会列出 Query Parameter 最终需要重跑的节点、受影响的动态 option Control 和 View，并区分 Control 的结构 scope、直接父节点、传递祖先/后代、直接数据 View、Interactive consumer、派生 View与内容绑定。若表格 Output 没有声明足以保证字段存在的 Schema，直接筛选关系会明确标记为 runtime field check，而不是伪装成静态精确关系。
@@ -121,37 +121,40 @@ views:
 pip install "ai-dataviz[visual-check]"
 python -m playwright install chromium
 dataviz validate myworkspace --dashboard sales-overview --strict
-dataviz inspect-layout myworkspace sales-overview --format json
+dataviz inspect layout myworkspace sales-overview --format json
 dataviz visual-check myworkspace sales-overview --target both
 ```
 
-AI 或脚本需要复用看板取数口径时，不必解析页面或复制 Dashboard。Analysis Plane 会从可重建 Catalog 中列出、正则搜索并执行现有 Named Output；短别名在定义修改后保持稳定：
+AI 或脚本需要复用看板取数口径时，不必解析页面或复制 Dashboard。Catalog 负责只读发现，`run` 接受 Dashboard id 或规范物理 Target Reference；不存在另一套短别名：
 
 ```bash
-dataviz analyze all myworkspace
-dataviz analyze search myworkspace '收入|工资|年入|月入'
-dataviz analyze all myworkspace --top 20
-dataviz analyze search myworkspace '收入|利润' --expand-occurrences
-dataviz analyze show myworkspace @base_ABCD123456 --detail full
-dataviz analyze run myworkspace @base_ABCD123456 --query-param region=华东
-dataviz analyze run myworkspace @drv_ABCD123456 --also @drv_EFGH567890
-dataviz analyze run myworkspace @base_ABCD123456 \
-  --format arrow --destination result.arrow
+dataviz catalog list myworkspace
+dataviz catalog search myworkspace '收入|工资|年入|月入'
+dataviz catalog list myworkspace --top 20
+dataviz catalog search myworkspace '收入|利润' --expand-occurrences
+dataviz catalog describe myworkspace \
+  'sales::source:orders/main' 'sales::interactive:forecast/main' --detail full
+dataviz run myworkspace 'sales::source:orders/main' --query-param region=华东
+dataviz run myworkspace 'sales::interactive:forecast/main' \
+  --also 'sales::interactive:baseline/main'
+dataviz result show myworkspace result_... --offset 0 --limit 100
+dataviz result export myworkspace result_... \
+  'sales::source:orders/main' --to result.parquet
 ```
 
-Base/Derived Output 可声明 `semantics.visibility/title/purpose/grain/caveats`、独立 `assurance`，以及按需的 time/measures/relationships。默认发现只返回 public 且 reviewed/certified 的可信口径；internal、draft、deprecated 仍可按精确 alias 检查和执行，也可用 `--include-internal --include-untrusted` 审计。`all/search` 默认只对实现与契约 hash 完全一致的 occurrence 做精确折叠，可展开 references 或关闭折叠；本地 `usage.sqlite` 的成功次数/最近时间只是 best-effort 排序证据，不影响执行。Arrow/Parquet 写入文件，stdout 返回带路径与 hash 的标准 JSON summary。
+Base/Derived Output 可声明 `semantics.visibility/title/purpose/grain/caveats`、独立 `assurance`，以及按需的 time/measures/relationships。默认发现只返回 public 且 reviewed/certified 的可信口径；internal、draft、deprecated 可用 `--include-internal --include-untrusted` 审计。`list/search` 默认以业务意义、粒度、参数契约和可信度为主体，只对实现与契约 hash 完全一致的 occurrence 做精确折叠；旧式单行索引可显式使用 `--compact`。Catalog、Run、Result、Evidence 始终使用同一条物理引用，例如 `dashboard::source:id/output`。
 
-`show --include-code` 只在同时使用 `--detail full` 时返回目标闭包内已脱敏的 SQL/JS/Python 文本；大型数据文件只返回路径、大小与 hash。临时实验使用一次性 Overlay，不修改原 Dashboard、Catalog 或正式缓存：
+`describe --include-code` 只在同时使用 `--detail full` 时返回目标闭包内已脱敏的 SQL/JS/Python 文本；一次可描述多个引用，但不会执行 Source 或创建 Result。`run` 完整执行一次并把不可变 Result 封存在 `.dataviz/results/<result-id>/`，默认只显示 10 行预览；后续分页、检查和原样复制 Output 都消费 Result，不重新运行 DAG。大型 File Source 默认只保留已读 path/hash 收据。临时实验使用一次性 Overlay，不修改原 Dashboard、Catalog 或正式缓存：
 
 ```bash
-dataviz analyze run myworkspace @drv_ABCD123456 \
+dataviz run myworkspace 'sales::interactive:forecast/main' \
   --overlay experiment.yaml --dry-run
-dataviz analyze run myworkspace @drv_ABCD123456 \
+dataviz run myworkspace 'sales::interactive:forecast/main' \
   --overlay experiment.yaml
-dataviz analyze evidence myworkspace result.json \
+dataviz evidence create myworkspace result_... \
   --question '口径是否可复用？' --conclusion '结论' \
   --status reviewed --reviewer alice
-dataviz analyze promote myworkspace evidence_... proposal.yaml --dry-run
+dataviz evidence promote myworkspace evidence_... proposal.yaml --dry-run
 ```
 
 Evidence 只保存 Result hash、lineage、结论/断言与可选小 snapshot；Promote 只生成经过临时 Workspace validate 的 Git diff 预览，不自动写回或认证 Output。Analysis CLI 复用 Server Query、Interaction 和 Browser Runtime，只面向本地可信 Workspace 代码，不是不可信代码沙箱。完整契约见 [AI Analysis Plane](docs/analysis-plane.md)。
@@ -277,7 +280,7 @@ uv sync --python 3.12 --extra dev --no-editable \
 从发行 ZIP 安装时：
 
 ```bash
-python -m pip install ./ai-dataviz-0.10.0.zip
+python -m pip install ./ai-dataviz-0.12.0.zip
 dataviz version
 dataviz serve /path/to/workspace --port 8080
 ```
@@ -288,23 +291,21 @@ dataviz serve /path/to/workspace --port 8080
 
 ```bash
 dataviz validate myworkspace --dashboard sales-overview --format json
-dataviz dependencies myworkspace sales-overview --format json
+dataviz inspect dependencies myworkspace sales-overview --format json
 ```
 
 再按需要查询、检查 Named Output、运行服务端交互计算或导出报告：
 
 ```bash
-dataviz query myworkspace sales-overview --source sales --format json
-dataviz output myworkspace sales-overview source:sales/main
-dataviz compute myworkspace sales-overview simulation \
-  --run-id run_xxx \
-  --compute-param dashboard:sales-overview/seed=42 --format json
+dataviz run myworkspace 'sales-overview::source:sales/main' --format json
+dataviz run myworkspace 'sales-overview::interactive:simulation/main' \
+  --control dashboard:sales-overview/seed=42 --format json
 dataviz report myworkspace sales-overview --output report.html
-dataviz benchmark myworkspace sales-overview --browser-runtime \
+dataviz benchmark runtime myworkspace sales-overview \
   --browser chromium --repeat 3 --query-param row_count=100000 --format json
 ```
 
-`benchmark --browser-runtime` 可选择 Chromium、Firefox 或 WebKit，重复装载并释放页面，分别报告 Query、HTML 构建、页面就绪、Arrow、Renderer、View 终态和可用内存口径。固定 10K/100K/1M 方法与结果见 [Runtime 性能基线](docs/runtime-performance.md)；它用于规模回归，不代替真实 AI Token 成对评测。
+`benchmark runtime` 可选择 Chromium、Firefox 或 WebKit，重复装载并释放页面，分别报告 Query、HTML 构建、页面就绪、Arrow、Renderer、View 终态和可用内存口径。固定 10K/100K/1M 方法与结果见 [Runtime 性能基线](docs/runtime-performance.md)。
 
 HTML 固定 Query Parameter。`browser-js` 可以直接保留交互；`browser-python` 可使用 Pyodide CDN，或把本地 Pyodide 作为 `HTML + assets` 文件包/ZIP 一起分发。`server-python` 在导出的 HTML 中不能重新运行，只能固化为 snapshot 或明确显示 unavailable。没有活动的 `browser-python` 分支时，报告不会携带或加载 Pyodide。
 
@@ -331,32 +332,12 @@ dataviz docs pipeline --format json
 dataviz docs data-entry-components --format json
 dataviz docs design-language --format json
 dataviz schemas dashboard --full --format json
-dataviz components --format json
-dataviz gallery --output component-gallery.html
-dataviz context myworkspace sales-overview --focus view:revenue --format json
+dataviz components list --format json
+dataviz components gallery --output component-gallery.html
+dataviz inspect context myworkspace sales-overview --focus view:revenue --format json
 ```
 
 Component Registry 当前包含 21 个 package-owned Package，其中 14 个 `control.*` Data Entry Package 分别对齐 Ant Design 的 Input、InputNumber、AutoComplete、Checkbox、Switch、Radio.Group、Select、Checkbox.Group、Cascader、TreeSelect、DatePicker、RangePicker、Slider 与 Form.List + Input 语义。每个 Package 都有独立 controller、Runtime Adapter、功能 CSS、Story 与测试声明；详见 [Data Entry Component 语义契约](docs/data-entry-components.md)。内置 Gallery 还提供 Control、View、Section 的 `ready / loading / stale / empty / error / cancelled / unavailable` 状态矩阵，以及真实 10、100、1,000 选项的 Select Story。
-
-项目也内置了 Dataviz 与 standalone HTML 的成对 AI 开发评测协议；它只记录客户端提供的真实 Token，不按文本大小估算：
-
-```bash
-dataviz authoring tasks --format json
-dataviz authoring protocol --format json
-dataviz authoring prepare default-dashboard /tmp/trial-dataviz \
-  --approach dataviz --trial-id trial-001
-dataviz authoring verify /tmp/trial-dataviz --format json
-dataviz authoring start myworkspace --trial-dir /tmp/trial-dataviz \
-  --model MODEL_NAME --tool CLIENT_NAME
-dataviz authoring assess /tmp/trial-dataviz CHECK_ID \
-  --status passed --assessor automation --evidence "TEST_OR_REVIEW_EVIDENCE"
-dataviz authoring finish myworkspace SESSION_ID --trial-dir /tmp/trial-dataviz \
-  --outcome success --first-attempt success --correction-rounds 0 \
-  --input-tokens ACTUAL_INPUT --output-tokens ACTUAL_OUTPUT
-dataviz authoring compare myworkspace --format json
-```
-
-每项固定验收条件必须通过 `authoring assess` 记录 assessor 和证据；只写 `outcome=success` 不能绕过质量门禁。真实试验仍需分别使用新的 AI 会话，并从客户端记录实际 Token。
 
 ## Workspace
 
@@ -404,7 +385,6 @@ Server 还提供受限的人工调参入口：右键 Run 编辑 Query Parameter�
 - [当前计划与验收状态](plan.md)
 - [代码实现索引](docs/product-architecture.md)
 - [版本与发布流程](docs/versioning-and-release.md)
-- [AI 开发效率评测协议](docs/authoring-evaluation.md)
 - [渐进式作者入口](docs/progressive-authoring.md)
 - [AI Analysis Plane](docs/analysis-plane.md)
 - [Runtime 性能基线](docs/runtime-performance.md)

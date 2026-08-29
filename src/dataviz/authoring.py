@@ -3,12 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from statistics import mean, median
 from typing import Any
 
 import yaml
 
-from dataviz.authoring_log import authoring_prompt
 from dataviz.errors import ValidationFailure
 from dataviz.identifiers import is_stable_id, stable_id_help
 from dataviz.execution.plan import compile_plan
@@ -19,7 +17,7 @@ from dataviz.templates import (
     component_catalog,
     template_catalog,
 )
-from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace, validate_workspace
+from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace
 from dataviz.workspace.control_components import resolve_control_component
 
 
@@ -460,11 +458,10 @@ def build_context_payload(
             "mode": "focused",
             "focus": parsed_focus.canonical,
             "runtime_contract": RUNTIME_CONTRACT,
-            "authoring_feedback": authoring_prompt(),
             "component": definition,
             "next": [
                 "dataviz scaffold " + parsed_focus.identifier,
-                "dataviz gallery",
+                "dataviz components gallery",
             ],
         }
 
@@ -619,7 +616,6 @@ def build_context_payload(
         "dashboard_readme": dashboard.readme,
         "templates": templates,
         "runtime_contract": RUNTIME_CONTRACT,
-        "authoring_feedback": authoring_prompt(dashboard.definition.id),
         "effective_controls": effective_contract,
         "dependency_contract": _dependency_context_payload(
             dependency_contract,
@@ -660,121 +656,6 @@ def context_size(payload: dict[str, Any]) -> dict[str, int]:
         "characters": len(compact),
         "utf8_bytes": len(compact.encode("utf-8")),
         "pretty_lines": pretty.count("\n") + 1,
-    }
-
-
-def _text_metrics(path: Path) -> dict[str, int] | None:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (UnicodeDecodeError, OSError):
-        return None
-    return {
-        "files": 1,
-        "characters": len(text),
-        "utf8_bytes": len(text.encode("utf-8")),
-        "lines": text.count("\n") + (1 if text else 0),
-    }
-
-
-def _sum_metrics(values: list[dict[str, int]]) -> dict[str, int]:
-    return {
-        key: sum(value[key] for value in values)
-        for key in ["files", "characters", "utf8_bytes", "lines"]
-    }
-
-
-def _authoring_file_metrics(dashboard: LoadedDashboard) -> dict[str, Any]:
-    groups: dict[str, list[dict[str, int]]] = {
-        "logic": [],
-        "presentation": [],
-        "documentation": [],
-    }
-    files: list[dict[str, Any]] = []
-    allowed = {".yaml", ".yml", ".py", ".sql", ".js", ".css", ".html", ".md"}
-    for path in sorted(value for value in dashboard.root.rglob("*") if value.is_file()):
-        relative = path.relative_to(dashboard.root)
-        if path.suffix.lower() not in allowed:
-            continue
-        if any(part in {".dataviz", "dist", "__pycache__"} for part in relative.parts):
-            continue
-        metric = _text_metrics(path)
-        if metric is None:
-            continue
-        relative_text = str(relative)
-        if relative_text == "README.md":
-            group = "documentation"
-        elif (
-            relative_text == "presentation.yaml"
-            or relative.parts[0] in {"assets", "canvas"}
-        ):
-            group = "presentation"
-        else:
-            group = "logic"
-        groups[group].append(metric)
-        files.append({"path": relative_text, "group": group, **metric})
-    totals = {name: _sum_metrics(values) for name, values in groups.items()}
-    totals["all"] = _sum_metrics([value for values in groups.values() for value in values])
-    return {"totals": totals, "files": files}
-
-
-def build_authoring_benchmark(
-    workspace: LoadedWorkspace,
-    dashboard: LoadedDashboard,
-    *,
-    focus: str | None = None,
-) -> dict[str, Any]:
-    full = context_size(build_context_payload(workspace, dashboard))
-    focus_values = [focus] if focus else [f"view:{value}" for value in dashboard.views]
-    focused = {
-        value: context_size(build_context_payload(workspace, dashboard, focus=value))
-        for value in focus_values
-    }
-    focused_bytes = [value["utf8_bytes"] for value in focused.values()]
-    diagnostics = validate_workspace(workspace)
-    errors = [value.as_dict() for value in diagnostics if value.level == "error"]
-    return {
-        "schema": "dataviz/authoring-benchmark/v1",
-        "dashboard": dashboard.definition.id,
-        "canvas_name": dashboard.canvas_name,
-        "component_registry_version": COMPONENT_REGISTRY_VERSION,
-        "authoring_files": _authoring_file_metrics(dashboard),
-        "context": {
-            "full": full,
-            "focused": focused,
-            "focused_summary": {
-                "samples": len(focused_bytes),
-                "minimum_utf8_bytes": min(focused_bytes) if focused_bytes else 0,
-                "median_utf8_bytes": int(median(focused_bytes)) if focused_bytes else 0,
-                "mean_utf8_bytes": int(mean(focused_bytes)) if focused_bytes else 0,
-                "maximum_utf8_bytes": max(focused_bytes) if focused_bytes else 0,
-                "median_reduction_percent": (
-                    round(100 * (1 - median(focused_bytes) / full["utf8_bytes"]), 1)
-                    if focused_bytes and full["utf8_bytes"]
-                    else 0
-                ),
-            },
-            "token_note": (
-                "Byte/character counts are deterministic. Token counts depend on the model and "
-                "tokenizer and are intentionally not estimated here."
-            ),
-        },
-        "structure": {
-            "sources": len(dashboard.sources),
-            "dataset_transforms": len(dashboard.dataset_transforms),
-            "interactive_transforms": len(dashboard.interactive_transforms),
-            "sections": len(dashboard.definition.sections),
-            "views": len(dashboard.views),
-            "selection_bindings": sum(
-                len(values)
-                for values in dashboard.dependency_contract.view_control_contract.values()
-            ),
-        },
-        "validation": {"valid": not errors, "errors": errors},
-        "not_measured": [
-            "model-specific input/output tokens",
-            "AI retries and elapsed authoring time",
-            "visual quality and interaction usability",
-        ],
     }
 
 

@@ -74,7 +74,7 @@ def _hint_for(item: Diagnostic) -> str:
         model = "workspace" if code.startswith("workspace") else "dashboard"
         return f"Compare this file with `dataviz schemas {model} --format json`; remove unknown or retired fields."
     if code == "dashboard_not_found":
-        return "Run `dataviz list <workspace>` and use the stable Dashboard id shown there."
+        return "Run `dataviz tree <workspace>` and use the stable Dashboard id shown there."
     if code == "sql_parameter_undeclared":
         return "Declare every named SQL placeholder as a local Source `query_inputs` key, then bind it to a Dashboard `query_parameters` id."
     if code == "sql_parameter_unused":
@@ -136,7 +136,7 @@ def _hint_for(item: Diagnostic) -> str:
     if code == "compute_trigger_ambiguous":
         return "Use one trigger policy for every Interactive Transform that consumes this Compute Control."
     if field.startswith(("inputs", "views", "sections")) or "reference" in item.message.lower():
-        return "Use `dataviz context <workspace> <dashboard-id> --format json` to inspect valid node and Output ids."
+        return "Use `dataviz inspect context <workspace> <dashboard-id> --format json` to inspect valid node and Output ids."
     if "python_dependencies" in field:
         return "Add a valid requirement and install the Dashboard's declared Python dependencies before querying."
     return "Open the reported file and field, apply the smallest contract fix, then rerun `dataviz validate`."
@@ -304,9 +304,9 @@ def validate_preflight(
         next_actions = [
             "Static contracts are valid; query only the Source or Dashboard branch you need next.",
             (
-                f"Next: dataviz query {root} {scope_id} --format json"
+                f"Next: dataviz run {root} {scope_id} --format json"
                 if scope_id
-                else "Next: choose a Dashboard from `dataviz list <workspace>`."
+                else "Next: choose a Dashboard from `dataviz tree <workspace>`."
             ),
         ]
 

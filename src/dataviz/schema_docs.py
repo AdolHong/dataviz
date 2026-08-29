@@ -8,6 +8,7 @@ from pydantic import BaseModel, TypeAdapter
 from dataviz import __version__
 from dataviz.analysis.contracts import (
     AnalysisCatalog as AnalysisCatalogContract,
+    AnalysisDescribe,
     AnalysisEvidence,
     AnalysisEntry,
     AnalysisPromotion,
@@ -16,6 +17,7 @@ from dataviz.analysis.contracts import (
 )
 from dataviz.adapter_contracts import ADAPTER_CONTRACTS
 from dataviz.errors import ValidationFailure
+from dataviz.target_reference import TargetReferenceContract
 from dataviz.view_contracts import VIEW_TEMPLATE_CONTRACTS
 from dataviz.workspace.models import (
     AdapterDefinition,
@@ -44,7 +46,7 @@ from dataviz.workspace.models import (
 )
 
 
-SCHEMA_CATALOG_VERSION = "dataviz/schema-catalog/v6"
+SCHEMA_CATALOG_VERSION = "dataviz/schema-catalog/v7"
 SchemaProvider = type[BaseModel] | TypeAdapter
 
 
@@ -73,8 +75,10 @@ SCHEMA_MODELS: OrderedDict[str, SchemaProvider] = OrderedDict(
         ("layout", LayoutDefinition),
         ("theme", ThemeDefinition),
         ("control-component-presentation", PresentationControlComponentDefinition),
+        ("target-reference", TargetReferenceContract),
         ("analysis-entry", AnalysisEntry),
         ("analysis-catalog", AnalysisCatalogContract),
+        ("analysis-describe", AnalysisDescribe),
         ("analysis-result", AnalysisResult),
         ("analysis-evidence", AnalysisEvidence),
         ("analysis-promotion", AnalysisPromotion),

@@ -2,18 +2,40 @@
 
 ## Unreleased
 
+## 0.12.0 — 2026-08-29
+
+- 公开 CLI 收敛为 `catalog → run → result → evidence`：删除 `analyze`、`query`、`output`、`compute` 和产品内 `authoring` 分组；工程导航改为 `tree`，结构检查归入 `inspect`，清理改为安全预览优先的 `prune`。
+- 新增 `dataviz/target-reference/v1`。Catalog、Describe、Run、Result、Evidence 和 next action 统一使用 `dashboard::source|dataset|interactive|view:...` 物理引用，不再生成或解析 hash 短别名。
+- `dataviz run WORKSPACE TARGET` 同时支持 Dashboard、Source、Base/Derived Output 和 View；显式执行进入终态后封存不可变 `ready|partial|failed|cancelled` Result，preflight 错误不创建 Result。
+- Result Store 统一写入 `.dataviz/results/`，新增 `result list`；show/inspect/export、Report 与 Evidence 只读既有 Result，不重新执行。Dashboard report 保留便利入口，但会先执行并封存 Result。
+- Share 操作同步封存可追溯 Result；`prune` 统一管理 Result、Execution Artifact 与缓存，默认只预览，`--apply` 才删除，分享缓存暂不自动清理。
+- `components list/show/check/gallery`、`renderer test`、`benchmark runtime` 与 `inspect context/dependencies/layout` 形成稳定命令域；`validate` 与需要浏览器的 `visual-check` 继续保持独立成本边界。
+- AI Authoring 成对评测、真实 Token/会话日志与 context benchmark 已移到仓库专用 `tools/authoring-evaluation/` 项目，使用独立 `dataviz-authoring-eval` 入口，不进入正式 Wheel、sdist、pip ZIP 或产品帮助。
+- README、DESIGN、Plan、机器 Schema、focused docs 和回归测试同步到 0.12.0 对象模型。
+- 402 项非浏览器测试通过；52 项 E2E 在 Chromium、Firefox、WebKit 三引擎分别执行并通过。四个示例 Workspace 通过 strict validate，21 个 Component Package（64 个组件、39 个 Story、76 个测试声明）通过检查；wheel、sdist、pip ZIP 完成内容审计与独立 Python 3.12 全流程安装冒烟。
+
+## 0.11.0 — 2026-08-29
+
+- Analysis discovery 改为语义优先：`analyze all/search` 默认显示业务意义、粒度、可信度、参数契约、消费 View 与命中原因；旧式单行索引保留为显式 `--compact`。Source/View 命中会投影到可复用 Base/Derived Output，不再与主要口径平铺竞争。
+- 运行前探索由 `analyze describe WORKSPACE REFERENCE...` 统一承载，可在同一 Catalog generation 中批量描述多个引用、保持输入顺序、去重并返回逐项失败；它不会执行 Source 或创建 Result。
+- Analysis 短别名改为裸 `src_.../base_.../drv_.../view_...`；旧 `@alias` 返回稳定 `analysis_alias_prefix_removed` 诊断和可直接复制的 replacement。
+- `analyze run` 默认输出高密度文本和 10 行预览，同时完整执行并原子封存不可变 `.dataviz/analysis-results/<result-id>/`。新增 `result show/inspect/export`，分别负责无重跑分页、渐进 provenance 和单个原生 Artifact 复制；run 不再承担 Arrow/Parquet 转换或任意目标路径导出。
+- Result index 可由不可变 manifest 重建；CLI 每日最多一次 best-effort 清理超过 30 天未访问的托管 Result。直接 File Source 只保存实际读取文件的 path/size/hash/reader 收据，文件变化或缺失时拒绝静默读取新内容。
+- 新增 `dataviz/analysis-describe/v1` JSON Schema，并覆盖语义摘要、批量 describe、Result 原子发布/分页/导出/索引重建、File Source hash 收据以及 Browser Result 原样导出回归。
+- 449 项当前测试契约通过；52 项 E2E 在 Chromium、Firefox、WebKit 三引擎分别通过。四个示例 Workspace 通过 strict validate，21 个 Component Package（64 个组件、39 个 Story、76 个测试声明）通过检查；wheel、sdist、pip ZIP 完成内容审计与独立 Python 3.12 安装冒烟。
+
 ## 0.10.0 — 2026-08-29
 
-- 新增 AI Analysis Plane 初版：`dataviz analyze all/search/show/run` 可通过稳定短别名搜索并执行 Source、Base Output、Derived Output 与 View 输入；Base/server-python/browser-js/browser-python 共用现有 Runtime 和机器可读 provenance。
-- P1 Analysis Plane A–E 完成：新增 Output `semantics`/`assurance`、六份版本化机器 JSON Schema、public/internal 与可信发现边界、稳定 Analysis 错误 envelope、Evidence 和 Promote dry-run。
+- 新增 AI Analysis Plane：`dataviz analyze all/search/describe/run` 可通过稳定裸别名搜索、批量描述并执行 Source、Base Output、Derived Output 与 View 输入；Base/server-python/browser-js/browser-python 共用现有 Runtime 和机器可读 provenance。
+- P1 Analysis Plane A–E 完成：新增 Output `semantics`/`assurance`、版本化机器 JSON Schema、public/internal 与可信发现边界、稳定 Analysis 错误 envelope、Evidence 和 Promote dry-run。
 - Workspace Catalog 补齐并发 refresh 去重、构建失败回退旧 generation、Server watcher 异步刷新和 stale diagnostics。
 - 新增 `.dataviz/usage.sqlite` 成功行为统计；Server Query 与 AI `analyze run` 使用 WAL、原子 UPSERT、首次初始化的有界锁重试和 best-effort 故障隔离，统计文件不影响 fingerprint、Hot Reload 或成功结果。
 - `analyze all/search` 对实现资产、Runtime、Adapter 引用、Query bindings 与 Output Contract 完全一致的口径做精确折叠，支持 occurrence 展开、关闭折叠和折叠后的 Top N；不推断 SQL 语义等价。
 - public 或 reviewed/certified SQL Output 的 `SELECT *`/`table.*` 产生稳定 warning，`count(*)` 不误报；Scaffold 与示例改用显式字段投影。
-- `analyze run` 新增 Parquet/Arrow、输入 Artifact provenance、summary/debug/full 分层、View presentation mapping，以及 `--also` 单浏览器会话批量 Derived 提取。
+- `analyze run` 使用原生 Parquet/Arrow Artifact、输入 Artifact provenance、summary/debug/full 分层、View presentation mapping，以及 `--also` 单浏览器会话批量 Derived 提取；格式转换不再暴露为 run 职责。
 - Browser Analysis 默认使用隔离 Context 并阻止非本地网络，按需加载 Pyodide，记录 launch/page-ready/runtime-ready/transform/extraction 分段耗时；可复用 Arrow Output 优先通过 Arrow IPC 提取。
 - 新增 `dataviz/analysis-overlay/v1`：`analyze run --overlay FILE|-` 可一次性替换 SQL、File Source、Python/JS Transform 及 code dependencies；`--dry-run` 先检查影响范围，正式执行不写回 Dashboard/Catalog，并使用独立缓存 salt 与 Analysis Run manifest。
-- `analyze show --detail full --include-code` 可查看目标闭包的定义、路径、hash 与已脱敏的小型代码资产；大型数据文件不内联。
+- `analyze describe --detail full --include-code` 可批量查看目标闭包的定义、路径、hash 与已脱敏的小型代码资产；大型数据文件不内联，也不会执行 Source。
 - Dashboard Contract 升级为 v9：Query Parameter、Selection 与 Compute 的所有 Select 统一使用 `initial`。多选支持 `all | empty | values`，单选支持 `first | empty | value`；非 Select 输入继续使用 `default`。
 - 动态 Selection 候选域采用混合协调策略：优先保留仍有效的用户选择；原非空选择完全失效时恢复 `initial`；用户主动清空始终保留；`all` 意图继续跟随完整候选域。
 - `visual-check` 提供独立可选依赖 `pip install "ai-dataviz[visual-check]"`；缺少 Playwright 包或浏览器时，CLI 直接返回可复制的安装命令。

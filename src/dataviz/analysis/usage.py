@@ -234,4 +234,4 @@ def dashboard_query_usage(dashboard_id: str) -> UsageKey:
 
 
 def output_analysis_usage(reference: str) -> UsageKey:
-    return UsageKey("output", reference, "analyze_run_succeeded", "ai")
+    return UsageKey("output", reference, "run_succeeded", "ai")

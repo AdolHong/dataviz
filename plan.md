@@ -12,18 +12,18 @@
 | P0 Selection 状态一致性 | 已完成 | `{intent, values}` 是唯一 canonical state；明确空集、动态全选、optional Single Clear、tab/HTML/三种 Interactive Runtime 使用同一 resolver。 |
 | P0 Control Binding / Linked Views | 已完成 | 一个 Selection Control 最多绑定一个可读写 View Adapter；Plotly/ECharts/Table/Custom 与面板共用 canonical state。 |
 | P0 Layout Contract | 已完成 | Dashboard v9 拥有结构；Layout Contract v1 统一确定性行列、span、custom mount、Renderer、Server/HTML、AI context 与 validate。 |
-| P0 最终配置有效性 | 已完成 | Semantic Validation、inspect-layout、状态摘要、Runtime-aware trigger、紧凑 CLI、Chart Service 与 visual-check 已统一消费最终契约。 |
+| P0 最终配置有效性 | 已完成 | Semantic Validation、`inspect layout`、状态摘要、Runtime-aware trigger、紧凑 CLI、Chart Service 与 visual-check 已统一消费最终契约。 |
 | P0 Renderer 生命周期 | 已完成 | Plotly、ECharts、Perspective 在 Server/HTML 共用 mount→update→empty→restore→interaction→resize→dispose→export 行为矩阵；首屏 bootstrap 也进入 View ID 状态表。 |
 | P1 Component Package | 当前范围已完成 | Registry v5 已覆盖常用 Data Entry、View、Section、Renderer、Repeat 和 Presentation 组件；继续扩张必须由真实场景触发。 |
 | P1 人工参数编辑 | 已完成 | Server 可编辑 Query/Dashboard/Section/View 的默认值、静态候选项和同级顺序；revision、round-trip YAML、Schema 校验与原子写入保证只修改 `dashboard.yaml` 的受限子集。 |
-| P1 AI Analysis Plane | A–E 已完成 | Output 语义、可信度、机器契约、使用统计、精确折叠、Evidence/Promote、批量执行、Arrow/Parquet 与 Browser/Pyodide 边界均已落地，并通过完整发行门禁。 |
+| P1 AI Analysis Plane | A–F 已完成 | Output 语义、可信度、Catalog 发现、批量 Describe、物理 Target Reference、不可变 Result、无重跑分页/检查/导出、Evidence/Promote 与 Browser/Pyodide 边界均已落地并通过完整套件。 |
 | P2 AI 开发效率评测 | 工具已完成，真实试验暂缓 | 成对任务、输入完整性、逐项验收和真实 Token 记录均已实现；试验方案尚未决定，不用仓库测试伪造结论。 |
 | P3 规模与浏览器矩阵 | 当前范围已完成 | 固定 10K/100K/1M 基准、流式 groupBy 优化，以及 Chromium/Firefox/WebKit 的窄屏与 Perspective 恢复组合矩阵均已有可复现证据。 |
-| 开源发布 | 本地发行完成 | `0.10.0` AI Analysis Plane A–E 已通过本地发行门禁；正式对外授权仍等待许可证决定。 |
+| 开源发布 | 本地发行完成 | `0.12.0` 已通过完整代码、三引擎浏览器、示例 strict validate 与三种归档门禁；正式对外授权仍等待许可证决定。 |
 
-当前开发基线：Package `0.10.0`、Python 3.11–3.14、Dashboard `dataviz/dashboard/v9`、Presentation `dataviz/presentation/v2`、Source/Dataset/Interactive Transform `v2`、Dependency Contract `v5`、Layout Contract `v1`、State Snapshot `v1`、Browser Runtime `dataviz/runtime/v5`、Component Registry `5.4.0`。这些破坏式契约只接受当前严格字段，不保留旧 alias、自动迁移或第二套 Runtime。
+当前开发基线：Package `0.12.0`、Python 3.11–3.14、Dashboard `dataviz/dashboard/v9`、Presentation `dataviz/presentation/v2`、Source/Dataset/Interactive Transform `v2`、Dependency Contract `v5`、Layout Contract `v1`、State Snapshot `v1`、Browser Runtime `dataviz/runtime/v5`、Component Registry `5.4.0`。这些破坏式契约只接受当前严格字段，不保留旧字段兼容名、自动迁移或第二套 Runtime。
 
-Authoring P0 的 A–G 已进入当前 Schema/Compiler/Runtime，并由 0.7.0 统一发行。复杂实现必须留在 Compiler/Runtime：普通 Dashboard 不手写依赖图、事务、revision 或回调；常见跨图联动最多新增一条声明。
+Authoring P0 的 A–G 已进入当前 Schema/Compiler/Runtime。复杂实现必须留在 Compiler/Runtime：普通 Dashboard 不手写依赖图、事务、revision 或回调；常见跨图联动最多新增一条声明。
 
 ## 已完成的核心能力
 
@@ -47,7 +47,7 @@ Authoring P0 的 A–G 已进入当前 Schema/Compiler/Runtime，并由 0.7.0 �
 - [x] Dependency Contract 以“可执行才存在”为不变量：环、未知 Output、browser → server-python 非法依赖和越界 Control consumer 在编译期拒绝；Loader 仅对无效图做 recovery diagnostics。
 - [x] Query/Interactive 节点只读取显式声明的 Query/Selection/Compute 参数；Browser Transform/View 注册会核对 data inputs、Control inputs、Query Parameter inputs 与 Output names，注册 payload 只作 drift assertion，调度与 View 取数仍由契约拥有。
 - [x] Control 通过 `depends_on` 只声明直接 Selection 父节点；Dependency Compiler 校验作用域、未知引用、父节点类型和环，生成 canonical 直接边、传递祖先/后代与 `control_order`。Browser 按同一拓扑原子协调候选域，支持 Dashboard→Section→View 和同 View 多级链，不再按 DOM 层级猜测级联。
-- [x] `dataviz dependencies WORKSPACE DASHBOARD [--format json]` 为人和 AI 输出同一份可审查依赖图；HTML manifest 同时保存完整契约作为运行证据。
+- [x] `dataviz inspect dependencies WORKSPACE DASHBOARD [--format json]` 为人和 AI 输出同一份可审查依赖图；HTML manifest 同时保存完整契约作为运行证据。
 
 ### Runtime 与 HTML Export
 
@@ -64,7 +64,7 @@ Authoring P0 的 A–G 已进入当前 Schema/Compiler/Runtime，并由 0.7.0 �
 
 ### 模板、验证与 AI 入口
 
-- [x] Component Registry v5.3 提供物理 Package、机器可读 manifest、Story、测试声明、语义 DOM 和 CSS token；`components --check` 检查包结构，行为由 pytest/E2E 实际执行。
+- [x] Component Registry v5.4 提供物理 Package、机器可读 manifest、Story、测试声明、语义 DOM 和 CSS token；`components check` 检查包结构，行为由 pytest/E2E 实际执行。
 - [x] 21 个 Component Package 全部为 package-owned；`data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 已迁出 Runtime bridge，删除 `declarative-runtime.js` 和重复实现。
 - [x] 14 个独立 `control.*` Data Entry Package 对齐 Ant Design 的 Input、InputNumber、AutoComplete、Checkbox、Switch、Radio.Group、Select、Checkbox.Group、Cascader、TreeSelect、DatePicker、RangePicker、Slider 与 Form.List + Input；Query/Selection/Compute 共用 Registry 和 Renderer。Checkbox Group 只承担 2–5 个并列选项的直接多选，不显示 All/Invert/Clear 工具栏；更大的平面候选域交给 Select，层级域交给 Cascader/TreeSelect。DatePicker/RangePicker 统一使用可编辑 `YYYY-MM-DD` 文本、同款图标和 Dataviz 日历；连续八位数字自动按 yyyy/mm/dd 分段，标题区可直接选年/月，Range 两端位于一个连续边框内，空 preset 与无动作 footer 都不产生占位或重复文字。
 - [x] 默认 Table 不显示独占一行的行数元信息；`options.show_count: true` 作为显式证据开关保留，空数据继续进入统一 Empty 状态。
@@ -76,9 +76,9 @@ Authoring P0 的 A–G 已进入当前 Schema/Compiler/Runtime，并由 0.7.0 �
 - [x] Server Header 将 Controls 作为明确按钮紧邻 Run 左侧；Query Pipeline 从操作区迁为品牌右侧的 Source/Dataset 状态灯。View 通过 Dependency Contract v5 的 `pipeline_nodes` 在类型标签左侧按需显示自己的上游与 Renderer，完成后自动隐藏，失败节点可点击查看执行证据。
 - [x] Gallery 提供 Control、View、Section 的七状态矩阵，以及实际包含 10、100、1,000 个原生选项的 Select Story；1,000 选项搜索覆盖全量且增强 DOM 有界。
 - [x] Table/Perspective、Plotly/ECharts、Repeat Small Multiples/Selection Gallery 和自定义 Renderer 都走统一 Runtime 边界。
-- [x] `validate` 是零查询静态门禁；`docs`、`schemas`、`components`、`context`、`scaffold` 为新 AI 会话提供当前契约。
+- [x] `validate` 是零查询静态门禁；`docs`、`schemas`、`components`、`inspect context`、`scaffold` 为新 AI 会话提供当前契约。
 - [x] Sources 面板提供参数化 statement、Resolved SQL、bound parameters、Adapter、timeout/retry、hash、日志和结构化错误，不暴露凭证。
-- [x] `authoring prepare/verify/assess/start/finish/compare` 固定任务身份、输入哈希、验收证据和真实 Token；缺失 Token 保持 unmeasured。
+- [x] 独立维护工具 `dataviz-authoring-eval` 固定任务身份、输入哈希、验收证据和真实 Token；缺失 Token 保持 unmeasured，正式产品 CLI 不暴露该能力。
 - [x] Server 提供统一的受限参数编辑器：右键 Run 或 Dashboard/Section/View Controls 打开对应作用域；面板不常驻编辑工具条。编辑器只修改默认值、静态候选项和同级顺序；推断候选项只读，当前分析状态不被覆盖，导出 HTML 不暴露编辑入口。
 - [x] 参数编辑使用 Dashboard 文件 revision、进程内写锁、保留注释/顺序的 YAML round-trip、完整 Schema 校验和原子替换；AI 或外部编辑造成 revision 漂移时拒绝覆盖。
 
@@ -90,27 +90,70 @@ Authoring P0 的 A–G 已进入当前 Schema/Compiler/Runtime，并由 0.7.0 �
 - [x] Artifact 与缓存命中验证 content hash；大文件改为流式哈希和原子流式复制，不再整文件读入内存。
 - [x] Runtime/Output/Pyodide 路径限制在受控根目录；portable Pyodide bundle 拒绝符号链接和不完整依赖闭包。
 - [x] 删除重复的公开 `templates` CLI 入口；AI 统一从 `components`、`schemas`、`docs` 和 `scaffold` 发现能力。
-- [x] `components --check` 的报告明确只验证 Package 元数据、资产和测试声明，不再暗示已经执行行为测试。
+- [x] `components check` 的报告明确只验证 Package 元数据、资产和测试声明，不再暗示已经执行行为测试。
 - [x] Interaction endpoint 不再等待整次 Query 完成；快 Base Output 可以驱动 Server/Browser Interactive 分支，Query 终态通过 frame handshake 原地同步而不重载 Canvas。
 - [x] Selection-kind、Compute-kind 与 Output delta 明确区分“全部/部分/无变化”；无关 Output 不再重启 active Transform，未变化 Output 不再重复传播或重绘。
 - [x] 删除旧 Server capability fallback；导航显示名严格来自 Dashboard 文件夹，运行态不再用页面 title 冒充 Canvas 名称。
 - [x] 保留策略保护活动 Query 及其活动 Interaction 仍在消费的 Run/Cache；长计算不再被后台清理误取消。
 - [x] wheel、sdist 与 pip 源码 ZIP 均在隔离环境完成 `install → version → components → init → validate → report`；归档不包含 `.dataviz`、本地凭据、虚拟环境或构建缓存。
 - [x] 同一 wheel 已在 Python 3.11、3.12、3.13、3.14 完成干净安装与 CLI/报告冒烟；完整 Python 测试矩阵由 CI 持续执行。
-- [x] `0.3.1` 修复动态 Selection 启动环：option domain 只来自 Base Output，首次水合、Control reconciliation、View 渲染与 Interactive 调度有唯一顺序；`canvas-ready` 只在首次 canonical state 提交后发布，父页面不再用早到的 tab 状态覆盖初始化中的用户操作。
+- [x] 动态 Selection 启动顺序固定：option domain 只来自 Base Output，首次水合、Control reconciliation、View 渲染与 Interactive 调度有唯一顺序；`canvas-ready` 只在首次 canonical state 提交后发布，父页面不再用早到的 tab 状态覆盖初始化中的用户操作。
 - [x] Browser Interactive 七状态通过 frame identity 回传 `Pipeline`；Base View 不再因其他动态 Selector 或 Interactive 分支而停在 `Waiting for dataset`，Server 与独立 HTML 均有回归。
-- [x] `0.3.2` 增加 Workspace 文件监听、debounced revision、SSE 通知和 `canvas / analysis / query` 影响分类；Presentation 自动重载，Interactive 基于现有 Base Output 重算，Query Contract 变化只进入 Outdated 并要求显式查询。
+- [x] Workspace 文件监听使用 debounced revision、SSE 通知和 `canvas / analysis / query` 影响分类；Presentation 自动重载，Interactive 基于现有 Base Output 重算，Query Contract 变化只进入 Outdated 并要求显式查询。
 - [x] 热更新保留 tab 的 Run、Control 与 Canvas 滚动位置；无效中间写入不替换当前 iframe，Header 提供诊断和显式 Reload。分类只跟踪实际声明/引用资产；保存 Source 后立即 Query 会先同步 revision。页面重开及查询运行途中发生定义变化时，也会重新核验 Query Contract，旧快照不能被误标为当前结果。
-- [x] `0.4.0` 将 Data Entry 升级为 Registry v4：值语义、Control scope 与 UI component 三轴解耦；13 个 `control.*` Package 逐项对齐 Ant Design 组件边界，删除 `selector.*`、`segmented`、`date-range` 及 Presentation `selectors/template` 旧接口，不提供兼容 alias。
+- [x] Data Entry 的值语义、Control scope 与 UI component 三轴解耦；14 个 `control.*` Package 逐项对齐 Ant Design 组件边界，不保留已移除组件或 Presentation 结构字段的兼容入口。
 - [x] Query Parameter、Selection 与 Compute 复用同一 Control Renderer；Gallery 与浏览器契约覆盖新文本、建议、数值、布尔、日期、范围、平面/层级单多选和 Slider 的真实水合、输入、键盘、浮层、状态与虚拟列表行为。
 
 ## 下一步优先级
+
+### P0：CLI 领域收敛与统一 Result（已完成）
+
+目标是以 0.12.0 正式产品对象模型提供 Analysis Plane，不复制 Runtime；Catalog、Target、Result 和 Evidence 只使用一套公开契约。设计见 DESIGN 的“0.12 CLI 与运行事实模型”。
+
+#### A. 冻结公开契约
+
+- [x] 确定公开链路为 `catalog → run → result → evidence`，内部保留可变 Execution Run 与不可变 Result 的边界。
+- [x] 确定 `dataviz/target-reference/v1` grammar（Dashboard、Source、Source/Dataset/Interactive Output、View）；删除生成式 `src_/base_/drv_/view_` alias，不提供隐藏兼容解析。
+- [x] 确定显式 CLI Execution 的终态封存规则：ready/partial/failed/cancelled 均可形成 Result，preflight 失败不形成 Result；Server 高频交互不自动封存。
+- [x] 确定正式文档的“构建与验证”及“探索与执行”两条渐进路径，并把 Authoring Evaluation 定义为非产品工具。
+
+#### B. 隔离维护者评测工具
+
+- [x] 将 `authoring prepare/verify/assess/start/note/finish/show/tasks/protocol/compare`、评测试题和日志实现迁入独立 `tools/authoring-evaluation/` 项目。
+- [x] 独立工具使用 `dataviz-authoring-eval` 入口和自己的依赖/测试；正式包、归档、README 与 `dataviz --help` 不包含评测命令或实现。
+- [x] 将 context/token benchmark 移入维护者工具；正式 `benchmark runtime` 只测 Query、Report、浏览器渲染、内存和释放。
+
+#### C. 重构公开命令树
+
+- [x] 公开命令域稳定为 `catalog list/search/describe`、`result list/show/inspect/export`、`evidence create/promote`。
+- [x] `dataviz run WORKSPACE TARGET` 是唯一公开执行入口，支持 Dashboard 与所有 Target Reference v1 物理坐标。
+- [x] `tree` 提供真实文本树与结构化 JSON；`inspect context/dependencies/layout` 统一承载只读编译结构。
+- [x] `gallery → components gallery`，组件命令拆为 list/show/check/gallery；`renderer-test → renderer test`；`clean → prune`；`benchmark → benchmark runtime`。
+
+#### D. Target 与 Catalog 物理引用
+
+- [x] 新增并 Schema 化 `dataviz/target-reference/v1` parser/serializer，Catalog、Describe、Run、Result、Evidence 与 next actions 共用同一实现。
+- [x] Catalog SQLite 和 JSON Contract 只存储规范物理 reference，不维护第二套引用索引；搜索默认输出以语义为主体、物理引用为可复制次级信息。
+- [x] 批量 Describe 和 Result Output 选择只接受 canonical 物理引用；迁移示例、Scaffold、文档和测试。
+
+#### E. Result 成为统一运行事实
+
+- [x] 显式 CLI Dashboard/局部执行共享 Result Store；终态封存 ready/partial/failed/cancelled，并保存错误、DAG、参数、definition hash、provenance 与 renderability。
+- [x] 实现 `result list`；show/inspect/export 对所有终态安全工作，且绝不重跑或改写 Result。
+- [x] Report/Share/Evidence 优先消费 Result；Dashboard convenience report 只执行一次，并在同一发布事务中封存数据 Artifact、Presentation 快照和 Result，后续报告不重复执行。
+- [x] `prune` 统一预览并清理过期 Result、Execution Artifact 和缓存；显式 `--apply` 才修改文件，shared cache 暂不自动清理。
+
+#### F. 文档、回归与发行门禁
+
+- [x] 更新 README、focused docs、Schema catalog、CHANGELOG 和 CLI help；内置 `dataviz docs` 分为“构建与验证”“探索与执行”“运行维护与扩展”，完整披露 Catalog、Target、Result、Overlay、Evidence/Promote，旧命令不再出现。
+- [x] 为 Target grammar、物理引用 Catalog、统一 run、所有 Result 终态、并发封存/读取/清理和下游消费建立契约测试。
+- [x] 完成 Ruff、完整 Python 测试、Chromium/Firefox/WebKit E2E、全部示例 strict validate、组件检查、三种归档内容审计及干净安装冒烟后再发布。
 
 ### P0：Selection、Linked Views 与最终配置有效性
 
 这一阶段解决“配置合法，但最终效果并非作者预期”的核心缺口。它是下一次破坏式发行的前置工作；项目尚未进入生产，不为当前实验性 Presentation 布局字段保留兼容 alias、迁移分支或双协议 Renderer。
 
-P0 不是以“底层支持了更多边”为完成，而以作者复杂度没有增加为门禁：普通看板不写 JS；跨图单选联动只写一条 binding；默认值无需重复声明；当前 `validate/dependencies` 与 Layout Contract 能解释已落地行为，后续 `inspect-layout` 将提供专用 CLI；高级逃生口不能绕过 canonical state。任一实现若要求作者维护第二份筛选值、直接连接两个 View 或理解事务细节，均不验收。
+P0 不是以“底层支持了更多边”为完成，而以作者复杂度没有增加为门禁：普通看板不写 JS；跨图单选联动只写一条 binding；默认值无需重复声明；当前 `validate`、`inspect dependencies` 与 `inspect layout` 能解释已落地行为；高级逃生口不能绕过 canonical state。任一实现若要求作者维护第二份筛选值、直接连接两个 View 或理解事务细节，均不验收。
 
 #### A. Selection State Contract 一致性（已完成）
 
@@ -152,7 +195,7 @@ P0 不是以“底层支持了更多边”为完成，而以作者复杂度没�
 - [x] 增加稳定 `error / warning / advice` 三级诊断；`--strict` 只因 error/warning 失败，主观 advice 不阻塞发布。
 - [x] 检查确定性冲突/no-op：模板 cardinality、超出 columns、无效 span、未被使用的 View、没有任何 consumer 的 Control、Renderer 不支持的属性和被覆盖的配置。
 - [x] 对 band 中大型明细、可疑 `min_height`、Browser Transform 使用 apply 等启发式问题只给 advice，不假装静态工具了解数据规模或审美。
-- [x] 实现 `dataviz inspect-layout WORKSPACE DASHBOARD [--format json]`，输出最终行列、span、来源、冲突和 custom 边界；为 CLI 输出建立稳定 Schema 和 Contract tests。
+- [x] 实现 `dataviz inspect layout WORKSPACE DASHBOARD [--format json]`，输出最终行列、span、来源、冲突和 custom 边界；为 CLI 输出建立稳定 Schema 和 Contract tests。
 
 #### E. 可见的当前分析状态
 
@@ -165,7 +208,7 @@ P0 不是以“底层支持了更多边”为完成，而以作者复杂度没�
 
 - [x] 将默认 trigger 改为 Runtime-aware：browser-js/browser-python 默认 auto，server-python 默认 apply；保留显式 auto/apply/manual、debounce、取消和 stale 语义。
 - [x] 为 Runtime-aware trigger 补齐 Schema、Dependency Contract、Server/HTML、CLI docs、Scaffold 和三浏览器回归；静态工具不猜测计算成本。
-- [x] 将 `query/output/compute --format json` 默认输出收敛为稳定 summary；增加 `--detail debug|full`（或等价显式选项）按需返回 SQL、bindings、Artifact、Node、provenance 和完整 diagnostics。
+- [x] `run` 默认输出稳定、高密度 Result summary；SQL、bindings、Artifact、Node、provenance 和完整 diagnostics 由 `result inspect` 渐进披露。
 - [x] 精简模式保留稳定错误 code、必要失败上下文和下一步建议，并用真实 AI context 快照测试防止输出再次膨胀。
 
 #### G. Chart Service 与真实浏览器视觉检查
@@ -176,7 +219,7 @@ P0 不是以“底层支持了更多边”为完成，而以作者复杂度没�
 - [x] visual-check 输出 Screenshot、机器可读 geometry report、稳定诊断 code 和复现参数，并覆盖 Server 与导出 HTML、Chromium/Firefox/WebKit 以及窄视口。
 - [x] 明确 visual-check 不判断配色、业务图表选择或主观美感；这些继续由视觉模型/人工审阅和 Gallery 负责。
 
-完成顺序固定为：Selection State Contract → View Event/Control transaction → Layout Contract → Semantic Validation → inspect-layout → State Snapshot/摘要 → Runtime/CLI 默认体验 → Chart Service → visual-check。Linked Views 必须建立在共享 Selection resolver 上；后续步骤不得先复制一套临时 Selection、事件、布局或状态推导。
+完成顺序固定为：Selection State Contract → View Event/Control transaction → Layout Contract → Semantic Validation → `inspect layout` → State Snapshot/摘要 → Runtime/CLI 默认体验 → Chart Service → visual-check。Linked Views 必须建立在共享 Selection resolver 上；后续步骤不得先复制一套临时 Selection、事件、布局或状态推导。
 
 排序原因是：Selection resolver 决定“当前到底选了什么”；Linked Views 只是增加同一状态的 writer；Layout/Semantic Validation 决定作者写的结构是否真的生效；State Snapshot 让用户看见当前上下文；CLI、Chart Service 与浏览器视觉检查最后再压缩试错成本。这样每一步都建立在前一份唯一契约上，而不是用 UI 补丁掩盖状态问题。
 
@@ -184,7 +227,7 @@ P0 不是以“底层支持了更多边”为完成，而以作者复杂度没�
 
 目标不是增加一套“给 AI 用的查询引擎”，而是让 AI 能搜索、理解并执行现有 Dashboard 的 Named Output，再把经过人审阅的试验结果晋升为普通 Workspace 资产。Dashboard Schema、Compiler 与 Dependency Contract 仍是事实来源；Catalog 只是可重建索引，Evidence 不变成第二个知识数据库。
 
-当前已完成“发现 → 执行 → 临时试验 → Evidence → Promote dry-run”，并完成使用统计、搜索概览压缩、批量/二进制输出、Browser/Pyodide 边界与发行门禁。A–E 均已完成。
+当前已完成“发现 → 描述执行契约 → 执行并封存 Result → 无重跑查看/导出 → 临时试验 → Evidence → Promote dry-run”，并完成使用统计、搜索概览压缩、Browser/Pyodide 边界与发行门禁。A–F 均已完成。
 
 #### A. Output 语义、可见性与可信度
 
@@ -198,7 +241,7 @@ P0 不是以“底层支持了更多边”为完成，而以作者复杂度没�
 #### 使用统计与搜索概览压缩
 
 - [x] 在 `.dataviz/usage.sqlite` 实现通用聚合表，以 `subject_kind + subject_ref + action_kind + actor_kind` 为主键，只保存 `use_count` 和 `last_used_at`。行为类型不做成专用列，以后增加行为无需迁移表结构。
-- [x] 当前只统计两种成功行为：人明确执行 Dashboard Query 成功后累加 `dashboard/query_succeeded/human`；AI 执行 `analyze run @output` 成功后累加 `output/analyze_run_succeeded/ai`。`all/search/show`、打开/刷新、失败与取消暂不记录。
+- [x] 当前只统计两种成功行为：人明确执行 Dashboard Query 成功后累加 `dashboard/query_succeeded/human`；AI 执行 `run TARGET` 成功后累加 `output/run_succeeded/ai`。`catalog list/search/describe`、Result 查看、打开/刷新、失败与取消暂不记录。
 - [x] 使用 SQLite WAL、每进程独立 connection、单条 UPSERT、有界 `busy_timeout` 和短事务保证 Server/CLI 多进程不丢计数。统计写入是 best-effort，失败只记 warning，不得改变 Query/Analysis 成功结果；该库不进入 fingerprint 或 hot reload。
 - [x] Catalog 结果只按实现资产 hash、Source/Runtime、Adapter 逻辑引用、Query bindings 和 Output Contract 的完全一致性做精确折叠，返回 representative、occurrence count 和可展开 references；不做 SQL 语义等价推断。
 - [x] `top N` 在折叠后输出。当前先继续使用稳定确定性顺序，只暴露使用次数和最后使用时间；等累积真实数据后再决定排序公式。
@@ -212,30 +255,39 @@ P0 不是以“底层支持了更多边”为完成，而以作者复杂度没�
 #### 已落地的执行基础
 
 - [x] generation Catalog 使用 `CURRENT.json`、跨进程 lock 和不可变 SQLite generation；以 Workspace 相对路径 + SHA-256 定义闭包检查 freshness，可删除后重建。
-- [x] `analyze all/search/show/run` 支持稳定短别名、结构化过滤、grep-like 搜索、最小 Query DAG、Base/Derived/View 目标与三种 Interactive Runtime；不复制 Runtime。
+- [x] `catalog list/search/describe` 与统一 `run` 支持规范物理 Target Reference、结构化过滤、grep-like 搜索、批量 Invocation Contract、最小 Query DAG、Base/Derived/View 目标与三种 Interactive Runtime；不复制 Runtime。
 - [x] `dataviz/analysis-overlay/v1` 支持 SQL/File/Python/JS 实现替换、dry-run、不可变 Analysis Variant、独立 cache salt 与 run manifest；不写回 Dashboard/Catalog。
 - [x] Overlay 只允许契约不变时的 what-if；新增 DAG、组合多 Output 或改变 Schema 进入 Analysis Draft，不继续扩张 Overlay。
 
-#### C. Analysis Result/Evidence 与 Promote
+#### C. Result、Evidence 与 Promote
 
 - [x] 定义 `dataviz/analysis-evidence/v1`，记录问题/假设、结论或断言、Result hash、lineage、生成者、审阅者和审阅状态；不默认复制大型结果。
 - [x] 提供 Promote dry-run/explain，把一次 Result/Evidence 转为可预览、可 validate、可 Git diff 审查的 Workspace 补丁；未经人确认不写入正式资产。
 - [x] Promote 支持三类结果：新的 Transform/Named Output、现有 semantics/caveat/deprecation 修订、契约测试/数据断言/小型证据 snapshot。
 - [x] 新 Output 一律从 draft 开始；Promote 不自动 certified，不绕开 owner/reviewer/evidence，不建立第二份 DAG 或知识库。
 
-#### D. Arrow/Parquet 与批量执行
+#### D. 原生 Artifact 与批量执行
 
-- [x] `analyze run` 补齐 Parquet/Arrow 文件输出；stdout 不直接打印二进制大结果，JSON summary 返回路径、hash、Schema、rows 和 truncation。
+- [x] `run` 完整封存 Runtime 原生 Parquet/Arrow Artifact；stdout 不直接打印二进制大结果，Result summary 只返回路径、hash、rows、truncation 和紧凑预览，Schema 按需由 `result inspect` 提供。
 - [x] 支持一次请求执行/提取多个 Output，共用 Query 闭包、Artifact 和浏览器会话；结果仍逐 Output 保留 reference、hash 和 lineage。
 - [x] browser-js/browser-python 按需加载 Pyodide、优先 Arrow 传输；先记录 cold start、Runtime ready、transform 和 extraction 分段耗时，再决定 browser pool 策略。
 
 #### E. 回归与交付门禁
 
-- [x] 覆盖 Catalog 增删改、并发写/读、构建失败回退、稳定快照重试、搜索/别名碰撞和 hash 精确折叠，并验证 Catalog 可删除重建。
+- [x] 覆盖 Catalog 增删改、并发写/读、构建失败回退、稳定快照重试、Target Reference 严格解析和 hash 精确折叠，并验证 Catalog 可删除重建。
 - [x] 用并发 Server/CLI 进程验证 usage UPSERT 不丢计数、`last_used_at` 单调保留较晚值、busy 有界退让和统计故障不污染成功执行。
 - [x] 端到端覆盖 SQL/File Base Output、Dataset Transform、三种 Interactive Runtime、默认/覆盖 Control、Overlay、Evidence/Promote、Arrow/Parquet、失败/超时/取消和无网络 Pyodide 提示。
-- [x] 用 feature-showcase 提供 reviewed/certified/deprecated 口径示例，通过 `validate → analyze search → analyze run → evidence → promote --dry-run`。
+- [x] 用 feature-showcase 提供 reviewed/certified/deprecated 口径示例，通过 `validate → catalog search → catalog describe → run → evidence create → evidence promote --dry-run`。
 - [x] 更新 README、DESIGN、focused docs、CLI `--help` 和 CHANGELOG；完成 Python/三浏览器套件、全部示例 strict validate、归档构建与干净安装冒烟后再发布。
+
+#### F. 语义发现与 Result-centric CLI（已完成）
+
+- [x] `catalog list/search` 共用语义密集的默认文本输出：title、purpose、grain、assurance 是主体，kind、Dashboard 和物理 reference 是次级索引；紧凑附带 Query Parameter 契约、Output 摘要、相关 View、精确折叠 occurrence count 和 search 命中原因。Source/View 命中默认投影到可复用 Output；完整候选池、Schema、SQL、代码和 occurrence 列表继续按需展开，单行索引表只保留为 `--compact`。
+- [x] 运行前探索统一为 `catalog describe WORKSPACE REFERENCE...`。一次可描述多个物理引用，固定在同一 Catalog generation，保持输入顺序并去重；逐项返回语义、参数闭包、类型、required/default、候选摘要、Control/Output 摘要、紧凑 lineage、代码位置和可复制的 Run 命令。单项失败不吞掉其他项，但整体退出码非零；该命令不执行 Source、候选查询或 Transform，也不创建 Result。
+- [x] 公共 CLI、Catalog 文本/JSON、示例和 `next_actions` 统一使用 `dataviz/target-reference/v1` 规范物理引用；Catalog 不生成或解析 `src_/base_/drv_/view_` hash alias，也不保留隐藏兼容语法。
+- [x] `run WORKSPACE TARGET` 一次完整执行并封存不可变 Result：默认写入 `.dataviz/results/<result-id>/`，stdout 只显示 Result ID/路径、紧凑闭包、标量或各最终表格 Output 的 head 10 和下一步命令；`--preview-rows` 只影响预览，run 不承担格式转换或任意目的路径导出。
+- [x] `result list/show/inspect/export` 只消费已封存 Result：show 分页且绝不重跑；inspect 渐进披露 Schema、DAG、lineage、hash、时序和 provenance；export 只复制明确选择的一个原生 Artifact，不改变格式、manifest 或内部路径。直接 File Source 只封存已读 path/hash 收据；`prune` 统一预览和显式清理 Result、Execution Artifact 与缓存，读取租约保护并发消费者。
+- [x] 新增 `dataviz/target-reference/v1` 与现行 Catalog/Result Schema，并同步 README、focused docs 和 CLI help；回归覆盖语义密度、正则命中原因、批量 describe、物理引用解析、Result 四种终态、原子发布、无重跑分页、原样导出、索引重建、显式 prune、File Source 变更检测和 Browser Result 导出。完整 Python + Chromium/Firefox/WebKit 套件和四个示例 strict validate 通过。
 
 HTML Analysis Capsule、HTML Output 提取和远程分享链接分析不在当前路线图，也不预埋对应 Manifest、执行协议或安全层。现有 HTML 导出和分享链接仍只作为人类消费看板的已有能力；未来如有真实需求，再重新立项。
 
@@ -249,12 +301,12 @@ HTML Analysis Capsule、HTML Output 提取和远程分享链接分析不在当�
 - [ ] 发布原始 JSONL、环境说明、逐项验收证据、真实 input/output Token、首次成功率、修正轮次和耗时。
 - [ ] 根据真实 friction 压缩 focused context、CLI docs 和 Scaffold；不预设固定 Token 上限或节省比例。
 
-评测协议见 [AI Authoring 成对评测](docs/authoring-evaluation.md)。
+评测协议已从正式产品文档移入仓库维护工具 [tools/authoring-evaluation/README.md](tools/authoring-evaluation/README.md)。
 
 ### P3：规模与性能证据
 
 - [x] Arrow 传输记录行数、字节和耗时；Renderer 记录 mount/update/empty/failure/耗时。
-- [x] `benchmark --browser-runtime` 等待传输、Interactive Transform、Repeat reconciliation 和已挂载 View 进入稳定状态，并分别记录 Query、报告生成和页面就绪时间。
+- [x] `benchmark runtime` 等待传输、Interactive Transform、Repeat reconciliation 和已挂载 View 进入稳定状态，并分别记录 Query、报告生成和页面就绪时间。
 - [x] 150K 行真实浏览器回归覆盖声明式 Metric、browser-js Worker 与 Custom Canvas 聚合。
 - [x] 固定并运行 10K、100K、1M 行 Query → Arrow → Interactive → Renderer 基准，记录 CLI 峰值 RSS、浏览器进程树 RSS、页面耗时和三轮 dispose 回落；原始结果见 `benchmarks/results/`。
 - [x] 依据 1M 证据把 Worker/Data API 的 groupBy 改为单遍流式聚合：页面就绪中位数约降低 23%，浏览器峰值增量约降低 20%。当前不实现通用服务端分页或 Record Batch DSL；原始明细 View 另行基准触发。
@@ -270,25 +322,14 @@ HTML Analysis Capsule、HTML Output 提取和远程分享链接分析不在当�
 
 这些工作不改变当前 DSL，但会降低下一次替换前端框架或拆分 Runtime 的迁移成本。
 
-- [x] `view.declarative`、`section.declarative`、`data.pipeline` 和 `presentation.shell` 已迁入 owner Package；20 个 Package 均为 package-owned，Runtime 内没有同功能副本。
+- [x] `view.declarative`、`section.declarative`、`data.pipeline` 和 `presentation.shell` 已迁入 owner Package；21 个 Package 均为 package-owned，Runtime 内没有同功能副本。
 - [ ] 按 Runtime Manifest、Output Store、Interactive Scheduler、Selection Binding、Renderer Lifecycle 拆分大型 `canvas-runtime.js`，并通过构建步骤输出单一浏览器资产。
 - [ ] 按 parse/load、cross-file contract、asset validation、catalog/navigation 拆分大型 `workspace/loader.py`；稳定错误 code 和 CLI 输出不得随物理拆分漂移。
 
 ### 开源发布
 
-- [x] 完成 `0.3.0` 本地发行门禁：wheel、sdist、pip ZIP 构建，并分别在干净 Python 3.12 环境完成 `version → schemas → components → init → validate → report` 冒烟。
-- [x] 完成 `0.3.1` 本地发行门禁：三种归档构建、内容审计，并分别在干净 Python 3.12 环境完成安装与 CLI/报告冒烟。
-- [x] 完成 `0.3.2` 本地发行门禁：全量 Python 与 Chromium Runtime 回归、三种归档内容审计，并分别在干净 Python 3.12 环境完成安装与 `version → schemas → components → init → validate → report` 冒烟。
-- [x] 完成 `0.4.0` 发行门禁：全量 Python/浏览器回归、wheel/sdist/pip ZIP 构建、内容审计与干净环境安装冒烟。
-- [x] 完成 `0.5.1` 依赖架构发行门禁：单一 Dependency Contract 残余审计、完整 Python 与 Chromium/Firefox/WebKit Runtime 回归、全部示例 Workspace strict validate，并分别从 wheel、sdist、pip ZIP 在干净 Python 3.12 环境完成 `install → version → components → validate → dependencies → report`。
-- [x] 完成 `0.5.2` Overlay 修复发行门禁：完整 Python 契约套件、Chromium/Firefox/WebKit 桌面与窄屏浮层回归、三种归档内容审计，并分别在干净 Python 3.12 环境完成 `install → version → components → validate → dependencies → report`；最终 wheel 另行通过真实 Server/Chromium 几何冒烟。
-- [x] 完成 `0.5.3` Plotly 页面滚动修复发行门禁：默认 `scrollZoom=false` 与显式 opt-in 均通过 Chromium/Firefox/WebKit 真实滚轮回归；306 项 Python 契约测试、Component Package 检查、Feature Showcase strict validate，以及 wheel/sdist/pip ZIP 的干净安装与报告导出全部通过。
-- [x] 完成 `0.5.4` Custom Renderer Plotly 滚轮契约发行门禁：AI 文档、组件契约与 Scaffold 明确自定义 `newPlot`/`react` 默认使用 `scrollZoom=false`；336 项完整测试、四个代表性 Workspace strict validate，以及 wheel/sdist/pip ZIP 的干净安装与离线报告导出全部通过。
-- [x] 完成 `0.6.0` 断代发行门禁：312 项 Python 契约测试、Chromium/Firefox/WebKit 各 25 项回归、8 个 Workspace/11 个 Dashboard 严格 validate、wheel/sdist/pip ZIP 内容审计，以及三套独立 Python 3.12 干净安装的完整 CLI/报告冒烟全部通过。
-- [x] 完成 `0.6.1` 布局修复发行门禁：Query Parameter 最多四轨的响应式布局与显式 `span` 通过 312 项 Python 契约测试、Chromium/Firefox/WebKit 各 26 项回归、全部示例 Workspace 严格校验，以及 wheel/sdist/pip ZIP 的内容审计和独立 Python 3.12 安装冒烟。
-- [x] 完成 `0.7.0` P0 A–G 发行门禁：335 项 Python 契约测试、Chromium 32 项及 Firefox/WebKit 各 31 项真实浏览器回归、5 个代表性 Workspace 严格校验、20 个 Component Package 检查，以及 wheel/sdist/pip ZIP 独立安装与 Python 3.11–3.14 兼容冒烟。
-- [x] 完成 `0.8.0` Renderer 生命周期发行门禁：统一 Plotly/ECharts/Perspective 的八阶段 Server/HTML 矩阵；373 项当前测试契约、完整 Chromium 与 Firefox/WebKit 核心 Perspective 生命周期、全部示例 Workspace strict validate、三种归档审计及独立 Python 3.12 安装冒烟通过。Perspective Worker/Table/Viewer 归属单个 Renderer 实例，异步阶段超时会进入 Table Fallback，不会永久 Loading。
-- [x] 完成 `0.9.0` Data Entry 语义收敛发行门禁：Query Parameter 默认四等分轨道并响应式降为三/二/一列；Checkbox Group 固定为 2–5 个紧凑选项且移除冗余批量操作，大规模/层级候选分别交给 Select 与 Cascader/TreeSelect。336 项非浏览器测试、Chromium/Firefox/WebKit 各 37 项完整 Runtime 回归、20 个 Component Package 检查、四个示例 Workspace strict validate、wheel/sdist/pip ZIP 内容审计，以及三套独立 Python 3.12 安装与报告导出全部通过。
+- [x] 完成 `0.12.0` 本地发行门禁：402 项非浏览器测试、Chromium/Firefox/WebKit 各 52 项 E2E、四个示例 Workspace strict validate、21 个 Component Package 检查，以及 wheel/sdist/pip ZIP 内容审计和独立 Python 3.12 全流程安装冒烟全部通过。
+- [x] 正式产品帮助、README 与三种发行归档不包含 Authoring Evaluation 命令或实现；维护工具只存在于 `tools/authoring-evaluation/`。
 - [ ] 维护者决定许可证并添加正式 `LICENSE`；许可证未定不阻塞开发，但阻塞正式对外授权。
 - [ ] 添加 `CONTRIBUTING.md`，说明安装、validate/test、Runtime/Component 变更和 PR 验收。
 - [ ] 正式 GitHub Release 发布 wheel、sdist、pip ZIP、SHA-256 和远端 CI 记录。

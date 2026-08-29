@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
@@ -21,10 +20,11 @@ from dataviz.analysis.usage import output_analysis_usage, read_usage_best_effort
 from dataviz.errors import ValidationFailure
 from dataviz.filesystem import atomic_write_text
 from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace, load_workspace
+from dataviz.workspace.controls import scoped_control_registry
 
 
 CATALOG_POINTER_SCHEMA = "dataviz/analysis-catalog-pointer/v1"
-CATALOG_BUILDER_VERSION = 4
+CATALOG_BUILDER_VERSION = 7
 
 
 def _now() -> str:
@@ -103,45 +103,88 @@ def _logical_reference(dashboard_id: str, local_reference: str) -> str:
     return f"{dashboard_id}::{local_reference}"
 
 
-def _alias_digest(reference: str) -> str:
-    encoded = base64.b32encode(hashlib.sha256(reference.encode("utf-8")).digest())
-    return encoded.decode("ascii").rstrip("=")
-
-
-def _assign_aliases(entries: list[dict[str, Any]]) -> None:
-    prefix = {
-        "source": "src",
-        "base_output": "base",
-        "derived_output": "drv",
-        "view": "view",
-    }
-    unresolved = list(entries)
-    length = 10
-    while unresolved:
-        groups: dict[str, list[dict[str, Any]]] = {}
-        for entry in unresolved:
-            candidate = f"{prefix[entry['kind']]}_{_alias_digest(entry['reference'])[:length]}"
-            groups.setdefault(candidate, []).append(entry)
-        next_unresolved: list[dict[str, Any]] = []
-        for candidate, members in groups.items():
-            if len(members) == 1:
-                members[0]["alias"] = candidate
-            else:
-                next_unresolved.extend(members)
-        if not next_unresolved:
-            return
-        length += 2
-        if length > 52:
-            raise RuntimeError("Unable to generate unique Analysis aliases")
-        unresolved = next_unresolved
-
-
 def _parameter_names(bindings: dict[str, dict[str, Any]]) -> set[str]:
     return {
         str(binding["parameter"])
         for binding in bindings.values()
         if isinstance(binding, dict) and binding.get("parameter")
     }
+
+
+def _parameter_contracts(
+    dashboard: LoadedDashboard, names: list[str] | set[str]
+) -> list[dict[str, Any]]:
+    registry = {item.id: item for item in dashboard.definition.query_parameters}
+    contracts: list[dict[str, Any]] = []
+    for name in sorted(names):
+        definition = registry.get(name)
+        if definition is None:
+            continue
+        item: dict[str, Any] = {
+            "id": definition.id,
+            "label": definition.label or definition.id,
+            "type": definition.type,
+            "value_type": definition.value_type,
+            "required": definition.required,
+        }
+        if "default" in definition.model_fields_set:
+            item["default"] = definition.default
+        if definition.initial is not None:
+            item["initial"] = definition.initial.model_dump(
+                mode="json", exclude_none=True
+            )
+        if definition.options is not None:
+            options = definition.options.model_dump(mode="json", exclude_none=True)
+            summary: dict[str, Any] = {"mode": options["mode"]}
+            if options["mode"] == "static":
+                summary["count"] = len(options.get("choices", []))
+            elif options.get("source"):
+                summary["source"] = options["source"]
+            item["options"] = summary
+        for field in ("min", "max", "step", "min_date", "max_date", "max_length"):
+            value = getattr(definition, field, None)
+            if value is not None:
+                item[field] = value
+        contracts.append(item)
+    return contracts
+
+
+def _control_contracts(
+    dashboard: LoadedDashboard, names: list[str] | set[str]
+) -> list[dict[str, Any]]:
+    registry = scoped_control_registry(dashboard.definition)
+    contracts: list[dict[str, Any]] = []
+    for name in sorted(names):
+        effective = registry.get(name)
+        if effective is None:
+            continue
+        definition = effective.definition
+        item: dict[str, Any] = {
+            "key": effective.key,
+            "id": effective.id,
+            "kind": effective.kind,
+            "type": definition.type,
+            "value_type": definition.value_type,
+            "required": definition.required,
+        }
+        if "default" in definition.model_fields_set:
+            item["default"] = definition.default
+        if definition.initial is not None:
+            item["initial"] = definition.initial.model_dump(
+                mode="json", exclude_none=True
+            )
+        if definition.options is not None:
+            options = definition.options.model_dump(mode="json", exclude_none=True)
+            item["options"] = {
+                "mode": options["mode"],
+                **(
+                    {"count": len(options.get("choices", []))}
+                    if options["mode"] == "static"
+                    else {"source": options.get("source")}
+                ),
+            }
+        contracts.append(item)
+    return contracts
 
 
 def _query_node_context(dashboard: LoadedDashboard, node_id: str) -> dict[str, Any]:
@@ -318,7 +361,6 @@ def _entry_base(
 ) -> dict[str, Any]:
     return {
         "schema": ANALYSIS_ENTRY_SCHEMA,
-        "alias": "",
         "reference": _logical_reference(dashboard_id, local_reference),
         "dashboard": {
             "id": dashboard_id,
@@ -552,6 +594,12 @@ def _dashboard_entries(
         entries.append(entry)
 
     for entry in entries:
+        entry["parameter_contracts"] = _parameter_contracts(
+            dashboard, entry.get("query_parameters", [])
+        )
+        entry["control_contracts"] = _control_contracts(
+            dashboard, entry.get("controls", [])
+        )
         if entry["kind"] not in {"base_output", "derived_output"}:
             continue
         missing = [
@@ -563,7 +611,6 @@ def _dashboard_entries(
         entry["semantic_missing"] = missing
         entry["trust_status"] = entry.get("assurance", {}).get("status", "draft")
 
-    _assign_aliases(entries)
     entries = [validate_analysis_entry(entry) for entry in entries]
     return entries
 
@@ -644,8 +691,7 @@ def _write_generation(path: Path, entries: list[dict[str, Any]], generation: str
             PRAGMA journal_mode=DELETE;
             PRAGMA synchronous=FULL;
             CREATE TABLE entries (
-                alias TEXT PRIMARY KEY,
-                reference TEXT NOT NULL UNIQUE,
+                reference TEXT PRIMARY KEY,
                 dashboard_id TEXT NOT NULL,
                 kind TEXT NOT NULL,
                 stage TEXT NOT NULL,
@@ -663,7 +709,6 @@ def _write_generation(path: Path, entries: list[dict[str, Any]], generation: str
             search_text = " ".join(
                 str(value)
                 for value in (
-                    entry.get("alias"),
                     entry.get("reference"),
                     entry.get("title"),
                     entry.get("purpose"),
@@ -682,9 +727,8 @@ def _write_generation(path: Path, entries: list[dict[str, Any]], generation: str
                 if value
             ).casefold()
             connection.execute(
-                "INSERT INTO entries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO entries VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    entry["alias"],
                     entry["reference"],
                     entry["dashboard"]["id"],
                     entry["kind"],
@@ -733,19 +777,18 @@ class AnalysisCatalog:
         self.entries = entries
         self.stale = stale
         self.diagnostics = list(diagnostics or [])
-        self._by_alias = {entry["alias"]: entry for entry in entries}
         self._by_reference = {entry["reference"]: entry for entry in entries}
 
     def resolve(self, reference: str) -> dict[str, Any]:
-        raw = reference.strip().removeprefix("@")
-        entry = self._by_alias.get(raw) or self._by_reference.get(raw)
+        raw = reference.strip()
+        entry = self._by_reference.get(raw)
         if entry is None:
             raise ValidationFailure(
                 f"Unknown Analysis reference: {reference}",
                 details={
                     "code": "analysis_reference_unknown",
                     "reference": reference,
-                    "action": "Run dataviz analyze search WORKSPACE QUERY --format json",
+                    "action": "Run dataviz catalog search WORKSPACE QUERY --format json",
                 },
             )
         return entry
@@ -864,7 +907,6 @@ class AnalysisCatalog:
                 occurrences = buckets[identity]
                 representative = dict(occurrences[0])
                 representative["representative"] = {
-                    "alias": representative["alias"],
                     "reference": representative["reference"],
                 }
                 representative["occurrence_count"] = len(occurrences)
@@ -885,7 +927,6 @@ class AnalysisCatalog:
                 if expand_occurrences:
                     representative["references"] = [
                         {
-                            "alias": item["alias"],
                             "reference": item["reference"],
                             "dashboard": item["dashboard"],
                             "usage": item["usage"],
@@ -1017,10 +1058,6 @@ def ensure_analysis_catalog(
                                 loaded, dashboard_id, dashboard, definition_hash
                             )
                         )
-                # Reassign across the complete Workspace so even a deliberately
-                # constructed truncated-hash collision cannot become ambiguous.
-                _assign_aliases(entries)
-
                 # A second complete load detects additions, removals and edits that
                 # happened while the immutable generation was being assembled.
                 stable = load_workspace(root)

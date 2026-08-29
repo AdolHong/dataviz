@@ -28,7 +28,12 @@ from starlette.middleware.gzip import GZipMiddleware
 from starlette.background import BackgroundTask
 
 from dataviz.artifacts import ArtifactDescriptor, ArtifactStore
-from dataviz.analysis import refresh_analysis_catalog_async
+from dataviz.analysis import (
+    ensure_analysis_catalog,
+    refresh_analysis_catalog_async,
+    validate_analysis_result,
+)
+from dataviz.analysis.results import AnalysisResultStore
 from dataviz.components import component_runtime_assets
 from dataviz.content_templates import (
     interpolate_dashboard_content,
@@ -1758,14 +1763,86 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                     result.model_dump_json(by_alias=True, indent=2),
                 )
                 temporary_share.replace(final_share)
+                catalog = ensure_analysis_catalog(workspace_root)
+                result_outputs = []
+                result_bindings: dict[str, dict[str, Any]] = {}
+                for local_reference, descriptor in sorted(
+                    {**result.outputs, **derived_outputs}.items()
+                ):
+                    canonical = f"{dashboard_id}::{local_reference}"
+                    try:
+                        catalog.resolve(canonical)
+                    except Exception:
+                        continue
+                    result_outputs.append(
+                        {
+                            "reference": canonical,
+                            "kind": descriptor.kind,
+                            "rows": descriptor.metadata.get("row_count"),
+                            "schema": descriptor.schema_ or [],
+                            "content_hash": descriptor.content_hash,
+                            "preview": descriptor.preview,
+                            "truncated": False,
+                            "run_id": result.run_id,
+                        }
+                    )
+                    result_bindings[canonical] = {
+                        "artifact_path": source_store.resolve(descriptor),
+                        "format": descriptor.format,
+                        "content_hash": descriptor.content_hash,
+                    }
+                sealed = AnalysisResultStore(workspace_root).publish(
+                    validate_analysis_result(
+                        {
+                            "schema": "dataviz/analysis-result/v1",
+                            "status": result.status,
+                            "generation": catalog.generation,
+                            "target": {
+                                "reference": dashboard_id,
+                                "kind": "dashboard",
+                                "title": dashboard.title,
+                                "dashboard": {
+                                    "id": dashboard_id,
+                                    "title": dashboard.title,
+                                    "path": dashboard.root.relative_to(workspace_root).as_posix(),
+                                },
+                            },
+                            "query_parameters": result.query_parameters,
+                            "effective_controls": {
+                                "selection": resolved_selection_state,
+                                "compute": resolved_compute,
+                            },
+                            "outputs": result_outputs,
+                            "lineage": {"query_nodes": result.query_nodes},
+                            "provenance": {
+                                "catalog_generation": catalog.generation,
+                                "query_contract_hash": result.query_contract_hash,
+                                "share_id": share_id,
+                            },
+                            "renderability": {
+                                "kind": "dashboard",
+                                "renderable": True,
+                                "share_id": share_id,
+                            },
+                        }
+                    ),
+                    result_bindings,
+                )
+                manifest["result_id"] = sealed["result_id"]
+                atomic_write_text(
+                    final_share / "manifest.json",
+                    json.dumps(manifest, ensure_ascii=False, indent=2, default=str),
+                )
             except BaseException:
                 shutil.rmtree(temporary_share, ignore_errors=True)
+                shutil.rmtree(final_share, ignore_errors=True)
                 raise
             return {
                 "status": "success",
                 "share_id": share_id,
                 "dashboard_id": dashboard_id,
                 "run_id": result.run_id,
+                "result_id": sealed["result_id"],
                 "url": f"/shared/{share_id}",
                 "path": str(final_share.relative_to(workspace_root)),
             }

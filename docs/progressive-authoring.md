@@ -73,6 +73,6 @@ Linux 精简环境可使用 `python -m playwright install --with-deps chromium` 
 
 ## 与 focused context 的分工
 
-任务路由回答“这类工作最少需要理解什么”；`dataviz context --focus` 回答“这个既有 Dashboard 的目标组件真实依赖什么”。新建任务先选 route，修改既有看板再读取具体 focus。两者不会用估算 Token 代替真实评测。
+任务路由回答“这类工作最少需要理解什么”；`dataviz inspect context --focus` 回答“这个既有 Dashboard 的目标组件真实依赖什么”。新建任务先选 route，修改既有看板再读取具体 focus。两者不会用估算 Token 代替真实评测。
 
 真实 Dataviz / standalone HTML 成对试验仍按独立评测计划执行。在相同模型、客户端、权限和时间预算下积累重复 trial 之前，不发布 Token 节省、首次成功率或耗时结论。

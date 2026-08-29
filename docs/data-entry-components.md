@@ -226,10 +226,10 @@ Query Parameters 的 `columns` 表示最大列数（默认 6），`column_width`
 
 ```bash
 dataviz docs data-entry-components --format json
-dataviz components --category data-entry --format json
-dataviz components control.cascader --format json
+dataviz components list --category data-entry --format json
+dataviz components show control.cascader --format json
 dataviz scaffold control.range-picker --id analysis-window --format json
-dataviz gallery --output component-gallery.html
+dataviz components gallery --output component-gallery.html
 dataviz validate <workspace> --dashboard <dashboard-id> --format json
 ```
 

@@ -10,6 +10,7 @@ from dataviz.workspace.models import OutputSemanticsDefinition
 ANALYSIS_ENTRY_SCHEMA = "dataviz/analysis-entry/v1"
 ANALYSIS_CATALOG_SCHEMA = "dataviz/analysis-catalog/v1"
 ANALYSIS_RESULT_SCHEMA = "dataviz/analysis-result/v1"
+ANALYSIS_DESCRIBE_SCHEMA = "dataviz/analysis-describe/v1"
 
 
 class AnalysisContract(BaseModel):
@@ -26,7 +27,6 @@ class AnalysisDashboardReference(AnalysisContract):
 
 class AnalysisEntry(AnalysisContract):
     schema_: Literal["dataviz/analysis-entry/v1"] = Field(alias="schema")
-    alias: str
     reference: str
     dashboard: AnalysisDashboardReference
     kind: Literal["source", "base_output", "derived_output", "view"]
@@ -64,8 +64,24 @@ class AnalysisCatalog(AnalysisContract):
     stale: bool = False
 
 
+class AnalysisDescribeItem(AnalysisContract):
+    status: Literal["ready", "error"]
+    requested_reference: str
+    entry: AnalysisEntry | dict[str, Any] | None = None
+    invocation: dict[str, Any] = Field(default_factory=dict)
+    closure: dict[str, Any] = Field(default_factory=dict)
+    next_actions: list[str] = Field(default_factory=list)
+    error: dict[str, Any] | None = None
+
+
+class AnalysisDescribe(AnalysisContract):
+    schema_: Literal["dataviz/analysis-describe/v1"] = Field(alias="schema")
+    generation: str
+    count: int = Field(ge=0)
+    items: list[AnalysisDescribeItem]
+
+
 class AnalysisOutputResult(AnalysisContract):
-    alias: str
     reference: str
     kind: str
     rows: int | None = None
@@ -79,7 +95,7 @@ class AnalysisOutputResult(AnalysisContract):
 
 class AnalysisResult(AnalysisContract):
     schema_: Literal["dataviz/analysis-result/v1"] = Field(alias="schema")
-    status: str
+    status: Literal["ready", "partial", "failed", "cancelled"]
     generation: str | None = None
     target: AnalysisEntry | dict[str, Any] | None = None
     query_parameters: dict[str, Any] = Field(default_factory=dict)
@@ -165,6 +181,12 @@ def validate_analysis_entry(value: dict[str, Any]) -> dict[str, Any]:
 
 def validate_analysis_catalog(value: dict[str, Any]) -> dict[str, Any]:
     return AnalysisCatalog.model_validate(value).model_dump(
+        mode="json", by_alias=True, exclude_none=True
+    )
+
+
+def validate_analysis_describe(value: dict[str, Any]) -> dict[str, Any]:
+    return AnalysisDescribe.model_validate(value).model_dump(
         mode="json", by_alias=True, exclude_none=True
     )
 

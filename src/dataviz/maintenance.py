@@ -102,8 +102,11 @@ def cleanup_workspace_storage(
     run_max_age_seconds: float | None,
     max_cache_entries: int | None,
     cache_max_age_seconds: float | None,
+    max_results: int | None = None,
+    result_max_age_seconds: float | None = None,
     include_runs: bool = True,
     include_cache: bool = True,
+    include_results: bool = True,
     apply: bool = False,
     protected_run_ids: set[str] | None = None,
     now: float | None = None,
@@ -113,6 +116,7 @@ def cleanup_workspace_storage(
     state_root = workspace_root / ".dataviz"
     runs_root = state_root / "runs"
     cache_root = state_root / "cache"
+    results_root = state_root / "results"
     current = time.time() if now is None else now
 
     run_entries = (
@@ -135,13 +139,37 @@ def cleanup_workspace_storage(
         max_age_seconds=cache_max_age_seconds,
         now=current,
     )
+    result_entries = (
+        [path for path in results_root.glob("result_*") if path.is_dir()]
+        if include_results and results_root.exists()
+        else []
+    )
+    result_leases = results_root / ".leases"
+    protected_results = (
+        {path.name.split("-", 1)[0] for path in result_leases.iterdir() if path.is_file()}
+        if result_leases.exists()
+        else set()
+    )
+    results = _candidate_rows(
+        result_entries,
+        root=results_root,
+        keep=max_results,
+        max_age_seconds=result_max_age_seconds,
+        now=current,
+        protected_names=protected_results,
+    )
 
     errors: list[dict[str, str]] = []
     deleted: list[str] = []
     if apply:
-        for item in [*runs, *cache]:
+        for item in [*runs, *cache, *results]:
             path = Path(item["path"])
-            parent = runs_root if path.parent == runs_root else cache_root
+            if path.parent == runs_root:
+                parent = runs_root
+            elif path.parent == results_root:
+                parent = results_root
+            else:
+                parent = cache_root
             if not _safe_child(path, parent):
                 errors.append({"path": str(path), "message": "unsafe cleanup path"})
                 continue
@@ -153,12 +181,13 @@ def cleanup_workspace_storage(
             except OSError as exc:
                 errors.append({"path": str(path), "message": str(exc)})
 
-    candidates = [*runs, *cache]
+    candidates = [*runs, *cache, *results]
     return {
         "mode": "apply" if apply else "dry-run",
         "workspace": str(workspace_root),
         "runs": runs,
         "cache": cache,
+        "results": results,
         "candidate_count": len(candidates),
         "candidate_bytes": sum(item["bytes"] for item in candidates),
         "deleted_count": len(deleted),

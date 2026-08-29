@@ -641,7 +641,7 @@ def test_validate_unknown_dashboard_is_structured_json(tmp_path: Path):
     assert report["schema"] == VALIDATION_SCHEMA
     assert report["queries_executed"] == 0
     assert diagnostic["details"]["available"] == ["sales-overview"]
-    assert "dataviz list" in diagnostic["hint"]
+    assert "dataviz tree" in diagnostic["hint"]
 
 
 def test_validate_dashboard_scope_does_not_accept_a_folder_path_alias(tmp_path: Path):

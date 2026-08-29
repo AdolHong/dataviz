@@ -5,6 +5,9 @@ from typing import Any
 from dataviz.view_contracts import VIEW_TEMPLATE_CONTRACTS
 
 
+DOC_CATALOG_SCHEMA = "dataviz/docs-catalog/v2"
+
+
 AUTHORING_ROUTE_ALIASES = {
     "dashboard": "minimal",
     "simple": "minimal",
@@ -103,7 +106,7 @@ sections:
         ],
         "validation_commands": [
             "dataviz validate <workspace> --dashboard <dashboard> --strict",
-            "dataviz dependencies <workspace> <dashboard> --format json",
+            "dataviz inspect dependencies <workspace> <dashboard> --format json",
             "dataviz visual-check <workspace> <dashboard> --target both",
         ],
     },
@@ -145,7 +148,7 @@ sections:
         ],
         "validation_commands": [
             "dataviz validate <workspace> --dashboard <dashboard> --strict",
-            "dataviz inspect-layout <workspace> <dashboard> --format json",
+            "dataviz inspect layout <workspace> <dashboard> --format json",
             "dataviz visual-check <workspace> <dashboard> --target both",
         ],
     },
@@ -201,7 +204,7 @@ export: {mode: interactive}""",
         ],
         "validation_commands": [
             "dataviz validate <workspace> --dashboard <dashboard> --strict",
-            "dataviz dependencies <workspace> <dashboard> --format json",
+            "dataviz inspect dependencies <workspace> <dashboard> --format json",
             "dataviz report <workspace> <dashboard> --output report.html",
             "dataviz visual-check <workspace> <dashboard> --target both",
         ],
@@ -235,7 +238,7 @@ AUTHORING_ROUTES: dict[str, dict[str, Any]] = {
         ],
         "commands": [
             "dataviz scaffold interactive --id <dashboard> --output <workspace>",
-            "dataviz dependencies <workspace> <dashboard> --format json",
+            "dataviz inspect dependencies <workspace> <dashboard> --format json",
         ],
         "excludes": ["renderer-contract"],
     },
@@ -246,8 +249,8 @@ AUTHORING_ROUTES: dict[str, dict[str, Any]] = {
         "scaffolds": ["custom-renderer", "renderer.custom", "view.custom"],
         "commands": [
             "dataviz scaffold custom-renderer --id <dashboard> --output <workspace>",
-            "dataviz components renderer.custom --format json",
-            "dataviz gallery --output component-gallery.html",
+            "dataviz components show renderer.custom --format json",
+            "dataviz components gallery --output component-gallery.html",
         ],
         "excludes": ["control", "interactive-transform"],
     },
@@ -257,7 +260,7 @@ AUTHORING_ROUTES: dict[str, dict[str, Any]] = {
         "documents": ["cascading-selection"],
         "scaffolds": ["control.select", "control.cascader", "control.tree-select"],
         "commands": [
-            "dataviz dependencies <workspace> <dashboard> --format json",
+            "dataviz inspect dependencies <workspace> <dashboard> --format json",
         ],
         "excludes": ["interactive-transform", "renderer-contract"],
     },
@@ -267,7 +270,7 @@ AUTHORING_ROUTES: dict[str, dict[str, Any]] = {
         "documents": ["view-filter"],
         "scaffolds": ["control.select", "control.checkbox-group"],
         "commands": [
-            "dataviz inspect-layout <workspace> <dashboard> --format json",
+            "dataviz inspect layout <workspace> <dashboard> --format json",
         ],
         "excludes": ["interactive-transform", "renderer-contract"],
     },
@@ -277,7 +280,7 @@ AUTHORING_ROUTES: dict[str, dict[str, Any]] = {
         "documents": ["browser-compute"],
         "scaffolds": ["interactive", "interactive-transform.browser-js"],
         "commands": [
-            "dataviz dependencies <workspace> <dashboard> --format json",
+            "dataviz inspect dependencies <workspace> <dashboard> --format json",
             "dataviz report <workspace> <dashboard> --output report.html",
         ],
         "excludes": ["renderer-contract"],
@@ -437,6 +440,18 @@ _CHART_FIELD_MATRIX = {
 
 DOC_ALIASES = {
     "start": "quickstart",
+    "build": "quickstart",
+    "analysis": "analysis-quickstart",
+    "analyze": "analysis-quickstart",
+    "explore": "analysis-quickstart",
+    "catalog": "catalog-discovery",
+    "search": "catalog-discovery",
+    "target": "target-references",
+    "reference": "target-references",
+    "result": "results",
+    "evidence": "evidence-promotion",
+    "promote": "evidence-promotion",
+    "overlay": "analysis-overlays",
     "architecture": "pipeline",
     "dag": "dependencies",
     "graph": "dependencies",
@@ -495,20 +510,61 @@ DOC_ALIASES = {
 }
 
 
+DOC_PATHS: dict[str, dict[str, Any]] = {
+    "build-and-verify": {
+        "title": "构建与验证看板",
+        "summary": "创建、校验、运行和交付 Dashboard。",
+        "start": "quickstart",
+        "workflow": [
+            "quickstart", "progressive-authoring", "workflow", "validation",
+            "design-language", "troubleshooting",
+        ],
+        "command": "dataviz docs quickstart",
+    },
+    "explore-and-execute": {
+        "title": "探索与执行数据",
+        "summary": "发现数据口径、执行 Target、复用 Result，并把审阅结论沉淀为 Evidence。",
+        "start": "analysis-quickstart",
+        "workflow": [
+            "analysis-quickstart", "catalog-discovery", "target-references",
+            "results", "analysis-overlays", "evidence-promotion", "troubleshooting",
+        ],
+        "command": "dataviz docs analysis-quickstart",
+    },
+    "operate-and-extend": {
+        "title": "运行维护与扩展",
+        "summary": "维护 Runtime、Component、Renderer、性能与发布边界。",
+        "start": "runtime-limits",
+        "workflow": [
+            "runtime-limits", "maintenance", "components", "renderers",
+            "frontend-adapters", "runtime-performance", "versioning-release",
+        ],
+        "command": "dataviz docs runtime-limits",
+    },
+}
+
+
 DOC_TOPICS: dict[str, dict[str, Any]] = {
     "quickstart": {
-        "summary": "从空环境到可验证 Dashboard 和 HTML 报告的最短 v5 路径。",
+        "summary": "从空环境到可验证 Dashboard、不可变 Result 和 HTML 报告的最短当前路径。",
+        "workspace_start": {
+            "empty_workspace": "dataviz init <workspace>",
+            "runnable_example": "dataviz scaffold minimal --id <dashboard-id> --output <workspace>",
+            "rule": "二选一：init 创建空的最小 Workspace；scaffold minimal 直接生成可运行示例。",
+        },
         "commands": [
             "dataviz version",
             "dataviz docs --task minimal --format json",
             "dataviz scaffold minimal --id <dashboard-id> --output <workspace>",
-            "dataviz list <workspace>",
-            "dataviz context <workspace> <dashboard-id> --focus view:<view-id> --format json",
-            "dataviz dependencies <workspace> <dashboard-id> --format json",
+            "dataviz tree <workspace>",
+            "dataviz inspect context <workspace> <dashboard-id> --focus view:<view-id> --format json",
+            "dataviz inspect dependencies <workspace> <dashboard-id> --format json",
             "dataviz validate <workspace> --dashboard <dashboard-id> --format json",
-            "dataviz query <workspace> <dashboard-id> --source <id> --output-name main --query-param key=value",
-            "dataviz output <workspace> <dashboard-id> source:<id>/<output>",
-            "dataviz report <workspace> <dashboard-id> --output report.html",
+            "dataviz run <workspace> <dashboard-id> --query-param key=value",
+            "dataviz result inspect <workspace> <result-id>",
+            "dataviz result show <workspace> <result-id> '<dashboard-id>::source:<id>/<output>'",
+            "dataviz report <workspace> <result-id> --output report.html",
+            "dataviz visual-check <workspace> <dashboard-id> --target both",
             "dataviz serve <workspace> --port 8080",
         ],
         "rules": [
@@ -522,10 +578,135 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
         ],
         "success": [
             "validate 返回 passed=true。",
-            "Query Run 的目标节点为 ready 或 empty。",
+            "run 返回不可变 result_id；Result 终态为 ready，或按明确要求接受 partial。",
+            "result inspect/show 只读取已封存 Artifact，不重新执行数据源。",
             "HTML report 生成，同时写出 report manifest。",
         ],
-        "related": ["progressive-authoring", "workflow", "design-language", "validation", "troubleshooting"],
+        "related": ["progressive-authoring", "workflow", "results", "design-language", "validation", "troubleshooting"],
+    },
+    "analysis-quickstart": {
+        "summary": "让 AI 从业务语义发现可复用口径，先理解调用契约，再执行一次并复用不可变 Result。",
+        "commands": [
+            "dataviz catalog search <workspace> '收入|销售|日期' --top 5",
+            "dataviz catalog describe <workspace> '<dashboard-id>::source:<source-id>/<output>' --format json",
+            "dataviz run <workspace> '<dashboard-id>::source:<source-id>/<output>' --query-param key=value",
+            "dataviz result inspect <workspace> <result-id>",
+            "dataviz result show <workspace> <result-id> '<dashboard-id>::source:<source-id>/<output>' --offset 0 --limit 100",
+            "dataviz result export <workspace> <result-id> '<dashboard-id>::source:<source-id>/<output>' --to output.arrow",
+        ],
+        "workflow": [
+            "不知道物理引用时先 catalog search；需要全局概览时使用 catalog list。",
+            "执行前用 catalog describe 查看参数闭包、默认值、lineage、语义和可复制的 run 命令。",
+            "run 只执行一次并原子封存 Result；预览行数不限制已保存的完整 Artifact。",
+            "后续分页、检查、导出和 Evidence 都消费 result_id，不重新查询。",
+            "只有需要临时替换 SQL、代码或 File 输入时才增加 --overlay。",
+        ],
+        "do_not": [
+            "不要猜测已移除的短 alias；复制 Catalog 返回的 canonical Target Reference。",
+            "不要为了查看更多行再次 run；使用 result show 分页。",
+            "不要把 Catalog 命中等同于可信口径；检查 assurance、purpose、grain 和 caveats。",
+        ],
+        "related": ["catalog-discovery", "target-references", "results", "analysis-overlays", "evidence-promotion"],
+    },
+    "catalog-discovery": {
+        "summary": "Catalog 是可删除重建的语义索引，只负责发现和描述，不执行数据。",
+        "commands": [
+            "dataviz catalog list <workspace>",
+            "dataviz catalog search <workspace> '收入|工资|年入|月入' --top 10",
+            "dataviz catalog describe <workspace> '<target-reference>' '<second-target-reference>' --format json",
+            "dataviz catalog describe <workspace> '<target-reference>' --detail full --include-code --format json",
+        ],
+        "default_output": [
+            "title、purpose、grain 和 assurance 是主体；kind、Dashboard 和物理引用是次级索引。",
+            "紧凑附带 Query Parameter 契约、Output 摘要、相关 View、最小执行闭包和搜索命中原因。",
+            "Source/View 命中默认投影到可复用 Output；--compact 才返回旧式单行索引。",
+        ],
+        "author_contract": {
+            "required_for_discovery": ["title", "purpose", "grain"],
+            "review_when_relevant": ["caveats", "visibility", "assurance", "measures", "relationships"],
+            "rule": "Output 作者应说明这份数据回答什么问题、每行代表什么以及使用限制；不要只重复 Source/View 名称。",
+        },
+        "consistency": [
+            "Catalog generation 由 Dashboard 定义 hash 驱动，可安全重建；它不是第二份业务事实来源。",
+            "list/search/describe 不执行 Source、候选查询或 Transform，也不创建 Result。",
+            "批量 describe 固定在同一 generation，保持输入顺序并逐项返回错误。",
+        ],
+        "related": ["target-references", "analysis-quickstart", "results", "outputs"],
+    },
+    "target-references": {
+        "summary": "Target Reference v1 是 Catalog、run、Result 和 Evidence 共用的可读物理坐标。",
+        "schema": "dataviz/target-reference/v1",
+        "grammar": [
+            "<dashboard-id>",
+            "<dashboard-id>::source:<source-id>",
+            "<dashboard-id>::source:<source-id>/<output-name>",
+            "<dashboard-id>::dataset:<transform-id>/<output-name>",
+            "<dashboard-id>::interactive:<transform-id>/<output-name>",
+            "<dashboard-id>::view:<view-id>",
+        ],
+        "rules": [
+            "Dashboard id 是完整看板执行的 CLI 简写；其余字符串按 v1 grammar 严格解析。",
+            "不接受 src_/base_/drv_/view_ 等生成式短 alias，也不按对象名或 Result ID 猜测。",
+            "Source Target 可封存其全部声明 Output；--output 只选择一个。View Target 封存其直接数据输入与呈现映射。",
+            "Derived Output 自动执行 Base 闭包和对应 Interactive Runtime。",
+        ],
+        "related": ["catalog-discovery", "results", "dependencies"],
+    },
+    "results": {
+        "summary": "Result 是一次 Execution 的不可变公开事实；show、inspect、export、report 和 Evidence 都不得重跑。",
+        "commands": [
+            "dataviz result list <workspace> --status ready",
+            "dataviz result inspect <workspace> <result-id> --detail full",
+            "dataviz result show <workspace> <result-id> '<output-reference>' --offset 0 --limit 100",
+            "dataviz result export <workspace> <result-id> '<output-reference>' --to output.arrow",
+            "dataviz report <workspace> <result-id> --output report.html",
+        ],
+        "terminal_statuses": {
+            "ready": "目标闭包完成且所需 Output 可用。",
+            "partial": "显式允许局部失败，并封存成功 Output 与失败证据。",
+            "failed": "没有满足目标，但仍封存错误、日志、lineage 和已完成 Artifact。",
+            "cancelled": "执行被取消并封存可审查终态。",
+        },
+        "storage": "默认位于 <workspace>/.dataviz/results/<result-id>/；manifest、hash、Artifact 和 provenance 发布后不可变。",
+        "artifact_rules": [
+            "--preview-rows 只影响 stdout，不截断完整 Artifact。",
+            "show 分页读取；export 只复制一个选定的原生 Artifact，不转换格式、不修改 Result。",
+            "直接 File Source 默认只封存实际读取的 path/hash 收据，不复制大型原文件；再次读取会核验变化。",
+            "只有携带完整 Presentation 快照且 renderability 允许的 Dashboard/View Result 才能生成完整报告。",
+        ],
+        "related": ["analysis-quickstart", "evidence-promotion", "maintenance", "html-export"],
+    },
+    "analysis-overlays": {
+        "summary": "Overlay 在内存中临时替换分析闭包的 SQL、代码或同格式 File 输入，不修改原 Dashboard。",
+        "commands": [
+            "dataviz run <workspace> '<target-reference>' --overlay experiment.yaml",
+            "cat experiment.yaml | dataviz run <workspace> '<target-reference>' --overlay -",
+        ],
+        "rules": [
+            "Overlay 只允许替换目标依赖闭包内的既有资产，不新增旁路 DAG。",
+            "相对路径按 Overlay 文件位置解析；stdin Overlay 的相对路径按 Workspace 解析。",
+            "Overlay 不写回 Dashboard、不进入 Catalog；Result provenance 记录原资产、替代资产和 Overlay hash。",
+            "缓存 namespace 包含 Overlay hash，不能污染正式 Dashboard 的同名缓存。",
+        ],
+        "related": ["target-references", "results", "evidence-promotion"],
+    },
+    "evidence-promotion": {
+        "summary": "Evidence 把 Result 中的结论变成可审阅证据；Promote 只生成可校验、可 Git 审查的补丁。",
+        "commands": [
+            "dataviz evidence create <workspace> <result-id> --question '<question>' --conclusion '<conclusion>' --snapshot-rows 10",
+            "dataviz evidence promote <workspace> <evidence-id-or-json> proposal.yaml --dry-run --output promotion.patch",
+        ],
+        "evidence_contract": [
+            "记录问题、结论/断言、Result 与 Output hash、lineage、生成者、审阅者和审阅状态。",
+            "默认不复制完整大结果；可附带小型 snapshot 方便核验。",
+            "Evidence 不是第二个知识数据库，原始数据变化时必须明确不可重现性。",
+        ],
+        "promotion_boundary": [
+            "可提议新的 Transform/Named Output、semantics/caveat/deprecation 修订或契约测试/小型证据 snapshot。",
+            "Promote 在隔离副本中 validate 并生成统一 diff，不直接修改 Workspace。",
+            "新 Output 仍从 draft 开始；Promote 不自动 apply、reviewed 或 certified。",
+        ],
+        "related": ["results", "catalog-discovery", "analysis-overlays"],
     },
     "progressive-authoring": {
         "summary": "按任务返回最小作者概念闭包，简单看板不需要阅读完整 Runtime 架构。",
@@ -585,8 +766,8 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
     "dependencies": {
         "summary": "检查一个 Dashboard 编译后的 Query、Control、Interactive、Output 与 View 依赖契约。",
         "commands": [
-            "dataviz dependencies <workspace> <dashboard-id>",
-            "dataviz dependencies <workspace> <dashboard-id> --format json",
+            "dataviz inspect dependencies <workspace> <dashboard-id>",
+            "dataviz inspect dependencies <workspace> <dashboard-id> --format json",
         ],
         "schema": "dataviz/dependency-contract/v5",
         "graphs": {
@@ -626,18 +807,25 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
         "related": ["pipeline", "controls", "interactive-transforms", "validation"],
     },
     "workflow": {
-        "summary": "按最小失败边界开发，避免把数据、计算和样式问题混在一起。",
-        "steps": [
-            {"stage": "Discover", "command": "dataviz list <workspace>"},
-            {"stage": "Read", "command": "dataviz context <workspace> <dashboard> --focus view:<id> --format json"},
+        "summary": "构建看板与探索数据是两条渐进路径；二者共享同一 Compiler、Runtime 和不可变 Result。",
+        "build_and_verify": [
+            {"stage": "Discover", "command": "dataviz tree <workspace>"},
+            {"stage": "Read", "command": "dataviz inspect context <workspace> <dashboard> --focus view:<id> --format json"},
             {"stage": "Validate", "command": "dataviz validate <workspace> --dashboard <dashboard> --format json"},
-            {"stage": "Layout", "command": "dataviz inspect-layout <workspace> <dashboard> --format json"},
-            {"stage": "Query", "command": "dataviz query <workspace> <dashboard> --source <id>"},
-            {"stage": "Inspect", "command": "dataviz output <workspace> <dashboard> <canonical-output>"},
-            {"stage": "Compute", "command": "dataviz compute <workspace> <dashboard> <transform-id> --run-id <run>"},
-            {"stage": "Render", "command": "dataviz report <workspace> <dashboard> --output report.html"},
+            {"stage": "Layout", "command": "dataviz inspect layout <workspace> <dashboard> --format json"},
+            {"stage": "Run", "command": "dataviz run <workspace> <dashboard>"},
+            {"stage": "Inspect", "command": "dataviz result inspect <workspace> <result-id>"},
+            {"stage": "Render", "command": "dataviz report <workspace> <result-id> --output report.html"},
             {"stage": "Visual", "command": "dataviz visual-check <workspace> <dashboard> --target both"},
             {"stage": "Interact", "command": "dataviz serve <workspace>"},
+        ],
+        "explore_and_execute": [
+            {"stage": "Search", "command": "dataviz catalog search <workspace> '<regex>'"},
+            {"stage": "Describe", "command": "dataviz catalog describe <workspace> '<target-reference>'"},
+            {"stage": "Run", "command": "dataviz run <workspace> '<target-reference>' --query-param key=value"},
+            {"stage": "Read", "command": "dataviz result show <workspace> <result-id> '<output-reference>'"},
+            {"stage": "Explain", "command": "dataviz result inspect <workspace> <result-id> --detail full"},
+            {"stage": "Preserve", "command": "dataviz evidence create <workspace> <result-id> --question '<question>' --conclusion '<conclusion>'"},
         ],
         "do_not": [
             "不要同时修改 SQL、Transform、View 字段和 CSS。",
@@ -750,9 +938,9 @@ sections:
   type: range_input
   value_type: date
   required: true
-    default:
-      - {mode: relative, anchor: today, offset: -3d}
-      - {mode: relative, anchor: today, offset: -1d}
+  default:
+    - {mode: relative, anchor: today, offset: -3d}
+    - {mode: relative, anchor: today, offset: -1d}
 """,
             "binding": """query_inputs:
   start_date: {parameter: job_date_range, part: start}
@@ -761,7 +949,7 @@ sections:
         },
         "relative_defaults": [
             "range_input/date 由两个独立 Date Atom 组成，每个端点可用固定 ISO 日期或 {mode: relative, anchor: today, offset: -1d}。",
-            "v0.6 只接受 anchor=today 与整数日偏移 ±Nd/0d。",
+            "当前严格契约只接受 anchor=today 与整数日偏移 ±Nd/0d。",
             "today 按 workspace.context.timezone 计算，不使用 Server 操作系统时区。",
             "Run 创建时固化为 ISO 日期；缓存、SQL、HTML Export 均使用固化值，不在导出文件中重新求值。",
         ],
@@ -880,7 +1068,7 @@ timeout_seconds: 120
     },
     "html-export": {
         "summary": (
-            "HTML 固化 Query Run；只有 Browser Runtime 能在脱离 Dataviz Server 后继续计算。"
+            "HTML 从已封存 Result 的数据与 Presentation 快照生成；只有 Browser Runtime 能在脱离 Dataviz Server 后继续计算。"
         ),
         "runtime_matrix": {
             "browser-js": "interactive/snapshot/unavailable；interactive 不需要 Python 或 Pyodide。",
@@ -917,7 +1105,8 @@ timeout_seconds: 120
             ),
         },
         "commands": [
-            "dataviz report <workspace> <dashboard> --output report.html",
+            "dataviz report <workspace> <result-id> --output report.html",
+            "dataviz report <workspace> <dashboard> --output report.html  # convenience: run once, seal Result, then render",
             "python -m http.server 8081 -d <report-directory>",
         ],
         "related": ["interactive-transforms", "pipeline", "troubleshooting"],
@@ -1034,7 +1223,7 @@ selection_inputs:
       mode: infer
       source: source:forecast-series/main
 """,
-        "compute_cli": "dataviz compute <workspace> <dashboard> <transform-id> --run-id <run> --compute-param dashboard:<dashboard>/<id>=42",
+        "compute_cli": "dataviz run <workspace> '<dashboard>::interactive:<transform-id>/<output>' --control dashboard:<dashboard>/<id>=42",
         "related": ["data-entry-components", "interactive-transforms", "presentation"],
     },
     "data-entry-components": {
@@ -1119,15 +1308,20 @@ control_components:
 """,
         "commands": [
             "dataviz docs data-entry-components --format json",
-            "dataviz components --category data-entry --format json",
-            "dataviz components control.cascader --format json",
+            "dataviz components list --category data-entry --format json",
+            "dataviz components show control.cascader --format json",
             "dataviz scaffold control.range-picker --id analysis-window --format json",
-            "dataviz gallery --output component-gallery.html",
+            "dataviz components gallery --output component-gallery.html",
         ],
         "related": ["controls", "components", "presentation", "design-language"],
     },
     "renderers": {
         "summary": "Renderer 只消费 Named Output 和 View descriptor，不执行业务取数。",
+        "commands": [
+            "dataviz renderer test <renderer.js> --renderer-id <renderer-id>",
+            "dataviz components show renderer.custom --format json",
+            "dataviz components gallery --output component-gallery.html",
+        ],
         "view_templates": list(VIEW_TEMPLATE_CONTRACTS),
         "chart_engines": ["plotly", "echarts"],
         "lifecycle": {
@@ -1372,7 +1566,7 @@ assets:
             "为追求独特而重写稳定 Data Entry、Perspective 或 Runtime DOM",
         ],
         "ai_workflow": [
-            "读取 dataviz context 与相关 Component contract，确认现有模板能否满足需求。",
+            "读取 dataviz inspect context 与相关 Component contract，确认现有模板能否满足需求。",
             "选择一个明确方向；默认沿用 business，不同时混合 business/editorial/terminal 的视觉语法。",
             "先写 Presentation YAML，再写最少量 Dashboard 自有 CSS；不修改数据逻辑。",
             "运行 dataviz validate，并在 Gallery/真实数据/窄视口下检查 Ready、Empty、Error 和弹层状态。",
@@ -1387,9 +1581,9 @@ assets:
             "自定义 CSS 删除后仍能回退为完整可用的声明式 Dashboard。",
         ],
         "commands": [
-            "dataviz components --category theme --format json",
-            "dataviz components theme.business --format json",
-            "dataviz gallery --output component-gallery.html",
+            "dataviz components list --category theme --format json",
+            "dataviz components show theme.business --format json",
+            "dataviz components gallery --output component-gallery.html",
             "dataviz validate <workspace> --dashboard <dashboard-id> --format json",
         ],
         "related": ["presentation", "components", "charts", "tables", "controls"],
@@ -1397,11 +1591,11 @@ assets:
     "components": {
         "summary": "Component Registry 是 AI 选择 Data Entry、View、Section、Runtime 和扩展点的机器可读目录。",
         "commands": [
-            "dataviz components --check --format json",
-            "dataviz components <component-id> --format json",
+            "dataviz components check --format json",
+            "dataviz components show <component-id> --format json",
             "dataviz scaffold --list --format json",
             "dataviz scaffold <recipe> --id <id> --format json",
-            "dataviz gallery --output gallery.html",
+            "dataviz components gallery --output gallery.html",
         ],
         "scaffold_rule": "Component IDs and Scaffold recipes are related catalogs, not interchangeable names; discover recipes with scaffold --list.",
         "contract": [
@@ -1413,7 +1607,7 @@ assets:
             "test declarations",
         ],
         "check_scope": (
-            "components --check validates Package metadata/assets and test declarations; "
+            "components check validates Package metadata/assets and test declarations; "
             "pytest plus browser E2E execute behavior."
         ),
     },
@@ -1421,37 +1615,16 @@ assets:
         "summary": "AI 应读取任务相关的最小契约，而不是整个 Runtime 源码。",
         "commands": [
             "dataviz docs design-language --format json",
-            "dataviz context <workspace> <dashboard> --focus view:<id> --format json",
-            "dataviz context <workspace> <dashboard> --focus dataset:<id> --format json",
-            "dataviz context <workspace> <dashboard> --focus interactive:<id> --format json",
-            "dataviz context <workspace> <dashboard> --focus component:<id> --format json",
-            "dataviz benchmark <workspace> <dashboard>",
-            "dataviz benchmark <workspace> <dashboard> --browser-runtime --browser chromium --repeat 3 --query-param row_count=1000000 --format json",
-            "dataviz authoring tasks --format json",
-            "dataviz authoring protocol --format json",
-            "dataviz authoring prepare <task> <directory> --approach dataviz|standalone-html --trial-id <trial>",
-            "dataviz authoring start <measurement-workspace> --trial-dir <directory> --model <model> --tool <client>",
-            "dataviz authoring assess <directory> <check-id> --status passed --assessor automation --evidence <evidence>",
-            "dataviz authoring verify <directory> --format json",
-            "dataviz authoring finish <measurement-workspace> <session> --trial-dir <directory> --outcome success --first-attempt success --correction-rounds 0",
-            "dataviz authoring compare <measurement-workspace> --format json",
+            "dataviz inspect context <workspace> <dashboard> --focus view:<id> --format json",
+            "dataviz inspect context <workspace> <dashboard> --focus dataset:<id> --format json",
+            "dataviz inspect context <workspace> <dashboard> --focus interactive:<id> --format json",
+            "dataviz inspect context <workspace> <dashboard> --focus component:<id> --format json",
+            "dataviz benchmark runtime <workspace> <dashboard> --browser chromium --repeat 3 --query-param row_count=1000000 --format json",
         ],
-        "evaluation": {
-            "design": "同一固定任务、模型、客户端/工具和权限做 Dataviz 与 standalone HTML 成对试验。",
-            "quality_gate": "固定任务/approach prompt/输入 SHA-256；每条验收项必须记录 assessor 与证据。只有两边 prompt/输入完整并通过全部验收的 identity-matched pair 才进入效率聚合。",
-            "measurements": [
-                "client 实际报告的 input/output tokens",
-                "首次成功率",
-                "行为修正轮次",
-                "完成时间",
-                "分类 friction",
-            ],
-            "rule": "缺失 Token 保持 unmeasured；不按字符数或文件大小估算。",
-        },
         "runtime_benchmark": {
             "purpose": "在 Chromium/Firefox/WebKit 中等待页面稳定，重复装载并 dispose；测量 Query、报告构建、页面就绪、Arrow、Renderer、View 终态和可用内存口径。",
             "schema": "dataviz/browser-runtime-benchmark/v3",
-            "boundary": "它验证页面规模与生命周期，不估算 AI Token，也不替代成对 authoring trial。",
+            "boundary": "它验证页面规模与生命周期，不估算 AI Token。",
         },
         "goal": "先追求可用性和低试错；Token 节省比例只能由真实任务测量，不能预设。",
     },
@@ -1461,6 +1634,9 @@ assets:
             "dataviz schemas --format json",
             "dataviz schemas dashboard --full --format json",
             "dataviz schemas interactive-transform --full --format json",
+            "dataviz schemas target-reference --full --format json",
+            "dataviz schemas analysis-result --full --format json",
+            "dataviz schemas analysis-evidence --full --format json",
         ],
     },
     "validation": {
@@ -1481,8 +1657,9 @@ assets:
             "advice": "主观或依赖未知数据规模的启发式建议，不阻塞 --strict。",
             "diagnostic": "包含稳定 code、field/JSON path、file、details 和 hint。",
         },
-        "layout": "inspect-layout 输出 dataviz/layout-inspection/v1 的最终 rows、span、来源与 custom 边界。",
+        "layout": "inspect layout 输出 dataviz/layout-inspection/v1 的最终 rows、span、来源与 custom 边界。",
         "visual": "visual-check 在真实浏览器中输出 dataviz/visual-check/v1、截图和客观几何诊断；不评价配色或业务图表选择。",
+        "visual_install": "未安装浏览器依赖时运行 pip install \"ai-dataviz[visual-check]\"，再执行 playwright install chromium；CLI 缺依赖错误会给出可复制命令。",
         "sql_parameter_example": {
             "errors": ["sql_parameter_undeclared", "sql_parameter_unused"],
             "fix": "同时更新 SQL placeholder、Source query_inputs 本地别名和 Dashboard query_parameters 绑定。",
@@ -1492,11 +1669,15 @@ assets:
         "summary": "只接受当前 DSL；不提供 deprecated 层、字段别名、自动迁移或双协议 Runtime。",
         "current": {
             "dashboard": "dataviz/dashboard/v9",
+            "presentation": "dataviz/presentation/v2",
             "source": "dataviz/source/v2",
             "runtime": "dataviz/runtime/v5",
             "dependency_contract": "dataviz/dependency-contract/v5",
             "dataset_transform": "dataviz/dataset-transform/v2",
             "interactive_transform": "dataviz/interactive-transform/v2",
+            "target_reference": "dataviz/target-reference/v1",
+            "analysis_result": "dataviz/analysis-result/v1",
+            "analysis_evidence": "dataviz/analysis-evidence/v1",
         },
         "rules": [
             "未知字段 extra=forbid。",
@@ -1518,7 +1699,7 @@ assets:
         "release_contract": [
             "Python 3.11–3.14 运行 unit/contract tests。",
             "Chromium/Firefox/WebKit 运行真实 Runtime tests。",
-            "wheel、sdist、pip ZIP 在干净 venv 中运行 version/schemas/components/init/validate/report smoke。",
+            "wheel、sdist、pip ZIP 在干净 venv 中运行 version/schemas/components check/init/validate/report smoke。",
             "发行包排除 .venv、build、缓存和运行 Artifact。",
         ],
     },
@@ -1532,7 +1713,7 @@ assets:
             "内置数值聚合使用线性 reducer，避免大数组展开触发 JavaScript 参数上限。",
             "节点独立发布，失败分支不阻塞无关分支。",
             "runtime.max_concurrent_runs 与 max_concurrent_interactions 分别限制单机并发 Query/Server 交互任务。",
-            "Run Artifact 与 NodeCache 只写入 Workspace/.dataviz；默认缓存由 tab session 隔离，Server Interactive 复用同一 Query Run。",
+            "Execution Artifact、NodeCache 与不可变 Result 只写入 Workspace/.dataviz；默认缓存由 tab session 隔离，Server Interactive 复用同一 Query Run。",
             "Run、cache、Worker、PyProxy、Renderer 与订阅均有 dispose/淘汰路径。",
         ],
         "current_limits": [
@@ -1549,7 +1730,7 @@ assets:
     "runtime-performance": {
         "summary": "用真实 Query → Arrow → Interactive → Renderer 页面建立可复现规模证据，而不是按行数猜测。",
         "commands": [
-            "dataviz benchmark <workspace> <dashboard> --browser-runtime --browser chromium --repeat 3 --query-param key=value --format json",
+            "dataviz benchmark runtime <workspace> <dashboard> --browser chromium --repeat 3 --query-param key=value --format json",
             "uv run --no-editable python scripts/run_runtime_scale_benchmarks.py --browser chromium --repeat 3 --output benchmarks/results/runtime-scale.json",
         ],
         "schema": "dataviz/browser-runtime-benchmark/v3",
@@ -1561,35 +1742,41 @@ assets:
         "memory_scope": "进程树 RSS 包含 Playwright driver、browser、workers、native Arrow 与 GPU helper；JS heap 不包含 Worker/native 内存。Firefox/WebKit 不公开 performance.memory 时返回 null，不伪造估值。",
         "fixed_fixture": "benchmarks/scale-workspace 的 row_count=10000/100000/1000000；结果与方法见 docs/runtime-performance.md。",
         "decision": "1M 聚合链路可完成后仍不自动推出通用分页；原始明细 View、Selection 和高基数组合需各自基准触发。",
-        "boundary": "Runtime 性能基准与 AI authoring 成对评测是两套证据，不能相互代替。",
+        "boundary": "Runtime 性能基准只衡量页面运行规模与资源生命周期。",
     },
     "maintenance": {
-        "summary": "安全清理 Workspace 的 Run Artifact 和缓存。",
+        "summary": "安全预览并清理 Workspace 的不可变 Result、Execution Artifact 和持久缓存。",
         "commands": [
-            "dataviz clean <workspace>",
-            "dataviz clean <workspace> --keep-runs 20 --run-max-age-hours 48",
-            "dataviz clean <workspace> --all --apply",
+            "dataviz prune <workspace>",
+            "dataviz prune <workspace> --keep-runs 20 --run-max-age-hours 48",
+            "dataviz prune <workspace> --keep-results 20 --result-max-age-days 30",
+            "dataviz prune <workspace> --all --apply",
         ],
         "rules": [
             "默认 dry-run；必须显式 --apply 才删除。",
-            "只允许删除 Workspace/.dataviz/runs 与 cache 中的目标。",
-            "活动 Query，以及仍被活动 Interaction 消费的 Query Run 和缓存始终受保护。",
+            "只允许删除 Workspace/.dataviz/results、runs 与 cache 中被策略选中的目标。",
+            "活动 Query、读取租约，以及仍被活动 Interaction 消费的 Query Run 和缓存始终受保护。",
+            "复制到 Workspace 外的 export 和原始 File Source 永不由 prune 删除。",
         ],
     },
     "troubleshooting": {
         "summary": "沿 Pipeline 分层定位，保留可复查证据。",
         "triage": [
             {"symptom": "Workspace 无法加载", "action": "先运行 validate，修复 schema、路径和重复 ID。"},
-            {"symptom": "Source 失败", "action": "单独 query；查看解析 SQL、Adapter、参数、timeout 和 traceback。"},
-            {"symptom": "Dataset Transform 失败", "action": "output 目标闭包；检查 input schema、node.error.traceback 和 node.log。"},
-            {"symptom": "Interactive Transform 失败", "action": "检查 Runtime、trigger、canonical state、generation 与 export.mode。"},
+            {"symptom": "找不到可执行口径", "action": "先 catalog search，再 catalog describe；不要猜测已移除的短 alias。必要时使用 --refresh-catalog 安全重建索引。"},
+            {"symptom": "Target Reference 无法解析", "action": "复制 catalog 返回的 canonical reference，并对照 docs target-references；不要传 Result ID 或模糊对象名。"},
+            {"symptom": "Source 失败", "action": "用规范 Source Target 单独 run；再通过 result inspect 查看解析 SQL、Adapter、参数、timeout 和 traceback。"},
+            {"symptom": "Dataset Transform 失败", "action": "run 对应 Output Target；检查 result inspect 中的 input schema、node.error.traceback 和 node.log。"},
+            {"symptom": "Interactive Transform 失败", "action": "检查 Runtime、trigger、canonical state、generation 与 export.mode；browser-python/js Derived Output 使用 --runtime browser。"},
+            {"symptom": "需要查看更多结果", "action": "不要重新 run；使用 result show 的 --offset/--limit 分页，或 result export 原样复制一个 Artifact。"},
+            {"symptom": "Result 引用的 File Source 已变化", "action": "Result 保留实际读取的 path/hash 收据；重新执行产生新 Result，不修改旧 manifest。"},
             {"symptom": "查询成功但 View 为空", "action": "检查 Named Output 字段、类型、Selection 后行数和 View input。"},
             {"symptom": "Server 正常但 HTML 失败", "action": "检查 export.mode；server-python 不能离线重算。browser-python 再检查 CDN/bundle、manifest，并通过 HTTP 打开。"},
             {"symptom": "源码环境 ModuleNotFoundError", "action": "在 dataviz-tool 下运行 uv sync --python 3.12 --extra dev --no-editable --reinstall-package ai-dataviz；后续 CLI 使用 uv run --no-editable dataviz。"},
         ],
         "evidence": [
             "dataviz validate 的完整 JSON。",
-            "query/output/compute 的状态、Node error、traceback、log 和 provenance。",
+            "result inspect 的状态、Node error、traceback、log 和 provenance。",
             "Sources 面板中的参数化 SQL 与解析 SQL。",
             "HTML 同目录的 manifest。",
         ],

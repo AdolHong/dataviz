@@ -4,7 +4,7 @@
 
 Dataviz 同时维护六类版本：
 
-- Python package：当前 `ai-dataviz 0.10.0`。
+- Python package：当前 `ai-dataviz 0.12.0`。
 - 文件 DSL：Workspace v1、Dashboard v9、Presentation v2、Source v2、Dataset/Interactive Transform v2。
 - Dashboard 依赖协议：`dataviz/dependency-contract/v5`。
 - Dashboard 布局协议：`dataviz/layout-contract/v1`。
@@ -17,7 +17,7 @@ Dataviz 同时维护六类版本：
 ```bash
 dataviz version
 dataviz schemas --format json
-dataviz components --format json
+dataviz components list --format json
 ```
 
 ## 修改公开契约
@@ -40,9 +40,9 @@ Component Registry 只在公开组件契约变化时升级；单个 Package 可�
 
 1. Python 3.11、3.12、3.13、3.14 运行 unit/contract tests。
 2. Chromium、Firefox、WebKit 运行真实 Runtime 测试，包括 Query/Interaction isolation、三 Runtime、Overlay、Selection、Renderer 和 HTML Export。
-3. `dataviz components --check` 的 Package 元数据/资产/测试声明检查通过；组件行为由前两项 pytest 与浏览器 E2E 执行。
+3. `dataviz components check` 的 Package 元数据/资产/测试声明检查通过；组件行为由前两项 pytest 与浏览器 E2E 执行。
 4. 四个代表性 Workspace 通过 `validate`，并至少执行一个 Query/Report smoke。
-5. wheel、sdist 和 pip-installable ZIP 分别进入干净 venv，运行 `version`、`schemas`、`components --check`、`init`、`validate` 和 `report`。
+5. wheel、sdist 和 pip-installable ZIP 分别进入干净 venv，运行 `version`、`schemas`、`components check`、`init`、`validate` 和 `report`。
 6. 文档只描述当前代码；计划能力必须留在 `plan.md`。
 
 构建：

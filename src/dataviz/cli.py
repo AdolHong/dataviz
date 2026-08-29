@@ -5,6 +5,7 @@ import hashlib
 import ipaddress
 import os
 import platform
+import re
 import shlex
 import shutil
 import socket
@@ -34,30 +35,16 @@ from dataviz.analysis import (
     output_analysis_usage,
     record_usage_best_effort,
     validate_analysis_catalog,
+    validate_analysis_describe,
     validate_analysis_result,
 )
 from dataviz.analysis.browser import run_browser_outputs
+from dataviz.analysis.results import AnalysisResultStore, result_manifest_hash
+from dataviz.auth import AdapterResolver
 from dataviz.authoring import (
-    build_authoring_benchmark,
     build_context_payload,
     scaffold_catalog,
     scaffold_recipe,
-)
-from dataviz.authoring_log import (
-    AUTHORING_LOG_NAME,
-    add_authoring_friction,
-    authoring_log_report,
-    finish_authoring_session,
-    start_authoring_session,
-)
-from dataviz.authoring_evaluation import (
-    AUTHORING_APPROACHES,
-    authoring_evaluation_protocol,
-    authoring_task_catalog,
-    build_authoring_evaluation_report,
-    inspect_authoring_trial,
-    prepare_authoring_trial,
-    record_authoring_assessment,
 )
 from dataviz.artifacts import ArtifactStore
 from dataviz.components import component_story_catalog, validate_component_packages
@@ -65,12 +52,13 @@ from dataviz.errors import DatavizError, ExecutionFailure
 from dataviz.frontend_adapters import frontend_adapter_catalog, frontend_adapter_source
 from dataviz.filesystem import (
     atomic_copy_file,
-    atomic_write_bytes,
     atomic_write_text,
     sha256_file,
     transactional_write_texts,
 )
 from dataviz.documentation import (
+    DOC_CATALOG_SCHEMA,
+    DOC_PATHS,
     DOC_TOPICS,
     authoring_route_catalog,
     docs_catalog,
@@ -81,14 +69,13 @@ from dataviz.execution import Executor, InteractionExecutor
 from dataviz.execution.dependencies import (
     DEPENDENCY_CONTRACT_SCHEMA,
 )
-from dataviz.execution.interactive import load_run_result
-from dataviz.execution.references import parse_output_reference
 from dataviz.maintenance import cleanup_workspace_storage
 from dataviz.rendering import CanvasRenderer, template_catalog
 from dataviz.renderer_contract import run_renderer_contract
 from dataviz.schema_docs import CURRENT_SCHEMAS, schema_catalog, schema_model_contract
 from dataviz.server import create_app
 from dataviz.templates import component_catalog
+from dataviz.target_reference import parse_target_reference
 from dataviz.validation import format_validation_text, validate_preflight
 from dataviz.workspace import load_workspace
 from dataviz.selection_state import state_from_explicit_values
@@ -107,18 +94,48 @@ app = typer.Typer(
     no_args_is_help=True,
     pretty_exceptions_show_locals=False,
 )
-authoring_app = typer.Typer(
-    name="authoring",
-    help="Record real AI authoring cost and friction in the Workspace.",
+catalog_app = typer.Typer(
+    name="catalog",
+    help="Discover reusable Dashboard data contracts without executing them.",
     no_args_is_help=True,
 )
-analysis_app = typer.Typer(
-    name="analyze",
-    help="Search and execute Dashboard data contracts for AI analysis.",
+result_app = typer.Typer(
+    name="result",
+    help="List, read, inspect, and export immutable Results without re-running data.",
     no_args_is_help=True,
 )
-app.add_typer(authoring_app, name="authoring")
-app.add_typer(analysis_app, name="analyze")
+evidence_app = typer.Typer(
+    name="evidence",
+    help="Turn immutable Results into reviewable analysis evidence.",
+    no_args_is_help=True,
+)
+inspect_app = typer.Typer(
+    name="inspect",
+    help="Inspect compiled Dashboard context, dependencies, and layout.",
+    no_args_is_help=True,
+)
+components_app = typer.Typer(
+    name="components",
+    help="Inspect, validate, and preview Component Packages.",
+    no_args_is_help=True,
+)
+renderer_app = typer.Typer(
+    name="renderer",
+    help="Develop and verify Custom Renderers.",
+    no_args_is_help=True,
+)
+benchmark_app = typer.Typer(
+    name="benchmark",
+    help="Measure observable Dataviz runtime performance.",
+    no_args_is_help=True,
+)
+app.add_typer(catalog_app, name="catalog")
+app.add_typer(result_app, name="result")
+app.add_typer(evidence_app, name="evidence")
+app.add_typer(inspect_app, name="inspect")
+app.add_typer(components_app, name="components")
+app.add_typer(renderer_app, name="renderer")
+app.add_typer(benchmark_app, name="benchmark")
 GALLERY_WORKSPACE = Path(__file__).resolve().parent / "gallery"
 
 
@@ -566,8 +583,12 @@ def handle_error(exc: Exception) -> None:
         "type": type(exc).__name__, "message": str(exc)
     }
     context = click.get_current_context(silent=True)
-    is_analysis = bool(context and " analyze " in f" {context.command_path} ")
-    if is_analysis:
+    command_path = f" {context.command_path} " if context else ""
+    is_data_command = any(
+        marker in command_path
+        for marker in (" catalog ", " result ", " evidence ", " run ")
+    )
+    if is_data_command:
         if not error.get("code"):
             error["code"] = (
                 "analysis_argument_invalid"
@@ -578,11 +599,11 @@ def handle_error(exc: Exception) -> None:
             validate_analysis_result(
                 {
                     "schema": "dataviz/analysis-result/v1",
-                    "status": "error",
+                    "status": "failed",
                     "error": error,
                     "next_actions": [
-                        "dataviz analyze --help",
-                        "dataviz docs workflow --format json",
+                        "dataviz catalog --help",
+                        "dataviz run --help",
                     ],
                 }
             )
@@ -853,49 +874,71 @@ theme:
     print_json({"status": "success", "workspace": str(path.resolve())})
 
 
-@app.command("list")
-def list_dashboards(workspace: Path = typer.Argument(..., exists=True, file_okay=False)) -> None:
-    """List dashboards and execution nodes."""
+@app.command("tree")
+def list_dashboards(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    output_format: str = typer.Option("text", "--format", help="text or json"),
+) -> None:
+    """Show the physical Workspace and Dashboard hierarchy."""
     try:
+        if output_format not in {"text", "json"}:
+            raise typer.BadParameter("--format must be text or json")
         loaded = load_workspace(workspace)
-        print_json(
+        entries = [
             {
-                "workspace": loaded.definition.model_dump(mode="json", by_alias=True),
-                "dashboards": [
-                    {
-                        "id": entry.id,
-                        "canvas_name": entry.canvas_name,
-                        "title": entry.title,
-                        "path": entry.relative_path,
-                        "logical_path": entry.logical_path,
-                        "parent_id": entry.parent_id,
-                        "status": entry.status,
-                        "runnable": entry.runnable,
-                        "discovered": entry.discovered,
-                        "message": entry.message,
-                        "presentation": (
-                            str(entry.dashboard.presentation_path.relative_to(loaded.root))
-                            if entry.dashboard and entry.dashboard.presentation_path
-                            else None
-                        ),
-                        "presentation_active": bool(entry.dashboard and entry.dashboard.presentation),
-                        "sources": list(entry.dashboard.sources) if entry.dashboard else [],
-                        "dataset_transforms": (
-                            list(entry.dashboard.dataset_transforms)
-                            if entry.dashboard
-                            else []
-                        ),
-                        "interactive_transforms": (
-                            list(entry.dashboard.interactive_transforms)
-                            if entry.dashboard
-                            else []
-                        ),
-                        "views": list(entry.dashboard.views) if entry.dashboard else [],
-                    }
-                    for entry in loaded.catalog
-                ],
+                "id": entry.id,
+                "canvas_name": entry.canvas_name,
+                "title": entry.title,
+                "path": entry.relative_path,
+                "logical_path": entry.logical_path,
+                "parent_id": entry.parent_id,
+                "status": entry.status,
+                "runnable": entry.runnable,
+                "discovered": entry.discovered,
+                "message": entry.message,
+                "presentation": (
+                    str(entry.dashboard.presentation_path.relative_to(loaded.root))
+                    if entry.dashboard and entry.dashboard.presentation_path
+                    else None
+                ),
+                "presentation_active": bool(entry.dashboard and entry.dashboard.presentation),
+                "sources": list(entry.dashboard.sources) if entry.dashboard else [],
+                "dataset_transforms": (
+                    list(entry.dashboard.dataset_transforms) if entry.dashboard else []
+                ),
+                "interactive_transforms": (
+                    list(entry.dashboard.interactive_transforms) if entry.dashboard else []
+                ),
+                "views": list(entry.dashboard.views) if entry.dashboard else [],
             }
-        )
+            for entry in loaded.catalog
+        ]
+        payload = {
+            "schema": "dataviz/workspace-tree/v1",
+            "workspace": loaded.definition.model_dump(mode="json", by_alias=True),
+            "dashboards": entries,
+        }
+        if output_format == "json":
+            print_json(payload)
+            return
+        typer.echo(f"{loaded.root.name}/")
+        for index, entry in enumerate(entries):
+            branch = "└──" if index == len(entries) - 1 else "├──"
+            status = "" if entry["status"] == "ready" else f" [{entry['status']}]"
+            typer.echo(f"{branch} {entry['logical_path']}{status}")
+            details = [
+                ("sources", entry["sources"]),
+                ("datasets", entry["dataset_transforms"]),
+                ("interactive", entry["interactive_transforms"]),
+                ("views", entry["views"]),
+            ]
+            continuation = "    " if index == len(entries) - 1 else "│   "
+            nonempty = [(label, values) for label, values in details if values]
+            for detail_index, (label, values) in enumerate(nonempty):
+                detail_branch = "└──" if detail_index == len(nonempty) - 1 else "├──"
+                typer.echo(
+                    f"{continuation}{detail_branch} {label}: " + ", ".join(values)
+                )
     except Exception as exc:
         handle_error(exc)
 
@@ -945,28 +988,50 @@ def _doc_heading(value: str) -> str:
     return value.replace("_", " ").strip().title()
 
 
+def _doc_fence_language(key: str) -> str:
+    normalized = key.casefold()
+    if "css" in normalized:
+        return "css"
+    if any(token in normalized for token in ("javascript", "browser_js", "service_example")):
+        return "javascript"
+    if "sql" in normalized:
+        return "sql"
+    return "yaml"
+
+
+def _print_doc_section(key: str, value: Any, *, level: int = 2) -> None:
+    typer.echo(f"{'#' * level} {_doc_heading(key)}\n")
+    if isinstance(value, str):
+        if "\n" in value:
+            typer.echo(f"```{_doc_fence_language(key)}")
+            typer.echo(value.rstrip())
+            typer.echo("```\n")
+        else:
+            typer.echo(f"{value}\n")
+        return
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        for item in value:
+            typer.echo(f"- {item}")
+        typer.echo()
+        return
+    if isinstance(value, dict) and any(
+        isinstance(item, str) and "\n" in item for item in value.values()
+    ):
+        for nested_key, nested_value in value.items():
+            _print_doc_section(nested_key, nested_value, level=level + 1)
+        return
+    typer.echo("```yaml")
+    typer.echo(yaml.safe_dump(value, allow_unicode=True, sort_keys=False).rstrip())
+    typer.echo("```\n")
+
+
 def _print_doc_topic(name: str, definition: dict[str, Any]) -> None:
     typer.echo(f"# Dataviz docs · {name}\n")
     typer.echo(f"{definition['summary']}\n")
     for key, value in definition.items():
         if key == "summary":
             continue
-        typer.echo(f"## {_doc_heading(key)}\n")
-        if isinstance(value, str):
-            if "\n" in value:
-                typer.echo("```yaml")
-                typer.echo(value.rstrip())
-                typer.echo("```\n")
-            else:
-                typer.echo(f"{value}\n")
-        elif isinstance(value, list) and all(isinstance(item, str) for item in value):
-            for item in value:
-                typer.echo(f"- {item}")
-            typer.echo()
-        else:
-            typer.echo("```yaml")
-            typer.echo(yaml.safe_dump(value, allow_unicode=True, sort_keys=False).rstrip())
-            typer.echo("```\n")
+        _print_doc_section(key, value)
 
 
 def _print_authoring_route(payload: dict[str, Any]) -> None:
@@ -1063,20 +1128,38 @@ def documentation(
     catalog = docs_catalog(search)
     if output_format == "json":
         print_json({
-            "start_here": {"task": "minimal", "topic": "quickstart"},
-            "recommended_workflow": "workflow",
+            "schema": DOC_CATALOG_SCHEMA,
+            "start_here": {
+                "build_dashboard": "quickstart",
+                "explore_data": "analysis-quickstart",
+            },
+            "paths": DOC_PATHS,
             "authoring_routes": authoring_route_catalog(),
             "topics": catalog,
         })
         return
-    typer.echo("# Dataviz CLI development manual\n")
-    typer.echo("Start with `dataviz docs --task minimal`; expand the route only when the task requires it.\n")
-    typer.echo("For the full manual, continue with `dataviz docs quickstart` and `dataviz docs workflow`.\n")
-    typer.echo("Before custom Presentation/CSS, read `dataviz docs design-language`.\n")
+    typer.echo("# Dataviz built-in manual\n")
+    typer.echo("Choose the path that matches the job; do not load the entire Runtime contract.\n")
     if search:
         typer.echo(f"Search: `{search}`\n")
-    for name, definition in catalog.items():
-        typer.echo(f"- **{name}** — {definition['summary']}")
+        for name, definition in catalog.items():
+            typer.echo(f"- **{name}** — {definition['summary']}")
+        if not catalog:
+            typer.echo("No matching topics.")
+    else:
+        grouped: set[str] = set()
+        for path in DOC_PATHS.values():
+            typer.echo(f"## {path['title']}\n")
+            typer.echo(f"{path['summary']} 从 `{path['command']}` 开始。\n")
+            for name in path["workflow"]:
+                grouped.add(name)
+                typer.echo(f"- **{name}** — {DOC_TOPICS[name]['summary']}")
+            typer.echo()
+        remaining = [name for name in catalog if name not in grouped]
+        if remaining:
+            typer.echo("## 参考主题\n")
+            for name in remaining:
+                typer.echo(f"- **{name}** — {catalog[name]['summary']}")
     typer.echo("\nRead a topic with `dataviz docs <topic>`; use `--format json` for machine input.")
 
 
@@ -1424,386 +1507,7 @@ def frontend_adapters(
     )
 
 
-def _first_attempt_value(value: str) -> bool | None:
-    normalized = value.strip().lower()
-    if normalized in {"success", "yes", "true"}:
-        return True
-    if normalized in {"failure", "failed", "no", "false"}:
-        return False
-    if normalized in {"unknown", "unmeasured", "none"}:
-        return None
-    raise typer.BadParameter("--first-attempt must be success, failure, or unknown")
-
-
-@authoring_app.command("start")
-def authoring_start(
-    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
-    task: str | None = typer.Option(None, "--task", help="Concrete ad-hoc authoring task"),
-    dashboard: str | None = typer.Option(None, "--dashboard"),
-    model: str | None = typer.Option(None, "--model"),
-    tool: str | None = typer.Option(None, "--tool"),
-    trial_directory: Path | None = typer.Option(
-        None,
-        "--trial-dir",
-        exists=True,
-        file_okay=False,
-        help="Prepared fixed-task directory; supplies task, approach and trial identity",
-    ),
-    notes: str = typer.Option("", "--notes"),
-) -> None:
-    """Start one append-only, shareable authoring measurement session."""
-    try:
-        trial = inspect_authoring_trial(trial_directory) if trial_directory else None
-        if trial is not None:
-            if not trial["integrity_passed"] or not trial["assessment_valid"]:
-                raise ValueError(
-                    "Prepared trial is invalid; run `dataviz authoring verify TRIAL_DIR`"
-                )
-            if task is not None:
-                raise ValueError("--task and --trial-dir are mutually exclusive")
-            if not model or not tool:
-                raise ValueError("Benchmark trials require both --model and --tool")
-            task = trial["task"]
-        elif not task or not task.strip():
-            raise ValueError("Provide --task for ad-hoc work or --trial-dir for a benchmark")
-        event = start_authoring_session(
-            workspace,
-            task=task,
-            dashboard_id=dashboard,
-            model=model,
-            tool=tool,
-            benchmark_task=trial["benchmark_task"] if trial else None,
-            approach=trial["approach"] if trial else None,
-            trial_id=trial["trial_id"] if trial else None,
-            task_contract_sha256=trial["task_contract_sha256"] if trial else None,
-            task_prompt_sha256=trial["task_prompt_sha256"] if trial else None,
-            fixture_sha256=trial["fixture_sha256"] if trial else None,
-            notes=notes,
-        )
-        workspace_arg = shlex.quote(str(workspace.resolve()))
-        session_arg = shlex.quote(event.session_id)
-        finish_command = (
-            f"dataviz authoring finish {workspace_arg} {session_arg} "
-            "--outcome success --first-attempt success --correction-rounds 0"
-        )
-        if trial_directory:
-            trial_arg = shlex.quote(str(trial_directory.resolve()))
-            next_steps = [
-                f"dataviz authoring assess {trial_arg} CHECK_ID --status passed "
-                "--assessor ASSESSOR --evidence EVIDENCE",
-                f"dataviz authoring verify {trial_arg} --format json",
-                f"{finish_command} --trial-dir {trial_arg}",
-            ]
-        else:
-            next_steps = [finish_command]
-        print_json(
-            {
-                "status": "started",
-                "session_id": event.session_id,
-                "log": str(workspace.resolve() / AUTHORING_LOG_NAME),
-                "benchmark_task": event.benchmark_task,
-                "approach": event.approach,
-                "trial_id": event.trial_id,
-                "next_steps": next_steps,
-            }
-        )
-    except Exception as exc:
-        handle_error(exc)
-
-
-@authoring_app.command("tasks")
-def authoring_tasks(
-    task: str | None = typer.Argument(None, help="Optional fixed evaluation task id"),
-    output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
-) -> None:
-    """List the five fixed Dataviz versus standalone-HTML evaluation tasks."""
-    if output_format not in {"markdown", "json"}:
-        raise typer.BadParameter("--format must be markdown or json")
-    try:
-        payload = authoring_task_catalog(task)
-    except Exception as exc:
-        handle_error(exc)
-        return
-    if output_format == "json":
-        print_json(payload)
-        return
-    typer.echo("# Dataviz AI authoring evaluation tasks\n")
-    for definition in payload["tasks"].values():
-        typer.echo(f"## {definition['id']} · {definition['title']}\n")
-        typer.echo(f"{definition['brief']}\n")
-        typer.echo("Acceptance:\n")
-        for item in definition["acceptance"]:
-            typer.echo(f"- [{item['id']}] {item['criterion']}")
-        typer.echo()
-
-
-@authoring_app.command("protocol")
-def authoring_protocol(
-    task: str | None = typer.Option(None, "--task"),
-    output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
-) -> None:
-    """Print the reproducible paired-evaluation protocol without running an AI."""
-    if output_format not in {"markdown", "json"}:
-        raise typer.BadParameter("--format must be markdown or json")
-    try:
-        payload = authoring_evaluation_protocol(task)
-    except Exception as exc:
-        handle_error(exc)
-        return
-    if output_format == "json":
-        print_json(payload)
-        return
-    typer.echo("# Dataviz AI authoring paired protocol\n")
-    typer.echo(f"{payload['quality_gate']}\n")
-    typer.echo(f"{payload['token_rule']}\n")
-    typer.echo("Run the same task once with `dataviz` and once with `standalone-html`, using the same `trial_id`.\n")
-    for name, command in payload["commands"].items():
-        typer.echo(f"- {name}: `{command}`")
-
-
-@authoring_app.command("prepare")
-def authoring_prepare(
-    task: str = typer.Argument(..., help="One id from `dataviz authoring tasks`"),
-    destination: Path = typer.Argument(...),
-    approach: str = typer.Option(..., "--approach", help="dataviz or standalone-html"),
-    trial_id: str = typer.Option(..., "--trial-id"),
-) -> None:
-    """Create a neutral data/task pack for one side of a paired trial."""
-    try:
-        payload = prepare_authoring_trial(
-            task,
-            destination,
-            approach=approach,
-            trial_id=trial_id,
-        )
-        print_json(payload)
-    except Exception as exc:
-        handle_error(exc)
-
-
-@authoring_app.command("verify")
-def authoring_verify(
-    trial_directory: Path = typer.Argument(..., exists=True, file_okay=False),
-    output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
-) -> None:
-    """Verify fixed task/input hashes and the evidence-backed acceptance record."""
-    if output_format not in {"markdown", "json"}:
-        raise typer.BadParameter("--format must be markdown or json")
-    payload = inspect_authoring_trial(trial_directory)
-    if output_format == "json":
-        print_json(payload)
-    else:
-        typer.echo(f"# Authoring trial · {payload['trial_id']}\n")
-        typer.echo(f"- Input integrity: {'passed' if payload['integrity_passed'] else 'failed'}")
-        typer.echo(f"- Assessment structure: {'valid' if payload['assessment_valid'] else 'invalid'}")
-        typer.echo(f"- Quality gate: {'passed' if payload['quality_passed'] else 'not passed'}")
-        for item in payload["checks"]:
-            typer.echo(f"- [{item['status']}] {item['id']}: {item['evidence'] or 'no evidence'}")
-        for item in payload["diagnostics"]:
-            typer.echo(f"- ERROR {item['code']}: {item['message']}")
-    if not payload["integrity_passed"] or not payload["assessment_valid"]:
-        raise typer.Exit(code=1)
-
-
-@authoring_app.command("assess")
-def authoring_assess(
-    trial_directory: Path = typer.Argument(..., exists=True, file_okay=False),
-    check_id: str = typer.Argument(...),
-    status: str = typer.Option(..., "--status", help="passed, failed or unmeasured"),
-    assessor: str | None = typer.Option(
-        None, "--assessor", help="human, automation or mixed"
-    ),
-    evidence: str = typer.Option("", "--evidence"),
-) -> None:
-    """Record evidence for exactly one fixed acceptance check."""
-    try:
-        payload = record_authoring_assessment(
-            trial_directory,
-            check_id,
-            status=status,
-            assessor=assessor,
-            evidence=evidence,
-        )
-        print_json(
-            {
-                "status": "recorded",
-                "check_id": check_id,
-                "quality_passed": payload["quality_passed"],
-                "remaining": [
-                    item["id"]
-                    for item in payload["checks"]
-                    if item["status"] != "passed"
-                ],
-            }
-        )
-    except Exception as exc:
-        handle_error(exc)
-
-
-@authoring_app.command("compare")
-def authoring_compare(
-    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
-    task: str | None = typer.Option(None, "--task"),
-    output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
-) -> None:
-    """Compare complete Dataviz/standalone-HTML trial pairs using real measurements."""
-    if output_format not in {"markdown", "json"}:
-        raise typer.BadParameter("--format must be markdown or json")
-    try:
-        sessions = authoring_log_report(workspace)["sessions"]
-        payload = build_authoring_evaluation_report(sessions, task_id=task)
-    except Exception as exc:
-        handle_error(exc)
-        return
-    if output_format == "json":
-        print_json(payload)
-        return
-    typer.echo("# Dataviz AI authoring comparison\n")
-    typer.echo(f"- Complete pairs: {payload['complete_pairs']}")
-    typer.echo(f"- Identity-matched pairs: {payload['comparable_pairs']}")
-    typer.echo(f"- Both approaches passed: {payload['quality_pairs']}")
-    typer.echo(f"- Measured sessions: {payload['sessions']}")
-    for approach in AUTHORING_APPROACHES:
-        metrics = payload["approaches"][approach]
-        typer.echo(
-            f"- {approach}: {metrics['successful']}/{metrics['sessions']} successful; "
-            f"first-attempt {metrics['first_attempt_success_rate'] if metrics['first_attempt_success_rate'] is not None else 'unmeasured'}; "
-            f"input tokens {metrics['mean_input_tokens'] if metrics['mean_input_tokens'] is not None else 'unmeasured'}"
-        )
-    if payload["diagnostics"]:
-        typer.echo("\nIncomplete/duplicate trial pairs are excluded; inspect `--format json` for diagnostics.")
-
-
-@authoring_app.command("note")
-def authoring_note(
-    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
-    session_id: str = typer.Argument(...),
-    category: str = typer.Option(..., "--category"),
-    message: str = typer.Option(..., "--message"),
-    reference: str | None = typer.Option(None, "--reference"),
-) -> None:
-    """Append one unclear document, bad contract or tooling friction observation."""
-    try:
-        event = add_authoring_friction(
-            workspace,
-            session_id,
-            category=category,
-            message=message,
-            reference=reference,
-        )
-        print_json(
-            {
-                "status": "recorded",
-                "session_id": event.session_id,
-                "category": event.category,
-            }
-        )
-    except Exception as exc:
-        handle_error(exc)
-
-
-@authoring_app.command("finish")
-def authoring_finish(
-    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
-    session_id: str = typer.Argument(...),
-    outcome: str = typer.Option("success", "--outcome"),
-    first_attempt: str = typer.Option("unknown", "--first-attempt"),
-    correction_rounds: int = typer.Option(0, "--correction-rounds", min=0),
-    input_tokens: int | None = typer.Option(None, "--input-tokens", min=0),
-    output_tokens: int | None = typer.Option(None, "--output-tokens", min=0),
-    docs_used: list[str] | None = typer.Option(None, "--docs-used"),
-    trial_directory: Path | None = typer.Option(
-        None,
-        "--trial-dir",
-        exists=True,
-        file_okay=False,
-        help="Required for a fixed benchmark session; rechecks fixtures and acceptance evidence",
-    ),
-    notes: str = typer.Option("", "--notes"),
-) -> None:
-    """Finish a session with measured quality, retries, elapsed time and token usage."""
-    try:
-        trial = inspect_authoring_trial(trial_directory) if trial_directory else None
-        event = finish_authoring_session(
-            workspace,
-            session_id,
-            outcome=outcome,
-            first_attempt_success=_first_attempt_value(first_attempt),
-            correction_rounds=correction_rounds,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            docs_used=docs_used,
-            trial_integrity_passed=trial["integrity_passed"] if trial else None,
-            acceptance_passed=trial["quality_passed"] if trial else None,
-            acceptance_results=trial["checks"] if trial else None,
-            benchmark_task=trial["benchmark_task"] if trial else None,
-            approach=trial["approach"] if trial else None,
-            trial_id=trial["trial_id"] if trial else None,
-            task_contract_sha256=trial["task_contract_sha256"] if trial else None,
-            task_prompt_sha256=trial["task_prompt_sha256"] if trial else None,
-            fixture_sha256=trial["fixture_sha256"] if trial else None,
-            notes=notes,
-        )
-        print_json(
-            {
-                "status": "finished",
-                "session_id": event.session_id,
-                "outcome": event.outcome,
-                "elapsed_seconds": event.elapsed_seconds,
-                "token_source": event.token_source,
-                "trial_integrity_passed": event.trial_integrity_passed,
-                "acceptance_passed": event.acceptance_passed,
-            }
-        )
-    except Exception as exc:
-        handle_error(exc)
-
-
-@authoring_app.command("show")
-def authoring_show(
-    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
-    session_id: str | None = typer.Option(None, "--session"),
-    output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
-) -> None:
-    """Aggregate the append-only authoring log without inventing missing measurements."""
-    if output_format not in {"markdown", "json"}:
-        raise typer.BadParameter("--format must be markdown or json")
-    try:
-        report = authoring_log_report(workspace, session_id=session_id)
-    except Exception as exc:
-        handle_error(exc)
-        return
-    if output_format == "json":
-        print_json(report)
-        return
-    metrics = report["metrics"]
-    typer.echo("# Dataviz authoring log\n")
-    typer.echo(f"File: `{report['log_file']}`\n")
-    typer.echo(f"- Sessions: {metrics['sessions']} ({metrics['finished']} finished)")
-    typer.echo(f"- Successful: {metrics['successful']}")
-    typer.echo(
-        f"- First-attempt success: {metrics['first_attempt_success_rate'] if metrics['first_attempt_success_rate'] is not None else 'unmeasured'}"
-    )
-    typer.echo(
-        f"- Mean correction rounds: {metrics['mean_correction_rounds'] if metrics['mean_correction_rounds'] is not None else 'unmeasured'}"
-    )
-    typer.echo(
-        f"- Reported tokens: {metrics['reported_input_tokens']} input / "
-        f"{metrics['reported_output_tokens']} output across {metrics['token_measured_sessions']} sessions\n"
-    )
-    for session in report["sessions"]:
-        typer.echo(
-            f"## {session['session_id']} · {session.get('outcome', session['status'])}\n\n"
-            f"{session.get('task', 'Orphaned event')}\n"
-        )
-        for friction in session["frictions"]:
-            reference = f" · {friction['reference']}" if friction.get("reference") else ""
-            typer.echo(f"- {friction['category']}{reference}: {friction['message']}")
-        if session["frictions"]:
-            typer.echo()
-
-
-@app.command()
+@components_app.command("list")
 def components(
     name: str | None = typer.Argument(None, help="Component name, for example control.cascader"),
     category: str | None = typer.Option(
@@ -1884,7 +1588,36 @@ def components(
         typer.echo("```\n")
 
 
-@app.command()
+@components_app.command("show")
+def component_show(
+    name: str = typer.Argument(..., help="Component name, for example control.cascader"),
+    output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
+) -> None:
+    """Show one Component contract, example, semantic DOM, and style tokens."""
+
+    components(
+        name=name,
+        category=None,
+        output_format=output_format,
+        check_packages=False,
+    )
+
+
+@components_app.command("check")
+def component_check(
+    output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
+) -> None:
+    """Validate every installed Component Package and its declared assets."""
+
+    components(
+        name=None,
+        category=None,
+        output_format=output_format,
+        check_packages=True,
+    )
+
+
+@components_app.command("gallery")
 def gallery(
     output: Path | None = typer.Option(
         None, "--output", help="Export the Gallery as one interactive HTML instead of serving it"
@@ -1929,7 +1662,7 @@ def gallery(
         handle_error(exc)
 
 
-@app.command("renderer-test")
+@renderer_app.command("test")
 def renderer_test(
     script: Path = typer.Argument(..., exists=True, dir_okay=False, help="Custom Renderer JavaScript"),
     renderer_id: str = typer.Option(..., "--renderer-id", help="Registered Renderer id"),
@@ -1959,7 +1692,7 @@ def renderer_test(
         handle_error(exc)
 
 
-@app.command()
+@inspect_app.command("context")
 def context(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     dashboard: str = typer.Argument(...),
@@ -1989,7 +1722,7 @@ def context(
         handle_error(exc)
 
 
-@app.command("dependencies")
+@inspect_app.command("dependencies")
 def dependencies_command(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     dashboard: str = typer.Argument(...),
@@ -2102,7 +1835,7 @@ def dependencies_command(
         handle_error(exc)
 
 
-@app.command("inspect-layout")
+@inspect_app.command("layout")
 def inspect_layout(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     dashboard: str = typer.Argument(...),
@@ -2245,19 +1978,11 @@ def scaffold(
         handle_error(exc)
 
 
-@app.command()
+@benchmark_app.command("runtime")
 def benchmark(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     dashboard: str = typer.Argument(...),
-    focus: str | None = typer.Option(
-        None, "--focus", help="Measure one context slice instead of every View"
-    ),
     output_format: str = typer.Option("json", "--format", help="json or markdown"),
-    browser_runtime: bool = typer.Option(
-        False,
-        "--browser-runtime",
-        help="Also execute the exported page in a real browser and measure Runtime scale",
-    ),
     query_param: list[str] | None = typer.Option(
         None,
         "--query-param",
@@ -2282,75 +2007,35 @@ def benchmark(
         help="Browser Runtime benchmark deadline",
     ),
 ) -> None:
-    """Measure authoring footprint and, optionally, the real browser Runtime."""
+    """Measure Query, report, browser rendering, memory, and disposal performance."""
     try:
         if output_format not in {"markdown", "json"}:
             raise typer.BadParameter("--format must be markdown or json")
         loaded = load_workspace(workspace)
-        payload = build_authoring_benchmark(
-            loaded, loaded.dashboard(dashboard), focus=focus
+        payload = _browser_runtime_benchmark(
+            loaded,
+            loaded.dashboard(dashboard),
+            timeout_seconds=timeout_seconds,
+            query_parameters=parse_params(query_param),
+            browser_name=browser,
+            repeat=repeat,
         )
-        if browser_runtime:
-            payload["browser_runtime"] = _browser_runtime_benchmark(
-                loaded,
-                loaded.dashboard(dashboard),
-                timeout_seconds=timeout_seconds,
-                query_parameters=parse_params(query_param),
-                browser_name=browser,
-                repeat=repeat,
-            )
         if output_format == "json":
             print_json(payload)
             return
-        summary = payload["context"]["focused_summary"]
-        files = payload["authoring_files"]["totals"]
-        typer.echo(f"# Dataviz authoring benchmark · {payload['dashboard']}\n")
+        transport = payload["runtime"].get("transports", {})
+        renderers = payload["runtime"].get("renderers", {})
+        typer.echo(f"# Dataviz runtime benchmark · {payload['dashboard']}\n")
         typer.echo(
-            f"- Authoring code: {files['all']['lines']} lines / "
-            f"{files['all']['utf8_bytes']} bytes"
-        )
-        typer.echo(f"- Full context: {payload['context']['full']['utf8_bytes']} bytes")
-        typer.echo(
-            f"- Focused context median: {summary['median_utf8_bytes']} bytes "
-            f"({summary['median_reduction_percent']}% smaller)"
+            f"- Browser: {payload['browser']['name']} · "
+            f"query {payload['query']['duration_ms']} ms · "
+            f"report {payload['report']['build_ms']} ms · "
+            f"page ready median {payload['browser']['page_ready_ms']['median']} ms"
         )
         typer.echo(
-            f"- Strict validation: "
-            f"{'valid' if payload['validation']['valid'] else 'invalid'}"
-        )
-        if payload.get("browser_runtime"):
-            runtime = payload["browser_runtime"]
-            transport = runtime["runtime"].get("transports", {})
-            renderers = runtime["runtime"].get("renderers", {})
-            typer.echo(
-                f"- Browser Runtime ({runtime['browser']['name']}): "
-                f"query {runtime['query']['duration_ms']} ms; "
-                f"report {runtime['report']['build_ms']} ms; "
-                f"page ready median {runtime['browser']['page_ready_ms']['median']} ms"
-            )
-            typer.echo(
-                f"- Arrow: {transport.get('arrowRows', 0)} rows / "
-                f"{transport.get('arrowBytes', 0)} bytes; "
-                f"renderer failures: {renderers.get('failed', 0)}"
-            )
-            typer.echo(
-                f"- Repeat Sections: {len(runtime['repeat_sections'])}; "
-                f"max groups: {max((item['groups'] for item in runtime['repeat_sections']), default=0)}"
-            )
-            typer.echo(
-                f"- Peak Chromium JS heap: "
-                f"{runtime['browser']['peak_js_heap_bytes'] or 'unavailable'} bytes; "
-                f"max retained delta: "
-                f"{runtime['browser']['maximum_retained_delta_bytes'] or 'unavailable'} bytes"
-            )
-            typer.echo(
-                f"- Browser process-tree peak increase: "
-                f"{runtime['browser']['peak_process_tree_increase_bytes'] or 'unavailable'} bytes; "
-                f"final retained delta: "
-                f"{runtime['browser']['final_process_tree_retained_delta_bytes'] or 0} bytes"
-            )
-        typer.echo(
-            "\nToken counts and AI retry quality are intentionally left for model-specific evals.\n"
+            f"- Arrow: {transport.get('arrowRows', 0)} rows / "
+            f"{transport.get('arrowBytes', 0)} bytes · "
+            f"renderer failures: {renderers.get('failed', 0)}"
         )
         typer.echo(f"```json\n{json.dumps(payload, ensure_ascii=False, indent=2)}\n```")
     except Exception as exc:
@@ -2362,7 +2047,6 @@ def _analysis_entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
         key: entry.get(key)
         for key in (
             "schema",
-            "alias",
             "reference",
             "kind",
             "stage",
@@ -2382,7 +2066,16 @@ def _analysis_entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
             "runtime",
             "source_type",
             "query_parameters",
+            "parameter_contracts",
             "controls",
+            "control_contracts",
+            "output",
+            "outputs",
+            "inputs",
+            "base_inputs",
+            "upstream_outputs",
+            "downstream_views",
+            "match_reasons",
             "equivalence_hash",
             "representative",
             "occurrence_count",
@@ -2393,9 +2086,162 @@ def _analysis_entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
     } | {"dashboard": entry["dashboard"]}
 
 
+def _analysis_parameter_text(entry: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for parameter in entry.get("parameter_contracts", []):
+        flags = [str(parameter.get("value_type") or parameter.get("type") or "value")]
+        if parameter.get("required"):
+            flags.append("required")
+        if "default" in parameter:
+            flags.append(f"default={parameter['default']!r}")
+        options = parameter.get("options") or {}
+        if options:
+            candidate = str(options.get("mode"))
+            if options.get("count") is not None:
+                candidate += f"({options['count']})"
+            flags.append(candidate)
+        parts.append(f"{parameter['id']}[{', '.join(flags)}]")
+    return ", ".join(parts)
+
+
+def _analysis_catalog_text(entries: list[dict[str, Any]], *, compact: bool) -> None:
+    for index, entry in enumerate(entries):
+        if index:
+            typer.echo()
+        if compact:
+            typer.echo(
+                f"{entry['reference']}  {entry['kind']}  "
+                f"{entry['dashboard']['id']}  {entry['title']}"
+            )
+            continue
+        typer.echo(str(entry.get("title") or entry["reference"]))
+        if entry.get("purpose"):
+            typer.echo(f"  {entry['purpose']}")
+        context: list[str] = []
+        if entry.get("grain"):
+            context.append(f"Grain: {entry['grain']}")
+        assurance = entry.get("assurance") or {}
+        if assurance.get("status"):
+            context.append(str(assurance["status"]).title())
+        output = entry.get("output") or {}
+        if output.get("kind"):
+            field_count = len(output.get("schema") or [])
+            output_text = str(output["kind"])
+            if field_count:
+                output_text += f" / {field_count} fields"
+            context.append(f"Output: {output_text}")
+        if context:
+            typer.echo("  " + " · ".join(context))
+        parameters = _analysis_parameter_text(entry)
+        if parameters:
+            typer.echo(f"  Inputs: {parameters}")
+        controls = entry.get("control_contracts") or []
+        if controls:
+            typer.echo(
+                "  Controls: "
+                + ", ".join(
+                    f"{item['key']}[{item['kind']}, {item['value_type']}]"
+                    for item in controls
+                )
+            )
+        consumers = entry.get("downstream_views") or []
+        if consumers:
+            typer.echo("  Used by: " + ", ".join(consumers))
+        occurrence_count = int(entry.get("occurrence_count") or 1)
+        occurrence = f" · {occurrence_count} exact occurrences" if occurrence_count > 1 else ""
+        typer.echo(
+            f"  Ref: {entry['reference']} · {entry['kind']}{occurrence}"
+        )
+        reasons = entry.get("match_reasons") or []
+        if reasons:
+            typer.echo("  Match: " + ", ".join(reasons))
+
+
+def _analysis_match_reasons(
+    entry: dict[str, Any], query: str, *, regex: bool
+) -> list[str]:
+    if not query:
+        return []
+    fields: list[tuple[str, str]] = [
+        ("title", str(entry.get("title") or "")),
+        ("purpose", str(entry.get("purpose") or "")),
+        ("grain", str(entry.get("grain") or "")),
+        ("dashboard", " ".join(str(value) for value in entry.get("dashboard", {}).values())),
+        ("parameter", " ".join(entry.get("query_parameters") or [])),
+        (
+            "field",
+            " ".join(
+                str(item.get("name") or "")
+                for item in (entry.get("output") or {}).get("schema", [])
+            ),
+        ),
+        ("view", " ".join(entry.get("downstream_views") or [])),
+    ]
+    if regex:
+        pattern = re.compile(query, re.IGNORECASE)
+        return [name for name, value in fields if value and pattern.search(value)]
+    terms = [term.casefold() for term in query.split() if term]
+    return [
+        name
+        for name, value in fields
+        if value and any(term in value.casefold() for term in terms)
+    ]
+
+
+def _analysis_primary_search_entries(
+    catalog,
+    entries: list[dict[str, Any]],
+    *,
+    explicit_kind: str | None,
+    include_internal: bool,
+    include_untrusted: bool,
+) -> list[dict[str, Any]]:
+    """Keep reusable Outputs primary while retaining Source/View match evidence."""
+
+    if explicit_kind is not None:
+        return entries
+    selected: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        if entry["kind"] in {"base_output", "derived_output"}:
+            selected.setdefault(entry["reference"], dict(entry))
+            continue
+        related = (
+            list(entry.get("outputs", []))
+            if entry["kind"] == "source"
+            else list((entry.get("inputs") or {}).values())
+        )
+        for reference in related:
+            try:
+                output = dict(catalog.resolve(reference))
+            except Exception:
+                continue
+            if output["kind"] not in {"base_output", "derived_output"}:
+                continue
+            if not include_internal and output.get("visibility", "public") != "public":
+                continue
+            if (
+                not include_untrusted
+                and output.get("assurance", {}).get("status", "draft")
+                not in {"reviewed", "certified"}
+            ):
+                continue
+            target = selected.setdefault(output["reference"], output)
+            target.setdefault("related_matches", []).append(
+                f"{entry['kind']}:{entry.get('title') or entry['reference']}"
+            )
+    return sorted(
+        selected.values(),
+        key=lambda entry: (
+            entry["dashboard"]["id"],
+            entry["kind"],
+            entry["reference"],
+        ),
+    )
+
+
 def _analysis_catalog_payload(catalog, entries: list[dict[str, Any]]) -> dict[str, Any]:
     incomplete = [
-        entry["alias"]
+        entry["reference"]
         for entry in entries
         if entry.get("semantic_status") == "incomplete"
     ]
@@ -2413,7 +2259,7 @@ def _analysis_catalog_payload(catalog, entries: list[dict[str, Any]]) -> dict[st
                         f"{len(incomplete)} public Output(s) need purpose/grain metadata "
                         "before the Analysis Catalog can be treated as self-explanatory."
                     ),
-                    "aliases": incomplete,
+                    "references": incomplete,
                 }
             ]
             if incomplete
@@ -2468,13 +2314,132 @@ def _analysis_overlay_payload(variant) -> dict[str, Any]:
 def _print_analysis_result(payload: dict[str, Any]) -> None:
     """Validate every successful/error Analysis result at the CLI boundary."""
 
-    print_json(validate_analysis_result(payload))
+    normalized = dict(payload)
+    if normalized.get("status") == "error":
+        normalized["status"] = "failed"
+    print_json(validate_analysis_result(normalized))
 
 
-@analysis_app.command("evidence")
+def _analysis_artifact_binding(loaded, dashboard, entry, store, artifact) -> dict[str, Any]:
+    node_id = str(entry.get("node_id") or "")
+    if node_id.startswith("source:"):
+        source_id = node_id.split(":", 1)[1]
+        definition_path, definition = dashboard.sources[source_id]
+        if definition.type == "file":
+            if definition.adapter:
+                path = AdapterResolver(loaded.root).resolve_path(
+                    definition.adapter,
+                    definition.path,
+                    dashboard.definition.adapters,
+                )
+            else:
+                path = (definition_path.parent / definition.path).resolve()
+            return {
+                "source_path": path,
+                "format": definition.format or path.suffix.lstrip(".").lower(),
+                "options": definition.options,
+                "content_hash": sha256_file(path),
+            }
+    return {
+        "artifact_path": store.resolve(artifact),
+        "format": artifact.format,
+        "content_hash": artifact.content_hash,
+    }
+
+
+def _analysis_result_text(payload: dict[str, Any]) -> None:
+    typer.echo(str(payload.get("status") or "ready").upper())
+    typer.echo(f"Result: {payload['result_id']}")
+    typer.echo(f"Path: {payload['result_path']}")
+    target = payload.get("target") or {}
+    if target:
+        typer.echo(
+            f"Target: {target.get('title') or target.get('reference')} "
+            f"({target.get('reference')})"
+        )
+    lineage = payload.get("lineage") or {}
+    nodes = [
+        *lineage.get("query_nodes", []),
+        *lineage.get("interactive_nodes", []),
+    ]
+    if nodes:
+        typer.echo("DAG: " + " <- ".join(dict.fromkeys(nodes)))
+    for output in payload.get("outputs", []):
+        rows = output.get("rows")
+        suffix = f" · {rows} rows" if rows is not None else ""
+        typer.echo()
+        typer.echo(f"{output['reference']} · {output['kind']}{suffix}")
+        preview = output.get("preview")
+        if output.get("kind") == "table" and isinstance(preview, list):
+            import pandas as pd
+
+            frame = pd.DataFrame(preview)
+            if not frame.empty:
+                typer.echo(frame.to_string(index=False))
+        elif preview is not None:
+            typer.echo(str(preview))
+    typer.echo()
+    typer.echo("Next:")
+    for action in payload.get("next_actions", []):
+        typer.echo(f"  {action}")
+
+
+def _publish_analysis_result(
+    workspace: Path,
+    payload: dict[str, Any],
+    bindings: dict[str, dict[str, Any]],
+    *,
+    output_format: str,
+) -> dict[str, Any]:
+    normalized = dict(payload)
+    if normalized.get("status") == "error":
+        normalized["status"] = "failed"
+    validated = validate_analysis_result(normalized)
+    store = AnalysisResultStore(workspace)
+    published = validate_analysis_result(store.publish(validated, bindings))
+    if output_format == "json":
+        print_json(published)
+    else:
+        _analysis_result_text(published)
+    return published
+
+
+def _publish_failed_result(
+    workspace: Path,
+    *,
+    target: dict[str, Any],
+    generation: str | None,
+    query_parameters: dict[str, Any],
+    error: dict[str, Any],
+    output_format: str,
+    status: str = "failed",
+    lineage: dict[str, Any] | None = None,
+    provenance: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Seal a terminal execution failure; preflight failures never call this helper."""
+
+    payload = {
+        "schema": "dataviz/analysis-result/v1",
+        "status": status,
+        "generation": generation,
+        "target": _analysis_entry_summary(target),
+        "query_parameters": query_parameters,
+        "effective_controls": {},
+        "outputs": [],
+        "lineage": lineage or {},
+        "provenance": provenance or {},
+        "timing": {},
+        "error": error,
+    }
+    return _publish_analysis_result(
+        workspace, payload, {}, output_format=output_format
+    )
+
+
+@evidence_app.command("create")
 def analyze_evidence(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
-    result: str = typer.Argument(..., help="Analysis Result JSON file, or - for stdin"),
+    result: str = typer.Argument(..., help="Immutable Result id"),
     question: str = typer.Option(..., "--question"),
     conclusion: list[str] = typer.Option(..., "--conclusion"),
     assertion: list[str] | None = typer.Option(None, "--assertion"),
@@ -2488,16 +2453,11 @@ def analyze_evidence(
     try:
         if status not in {"draft", "reviewed"}:
             raise typer.BadParameter("--status must be draft or reviewed")
-        if result == "-":
-            payload = json.load(sys.stdin)
-            source = "stdin"
-        else:
-            result_path = Path(result).resolve()
-            payload = json.loads(result_path.read_text(encoding="utf-8"))
-            try:
-                source = result_path.relative_to(workspace.resolve()).as_posix()
-            except ValueError:
-                source = result_path.name
+        store = AnalysisResultStore(workspace)
+        with store.lease(result):
+            manifest = store.load(result)
+        payload = manifest["result"]
+        source = f".dataviz/results/{result}/manifest.json"
         evidence, destination = create_analysis_evidence(
             workspace,
             payload,
@@ -2513,7 +2473,8 @@ def analyze_evidence(
         output = evidence.model_dump(mode="json", by_alias=True)
         output["artifact"] = destination.relative_to(workspace.resolve()).as_posix()
         output["next_actions"] = [
-            f"dataviz analyze promote {shlex.quote(str(workspace))} {evidence.evidence_id} proposal.yaml --dry-run"
+            f"dataviz evidence promote {shlex.quote(str(workspace))} "
+            f"{evidence.evidence_id} proposal.yaml --dry-run"
         ]
         print_json(output)
     except typer.Exit:
@@ -2522,7 +2483,7 @@ def analyze_evidence(
         handle_error(exc)
 
 
-@analysis_app.command("promote")
+@evidence_app.command("promote")
 def analyze_promote(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     evidence_reference: str = typer.Argument(..., help="Evidence id or JSON path"),
@@ -2560,15 +2521,15 @@ def analyze_promote(
         handle_error(exc)
 
 
-@analysis_app.command("list", hidden=True)
-@analysis_app.command("all")
+@catalog_app.command("list")
 def analyze_list(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     kind: str | None = typer.Option("base", "--kind", help="base, derived, source, view, or all"),
     dashboard: str | None = typer.Option(None, "--dashboard", help="Filter by Dashboard id"),
     source_type: str | None = typer.Option(None, "--source-type", help="Filter by Source type"),
     parameter: str | None = typer.Option(None, "--parameter", help="Require a Query Parameter id"),
-    output_format: str = typer.Option("json", "--format", help="json or text"),
+    output_format: str = typer.Option("text", "--format", help="text or json"),
+    compact: bool = typer.Option(False, "--compact", help="Use the legacy one-line index"),
     refresh_catalog: bool = typer.Option(False, "--refresh-catalog", help="Force a safe Catalog rebuild"),
     include_internal: bool = typer.Option(False, "--include-internal", help="Include internal Outputs"),
     include_untrusted: bool = typer.Option(
@@ -2580,7 +2541,7 @@ def analyze_list(
     expand_occurrences: bool = typer.Option(
         False,
         "--expand-occurrences",
-        help="Include every folded alias/reference and its own usage",
+        help="Include every folded physical reference and its own usage",
     ),
     top: int | None = typer.Option(
         None, "--top", min=1, help="Return N results after exact folding"
@@ -2608,18 +2569,14 @@ def analyze_list(
         if output_format == "json":
             print_json(_analysis_catalog_payload(catalog, entries))
             return
-        for entry in entries:
-            typer.echo(
-                f"@{entry['alias']}  {entry['kind']}  "
-                f"{entry['dashboard']['id']}  {entry['title']}"
-            )
+        _analysis_catalog_text(entries, compact=compact)
     except typer.Exit:
         raise
     except Exception as exc:
         handle_error(exc)
 
 
-@analysis_app.command("search")
+@catalog_app.command("search")
 def analyze_search(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     query_text: str = typer.Argument(..., help="Words describing the desired data contract"),
@@ -2627,7 +2584,8 @@ def analyze_search(
     dashboard: str | None = typer.Option(None, "--dashboard", help="Filter by Dashboard id"),
     source_type: str | None = typer.Option(None, "--source-type", help="Filter by Source type"),
     parameter: str | None = typer.Option(None, "--parameter", help="Require a Query Parameter id"),
-    output_format: str = typer.Option("json", "--format", help="json or text"),
+    output_format: str = typer.Option("text", "--format", help="text or json"),
+    compact: bool = typer.Option(False, "--compact", help="Use the legacy one-line index"),
     regex: bool = typer.Option(
         True,
         "--regex/--literal",
@@ -2644,7 +2602,7 @@ def analyze_search(
     expand_occurrences: bool = typer.Option(
         False,
         "--expand-occurrences",
-        help="Include every folded alias/reference and its own usage",
+        help="Include every folded physical reference and its own usage",
     ),
     top: int | None = typer.Option(
         None, "--top", min=1, help="Return N results after exact folding"
@@ -2655,13 +2613,21 @@ def analyze_search(
         if output_format not in {"json", "text"}:
             raise typer.BadParameter("--format must be json or text")
         catalog = ensure_analysis_catalog(workspace, refresh=refresh_catalog)
+        normalized_kind = _analysis_validate_kind(kind)
         entries = catalog.select(
             query=query_text,
-            kind=_analysis_validate_kind(kind),
+            kind=normalized_kind,
             dashboard=dashboard,
             source_type=source_type,
             parameter=parameter,
             regex=regex,
+            include_internal=include_internal,
+            include_untrusted=include_untrusted,
+        )
+        entries = _analysis_primary_search_entries(
+            catalog,
+            entries,
+            explicit_kind=normalized_kind,
             include_internal=include_internal,
             include_untrusted=include_untrusted,
         )
@@ -2671,64 +2637,152 @@ def analyze_search(
             expand_occurrences=expand_occurrences,
             top=top,
         )
+        entries = [
+            {
+                **entry,
+                "match_reasons": _analysis_match_reasons(
+                    entry, query_text, regex=regex
+                ) + list(entry.get("related_matches") or []),
+            }
+            for entry in entries
+        ]
         if output_format == "json":
             print_json(_analysis_catalog_payload(catalog, entries))
             return
-        for entry in entries:
-            typer.echo(
-                f"@{entry['alias']}  {entry['kind']}  "
-                f"{entry['dashboard']['id']}  {entry['title']}"
-            )
+        _analysis_catalog_text(entries, compact=compact)
     except typer.Exit:
         raise
     except Exception as exc:
         handle_error(exc)
 
 
-@analysis_app.command("show")
-def analyze_show(
+@catalog_app.command("describe")
+def analyze_describe(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
-    reference: str = typer.Argument(..., help="@short-alias or full canonical reference"),
+    references: list[str] = typer.Argument(
+        ..., help="One or more canonical Target References"
+    ),
     refresh_catalog: bool = typer.Option(False, "--refresh-catalog"),
     detail: str = typer.Option("summary", "--detail", help="summary, debug, or full"),
+    output_format: str = typer.Option("text", "--format", help="text or json"),
     include_code: bool = typer.Option(
         False,
         "--include-code",
         help="Include redacted SQL/JS/Python text for the target closure",
     ),
 ) -> None:
-    """Show one Analysis contract and its directly executable command."""
+    """Describe how to execute one or more contracts without running data."""
     try:
+        if output_format not in {"text", "json"}:
+            raise typer.BadParameter("--format must be text or json")
         detail = _result_detail(detail)
         if include_code and detail != "full":
             raise typer.BadParameter("--include-code requires --detail full")
         catalog = ensure_analysis_catalog(workspace, refresh=refresh_catalog)
-        resolved = dict(catalog.resolve(reference))
-        entry = (
-            _analysis_entry_summary(resolved)
-            if detail == "summary"
-            else resolved
+        loaded = load_workspace(workspace) if detail == "full" else None
+        items: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        failed = False
+        for requested in references:
+            try:
+                resolved = dict(catalog.resolve(requested))
+                if resolved["reference"] in seen:
+                    continue
+                seen.add(resolved["reference"])
+                entry = (
+                    _analysis_entry_summary(resolved)
+                    if detail == "summary"
+                    else resolved
+                )
+                local_closure = {
+                    key: resolved.get(key, [])
+                    for key in (
+                        "query_nodes",
+                        "interactive_nodes",
+                        "base_inputs",
+                        "upstream_outputs",
+                        "inputs",
+                    )
+                    if resolved.get(key)
+                }
+                item: dict[str, Any] = {
+                    "status": "ready",
+                    "requested_reference": requested,
+                    "entry": entry,
+                    "invocation": {
+                        "query_parameters": resolved.get("parameter_contracts", []),
+                        "controls": resolved.get("control_contracts", []),
+                        "outputs": resolved.get("outputs")
+                        or resolved.get("inputs")
+                        or [resolved["reference"]],
+                    },
+                    "closure": local_closure,
+                    "next_actions": [
+                        f"dataviz run {shlex.quote(str(workspace))} {resolved['reference']}"
+                    ],
+                }
+                if detail == "full" and loaded is not None:
+                    dashboard = loaded.dashboard(resolved["dashboard"]["id"])
+                    closure_references = (
+                        resolved.get("inputs", {}).values()
+                        if resolved["kind"] == "view"
+                        else [resolved["reference"]]
+                    )
+                    item["closure"] = inspect_analysis_closure(
+                        loaded,
+                        dashboard,
+                        closure_references,
+                        include_code=include_code,
+                    )
+                items.append(item)
+            except Exception as error:
+                failed = True
+                details = getattr(error, "details", {}) or {}
+                items.append(
+                    {
+                        "status": "error",
+                        "requested_reference": requested,
+                        "error": {
+                            "code": details.get("code", "analysis_describe_failed"),
+                            "message": str(error),
+                        },
+                    }
+                )
+        payload = validate_analysis_describe(
+            {
+                "schema": "dataviz/analysis-describe/v1",
+                "generation": catalog.generation,
+                "count": len(items),
+                "items": items,
+            }
         )
-        entry["generation"] = catalog.generation
-        entry["next_actions"] = [
-            f"dataviz analyze run {shlex.quote(str(workspace))} @{resolved['alias']} --format json",
-            f"dataviz analyze search {shlex.quote(str(workspace))} {shlex.quote(resolved['dashboard']['id'])} --format json",
-        ]
-        if detail == "full":
-            loaded = load_workspace(workspace)
-            dashboard = loaded.dashboard(resolved["dashboard"]["id"])
-            references = (
-                resolved.get("inputs", {}).values()
-                if resolved["kind"] == "view"
-                else [resolved["reference"]]
-            )
-            entry["closure"] = inspect_analysis_closure(
-                loaded,
-                dashboard,
-                references,
-                include_code=include_code,
-            )
-        print_json(entry)
+        if output_format == "json":
+            print_json(payload)
+        else:
+            for index, item in enumerate(payload["items"]):
+                if index:
+                    typer.echo()
+                if item["status"] == "error":
+                    typer.echo(
+                        f"{item['requested_reference']}: ERROR {item['error']['message']}"
+                    )
+                    continue
+                entry = item["entry"]
+                typer.echo(str(entry.get("title") or entry["reference"]))
+                if entry.get("purpose"):
+                    typer.echo(f"  {entry['purpose']}")
+                typer.echo(
+                    f"  Ref: {entry['reference']} · {entry['kind']}"
+                )
+                parameters = _analysis_parameter_text(entry)
+                typer.echo(f"  Parameters: {parameters or 'none'}")
+                closure = item.get("closure") or {}
+                for key, values in closure.items():
+                    if values:
+                        typer.echo(f"  {key}: {values}")
+                typer.echo(f"  Run: {item['next_actions'][0]}")
+        if failed:
+            raise typer.Exit(1)
     except typer.Exit:
         raise
     except Exception as exc:
@@ -2745,138 +2799,6 @@ def _analysis_artifact_value(store: ArtifactStore, artifact, limit: int) -> tupl
     return value, truncated
 
 
-def _analysis_emit_non_json(store: ArtifactStore, artifact, output_format: str, limit: int) -> None:
-    value = store.read_value(artifact)
-    if artifact.kind == "table":
-        _analysis_emit_frame(value.head(limit), output_format)
-        return
-    typer.echo(str(value))
-
-
-def _analysis_emit_frame(frame, output_format: str) -> None:
-    if output_format == "csv":
-        typer.echo(frame.to_csv(index=False), nl=False)
-    elif output_format == "markdown":
-        typer.echo(frame.to_markdown(index=False))
-    elif output_format == "text":
-        typer.echo(frame.to_string(index=False))
-    else:  # pragma: no cover - validated by the command boundary.
-        raise typer.BadParameter(f"Unsupported Analysis format: {output_format}")
-
-
-def _analysis_export_path(
-    workspace: Path,
-    entry: dict[str, Any],
-    run_id: str,
-    output_format: str,
-    destination: Path | None,
-    *,
-    output_count: int,
-) -> Path:
-    suffix = f".{output_format}"
-    filename = f"{entry['alias']}{suffix}"
-    if destination is None:
-        return workspace.resolve() / ".dataviz" / "analysis-exports" / run_id / filename
-    resolved = destination.expanduser().resolve()
-    if output_count > 1:
-        if resolved.suffix:
-            raise typer.BadParameter(
-                "--destination must be a directory when exporting multiple Outputs"
-            )
-        return resolved / filename
-    if resolved.is_dir() or not resolved.suffix:
-        return resolved / filename
-    if resolved.suffix.casefold() != suffix:
-        raise typer.BadParameter(
-            f"--destination must end with {suffix} for --format {output_format}"
-        )
-    return resolved
-
-
-def _analysis_export_metadata(workspace: Path, path: Path, output_format: str) -> dict[str, Any]:
-    try:
-        display_path = path.relative_to(workspace.resolve()).as_posix()
-    except ValueError:
-        display_path = str(path)
-    return {
-        "format": output_format,
-        "path": display_path,
-        "size_bytes": path.stat().st_size,
-        "sha256": sha256_file(path),
-    }
-
-
-def _analysis_export_artifact(
-    workspace: Path,
-    store: ArtifactStore,
-    artifact,
-    entry: dict[str, Any],
-    output_format: str,
-    destination: Path | None,
-    *,
-    output_count: int,
-) -> dict[str, Any]:
-    if artifact.kind != "table":
-        raise typer.BadParameter(f"--format {output_format} requires a table Output")
-    path = _analysis_export_path(
-        workspace,
-        entry,
-        store.run_id,
-        output_format,
-        destination,
-        output_count=output_count,
-    )
-    if output_format == "parquet" and artifact.format == "parquet":
-        atomic_copy_file(
-            store.resolve(artifact),
-            path,
-            expected_sha256=artifact.content_hash,
-        )
-    else:
-        import pyarrow as pa
-
-        table = store.read_arrow_table(artifact)
-        sink = pa.BufferOutputStream()
-        with pa.ipc.new_stream(sink, table.schema) as writer:
-            writer.write_table(table)
-        atomic_write_bytes(path, sink.getvalue().to_pybytes())
-    return _analysis_export_metadata(workspace, path, output_format)
-
-
-def _analysis_export_frame(
-    workspace: Path,
-    frame,
-    entry: dict[str, Any],
-    run_id: str,
-    output_format: str,
-    destination: Path | None,
-    *,
-    output_count: int,
-) -> dict[str, Any]:
-    path = _analysis_export_path(
-        workspace,
-        entry,
-        run_id,
-        output_format,
-        destination,
-        output_count=output_count,
-    )
-    if output_format == "arrow":
-        import pyarrow as pa
-
-        table = pa.Table.from_pandas(frame, preserve_index=False)
-        sink = pa.BufferOutputStream()
-        with pa.ipc.new_stream(sink, table.schema) as writer:
-            writer.write_table(table)
-        atomic_write_bytes(path, sink.getvalue().to_pybytes())
-    else:
-        with TemporaryDirectory(prefix="dataviz-analysis-export-") as directory:
-            temporary = Path(directory) / path.name
-            frame.to_parquet(temporary, index=False)
-            atomic_copy_file(temporary, path)
-    return _analysis_export_metadata(workspace, path, output_format)
-
-
 def _analysis_artifact_evidence(reference: str, artifact) -> dict[str, Any]:
     return {
         "reference": reference,
@@ -2890,8 +2812,8 @@ def _analysis_artifact_evidence(reference: str, artifact) -> dict[str, Any]:
 def _analysis_next_actions(workspace: Path, entry: dict[str, Any]) -> list[str]:
     quoted_workspace = shlex.quote(str(workspace))
     return [
-        f"dataviz analyze show {quoted_workspace} @{entry['alias']} --detail debug",
-        f"dataviz analyze run {quoted_workspace} @{entry['alias']} --format arrow --destination output.arrow",
+        f"dataviz catalog describe {quoted_workspace} {entry['reference']} --detail debug",
+        f"dataviz run {quoted_workspace} {entry['reference']}",
     ]
 
 
@@ -2908,6 +2830,215 @@ def _analysis_record_success(
     }
     for reference in sorted(references):
         record_usage_best_effort(workspace, output_analysis_usage(reference))
+
+
+@result_app.command("list")
+def result_list(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    status: str | None = typer.Option(
+        None, "--status", help="Filter by ready, partial, failed, or cancelled"
+    ),
+    limit: int = typer.Option(50, "--limit", min=1, max=1000),
+    output_format: str = typer.Option("text", "--format", help="text or json"),
+) -> None:
+    """List sealed Results without loading their data Artifacts."""
+
+    try:
+        if output_format not in {"text", "json"}:
+            raise typer.BadParameter("--format must be text or json")
+        if status not in {None, "ready", "partial", "failed", "cancelled"}:
+            raise typer.BadParameter(
+                "--status must be ready, partial, failed, or cancelled"
+            )
+        store = AnalysisResultStore(workspace)
+        values = store.list(limit=limit, status=status)
+        payload = {
+            "schema": "dataviz/result-list/v1",
+            "count": len(values),
+            "results": values,
+        }
+        if output_format == "json":
+            print_json(payload)
+            return
+        for item in values:
+            target = item.get("target") or {}
+            typer.echo(
+                f"{item['result_id']}  {item['status']}  "
+                f"{target.get('reference') or 'unknown-target'}  "
+                f"{item['outputs']} output(s)  {item['created_at']}"
+            )
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        handle_error(exc)
+
+
+@result_app.command("show")
+def analyze_result_show(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    result_id: str = typer.Argument(...),
+    output: str | None = typer.Argument(
+        None, help="Canonical Output reference; required for multi-Output paging"
+    ),
+    offset: int = typer.Option(0, "--offset", min=0),
+    limit: int = typer.Option(100, "--limit", min=1),
+    output_format: str = typer.Option("text", "--format", help="text or json"),
+) -> None:
+    """Read an immutable Result Output without executing its Dashboard again."""
+
+    try:
+        if output_format not in {"text", "json"}:
+            raise typer.BadParameter("--format must be text or json")
+        store = AnalysisResultStore(workspace)
+        with store.lease(result_id):
+            manifest = store.load(result_id)
+            outputs = manifest["result"].get("outputs", [])
+            selected = (
+                [store.resolve_output(manifest, output)]
+                if output is not None or len(outputs) == 1
+                else outputs
+            )
+            rendered: list[dict[str, Any]] = []
+            for item in selected:
+                value, total = store.read_output(
+                    manifest, item, offset=offset, limit=limit
+                )
+                if item.get("kind") == "table":
+                    records = json.loads(value.to_json(orient="records", date_format="iso"))
+                else:
+                    records = value
+                rendered.append(
+                    {
+                        "reference": item["reference"],
+                        "kind": item["kind"],
+                        "rows": total,
+                        "offset": offset,
+                        "limit": limit,
+                        "value": records,
+                    }
+                )
+        payload = {
+            "schema": "dataviz/analysis-result-page/v1",
+            "result_id": result_id,
+            "outputs": rendered,
+        }
+        if output_format == "json":
+            print_json(payload)
+            return
+        typer.echo(f"Result: {result_id}")
+        for item in rendered:
+            typer.echo()
+            rows = f" · {item['rows']} rows" if item["rows"] is not None else ""
+            typer.echo(f"{item['reference']} · {item['kind']}{rows}")
+            if item["kind"] == "table":
+                import pandas as pd
+
+                frame = pd.DataFrame(item["value"])
+                if not frame.empty:
+                    typer.echo(frame.to_string(index=False))
+            else:
+                typer.echo(str(item["value"]))
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        handle_error(exc)
+
+
+@result_app.command("inspect")
+def analyze_result_inspect(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    result_id: str = typer.Argument(...),
+    output_format: str = typer.Option("text", "--format", help="text or json"),
+    detail: str = typer.Option("summary", "--detail", help="summary or full"),
+) -> None:
+    """Inspect Result lineage, storage, hashes, and provenance without re-running."""
+
+    try:
+        if output_format not in {"text", "json"}:
+            raise typer.BadParameter("--format must be text or json")
+        if detail not in {"summary", "full"}:
+            raise typer.BadParameter("--detail must be summary or full")
+        store = AnalysisResultStore(workspace)
+        with store.lease(result_id):
+            manifest = store.load(result_id)
+        payload = manifest if detail == "full" else {
+            "schema": manifest["schema"],
+            "result_id": manifest["result_id"],
+            "status": manifest["status"],
+            "created_at": manifest["created_at"],
+            "manifest_hash": result_manifest_hash(manifest),
+            "target": manifest["result"].get("target"),
+            "query_parameters": manifest["result"].get("query_parameters", {}),
+            "effective_controls": manifest["result"].get("effective_controls", {}),
+            "outputs": [
+                {
+                    key: item.get(key)
+                    for key in (
+                        "reference",
+                        "kind",
+                        "rows",
+                        "content_hash",
+                        "storage",
+                    )
+                }
+                for item in manifest["result"].get("outputs", [])
+            ],
+            "lineage": manifest["result"].get("lineage", {}),
+            "timing": manifest["result"].get("timing", {}),
+            "provenance": manifest["result"].get("provenance", {}),
+        }
+        if output_format == "json":
+            print_json(payload)
+            return
+        typer.echo(f"Result: {result_id} · {manifest['status']}")
+        typer.echo(f"Created: {manifest['created_at']}")
+        target = manifest["result"].get("target") or {}
+        typer.echo(f"Target: {target.get('title') or target.get('reference')}")
+        for item in manifest["result"].get("outputs", []):
+            typer.echo(
+                f"  {item['reference']} · {item['kind']} · {item.get('rows', '?')} rows · "
+                f"{item['storage']['mode']}:{item['storage'].get('path')}"
+            )
+        if detail == "full":
+            typer.echo(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+        else:
+            typer.echo("Use --detail full --format json for the complete immutable manifest.")
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        handle_error(exc)
+
+
+@result_app.command("export")
+def analyze_result_export(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    result_id: str = typer.Argument(...),
+    output: str = typer.Argument(..., help="Canonical Output reference"),
+    destination: Path = typer.Option(..., "--to", help="Copy the native Artifact here"),
+) -> None:
+    """Copy one existing native Output Artifact without conversion or re-execution."""
+
+    try:
+        store = AnalysisResultStore(workspace)
+        with store.lease(result_id):
+            manifest = store.load(result_id)
+            selected = store.resolve_output(manifest, output)
+            target = store.export_output(manifest, selected, destination)
+        print_json(
+            {
+                "schema": "dataviz/analysis-result-export/v1",
+                "status": "ready",
+                "result_id": result_id,
+                "output": selected["reference"],
+                "path": str(target),
+                "content_hash": sha256_file(target),
+                "converted": False,
+            }
+        )
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        handle_error(exc)
 
 
 def _analysis_target_payload(
@@ -2935,7 +3066,6 @@ def _analysis_artifact_payload(
     duration_ms: int | None,
 ) -> dict[str, Any]:
     return {
-        "alias": entry["alias"],
         "reference": entry["reference"],
         "kind": artifact.kind,
         "rows": artifact.metadata.get("row_count"),
@@ -2948,10 +3078,9 @@ def _analysis_artifact_payload(
     }
 
 
-@analysis_app.command("run")
-def analyze_run(
+def _run_target(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
-    reference: str = typer.Argument(..., help="@src_, @base_, @drv_, @view_ alias or full reference"),
+    reference: str = typer.Argument(..., help="Canonical Target Reference"),
     also: list[str] | None = typer.Option(
         None,
         "--also",
@@ -2962,14 +3091,9 @@ def analyze_run(
     output_name: str | None = typer.Option(None, "--output", help="Source Output name"),
     runtime: str = typer.Option("auto", "--runtime", help="auto, server, or browser"),
     output_format: str = typer.Option(
-        "json", "--format", help="json, csv, markdown, text, parquet, or arrow"
+        "text", "--format", help="text or json"
     ),
-    destination: Path | None = typer.Option(
-        None,
-        "--destination",
-        help="File or directory for Parquet/Arrow exports; defaults to .dataviz/analysis-exports",
-    ),
-    limit: int = typer.Option(100, "--limit", min=1),
+    limit: int = typer.Option(10, "--preview-rows", min=1),
     refresh: bool = typer.Option(False, "--refresh"),
     refresh_catalog: bool = typer.Option(False, "--refresh-catalog"),
     allow_network: bool = typer.Option(
@@ -2992,30 +3116,42 @@ def analyze_run(
 ) -> None:
     """Execute one Source, Base/Derived Output, or View data contract."""
     variant = None
+    catalog = None
+    requested_entry: dict[str, Any] | None = None
+    query_values: dict[str, Any] = {}
+    execution_started = False
+    result_published = False
     try:
-        if output_format not in {"json", "csv", "markdown", "text", "parquet", "arrow"}:
-            raise typer.BadParameter(
-                "--format must be json, csv, markdown, text, parquet, or arrow"
-            )
+        if output_format not in {"json", "text"}:
+            raise typer.BadParameter("--format must be text or json")
         if runtime not in {"auto", "server", "browser"}:
             raise typer.BadParameter("--runtime must be auto, server, or browser")
         detail = _result_detail(detail)
         catalog = ensure_analysis_catalog(workspace, refresh=refresh_catalog)
-        entry = catalog.resolve(reference)
+        parsed_reference = parse_target_reference(reference)
+        if parsed_reference.kind == "dashboard":
+            raise typer.BadParameter("Dashboard targets are handled by `dataviz run` directly")
+        entry = catalog.resolve(parsed_reference.canonical)
         requested_entry = entry
-        additional_entries = [catalog.resolve(value) for value in (also or [])]
+        additional_entries = [
+            catalog.resolve(parse_target_reference(value).canonical)
+            for value in (also or [])
+        ]
 
         if entry["kind"] == "view":
             inputs = entry.get("inputs", {})
-            selected_name = output_name or ("main" if "main" in inputs else None)
-            if selected_name is None and len(inputs) == 1:
-                selected_name = next(iter(inputs))
-            if selected_name not in inputs:
-                raise typer.BadParameter(
-                    "This View has multiple inputs; choose one with --output "
-                    + "|".join(sorted(inputs))
-                )
-            entry = catalog.resolve(inputs[selected_name])
+            if output_name is not None:
+                if output_name not in inputs:
+                    raise typer.BadParameter(
+                        "Unknown View input; choose " + "|".join(sorted(inputs))
+                    )
+                view_entries = [catalog.resolve(inputs[output_name])]
+            else:
+                view_entries = [catalog.resolve(value) for value in inputs.values()]
+            if not view_entries:
+                raise typer.BadParameter("This View has no executable data inputs")
+            entry = view_entries[0]
+            additional_entries = [*view_entries[1:], *additional_entries]
             output_name = None
 
         if additional_entries:
@@ -3038,12 +3174,6 @@ def analyze_run(
                 raise typer.BadParameter(
                     "--also requires all targets to be Base Outputs or all to be Derived Outputs"
                 )
-            if output_format not in {"json", "parquet", "arrow"}:
-                raise typer.BadParameter(
-                    "Batch Browser extraction requires --format json, parquet, or arrow"
-                )
-        if destination is not None and output_format not in {"parquet", "arrow"}:
-            raise typer.BadParameter("--destination requires --format parquet or arrow")
 
         loaded = load_workspace(workspace)
         dashboard_id = entry["dashboard"]["id"]
@@ -3115,12 +3245,13 @@ def analyze_run(
                     target_references = list(source_outputs.values())
             else:
                 if output_name:
-                    raise typer.BadParameter("Base Output aliases already identify one output")
+                    raise typer.BadParameter("Base Output references already identify one output")
                 target_references = [
                     _analysis_local_reference(item)
                     for item in [entry, *additional_entries]
                 ]
             query_started = time.perf_counter()
+            execution_started = True
             result = Executor(loaded, **executor_options).run(
                 dashboard_id,
                 query_parameters=query_values,
@@ -3141,38 +3272,31 @@ def analyze_run(
                         status="error",
                         evidence={"run_id": result.run_id, "missing_outputs": missing},
                     )
-                _print_analysis_result(
-                    {
-                        "schema": "dataviz/analysis-result/v1",
-                        "status": result.status,
-                        "generation": catalog.generation,
-                        **_analysis_target_payload(requested_entry, entry),
-                        "query_parameters": result.query_parameters,
-                        "error": node.error
+                result_published = True
+                _publish_failed_result(
+                    workspace,
+                    target=requested_entry,
+                    generation=catalog.generation,
+                    query_parameters=result.query_parameters,
+                    error=(
+                        node.error
                         if node
                         else {
                             "code": "analysis_output_unavailable",
                             "message": "Named Output was not produced",
-                        },
-                        "next_actions": [
-                            f"dataviz analyze show {shlex.quote(str(workspace))} @{entry['alias']} --detail full",
-                            f"dataviz validate {shlex.quote(str(workspace))} --dashboard {dashboard_id} --format json",
-                        ],
-                    }
+                        }
+                    ),
+                    output_format=output_format,
+                    lineage={
+                        "query_nodes": result.query_nodes,
+                        "query_targets": result.query_targets,
+                    },
+                    provenance={"query_contract_hash": result.query_contract_hash},
                 )
                 raise typer.Exit(1)
             store = ArtifactStore(loaded.root, result.run_id)
-            if output_format not in {"json", "parquet", "arrow"}:
-                if len(artifacts) != 1:
-                    raise typer.BadParameter(
-                        "Non-JSON Source output requires --output to select one Named Output"
-                    )
-                _analysis_emit_non_json(store, artifacts[0][1], output_format, limit)
-                if variant is not None:
-                    variant.write_manifest(status="ready", evidence={"run_id": result.run_id})
-                _analysis_record_success(workspace, [entry, *additional_entries])
-                return
             outputs = []
+            result_bindings: dict[str, dict[str, Any]] = {}
             for local_reference, artifact in artifacts:
                 assert artifact is not None
                 value, truncated = _analysis_artifact_value(store, artifact, limit)
@@ -3190,17 +3314,9 @@ def analyze_run(
                         duration_ms=node.duration_ms if node else None,
                     )
                 )
-                if output_format in {"parquet", "arrow"}:
-                    outputs[-1]["export"] = _analysis_export_artifact(
-                        workspace,
-                        store,
-                        artifact,
-                        target_entry,
-                        output_format,
-                        destination,
-                        output_count=len(artifacts),
-                    )
-                    outputs[-1]["truncated"] = False
+                result_bindings[target_entry["reference"]] = _analysis_artifact_binding(
+                    loaded, dashboard, target_entry, store, artifact
+                )
             payload: dict[str, Any] = {
                 "schema": "dataviz/analysis-result/v1",
                 "status": result.status,
@@ -3237,7 +3353,10 @@ def analyze_run(
             if variant is not None:
                 variant.write_manifest(status="ready", evidence={"run_id": result.run_id})
             _analysis_record_success(workspace, [entry, *additional_entries])
-            _print_analysis_result(payload)
+            result_published = True
+            _publish_analysis_result(
+                workspace, payload, result_bindings, output_format=output_format
+            )
             return
 
         if entry["kind"] != "derived_output":
@@ -3260,6 +3379,7 @@ def analyze_run(
             )
         )
         query_started = time.perf_counter()
+        execution_started = True
         run_result = Executor(loaded, **executor_options).run(
             dashboard_id,
             query_parameters=query_values,
@@ -3311,24 +3431,8 @@ def analyze_run(
                 cache_salt=variant.overlay_hash if variant is not None else None,
             )
             browser_results = browser_batch["outputs"]
-            browser_result = browser_results[0]
-            raw_value = browser_result["value"]
-            rows = browser_result["rows"]
-            truncated = bool(rows is not None and rows > limit)
-            preview = raw_value[:limit] if browser_result["kind"] == "table" else raw_value
-            if output_format not in {"json", "parquet", "arrow"}:
-                if browser_result["kind"] == "table":
-                    import pandas as pd
-
-                    frame = pd.DataFrame(preview)
-                    _analysis_emit_frame(frame, output_format)
-                else:
-                    typer.echo(str(raw_value))
-                if variant is not None:
-                    variant.write_manifest(status="ready", evidence={"run_id": run_result.run_id})
-                _analysis_record_success(workspace, execution_entries)
-                return
             output_payloads = []
+            result_bindings: dict[str, dict[str, Any]] = {}
             for target_entry, extracted in zip(
                 execution_entries, browser_results, strict=True
             ):
@@ -3336,7 +3440,6 @@ def analyze_run(
                 extracted_value = extracted["value"]
                 output_payloads.append(
                     {
-                        "alias": target_entry["alias"],
                         "reference": target_entry["reference"],
                         "kind": extracted["kind"],
                         "rows": extracted_rows,
@@ -3355,23 +3458,10 @@ def analyze_run(
                         "run_id": run_result.run_id,
                     }
                 )
-                if output_format in {"parquet", "arrow"}:
-                    if extracted["kind"] != "table":
-                        raise typer.BadParameter(
-                            f"--format {output_format} requires a table Output"
-                        )
-                    import pandas as pd
-
-                    output_payloads[-1]["export"] = _analysis_export_frame(
-                        workspace,
-                        pd.DataFrame(extracted_value),
-                        target_entry,
-                        run_result.run_id,
-                        output_format,
-                        destination,
-                        output_count=len(execution_entries),
-                    )
-                    output_payloads[-1]["truncated"] = False
+                result_bindings[target_entry["reference"]] = {
+                    "value": extracted_value,
+                    "kind": extracted["kind"],
+                }
             payload = {
                 "schema": "dataviz/analysis-result/v1",
                 "status": "ready",
@@ -3425,7 +3515,10 @@ def analyze_run(
             if variant is not None:
                 variant.write_manifest(status="ready", evidence={"run_id": run_result.run_id})
             _analysis_record_success(workspace, execution_entries)
-            _print_analysis_result(payload)
+            result_published = True
+            _publish_analysis_result(
+                workspace, payload, result_bindings, output_format=output_format
+            )
             return
         interaction_started = time.perf_counter()
         interaction_executor = InteractionExecutor(loaded, **executor_options)
@@ -3453,29 +3546,33 @@ def analyze_run(
                             "target": target_entry["reference"],
                         },
                     )
-                _print_analysis_result(
-                    {
-                        "schema": "dataviz/analysis-result/v1",
-                        "status": interaction.status,
-                        **_analysis_target_payload(requested_entry, entry),
-                        "error": node.error
+                result_published = True
+                _publish_failed_result(
+                    workspace,
+                    target=requested_entry,
+                    generation=catalog.generation,
+                    query_parameters=run_result.query_parameters,
+                    error=(
+                        node.error
                         if node
-                        else {"code": "analysis_output_unavailable"},
-                    }
+                        else {
+                            "code": "analysis_output_unavailable",
+                            "message": "Interactive Output was not produced",
+                        }
+                    ),
+                    output_format=output_format,
+                    lineage={
+                        "query_nodes": run_result.query_nodes,
+                        "interactive_nodes": list(interaction.nodes),
+                    },
+                    provenance={"query_contract_hash": run_result.query_contract_hash},
                 )
                 raise typer.Exit(1)
             interactions.append((target_entry, interaction, artifact))
         interaction_ms = round((time.perf_counter() - interaction_started) * 1000, 2)
         store = ArtifactStore(loaded.root, run_result.run_id)
-        if output_format not in {"json", "parquet", "arrow"}:
-            if len(interactions) != 1:
-                raise typer.BadParameter("Batch extraction requires a structured format")
-            _analysis_emit_non_json(store, interactions[0][2], output_format, limit)
-            if variant is not None:
-                variant.write_manifest(status="ready", evidence={"run_id": run_result.run_id})
-            _analysis_record_success(workspace, execution_entries)
-            return
         output_payloads = []
+        result_bindings: dict[str, dict[str, Any]] = {}
         for target_entry, interaction, artifact in interactions:
             value, truncated = _analysis_artifact_value(store, artifact, limit)
             node = interaction.nodes.get(target_entry["node_id"])
@@ -3487,18 +3584,10 @@ def analyze_run(
                 run_id=run_result.run_id,
                 duration_ms=node.duration_ms if node else None,
             )
-            if output_format in {"parquet", "arrow"}:
-                output_payload["export"] = _analysis_export_artifact(
-                    workspace,
-                    store,
-                    artifact,
-                    target_entry,
-                    output_format,
-                    destination,
-                    output_count=len(interactions),
-                )
-                output_payload["truncated"] = False
             output_payloads.append(output_payload)
+            result_bindings[target_entry["reference"]] = _analysis_artifact_binding(
+                loaded, dashboard, target_entry, store, artifact
+            )
         last_interaction = interactions[-1][1]
         interactive_nodes = list(
             dict.fromkeys(
@@ -3578,325 +3667,234 @@ def analyze_run(
         if variant is not None:
             variant.write_manifest(status="ready", evidence={"run_id": run_result.run_id})
         _analysis_record_success(workspace, execution_entries)
-        _print_analysis_result(payload)
+        result_published = True
+        _publish_analysis_result(
+            workspace, payload, result_bindings, output_format=output_format
+        )
     except typer.Exit:
         raise
+    except (KeyboardInterrupt, click.Abort) as exc:
+        if variant is not None:
+            variant.write_manifest(
+                status="cancelled",
+                evidence={"error_type": type(exc).__name__, "message": "Execution cancelled"},
+            )
+        if (
+            execution_started
+            and not result_published
+            and requested_entry is not None
+            and catalog is not None
+        ):
+            _publish_failed_result(
+                workspace,
+                target=requested_entry,
+                generation=catalog.generation,
+                query_parameters=query_values,
+                error={"code": "execution_cancelled", "message": "Execution cancelled"},
+                output_format=output_format,
+                status="cancelled",
+            )
+        raise typer.Exit(130) from exc
     except Exception as exc:
         if variant is not None:
             variant.write_manifest(
                 status="error",
                 evidence={"error_type": type(exc).__name__, "message": str(exc)},
             )
+        if (
+            execution_started
+            and not result_published
+            and requested_entry is not None
+            and catalog is not None
+        ):
+            error = (
+                exc.as_dict()
+                if isinstance(exc, DatavizError)
+                else {"type": type(exc).__name__, "message": str(exc)}
+            )
+            try:
+                _publish_failed_result(
+                    workspace,
+                    target=requested_entry,
+                    generation=catalog.generation,
+                    query_parameters=query_values,
+                    error=error,
+                    output_format=output_format,
+                )
+            except Exception:
+                pass
+            else:
+                raise typer.Exit(1) from exc
         handle_error(exc)
 
 
-@app.command()
-def query(
-    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
-    dashboard: str = typer.Argument(...),
-    source: str = typer.Option(..., "--source"),
-    output_name: str = typer.Option("main", "--output-name"),
-    query_param: list[str] | None = typer.Option(None, "--query-param"),
-    output_format: str = typer.Option(
-        "json", "--format", help="json, csv, markdown, or text"
-    ),
-    limit: int = typer.Option(100, "--limit", min=1),
-    refresh: bool = typer.Option(False, "--refresh"),
-    detail: str = typer.Option("summary", "--detail", help="summary, debug, or full"),
-) -> None:
-    """Query one named Source Output without starting a server."""
-    try:
-        if output_format not in {"json", "csv", "markdown", "text"}:
-            raise typer.BadParameter("--format must be json, csv, markdown, or text")
-        detail = _result_detail(detail)
-        loaded = load_workspace(workspace)
-        reference = parse_output_reference(f"source:{source}/{output_name}")
-        result = Executor(loaded).run(
-            dashboard,
-            query_parameters=parse_params(query_param),
-            targets=[reference.canonical],
-            refresh=refresh,
-        )
-        node = result.nodes[reference.node_id]
-        artifact = node.outputs.get(reference.output)
-        if not artifact:
-            print_json(
-                result if detail == "full" else _failed_result_summary(result, reference.canonical, node)
-            )
-            raise typer.Exit(1)
-        store = ArtifactStore(loaded.root, result.run_id)
-        value = store.read_value(artifact)
-        truncated = False
-        if artifact.kind == "table":
-            frame = value.head(limit)
-            truncated = int(artifact.metadata.get("row_count", 0)) > limit
-            if output_format == "csv":
-                typer.echo(frame.to_csv(index=False), nl=False)
-                return
-            if output_format == "markdown":
-                typer.echo(frame.to_markdown(index=False))
-                return
-            if output_format == "text":
-                typer.echo(frame.to_string(index=False))
-                return
-            value = json.loads(frame.to_json(orient="records", date_format="iso"))
-        elif output_format != "json":
-            typer.echo(str(value))
-            return
-        if output_format == "json":
-            summary = _artifact_result_summary(
-                status=result.status,
-                reference=reference.canonical,
+def _run_dashboard_target(
+    workspace: Path,
+    dashboard_id: str,
+    *,
+    query_param: list[str] | None,
+    refresh: bool,
+    preview_rows: int,
+    output_format: str,
+    detail: str,
+) -> dict[str, Any]:
+    loaded = load_workspace(workspace)
+    dashboard = loaded.dashboard(dashboard_id)
+    started = time.perf_counter()
+    execution = Executor(loaded).run(
+        dashboard_id,
+        query_parameters=parse_params(query_param),
+        refresh=refresh,
+    )
+    catalog = ensure_analysis_catalog(workspace)
+    store = ArtifactStore(loaded.root, execution.run_id)
+    outputs: list[dict[str, Any]] = []
+    bindings: dict[str, dict[str, Any]] = {}
+    for local_reference, artifact in sorted(execution.outputs.items()):
+        canonical = f"{dashboard_id}::{local_reference}"
+        try:
+            entry = catalog.resolve(canonical)
+        except Exception:
+            continue
+        value, truncated = _analysis_artifact_value(store, artifact, preview_rows)
+        node = execution.nodes.get(local_reference.split("/", 1)[0])
+        outputs.append(
+            _analysis_artifact_payload(
+                entry=entry,
                 artifact=artifact,
                 value=value,
                 truncated=truncated,
-                run_id=result.run_id,
-                duration_ms=node.duration_ms,
+                run_id=execution.run_id,
+                duration_ms=node.duration_ms if node else None,
             )
-            if detail == "debug":
-                summary.update(
-                    query_parameters=result.query_parameters,
-                    artifact=artifact.model_dump(mode="json", by_alias=True),
-                    node=node.model_dump(mode="json", by_alias=True),
-                )
-            print_json(
-                result.model_dump(mode="json", by_alias=True)
-                | {"value": value, "reference": reference.canonical}
-                if detail == "full"
-                else summary
-            )
-        if result.status == "error":
-            raise typer.Exit(1)
-    except typer.Exit:
-        raise
-    except Exception as exc:
-        handle_error(exc)
-
-
-@app.command("output")
-def inspect_output(
-    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
-    dashboard: str = typer.Argument(...),
-    reference: str = typer.Argument(
-        ..., help="Base Named Output, for example dataset:sales-metrics/trend"
-    ),
-    query_param: list[str] | None = typer.Option(None, "--query-param"),
-    output_format: str = typer.Option("json", "--format", help="json, csv, markdown, or text"),
-    limit: int = typer.Option(100, "--limit", min=1),
-    refresh: bool = typer.Option(False, "--refresh"),
-    detail: str = typer.Option("summary", "--detail", help="summary, debug, or full"),
-) -> None:
-    """Execute the dependency closure and inspect one canonical Named Output."""
-    try:
-        if output_format not in {"json", "csv", "markdown", "text"}:
-            raise typer.BadParameter("--format must be json, csv, markdown, or text")
-        detail = _result_detail(detail)
-        loaded = load_workspace(workspace)
-        parsed = parse_output_reference(reference)
-        canonical = parsed.canonical
-        if parsed.node_id.startswith("interactive:"):
-            raise typer.BadParameter(
-                "Interactive Outputs require `dataviz compute`; `dataviz output` only executes the Query DAG"
-            )
-        result = Executor(loaded).run(
-            dashboard,
-            query_parameters=parse_params(query_param),
-            targets=[canonical],
-            refresh=refresh,
         )
-        artifact = result.outputs.get(canonical)
-        if artifact is None:
-            node = result.nodes.get(parsed.node_id)
-            print_json(
-                result if detail == "full" else _failed_result_summary(result, canonical, node)
-            )
-            raise typer.Exit(1)
-        store = ArtifactStore(loaded.root, result.run_id)
-        value = store.read_value(artifact)
-        if artifact.kind == "table":
-            frame = value.head(limit)
-            if output_format == "csv":
-                typer.echo(frame.to_csv(index=False), nl=False)
-                return
-            if output_format == "markdown":
-                typer.echo(frame.to_markdown(index=False))
-                return
-            if output_format == "text":
-                typer.echo(frame.to_string(index=False))
-                return
-            value = json.loads(frame.to_json(orient="records", date_format="iso"))
-        elif output_format != "json":
-            typer.echo(str(value))
-            return
-        truncated = artifact.kind == "table" and int(artifact.metadata.get("row_count", 0)) > limit
-        node = result.nodes.get(parsed.node_id)
-        summary = _artifact_result_summary(
-            status=result.status,
-            reference=canonical,
-            artifact=artifact,
-            value=value,
-            truncated=truncated,
-            run_id=result.run_id,
-            duration_ms=node.duration_ms if node else None,
+        bindings[canonical] = _analysis_artifact_binding(
+            loaded, dashboard, entry, store, artifact
         )
-        if detail == "debug":
-            summary.update(
-                query_parameters=result.query_parameters,
-                artifact=artifact.model_dump(mode="json", by_alias=True),
-                node=node.model_dump(mode="json", by_alias=True) if node else None,
-            )
-        print_json(
-            result.model_dump(mode="json", by_alias=True)
-            | {"value": value, "reference": canonical}
-            if detail == "full"
-            else summary
+    if execution.status in {"ready", "partial"}:
+        report_source = (
+            loaded.root / ".dataviz" / "runs" / execution.run_id / "dashboard-result.html"
         )
-    except typer.Exit:
-        raise
-    except Exception as exc:
-        handle_error(exc)
-
-
-@app.command()
-def compute(
-    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
-    dashboard: str = typer.Argument(...),
-    interactive_transform: str = typer.Argument(..., help="Interactive Transform id"),
-    run_id: str = typer.Option(..., "--run-id", help="Completed immutable Query Run id"),
-    compute_param: list[str] | None = typer.Option(None, "--compute-param"),
-    selection: list[str] | None = typer.Option(None, "--selection"),
-    output_name: str | None = typer.Option(
-        None, "--output-name", help="Named Output to print for non-JSON formats"
-    ),
-    output_format: str = typer.Option(
-        "json", "--format", help="json, csv, markdown, or text"
-    ),
-    limit: int = typer.Option(100, "--limit", min=1),
-    refresh: bool = typer.Option(False, "--refresh"),
-    detail: str = typer.Option("summary", "--detail", help="summary, debug, or full"),
-) -> None:
-    """Run one server-python Interactive Transform against an existing Query Run."""
-    try:
-        if output_format not in {"json", "csv", "markdown", "text"}:
-            raise typer.BadParameter("--format must be json, csv, markdown, or text")
-        detail = _result_detail(detail)
-        loaded = load_workspace(workspace)
-        run_result = load_run_result(loaded.root, run_id)
-        if run_result.dashboard != dashboard:
-            raise typer.BadParameter(
-                f"Query Run {run_id} belongs to {run_result.dashboard}, not {dashboard}"
-            )
-        loaded_dashboard = loaded.dashboard(dashboard)
-        selection_state = state_from_explicit_values(
-            loaded_dashboard.definition,
-            parse_params(selection),
-        )
-        interaction = InteractionExecutor(loaded).execute(
-            run_result,
-            interactive_transform,
-            compute_parameters=parse_params(compute_param),
-            selection_state=selection_state,
-            refresh=refresh,
-        )
-        if output_format == "json":
-            if detail == "full":
-                print_json(interaction)
-            else:
-                output_summaries = []
-                store = ArtifactStore(loaded.root, run_id)
-                for reference, artifact in interaction.outputs.items():
-                    preview = artifact.preview
-                    if preview is None:
-                        raw = store.read_value(artifact)
-                        if artifact.kind == "table":
-                            preview = json.loads(raw.head(limit).to_json(orient="records", date_format="iso"))
-                        else:
-                            preview = raw
-                    output_summaries.append(
-                        _artifact_result_summary(
-                            status=interaction.status,
-                            reference=reference,
-                            artifact=artifact,
-                            value=preview,
-                            truncated=(
-                                artifact.kind == "table"
-                                and int(artifact.metadata.get("row_count", 0)) > limit
-                            ),
-                            run_id=run_id,
-                            duration_ms=interaction.nodes.get(interactive_transform).duration_ms
-                            if interaction.nodes.get(interactive_transform)
-                            else None,
-                        )
-                    )
-                payload = {
-                    "schema": "dataviz/cli-result/v1",
-                    "status": interaction.status,
-                    "run_id": run_id,
-                    "interaction_id": interaction.interaction_id,
-                    "target": interactive_transform,
-                    "outputs": output_summaries,
-                }
-                if detail == "debug":
-                    payload.update(
-                        compute_parameters=interaction.compute_parameters,
-                        selection_state=interaction.selection_state,
-                        nodes={
-                            key: value.model_dump(mode="json", by_alias=True)
-                            for key, value in interaction.nodes.items()
-                        },
-                    )
-                print_json(payload)
-        else:
-            if not output_name:
-                raise typer.BadParameter("--output-name is required for non-JSON formats")
-            reference = f"interactive:{interactive_transform}/{output_name}"
-            artifact = interaction.outputs.get(reference)
-            if artifact is None:
-                raise typer.BadParameter(
-                    f"Unknown or unavailable Interactive Output: {reference}"
-                )
-            value = ArtifactStore(loaded.root, run_id).read_value(artifact)
-            if artifact.kind == "table":
-                frame = value.head(limit)
-                if output_format == "csv":
-                    typer.echo(frame.to_csv(index=False), nl=False)
-                elif output_format == "markdown":
-                    typer.echo(frame.to_markdown(index=False))
-                else:
-                    typer.echo(frame.to_string(index=False))
-            else:
-                typer.echo(str(value))
-        if interaction.status != "ready":
-            raise typer.Exit(1)
-    except typer.Exit:
-        raise
-    except Exception as exc:
-        handle_error(exc)
+        try:
+            CanvasRenderer(loaded).write_report(dashboard, execution, report_source)
+            bindings["__report__"] = {"source_path": report_source}
+        except Exception:
+            # Data Results remain valid even when their optional Presentation snapshot fails.
+            pass
+    payload: dict[str, Any] = {
+        "schema": "dataviz/analysis-result/v1",
+        "status": execution.status,
+        "generation": catalog.generation,
+        "target": {
+            "reference": dashboard_id,
+            "kind": "dashboard",
+            "title": dashboard.title,
+            "dashboard": {
+                "id": dashboard_id,
+                "title": dashboard.title,
+                "path": dashboard.root.relative_to(loaded.root).as_posix(),
+            },
+        },
+        "query_parameters": execution.query_parameters,
+        "effective_controls": {},
+        "outputs": outputs,
+        "lineage": {
+            "query_nodes": execution.query_nodes,
+            "query_targets": execution.query_targets,
+        },
+        "provenance": {
+            "catalog_generation": catalog.generation,
+            "query_contract_hash": execution.query_contract_hash,
+            "artifacts": [
+                _analysis_artifact_evidence(reference, artifact)
+                for reference, artifact in sorted(execution.outputs.items())
+            ],
+        },
+        "renderability": {
+            "kind": "dashboard",
+            "renderable": execution.status in {"ready", "partial"},
+            "dashboard": dashboard_id,
+        },
+        "timing": {"query_ms": round((time.perf_counter() - started) * 1000, 2)},
+    }
+    failed_nodes = [node for node in execution.nodes.values() if node.status == "error"]
+    if failed_nodes:
+        payload["error"] = failed_nodes[0].error
+    if detail == "full":
+        payload["execution"] = execution.model_dump(mode="json", by_alias=True)
+    elif detail == "debug":
+        payload["nodes"] = {
+            key: value.model_dump(mode="json", by_alias=True)
+            for key, value in execution.nodes.items()
+        }
+    published = _publish_analysis_result(
+        workspace, payload, bindings, output_format=output_format
+    )
+    return published
 
 
 @app.command()
 def run(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
-    dashboard: str = typer.Argument(...),
-    query_param: list[str] | None = typer.Option(None, "--query-param"),
-    target: list[str] | None = typer.Option(
-        None, "--target", help="Source/Dataset node or Base Named Output; repeatable"
+    target: str = typer.Argument(..., help="Dashboard id or canonical Target Reference"),
+    also: list[str] | None = typer.Option(
+        None, "--also", help="Repeat compatible canonical Output targets in one execution"
     ),
+    query_param: list[str] | None = typer.Option(None, "--query-param"),
+    control: list[str] | None = typer.Option(None, "--control"),
+    output_name: str | None = typer.Option(None, "--output", help="View input name"),
+    runtime: str = typer.Option("auto", "--runtime", help="auto, server, or browser"),
+    output_format: str = typer.Option("text", "--format", help="text or json"),
+    preview_rows: int = typer.Option(10, "--preview-rows", min=1),
     refresh: bool = typer.Option(False, "--refresh"),
+    refresh_catalog: bool = typer.Option(False, "--refresh-catalog"),
+    allow_network: bool = typer.Option(False, "--allow-network"),
+    timeout_seconds: float = typer.Option(60.0, "--timeout", min=1.0),
+    detail: str = typer.Option("summary", "--detail", help="summary, debug, or full"),
+    overlay: str | None = typer.Option(None, "--overlay"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
     allow_partial: bool = typer.Option(False, "--allow-partial"),
 ) -> None:
-    """Execute the immutable Source and Dataset Transform Query DAG."""
+    """Execute a Dashboard or canonical data Target and seal one immutable Result."""
     try:
-        loaded = load_workspace(workspace)
-        result = Executor(loaded).run(
-            dashboard,
-            query_parameters=parse_params(query_param),
-            targets=target,
+        parsed = parse_target_reference(target)
+        if parsed.kind == "dashboard":
+            if any((also, control, output_name, overlay, dry_run)):
+                raise typer.BadParameter(
+                    "Dashboard targets do not accept --also, --control, --output, or --overlay"
+                )
+            published = _run_dashboard_target(
+                workspace,
+                parsed.dashboard,
+                query_param=query_param,
+                refresh=refresh,
+                preview_rows=preview_rows,
+                output_format=output_format,
+                detail=_result_detail(detail),
+            )
+            if published["status"] != "ready" and not (
+                allow_partial and published["status"] == "partial"
+            ):
+                raise typer.Exit(1)
+            return
+        _run_target(
+            workspace=workspace,
+            reference=parsed.canonical,
+            also=also,
+            query_param=query_param,
+            control=control,
+            output_name=output_name,
+            runtime=runtime,
+            output_format=output_format,
+            limit=preview_rows,
             refresh=refresh,
+            refresh_catalog=refresh_catalog,
+            allow_network=allow_network,
+            timeout_seconds=timeout_seconds,
+            detail=detail,
+            overlay=overlay,
+            dry_run=dry_run,
         )
-        print_json(result)
-        if result.status != "ready" and not (allow_partial and result.status == "partial"):
-            raise typer.Exit(1)
     except typer.Exit:
         raise
     except Exception as exc:
@@ -3906,7 +3904,7 @@ def run(
 @app.command()
 def report(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
-    dashboard: str = typer.Argument(...),
+    target: str = typer.Argument(..., help="Result id or Dashboard id convenience target"),
     output: Path = typer.Option(..., "--output"),
     query_param: list[str] | None = typer.Option(None, "--query-param"),
     compute_param: list[str] | None = typer.Option(None, "--compute-param"),
@@ -3914,8 +3912,32 @@ def report(
     refresh: bool = typer.Option(False, "--refresh"),
     allow_partial: bool = typer.Option(False, "--allow-partial"),
 ) -> None:
-    """Execute a dashboard and write a shareable HTML report."""
+    """Write a report from an immutable Result, or run a Dashboard as a convenience."""
     try:
+        if target.startswith("result_"):
+            store = AnalysisResultStore(workspace)
+            with store.lease(target):
+                manifest = store.load(target)
+                renderability = manifest["result"].get("renderability") or {}
+                snapshot = renderability.get("snapshot")
+                if not renderability.get("renderable") or not snapshot:
+                    raise typer.BadParameter(
+                        "This Result is data-only and has no sealed Presentation snapshot"
+                    )
+                source = (store.root / target / snapshot).resolve()
+                expected = str(renderability.get("content_hash") or sha256_file(source))
+                copied = atomic_copy_file(source, output.resolve(), expected_sha256=expected)
+            print_json(
+                {
+                    "status": "success",
+                    "result_id": target,
+                    "report": str(output.resolve()),
+                    "content_hash": copied,
+                    "reexecuted": False,
+                }
+            )
+            return
+        dashboard = target
         loaded = load_workspace(workspace)
         result = Executor(loaded).run(
             dashboard,
@@ -3994,10 +4016,79 @@ def report(
         )
         manifest_path = path.with_suffix(path.suffix + ".manifest.json")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        catalog = ensure_analysis_catalog(workspace)
+        artifact_store = ArtifactStore(loaded.root, result.run_id)
+        result_outputs: list[dict[str, Any]] = []
+        result_bindings: dict[str, dict[str, Any]] = {"__report__": {"source_path": path}}
+        for local_reference, artifact in sorted(
+            {**result.outputs, **derived_outputs}.items()
+        ):
+            canonical = f"{dashboard}::{local_reference}"
+            try:
+                entry = catalog.resolve(canonical)
+            except Exception:
+                continue
+            value, truncated = _analysis_artifact_value(artifact_store, artifact, 10)
+            result_outputs.append(
+                _analysis_artifact_payload(
+                    entry=entry,
+                    artifact=artifact,
+                    value=value,
+                    truncated=truncated,
+                    run_id=result.run_id,
+                    duration_ms=None,
+                )
+            )
+            result_bindings[canonical] = _analysis_artifact_binding(
+                loaded, loaded_dashboard, entry, artifact_store, artifact
+            )
+        sealed = AnalysisResultStore(workspace).publish(
+            validate_analysis_result(
+                {
+                    "schema": "dataviz/analysis-result/v1",
+                    "status": result.status,
+                    "generation": catalog.generation,
+                    "target": {
+                        "reference": dashboard,
+                        "kind": "dashboard",
+                        "title": loaded_dashboard.title,
+                        "dashboard": {
+                            "id": dashboard,
+                            "title": loaded_dashboard.title,
+                            "path": loaded_dashboard.root.relative_to(loaded.root).as_posix(),
+                        },
+                    },
+                    "query_parameters": result.query_parameters,
+                    "effective_controls": {
+                        "selection": resolved_selection_state,
+                        "compute": compute_values,
+                    },
+                    "outputs": result_outputs,
+                    "lineage": {
+                        "query_nodes": result.query_nodes,
+                        "interactive_nodes": [
+                            value.interaction_id for value in interaction_results
+                        ],
+                    },
+                    "provenance": {
+                        "catalog_generation": catalog.generation,
+                        "query_contract_hash": result.query_contract_hash,
+                    },
+                    "renderability": {
+                        "kind": "dashboard",
+                        "renderable": True,
+                        "dashboard": dashboard,
+                    },
+                    "timing": {},
+                }
+            ),
+            result_bindings,
+        )
         print_json(
             {
                 "status": "success",
                 "run_id": result.run_id,
+                "result_id": sealed["result_id"],
                 "report": str(path),
                 "manifest": str(manifest_path),
                 "portable_without_network": manifest["portable_without_network"],
@@ -4019,7 +4110,7 @@ def report(
         handle_error(exc)
 
 
-@app.command("clean")
+@app.command("prune")
 def clean_workspace(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     apply: bool = typer.Option(
@@ -4030,7 +4121,7 @@ def clean_workspace(
     all_state: bool = typer.Option(
         False,
         "--all",
-        help="Select every unprotected Run and cache entry.",
+        help="Select every unprotected Result, Run, and cache entry.",
     ),
     keep_runs: int | None = typer.Option(
         None,
@@ -4056,10 +4147,23 @@ def clean_workspace(
         min=0,
         help="Select persistent cache entries older than this many hours.",
     ),
+    keep_results: int | None = typer.Option(
+        None,
+        "--keep-results",
+        min=0,
+        help="Override the number of newest immutable Results to retain.",
+    ),
+    result_max_age_days: float = typer.Option(
+        30,
+        "--result-max-age-days",
+        min=0,
+        help="Select immutable Results older than this many days.",
+    ),
     include_runs: bool = typer.Option(True, "--runs/--no-runs"),
     include_cache: bool = typer.Option(True, "--cache/--no-cache"),
+    include_results: bool = typer.Option(True, "--results/--no-results"),
 ) -> None:
-    """Preview or remove old .dataviz Run Artifacts and persistent caches."""
+    """Preview or remove old Results, Run Artifacts, and persistent caches."""
     try:
         loaded = load_workspace(workspace)
         runtime = loaded.definition.runtime
@@ -4093,10 +4197,17 @@ def clean_workspace(
                 if cache_max_age_hours is not None
                 else runtime.cache_retention_seconds
             ),
+            max_results=(0 if all_state else keep_results),
+            result_max_age_seconds=(
+                0 if all_state else result_max_age_days * 24 * 3600
+            ),
             include_runs=include_runs,
             include_cache=include_cache,
+            include_results=include_results,
             apply=apply,
         )
+        if apply and report["results"]:
+            AnalysisResultStore(loaded.root).rebuild_index()
         print_json({"status": "success", **report})
         if report["errors"]:
             raise typer.Exit(1)

@@ -26,7 +26,7 @@ uv run --no-editable python scripts/run_runtime_scale_benchmarks.py \
 也可测任意 Dashboard：
 
 ```bash
-dataviz benchmark WORKSPACE DASHBOARD --browser-runtime \
+dataviz benchmark runtime WORKSPACE DASHBOARD \
   --browser chromium --repeat 3 --query-param row_count=1000000 --format json
 ```
 

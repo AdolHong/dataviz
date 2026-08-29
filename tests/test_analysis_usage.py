@@ -151,7 +151,7 @@ def test_analyze_run_records_only_success_and_usage_failure_does_not_fail_comman
     runner = CliRunner()
     result = runner.invoke(
         app,
-        ["analyze", "run", str(workspace), f"@{entry['alias']}", "--format", "json"],
+        ["run", str(workspace), entry["reference"], "--format", "json"],
     )
     assert result.exit_code == 0, result.output
     usage = read_usage(workspace)[output_analysis_usage(entry["reference"])]
@@ -163,10 +163,9 @@ def test_analyze_run_records_only_success_and_usage_failure_does_not_fail_comman
     successful = runner.invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{entry['alias']}",
+            entry["reference"],
             "--format",
             "json",
         ],

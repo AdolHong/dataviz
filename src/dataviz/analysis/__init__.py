@@ -9,11 +9,13 @@ from dataviz.analysis.catalog import (
 )
 from dataviz.analysis.contracts import (
     AnalysisCatalog as AnalysisCatalogContract,
+    AnalysisDescribe,
     AnalysisEvidence,
     AnalysisEntry,
     AnalysisPromotion,
     AnalysisResult,
     validate_analysis_catalog,
+    validate_analysis_describe,
     validate_analysis_result,
 )
 from dataviz.analysis.overlay import (
@@ -45,6 +47,7 @@ __all__ = [
     "ANALYSIS_CATALOG_SCHEMA",
     "ANALYSIS_ENTRY_SCHEMA",
     "AnalysisCatalogContract",
+    "AnalysisDescribe",
     "ensure_analysis_catalog",
     "refresh_analysis_catalog_async",
     "AnalysisCatalog",
@@ -53,6 +56,7 @@ __all__ = [
     "AnalysisPromotion",
     "AnalysisResult",
     "validate_analysis_catalog",
+    "validate_analysis_describe",
     "validate_analysis_result",
     "ANALYSIS_OVERLAY_SCHEMA",
     "AnalysisVariant",

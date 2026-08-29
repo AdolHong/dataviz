@@ -78,7 +78,7 @@ def create_analysis_evidence(
         output_evidence.append(
             {
                 key: output.get(key)
-                for key in ("alias", "reference", "kind", "rows", "schema", "content_hash")
+                for key in ("reference", "kind", "rows", "schema", "content_hash")
                 if output.get(key) is not None
             }
         )

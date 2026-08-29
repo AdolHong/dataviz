@@ -6,8 +6,8 @@
 
 ```bash
 dataviz docs design-language --format json
-dataviz components theme.business --format json
-dataviz gallery --output component-gallery.html
+dataviz components show theme.business --format json
+dataviz components gallery --output component-gallery.html
 ```
 
 ## 1. 默认方向
@@ -195,7 +195,7 @@ Dashboard 自有 CSS：
 
 ## 7. AI 工作流
 
-1. 读取 `dataviz context` 和相关 Component contract。
+1. 读取 `dataviz inspect context` 和相关 Component contract。
 2. 选择一个清晰方向；没有明确品牌需求时沿用 `business`。
 3. 先写 Presentation YAML，再写最少量 Dashboard 自有 CSS。
 4. 运行 `dataviz validate`。

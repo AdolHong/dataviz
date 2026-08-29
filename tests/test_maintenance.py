@@ -105,14 +105,14 @@ def test_clean_cli_previews_then_applies_all_state(tmp_path: Path):
     _entry(root / ".dataviz" / "runs" / "run_old", time.time() - 100)
     runner = CliRunner()
 
-    preview = runner.invoke(app, ["clean", str(root), "--all"])
+    preview = runner.invoke(app, ["prune", str(root), "--all"])
     assert preview.exit_code == 0, preview.output
     preview_payload = json.loads(preview.output)
     assert preview_payload["mode"] == "dry-run"
     assert preview_payload["candidate_count"] == 1
     assert (root / ".dataviz" / "runs" / "run_old").exists()
 
-    applied = runner.invoke(app, ["clean", str(root), "--all", "--apply"])
+    applied = runner.invoke(app, ["prune", str(root), "--all", "--apply"])
     assert applied.exit_code == 0, applied.output
     applied_payload = json.loads(applied.output)
     assert applied_payload["mode"] == "apply"

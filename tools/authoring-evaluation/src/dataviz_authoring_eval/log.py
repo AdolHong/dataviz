@@ -10,7 +10,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from dataviz import __version__
-from dataviz.authoring_evaluation import AUTHORING_APPROACHES, AUTHORING_TASKS
+from .evaluation import AUTHORING_APPROACHES, AUTHORING_TASKS
 from dataviz.errors import ValidationFailure
 
 

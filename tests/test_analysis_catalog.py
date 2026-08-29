@@ -11,14 +11,44 @@ import yaml
 from typer.testing import CliRunner
 
 from dataviz.analysis import ensure_analysis_catalog
-from dataviz.analysis.contracts import AnalysisCatalog, AnalysisEntry, AnalysisResult
+from dataviz.analysis.contracts import (
+    AnalysisCatalog,
+    AnalysisDescribe,
+    AnalysisEntry,
+    AnalysisResult,
+)
 from dataviz.cli import app
 from dataviz.errors import ValidationFailure
+from dataviz.target_reference import TargetReferenceContract, parse_target_reference
 from dataviz.workspace.models import OutputDefinition
 
 
 FEATURE_SHOWCASE = Path("examples/feature-showcase")
 SALES_WORKSPACE = Path("examples/sales-workspace")
+
+
+@pytest.mark.parametrize(
+    ("reference", "kind"),
+    [
+        ("sales", "dashboard"),
+        ("sales::source:orders", "source"),
+        ("sales::source:orders/main", "source_output"),
+        ("sales::dataset:clean/main", "dataset_output"),
+        ("sales::interactive:forecast/main", "interactive_output"),
+        ("sales::view:trend", "view"),
+    ],
+)
+def test_target_reference_v1_round_trips(reference: str, kind: str) -> None:
+    parsed = parse_target_reference(reference)
+    assert parsed.canonical == reference
+    assert parsed.kind == kind
+    assert TargetReferenceContract.model_validate(parsed.as_contract()).reference == reference
+
+
+@pytest.mark.parametrize("reference", ["@base_ABC", "sales/source:orders", "sales::source:orders/"])
+def test_target_reference_v1_rejects_aliases_and_ambiguous_strings(reference: str) -> None:
+    with pytest.raises(ValidationFailure, match="Invalid Target Reference"):
+        parse_target_reference(reference)
 
 
 def _build_server_derived_workspace(root: Path) -> Path:
@@ -81,7 +111,7 @@ outputs:
     return root
 
 
-def test_analysis_catalog_is_incremental_atomic_and_alias_stable(isolated_workspace):
+def test_analysis_catalog_is_incremental_atomic_and_reference_stable(isolated_workspace):
     workspace = isolated_workspace(FEATURE_SHOWCASE)
     first = ensure_analysis_catalog(workspace)
     target = next(
@@ -89,9 +119,10 @@ def test_analysis_catalog_is_incremental_atomic_and_alias_stable(isolated_worksp
         for entry in first.entries
         if entry["reference"] == "date-parameter-lab::source:date-window/main"
     )
-    first_alias = target["alias"]
+    first_reference = target["reference"]
     first_hash = target["definition_hash"]
-    assert first_alias.startswith("base_")
+    assert first_reference == "date-parameter-lab::source:date-window/main"
+    assert "alias" not in target
     assert (workspace / ".dataviz/catalog/CURRENT.json").is_file()
     assert (
         workspace / ".dataviz/catalog/generations" / first.generation
@@ -109,10 +140,13 @@ def test_analysis_catalog_is_incremental_atomic_and_alias_stable(isolated_worksp
         encoding="utf-8",
     )
     changed = ensure_analysis_catalog(workspace)
-    changed_target = changed.resolve(f"@{first_alias}")
+    changed_target = changed.resolve(first_reference)
     assert changed.generation != first.generation
-    assert changed_target["alias"] == first_alias
+    assert changed_target["reference"] == first_reference
     assert changed_target["definition_hash"] != first_hash
+    with pytest.raises(ValidationFailure) as prefixed:
+        changed.resolve(f"@{first_reference}")
+    assert prefixed.value.details["code"] == "analysis_reference_unknown"
 
 
 def test_analysis_catalog_supports_grep_like_regex(isolated_workspace):
@@ -133,6 +167,9 @@ def test_analysis_contracts_publish_machine_json_schemas():
     )
     assert AnalysisCatalog.model_json_schema()["properties"]["schema"]["const"] == (
         "dataviz/analysis-catalog/v1"
+    )
+    assert AnalysisDescribe.model_json_schema()["properties"]["schema"]["const"] == (
+        "dataviz/analysis-describe/v1"
     )
     assert AnalysisResult.model_json_schema()["properties"]["schema"]["const"] == (
         "dataviz/analysis-result/v1"
@@ -173,7 +210,7 @@ def test_public_output_semantics_are_strict_and_internal_outputs_are_hidden(tmp_
     assert internal in catalog.select(
         kind="base_output", include_internal=True, include_untrusted=True
     )
-    assert catalog.resolve(f"@{internal['alias']}")["reference"] == internal["reference"]
+    assert catalog.resolve(internal["reference"])["reference"] == internal["reference"]
 
 
 def test_catalog_concurrent_refresh_reuses_one_generation_and_failure_falls_back(
@@ -254,31 +291,18 @@ def test_catalog_retries_unstable_snapshot_removes_deleted_dashboard_and_rebuild
     )
 
 
-def test_analysis_alias_collision_extends_only_colliding_hashes(monkeypatch):
-    import dataviz.analysis.catalog as catalog_module
-
-    entries = [
-        {"kind": "base_output", "reference": "one::source:rows/main"},
-        {"kind": "base_output", "reference": "two::source:rows/main"},
-        {"kind": "derived_output", "reference": "three::interactive:x/main"},
-    ]
-    digests = {
-        entries[0]["reference"]: "AAAAAAAAAA11" + "X" * 40,
-        entries[1]["reference"]: "AAAAAAAAAA22" + "Y" * 40,
-        entries[2]["reference"]: "BBBBBBBBBB33" + "Z" * 40,
-    }
-    monkeypatch.setattr(catalog_module, "_alias_digest", digests.__getitem__)
-    catalog_module._assign_aliases(entries)
-    assert entries[0]["alias"] == "base_AAAAAAAAAA11"
-    assert entries[1]["alias"] == "base_AAAAAAAAAA22"
-    assert entries[2]["alias"] == "drv_BBBBBBBBBB"
+def test_analysis_catalog_publishes_unique_physical_references(isolated_workspace):
+    catalog = ensure_analysis_catalog(isolated_workspace(FEATURE_SHOWCASE))
+    references = [entry["reference"] for entry in catalog.entries]
+    assert len(references) == len(set(references))
+    assert all("alias" not in entry for entry in catalog.entries)
 
 
 def test_analysis_cli_all_show_and_run_base_output(isolated_workspace):
     workspace = isolated_workspace(FEATURE_SHOWCASE)
     runner = CliRunner()
     overview = runner.invoke(
-        app, ["analyze", "all", str(workspace), "--format", "json"]
+        app, ["catalog", "list", str(workspace), "--format", "json"]
     )
     assert overview.exit_code == 0, overview.output
     overview_payload = json.loads(overview.output)
@@ -291,27 +315,29 @@ def test_analysis_cli_all_show_and_run_base_output(isolated_workspace):
     )
 
     shown = runner.invoke(
-        app, ["analyze", "show", str(workspace), f"@{target['alias']}"]
+        app,
+        ["catalog", "describe", str(workspace), target["reference"], "--format", "json"],
     )
     assert shown.exit_code == 0, shown.output
-    shown_payload = json.loads(shown.output)
+    shown_payload = json.loads(shown.output)["items"][0]["entry"]
     assert shown_payload["query_parameters"] == ["analysis_date", "report_range"]
     assert "code" not in shown_payload
 
     full = runner.invoke(
         app,
         [
-            "analyze",
-            "show",
+            "catalog", "describe",
             str(workspace),
-            f"@{target['alias']}",
+            target["reference"],
             "--detail",
             "full",
             "--include-code",
+            "--format",
+            "json",
         ],
     )
     assert full.exit_code == 0, full.output
-    closure = json.loads(full.output)["closure"]
+    closure = json.loads(full.output)["items"][0]["closure"]
     assert closure["node_count"] == 1
     assert closure["nodes"][0]["node_id"] == "source:date-window"
     assert "select" in closure["nodes"][0]["assets"][0]["content"].casefold()
@@ -319,11 +345,10 @@ def test_analysis_cli_all_show_and_run_base_output(isolated_workspace):
     executed = runner.invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{target['alias']}",
-            "--limit",
+            target["reference"],
+            "--preview-rows",
             "1",
             "--format",
             "json",
@@ -339,49 +364,6 @@ def test_analysis_cli_all_show_and_run_base_output(isolated_workspace):
     assert result["provenance"]["artifacts"][0]["content_hash"]
     assert result["next_actions"]
 
-    arrow = runner.invoke(
-        app,
-        [
-            "analyze",
-            "run",
-            str(workspace),
-            f"@{target['alias']}",
-            "--format",
-            "arrow",
-        ],
-    )
-    assert arrow.exit_code == 0, arrow.output
-    import pyarrow as pa
-
-    arrow_payload = json.loads(arrow.output)
-    exported = arrow_payload["outputs"][0]["export"]
-    exported_path = workspace / exported["path"]
-    assert exported["format"] == "arrow"
-    assert exported["size_bytes"] == exported_path.stat().st_size
-    table = pa.ipc.open_stream(exported_path).read_all()
-    assert table.num_rows == 1
-
-    parquet_destination = workspace / "exports" / "dates.parquet"
-    parquet = runner.invoke(
-        app,
-        [
-            "analyze",
-            "run",
-            str(workspace),
-            f"@{target['alias']}",
-            "--format",
-            "parquet",
-            "--destination",
-            str(parquet_destination),
-        ],
-    )
-    assert parquet.exit_code == 0, parquet.output
-    parquet_payload = json.loads(parquet.output)
-    assert parquet_destination.is_file()
-    assert parquet_payload["outputs"][0]["export"]["sha256"] == hashlib.sha256(
-        parquet_destination.read_bytes()
-    ).hexdigest()
-
     view = next(
         entry
         for entry in ensure_analysis_catalog(workspace).entries
@@ -389,7 +371,7 @@ def test_analysis_cli_all_show_and_run_base_output(isolated_workspace):
     )
     viewed = runner.invoke(
         app,
-        ["analyze", "run", str(workspace), f"@{view['alias']}", "--format", "json"],
+        ["run", str(workspace), view["reference"], "--format", "json"],
     )
     assert viewed.exit_code == 0, viewed.output
     viewed_payload = json.loads(viewed.output)
@@ -408,13 +390,12 @@ def test_analysis_cli_executes_file_sql_and_dataset_transform(tmp_path: Path):
     file_source = runner.invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{entries['sales::source:orders']['alias']}",
+            entries["sales::source:orders"]["reference"],
             "--output",
             "main",
-            "--limit",
+            "--preview-rows",
             "1",
             "--format",
             "json",
@@ -426,10 +407,9 @@ def test_analysis_cli_executes_file_sql_and_dataset_transform(tmp_path: Path):
     sql_source = runner.invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{entries['sales::source:targets']['alias']}",
+            entries["sales::source:targets"]["reference"],
             "--output",
             "main",
             "--query-param",
@@ -446,13 +426,12 @@ def test_analysis_cli_executes_file_sql_and_dataset_transform(tmp_path: Path):
     dataset_output = runner.invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{entries['sales::dataset:sales-metrics/trend']['alias']}",
+            entries["sales::dataset:sales-metrics/trend"]["reference"],
             "--query-param",
             "target_factor=2",
-            "--limit",
+            "--preview-rows",
             "1",
             "--detail",
             "debug",
@@ -477,10 +456,9 @@ def test_analysis_cli_runs_server_derived_output(tmp_path: Path):
     result = CliRunner().invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{derived['alias']}",
+            derived["reference"],
             "--format",
             "json",
         ],
@@ -535,12 +513,11 @@ outputs:
     base_batch = CliRunner().invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{base['alias']}",
+            base["reference"],
             "--also",
-            f"@{base['alias']}",
+            base["reference"],
             "--format",
             "json",
         ],
@@ -560,12 +537,11 @@ outputs:
     server_batch = CliRunner().invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{derived['interactive:doubled']['alias']}",
+            derived["interactive:doubled"]["reference"],
             "--also",
-            f"@{derived['interactive:tripled']['alias']}",
+            derived["interactive:tripled"]["reference"],
             "--format",
             "json",
         ],
@@ -592,25 +568,22 @@ def test_analysis_evidence_and_promote_preview_do_not_mutate_workspace(tmp_path:
     executed = runner.invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{target['alias']}",
+            target["reference"],
             "--format",
             "json",
         ],
     )
     assert executed.exit_code == 0, executed.output
-    result_path = tmp_path / "result.json"
-    result_path.write_text(executed.output, encoding="utf-8")
+    result_id = json.loads(executed.output)["result_id"]
 
     evidence_result = runner.invoke(
         app,
         [
-            "analyze",
-            "evidence",
+            "evidence", "create",
             str(workspace),
-            str(result_path),
+            result_id,
             "--question",
             "原始收入是否可作为断言基线？",
             "--conclusion",
@@ -641,7 +614,7 @@ def test_analysis_evidence_and_promote_preview_do_not_mutate_workspace(tmp_path:
     proposal.write_text(
         f"""schema: dataviz/analysis-promote/v1
 kind: assertion
-target: '@{target['alias']}'
+target: '{target['reference']}'
 include_snapshot: true
 """,
         encoding="utf-8",
@@ -652,8 +625,7 @@ include_snapshot: true
     promoted = runner.invoke(
         app,
         [
-            "analyze",
-            "promote",
+            "evidence", "promote",
             str(workspace),
             evidence["evidence_id"],
             str(proposal),
@@ -679,7 +651,7 @@ include_snapshot: true
             {
                 "schema": "dataviz/analysis-promote/v1",
                 "kind": "semantics",
-                "target": f"@{target['alias']}",
+                "target": target["reference"],
                 "semantics": {
                     "visibility": "public",
                     "title": "原始收入明细",
@@ -696,8 +668,7 @@ include_snapshot: true
     semantics_preview = runner.invoke(
         app,
         [
-            "analyze",
-            "promote",
+            "evidence", "promote",
             str(workspace),
             evidence["evidence_id"],
             str(semantics_proposal),
@@ -753,8 +724,7 @@ include_snapshot: true
     new_output_preview = runner.invoke(
         app,
         [
-            "analyze",
-            "promote",
+            "evidence", "promote",
             str(workspace),
             evidence["evidence_id"],
             str(new_output_proposal),
@@ -798,10 +768,9 @@ replacements:
     result = CliRunner().invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{target['alias']}",
+            target["reference"],
             "--overlay",
             str(overlay),
             "--format",
@@ -846,10 +815,9 @@ replacements:
     explained = runner.invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{target['alias']}",
+            target["reference"],
             "--overlay",
             str(overlay),
             "--dry-run",
@@ -863,10 +831,9 @@ replacements:
     executed = runner.invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{target['alias']}",
+            target["reference"],
             "--overlay",
             str(overlay),
             "--format",
@@ -901,10 +868,9 @@ replacements:
     result = CliRunner().invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{target['alias']}",
+            target["reference"],
             "--overlay",
             str(overlay),
             "--dry-run",
@@ -949,10 +915,9 @@ replacements:
     result = CliRunner().invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{target['alias']}",
+            target["reference"],
             "--overlay",
             str(overlay),
             "--format",
@@ -974,8 +939,7 @@ def test_feature_showcase_analysis_evidence_promote_dry_run_flow(
     searched = runner.invoke(
         app,
         [
-            "analyze",
-            "search",
+            "catalog", "search",
             str(workspace),
             "日期参数",
             "--kind",
@@ -988,18 +952,16 @@ def test_feature_showcase_analysis_evidence_promote_dry_run_flow(
     entry = json.loads(searched.output)["entries"][0]
     executed = runner.invoke(
         app,
-        ["analyze", "run", str(workspace), f"@{entry['alias']}", "--format", "json"],
+        ["run", str(workspace), entry["reference"], "--format", "json"],
     )
     assert executed.exit_code == 0, executed.output
-    result_path = tmp_path / "feature-result.json"
-    result_path.write_text(executed.output, encoding="utf-8")
+    result_id = json.loads(executed.output)["result_id"]
     evidence_result = runner.invoke(
         app,
         [
-            "analyze",
-            "evidence",
+            "evidence", "create",
             str(workspace),
-            str(result_path),
+            result_id,
             "--question",
             "日期参数解析是否可重现？",
             "--conclusion",
@@ -1022,7 +984,7 @@ def test_feature_showcase_analysis_evidence_promote_dry_run_flow(
     proposal.write_text(
         f"""schema: dataviz/analysis-promote/v1
 kind: assertion
-target: '@{entry['alias']}'
+target: '{entry['reference']}'
 include_snapshot: true
 """,
         encoding="utf-8",
@@ -1030,8 +992,7 @@ include_snapshot: true
     promoted = runner.invoke(
         app,
         [
-            "analyze",
-            "promote",
+            "evidence", "promote",
             str(workspace),
             evidence["evidence_id"],
             str(proposal),
@@ -1042,3 +1003,283 @@ include_snapshot: true
     promotion = json.loads(promoted.output)
     assert promotion["status"] == "ready"
     assert promotion["mutated_workspace"] is False
+
+
+def test_analysis_f_discovery_uses_dense_physical_references_and_batch_describe(
+    isolated_workspace,
+):
+    workspace = isolated_workspace(FEATURE_SHOWCASE)
+    runner = CliRunner()
+    searched = runner.invoke(
+        app,
+        [
+            "catalog", "search",
+            str(workspace),
+            "收入|日期",
+            "--top",
+            "3",
+        ],
+    )
+    assert searched.exit_code == 0, searched.output
+    assert "Ref: chart-gallery::" in searched.output or "Ref: date-parameter-lab::" in searched.output
+    assert "比较城市季度收入" in searched.output
+    assert "@base_" not in searched.output
+
+    catalog = ensure_analysis_catalog(workspace)
+    targets = [
+        entry["reference"]
+        for entry in catalog.entries
+        if entry["kind"] == "base_output"
+        and entry["dashboard"]["id"] in {"chart-gallery", "date-parameter-lab"}
+    ][:2]
+    described = runner.invoke(
+        app,
+        [
+            "catalog", "describe",
+            str(workspace),
+            targets[0],
+            targets[0],
+            targets[1],
+            "missing_ref",
+            "--format",
+            "json",
+        ],
+    )
+    assert described.exit_code == 1
+    payload = json.loads(described.output)
+    assert payload["schema"] == "dataviz/analysis-describe/v1"
+    assert [item["requested_reference"] for item in payload["items"]] == [
+        targets[0],
+        targets[1],
+        "missing_ref",
+    ]
+    assert payload["items"][0]["status"] == "ready"
+    assert payload["items"][-1]["error"]["code"] == "analysis_reference_unknown"
+    assert AnalysisDescribe.model_validate(payload)
+
+    legacy = runner.invoke(
+        app,
+        ["run", str(workspace), f"@{targets[0]}", "--format", "json"],
+    )
+    assert legacy.exit_code == 1
+    assert "target_reference_invalid" in legacy.output
+
+
+def test_analysis_f_result_is_immutable_pageable_exportable_and_index_rebuilds(
+    isolated_workspace, tmp_path: Path, monkeypatch
+):
+    workspace = isolated_workspace(FEATURE_SHOWCASE)
+    target = next(
+        entry
+        for entry in ensure_analysis_catalog(workspace).entries
+        if entry["reference"] == "chart-gallery::source:metrics/main"
+    )
+    runner = CliRunner()
+    executed = runner.invoke(
+        app,
+        ["run", str(workspace), target["reference"], "--format", "json"],
+    )
+    assert executed.exit_code == 0, executed.output
+    payload = json.loads(executed.output)
+    result_id = payload["result_id"]
+    result_root = workspace / payload["result_path"]
+    assert (result_root / "manifest.json").is_file()
+    storage = payload["outputs"][0]["storage"]
+    assert storage["mode"] == "managed"
+    assert (result_root / storage["path"]).is_file()
+
+    def must_not_execute(*_args, **_kwargs):
+        raise AssertionError("Result commands must not execute the Dashboard")
+
+    monkeypatch.setattr("dataviz.cli.Executor.run", must_not_execute)
+    page = runner.invoke(
+        app,
+        [
+            "result", "show",
+            str(workspace),
+            result_id,
+            "--offset",
+            "2",
+            "--limit",
+            "3",
+            "--format",
+            "json",
+        ],
+    )
+    assert page.exit_code == 0, page.output
+    page_payload = json.loads(page.output)
+    assert len(page_payload["outputs"][0]["value"]) == 3
+    assert page_payload["outputs"][0]["offset"] == 2
+
+    exported = tmp_path / "native.parquet"
+    export = runner.invoke(
+        app,
+        [
+            "result", "export",
+            str(workspace),
+            result_id,
+            target["reference"],
+            "--to",
+            str(exported),
+        ],
+    )
+    assert export.exit_code == 0, export.output
+    assert exported.is_file()
+    assert json.loads(export.output)["converted"] is False
+
+    (workspace / ".dataviz/results/index.sqlite").unlink()
+    inspected = runner.invoke(
+        app,
+        ["result", "inspect", str(workspace), result_id, "--format", "json"],
+    )
+    assert inspected.exit_code == 0, inspected.output
+    assert json.loads(inspected.output)["result_id"] == result_id
+
+
+def test_analysis_f_file_source_uses_hash_receipt_and_rejects_changed_source(
+    tmp_path: Path,
+):
+    workspace = tmp_path / "sales-workspace"
+    shutil.copytree(SALES_WORKSPACE, workspace)
+    target = next(
+        entry
+        for entry in ensure_analysis_catalog(workspace).entries
+        if entry["reference"] == "sales::source:orders/main"
+    )
+    runner = CliRunner()
+    executed = runner.invoke(
+        app,
+        ["run", str(workspace), target["reference"], "--format", "json"],
+    )
+    assert executed.exit_code == 0, executed.output
+    payload = json.loads(executed.output)
+    assert payload["outputs"][0]["storage"]["mode"] == "source-receipt"
+    assert not any((workspace / payload["result_path"] / "outputs").iterdir())
+
+    source = workspace / "dashboards/sales/data/orders.csv"
+    source.write_text(source.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    page = runner.invoke(
+        app,
+        [
+            "result", "show",
+            str(workspace),
+            payload["result_id"],
+            "--format",
+            "json",
+        ],
+    )
+    assert page.exit_code == 1
+    assert "analysis_result_source_changed" in page.output
+
+
+def test_prune_removes_selected_managed_results(
+    isolated_workspace,
+):
+    workspace = isolated_workspace(FEATURE_SHOWCASE)
+    target = next(
+        entry
+        for entry in ensure_analysis_catalog(workspace).entries
+        if entry["reference"] == "chart-gallery::source:metrics/main"
+    )
+    executed = CliRunner().invoke(
+        app,
+        ["run", str(workspace), target["reference"], "--format", "json"],
+    )
+    assert executed.exit_code == 0, executed.output
+    result_id = json.loads(executed.output)["result_id"]
+    pruned = CliRunner().invoke(
+        app,
+        [
+            "prune",
+            str(workspace),
+            "--all",
+            "--no-runs",
+            "--no-cache",
+            "--apply",
+        ],
+    )
+    assert pruned.exit_code == 0, pruned.output
+    payload = json.loads(pruned.output)
+    assert any(result_id in path for path in payload["deleted"])
+    assert not (workspace / ".dataviz/results" / result_id).exists()
+
+
+def test_dashboard_run_result_list_and_report_reuse_one_sealed_result(
+    isolated_workspace, tmp_path: Path, monkeypatch
+) -> None:
+    workspace = isolated_workspace(FEATURE_SHOWCASE)
+    runner = CliRunner()
+    executed = runner.invoke(
+        app,
+        ["run", str(workspace), "chart-gallery", "--format", "json"],
+    )
+    assert executed.exit_code == 0, executed.output
+    result_id = json.loads(executed.output)["result_id"]
+
+    listed = runner.invoke(app, ["result", "list", str(workspace), "--format", "json"])
+    assert listed.exit_code == 0, listed.output
+    assert result_id in {item["result_id"] for item in json.loads(listed.output)["results"]}
+
+    def must_not_execute(*_args, **_kwargs):
+        raise AssertionError("Reporting a Result must not execute the Dashboard")
+
+    monkeypatch.setattr("dataviz.cli.Executor.run", must_not_execute)
+    destination = tmp_path / "result-report.html"
+    reported = runner.invoke(
+        app,
+        ["report", str(workspace), result_id, "--output", str(destination)],
+    )
+    assert reported.exit_code == 0, reported.output
+    assert destination.is_file()
+
+
+def test_started_cli_execution_seals_a_failed_result(isolated_workspace, monkeypatch) -> None:
+    workspace = isolated_workspace(FEATURE_SHOWCASE)
+
+    def fail_after_start(*_args, **_kwargs):
+        raise RuntimeError("simulated execution failure")
+
+    monkeypatch.setattr("dataviz.cli.Executor.run", fail_after_start)
+    runner = CliRunner()
+    executed = runner.invoke(
+        app,
+        [
+            "run",
+            str(workspace),
+            "chart-gallery::source:metrics/main",
+            "--format",
+            "json",
+        ],
+    )
+    assert executed.exit_code == 1, executed.output
+    payload = json.loads(executed.output)
+    assert payload["status"] == "failed"
+    assert payload["result_id"].startswith("result_")
+    inspected = runner.invoke(
+        app,
+        ["result", "inspect", str(workspace), payload["result_id"], "--format", "json"],
+    )
+    assert inspected.exit_code == 0, inspected.output
+
+
+def test_started_cli_execution_seals_a_cancelled_result(
+    isolated_workspace, monkeypatch
+) -> None:
+    workspace = isolated_workspace(FEATURE_SHOWCASE)
+
+    def cancel_after_start(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("dataviz.cli.Executor.run", cancel_after_start)
+    executed = CliRunner().invoke(
+        app,
+        [
+            "run",
+            str(workspace),
+            "chart-gallery::source:metrics/main",
+            "--format",
+            "json",
+        ],
+    )
+    assert executed.exit_code == 130, executed.output
+    assert json.loads(executed.output)["status"] == "cancelled"

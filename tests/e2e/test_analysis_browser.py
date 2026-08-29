@@ -24,13 +24,12 @@ def test_analysis_cli_reuses_browser_runtime_for_derived_output(isolated_workspa
     result = CliRunner().invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{entry['alias']}",
+            entry["reference"],
             "--control",
             "dashboard:worker-runtime/delay_ms=0",
-            "--limit",
+            "--preview-rows",
             "1",
             "--detail",
             "debug",
@@ -101,12 +100,11 @@ timeout_seconds: 1""",
     result = CliRunner().invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{entry['alias']}",
+            entry["reference"],
             "--also",
-            f"@{secondary['alias']}",
+            secondary["reference"],
             "--control",
             "dashboard:worker-runtime/delay_ms=0",
             "--detail",
@@ -124,7 +122,9 @@ timeout_seconds: 1""",
 
 
 @pytest.mark.e2e
-def test_analysis_cli_exports_browser_output_to_arrow_file(isolated_workspace):
+def test_analysis_cli_exports_existing_browser_result_without_rerun(
+    isolated_workspace, tmp_path: Path
+):
     workspace = isolated_workspace(Path("tests/fixtures/browser-worker-workspace"))
     catalog = ensure_analysis_catalog(workspace)
     entry = next(
@@ -135,27 +135,35 @@ def test_analysis_cli_exports_browser_output_to_arrow_file(isolated_workspace):
     result = CliRunner().invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{entry['alias']}",
+            entry["reference"],
             "--control",
             "dashboard:worker-runtime/delay_ms=0",
             "--format",
-            "arrow",
+            "json",
         ],
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    exported = payload["outputs"][0]["export"]
-    exported_path = workspace / exported["path"]
+    exported_path = tmp_path / "browser-result.parquet"
+    exported = CliRunner().invoke(
+        app,
+        [
+            "result", "export",
+            str(workspace),
+            payload["result_id"],
+            entry["reference"],
+            "--to",
+            str(exported_path),
+        ],
+    )
+    assert exported.exit_code == 0, exported.output
     assert exported_path.is_file()
     assert payload["outputs"][0]["rows"] == 2
-    assert payload["outputs"][0]["truncated"] is False
+    import pandas as pd
 
-    import pyarrow as pa
-
-    assert pa.ipc.open_stream(exported_path).read_all().num_rows == 2
+    assert len(pd.read_parquet(exported_path)) == 2
 
 
 @pytest.mark.e2e
@@ -196,10 +204,9 @@ replacements:
     result = CliRunner().invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{entry['alias']}",
+            entry["reference"],
             "--overlay",
             str(overlay),
             "--control",
@@ -231,10 +238,9 @@ def test_analysis_cli_executes_browser_python_in_bundled_runtime(isolated_worksp
     result = CliRunner().invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{entry['alias']}",
+            entry["reference"],
             "--control",
             "dashboard:browser-python/factor=4",
             "--format",
@@ -274,10 +280,9 @@ def test_analysis_cli_explains_blocked_cdn_browser_python(tmp_path: Path):
     result = CliRunner().invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{entry['alias']}",
+            entry["reference"],
             "--control",
             "dashboard:browser-python/factor=4",
             "--timeout",
@@ -289,7 +294,7 @@ def test_analysis_cli_explains_blocked_cdn_browser_python(tmp_path: Path):
 
     assert result.exit_code == 1
     payload = json.loads(result.output)
-    assert payload["status"] == "error"
+    assert payload["status"] == "failed"
     assert "--allow-network" in json.dumps(payload, ensure_ascii=False)
     assert "bundled Pyodide" in json.dumps(payload, ensure_ascii=False)
 
@@ -308,10 +313,9 @@ def test_analysis_cli_returns_stable_browser_timeout_error(tmp_path: Path):
     result = CliRunner().invoke(
         app,
         [
-            "analyze",
             "run",
             str(workspace),
-            f"@{entry['alias']}",
+            entry["reference"],
             "--control",
             "dashboard:worker-runtime/delay_ms=1500",
             "--timeout",
@@ -323,7 +327,7 @@ def test_analysis_cli_returns_stable_browser_timeout_error(tmp_path: Path):
 
     assert result.exit_code == 1
     payload = json.loads(result.output)
-    assert payload["status"] == "error"
+    assert payload["status"] == "failed"
     assert payload["error"]["code"] in {
         "interactive_transform_timeout",
         "interactive_transform_error",

@@ -444,11 +444,11 @@ def test_query_parameter_consumers_are_compiled_once():
 def test_dependency_contract_is_directly_inspectable_by_ai_and_humans():
     machine = CliRunner().invoke(
         app,
-        ["dependencies", str(FEATURES), "chart-gallery", "--format", "json"],
+        ["inspect", "dependencies", str(FEATURES), "chart-gallery", "--format", "json"],
     )
     human = CliRunner().invoke(
         app,
-        ["dependencies", str(FEATURES), "chart-gallery"],
+        ["inspect", "dependencies", str(FEATURES), "chart-gallery"],
     )
 
     assert machine.exit_code == 0, machine.stdout

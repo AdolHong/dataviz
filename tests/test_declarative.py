@@ -52,14 +52,18 @@ def test_template_registry_is_ai_discoverable():
     assert {"metric", "line", "table", "perspective", "markdown"} <= set(catalog["views"])
     assert {"grid", "split", "chart-and-table", "band"} <= set(catalog["sections"])
     assert {"small-multiples", "selection-gallery"} <= set(catalog["sections"])
-    result = CliRunner().invoke(app, ["components", "--format", "json"])
+    result = CliRunner().invoke(app, ["components", "list", "--format", "json"])
     assert result.exit_code == 0
     assert "view.stacked-bar" in json.loads(result.stdout)
 
 
 def test_repeat_section_components_are_ai_discoverable():
-    listing = CliRunner().invoke(app, ["components", "section.small-multiples", "--format", "json"])
-    gallery = CliRunner().invoke(app, ["components", "section.selection-gallery", "--format", "json"])
+    listing = CliRunner().invoke(
+        app, ["components", "show", "section.small-multiples", "--format", "json"]
+    )
+    gallery = CliRunner().invoke(
+        app, ["components", "show", "section.selection-gallery", "--format", "json"]
+    )
 
     assert listing.exit_code == 0
     assert gallery.exit_code == 0
@@ -117,10 +121,10 @@ def test_repeat_templates_share_one_dataset_and_render_dynamic_instances(tmp_pat
 
 
 def test_component_registry_has_human_and_ai_help():
-    listing = CliRunner().invoke(app, ["components"])
-    detail = CliRunner().invoke(app, ["components", "control.cascader"])
+    listing = CliRunner().invoke(app, ["components", "list"])
+    detail = CliRunner().invoke(app, ["components", "show", "control.cascader"])
     machine = CliRunner().invoke(
-        app, ["components", "control.cascader", "--format", "json"]
+        app, ["components", "show", "control.cascader", "--format", "json"]
     )
 
     assert listing.exit_code == 0
@@ -138,14 +142,14 @@ def test_cli_docs_provide_onboarding_chart_recipes_and_error_recovery():
     charts = CliRunner().invoke(app, ["docs", "chart", "--format", "json"])
     search = CliRunner().invoke(app, ["docs", "--search", "Perspective"])
     failure = CliRunner().invoke(
-        app, ["context", str(WORKSPACE), "missing-dashboard", "--format", "json"]
+        app, ["inspect", "context", str(WORKSPACE), "missing-dashboard", "--format", "json"]
     )
 
     assert listing.exit_code == 0
     assert "dataviz docs quickstart" in listing.stdout
     assert "troubleshooting" in listing.stdout
     assert quickstart.exit_code == 0
-    assert "dataviz query" in quickstart.stdout
+    assert "dataviz run" in quickstart.stdout
     assert "不要从自定义 HTML/CSS/JS 开始" in quickstart.stdout
     interpolation = CliRunner().invoke(
         app, ["docs", "interpolation", "--format", "json"]
@@ -226,18 +230,14 @@ def test_init_creates_declarative_dashboard_without_frontend_scaffold(tmp_path: 
     assert validate_workspace(workspace) == []
 
 
-def test_query_cli_reads_an_explicit_named_source_output():
+def test_run_cli_reads_an_explicit_named_source_output():
     result = CliRunner().invoke(
         app,
         [
-            "query",
+            "run",
             str(WORKSPACE),
-            "sales-overview",
-            "--source",
-            "sales",
-            "--output-name",
-            "main",
-            "--limit",
+            "sales-overview::source:sales/main",
+            "--preview-rows",
             "1",
             "--format",
             "json",
@@ -246,23 +246,24 @@ def test_query_cli_reads_an_explicit_named_source_output():
 
     assert result.exit_code == 0, result.stdout
     payload = json.loads(result.stdout)
-    assert payload["reference"] == "source:sales/main"
-    assert payload["schema"] == "dataviz/cli-result/v1"
-    assert len(payload["preview"]) == 1
-    assert payload["truncated"] is True
+    assert payload["target"]["reference"] == "sales-overview::source:sales/main"
+    assert payload["schema"] == "dataviz/analysis-result/v1"
+    assert len(payload["outputs"][0]["preview"]) == 1
+    assert payload["outputs"][0]["truncated"] is True
+    assert payload["result_id"].startswith("result_")
 
     debug = CliRunner().invoke(
         app,
         [
-            "query", str(WORKSPACE), "sales-overview", "--source", "sales",
-            "--limit", "1", "--format", "json", "--detail", "debug",
+            "run", str(WORKSPACE), "sales-overview::source:sales/main",
+            "--preview-rows", "1", "--format", "json", "--detail", "debug",
         ],
     )
     assert debug.exit_code == 0, debug.stdout
     debug_payload = json.loads(debug.stdout)
-    assert debug_payload["schema"] == "dataviz/cli-result/v1"
-    assert debug_payload["artifact"]["kind"] == "table"
-    assert debug_payload["node"]["diagnostics"]
+    assert debug_payload["schema"] == "dataviz/analysis-result/v1"
+    assert debug_payload["outputs"][0]["kind"] == "table"
+    assert debug_payload["nodes"]["source:sales"]["diagnostics"]
 
 
 def test_inline_sources_and_views_load_without_frontend_files():
@@ -743,7 +744,7 @@ def test_showcase_view_selection_uses_data_driven_cascader():
 
 def test_presentation_is_included_in_ai_context():
     result = CliRunner().invoke(
-        app, ["context", str(WORKSPACE), "sales-overview", "--format", "json"]
+        app, ["inspect", "context", str(WORKSPACE), "sales-overview", "--format", "json"]
     )
     payload = json.loads(result.stdout)
 

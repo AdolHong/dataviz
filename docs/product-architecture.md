@@ -48,7 +48,7 @@ View user event → one Selection Control writer binding
 Named Output → View consumers
 ```
 
-`execution.plan`、`execution.interactive`、Loader 跨文件校验、Canvas、Server Pipeline、HTML manifest、Web Component Adapter、AI context 与 `dataviz dependencies` 都只消费这份契约。`workspace.selection_domains` 只是轻量只读投影，不再拥有独立递归算法。
+`execution.plan`、`execution.interactive`、Loader 跨文件校验、Canvas、Server Pipeline、HTML manifest、Web Component Adapter、AI context 与 `dataviz inspect dependencies` 都只消费这份契约。`workspace.selection_domains` 只是轻量只读投影，不再拥有独立递归算法。
 
 编译结果还保存每个 Query Parameter 的最终影响闭包：需要重跑的 Query 节点、随后失效的 Interactive 分支、option Control、内容字段和 View。Control 则分别保存直接数据筛选、Interactive consumer、派生 View 与内容边，避免把“结构 scope”误说成“每次一定重绘”。
 
@@ -65,8 +65,8 @@ Selection 的结构 scope 与数据适用性分开报告。`direct_view_bindings
 检查入口：
 
 ```bash
-dataviz dependencies WORKSPACE DASHBOARD
-dataviz dependencies WORKSPACE DASHBOARD --format json
+dataviz inspect dependencies WORKSPACE DASHBOARD
+dataviz inspect dependencies WORKSPACE DASHBOARD --format json
 ```
 
 新建作者任务不需要先加载上述完整依赖契约。`dataviz docs --task minimal|interactive|custom-renderer --format json` 返回 `dataviz/authoring-route/v1` 最小概念闭包；`dataviz docs --component <id>` 根据 Component Registry 自动选择路由。`dataviz scaffold --list --format json` 返回 Scaffold Catalog v2，区分完整 Workspace profile 与组合片段。
@@ -182,7 +182,7 @@ Runtime 将 Selection-kind、Compute-kind 和 Output 视为三种独立 delta。
 规模回归入口：
 
 ```bash
-dataviz benchmark <workspace> <dashboard> --browser-runtime --format json
+dataviz benchmark runtime <workspace> <dashboard> --format json
 ```
 
 浏览器基准等待 Arrow hydration、Interactive Transform、Repeat reconciliation 和已挂载 View 进入稳定状态，并分开记录 Query、报告构建、页面就绪、Arrow 行数/字节/耗时、Renderer mount/update/failure/耗时与 View 终态。
@@ -273,18 +273,10 @@ Shell 还拥有独立于 Dashboard Theme 的稳定视觉 token。Server 与导�
 dataviz docs quickstart
 dataviz docs design-language --format json
 dataviz schemas dashboard --full --format json
-dataviz components --check --format json
-dataviz context WORKSPACE DASHBOARD --focus interactive:<id> --format json
+dataviz components check --format json
+dataviz inspect context WORKSPACE DASHBOARD --focus interactive:<id> --format json
 dataviz validate WORKSPACE --dashboard DASHBOARD --format json
-dataviz authoring tasks --format json
-dataviz authoring protocol --format json
-dataviz authoring prepare TASK DIRECTORY --approach dataviz|standalone-html --trial-id TRIAL
-dataviz authoring assess DIRECTORY CHECK --status passed --assessor automation --evidence "..."
-dataviz authoring verify DIRECTORY --format json
-dataviz authoring compare MEASUREMENT_WORKSPACE --format json
 ```
-
-固定 trial 使用任务契约、approach prompt 与输入 SHA-256；逐项验收必须留下 assessor 和证据，只有两种方案均保持 prompt/输入完整并通过全部验收时才进入效率聚合。
 
 错误应包含稳定 code、文件、字段、节点/依赖细节和修复建议。AI 不需要读取整个 Browser Runtime 才能新增普通看板。
 

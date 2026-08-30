@@ -1157,7 +1157,7 @@ function collectCanvasSnapshot(expectedIdentity) {
       clearInterval(retry);
       window.removeEventListener('message', receive);
       if (event.data.error) reject(new Error(event.data.error.message || 'Snapshot collection failed'));
-      else if (event.data.missing?.length) reject(new Error(`Run analysis before export: ${event.data.missing.join(', ')}`));
+      else if (event.data.missing?.length) reject(new Error(`Run Query before export: ${event.data.missing.join(', ')}`));
       else resolve({
         outputs:event.data.outputs || {},
         selectionState:event.data.selection_state || {},

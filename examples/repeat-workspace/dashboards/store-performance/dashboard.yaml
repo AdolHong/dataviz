@@ -23,25 +23,21 @@ views:
     title: 门店周度收入
     input: source:store-sales/main
     template: line
-    engine: plotly
     x: week
     y: revenue
     aggregate: sum
     options:
-      layout:
-        showlegend: false
+      legend: {show: false}
 
   - id: selected-store-trend
     title: 选中门店周度收入
     input: source:store-sales/main
     template: line
-    engine: plotly
     x: week
     y: revenue
     aggregate: sum
     options:
-      layout:
-        showlegend: false
+      legend: {show: false}
 
 sections:
   - id: selected-stores

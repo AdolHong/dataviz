@@ -46,6 +46,7 @@ from dataviz.execution.outputs import normalize_outputs
 from dataviz.execution.parameters import resolve_parameter_default
 from dataviz.execution.references import parse_output_reference
 from dataviz.filesystem import atomic_copy_file, atomic_write_text
+from dataviz.plotly_runtime import PLOTLY_JS_VERSION, get_plotlyjs
 from dataviz.rendering import CanvasRenderer
 from dataviz.server.hot_reload import (
     WorkspaceChangeJournal,
@@ -533,9 +534,11 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
 
     @app.get("/runtime/plotly.js")
     def plotly_runtime():
-        from plotly.offline.offline import get_plotlyjs
-
-        return Response(get_plotlyjs(), media_type="application/javascript")
+        return Response(
+            get_plotlyjs(),
+            media_type="application/javascript",
+            headers={"X-Dataviz-Plotly-Version": PLOTLY_JS_VERSION},
+        )
 
     @app.get("/runtime/pyodide/{asset_path:path}")
     def pyodide_runtime_asset(asset_path: str):
@@ -1504,7 +1507,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         return HTMLResponse(content)
 
     @app.post("/api/dashboards/{dashboard_id}/report")
-    def download_report(
+    def create_report(
         dashboard_id: str,
         request: ReportRequest,
     ):
@@ -1889,7 +1892,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
 
     @app.post("/api/dashboards/{dashboard_id}/share")
     def create_shared_result(dashboard_id: str, request: ReportRequest):
-        return download_report(
+        return create_report(
             dashboard_id,
             request.model_copy(update={"destination": "share"}),
         )

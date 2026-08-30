@@ -1,9 +1,14 @@
 include README.md
+include dataviz-skill.md
 include DESIGN.md
 include plan.md
 include CHANGELOG.md
 include pyproject.toml
 include setup.py
+include tools/build_canvas_runtime.py
+include tools/build_tanstack_table_runtime.py
+include tools/tanstack_table_runtime_entry.js
+include tools/sync_plotly_runtime.py
 recursive-include docs *.md
 graft src/dataviz
 

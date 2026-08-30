@@ -182,7 +182,7 @@ def test_cli_docs_provide_onboarding_chart_recipes_and_error_recovery():
         "label",
         "columns",
     ]
-    assert chart_docs["field_matrix"]["radar"]["engine"] == "echarts"
+    assert "engine" not in chart_docs["field_matrix"]["radar"]
     strict = CliRunner().invoke(app, ["docs", "strict-schema", "--format", "json"])
     assert strict.exit_code == 0
     assert "不提供 deprecated 层" in json.loads(strict.stdout)["summary"]
@@ -227,6 +227,12 @@ def test_init_creates_declarative_dashboard_without_frontend_scaffold(tmp_path: 
     assert "auth/adapters.local.yaml" in (destination / ".gitignore").read_text(
         encoding="utf-8"
     )
+    readme = (destination / "README.md").read_text(encoding="utf-8")
+    assert "dataviz validate . --strict" in readme
+    assert "dataviz catalog search" in readme
+    assert "dataviz run . 'hello::source:data/main'" in readme
+    assert "dataviz authoring" not in readme
+    assert "dataviz analyze" not in readme
     assert validate_workspace(workspace) == []
 
 
@@ -1041,10 +1047,10 @@ def test_default_renderer_builds_templates_and_portable_report(tmp_path: Path):
     assert "scrollZoom:false" in report
     assert "chartService.plotly.mount" in report
     assert "chartService.plotly.update" in report
-    assert "chartService.plotly.mount(chartNode, spec" in report
-    assert "const syncEchartsInteractions" in report
+    assert "managedPlotlyDescriptor(spec, renderContext)" in report
+    assert "const syncPlotlyInteractions" in report
     # Initial bootstrap, managed mount and update all install the same event contract.
-    assert report.count("syncEchartsInteractions(state, descriptor)") == 3
+    assert report.count("syncPlotlyInteractions(state, descriptor)") == 2
     assert "const createPerspective" in report
     assert "const updatePerspective" in report
     assert "const disposePerspective" in report

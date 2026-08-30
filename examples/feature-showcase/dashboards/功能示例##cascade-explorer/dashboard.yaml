@@ -30,7 +30,6 @@ views:
     title: 区县值分布
     input: source:cities/main
     template: bar
-    engine: echarts
     x: district
     y: val
     series: city
@@ -65,7 +64,6 @@ views:
     title: Workspace Adapter 文件
     input: source:uploaded-file/main
     template: bar
-    engine: echarts
     x: label
     y: val
     aggregate: sum
@@ -95,4 +93,4 @@ canvas:
   template: canvas/template.html
   styles: [canvas/style.css]
   use_default_style: true
-  client_libraries: [echarts]
+  client_libraries: [plotly]

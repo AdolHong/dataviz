@@ -36,7 +36,7 @@ Dataviz 的默认方向是 **Quiet white shell + clean analytical canvas**：稳
 
 标题、subtitle 和 description 是分析内容，不是装饰。Query Parameter 或 Control 决定当前分析对象时，应通过内容插值让上下文可见，而不是要求用户重新打开参数面板确认。
 
-Server Header 横跨整个屏幕：左侧的 Dataviz Logo/品牌名同时是 Sidebar disclosure，后接 Source/Dataset 状态灯；右侧依次放 SHARE、Dashboard Controls，最右侧是“查询 + ▼”分段按钮。SHARE 的临时菜单只显示“分享链接”和“导出 HTML”，不附加解释小字；包含 Server Python Interactive Transform 时“导出 HTML”禁用。Sidebar 与 Workbench 都从 Header 下方开始，不再显示独立 Navigation 按钮或重复的 Dashboards 标题。查询主按钮执行 Query，箭头整体显示或隐藏 Workbench 顶部、正常文档流中的圆角 Query Card；不新增独立 Parameters 按钮。Card 首行只写“查询参数”，不放运行按钮；字段按“标题在上、输入在下”排列，不补参数数量或说明文案。Query Card 与 Canvas 共用 `clamp(22px, 3vw, 48px)` 水平 gutter。Server 默认展开，导出 HTML 默认折叠；展开推动 Canvas，不覆盖内容。Dashboard/Section/View Controls 使用临时浮层，并遵循外部点击与 `Esc` 关闭语义。Controls 托盘只呈现业务字段标签与组件；DATA/LOGIC、Selection/Compute、作用域和影响 View 数量属于 Runtime 诊断信息，不作为默认视觉层级。Query Pipeline 不再占用操作位：Source/Dataset 节点在 Dataviz 品牌右侧对应状态灯，悬停只显示任务名，点击进入完整证据。View 的依赖节点和 Renderer 灯位于 `PLOTLY / ECHARTS / TABLE / PERSPECTIVE` 标签左侧，仅在运行、过期或失败时出现，完成后消失；导出 HTML 不重复展示已固化为 Ready 的 Source 灯。
+Server Header 横跨整个屏幕：左侧的 Dataviz Logo/品牌名同时是 Sidebar disclosure，后接 Source/Dataset 状态灯；右侧依次放 SHARE、Dashboard Controls，最右侧是“查询 + ▼”分段按钮。SHARE 的临时菜单只显示“分享链接”和“导出 HTML”，不附加解释小字；包含 Server Python Interactive Transform 时“导出 HTML”禁用。Sidebar 与 Workbench 都从 Header 下方开始，不再显示独立 Navigation 按钮或重复的 Dashboards 标题。查询主按钮执行 Query，箭头整体显示或隐藏 Workbench 顶部、正常文档流中的圆角 Query Card；不新增独立 Parameters 按钮。Card 首行只写“查询参数”，不放运行按钮；字段按“标题在上、输入在下”排列，不补参数数量或说明文案。Query Card 与 Canvas 共用 `clamp(22px, 3vw, 48px)` 水平 gutter。Server 默认展开，导出 HTML 默认折叠；展开推动 Canvas，不覆盖内容。Dashboard/Section/View Controls 使用临时浮层，并遵循外部点击与 `Esc` 关闭语义。Controls 托盘只呈现业务字段标签与组件；DATA/LOGIC、Selection/Compute、作用域和影响 View 数量属于 Runtime 诊断信息，不作为默认视觉层级。Query Pipeline 不再占用操作位：Source/Dataset 节点在 Dataviz 品牌右侧对应状态灯，悬停只显示任务名，点击进入完整证据。View 的依赖节点和 Renderer 灯位于 `PLOTLY / TABLE / PERSPECTIVE` 标签左侧，仅在运行、过期或失败时出现，完成后消失；导出 HTML 不重复展示已固化为 Ready 的 Source 灯。
 
 一个 Section 应回答一个问题，并且至多有一个主要 View。其余 View 是解释、比较或明细，应降低视觉重量。
 
@@ -108,12 +108,17 @@ Shell 与 Dashboard 使用两组边界明确的 Token：`--dv-shell-*` 只控制
 - 保持主题字体、网格和 palette，除非颜色本身承载稳定业务语义。
 - 优先使用位置、长度、直接标签和小倍图完成比较。
 - 避免 3D、彩虹色、厚重阴影和多个同时争夺注意力的图表风格。
-- 页面滚动优先于图表滚轮手势。内置模板和 Custom Renderer 的 `context.charts.plotly` 默认 `scrollZoom: false`，并统一 Theme、Resize、Update 与 Dispose。直接调用 `Plotly.newPlot`/`Plotly.react` 是低层逃生口，作者必须自行承担这些策略；只有用户明确要求图内滚轮缩放时才能设为 `true`。
+- Plotly 是唯一的作者图表接口。普通图表先用声明式模板，通过 `options.trace`、`options.layout` 与 `config` 覆盖；涉及自定义 trace、函数、事件或命令式交互时使用 Custom Renderer，不为了留在模板层而牺牲表达能力。
+- 视觉选型先明确要回答的分析问题，再参考 [Plotly JavaScript 官方文档](https://plotly.com/javascript/) 与 [Chart Studio Gallery](https://plotly.com/graphing-libraries/)。Dataviz Recipe 只是经过验证的起步代码，不是独立图表目录，也不限制作者使用官方 API。
+- 页面滚动优先于图表滚轮手势。Custom Renderer 默认使用 `context.charts.plotly`，由平台统一 Theme、Resize、Update 与 Dispose；需要完整底层能力时可以直接调用页面内嵌的 Plotly API，但必须自行承担这些策略。
 
 ### Table 与 Perspective
 
-- 普通 Table 用于可定制阅读；Perspective 用于排序、筛选和透视探索。
+- Table 是默认的数据表达组件，应优先完成明细、排行、对账、分组展示、格式化输出和行选择；不要仅因为默认 Table 能力不足就切换到分析工作台。
+- Table 使用本地固定的 `@tanstack/table-core` 作为 headless 行为内核；声明式 View 自动获得默认 Dataviz DOM/CSS，可信 Custom Renderer 可通过 `context.tables.tanstack` 使用托管生命周期或完整 Core 自定义任意 header、cell、footer、feature 与样式。
+- Perspective 只用于明确需要赋予终端用户临时分组、聚合、透视和多维探索能力的场景，不作为普通数据表的升级版或默认替代品。
 - 数字右对齐，文本左对齐；表头、条纹和 hover 使用低对比。
+- 默认 Table 保持克制的 Dataviz DOM/CSS；高级作者必须能替换 header、cell、footer、交互与样式，而不是被默认外观封死。
 - Perspective 拥有自己的内部 UI。只调整外层容器和语义 Token，不覆盖其 Shadow DOM 或交互结构。
 - 内部滚动只在容器仍可滚动时消费滚轮；到达边界后必须把滚轮交还页面。
 
@@ -200,7 +205,7 @@ Dashboard 自有 CSS：
 3. 先写 Presentation YAML，再写最少量 Dashboard 自有 CSS。
 4. 运行 `dataviz validate`。
 5. 在 Gallery、真实数据和窄视口下检查 Ready/Empty/Error、弹层和滚动。
-6. 确认 Server 与导出 HTML 一致，Plotly/ECharts/Table/Perspective 都继承 Token。
+6. 确认 Server 与导出 HTML 一致，Plotly/Table/Perspective 都继承 Token。
 
 ## 8. 完成标准
 

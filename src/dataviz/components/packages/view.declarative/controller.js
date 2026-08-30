@@ -107,6 +107,7 @@
   const plotlyDescriptor = (view, rows, binding = null) => {
     const groups = view.series ? [...new Set(rows.map(row => row[view.series]))] : [null];
     const measures = Array.isArray(view.y) ? view.y : [view.y];
+    const traceOptions = view.options?.trace || {};
     const traces = groups.flatMap(group => measures.map(measure => {
       const selected = group == null ? rows : rows.filter(row => row[view.series] === group);
       const common = {
@@ -118,17 +119,37 @@
           bindingSelected(binding, bindingValue(binding, row)) ? index : null
         )).filter(index => index != null) : undefined,
       };
-      if (view.template === 'line') return {...common, type:'scatter', mode:'lines+markers'};
-      if (view.template === 'scatter') return {
+      if (view.template === 'line') return {
+        ...common,
+        type:'scatter',
+        mode:'lines+markers',
+        ...traceOptions,
+        line:{width:2.25, ...(traceOptions.line || {})},
+        marker:{size:6, ...(traceOptions.marker || {})},
+      };
+      if (view.template === 'scatter') {
+        const sizes = view.size
+          ? selected.map(row => Number(row[view.size])).filter(Number.isFinite)
+          : [];
+        const maximumSize = sizes.length ? Math.max(...sizes) : 0;
+        return {
         ...common,
         type:'scatter',
         mode:'markers',
+        ...traceOptions,
         marker:{
           size:view.size ? selected.map(row => row[view.size]) : 9,
           color:view.color ? selected.map(row => row[view.color]) : undefined,
+          ...(view.size && maximumSize > 0 ? {
+            sizemode:'area',
+            sizeref:(2 * maximumSize) / (30 ** 2),
+            sizemin:6,
+          } : {}),
+          ...(traceOptions.marker || {}),
         },
       };
-      return {...common, type:'bar'};
+      }
+      return {...common, type:'bar', ...traceOptions};
     }));
     if (view.template === 'pie') {
       traces.splice(0, traces.length, {
@@ -153,6 +174,21 @@
         colorscale:view.options?.colorscale || 'Viridis',
       });
     }
+    if (view.template === 'radar') {
+      const theta = [...view.columns, view.columns[0]];
+      traces.splice(0, traces.length, ...rows.map(row => ({
+        type:'scatterpolar',
+        mode:'lines+markers',
+        fill:view.options?.fill || 'toself',
+        name:String(row[view.label] ?? ''),
+        theta,
+        r:[...view.columns.map(field => row[field]), row[view.columns[0]]],
+        customdata:binding
+          ? theta.map(() => bindingValue(binding, row))
+          : undefined,
+        ...traceOptions,
+      })));
+    }
     return {
       type:'plotly',
       data:traces,
@@ -162,174 +198,13 @@
         plot_bgcolor:'transparent',
         barmode:view.template === 'stacked-bar' ? 'stack' : (view.options?.barmode || 'group'),
         legend:{orientation:'h', y:1.12},
+        ...(view.template === 'radar' ? {
+          polar:{radialaxis:{visible:true, rangemode:'tozero'}},
+        } : {}),
         ...view.options?.layout,
       },
       config:view.config,
       controlBinding:binding,
-    };
-  };
-  const echartsPoint = (binding, row, value, extra = {}) => binding ? {
-    value,
-    __datavizControlValue:bindingValue(binding, row),
-    selected:bindingSelected(binding, bindingValue(binding, row)),
-    ...extra,
-  } : (Object.keys(extra).length ? {value, ...extra} : value);
-  const echartsDescriptor = (view, rows, binding = null) => {
-    if (view.template === 'pie') return {
-      type:'echarts',
-      controlBinding:binding,
-      options:{
-        tooltip:{trigger:'item'},
-        series:[{
-          type:'pie', radius:['18%', '72%'],
-          selectedMode:binding ? 'multiple' : false,
-          data:rows.map(row => binding ? ({
-            name:row[view.label || view.x],
-            ...echartsPoint(binding, row, row[view.value || view.y]),
-          }) : ({
-            name:row[view.label || view.x],
-            value:row[view.value || view.y],
-          })),
-        }],
-        ...view.options,
-      },
-    };
-    if (view.template === 'heatmap') {
-      const xs = [...new Set(rows.map(row => row[view.x]))];
-      const ys = [...new Set(rows.map(row => row[view.y]))];
-      const data = rows.map(row => [xs.indexOf(row[view.x]), ys.indexOf(row[view.y]), row[view.z]]);
-      const {colors, visualMap:visualMapOptions, ...heatmapOptions} = view.options || {};
-      const visualMap = {
-        min:numericAggregate(data, 'min', item => item[2]),
-        max:numericAggregate(data, 'max', item => item[2]),
-        calculable:true,
-        orient:'horizontal',
-        ...(colors ? {inRange:{color:colors}} : {}),
-        ...(visualMapOptions || {}),
-      };
-      return {
-        type:'echarts',
-        controlBinding:binding,
-        options:{
-          tooltip:{},
-          xAxis:{type:'category', data:xs},
-          yAxis:{type:'category', data:ys},
-          visualMap,
-          series:[{type:'heatmap', data:rows.map((row, index) => (
-            echartsPoint(binding, row, data[index])
-          ))}],
-          ...heatmapOptions,
-        },
-      };
-    }
-    if (view.template === 'scatter') {
-      const groups = view.series ? [...new Set(rows.map(row => row[view.series]))] : [null];
-      const {legend_interaction:legendInteraction = 'filter', ...chartOptions} = view.options || {};
-      return {
-        type:'echarts',
-        controlBinding:binding,
-        legendInteraction,
-        options:{
-          tooltip:{trigger:'item'}, legend:{},
-          xAxis:{type:'value'}, yAxis:{type:'value'},
-          series:groups.map(group => {
-            const selected = group == null ? rows : rows.filter(row => row[view.series] === group);
-            return {
-              name:group == null ? (view.title || '') : String(group),
-              type:'scatter',
-              data:selected.map(row => {
-                const value = [row[view.x], row[view.y], view.size ? row[view.size] : undefined];
-                return echartsPoint(
-                  binding,
-                  row,
-                  value,
-                  view.color ? {itemStyle:{color:row[view.color]}} : {},
-                );
-              }),
-              symbolSize:item => (Array.isArray(item) ? item : item.value)?.[2] || 10,
-            };
-          }),
-          ...chartOptions,
-        },
-      };
-    }
-    if (view.template === 'radar') {
-      const maxima = view.columns.map(field => Math.max(
-        1,
-        numericAggregate(rows, 'max', row => row[field]),
-      ));
-      return {
-        type:'echarts',
-        controlBinding:binding,
-        options:{
-          tooltip:{}, legend:{},
-          radar:{indicator:view.columns.map((field, index) => ({name:field, max:maxima[index]}))},
-          series:[{
-            type:'radar',
-            data:rows.map(row => ({
-              name:String(row[view.label] ?? ''),
-              value:view.columns.map(field => row[field]),
-              __datavizControlValue:binding ? bindingValue(binding, row) : undefined,
-              selected:binding ? bindingSelected(binding, bindingValue(binding, row)) : false,
-            })),
-          }],
-          ...view.options,
-        },
-      };
-    }
-    const categories = [...new Set(rows.map(row => row[view.x]))];
-    const groups = view.series ? [...new Set(rows.map(row => row[view.series]))] : [null];
-    const measures = Array.isArray(view.y) ? view.y : [view.y];
-    const {
-      legend_interaction:legendInteraction = 'filter',
-      legend:legendOptions = {},
-      ...chartOptions
-    } = view.options || {};
-    const series = groups.flatMap(group => measures.map(measure => ({
-      name:[group, measures.length > 1 ? measure : null].filter(Boolean).join(' · ') || view.title,
-      type:view.template === 'line' ? 'line' : 'bar',
-      stack:view.template === 'stacked-bar' ? 'total' : undefined,
-      data:categories.map(category => {
-        const row = rows.find(candidate => (
-          candidate[view.x] === category
-          && (group == null || candidate[view.series] === group)
-        ));
-        return row ? echartsPoint(binding, row, row[measure]) : null;
-      }),
-    })));
-    const centerDisjointBars = (
-      view.template === 'bar'
-      && series.length > 1
-      && measures.length === 1
-      && categories.every((_category, index) => (
-        series.filter(item => item.data[index] != null).length <= 1
-      ))
-    );
-    if (centerDisjointBars) {
-      // ECharts reserves one horizontal slot per bar series even when every
-      // category belongs to exactly one series. Overlap those otherwise empty
-      // slots so each lone bar remains centered on its category label. Keep the
-      // option on every series because legend filtering can change which series
-      // is the last active one used to resolve the shared bar gap.
-      series.forEach(item => { item.barGap = '-100%'; });
-    }
-    return {
-      type:'echarts',
-      legendInteraction,
-      controlBinding:binding,
-      options:{
-        tooltip:{trigger:'axis'},
-        legend:{
-          ...legendOptions,
-          selectedMode:legendInteraction === 'none'
-            ? false
-            : (legendOptions.selectedMode ?? true),
-        },
-        xAxis:{type:'category', data:categories},
-        yAxis:{type:'value'},
-        series,
-        ...chartOptions,
-      },
     };
   };
   const build = (view, state, preparedRows = null) => {
@@ -423,9 +298,7 @@
         html:`<div class="dv-metric"><strong>${escape(formatted)}</strong><span>${escape(view.label || field || '')}</span></div>`,
       };
     }
-    const descriptor = view.engine === 'echarts'
-      ? echartsDescriptor(view, rows, binding)
-      : plotlyDescriptor(view, rows, binding);
+    const descriptor = plotlyDescriptor(view, rows, binding);
     return {
       ...descriptor,
       empty:rows.length === 0,

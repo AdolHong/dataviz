@@ -16,7 +16,7 @@ from dataviz.execution.dependencies import (
 )
 from dataviz.execution.plan import compile_plan
 from dataviz.workspace import load_workspace
-from dataviz.workspace import loader as loader_module
+from dataviz.workspace.loading import loaded_types
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,12 +30,7 @@ MINIMAL = ROOT / "examples" / "minimal-workspace"
 def _copy_cascade_workspace(tmp_path: Path) -> tuple[Path, Path, dict]:
     workspace = tmp_path / "workspace"
     shutil.copytree(FEATURES, workspace)
-    dashboard_path = (
-        workspace
-        / "dashboards"
-        / "功能示例##cascade-explorer"
-        / "dashboard.yaml"
-    )
+    dashboard_path = workspace / "dashboards" / "功能示例##cascade-explorer" / "dashboard.yaml"
     definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
     return workspace, dashboard_path, definition
 
@@ -70,9 +65,7 @@ def test_query_graph_and_progressive_targets_share_one_compiled_closure():
         "source:slow/main",
     )
     assert contract.query_closure(["source:fast"]) == {"source:fast"}
-    assert set(compile_plan(dashboard, targets=["source:fast"]).nodes) == {
-        "source:fast"
-    }
+    assert set(compile_plan(dashboard, targets=["source:fast"]).nodes) == {"source:fast"}
 
 
 def test_dependency_contract_compiles_once_under_concurrent_first_access(
@@ -80,7 +73,7 @@ def test_dependency_contract_compiles_once_under_concurrent_first_access(
 ):
     dashboard = load_workspace(PROGRESSIVE).dashboard("progressive")
     dashboard._dependency_contract = None
-    original = loader_module.compile_dashboard_dependencies
+    original = loaded_types.compile_dashboard_dependencies
     calls = 0
 
     def compile_once(item):
@@ -89,7 +82,7 @@ def test_dependency_contract_compiles_once_under_concurrent_first_access(
         time.sleep(0.02)
         return original(item)
 
-    monkeypatch.setattr(loader_module, "compile_dashboard_dependencies", compile_once)
+    monkeypatch.setattr(loaded_types, "compile_dashboard_dependencies", compile_once)
     with ThreadPoolExecutor(max_workers=8) as pool:
         contracts = list(pool.map(lambda _: dashboard.dependency_contract, range(16)))
 
@@ -122,9 +115,7 @@ def test_selection_domains_and_control_effects_are_explicit():
     assert city.option_domain_references == ("source:cities/main",)
     assert city.direct_views == ("city-detail", "map-bars")
     assert city.depends_on == ("dashboard:cascade-explorer/province",)
-    assert city.dependency_ancestors == (
-        "dashboard:cascade-explorer/province",
-    )
+    assert city.dependency_ancestors == ("dashboard:cascade-explorer/province",)
     assert city.dependency_descendants == ("view:city-detail/district",)
     assert district.option_domain_references == ("source:cities/main",)
     assert district.direct_views == ("city-detail",)
@@ -138,9 +129,7 @@ def test_selection_domains_and_control_effects_are_explicit():
         "city",
         "district",
     )
-    assert district.direct_view_bindings["city-detail"].input_references == (
-        "source:cities/main",
-    )
+    assert district.direct_view_bindings["city-detail"].input_references == ("source:cities/main",)
 
 
 def test_view_control_binding_compiles_one_writer_and_projection_edge(tmp_path: Path):
@@ -155,9 +144,9 @@ def test_view_control_binding_compiles_one_writer_and_projection_edge(tmp_path: 
     assert control.writer_view == "region-comparison"
     assert control.writer_fields == ("region",)
     assert "region-comparison" in control.affected_views
-    assert contract.runtime_manifest()["views"]["region-comparison"][
-        "control_binding"
-    ]["actions"] == ["select", "select_many", "clear"]
+    assert contract.runtime_manifest()["views"]["region-comparison"]["control_binding"][
+        "actions"
+    ] == ["select", "select_many", "clear", "reset"]
 
 
 def test_view_control_binding_rejects_a_second_writer(tmp_path: Path):
@@ -181,7 +170,8 @@ def test_view_control_binding_rejects_narrower_candidate_selection(tmp_path: Pat
         {
             "id": "city",
             "kind": "selection",
-            "type": "single_select", "value_type": "text",
+            "type": "single_select",
+            "value_type": "text",
             "field": "city",
             "initial": {"mode": "empty"},
             "options": {"mode": "infer"},
@@ -207,7 +197,8 @@ def test_same_view_dependencies_compile_direct_edges_transitive_closure_and_orde
             "id": "dow",
             "kind": "selection",
             "field": "city",
-            "type": "single_select", "value_type": "text",
+            "type": "single_select",
+            "value_type": "text",
             "depends_on": ["section.city"],
             "options": {
                 "mode": "static",
@@ -221,7 +212,8 @@ def test_same_view_dependencies_compile_direct_edges_transitive_closure_and_orde
             "id": "dates",
             "kind": "selection",
             "field": "district",
-            "type": "multiple_select", "value_type": "text",
+            "type": "multiple_select",
+            "value_type": "text",
             "depends_on": ["view.dow"],
             "options": {"mode": "infer", "source": "source:cities/main"},
         },
@@ -286,12 +278,19 @@ def test_control_dependencies_reject_compute_parent_and_report_full_cycle(
     controls = _city_detail(definition)["controls"]
     controls.extend(
         [
-            {"id": "seed", "kind": "compute", "type": "single_input", "value_type": "integer", "default": 42},
+            {
+                "id": "seed",
+                "kind": "compute",
+                "type": "single_input",
+                "value_type": "integer",
+                "default": 42,
+            },
             {
                 "id": "dow",
                 "kind": "selection",
                 "field": "city",
-                "type": "multiple_select", "value_type": "text",
+                "type": "multiple_select",
+                "value_type": "text",
                 "depends_on": ["view.seed"],
                 "options": {"mode": "infer", "source": "source:cities/main"},
             },
@@ -315,7 +314,8 @@ def test_control_dependencies_reject_compute_parent_and_report_full_cycle(
                 "id": "first",
                 "kind": "selection",
                 "field": "city",
-                "type": "multiple_select", "value_type": "text",
+                "type": "multiple_select",
+                "value_type": "text",
                 "depends_on": ["view.second"],
                 "options": {"mode": "infer", "source": "source:cities/main"},
             },
@@ -323,7 +323,8 @@ def test_control_dependencies_reject_compute_parent_and_report_full_cycle(
                 "id": "second",
                 "kind": "selection",
                 "field": "district",
-                "type": "multiple_select", "value_type": "text",
+                "type": "multiple_select",
+                "value_type": "text",
                 "depends_on": ["view.first"],
                 "options": {"mode": "infer", "source": "source:cities/main"},
             },
@@ -376,19 +377,13 @@ def test_runtime_manifest_is_a_projection_of_the_same_contract():
 
     assert manifest["schema"] == DEPENDENCY_CONTRACT_SCHEMA
     assert manifest["interactive"]["order"] == ["scaled"]
-    assert manifest["interactive"]["inputs"] == {
-        "scaled": {"rows": "source:raw/main"}
-    }
-    assert manifest["interactive"]["outputs"] == {
-        "scaled": ["interactive:scaled/main"]
-    }
+    assert manifest["interactive"]["inputs"] == {"scaled": {"rows": "source:raw/main"}}
+    assert manifest["interactive"]["outputs"] == {"scaled": ["interactive:scaled/main"]}
     assert manifest["interactive"]["dependencies"] == {"scaled": []}
     assert manifest["interactive"]["compute_inputs"] == {
         "scaled": {"delay_ms": "dashboard:worker-runtime/delay_ms"}
     }
-    assert manifest["views"]["scaled-table"]["inputs"] == {
-        "main": "interactive:scaled/main"
-    }
+    assert manifest["views"]["scaled-table"]["inputs"] == {"main": "interactive:scaled/main"}
     assert manifest["views"]["scaled-table"]["pipeline_nodes"] == [
         "source:raw",
         "interactive:scaled",
@@ -407,9 +402,7 @@ def test_query_parameter_consumers_are_compiled_once():
     dashboard = load_workspace(SALES).dashboard("sales")
     contract = dashboard.dependency_contract
 
-    assert contract.query_parameter_consumers["target_factor"] == (
-        "source:targets",
-    )
+    assert contract.query_parameter_consumers["target_factor"] == ("source:targets",)
     assert contract.parameter_inputs["source:targets"] == {
         "target_factor": {"parameter": "target_factor"}
     }

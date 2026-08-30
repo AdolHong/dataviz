@@ -1,4 +1,4 @@
-
+// Owner: Runtime protocol, manifest normalization, and shared constants.
 const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v5';
 const DATAVIZ_INTERACTIVE_WORKER_PROTOCOL = 'dataviz/interactive-worker/v1';
 const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v5';
@@ -117,6 +117,7 @@ const datavizValueSignature = value => {
   try { return JSON.stringify(value); }
   catch { return String(value); }
 };
+// Owner: canonical value, output-reference, and transport value contracts.
 const datavizRuntimeError = payload => {
   const error = new Error(payload?.message || 'Dataviz Runtime failed');
   Object.assign(error, payload || {});
@@ -538,6 +539,7 @@ const validateInteractiveOutput = (transformId, name, value, definition = {}) =>
     throw datavizContractError('interactive_output_not_json_serializable', `${label} must return strict JSON data`, {transform_id:transformId, output:name});
   }
 };
+// Owner: shared Runtime host state and public registration surface.
 const datavizRuntime = window.datavizRuntime = {
   protocol: 'dataviz/runtime/v5',
   transforms: new Map(),
@@ -684,7 +686,10 @@ const datavizRuntime = window.datavizRuntime = {
     return window.dataviz.dependency_contract?.outputs?.[
       canonicalOutputReference(reference)
     ]?.views || [];
-  },
+  }
+};
+// Owner: Interactive Transform scheduling, workers, cancellation, and status.
+Object.assign(datavizRuntime, {
   interactiveWorkerUrl(runtime) {
     if (this.workerUrls.has(runtime)) return this.workerUrls.get(runtime);
     const source = runtime === 'browser-python'
@@ -1208,6 +1213,9 @@ const datavizRuntime = window.datavizRuntime = {
     await Promise.all(tasks.values());
     return changedOutputs;
   },
+});
+// Owner: affected-view resolution and Renderer mount/update lifecycle.
+Object.assign(datavizRuntime, {
   affectedViews(changedSelectionKeys, changedOutputs = new Set()) {
     // A null Selection delta is the first render, not an empty update. Render
     // every registered host so input-free Markdown/Image Views become ready and
@@ -1342,6 +1350,9 @@ const datavizRuntime = window.datavizRuntime = {
     this.publishControlImpacts();
     return changedOutputs;
   },
+});
+// Owner: Named Output transport registration, hydration, and publication.
+Object.assign(datavizRuntime, {
   registerOutputTransport(reference, descriptor) {
     const canonical = canonicalOutputReference(reference);
     window.dataviz.portable.output_schemas ||= {};
@@ -1430,6 +1441,9 @@ const datavizRuntime = window.datavizRuntime = {
     if (changed) datavizPostToParent({type:'dataviz:control-impact-changed', controls});
     return controls;
   },
+});
+// Owner: Runtime-wide Renderer, worker, observer, and resource disposal.
+Object.assign(datavizRuntime, {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
@@ -1444,8 +1458,8 @@ const datavizRuntime = window.datavizRuntime = {
     this.controlImpactSignatures.clear();
     Object.values(this.interactiveAdapters).forEach(adapter => adapter.dispose());
   },
-};
-
+});
+// Owner: Selection binding, canonical commits, and parent-frame synchronization.
 window.addEventListener('dataviz:interactionprogress', event => {
   const detail = event.detail || {};
   const percent = Number.isFinite(Number(detail.value))
@@ -1759,8 +1773,11 @@ const datavizDispatchControlAction = event => {
     }
     const definition = datavizSelectionDefinition(binding.control);
     const current = datavizSelectionEntry(binding.control);
+    let next;
     let value;
-    if (event.action === 'clear') value = definition.type === 'range_input' ? [] : (
+    if (event.action === 'reset') {
+      next = datavizNormalizeSelectionState(binding.control);
+    } else if (event.action === 'clear') value = definition.type === 'range_input' ? [] : (
       ['multiple_input', 'multiple_select'].includes(definition.type) ? [] : null
     );
     else if (event.action === 'select_many') {
@@ -1774,7 +1791,7 @@ const datavizDispatchControlAction = event => {
         `Unknown Control action: ${event.action}`,
       );
     }
-    const next = datavizNormalizeSelectionState(binding.control, {
+    if (!next) next = datavizNormalizeSelectionState(binding.control, {
       intent:'explicit',
       values:datavizSelectionLogicalValues(
         definition,
@@ -2188,6 +2205,7 @@ const syncDatavizContentBindings = changedSelectionKeys => {
   return affectedViews;
 };
 window.dataviz.syncContentBindings = syncDatavizContentBindings;
+// Owner: analysis state projection and live Query/Interactive scheduling.
 /*
  * Analysis state is evidence, not another editable control surface. The same
  * canonical snapshot drives Server canvases and exported reports.
@@ -2780,6 +2798,7 @@ window.addEventListener('message', event => {
     }
   }
 });
+// Owner: DOM/bootstrap event wiring after every Runtime owner is registered.
 let datavizSelectionScheduled = false;
 let datavizSelectionQueue = Promise.resolve();
 const scheduleDatavizSelection = event => {

@@ -13,6 +13,11 @@ from dataviz.cli import app
 from dataviz.execution import Executor
 from dataviz.execution.fingerprint import ensure_query_run_compatible
 from dataviz.errors import ExecutionFailure, WorkspaceError
+from dataviz.plotly_runtime import (
+    PLOTLY_JS_SHA256,
+    PLOTLY_JS_VERSION,
+    get_plotlyjs,
+)
 from dataviz.rendering import CanvasRenderer
 from dataviz.workspace import compile_control_contract, load_workspace, validate_workspace
 
@@ -35,6 +40,16 @@ def test_workspace_is_valid():
     assert not [item for item in diagnostics if item.level == "error"]
     assert set(workspace.dashboards["sales"].sources) == {"orders", "targets"}
     assert set(workspace.dashboards["sales"].dataset_transforms) == {"sales-metrics"}
+
+
+def test_plotly_runtime_is_the_pinned_direct_browser_asset():
+    source = get_plotlyjs()
+
+    assert PLOTLY_JS_VERSION == "4.0.0"
+    assert PLOTLY_JS_SHA256 == (
+        "14461f3b4c91c8bb590a99d6d03c3fd031ca40eec07ebab79a5e3eac107cd7ca"
+    )
+    assert source.startswith("/**\n* plotly.js v4.0.0")
 
 
 def test_workspace_uses_physical_names_for_renamed_copied_and_deleted_dashboards(tmp_path: Path):
@@ -314,21 +329,23 @@ def test_custom_canvas_and_report(tmp_path: Path):
     html = renderer.render(workspace.dashboard("sales"), result, asset_mode="server")
     assert "CUSTOM CANVAS" in html
     assert "dv-plotly" in html
-    assert "dv-echarts" in html
+    assert '<script src="/static/tanstack-table-runtime.js"></script>' in html
+    assert '<script src="/runtime/plotly.js"></script>' in html
     output = renderer.write_report(workspace.dashboard("sales"), result, tmp_path / "report.html")
     assert output.exists()
     manifest_path = output.with_suffix(".html.manifest.json")
     assert manifest_path.exists()
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest["portable_without_network"] is False
+    assert manifest["portable_without_network"] is True
     assert manifest["portability_scope"] == "declared-runtime-and-view-assets"
-    assert {item["library"] for item in manifest["network_dependencies"]} == {
-        "echarts"
-    }
+    assert manifest["network_dependencies"] == []
     report = output.read_text(encoding="utf-8")
     assert "fonts.googleapis.com" not in report
     assert "@import url(" not in report
-    assert "Plotly" in report
+    assert '"tanstack_table": "9.2.4"' in report
+    assert '"plotly_js": "4.0.0"' in report
+    assert "plotly.js v4.0.0" in report
+    assert "globalThis.datavizTanStackTable" in report
     assert "PORTABLE ANALYSIS" not in report
     assert ">Query snapshot<" not in report
     assert 'data-runtime-query-toggle' in report
@@ -397,15 +414,29 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert "perspective-viewer-datagrid.js" not in report
     assert "perspective-viewer-charts.js" not in report
     assert "runtime.registerRenderer('table'" in report
+    assert "context.tables.tanstack" not in report
+    assert "global.dataviz.tables = tableService" in report
+    assert "const mountTanStackTable" in report
+    assert "renderPlainTable" not in report
     assert "runtime.registerRenderer('perspective'" in report
     assert "dv-view--table" in report
     assert "const createPerspective" in report
-    assert "const bindEchartsLegend =" in report
-    assert "descriptor.legendInteraction !== 'filter'" in report
-    assert "replaceMerge:['xAxis', 'series']" in report
+    assert "const syncPlotlyInteractions =" in report
+    assert "plotly_selected" in report
+    assert "plotly_doubleclick" in report
     assert "state.table.replace(state.latestRows)" in report
     assert "window.datavizInteractivePythonWorkerSource=" not in report
     assert '"pyodide_index_url"' not in report
+
+
+def test_declarative_charts_load_the_plotly_runtime():
+    workspace = load_workspace(WORKSPACE)
+    dashboard = workspace.dashboard("sales")
+    result = Executor(workspace).run("sales")
+
+    html = CanvasRenderer(workspace).render(dashboard, result, asset_mode="server")
+
+    assert '<script src="/runtime/plotly.js"></script>' in html
 
 
 def test_report_cli_exposes_the_scoped_portability_claim(tmp_path: Path):
@@ -426,30 +457,19 @@ def test_report_cli_exposes_the_scoped_portability_claim(tmp_path: Path):
     assert payload["portability_scope"] == "declared-runtime-and-view-assets"
 
 
-def test_direct_render_and_export_reject_runtime_assets_outside_workspace(
+def test_report_export_rejects_runtime_bundle_outside_workspace(
     tmp_path: Path,
     monkeypatch,
 ):
     root = tmp_path / "workspace"
     shutil.copytree(WORKSPACE, root)
-    outside_script = tmp_path / "outside-echarts.js"
-    outside_script.write_text("window.echarts = {};", encoding="utf-8")
     workspace = load_workspace(root)
     dashboard = workspace.dashboard("sales")
     result = Executor(workspace).run("sales")
     renderer = CanvasRenderer(workspace)
-    workspace.definition.runtime.echarts_js = "../outside-echarts.js"
-
-    with pytest.raises(ExecutionFailure) as chart_failure:
-        renderer.render(dashboard, result)
-    assert chart_failure.value.details["code"] == "runtime_asset_outside_workspace"
-    assert chart_failure.value.details["field"] == "runtime.echarts_js"
 
     outside_bundle = tmp_path / "outside-pyodide"
     outside_bundle.mkdir()
-    workspace.definition.runtime.echarts_js = (
-        "https://cdn.jsdelivr.net/npm/echarts@6.0.0/dist/echarts.min.js"
-    )
     workspace.definition.runtime.pyodide_bundle_path = "../outside-pyodide"
     monkeypatch.setattr(
         renderer, "_browser_python_export_assets", lambda _, **__: "bundle"

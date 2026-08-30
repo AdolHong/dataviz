@@ -7,7 +7,7 @@
 .gallery-grid { display: grid; gap: 14px; }
 .gallery-grid--top { grid-template-columns: 1.5fr .8fr .8fr; }
 .gallery-grid--bottom { grid-template-columns: 1fr 1fr 1.2fr; }
-.gallery-grid > div { min-height: 350px; }
+.gallery-grid > div { min-width: 0; min-height: 350px; }
 .gallery-feature { grid-row: span 1; }
 .gallery-grid .dv-view { height: 100%; border: 1px solid var(--gallery-line); box-shadow: none; }
 .gallery-grid .dv-view-header { font-weight: 700; }

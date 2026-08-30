@@ -528,14 +528,13 @@ def test_validate_rejects_python_attribute_names_as_dsl_aliases(tmp_path: Path):
     )
 
 
-def test_validate_checks_local_browser_runtime_assets(tmp_path: Path):
+def test_validate_checks_configurable_local_browser_runtime_assets(tmp_path: Path):
     workspace = _copy_workspace(tmp_path)
     workspace_path = workspace / "workspace.yaml"
     definition = yaml.safe_load(workspace_path.read_text(encoding="utf-8"))
     definition["runtime"] = {
         **definition.get("runtime", {}),
-        "echarts_js": "runtime/missing-echarts.js",
-        "arrow_js": "../outside-arrow.js",
+        "arrow_js": "runtime/missing-arrow.js",
     }
     workspace_path.write_text(
         yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
@@ -545,8 +544,7 @@ def test_validate_checks_local_browser_runtime_assets(tmp_path: Path):
     report = validate_preflight(workspace)
     diagnostics = {item["code"]: item for item in report["diagnostics"]}
 
-    assert diagnostics["runtime_asset_missing"]["field"] == "runtime.echarts_js"
-    assert diagnostics["runtime_asset_outside_workspace"]["field"] == "runtime.arrow_js"
+    assert diagnostics["runtime_asset_missing"]["field"] == "runtime.arrow_js"
 
 
 def test_validate_selection_binding_against_declared_output_schema(tmp_path: Path):

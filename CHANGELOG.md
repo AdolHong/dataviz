@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 0.12.2 — 2026-08-30
+
+- Plotly Selection Binding 只在真实用户操作完成后提交；绑定图表默认仅显示矩形选择、套索选择和恢复默认选择，未绑定图表不显示空工具栏。空 `plotly_selected` 不再覆盖刚完成的点选，click、area select 与 double-click 会取消尚未提交的旧动作；`clear` 与 `reset` 分离，恢复默认选择不再制造显式空集。
+- 删除产品源码、Schema、示例、文档和发行资产中的 ECharts/Vega 分支；Plotly 保持唯一作者图表接口，普通 Table 继续使用 TanStack Table Core。
+- 浏览器图表 Runtime 直接固定并内置 Plotly.js 4.0.0；Server 与 portable HTML 共用同一资产，删除仅用于转运 JS bundle 的 Python `plotly` 依赖，并显式关闭 v4 默认云端分享入口。
+- TanStack Table 搜索框支持中文输入法 composition 生命周期：拼音组合期间不重绘，候选文字提交后再过滤；`source-lab` 右侧图表移除独立灰蓝背景，与同页 Plotly 卡片统一表面颜色。
+- README 收敛为产品理念、安装和两条 Quickstart；DESIGN 清除旧版本/旧 CLI/旧 Runtime 残留，plan 只保留当前基线与真实待办。
+- 快速迭代发布默认执行 Chromium 完整 E2E；稳定发布、跨浏览器敏感变更或明确要求时再重复 Firefox/WebKit，避免把尚未执行的跨浏览器验证写成发布事实。
+- 421 项非浏览器测试与 52 项 Chromium E2E 通过；四个示例 Workspace strict validate、21 个 Component Package（65 个组件、39 个 Story、77 个测试声明）和实际 `run`/`report` 冒烟通过。wheel、sdist、pip ZIP 完成内容审计与独立 Python 3.12 安装全流程冒烟。
+
+## 0.12.1 — 2026-08-30
+
+- Plotly Control Binding 的框选改为仅在 `brushEnd` 提交一次；拖动过程中的高频 `brushselected` 只保存预览，不再因首个命中点触发 View 重绘并中断手势。
+
+- Replaced the hand-written default Table behavior with locally bundled `@tanstack/table-core` 9.2.4, added polished Dataviz defaults for sorting/search/pagination/pinning, and exposed managed plus unrestricted `context.tables.tanstack` APIs to Custom Renderers.
+
+- 文档与机器可读 `dataviz docs` 将 Plotly 固定为唯一作者图表接口；作者只关心数据口径、视觉编码与交互目标，从声明式模板逐步进入 trace/layout/config 覆盖和拥有完整 Plotly.js API 的 Custom Renderer。官方文档与 Gallery 用于视觉和 API 参考，项目 Recipe 只保留少量完成 Dataviz 生命周期适配的样例。
+
+- 新增 `dataviz-skill.md`，把快速构建、渐进式文档、分析问题设计、Catalog 复用、Result-centric 执行和长期维护整理为一份可直接交给 AI 的工作流。
+
+- 大型 Canvas Runtime 与 Workspace Loader 按 owner 边界拆分为可维护源码模块，由确定性构建和兼容 façade 保持单一浏览器资产、稳定错误 code 与既有 CLI 行为。
+
 ## 0.12.0 — 2026-08-29
 
 - 公开 CLI 收敛为 `catalog → run → result → evidence`：删除 `analyze`、`query`、`output`、`compute` 和产品内 `authoring` 分组；工程导航改为 `tree`，结构检查归入 `inspect`，清理改为安全预览优先的 `prune`。
@@ -80,17 +102,17 @@ Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本
 
 ### Unified Renderer lifecycle
 
-- Plotly、ECharts 与 Perspective 统一遵守平台行为矩阵：`mount → update → empty → restore → interaction → resize → dispose → export`；Custom Renderer 作者接口仍保持精简的 `validate → mount → update → dispose`。
+- Plotly 与 Perspective 统一遵守平台行为矩阵：`mount → update → empty → restore → interaction → resize → dispose → export`；Custom Renderer 作者接口仍保持精简的 `validate → mount → update → dispose`。
 - 首屏 Server/HTML bootstrap 不再绕过 View Package，而是按真实 View ID 注册到同一实例状态表；后续更新、空集、恢复、Resize 与销毁因此只有一个生命周期 owner。
 - 空数据成为同步终态：View 立即发布 Empty 并释放旧实例；数据恢复时创建唯一的新实例，不保留旧坐标轴、图例、透视状态或事件监听器。
 - Perspective Worker、Table 与 Viewer 改由单个 Renderer 实例共同拥有和释放，不再跨 View 生命周期共享 Canvas 全局 Worker；加载、建表、恢复、更新与销毁均有有界终态，外部资产或引擎停滞时回退普通 Table，不会永久 Loading。
-- Plotly/ECharts 交互监听和 ResizeObserver 由平台 Chart Service 管理，重复 update 不会叠加回调；Perspective 的 resize/dispose 也进入同一指标与错误边界。
+- Plotly 交互监听和 ResizeObserver 由平台 Chart Service 管理，重复 update 不会叠加回调；Perspective 的 resize/dispose 也进入同一指标与错误边界。
 - Runtime 暴露 mount、update、empty、restore、interaction、resize、dispose、failed 与耗时指标，便于 Gallery、Visual Check 和浏览器回归定位生命周期缺口。
 
 ### Component contract and verification
 
 - Component Registry 升级为 `4.2.0`，新增 `view.renderer-lifecycle` 契约；`view.declarative` 与 `renderer.custom` manifest 明确区分作者 hooks 和平台矩阵。
-- Chromium、Firefox、WebKit 在 Server Canvas 与 portable HTML 中共同覆盖 Plotly、ECharts、Perspective 的八阶段矩阵，并保留 ECharts 图例更新与 Perspective 空集恢复专项回归。
+- Chromium、Firefox、WebKit 在 Server Canvas 与 portable HTML 中共同覆盖 Plotly、Perspective 的八阶段矩阵，并保留 Plotly 交互与 Perspective 空集恢复专项回归。
 - 373 项当前测试契约、全部示例 Workspace strict validate、20 个 Component Package（60 个组件、38 个 Story、72 个测试声明）检查，以及 wheel/sdist/pip ZIP 独立 Python 3.12 安装与报告导出冒烟通过。
 - CLI Renderer 文档、Design、Product Architecture 和 Plan 同步记录唯一生命周期 owner、空集语义及 Export 同构要求。
 
@@ -125,7 +147,7 @@ Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本
 
 - Dashboard 升级为 `dataviz/dashboard/v8`、Presentation 升级为 v2、Dependency Contract 升级为 v4、Browser Runtime 升级为 v5，并新增 Layout Contract v1；不提供兼容分支。
 - Selection 统一保存 `{intent, values}`；`explicit + []` 是明确空集，`all_available` 随候选域扩张。optional Single Select 支持 Clear，required Single 禁止 clearable。
-- View 可用一条 `control_binding` 双向绑定现有 Selection Control；一个 Control 最多一个 writer View，Plotly/ECharts/Table/Custom 共用类型化 Action 和 canonical commit。
+- View 可用一条 `control_binding` 双向绑定现有 Selection Control；一个 Control 最多一个 writer View，Plotly/Table/Custom 共用类型化 Action 和 canonical commit。
 - Section/View 顺序、模板、columns 与 span 全部属于 Dashboard；Presentation v2 删除结构布局字段。默认 Renderer、Server/HTML、AI context 与 validate 共用 `dataviz/layout-contract/v1`。
 - Selection 使用 `depends_on: [dashboard.<id> | section.<id> | view.<id>]` 只声明直接父节点。Compiler 相对当前 owner 解析 canonical key，生成传递祖先/后代和稳定拓扑顺序，并拒绝未知引用、Compute 父节点、越界和完整环路径。
 - 支持同一 View 内的显式多级候选关系，例如 `dates depends_on view.dow`；Dashboard、Section 与 View 的跨层依赖继续遵守结构作用域，不能跨兄弟 Section/View。
@@ -147,7 +169,7 @@ Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本
 
 - browser-js/browser-python 未显式声明时默认 `trigger: auto`，server-python 默认 `apply`；Scaffold 与文档使用同一规则。
 - `query`、`output`、`compute` 默认输出紧凑 `dataviz/cli-result/v1`，`--detail debug|full` 才展开执行证据。
-- Component Registry 升级为 4.1.0；Custom Renderer 可通过 `context.charts.plotly/echarts` 复用平台 Theme、滚轮、Resize、Update 与 Dispose。
+- Component Registry 升级为 4.1.0；Custom Renderer 可通过 `context.charts.plotly` 复用平台 Theme、滚轮、Resize、Update 与 Dispose。
 - 新增 `visual-check`，真实加载 Server/Report 并输出 `dataviz/visual-check/v1`、截图和稳定几何/Loading/Console 诊断；不判断主观美感。
 - Interactive Runtime 按完整输入指纹合并同一时刻的重复请求，消除 Base Output 与父页面同步竞态造成的无意义 Worker 重启；输入真正变化时仍按 generation 取消旧任务。
 
@@ -302,7 +324,7 @@ Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本
 ### Presentation
 
 - 新建 Dashboard 默认使用现代靛蓝 `business` Theme：冷灰页面、白色卡片、低阴影与紧凑数据表；`plain`、`editorial`、`terminal` 仍是显式可选风格。
-- Server、导出 HTML、Data Entry Control、Plotly、ECharts、普通 Table 与 Perspective 统一消费 Theme token；Renderer 的显式 options/config 继续拥有更高优先级。
+- Server、导出 HTML、Data Entry Control、Plotly、普通 Table 与 Perspective 统一消费 Theme token；Renderer 的显式 options/config 继续拥有更高优先级。
 - Gallery 增加四种 Theme 的同构预览，并把等待、失效与损坏 Canvas 的状态页统一到 Server 视觉体系。
 
 ### Authoring
@@ -443,7 +465,7 @@ Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本
 
 ### Fixed
 
-- 默认 View Shell 现在实际渲染 `description`，并统一覆盖 Table、Perspective、Plotly、ECharts、Custom Renderer 与 Repeat View；动态 Selection 文案原地更新，Server 与导出 HTML 保持一致。
+- 默认 View Shell 现在实际渲染 `description`，并统一覆盖 Table、Perspective、Plotly、Custom Renderer 与 Repeat View；动态 Selection 文案原地更新，Server 与导出 HTML 保持一致。
 
 ## 0.1.3 — 2026-08-23
 

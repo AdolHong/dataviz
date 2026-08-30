@@ -70,6 +70,7 @@ from dataviz.execution.dependencies import (
     DEPENDENCY_CONTRACT_SCHEMA,
 )
 from dataviz.maintenance import cleanup_workspace_storage
+from dataviz.plotly_runtime import PLOTLY_JS_VERSION
 from dataviz.rendering import CanvasRenderer, template_catalog
 from dataviz.renderer_contract import run_renderer_contract
 from dataviz.schema_docs import CURRENT_SCHEMAS, schema_catalog, schema_model_contract
@@ -626,50 +627,6 @@ def _result_detail(value: str) -> str:
     return value
 
 
-def _artifact_result_summary(
-    *,
-    status: str,
-    reference: str,
-    artifact,
-    value: Any,
-    truncated: bool,
-    run_id: str,
-    duration_ms: int | None = None,
-) -> dict[str, Any]:
-    schema = artifact.schema_ or []
-    columns = [item.get("name") for item in schema if item.get("name")]
-    return {
-        "schema": "dataviz/cli-result/v1",
-        "status": status,
-        "run_id": run_id,
-        "reference": reference,
-        "kind": artifact.kind,
-        "rows": artifact.metadata.get("row_count"),
-        "columns": columns,
-        "duration_ms": duration_ms,
-        "preview": value,
-        "truncated": truncated,
-        "next_actions": [
-            "Use --detail debug to inspect bindings and diagnostics.",
-            "Use --detail full only when the complete execution envelope is required.",
-        ],
-    }
-
-
-def _failed_result_summary(result, reference: str, node=None) -> dict[str, Any]:
-    return {
-        "schema": "dataviz/cli-result/v1",
-        "status": result.status,
-        "run_id": result.run_id,
-        "reference": reference,
-        "error": node.error if node else {"code": "output_unavailable", "message": "Named Output was not produced"},
-        "next_actions": [
-            "Run dataviz validate WORKSPACE --dashboard DASHBOARD --format json.",
-            "Repeat with --detail debug to inspect the failing node.",
-        ],
-    }
-
-
 @contextmanager
 def _visual_server(workspace: Path):
     import uvicorn
@@ -806,16 +763,22 @@ folders: []
 
 Run with `dataviz serve .`.
 
-AI authoring starts with:
+Build and verify the Dashboard:
 
 ```bash
 dataviz docs quickstart
-dataviz authoring start . --task \"Describe the dashboard change\"
+dataviz validate . --strict
+dataviz inspect dependencies . hello
+dataviz report . hello --output report.html
 ```
 
-Finish the returned session with `dataviz authoring finish`. Commit the generated
-`dataviz-authoring.jsonl` when its task text and notes contain no sensitive data;
-sharing that file gives the Dataviz author real retry, time and documentation-friction data.
+Explore and execute its reusable data contract:
+
+```bash
+dataviz catalog search . \"sample|category\"
+dataviz catalog describe . 'hello::source:data/main'
+dataviz run . 'hello::source:data/main'
+```
 """,
         "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v9
 kind: dashboard
@@ -1249,8 +1212,6 @@ def schemas(
             constraints = []
             if contract.get("one_of"):
                 constraints.append(f"one of {contract['one_of']}")
-            if contract.get("engine"):
-                constraints.append(f"engine={contract['engine']}")
             if contract.get("aggregate"):
                 constraints.append(f"aggregate in {contract['aggregate']}")
             typer.echo(
@@ -1450,6 +1411,7 @@ def version(output_format: str = typer.Option("json", "--format", help="json or 
         "dependency_contract": DEPENDENCY_CONTRACT_SCHEMA,
         "component_registry": template_catalog()["component_registry_version"],
         "runtime_protocol": template_catalog()["runtime_protocol"],
+        "plotly_js": PLOTLY_JS_VERSION,
         "workspace_change_protocol": "dataviz/workspace-change/v1",
     }
     if output_format == "json":
@@ -1458,7 +1420,7 @@ def version(output_format: str = typer.Option("json", "--format", help="json or 
         typer.echo(
             f"ai-dataviz {__version__} · "
             f"{payload['dependency_contract']} · {payload['runtime_protocol']} · "
-            f"components {payload['component_registry']}"
+            f"components {payload['component_registry']} · Plotly.js {payload['plotly_js']}"
         )
 
 
@@ -2104,16 +2066,10 @@ def _analysis_parameter_text(entry: dict[str, Any]) -> str:
     return ", ".join(parts)
 
 
-def _analysis_catalog_text(entries: list[dict[str, Any]], *, compact: bool) -> None:
+def _analysis_catalog_text(entries: list[dict[str, Any]]) -> None:
     for index, entry in enumerate(entries):
         if index:
             typer.echo()
-        if compact:
-            typer.echo(
-                f"{entry['reference']}  {entry['kind']}  "
-                f"{entry['dashboard']['id']}  {entry['title']}"
-            )
-            continue
         typer.echo(str(entry.get("title") or entry["reference"]))
         if entry.get("purpose"):
             typer.echo(f"  {entry['purpose']}")
@@ -2311,15 +2267,6 @@ def _analysis_overlay_payload(variant) -> dict[str, Any]:
     }
 
 
-def _print_analysis_result(payload: dict[str, Any]) -> None:
-    """Validate every successful/error Analysis result at the CLI boundary."""
-
-    normalized = dict(payload)
-    if normalized.get("status") == "error":
-        normalized["status"] = "failed"
-    print_json(validate_analysis_result(normalized))
-
-
 def _analysis_artifact_binding(loaded, dashboard, entry, store, artifact) -> dict[str, Any]:
     node_id = str(entry.get("node_id") or "")
     if node_id.startswith("source:"):
@@ -2437,7 +2384,7 @@ def _publish_failed_result(
 
 
 @evidence_app.command("create")
-def analyze_evidence(
+def evidence_create(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     result: str = typer.Argument(..., help="Immutable Result id"),
     question: str = typer.Option(..., "--question"),
@@ -2484,7 +2431,7 @@ def analyze_evidence(
 
 
 @evidence_app.command("promote")
-def analyze_promote(
+def evidence_promote(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     evidence_reference: str = typer.Argument(..., help="Evidence id or JSON path"),
     proposal: Path = typer.Argument(..., exists=True, dir_okay=False),
@@ -2522,14 +2469,13 @@ def analyze_promote(
 
 
 @catalog_app.command("list")
-def analyze_list(
+def catalog_list(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     kind: str | None = typer.Option("base", "--kind", help="base, derived, source, view, or all"),
     dashboard: str | None = typer.Option(None, "--dashboard", help="Filter by Dashboard id"),
     source_type: str | None = typer.Option(None, "--source-type", help="Filter by Source type"),
     parameter: str | None = typer.Option(None, "--parameter", help="Require a Query Parameter id"),
     output_format: str = typer.Option("text", "--format", help="text or json"),
-    compact: bool = typer.Option(False, "--compact", help="Use the legacy one-line index"),
     refresh_catalog: bool = typer.Option(False, "--refresh-catalog", help="Force a safe Catalog rebuild"),
     include_internal: bool = typer.Option(False, "--include-internal", help="Include internal Outputs"),
     include_untrusted: bool = typer.Option(
@@ -2569,7 +2515,7 @@ def analyze_list(
         if output_format == "json":
             print_json(_analysis_catalog_payload(catalog, entries))
             return
-        _analysis_catalog_text(entries, compact=compact)
+        _analysis_catalog_text(entries)
     except typer.Exit:
         raise
     except Exception as exc:
@@ -2577,7 +2523,7 @@ def analyze_list(
 
 
 @catalog_app.command("search")
-def analyze_search(
+def catalog_search(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     query_text: str = typer.Argument(..., help="Words describing the desired data contract"),
     kind: str | None = typer.Option(None, "--kind", help="source, base, derived, or view"),
@@ -2585,7 +2531,6 @@ def analyze_search(
     source_type: str | None = typer.Option(None, "--source-type", help="Filter by Source type"),
     parameter: str | None = typer.Option(None, "--parameter", help="Require a Query Parameter id"),
     output_format: str = typer.Option("text", "--format", help="text or json"),
-    compact: bool = typer.Option(False, "--compact", help="Use the legacy one-line index"),
     regex: bool = typer.Option(
         True,
         "--regex/--literal",
@@ -2649,7 +2594,7 @@ def analyze_search(
         if output_format == "json":
             print_json(_analysis_catalog_payload(catalog, entries))
             return
-        _analysis_catalog_text(entries, compact=compact)
+        _analysis_catalog_text(entries)
     except typer.Exit:
         raise
     except Exception as exc:
@@ -2657,7 +2602,7 @@ def analyze_search(
 
 
 @catalog_app.command("describe")
-def analyze_describe(
+def catalog_describe(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     references: list[str] = typer.Argument(
         ..., help="One or more canonical Target References"
@@ -2874,7 +2819,7 @@ def result_list(
 
 
 @result_app.command("show")
-def analyze_result_show(
+def result_show(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     result_id: str = typer.Argument(...),
     output: str | None = typer.Argument(
@@ -2945,7 +2890,7 @@ def analyze_result_show(
 
 
 @result_app.command("inspect")
-def analyze_result_inspect(
+def result_inspect(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     result_id: str = typer.Argument(...),
     output_format: str = typer.Option("text", "--format", help="text or json"),
@@ -3010,7 +2955,7 @@ def analyze_result_inspect(
 
 
 @result_app.command("export")
-def analyze_result_export(
+def result_export(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     result_id: str = typer.Argument(...),
     output: str = typer.Argument(..., help="Canonical Output reference"),

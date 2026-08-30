@@ -12,7 +12,6 @@ VIEW_TEMPLATES: dict[str, dict[str, Any]] = {
         "fields": list(contract["required"]),
         "optional": list(contract["optional"]),
         **({"one_of": contract["one_of"]} if contract.get("one_of") else {}),
-        **({"engine": contract["engine"]} if contract.get("engine") else {}),
         **({"aggregate": contract["aggregate"]} if contract.get("aggregate") else {}),
     }
     for name, contract in VIEW_TEMPLATE_CONTRACTS.items()
@@ -104,7 +103,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
     },
     "view.table": {
         "category": "view",
-        "purpose": "Themeable, readable detail table",
+        "purpose": "Default TanStack-powered data expression table",
         "logic": {
             "template": "table",
             "fields": ["input"],
@@ -113,37 +112,38 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
         "presentation": {
             "options": ["min_height", "container", "css_class", "options"]
         },
-        "behavior": {"wheel_boundary": "Scroll the table only while it can consume vertical movement; otherwise continue scrolling the page"},
-        "semantic_dom": [".dv-view--table", ".dv-table-meta", ".dv-table-wrap", ".dv-table"],
+        "behavior": {
+            "runtime": "Locally bundled @tanstack/table-core 9.2.4; no React or Runtime CDN",
+            "defaults": "Dataviz owns semantic DOM, accessible headers, styling, numeric alignment, sorting and Control Binding",
+            "optional_features": ["searchable", "page_size", "hidden_columns", "column_order", "pinned_columns", "widths"],
+            "custom_service": "context.tables.tanstack provides managed lifecycle; context.tables.tanstack.core exposes the complete headless API",
+            "wheel_boundary": "Scroll the table only while it can consume vertical movement; otherwise continue scrolling the page",
+        },
+        "semantic_dom": [".dv-view--table", ".dv-table-toolbar", ".dv-table-meta", ".dv-table-wrap", ".dv-table", ".dv-table-pagination"],
         "tokens": ["--dv-ink", "--dv-line", "--dv-panel", "--dv-paper"],
     },
-    "view.echarts-category": {
+    "view.plotly-category": {
         "category": "view",
         "purpose": "Render categorical bar or line charts with explicit legend semantics",
-        "use_when": "A bar or line View uses engine: echarts and one or more series",
+        "use_when": "A bar or line View contains one or more series",
         "logic": {
             "templates": ["bar", "stacked-bar", "line"],
             "fields": ["input", "x", "y"],
             "optional": ["series", "aggregate"],
         },
         "presentation": {
-            "engine": "echarts",
-            "options": ["legend_interaction", "legend", "color"],
+            "options": ["layout", "trace", "config"],
         },
         "behavior": {
-            "legend_interaction": {
-                "filter": "Hide the series and remove categories that no visible series uses (default)",
-                "visibility": "Use native ECharts series visibility and keep the category axis",
-                "none": "Render a non-interactive legend",
-            }
+            "legend": "Plotly owns native series visibility and double-click isolation",
+            "analysis": "Zoom, pan, box/lasso selection and autoscale remain available through Plotly",
         },
-        "semantic_dom": [".dv-view", ".dv-chart", ".dv-echarts"],
+        "semantic_dom": [".dv-view", ".dv-chart", ".dv-plotly"],
         "tokens": ["--dv-ink", "--dv-line", "--dv-panel", "--dv-paper"],
         "example": {
             "dashboard.yaml": {
                 "id": "district-bars",
                 "template": "bar",
-                "engine": "echarts",
                 "input": "source:cities/main",
                 "x": "district",
                 "y": "value",
@@ -152,7 +152,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
             "presentation.yaml": {
                 "views": {
                     "district-bars": {
-                        "options": {"legend_interaction": "filter"}
+                        "options": {"layout": {"legend": {"orientation": "h"}}}
                     }
                 }
             },
@@ -160,7 +160,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
     },
     "view.perspective": {
         "category": "view",
-        "purpose": "Interactive sorting, filtering, pivoting and chart exploration",
+        "purpose": "End-user grouping, aggregation, pivoting and multidimensional exploration",
         "logic": {
             "template": "perspective",
             "fields": ["input"],
@@ -309,13 +309,14 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
                 "mount", "update", "empty", "restore",
                 "interaction", "resize", "dispose", "export",
             ],
-            "plotly_wheel": "Custom Plotly calls must default to scrollZoom:false so the Dashboard keeps wheel ownership; enable true only on an explicit user request",
+            "chart_service": "Prefer context.charts.plotly so theme, page-first wheel behavior, resize, update and disposal remain platform-owned",
+            "table_service": "Use context.tables.tanstack for the managed default table or context.tables.tanstack.core for unrestricted TanStack Table Core",
         },
     },
 }
 
 
-COMPONENT_REGISTRY_VERSION = "5.4.0"
+COMPONENT_REGISTRY_VERSION = "5.5.0"
 RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v5"
 
 
@@ -331,8 +332,8 @@ def _generated_component_templates() -> dict[str, dict[str, Any]]:
         presentation_options = ["min_height", "container", "css_class"]
         presentation_options.extend(
             field
-            for field in ("engine", "options", "config")
-            if field in optional and not (field == "engine" and definition.get("engine"))
+            for field in ("options", "config")
+            if field in optional
         )
         required_inputs = "input" in definition.get("fields", [])
         optional_inputs = "input" in optional or "inputs" in optional
@@ -344,7 +345,6 @@ def _generated_component_templates() -> dict[str, dict[str, Any]]:
                 "fields": definition.get("fields", []),
                 "optional": optional,
                 **({"one_of": definition["one_of"]} if definition.get("one_of") else {}),
-                **({"engine": definition["engine"]} if definition.get("engine") else {}),
                 **({"aggregate": definition["aggregate"]} if definition.get("aggregate") else {}),
             },
             "presentation": {

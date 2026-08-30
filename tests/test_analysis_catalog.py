@@ -189,6 +189,11 @@ def test_public_output_semantics_are_strict_and_internal_outputs_are_hidden(tmp_
         )
 
     workspace = _build_server_derived_workspace(tmp_path / "workspace")
+    inferred_catalog = ensure_analysis_catalog(workspace)
+    inferred = inferred_catalog.resolve("analysis::source:rows/main")
+    assert inferred["semantic_source"] == "inferred"
+    assert inferred["visibility"] == "internal"
+
     definition = workspace / "dashboards/analysis/dashboard.yaml"
     definition.write_text(
         definition.read_text(encoding="utf-8").replace(

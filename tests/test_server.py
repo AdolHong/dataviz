@@ -70,6 +70,16 @@ def test_server_exposes_active_presentation_contract():
     assert not [item for item in summary["diagnostics"] if item["level"] == "error"]
 
 
+def test_server_exposes_the_pinned_direct_plotly_browser_runtime():
+    client = TestClient(create_app(MINIMAL_WORKSPACE, watch=False))
+
+    response = client.get("/runtime/plotly.js")
+
+    assert response.status_code == 200
+    assert response.headers["x-dataviz-plotly-version"] == "4.0.0"
+    assert response.text.startswith("/**\n* plotly.js v4.0.0")
+
+
 def test_parameter_editor_updates_only_defaults_static_choices_and_sibling_order(
     tmp_path: Path,
 ):

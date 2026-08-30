@@ -31,6 +31,7 @@ from dataviz.execution.dependencies import (
 from dataviz.execution.results import RunResult
 from dataviz.execution.fingerprint import ensure_query_run_compatible
 from dataviz.filesystem import atomic_write_bytes, atomic_write_text
+from dataviz.plotly_runtime import PLOTLY_JS_VERSION, get_plotlyjs
 from dataviz.state_snapshot import build_state_snapshot
 from dataviz.templates import COMPONENT_REGISTRY_VERSION, RUNTIME_PROTOCOL_SCHEMA
 from dataviz.value_contract import initial_control_value, static_control_choices
@@ -46,6 +47,7 @@ from dataviz.workspace.control_components import resolve_control_component
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+TANSTACK_TABLE_RUNTIME_VERSION = "9.2.4"
 VIEW_PIPELINE_VISIBLE_STATUSES = {
     "queued",
     "loading",
@@ -202,18 +204,21 @@ class CanvasRenderer:
             view
             for view in declarative_views
             if view.template
-            in {"line", "bar", "stacked-bar", "pie", "scatter", "heatmap", "radar"}
+            in {
+                "line",
+                "bar",
+                "stacked-bar",
+                "pie",
+                "scatter",
+                "heatmap",
+                "radar",
+            }
         ]
         formats = {artifact.format for artifact in outputs.values()}
         needs_plotly = (
             "plotly-json" in formats
             or "plotly" in dashboard.definition.canvas.client_libraries
-            or any(view.engine == "plotly" for view in chart_views)
-        )
-        needs_echarts = (
-            "echarts-json" in formats
-            or "echarts" in dashboard.definition.canvas.client_libraries
-            or any(view.engine == "echarts" for view in chart_views)
+            or bool(chart_views)
         )
         needs_perspective = (
             "perspective" in dashboard.definition.canvas.client_libraries
@@ -260,8 +265,6 @@ class CanvasRenderer:
             if urlparse(source).scheme in {"http", "https"}:
                 network_dependencies.append({"library": library, "source": source})
 
-        if needs_echarts:
-            add_remote("echarts", runtime.echarts_js)
         if needs_arrow:
             add_remote("apache-arrow", runtime.arrow_js)
         if needs_perspective:
@@ -284,7 +287,6 @@ class CanvasRenderer:
                 add_remote(f"view-image:{view.id}", view.url)
         return {
             "plotly": needs_plotly,
-            "echarts": needs_echarts,
             "arrow": needs_arrow,
             "perspective": needs_perspective,
             "pyodide": needs_pyodide,
@@ -466,11 +468,10 @@ class CanvasRenderer:
             pyodide_index_url=pyodide_index_url,
         )
         needs_plotly = asset_usage["plotly"]
-        needs_echarts = asset_usage["echarts"]
         needs_arrow = asset_usage["arrow"]
         needs_perspective = asset_usage["perspective"]
         plotly_script = self._plotly_script(asset_mode) if needs_plotly else ""
-        echarts_script = self._echarts_script(asset_mode) if needs_echarts else ""
+        tanstack_table_script = self._tanstack_table_script(asset_mode)
         arrow_script = self._arrow_script() if needs_arrow else ""
         perspective_script = self._perspective_script() if needs_perspective else ""
         runtime = self._runtime_script()
@@ -571,6 +572,8 @@ class CanvasRenderer:
             "view_specs": view_specs,
             "repeat_specs": repeat_specs,
             "runtime_versions": {
+                **({"plotly_js": PLOTLY_JS_VERSION} if needs_plotly else {}),
+                "tanstack_table": TANSTACK_TABLE_RUNTIME_VERSION,
                 **(
                     {"perspective": self.workspace.definition.runtime.perspective_version}
                     if needs_perspective
@@ -605,7 +608,7 @@ class CanvasRenderer:
   <title>{html.escape(document_title)}</title>
   <style>{functional_style}\n{base_style}\n{component_style}\n{custom_style}</style>
   {plotly_script}
-  {echarts_script}
+  {tanstack_table_script}
   {arrow_script}
   {perspective_script}
 </head>
@@ -638,10 +641,16 @@ class CanvasRenderer:
         description = (declarative.description or "") if declarative else ""
         status = declarative.template if declarative else "browser"
         chart_templates = {
-            "line", "bar", "stacked-bar", "pie", "scatter", "heatmap", "radar"
+            "line",
+            "bar",
+            "stacked-bar",
+            "pie",
+            "scatter",
+            "heatmap",
+            "radar",
         }
         renderer_label = (
-            declarative.engine
+            "plotly"
             if declarative and declarative.template in chart_templates
             else status
         )
@@ -851,7 +860,7 @@ class CanvasRenderer:
                 '<footer class="dv-context-controls__footer">'
                 '<span data-compute-dirty-label>Results are current</span>'
                 f'<button type="button" data-compute-apply data-control-keys="{control_keys}" '
-                f'data-analysis-always="true" data-manual-targets="{targets}">Run analysis</button>'
+                f'data-analysis-always="true" data-manual-targets="{targets}">RUN</button>'
                 '</footer>'
             )
         panel_attributes = self._control_panel_attributes(
@@ -1437,7 +1446,7 @@ class CanvasRenderer:
                 '<footer><span data-compute-dirty-label>Results are current</span>'
                 f'<button type="button" data-compute-apply data-control-keys="{encoded_keys}" '
                 f'data-analysis-always="{str(bool(actionable)).lower()}" '
-                f'data-manual-targets="{encoded_targets}">Run analysis</button></footer>'
+                f'data-manual-targets="{encoded_targets}">RUN</button></footer>'
                 if compute_items or actionable
                 else ""
             )
@@ -2070,19 +2079,15 @@ class CanvasRenderer:
     def _plotly_script(self, asset_mode: str) -> str:
         if asset_mode == "server":
             return '<script src="/runtime/plotly.js"></script>'
-        from plotly.offline.offline import get_plotlyjs
-
         return f"<script>{get_plotlyjs()}</script>"
 
-    def _echarts_script(self, asset_mode: str) -> str:
-        source = self.workspace.definition.runtime.echarts_js
-        if source.startswith("http://") or source.startswith("https://"):
-            return f'<script src="{html.escape(source)}"></script>'
-        path = self._workspace_runtime_asset(
-            source,
-            field="runtime.echarts_js",
-        )
-        return f"<script>{path.read_text(encoding='utf-8')}</script>"
+    def _tanstack_table_script(self, asset_mode: str) -> str:
+        if asset_mode == "server":
+            return '<script src="/static/tanstack-table-runtime.js"></script>'
+        source = (
+            PACKAGE_ROOT / "server" / "static" / "tanstack-table-runtime.js"
+        ).read_text(encoding="utf-8")
+        return f"<script>{source}</script>"
 
     def _perspective_script(self) -> str:
         version = html.escape(self.workspace.definition.runtime.perspective_version, quote=True)

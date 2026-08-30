@@ -8,7 +8,4 @@
 .lab-main, .lab-side { min-height: 420px; }
 .lab-table { min-height: 360px; }
 .lab-pulse .dv-view, .lab-table .dv-view { height: 100%; border-color: var(--lab-line); box-shadow: none; }
-.lab-side .dv-view { color: #20242b; background: #f7f8fc; }
-.lab-side .dv-view-header { border-color: var(--lab-line); }
-.lab-side .dv-view-body { background: transparent; }
 @media (max-width: 900px) { .lab-hero, .lab-pulse { grid-template-columns: 1fr; } .lab-main, .lab-side { min-height: 340px; } }

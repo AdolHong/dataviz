@@ -17,25 +17,25 @@ VIEW_TEMPLATE_CONTRACTS: dict[str, dict[str, Any]] = {
     "line": {
         "purpose": "Trend or ordered series",
         "required": ["input", "x", "y"],
-        "optional": ["series", "aggregate", "sort", "limit", "engine", "options", "config"],
+        "optional": ["series", "aggregate", "sort", "limit", "options", "config"],
         "field_references": ["x", "y", "series", "sort"],
     },
     "bar": {
         "purpose": "Category comparison",
         "required": ["input", "x", "y"],
-        "optional": ["series", "aggregate", "sort", "limit", "engine", "options", "config"],
+        "optional": ["series", "aggregate", "sort", "limit", "options", "config"],
         "field_references": ["x", "y", "series", "sort"],
     },
     "stacked-bar": {
         "purpose": "Part-to-whole category comparison",
         "required": ["input", "x", "y", "series"],
-        "optional": ["aggregate", "sort", "limit", "engine", "options", "config"],
+        "optional": ["aggregate", "sort", "limit", "options", "config"],
         "field_references": ["x", "y", "series", "sort"],
     },
     "pie": {
         "purpose": "Compact part-to-whole view",
         "required": ["input", "label", "value"],
-        "optional": ["aggregate", "sort", "limit", "engine", "options", "config"],
+        "optional": ["aggregate", "sort", "limit", "options", "config"],
         "field_references": ["label", "value", "sort"],
     },
     "scatter": {
@@ -43,31 +43,30 @@ VIEW_TEMPLATE_CONTRACTS: dict[str, dict[str, Any]] = {
         "required": ["input", "x", "y"],
         "optional": [
             "series", "color", "size", "aggregate", "sort", "limit",
-            "engine", "options", "config",
+            "options", "config",
         ],
         "field_references": ["x", "y", "series", "color", "size", "sort"],
     },
     "heatmap": {
         "purpose": "Two-dimensional intensity matrix",
         "required": ["input", "x", "y", "z"],
-        "optional": ["aggregate", "sort", "limit", "engine", "options", "config"],
+        "optional": ["aggregate", "sort", "limit", "options", "config"],
         "field_references": ["x", "y", "z", "sort"],
     },
     "radar": {
         "purpose": "Compare multiple measures across entities",
         "required": ["input", "label", "columns"],
-        "optional": ["sort", "limit", "engine", "options"],
-        "engine": "echarts",
+        "optional": ["sort", "limit", "options", "config"],
         "field_references": ["label", "columns", "sort"],
     },
     "table": {
-        "purpose": "Themeable presentation table",
+        "purpose": "TanStack-powered default data expression table",
         "required": ["input"],
         "optional": ["columns", "sort", "limit", "options"],
         "field_references": ["columns", "sort"],
     },
     "perspective": {
-        "purpose": "Interactive table, sorting, filtering and pivoting",
+        "purpose": "End-user grouping, aggregation, pivoting and multidimensional exploration",
         "required": ["input"],
         "optional": ["columns", "sort", "limit", "config"],
         "field_references": ["columns", "sort"],
@@ -133,11 +132,6 @@ def validate_view_contract(view: Any) -> Any:
             raise ValueError(
                 f"View template {view.template} requires one of: {', '.join(group)}"
             )
-    required_engine = contract.get("engine")
-    if required_engine and view.engine != required_engine:
-        raise ValueError(
-            f"View template {view.template} requires engine={required_engine}"
-        )
     allowed_aggregates = contract.get("aggregate")
     if view.aggregate is not None and allowed_aggregates is not None:
         if view.aggregate not in allowed_aggregates:
@@ -145,11 +139,6 @@ def validate_view_contract(view: Any) -> Any:
                 f"View template {view.template} does not support "
                 f"aggregate={view.aggregate}"
             )
-    if view.engine == "echarts" and "config" in view.model_fields_set:
-        raise ValueError(
-            f"View template {view.template} with engine=echarts does not use config; "
-            "put ECharts configuration in options"
-        )
     return view
 
 

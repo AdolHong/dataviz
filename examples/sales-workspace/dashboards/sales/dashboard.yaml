@@ -50,10 +50,9 @@ views:
 
   - id: target
     title: 区域目标完成度
-    description: ECharts 动态条形图
+    description: Plotly 动态条形图
     input: dataset:sales-metrics/completion
     template: bar
-    engine: echarts
     x: region
     y: completion_pct
     aggregate: none
@@ -62,10 +61,9 @@ views:
 
   - id: distribution
     title: 订单分布
-    description: ECharts 动态订单分布
+    description: Plotly 动态订单分布
     input: source:orders/main
     template: bar
-    engine: echarts
     x: region
     y: orders
     aggregate: sum
@@ -112,4 +110,4 @@ canvas:
   template: canvas/template.html
   styles: [canvas/style.css]
   use_default_style: true
-  client_libraries: [plotly, echarts]
+  client_libraries: [plotly]

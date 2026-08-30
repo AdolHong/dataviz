@@ -649,16 +649,6 @@ def build_context_payload(
     }
 
 
-def context_size(payload: dict[str, Any]) -> dict[str, int]:
-    compact = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
-    pretty = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
-    return {
-        "characters": len(compact),
-        "utf8_bytes": len(compact.encode("utf-8")),
-        "pretty_lines": pretty.count("\n") + 1,
-    }
-
-
 def _yaml(value: Any) -> str:
     return yaml.safe_dump(value, allow_unicode=True, sort_keys=False).rstrip() + "\n"
 
@@ -1070,8 +1060,6 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                 definition[field] = ["value_field"]
             else:
                 definition[field] = placeholders.get(field, f"{field}_value")
-        if template == "radar":
-            definition["engine"] = "echarts"
         if template == "markdown":
             definition["text"] = placeholders["text"]
         files = {"dashboard.view.snippet.yaml": _yaml([definition])}
@@ -1241,9 +1229,9 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                 ]
             ),
             f"assets/{item_id}.js": (
-                "// For charts use context.charts.plotly/echarts. The platform owns theme,\n"
+                "// For charts prefer context.charts.plotly. The platform owns theme,\n"
                 "// responsive resize, page-first wheel behavior, update and disposal.\n"
-                "// Direct Plotly/ECharts calls are an explicit low-level escape hatch.\n"
+                "// For tables use context.tables.tanstack; .core exposes the full headless API.\n"
                 f"window.datavizRuntime.registerRenderer({renderer_literal}, {{\n"
                 "  validate(descriptor) {},\n"
                 "  mount(context, descriptor) {\n"

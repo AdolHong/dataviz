@@ -1,6 +1,6 @@
 schema: dataviz/component-package/v1
 package: view.declarative
-version: 1.5.0
+version: 2.0.0
 category: view
 purpose: Declarative View descriptors, Renderer adapters and lifecycle state boundaries.
 implementation:
@@ -16,13 +16,14 @@ components:
   - {id: view.scatter, purpose: Relationship between measures, status: stable}
   - {id: view.heatmap, purpose: Two-dimensional intensity matrix, status: stable}
   - {id: view.radar, purpose: Compare measures across entities, status: stable}
-  - {id: view.table, purpose: Themeable presentation table, status: stable}
-  - {id: view.perspective, purpose: Interactive table sorting filtering and pivoting, status: stable}
+  - {id: view.table, purpose: TanStack-powered default data expression table, status: stable}
+  - {id: view.perspective, purpose: End-user grouping aggregation pivoting and multidimensional exploration, status: stable}
   - {id: view.markdown, purpose: Narrative text, status: stable}
   - {id: view.image, purpose: Image or generated visual, status: stable}
   - {id: view.custom, purpose: Registered custom Renderer host, status: stable}
-  - {id: service.charts, purpose: Managed Plotly and ECharts mount update resize theme and dispose lifecycle, status: stable}
-  - {id: view.echarts-category, purpose: ECharts category legend interaction contract, status: stable}
+  - {id: service.charts, purpose: Managed Plotly mount update resize theme interaction and dispose lifecycle, status: stable}
+  - {id: service.tables, purpose: Managed TanStack Table Core with default Dataviz DOM CSS and full custom access, status: stable}
+  - {id: view.plotly-category, purpose: Plotly category legend and analysis interaction contract, status: stable}
   - {id: view.state, purpose: Semantic View lifecycle states and scoped failure boundaries, status: stable}
   - {id: view.renderer-lifecycle, purpose: Managed Renderer behavioral matrix across live Canvas and portable HTML, status: stable}
   - {id: view.pipeline-status, purpose: Compiler-owned upstream and Renderer diagnostic signals shown only while active or failed, status: stable}

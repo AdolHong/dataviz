@@ -37,17 +37,25 @@
         const label = document.createElement('span');
         label.textContent = option.textContent;
         button.append(mark, label);
-        button.addEventListener('click', () => {
-          if (button.disabled) return;
-          if (option.selected && selected.length === 1 && !allowEmpty) return;
-          option.selected = !option.selected;
-          api.markSelectionIntent(input, 'explicit');
-          sync();
-          api.emitChange(input);
-        });
         optionsHost.append(button);
       });
     }
+
+    optionsHost.addEventListener('click', event => {
+      const button = event.target.closest('.dv-checkbox-option');
+      if (!(button instanceof HTMLButtonElement) || button.disabled) return;
+      const option = api.options(input).find(item => item.value === button.dataset.value);
+      if (!option) return;
+      const selected = api.selectedOptions(input);
+      if (option.selected && selected.length === 1 && !allowEmpty) return;
+      option.selected = !option.selected;
+      api.markSelectionIntent(input, 'explicit');
+      // Publish the canonical native-control state before refreshing the
+      // visual buttons. This avoids stale detached-button closures during
+      // consecutive clicks, notably in Firefox.
+      api.emitChange(input);
+      sync();
+    });
 
     mount.replaceChildren(group);
     return {sync};

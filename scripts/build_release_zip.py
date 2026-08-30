@@ -45,6 +45,7 @@ def included_files() -> list[Path]:
         ROOT / "pyproject.toml",
         ROOT / "setup.py",
         ROOT / "README.md",
+        ROOT / "dataviz-skill.md",
         ROOT / "DESIGN.md",
         ROOT / "plan.md",
         ROOT / "MANIFEST.in",

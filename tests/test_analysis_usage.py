@@ -138,7 +138,7 @@ def test_usage_busy_timeout_is_bounded_and_best_effort(tmp_path: Path, caplog):
     assert "successful action is unchanged" in caplog.text
 
 
-def test_analyze_run_records_only_success_and_usage_failure_does_not_fail_command(
+def test_run_records_only_success_and_usage_failure_does_not_fail_command(
     isolated_workspace,
 ):
     workspace = isolated_workspace(FEATURE_SHOWCASE)

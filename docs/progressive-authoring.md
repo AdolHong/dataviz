@@ -62,6 +62,12 @@ validate → report → visual-check
 
 三条 profile 路径分别执行这条链。文档回归同时检查每份文档的 `requires` 都属于当前路由闭包，避免 minimal 文档悄悄引用未披露的高级概念。
 
+## 图表 Recipe 与完整 Plotly.js 能力
+
+Scaffold Recipe 只负责提供少量可运行的起点，不承担完整图表目录的职责。新看板统一使用 Plotly：常见图表从声明式模板开始，通过 `options.trace`、`options.layout` 与 `config` 调整，需要自定义 trace、函数或命令式交互时再进入 Custom Renderer。寻找图表形态时先明确分析问题，再参考 [Plotly JavaScript 官方文档](https://plotly.com/javascript/) 与 [Chart Studio Gallery](https://plotly.com/graphing-libraries/)，最后接入 Named Output、Controls 和 Dataviz 生命周期。
+
+Recipe 不复制官方 Gallery 或源码仓库，也不形成能力白名单。可信 Custom Renderer 始终保留完整 Plotly.js API 作为底层接口；`context.charts.plotly` 是带有 Theme、Resize、Update、Purge 和 Export 管理的推荐入口。适配官方示例时必须替换独立 DOM、内联数据与事件宿主，并显式处理外部数据与第三方依赖。作者只声明数据与表达意图，图表实现统一为 Plotly。
+
 `visual-check` 是可选的真实浏览器能力，首次使用前安装独立 extra 和 Chromium：
 
 ```bash

@@ -2,7 +2,7 @@ schema: dataviz/dashboard/v9
 kind: dashboard
 id: chart-gallery
 title: 多图表陈列室
-description: 用同一份声明式数据契约展示浏览器端 Plotly 与 ECharts 图形语法。
+description: 用同一份声明式数据契约展示 Plotly 图表模板、交互与统一主题。
 context:
   grain: 每个城市、每个季度一行经营指标
 adapters: {warehouse: demo-duckdb}
@@ -46,7 +46,6 @@ views:
     title: 城市收入排行
     input: source:metrics/main
     template: bar
-    engine: echarts
     x: city
     y: revenue
     aggregate: sum
@@ -56,25 +55,28 @@ views:
     title: 省份构成
     input: source:metrics/main
     template: pie
-    engine: echarts
     label: province
     value: revenue
     aggregate: sum
 
   - id: scatter
-    title: 订单与收入关系
+    title: Plotly 区间探索
+    description: 使用工具栏矩形或套索选择数据点；双击图表或点击恢复按钮回到默认选择。
     input: source:metrics/main
     template: scatter
     x: orders
     y: revenue
+    series: province
     size: customers
     aggregate: none
+    control_binding:
+      control: dashboard.province
+      field: province
 
   - id: radial
     title: 城市能力雷达
     input: interactive:latest-metrics/main
     template: radar
-    engine: echarts
     label: city
     columns: [revenue, orders, customers]
     limit: 5
@@ -85,6 +87,12 @@ views:
     template: table
     columns: [province, city, quarter, revenue, orders, customers]
     limit: 40
+    options:
+      searchable: true
+      page_size: 5
+      show_count: true
+      align: {revenue: right, orders: right, customers: right}
+      formats: {revenue: number, orders: number, customers: number}
 
 sections:
   - {id: overview, title: 图形总览, views: [trend, ranking, composition]}
@@ -93,4 +101,4 @@ canvas:
   template: canvas/template.html
   styles: [canvas/style.css]
   use_default_style: true
-  client_libraries: [plotly, echarts]
+  client_libraries: [plotly]

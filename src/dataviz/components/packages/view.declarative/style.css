@@ -132,62 +132,226 @@
 @keyframes dv-perspective-spin { to { transform: rotate(360deg); } }
 
 .dv-view--table .dv-view-body { padding: 0; }
+.dv-table-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--dv-panel, #fff) 97%, var(--dv-paper, #f5f7fa));
+  border-bottom: 1px solid var(--dv-line, #d9e0ec);
+}
+.dv-table-search-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: min(260px, 100%);
+}
+.dv-table-search-icon {
+  position: absolute;
+  left: 11px;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--dv-muted, #667085);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.dv-table-search-icon::after {
+  position: absolute;
+  right: -4px;
+  bottom: -3px;
+  width: 5px;
+  height: 1.5px;
+  content: "";
+  background: var(--dv-muted, #667085);
+  border-radius: 999px;
+  transform: rotate(45deg);
+  transform-origin: left center;
+}
+.dv-table-search {
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 30px 6px 32px;
+  color: var(--dv-ink, #202536);
+  background: var(--dv-panel, #fff);
+  border: 1px solid var(--dv-line, #d9e0ec);
+  border-radius: 8px;
+  outline: 0;
+  font: 12px/1.4 var(--dv-font-sans, sans-serif);
+  transition: border-color .14s ease, box-shadow .14s ease;
+}
+.dv-table-search:focus {
+  border-color: color-mix(in srgb, var(--dv-accent, #3949ab) 60%, var(--dv-line, #d9e0ec));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dv-accent, #3949ab) 12%, transparent);
+}
 .dv-table-meta {
   display: flex;
   align-items: baseline;
   gap: 6px;
-  min-height: 38px;
-  padding: 10px 14px;
+  min-height: 28px;
+  margin-left: auto;
   color: var(--dv-muted, #667085);
-  background: var(--dv-panel, #fff);
-  border-bottom: 1px solid var(--dv-line, #d9e0ec);
   font-size: 9px;
 }
-.dv-table-meta strong { color: var(--dv-accent-strong, #1a237e); font-size: 13px; }
-.dv-table-wrap { background: var(--dv-panel, #fff); }
+.dv-table-meta strong {
+  color: var(--dv-ink, #202536);
+  font: 700 13px/1 var(--dv-font-sans, sans-serif);
+  letter-spacing: -.01em;
+}
+.dv-table-wrap {
+  max-width: 100%;
+  overflow: auto;
+  background: var(--dv-panel, #fff);
+  scrollbar-gutter: stable;
+}
 .dv-table {
   width: 100%;
   color: var(--dv-ink, #202536);
   background: var(--dv-panel, #fff);
   border-collapse: separate;
   border-spacing: 0;
-  font: 11px/1.45 var(--dv-font-mono, ui-monospace, monospace);
+  font: 12px/1.45 var(--dv-font-sans, sans-serif);
   font-variant-numeric: tabular-nums;
 }
 .dv-table th,
 .dv-table td {
-  padding: 10px 13px;
+  box-sizing: border-box;
+  padding: 10px 14px;
   text-align: left;
   white-space: nowrap;
   border-bottom: 1px solid color-mix(in srgb, var(--dv-line, #d9e0ec) 72%, transparent);
 }
 .dv-table th {
   position: sticky;
-  z-index: 1;
+  z-index: 2;
   top: 0;
-  color: var(--dv-accent-strong, #1a237e);
-  background: color-mix(in srgb, var(--dv-soft, #e8eaf6) 58%, var(--dv-panel, #fff));
+  color: var(--dv-muted, #667085);
+  background: color-mix(in srgb, var(--dv-paper, #f5f7fa) 72%, var(--dv-panel, #fff));
   border-bottom-color: var(--dv-line, #d9e0ec);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: .07em;
+  font-size: 10px;
+  font-weight: 680;
+  letter-spacing: .055em;
   text-transform: uppercase;
+}
+.dv-table-sort {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.dv-table [data-align="right"] .dv-table-sort { justify-content: flex-end; }
+.dv-table [data-align="center"] .dv-table-sort { justify-content: center; }
+.dv-table-sort:focus-visible {
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dv-accent, #3949ab) 24%, transparent);
+}
+.dv-table-sort-indicator {
+  color: color-mix(in srgb, var(--dv-muted, #667085) 58%, transparent);
+  font: 700 11px/1 var(--dv-font-sans, sans-serif);
+}
+.dv-table-sort:not([data-sorted="none"]) .dv-table-sort-indicator {
+  color: var(--dv-accent, #3949ab);
 }
 .dv-table th[data-align="right"], .dv-table td[data-align="right"] { text-align: right; }
 .dv-table th[data-align="center"], .dv-table td[data-align="center"] { text-align: center; }
+.dv-table th[data-wrap="true"], .dv-table td[data-wrap="true"],
+.dv-table--wrap th, .dv-table--wrap td {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.dv-table [data-pinned] {
+  position: sticky;
+  z-index: 1;
+  background: var(--dv-panel, #fff);
+}
+.dv-table th[data-pinned] {
+  z-index: 3;
+  background: color-mix(in srgb, var(--dv-paper, #f5f7fa) 72%, var(--dv-panel, #fff));
+}
+.dv-table [data-pinned="start"] {
+  box-shadow: 1px 0 0 color-mix(in srgb, var(--dv-line, #d9e0ec) 88%, transparent);
+}
+.dv-table [data-pinned="end"] {
+  box-shadow: -1px 0 0 color-mix(in srgb, var(--dv-line, #d9e0ec) 88%, transparent);
+}
 .dv-table--striped tbody tr:nth-child(even) td {
   background: color-mix(in srgb, var(--dv-paper, #f5f7fa) 52%, transparent);
 }
 .dv-table tbody tr { transition: background .12s ease; }
 .dv-table tbody tr:hover td {
-  background: color-mix(in srgb, var(--dv-accent, #3949ab) 8%, var(--dv-panel, #fff));
+  background: color-mix(in srgb, var(--dv-accent, #3949ab) 6%, var(--dv-panel, #fff));
 }
 .dv-table tbody tr[aria-selected="true"] td {
-  background: color-mix(in srgb, var(--dv-accent, #3949ab) 15%, var(--dv-panel, #fff));
+  background: color-mix(in srgb, var(--dv-accent, #3949ab) 12%, var(--dv-panel, #fff));
   box-shadow: inset 3px 0 0 var(--dv-accent, #3949ab);
 }
 .dv-table tbody tr[tabindex] { cursor: pointer; }
-.dv-table--compact th, .dv-table--compact td { padding: 6px 10px; font-size: 10px; }
+.dv-table tbody tr[tabindex]:focus-visible { outline: 0; }
+.dv-table tbody tr[tabindex]:focus-visible td {
+  background: color-mix(in srgb, var(--dv-accent, #3949ab) 8%, var(--dv-panel, #fff));
+  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--dv-accent, #3949ab) 55%, transparent),
+    inset 0 -2px 0 color-mix(in srgb, var(--dv-accent, #3949ab) 55%, transparent);
+}
+.dv-table tfoot td {
+  position: sticky;
+  z-index: 2;
+  bottom: 0;
+  color: var(--dv-ink, #202536);
+  background: color-mix(in srgb, var(--dv-paper, #f5f7fa) 78%, var(--dv-panel, #fff));
+  border-top: 1px solid var(--dv-line, #d9e0ec);
+  border-bottom: 0;
+  font-weight: 680;
+}
+.dv-table--compact th, .dv-table--compact td { padding: 6px 10px; font-size: 11px; }
+.dv-table-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-height: 42px;
+  padding: 7px 12px;
+  background: color-mix(in srgb, var(--dv-panel, #fff) 97%, var(--dv-paper, #f5f7fa));
+  border-top: 1px solid var(--dv-line, #d9e0ec);
+}
+.dv-table-page-button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  color: var(--dv-ink, #202536);
+  background: var(--dv-panel, #fff);
+  border: 1px solid var(--dv-line, #d9e0ec);
+  border-radius: 7px;
+  font: 18px/1 var(--dv-font-sans, sans-serif);
+  cursor: pointer;
+}
+.dv-table-page-button:hover:not(:disabled) {
+  color: var(--dv-accent, #3949ab);
+  border-color: color-mix(in srgb, var(--dv-accent, #3949ab) 42%, var(--dv-line, #d9e0ec));
+}
+.dv-table-page-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--dv-accent, #3949ab) 28%, transparent);
+  outline-offset: 1px;
+}
+.dv-table-page-button:disabled { cursor: default; opacity: .4; }
+.dv-table-page-status {
+  min-width: 48px;
+  color: var(--dv-muted, #667085);
+  font: 650 10px/1 var(--dv-font-mono, ui-monospace, monospace);
+  text-align: center;
+}
 .dv-table-empty {
   display: grid;
   place-items: center;
@@ -198,6 +362,11 @@
   font: 10px var(--dv-font-mono, ui-monospace, monospace);
   letter-spacing: .05em;
   text-align: center;
+}
+@media (max-width: 640px) {
+  .dv-table-toolbar { align-items: stretch; flex-direction: column; gap: 5px; }
+  .dv-table-search-field { width: 100%; }
+  .dv-table-meta { min-height: 20px; margin-left: 0; }
 }
 
 .dv-scalar {

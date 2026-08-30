@@ -51,7 +51,6 @@ views:
     title: 日均绝对误差
     input: source:forecast/main
     template: bar
-    engine: echarts
     x: day
     y: error
     aggregate: mean
@@ -70,4 +69,4 @@ canvas:
   template: canvas/template.html
   styles: [canvas/style.css]
   use_default_style: true
-  client_libraries: [plotly, echarts]
+  client_libraries: [plotly]

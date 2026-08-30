@@ -2,15 +2,40 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from dataviz.cli import app
 from dataviz.maintenance import cleanup_workspace_storage
 from dataviz.server.manager import InteractionRecord, RunManager, RunRecord
 from dataviz.workspace import load_workspace
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize(
+    "builder",
+    [
+        "tools/build_canvas_runtime.py",
+        "tools/build_tanstack_table_runtime.py",
+    ],
+)
+def test_generated_browser_asset_is_current(builder: str):
+    completed = subprocess.run(
+        [sys.executable, builder, "--check"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 def _workspace(root: Path) -> Path:

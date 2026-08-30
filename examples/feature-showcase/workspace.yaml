@@ -8,8 +8,6 @@ context:
   timezone: Asia/Shanghai
 runtime:
   max_workers: 4
-  plotly_js: bundled
-  echarts_js: https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js
   perspective_version: 5.2.0
 folders:
 - path: __TRASH__/aa

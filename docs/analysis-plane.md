@@ -11,7 +11,7 @@ dataviz catalog describe WORKSPACE 'sales::source:orders/main'
 dataviz run WORKSPACE 'sales::source:orders/main'
 ```
 
-`list` 默认只列 Base Named Output 的业务概览。`search` 默认使用不区分大小写的 grep-like 正则；希望按普通文本搜索时使用 `--literal`。默认文本把 title、purpose、grain、assurance 和参数契约放在引用前面；`--compact` 才返回单行索引。Catalog 不生成短别名，所有命令复用同一条规范物理引用。
+`list` 默认只列 Base Named Output 的业务概览。`search` 默认使用不区分大小写的 grep-like 正则；希望按普通文本搜索时使用 `--literal`。默认文本把 title、purpose、grain、assurance 和参数契约放在引用前面。Catalog 不生成短别名，所有命令复用同一条规范物理引用。
 
 可复用 Output 应直接声明业务语义；技术 `description` 不再承担口径契约：
 

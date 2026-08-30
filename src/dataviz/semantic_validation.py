@@ -161,17 +161,6 @@ def validate_dashboard_semantics(dashboard: LoadedDashboard) -> list[Diagnostic]
                         {"view": view_id, "template": view.template},
                     )
                 )
-            if visual.engine and "engine" not in allowed and visual.engine != view.engine:
-                diagnostics.append(
-                    _diagnostic(
-                        dashboard,
-                        "warning",
-                        "semantic_renderer_engine_noop",
-                        f"View {view_id} template {view.template} has a fixed Renderer engine",
-                        f"presentation.views.{view_id}.engine",
-                        {"view": view_id, "template": view.template, "engine": visual.engine},
-                    )
-                )
             if visual.min_height and visual.min_height >= 900:
                 diagnostics.append(
                     _diagnostic(

@@ -2,13 +2,13 @@
 
 > 快速安装和当前可用命令见 [README](README.md)；后续工作见 [plan.md](plan.md)。安装版本真正接受的字段始终以 `dataviz schemas`、`dataviz docs` 和 `dataviz components` 为准。
 
-本文记录已经落地并可由当前 Schema、CLI、Runtime 和测试证明的契约，以及明确标注的后续目标。当前严格契约是 `dataviz/dashboard/v9`、`dataviz/presentation/v2`、`dataviz/dependency-contract/v5`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v1`、`dataviz/runtime/v5` 与 Component Registry `5.4.0`。统一 Selection State、Control Binding、Layout/Semantic Contract、自动分析状态、Runtime-aware trigger、Chart Service、Renderer 行为矩阵、`inspect layout` 与 visual-check 已进入实现；当前代码不保留 Dashboard v6、Presentation v1、旧 `cascade`、Source/Transform v1、`query_params` 或旧 Selector 字段。
+本文记录已经落地并可由当前 Schema、CLI、Runtime 和测试证明的契约，以及明确标注的后续目标。当前严格契约是 `dataviz/dashboard/v9`、`dataviz/presentation/v2`、`dataviz/dependency-contract/v5`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v1`、`dataviz/runtime/v5` 与 Component Registry `5.5.0`。统一 Selection State、Control Binding、Layout/Semantic Contract、自动分析状态、Runtime-aware trigger、Chart Service、Table Service、Renderer 行为矩阵、`inspect layout` 与 visual-check 已进入实现；当前代码只接受现行严格契约，不保留实验字段别名、自动迁移或双协议 Runtime。
 
 Dataviz 是一个 workspace-first、AI-friendly 的数据看板工具。看板是普通文件，能够被 Git 管理、复制和审查；Server 面向人提供交互页面，CLI 面向 AI 与自动化提供构建校验、Catalog 发现、Target 执行、不可变 Result 检查和 HTML 报告。
 
-## 0.12 CLI 与运行事实模型
+## CLI 与运行事实模型
 
-0.12.0 已将语义 Catalog、局部 DAG 执行和不可变 Result 收敛到稳定领域对象，不增加第二套执行引擎，也不暴露生成式短 alias 或并列执行入口：
+当前 CLI 使用语义 Catalog、局部 DAG 执行和不可变 Result 这组稳定领域对象，不增加第二套执行引擎，也不暴露生成式短 alias 或并列执行入口：
 
 ```text
 Catalog ──发现──> Target ──run──> Execution Run ──终态封存──> Result
@@ -119,7 +119,7 @@ AI/代码仍然拥有 Dashboard 的结构和逻辑：ID、类型、作用域、�
 
 编辑器直接对当前 Dashboard 的 `dashboard.yaml` 做保留注释与格式的 round-trip 更新，不创建数据库或第二份配置。保存使用 revision 乐观锁、进程内写锁、完整 Dashboard Schema 校验和原子替换；若 AI 或其他编辑器在弹窗打开后修改了文件，本次保存必须冲突失败，不能覆盖新内容。编辑器改变的是下一次初始化使用的默认配置，不得悄悄改写当前 tab 已经提交的 Query/Selection/Compute 状态。它只存在于 Server authoring surface，导出 HTML 永远是只读分析报告。
 
-编辑入口复用现有操作对象，不向任何 Control Panel 添加常驻工具条：右键 Run 打开 Query Parameter 编辑，右键 Dashboard/Section/View Controls 触发器打开对应作用域编辑；左键仍只执行 Run 或开合 Controls。没有可编辑项时保留浏览器原生右键菜单。此入口属于熟练用户的低频 authoring 动作，不与高频分析操作争夺视觉注意力。
+编辑入口复用现有操作对象，不向任何 Control Panel 添加常驻工具条：右键“查询”主按钮打开 Query Parameter 编辑，右键 Dashboard/Section/View Controls 触发器打开对应作用域编辑；左键仍只执行 Query 或开合 Controls。没有可编辑项时保留浏览器原生右键菜单。此入口属于熟练用户的低频 authoring 动作，不与高频分析操作争夺视觉注意力。
 
 能力按下面顺序渐进开放，前一层始终可以独立工作：
 
@@ -235,7 +235,7 @@ View 点击、框选或表格行选择不是第三个一级入口，也不拥有
 
 ### Query Parameter
 
-- 只在用户执行 **Run query** 后提交。
+- 只在用户点击 **查询** 后提交。
 - Dashboard 保存 canonical 值；Source/Dataset/Interactive Transform 必须用 `query_inputs` 映射到节点本地 alias。
 - 进入节点执行上下文和缓存键的是投影后的本地 `context.query_inputs`，未声明的全局参数不可读取。
 - 修改草稿但没有重新查询时，页面仍展示上一次 Run 的已提交值和结果。
@@ -336,7 +336,7 @@ bound View event ──┘                  │
                                      └─→ bound View projection
 ```
 
-这意味着 Control 不关心下游是散点、地图、表格行还是某个 cell，也不声明 `effect: highlight`。读写投影属于绑定它的 View Adapter：Plotly/ECharts 可以把 Control 值投影为 selected point，Table 可以投影为 selected row/cell，Custom Renderer 必须实现相同的类型化 Adapter Contract。上游只提供值、候选域、作用域和 Selection 语义，不了解 Renderer。
+这意味着 Control 不关心下游是散点、地图、表格行还是某个 cell，也不声明 `effect: highlight`。读写投影属于绑定它的 View Adapter：Plotly 可以把 Control 值投影为 data item 状态，Table 可以投影为 selected row/cell，Custom Renderer 必须实现相同的类型化 Adapter Contract。上游只提供值、候选域、作用域和 Selection 语义，不了解 Renderer。
 
 当前 author-facing DSL 只在 View 侧增加一条 `control_binding`：字符串用于目标字段与 Control 字段一致的常见情况，对象形式可显式写 `field`：
 
@@ -398,7 +398,9 @@ Dependency Contract 必须明确区分三类边：
 
 作者只声明 Control、直接 `depends_on` 和一条 View 侧 `control_binding`；Compiler 生成其余索引。程序化 selected point/row 更新、状态恢复和 Renderer 重绘绝不能重新发出用户事件，从根源上阻断 `View → Control → View` 反馈循环。所有 Control Component、Bound View event、tab restore 和 API 写入共用同一个原子事务：校验 action → 更新目标 Control → 按 `control_order` 协调下游候选域 → 提交 canonical snapshot → 计算一次 delta → 调度 consumer。若有效状态没有变化，不重绘；每个受影响 consumer 每次事务最多更新一次。
 
-View event envelope 由 Adapter 携带 dashboard/run/frame/view/render generation；旧 frame、已 dispose View 或旧 generation 的事件直接拒绝。较早的 Browser/Server Interactive 结果若在新 revision 后完成也必须丢弃。Table、Plotly 与 ECharts Adapter 只把真实用户操作归一化为 `select`、`select_many` 或 `clear`；Custom Renderer 只通过类型化出口发送 datum，不得修改 Control DOM、调用另一个 View 或绕过 Dependency Contract。
+View event envelope 由 Adapter 携带 dashboard/run/frame/view/render generation；旧 frame、已 dispose View 或旧 generation 的事件直接拒绝。较早的 Browser/Server Interactive 结果若在新 revision 后完成也必须丢弃。Table 与 Plotly Adapter 只把真实用户操作归一化为 `select`、`select_many`、`clear` 或 `reset`；其中 `clear` 是显式空值，`reset` 恢复 Control 的初始策略。Custom Renderer 只通过类型化出口发送 datum，不得修改 Control DOM、调用另一个 View 或绕过 Dependency Contract。
+
+Plotly 默认工具栏必须反映真实能力：未绑定 Selection 的图不显示工具栏；绑定 Selection 的图只显示矩形选择、套索选择和恢复默认选择。下载、缩放、平移、轴恢复与滚轮缩放不默认出现，作者只有在分析任务明确需要时才通过 `config` 覆盖。
 
 以同一 Section 的 A/B 两个 View 为例：A 绑定 `section.selected_store`，B 只读消费它。用户在 A 点击门店 X 后，共享 Control 提交 X，A Adapter 选中 X，B 更新一次，Control 面板同步显示 X；随后用户在面板 Clear，Control 提交 `explicit + []`，A 清除 selected projection，B 进入空状态。不存在“图表状态”和“面板状态”谁覆盖谁，只有按 revision 排序的一份 canonical state。
 
@@ -448,10 +450,10 @@ controls:
 Interactive Transform 支持：
 
 - `trigger: auto`：控件变化后 debounce 并自动提交；新状态会取消或 supersede 旧计算。
-- `trigger: apply`：控件变化先形成草稿，分支标记 stale，用户点击 Apply/Run analysis 后提交。
+- `trigger: apply`：控件变化先形成草稿，分支标记 stale，用户点击 RUN 后提交。
 - `trigger: manual`：只由明确按钮或 CLI/API 调用。
 
-目标默认值按 Runtime 决定：`browser-js` 与 `browser-python` 默认 `auto`，`server-python` 默认 `apply`；作者仍可显式覆盖。浏览器并不等于计算便宜，因此不得删除 `apply/manual`，也不得由静态校验猜测计算成本。当前 Interactive Transform v2 仍统一默认 `apply`，在 Runtime-aware 默认值进入 Schema、Dependency Contract、CLI 文档和测试前，以显式 `trigger` 为准。
+目标默认值按 Runtime 决定：`browser-js` 与 `browser-python` 默认 `auto`，`server-python` 默认 `apply`；作者仍可显式覆盖。浏览器并不等于计算便宜，因此不得删除 `apply/manual`，也不得由静态校验猜测计算成本。
 
 直接 Selection Control 筛选仍即时生效；只有依赖该 Control 的重型 Interactive Transform 可以进入 stale 状态等待 Apply。页面标题、说明和运行证据引用的是产生当前结果的 **已提交值**，不能把未应用的草稿伪装成结果上下文。
 
@@ -557,7 +559,7 @@ browser-js → browser-python → server-python
 
 - 当前引擎确定为 Pyodide，但公开语义使用 `runtime: browser-python`，避免把业务 DSL 与某个加载器 API 绑死。
 - 必须运行在 module Web Worker，不允许阻塞主线程或直接操作 DOM。
-- Python 只负责计算并返回 Named Output；Plotly.js、ECharts、Perspective 和其他 Renderer 仍由 JavaScript 管理。
+- Python 只负责计算并返回 Named Output；Plotly、Perspective 和其他 Renderer 仍由 JavaScript 管理。
 - 依赖必须显式锁定。纯 Python wheel 和 Pyodide 已构建的 WASM wheel 可以使用；普通原生 CPython wheel 不能假设可用。
 - JS/Python 数据交换优先使用 Arrow、TypedArray 或受控结构化数据，避免把大表重复转换为百万个行对象。
 - PyProxy、Worker、buffer 和临时 Python namespace 必须在 dispose 时释放。
@@ -567,7 +569,7 @@ Pyodide 有两种资产策略：
 - `cdn`：报告较小，打开时从 `runtime.pyodide_index_url` 加载；适合有稳定外网或内部镜像的环境。
 - `bundle`：从 Workspace 的 `runtime.pyodide_bundle_path` 复制经过 `validate` 检查的本地 Pyodide 分发；适合公司内网和离线分发。
 
-`bundle` 当前导出为一个文件包，而不是把 WASM、标准库和 wheel base64 塞进单个 HTML：CLI 产生 `report.html`、`report.assets/pyodide/` 与 manifest，Server 下载 ZIP。解压后应通过 HTTP 静态服务打开，因为 module Worker/WASM 在 `file://` 下没有可靠的跨浏览器行为。它只打包 Pyodide：Plotly 由 Dataviz 内嵌，ECharts/Arrow 需要显式配置 Workspace 本地文件，Perspective 当前仍是 CDN-only。manifest 的 `portable_without_network` 只覆盖声明的 Runtime/View 资产；任意 Canvas/Presentation 脚本自行发起的请求不在静态证明范围内。
+`bundle` 当前导出为一个文件包，而不是把 WASM、标准库和 wheel base64 塞进单个 HTML：CLI 产生 `report.html`、`report.assets/pyodide/` 与 manifest，Server 下载 ZIP。解压后应通过 HTTP 静态服务打开，因为 module Worker/WASM 在 `file://` 下没有可靠的跨浏览器行为。它只打包 Pyodide：Plotly.js 4.0.0 与 TanStack Table Core Runtime 由 Dataviz 内嵌，Arrow 需要显式配置 Workspace 本地文件，Perspective 当前仍是 CDN-only。manifest 的 `portable_without_network` 只覆盖声明的 Runtime/View 资产；任意 Canvas/Presentation 脚本自行发起的请求不在静态证明范围内。
 
 配置目录必须是版本匹配的官方完整分发根目录，至少直接包含 `pyodide.mjs`、`pyodide.asm.mjs`、`pyodide.asm.wasm`、`python_stdlib.zip`、`package.json` 与 `pyodide-lock.json`。`validate` 会核对 `package.json` 版本，在 Pyodide/Emscripten 目标环境中解析 dependency marker，沿 lockfile 检查 `micropip`、声明的 Python 包及其传递依赖 wheel，并要求每个所需文件都有匹配的 SHA-256；因此旧版本、只有 loader 文件或不可验证 wheel 的伪 bundle 都不会通过预检。
 
@@ -697,7 +699,7 @@ Schema 合法不等于配置有效。Semantic Validation 必须在 Dashboard、P
 
 `--strict` 只把 `warning/error` 作为门禁，不能因主观 `advice` 失败。所有诊断必须有稳定 code、文件/字段、最终有效值、冲突来源和最小修复建议；Validator 不得维护第二套 Layout 或 Dependency 推导。
 
-产品外壳与分析画布属于两层视觉所有权，但默认不制造两张彼此竞争的“大卡片”。Server 与导出 HTML Header、Sidebar 及 Workbench 使用连续近白表面；Sidebar 只用轻微表面色差、发丝线和近乎不可见的环境阴影确认导航边界，不形成悬浮卡片。靛蓝用于当前项、主操作和默认分析序列，绿色只表示 Ready/成功等语义状态。这些稳定 Shell token 不跟随 Dashboard Theme 染色，因此切换 `business`、`editorial` 或 `terminal` 时操作入口仍保持一致且退居背景。Dashboard 默认 Theme 是 `business`：白色画布、白色分析卡片、靛蓝分析强调、轻边框、极低阴影和紧凑数据表。Plotly、ECharts、普通 Table、Perspective 与 Data Entry Component 共同消费 Dashboard Theme token。`plain` 是更克制的中性版本，`editorial` 与 `terminal` 分别用于叙事报告和深色技术监控；Dashboard 可通过 token、`css_class` 和局部 CSS 覆盖画布视觉，但不得越界重写 Shell。
+产品外壳与分析画布属于两层视觉所有权，但默认不制造两张彼此竞争的“大卡片”。Server 与导出 HTML Header、Sidebar 及 Workbench 使用连续近白表面；Sidebar 只用轻微表面色差、发丝线和近乎不可见的环境阴影确认导航边界，不形成悬浮卡片。靛蓝用于当前项、主操作和默认分析序列，绿色只表示 Ready/成功等语义状态。这些稳定 Shell token 不跟随 Dashboard Theme 染色，因此切换 `business`、`editorial` 或 `terminal` 时操作入口仍保持一致且退居背景。Dashboard 默认 Theme 是 `business`：白色画布、白色分析卡片、靛蓝分析强调、轻边框、极低阴影和紧凑数据表。Plotly、普通 Table、Perspective 与 Data Entry Component 共同消费 Dashboard Theme token。`plain` 是更克制的中性版本，`editorial` 与 `terminal` 分别用于叙事报告和深色技术监控；Dashboard 可通过 token、`css_class` 和局部 CSS 覆盖画布视觉，但不得越界重写 Shell。
 
 Server 与 portable HTML 是同一分析 Shell 的两个 Host，而不是两套独立主题。`presentation.shell` 唯一拥有 Header 高度、基础正文字号/行高、操作间距、Query Card、Panel 表面、字段 label 和输入控件尺寸；Server `server.css` 只拥有 Sidebar、导航、编辑器和 Server-only 诊断。Query Card 与 Canvas 使用同一个 `clamp(22px, 3vw, 48px)` 页面 gutter，不得再用独立 `max-width` 在宽屏上二次收窄。两种 Host 可以有不同操作能力，但同一个 Dashboard 从 Server 导出后，Header、Query/Control Panel 与正文排版不能发生视觉跳变。Dashboard 自定义 CSS 最后加载，只可有意覆盖 Canvas 内容，不应复制或重写 Host Shell。
 
@@ -798,7 +800,7 @@ dataset:features + dashboard:sales-overview/seed (kind: compute)
 | --- | --- | --- |
 | title、description、Section/View、Presentation、CSS/Canvas 资源 | `canvas` | 重载 Canvas，保留当前 Run、Controls 和滚动位置 |
 | browser-js、browser-python、server-python Interactive Transform 或其 Control Contract | `analysis` | 使用已有 Base Output 重建并重算受影响交互分支，不查询 Source |
-| Query Parameter、Adapter、Source、Source 数据文件、Dataset Transform 或 Query 可达图 | `query` | 当前 Run 标记 `Outdated`；不自动执行查询，等待用户明确 Run query |
+| Query Parameter、Adapter、Source、Source 数据文件、Dataset Transform 或 Query 可达图 | `query` | 当前 Run 标记 `Outdated`；不自动执行查询，等待用户明确点击“查询” |
 | Dashboard 目录新增、移除、改名或逻辑目录变化 | `navigation` | 更新目录；未影响当前 Dashboard 时不重载 Canvas |
 | Workspace Runtime 或进程级配置 | `server` | 保留当前页面并明确提示重启，不伪装成已经热应用 |
 | 新配置无法加载或出现新的静态错误 | `invalid` | 保持当前 iframe，不把半写入状态发布给页面，展示诊断并等待下一次有效 revision |
@@ -836,17 +838,25 @@ Dataset Transform 与 `server-python` Interactive Transform 都是可信单机 P
 
 DatePicker 与 RangePicker 不使用浏览器原生 `date` 外观作为产品界面，因为其日期格式、图标、日历语言和弹层样式会随浏览器漂移。两者统一显示并保存 `YYYY-MM-DD`：输入连续八位数字时按 `yyyy → mm → dd` 自动分段，例如 `20260809` 变为 `2026-08-09`；粘贴和直接编辑 ISO 文本走同一路径，真实日期、min/max 与范围顺序继续按值契约校验。日历按钮只负责打开同款 Dataviz 浮层，不取代文本输入；浮层标题以年、月下拉框支持直接跳转，左右箭头只用于相邻月微调。RangePicker 在一个连续边框内提供两个无独立边框的可编辑端点，宽屏显示相邻双月、窄屏收敛为单月；preset、键盘导航与范围边界属于同一个 Component Contract，没有 preset 时不保留空工具条，没有 Clear/Apply 动作时也不重复显示已在输入框中可见的日期范围。组件语义不决定网格宽度，因此 RangePicker 默认也只占一轨。
 
+Table 是默认的数据表达组件，而不是缩减版分析工具。它应覆盖列选择与顺序、标题、格式、对齐、宽度、固定列、排序、筛选、分页、展开、选择、自定义 header/cell/footer、虚拟化接入和可访问性等表格表达能力。Perspective 只在产品明确需要赋予终端用户临时分组、聚合、透视和多维探索能力时使用；普通明细、排行、对账、分组展示或格式化输出不应因为 Table 能力不足而退到 Perspective。
+
 Table 默认只呈现列头和数据行，不为 `N rows` 单独占据一条元信息行；作者确实需要显式行数证据时才启用 `options.show_count: true`。空数据仍使用统一 Empty 状态，不能把“0 rows”元信息误当成空状态替代品。
+
+Table 当前使用 framework-agnostic `@tanstack/table-core` 作为 headless 行为内核，不继续自研排序、筛选、列模型、分页、选择和扩展状态机。Dataviz 仍拥有默认语义 DOM、Theme、紧凑样式、滚轮边界、View lifecycle、Control Binding 和 Export，因此引入 TanStack 不等于引入另一套视觉系统，也不要求 React。
+
+作者能力按三层展开：声明式 `table` 使用 Dataviz 默认列模型与样式；`options` 选择需要的 Table feature 和列呈现；可信 Custom Renderer 通过 `context.tables.tanstack` 使用完整 Core、ColumnDef、Table instance、state 和 feature/plugin 能力，并可完全控制 markup 与 CSS。平台托管入口负责 mount/update/empty/restore/interaction/resize/dispose/export；直接底层调用保留全部 DIY 能力，但作者自行承担订阅、重绘、事件解绑和资源释放。TanStack Runtime 固定版本、本地打包，并由 Server 与 portable HTML 共用同一资产。
 
 `options.mode=static` 的 `choices` 是封闭候选集合，而不是动态数据域的标签缓存。维度成员来自 Source 时必须使用 `options.mode=infer`，由 `options.source` 或消费 View 的 Base Output 推导；否则 Source 新增但未写入静态枚举的值会被有意排除。候选域来源与初始选择意图分开，避免 Dashboard 同时维护数据和一份易漂移的默认值/白名单。
 
 组件边界、值形状、状态和交互语义逐项对齐 Ant Design Data Entry，但 Runtime 不引入 React/Ant 依赖，以保持 Server、单 HTML 与离线报告同构。Checkbox 表达随所在流程提交的 boolean，Switch 表达立即反馈的 boolean；AutoComplete 接受自由 string，suggestions 不是封闭枚举；Radio.Group 不再借用 Segmented 语义。Form 是 `control_panels` 的组合职责，不制造新的 value type。TimePicker、Transfer、ColorPicker、Mentions、Rate、Upload 只有在形成明确分析语义后才进入 DSL。完整矩阵见 [Data Entry Component 语义契约](docs/data-entry-components.md)。
 
-普通 Table 和 Perspective 是不同模板：前者便于自定义样式，后者提供排序、筛选、分组和透视。Small Multiples/Selection Gallery 从共享 Named Output 和一个 View 蓝图生成实例，不复制查询或计算。
+Table 和 Perspective 是不同产品层级：Table 是默认表达层，Perspective 是显式分析工作台。只有需求包含“让看板使用者现场改变分析维度或聚合方式”时才选择 Perspective。Small Multiples/Selection Gallery 从共享 Named Output 和一个 View 蓝图生成实例，不复制查询或计算。
 
-每个 Component 都有明确 owner Package；Package 是 headless controller、Runtime Adapter、功能 CSS、Story 和测试声明的唯一实现来源。`canvas-runtime.js` 只保留 Runtime Manifest、Named Output Store、Interactive Scheduler、Selection Binding 等共享主机能力，不再实现声明式 View、Repeat Section、Presentation 或 Data Frame/Interactive Adapter。已删除独立的 `declarative-runtime.js`，Runtime 内也不保留同功能副本。
+每个 Component 都有明确 owner Package；Package 是 headless controller、Runtime Adapter、功能 CSS、Story 和测试声明的唯一实现来源。浏览器主机源码按 Runtime Manifest、Value Contract、Named Output Store、Interactive Scheduler、Selection Binding、Renderer Lifecycle 与 bootstrap 分布在 `src/dataviz/server/runtime_src/`，不再以一个手写巨型文件承载全部职责。`tools/build_canvas_runtime.py` 按固定顺序确定性生成唯一对外资产 `server/static/canvas-runtime.js`；生成文件不得手工修改，回归必须执行构建器 `--check` 和 JavaScript 语法检查。Runtime 不再实现声明式 View、Repeat Section、Presentation 或 Data Frame/Interactive Adapter，也不保留已删除的 `declarative-runtime.js` 同功能副本。
 
-四个核心 owner 的边界是：
+Workspace 加载采用同样的物理 owner 边界。`workspace/loader.py` 只保留稳定公共 façade，现有调用方无需感知拆分；`workspace/loading/parse_load.py` 拥有 YAML/Schema 解析和 Dashboard 装载，`loaded_types.py` 拥有不可变加载快照，`catalog_navigation.py` 拥有 Workspace 目录、回收站与导航投影，`asset_validation.py` 拥有本地代码、依赖和浏览器资产检查，`contract_validation.py` 拥有跨文件语义契约。物理拆分不得改变错误 code、诊断顺序、字段路径或 CLI 文本。
+
+核心 owner 的边界是：
 
 | Package | 唯一拥有的行为 |
 | --- | --- |
@@ -857,7 +867,7 @@ Table 默认只呈现列头和数据行，不为 `N rows` 单独占据一条元�
 | `runtime.control` | canonical native value、共享事件、键盘与浮层桥接 |
 | `control.*` | 每个 Data Entry Component 的唯一 controller、adapter、CSS、Story 与测试声明 |
 
-Package 内的 `test.yaml` 是机器可读验收声明，不是测试执行器；`dataviz components check` 验证 Package 元数据、资产和声明，真实行为由 pytest 与浏览器 E2E 执行。当前 Registry v5.4 有 21 个 package-owned Package，其中 14 个是独立 `control.*` Data Entry Package，不存在 bridge implementation。
+Package 内的 `test.yaml` 是机器可读验收声明，不是测试执行器；`dataviz components check` 验证 Package 元数据、资产和声明，真实行为由 pytest 与浏览器 E2E 执行。当前 Registry v5.5.0 有 21 个 package-owned Package，其中 14 个是独立 `control.*` Data Entry Package，不存在 bridge implementation。
 
 Gallery 是这些契约的可执行说明，而不是截图目录。Control、View、Section 各自拥有 ready/loading/stale/empty/error/cancelled/unavailable 七状态矩阵；Select 另外提供真实含 10、100、1,000 个原生 option 的 Story，验证搜索、自动虚拟化、键盘和有界可视 DOM。
 
@@ -875,16 +885,29 @@ validate → mount → update → dispose
 mount → update → empty → restore → interaction → resize → dispose → export
 ```
 
-`view.declarative` 宿主统一识别空数据、发布 Empty、释放旧实例并在数据恢复时重新 mount；Renderer/Chart Service 负责交互事件与 ResizeObserver；Export 必须加载同一 Runtime 和 Adapter，不能另写静态渲染分支。首屏 Python 生成的 Plotly/ECharts/Perspective bootstrap 也必须注册到同一 View ID 状态表，不能绕过后续 update/dispose。命令式引擎资源必须归属具体 Renderer 实例：Perspective 的 Worker、Table 与 Viewer 一同 mount/dispose，不能把 Worker 隐藏成 Canvas 全局单例。异步 mount/update/dispose 必须在平台时限内进入 Ready、Fallback 或 Error，不能永久停在 Loading。矩阵至少同时覆盖 Plotly、ECharts、Perspective 的 Server Canvas 和 portable HTML。
+`view.declarative` 宿主统一识别空数据、发布 Empty、释放旧实例并在数据恢复时重新 mount；Renderer/Chart Service 负责交互事件与 ResizeObserver；Export 必须加载同一 Runtime 和 Adapter，不能另写静态渲染分支。首屏 Python 生成的 Plotly/Perspective bootstrap 也必须注册到同一 View ID 状态表，不能绕过后续 update/dispose。命令式资源必须归属具体 Renderer 实例：Plotly View 必须 `purge`，Perspective 的 Worker、Table 与 Viewer 一同 mount/dispose，不能把资源隐藏成 Canvas 全局单例。异步 mount/update/dispose 必须在平台时限内进入 Ready、Fallback 或 Error，不能永久停在 Loading。矩阵至少同时覆盖 Plotly 与 Perspective 的 Server Canvas 和 portable HTML。
 
-Custom Renderer 的目标默认路径不是直接调用全局 Plotly/ECharts，而是使用平台 Chart Service：
+Custom Renderer 的目标默认路径不是直接调用全局图表对象，而是使用平台 Plotly Chart Service：
 
 ```javascript
-context.charts.plotly.mount(element, {data, layout, config})
-context.charts.echarts.mount(element, {options})
+await context.charts.plotly.mount(element, {data, layout, config})
 ```
 
-Service 与内置 View Adapter 共用 Theme、responsive、`scrollZoom`、resize、update、dispose、错误状态和 HTML Export 策略。直接访问底层库仍是显式逃生口，但不会自动继承平台默认值；Scaffold、Gallery 和 AI 文档优先生成 Service 调用。`view.declarative` Package manifest 声明 `service.charts` 能力，Semantic Validation 可据最终 Renderer 配置判断属性是否生效。
+Plotly 是唯一的作者图表接口，能力按需展开，但不能按层级削弱：
+
+1. 内置 line/bar/stacked-bar/pie/scatter/heatmap/radar 把字段映射编译为 Plotly traces 与 layout；
+2. 常见视觉覆盖使用 View `options.trace`、`options.layout` 与 `config`，不引入第二套图表语法；
+3. 需要自定义 trace、函数、事件或命令式状态时，可信 Custom Renderer 可使用托管 Chart Service，也可直接访问页面内嵌的完整 Plotly.js API。
+
+第三层拥有 Plotly.js 提供的完整开发能力；Dataviz 只约束数据来源、Control Action、View 生命周期、资源释放、页面滚轮和 Export，不建立需要持续追赶上游的封闭能力白名单。托管 Service 是默认入口，因为它自动继承平台策略；直接底层调用是受支持的完整能力逃生口，作者必须自行承担 Theme、Resize、Update、Purge、事件解绑和滚轮所有权。
+
+Dataviz 固定并直接内置 Plotly.js 4.0.0，不安装或调用 Python `plotly`。Server 负责生成 canonical Named Output 与稳定的 View 字段映射；Browser Adapter 只把这些已计算数据投影为 Plotly `data`，并合并容器尺寸、主题、交互策略与作者覆盖，形成最终 `layout/config` 后调用 Plotly.js。该投影不得重新解释指标口径；之所以保留在浏览器，是为了让 Control、browser-js/browser-python Derived Output 与 portable HTML 无需回到 Server 也能更新图表。Server 与 portable HTML 使用同一份经过完整性校验的浏览器资产，因此不存在 Python wrapper 与浏览器版本漂移。视觉选型优先参考 [Plotly JavaScript 官方文档](https://plotly.com/javascript/) 与 [Chart Studio Gallery](https://plotly.com/graphing-libraries/)，Dataviz Recipe 只保存少量经过接入和回归验证的起步代码，不抓取、复制或替代官方资料。AI 应先明确分析问题，再将选定的 traces、layout、数据映射和交互接入 Named Output、Controls 与 Renderer 生命周期。
+
+官方示例是参考输入，不是可直接执行的 Dataviz Contract。适配器必须替换示例中的独立 DOM、内联数据与事件宿主，声明需要的本地/网络资产，并把实例创建、事件、Resize 和 Purge 交回 Renderer 生命周期。只有完成这些适配并通过 `validate → report → visual-check` 的代码，才可成为 Dataviz Recipe。
+
+作者契约只有 Plotly：View 不填写 `engine`，Scaffold、Gallery、Recipe、focused docs 和 Component contract 不暴露图表包分支。
+
+Service 与内置 View Adapter 共用 Theme、responsive、page-first wheel、resize、update、dispose、错误状态和 HTML Export 策略。直接访问底层库仍是显式逃生口，但不会自动继承平台默认值；Scaffold、Gallery 和 AI 文档优先生成 Plotly Service 调用。`view.declarative` Package manifest 声明 `service.charts` 能力，Semantic Validation 可据最终 Renderer 配置判断属性是否生效。
 
 Server 页面与导出 HTML 必须使用同一组件实现。
 
@@ -932,13 +955,13 @@ Analysis Plane 已闭合发现、试验和人工晋升两个循环：
 | 分析口径 | Derived Named Output | Base Named Output + resolved Controls → Interactive Transform 的结果 | 结构化表、有效 Control、Runtime 与 lineage |
 | 呈现口径 | View | Named Output 到 title、x/y、series、columns、aggregation 等视觉编码的映射 | View spec 与输入引用；Screenshot 只用于视觉 QA |
 
-Source 是取数节点和 lineage 起点，不是最终复用单位。Catalog 以 Named Output 为主记录；没有 Dataset Transform 时，Source Output 自然就是 Base Named Output。所有 Base Named Output 都应可独立检查和导出为表。Derived Named Output 也应保持数据结果，不把 Plotly、ECharts、Perspective 或 DOM 实例当作分析结果。
+Source 是取数节点和 lineage 起点，不是最终复用单位。Catalog 以 Named Output 为主记录；没有 Dataset Transform 时，Source Output 自然就是 Base Named Output。所有 Base Named Output 都应可独立检查和导出为表。Derived Named Output 也应保持数据结果，不把 Plotly View、Perspective 或 DOM 实例当作分析结果。
 
 View 图像适合人快速识别模式，但 AI 通常更适合读取结构化 Output 与 View mapping。只有判断布局、裁切、视觉层级或图形是否误导时，才启动浏览器并读取 Screenshot/geometry；不能把视觉识别作为数据分析的必经路径。
 
 ### 13.2 Output 语义、可见性与可信度
 
-AI 作者在定义可复用 Output 时，应同时记录它为什么存在，而不仅是技术名称。Dashboard schema 在每个 Base/Derived Named Output 附近提供 Output 级 `semantics` 契约；不再用 Dashboard 级 grain 代替不同 Output 的行粒度。P1 的最小契约为：
+AI 作者在定义可复用 Output 时，应同时记录它为什么存在，而不仅是技术名称。Dashboard schema 在每个 Base/Derived Named Output 附近提供 Output 级 `semantics` 契约；不再用 Dashboard 级 grain 代替不同 Output 的行粒度。当前最小契约为：
 
 ```yaml
 semantics:
@@ -980,7 +1003,7 @@ Dashboard YAML 只声明作者无法可靠推导的语义。参数闭包、linea
 
 搜索覆盖 title、purpose、Dashboard/Source/Output 名称、Query Parameter、字段、类型、相对路径、Adapter 和下游 View；默认支持不区分大小写、类似 grep 的正则表达式，例如 `收入|工资|年入|月入`，避免单一关键词召回不足。`--literal` 用于按原文搜索包含正则符号的内容；无效或过长正则返回稳定诊断。同时保留 `--dashboard`、`--kind`、`--source-type`、`--parameter` 等确定性过滤，并先过滤再匹配文本。搜索结果必须返回稳定引用，供后续 `describe` 和 `run` 直接消费。
 
-`catalog list/search` 共用一份语义密集的默认文本 renderer，区别只在于 search 额外显示命中原因。每条结果以 title/purpose/grain/assurance 为主，物理 reference、kind 和 Dashboard 退居次级；同时紧凑显示 Query Parameter 的 ID、类型、required/default、候选模式/数量/依赖，Output kind/字段数、最短执行闭包、相关 View 和精确折叠 occurrence count。默认不展开完整候选池、Schema、SQL、代码或所有 occurrence。Source 和 View 默认附着在主要 Base/Derived Output 下作为 lineage/consumer，不与可复用 Output 平铺竞争；只有显式 `--kind source|view` 才独立列出。当前单行索引表保留为显式 `--compact`，不能继续充当默认结果。
+`catalog list/search` 共用一份语义密集的默认文本 renderer，区别只在于 search 额外显示命中原因。每条结果以 title/purpose/grain/assurance 为主，物理 reference、kind 和 Dashboard 退居次级；同时紧凑显示 Query Parameter 的 ID、类型、required/default、候选模式/数量/依赖，Output kind/字段数、最短执行闭包、相关 View 和精确折叠 occurrence count。默认不展开完整候选池、Schema、SQL、代码或所有 occurrence。Source 和 View 默认附着在主要 Base/Derived Output 下作为 lineage/consumer，不与可复用 Output 平铺竞争；只有显式 `--kind source|view` 才独立列出。
 
 默认文本的视觉层级参考如下；它是确定性文本契约，不要求终端图布局库：
 
@@ -1048,7 +1071,7 @@ CREATE TABLE usage_stats (
 
 `catalog list/search/describe`、页面打开/刷新、失败、取消和其他行为当前都不记录。是否将它们加入、以及统计如何参与搜索排序，都等真实使用数据出现后再决定。
 
-多线程/多进程不读取后在 Python 中执行 `count + 1`，而是使用单条 `INSERT ... ON CONFLICT DO UPDATE SET use_count = use_count + 1`原子更新，并将 `last_used_at` 取为已存值和新值中较晚者。每个进程创建自己的 SQLite connection，使用 WAL、有界 `busy_timeout` 和短事务；统计更新是 best-effort，最终失败只写 warning，绝不使已成功的 Query/Analysis 变为失败。`usage.sqlite` 不进入 Dashboard/Catalog fingerprint，也不触发 Workspace hot reload。
+多线程/多进程不读取后在 Python 中执行 `count + 1`，而是使用单条 `INSERT ... ON CONFLICT DO UPDATE SET use_count = use_count + 1`原子更新，并将 `last_used_at` 取为已存值和新值中较晚者。每个进程创建自己的 SQLite connection，使用 WAL、有界 `busy_timeout` 和短事务；统计更新是 best-effort，最终失败只写 warning，绝不使已成功的人类 Query 或 CLI Run 变为失败。`usage.sqlite` 不进入 Dashboard/Catalog fingerprint，也不触发 Workspace hot reload。
 
 ### 13.5 Python CLI 分析协议
 
@@ -1123,7 +1146,7 @@ Result 不在普通查询命令中机会式清理。`dataviz prune` 统一预览
 
 ### 13.7 临时分析覆盖层
 
-AI 分析经常需要回答“如果这段 SQL、输入文件或计算逻辑换成另一版，结果会怎样”。复制完整 Dashboard 会制造无意义分支和过期副本，因此 Analysis Plane 应支持只作用于一次 Analysis Run 的 Overlay：
+AI 分析经常需要回答“如果这段 SQL、输入文件或计算逻辑换成另一版，结果会怎样”。复制完整 Dashboard 会制造无意义分支和过期副本，因此 Analysis Plane 支持只作用于一次 CLI Run 的 Overlay：
 
 ```yaml
 schema: dataviz/analysis-overlay/v1
@@ -1195,7 +1218,7 @@ HTML 导出和现有分享链接继续作为人类消费看板的已有能力；
 | Browser Runtime Manifest/Event | `dataviz/runtime/v5` |
 | Dataset Transform schema | `dataviz/dataset-transform/v2` |
 | Interactive Transform schema | `dataviz/interactive-transform/v2` |
-| Component Registry | `5.4.0` |
+| Component Registry | `5.5.0` |
 
 已经实现：
 
@@ -1215,13 +1238,13 @@ HTML 导出和现有分享链接继续作为人类消费看板的已有能力；
 14. 动态 Selection option domain 从 Base Output 建立；首次运行先 hydration/reconciliation，再渲染与调度 Interactive 分支。`canvas-ready` 只在首次 canonical state 提交后发布，Browser Interactive 状态通过 frame identity 约束的事件同步到 Server `Pipeline` 面板。
 15. Query、Interactive、Control、Output 与 View 的所有边由单一 Dependency Contract 编译；Planner、Server、Browser、Export、CLI 与 AI context 只消费其投影。Query/Interactive 节点只能读取声明的参数，Browser 注册与契约漂移会立即失败。
 16. Selection 的唯一状态是 `{intent, values}`；Control、Repeat、View、三种 Interactive Runtime、tab 恢复与 HTML Export 共用 resolver。`explicit + []` 是明确空集，`all_available` 随候选域变化；optional Single Select 支持受契约约束的 Clear。
-17. View 可通过一条 `control_binding` 双向绑定现有 Selection Control。Dependency Contract v4 编译唯一 writer 与普通 consumers；Plotly、ECharts、Table 和 Custom Renderer 只通过类型化 Adapter Action 写 canonical state，并拒绝越界、第二 writer、旧 generation 与反向作用域依赖。
+17. View 可通过一条 `control_binding` 双向绑定现有 Selection Control。Dependency Contract v5 编译唯一 writer 与普通 consumers；Plotly、Table 和 Custom Renderer 只通过类型化 Adapter Action 写 canonical state，并拒绝越界、第二 writer、旧 generation 与反向作用域依赖。
 18. Layout Contract v1 是声明式页面结构的唯一编译结果；Dashboard 拥有顺序、模板、columns 与 span，Presentation v2 只拥有视觉。默认 Renderer、Server、HTML、AI context 与 validate 共用该契约，自定义 Canvas 只暴露稳定 mount points。
 19. Semantic Validation 在最终 Layout/Dependency/Renderer 配置上输出稳定 error/warning/advice；`inspect layout` 公开编译后的行列与来源，不维护第二张布局图。
 20. `state-snapshot/v1` 是当前分析状态的只读证据；默认画布不展示状态胶囊。作者显式启用后，Dashboard/Section/View 才展示 committed/applied 值，并把 Compute draft 明确标成待应用。
 21. browser-js/browser-python 默认 `auto`，server-python 默认 `apply`；显式 trigger 仍优先。`run` 默认返回高密度 Result 摘要，调试证据通过 `result inspect` 的渐进详情获取。
-22. Custom Renderer 通过 `context.charts.plotly/echarts` 复用平台 Theme、滚轮、Resize、Update 与 Dispose；`visual-check` 对 Server/Report 执行真实浏览器几何和永久 Loading 检查并保存截图。
-23. AI Analysis Plane 0.12.0 已提供可重建 Catalog、规范物理 Target Reference、语义密集 `catalog list/search`、批量 `catalog describe`、Result-centric `run`、`result list/show/inspect/export`、Base/Derived/View 调度、三种 Interactive Runtime 与本地 Analysis Overlay；它们复用现有 Dependency Contract 与 Runtime。
+22. Custom Renderer 通过 `context.charts.plotly` 复用平台 Theme、滚轮、Resize、Update 与 Dispose；`visual-check` 对 Server/Report 执行真实浏览器几何和永久 Loading 检查并保存截图。
+23. AI Analysis Plane 提供可重建 Catalog、规范物理 Target Reference、语义密集 `catalog list/search`、批量 `catalog describe`、Result-centric `run`、`result list/show/inspect/export`、Base/Derived/View 调度、三种 Interactive Runtime 与本地 Analysis Overlay；它们复用现有 Dependency Contract 与 Runtime。
 
 仍属于后续优化，而不是隐藏的兼容工作：
 
@@ -1235,24 +1258,24 @@ HTML 导出和现有分享链接继续作为人类消费看板的已有能力；
 8. Semantic Validation 只判断确定性 no-op 与保守启发式；它不会根据未知真实数据规模判定图表是否适合，也不会替代人工审美判断。
 9. 可选分析状态摘要覆盖默认 Canvas；完整自定义 Canvas 即使启用摘要，也需要显式放置稳定的 state-summary mount，平台不会猜测任意 HTML 的标题区域。
 10. visual-check 判断溢出、裁切、重叠、零尺寸、永久 Loading、Perspective 高度和 Console error，不判断配色、业务图表选择或叙事质量。
-11. Analysis Plane 0.12.0 已完成 Output semantics/assurance、版本化机器 JSON Schema、稳定错误 envelope、generation Catalog、规范物理 Target Reference、完整执行 provenance、compact Evidence、三类 Promote dry-run、不可变 Result 和多 Runtime 批量 Output；Promote 不自动 apply/certified，正式知识仍以人审阅后的普通 Workspace/Git 变更为准。
+11. Analysis Plane 已完成 Output semantics/assurance、版本化机器 JSON Schema、稳定错误 envelope、generation Catalog、规范物理 Target Reference、完整执行 provenance、compact Evidence、三类 Promote dry-run、不可变 Result 和多 Runtime 批量 Output；Promote 不自动 apply/certified，正式知识仍以人审阅后的普通 Workspace/Git 变更为准。
 12. HTML Analysis Capsule、HTML Output 提取和远程分享链接分析不在当前路线图中；现有 HTML 导出和分享链接仍只是人类消费看板的产品能力。
 
 Component Registry 独立版本化，只在公共组件契约变化时升级，不跟随 Dashboard schema 机械改号。
 
-## 15. 已明确放弃的旧方向
+## 15. 设计非目标
 
-以下内容不是待恢复功能：
+以下内容不属于当前产品方向：
 
 - 不以中心 Server 数据库保存页面和多人编辑状态；Git/文件夹是协作边界。
 - 不提供可编辑数据逻辑、依赖、布局和样式的通用网页开发器；Server 只保留默认值、静态候选项与同级顺序的受限人工调参面。
 - 不使用 Filter/exclude；Selection 只表达 include。
 - 不把 Selection 与 Compute 的 Runtime 语义抹平成无类型参数；统一入口必须保留显式 `kind`。
 - 不支持任意 Filter Group 或一个 View 同时归属多个组。
-- 不恢复 Mosaic、Widget 坐标或拖拽画布协议。
+- 不提供 Mosaic、Widget 坐标或拖拽画布协议。
 - 不让 browser-python/Pyodide 直接操作 DOM 或承担 View Renderer；它只产生 Named Output。
 - 不把凭证写进 Dashboard，也不让 Dataset/Interactive Transform 获得隐式 Adapter。
-- 不为已经移除的实验性字段、Schema 或 Runtime 保留 alias、自动迁移或双协议分支。
+- 不为实验性字段、Schema 或 Runtime 保留 alias、自动迁移或双协议分支。
 - 不要求普通 Dashboard 编写自定义 HTML/CSS/JS；完整 Canvas 只是最后逃生口。
 - 不为 AI Analysis Plane 复制 Dependency Contract、Query Executor、InteractionExecutor 或 Browser Runtime。
 - 不把 Renderer 像素识别当作 AI 获取分析数据的默认路径。

@@ -5,8 +5,18 @@ from pathlib import Path
 from statistics import mean, median
 from typing import Any
 
-from dataviz.authoring import build_context_payload, context_size
+from dataviz.authoring import build_context_payload
 from dataviz.workspace import load_workspace, validate_workspace
+
+
+def context_size(payload: dict[str, object]) -> dict[str, int]:
+    compact = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    pretty = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+    return {
+        "characters": len(compact),
+        "utf8_bytes": len(compact.encode("utf-8")),
+        "pretty_lines": pretty.count("\n") + 1,
+    }
 
 
 def _text_metrics(path: Path) -> dict[str, int] | None:
@@ -66,4 +76,3 @@ def build_context_benchmark(workspace_path: Path, dashboard_id: str) -> dict[str
         ],
         "stable_json_bytes": len(json.dumps(full, sort_keys=True).encode("utf-8")),
     }
-

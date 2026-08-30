@@ -108,12 +108,12 @@ views:
   - {id: total-revenue, title: Revenue, template: metric, input: source:gallery-data/main, value: revenue, aggregate: sum, label: selected revenue}
   - {id: total-orders, title: Orders, template: metric, input: source:gallery-data/main, value: orders, aggregate: sum, label: selected orders}
   - {id: revenue-line, title: Line · Plotly, template: line, input: source:gallery-data/main, x: month, y: revenue, series: region, aggregate: sum, span: 7}
-  - {id: category-bars, title: Bar · ECharts, template: bar, engine: echarts, input: source:gallery-data/main, x: category, y: revenue, series: region, aggregate: sum, span: 5}
-  - {id: stacked-orders, title: Stacked bar, template: stacked-bar, engine: echarts, input: source:gallery-data/main, x: month, y: orders, series: category, aggregate: sum, span: 7}
-  - {id: category-share, title: Pie, template: pie, engine: echarts, input: source:gallery-data/main, label: category, value: revenue, aggregate: sum, span: 5}
-  - {id: revenue-scatter, title: Scatter, template: scatter, input: source:gallery-data/main, x: orders, y: revenue, series: region, size: satisfaction, span: 6}
-  - {id: revenue-heatmap, title: Heatmap, template: heatmap, engine: echarts, input: source:gallery-data/main, x: month, y: region, z: revenue, aggregate: sum, span: 6}
-  - {id: store-radar, title: Radar, template: radar, engine: echarts, input: source:gallery-data/main, label: store_id, columns: [revenue, orders, satisfaction], limit: 4, span: 12}
+  - {id: category-bars, title: Bar · Plotly, template: bar, input: source:gallery-data/main, x: category, y: revenue, series: region, aggregate: sum, span: 5}
+  - {id: stacked-orders, title: Stacked bar, template: stacked-bar, input: source:gallery-data/main, x: month, y: orders, series: category, aggregate: sum, span: 7}
+  - {id: category-share, title: Pie, template: pie, input: source:gallery-data/main, label: category, value: revenue, aggregate: sum, span: 5}
+  - {id: revenue-scatter, title: Scatter · Plotly, template: scatter, input: source:gallery-data/main, x: orders, y: revenue, series: region, size: satisfaction, span: 6}
+  - {id: revenue-heatmap, title: Heatmap, template: heatmap, input: source:gallery-data/main, x: month, y: region, z: revenue, aggregate: sum, span: 6}
+  - {id: store-radar, title: Radar, template: radar, input: source:gallery-data/main, label: store_id, columns: [revenue, orders, satisfaction], limit: 4, span: 12}
   - id: detail-table
     title: Themeable table + View controls
     template: table
@@ -121,6 +121,14 @@ views:
     columns: [date, month, region, category, product, province, city, district, store_id, revenue, orders]
     limit: 100
     span: 6
+    options:
+      searchable: true
+      show_count: true
+      page_size: 8
+      widths: {date: 112, region: 96}
+      pinned_columns: {start: [date, region]}
+      align: {revenue: right, orders: right}
+      formats: {revenue: currency, orders: number}
     controls:
       - id: product
         kind: selection
@@ -233,7 +241,7 @@ sections:
 
   - id: analysis
     title: Analysis tables
-    description: Plain Table remains themeable; Perspective owns pivot interaction.
+    description: TanStack Table owns everyday data expression; Perspective owns end-user pivot exploration.
     template: comparison
     views: [detail-table, pivot-table]
 
@@ -283,4 +291,4 @@ sections:
 
 canvas:
   scripts: [assets/component-stories.js, assets/gallery-renderer.js]
-  client_libraries: [plotly, echarts, perspective]
+  client_libraries: [plotly, perspective]

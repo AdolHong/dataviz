@@ -8,13 +8,14 @@ tests:
   - {id: view.scatter.lifecycle, component: view.scatter, kind: renderer, assertions: [mount, update, dispose]}
   - {id: view.heatmap.lifecycle, component: view.heatmap, kind: renderer, assertions: [mount, update, dispose]}
   - {id: view.radar.lifecycle, component: view.radar, kind: renderer, assertions: [mount, update, dispose]}
-  - {id: view.table.lifecycle, component: view.table, kind: renderer, assertions: [mount, update, dispose, wheel-boundary, default-count-hidden, explicit-count-visible]}
+  - {id: view.table.lifecycle, component: view.table, kind: renderer, assertions: [tanstack-core, default-style, mount, update, dispose, sort, search, pagination, column-pinning, control-binding, wheel-boundary, default-count-hidden, explicit-count-visible, portable-html]}
   - {id: view.perspective.lifecycle, component: view.perspective, kind: renderer, assertions: [mount, update, dispose, wheel-boundary]}
   - {id: view.markdown.lifecycle, component: view.markdown, kind: renderer, assertions: [mount, update, dispose]}
   - {id: view.image.lifecycle, component: view.image, kind: renderer, assertions: [mount, update, dispose]}
   - {id: view.custom.lifecycle, component: view.custom, kind: renderer, assertions: [mount, update, dispose, view-scoped-error]}
-  - {id: service.charts.lifecycle, component: service.charts, kind: renderer, assertions: [plotly, echarts, theme, page-wheel-default, resize, update, dispose]}
-  - {id: view.renderer-lifecycle.matrix, component: view.renderer-lifecycle, kind: browser, assertions: [mount, update, empty, restore, interaction, resize, dispose, export, plotly, echarts, perspective, server, portable-html]}
-  - {id: view.echarts-category.legend, component: view.echarts-category, kind: interaction, assertions: [filter, visibility, none]}
+  - {id: service.charts.lifecycle, component: service.charts, kind: renderer, assertions: [plotly, theme, page-wheel-default, resize, update, dispose]}
+  - {id: service.tables.lifecycle, component: service.tables, kind: renderer, assertions: [tanstack-core, managed-default, raw-core, custom-column-def, mount, update, resize, dispose]}
+  - {id: view.renderer-lifecycle.matrix, component: view.renderer-lifecycle, kind: browser, assertions: [mount, update, empty, restore, interaction, resize, dispose, export, plotly, perspective, server, portable-html]}
+  - {id: view.plotly-category.legend, component: view.plotly-category, kind: interaction, assertions: [visibility, isolate, restore]}
   - {id: view.state.matrix, component: view.state, kind: browser, assertions: [ready, loading, stale, empty, error, cancelled, unavailable, aria-busy, aria-invalid]}
   - {id: view.pipeline-status.contract, component: view.pipeline-status, kind: contract, assertions: [compiler-order, query-status, interactive-status, renderer-status, transient-ready-hidden, error-retained, portable-html]}

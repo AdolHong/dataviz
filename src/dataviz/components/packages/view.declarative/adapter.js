@@ -38,6 +38,7 @@
       viewId:key,
       runtime,
       charts:chartService,
+      tables:tableService,
       controlBinding:bindingContext(root, key, descriptor, generation),
     });
     const setRendererSignal = (root, status, {active = null} = {}) => {
@@ -183,62 +184,42 @@
       // wheel gesture unless the author explicitly opts into chart zooming.
       responsive:true,
       displaylogo:false,
+      showSendToCloud:false,
       scrollZoom:false,
       ...config,
     });
-    const echartsAxisTheme = (axis, theme) => {
-      const source = axis || {};
-      const axisLine = source.axisLine || {};
-      const axisTick = source.axisTick || {};
-      const splitLine = source.splitLine || {};
-      return {
-        ...source,
-        axisLabel:{color:theme.muted, ...(source.axisLabel || {})},
-        nameTextStyle:{color:theme.muted, ...(source.nameTextStyle || {})},
-        axisLine:{...axisLine, lineStyle:{color:theme.line, ...(axisLine.lineStyle || {})}},
-        axisTick:{...axisTick, lineStyle:{color:theme.line, ...(axisTick.lineStyle || {})}},
-        splitLine:{...splitLine, lineStyle:{color:theme.grid, ...(splitLine.lineStyle || {})}},
-      };
+    const plotlyRestoreSelectionIcon = {
+      width:24,
+      height:24,
+      path:'M20 12a8 8 0 1 1-2.34-5.66L20 8V2l-2.2 2.2A10 10 0 1 0 22 12h-2z',
     };
-    const echartsAxisCollection = (axis, theme) => Array.isArray(axis)
-      ? axis.map(item => echartsAxisTheme(item, theme))
-      : echartsAxisTheme(axis, theme);
-    const echartsTheme = (root, options = {}) => {
-      const theme = chartTheme(root);
-      const legend = options.legend || {};
-      const tooltip = options.tooltip || {};
-      const radar = options.radar || {};
-      const visualMap = options.visualMap || {};
-      const result = {
-        backgroundColor:'transparent',
-        color:theme.palette,
-        ...options,
-        textStyle:{fontFamily:theme.font, color:theme.ink, ...(options.textStyle || {})},
-        legend:{
-          ...legend,
-          textStyle:{fontFamily:theme.font, color:theme.muted, ...(legend.textStyle || {})},
+    const managedPlotlyDescriptor = (descriptor, renderContext) => {
+      const sourceConfig = descriptor.config || {};
+      const restoreButton = {
+        name:'Restore default selection',
+        icon:plotlyRestoreSelectionIcon,
+        click:() => requestAnimationFrame(() => {
+          runtime.metrics.renderers.interactions += 1;
+          renderContext.controlBinding?.emit('reset');
+        }),
+      };
+      const defaultModeBar = renderContext.controlBinding
+        ? [['select2d', 'lasso2d', restoreButton]]
+        : undefined;
+      const hasExplicitModeBar = Object.prototype.hasOwnProperty.call(
+        sourceConfig, 'modeBarButtons'
+      );
+      return {
+        ...descriptor,
+        config:{
+          ...sourceConfig,
+          displayModeBar:sourceConfig.displayModeBar
+            ?? Boolean(renderContext.controlBinding),
+          ...(hasExplicitModeBar || !defaultModeBar ? {} : {
+            modeBarButtons:defaultModeBar,
+          }),
         },
-        tooltip:{
-          backgroundColor:theme.panel,
-          borderColor:theme.line,
-          ...tooltip,
-          textStyle:{fontFamily:theme.font, color:theme.ink, ...(tooltip.textStyle || {})},
-        },
       };
-      if (options.xAxis !== undefined) result.xAxis = echartsAxisCollection(options.xAxis, theme);
-      if (options.yAxis !== undefined) result.yAxis = echartsAxisCollection(options.yAxis, theme);
-      if (options.radar !== undefined) result.radar = {
-        ...radar,
-        axisName:{color:theme.muted, ...(radar.axisName || {})},
-        axisLine:{...radar.axisLine, lineStyle:{color:theme.line, ...(radar.axisLine?.lineStyle || {})}},
-        splitLine:{...radar.splitLine, lineStyle:{color:theme.grid, ...(radar.splitLine?.lineStyle || {})}},
-        splitArea:{...radar.splitArea, areaStyle:{color:['transparent'], ...(radar.splitArea?.areaStyle || {})}},
-      };
-      if (options.visualMap !== undefined) result.visualMap = {
-        ...visualMap,
-        textStyle:{color:theme.muted, ...(visualMap.textStyle || {})},
-      };
-      return result;
     };
     const chartService = Object.freeze({
       plotly:Object.freeze({
@@ -256,7 +237,7 @@
             plotlyTheme(root, specification.layout || {}),
             config,
           );
-          const state = {engine:'plotly', node:host, specification, observer:null};
+          const state = {node:host, specification, observer:null};
           state.observer = new ResizeObserver(() => {
             runtime.metrics.renderers.resizes += 1;
             global.Plotly?.Plots?.resize?.(host);
@@ -285,37 +266,6 @@
           if (state?.node) global.Plotly?.purge?.(state.node);
         },
       }),
-      echarts:Object.freeze({
-        mount(host, specification = {}, root = host?.closest?.('.dv-view')) {
-          if (!global.echarts) throw new Error('ECharts.js is not loaded');
-          const chart = global.echarts.init(host);
-          chart.setOption(echartsTheme(root, specification.options || specification));
-          const observer = new ResizeObserver(() => {
-            runtime.metrics.renderers.resizes += 1;
-            chart.resize();
-          });
-          observer.observe(host);
-          return {engine:'echarts', node:host, chart, observer, specification};
-        },
-        update(state, specification = {}, root = state?.node?.closest?.('.dv-view')) {
-          if (!state?.chart) throw new Error('ECharts chart state is missing its instance');
-          state.chart.setOption(
-            echartsTheme(root, specification.options || specification),
-            {notMerge:true},
-          );
-          state.specification = specification;
-          return state;
-        },
-        resize(state) {
-          if (!state?.chart) return;
-          runtime.metrics.renderers.resizes += 1;
-          state.chart.resize();
-        },
-        dispose(state) {
-          state?.observer?.disconnect?.();
-          state?.chart?.dispose?.();
-        },
-      }),
     });
     global.dataviz.charts = chartService;
     const formatTableValue = (value, rule) => {
@@ -342,78 +292,453 @@
       }
       return String(value);
     };
-    const renderPlainTable = (body, rows, columns, limit = 100, descriptor = {}) => {
-      const options = descriptor.options || {};
-      const visibleRows = rows.slice(0, limit || rows.length);
-      const fragment = document.createDocumentFragment();
-      if (options.show_count === true) {
-        const meta = document.createElement('div');
-        meta.className = 'dv-table-meta';
-        meta.innerHTML = `<strong>${rows.length}</strong><span>rows${
-          visibleRows.length < rows.length ? ` · showing ${visibleRows.length}` : ''
-        }</span>`;
-        fragment.append(meta);
+    let managedTableFeatures = null;
+    const tanstackCore = () => {
+      const core = global.datavizTanStackTable;
+      if (!core?.constructTable || !core?.tableFeatures) {
+        throw new Error('TanStack Table Core is not loaded');
       }
-      if (!rows.length) {
+      const expected = String(global.dataviz.runtime_versions?.tanstack_table || '');
+      if (expected && expected !== String(core.version || '')) {
+        throw new Error(
+          `TanStack Table Runtime version mismatch: expected ${expected}, loaded ${core.version}`
+        );
+      }
+      return core;
+    };
+    const defaultTableFeatures = () => {
+      if (managedTableFeatures) return managedTableFeatures;
+      const core = tanstackCore();
+      managedTableFeatures = core.tableFeatures({
+        coreReactivityFeature:core.storeReactivityBindings(),
+        columnFilteringFeature:core.columnFilteringFeature,
+        globalFilteringFeature:core.globalFilteringFeature,
+        filteredRowModel:core.createFilteredRowModel(),
+        filterFns:core.filterFns,
+        rowSortingFeature:core.rowSortingFeature,
+        sortedRowModel:core.createSortedRowModel(),
+        sortFns:core.sortFns,
+        rowExpandingFeature:core.rowExpandingFeature,
+        expandedRowModel:core.createExpandedRowModel(),
+        rowPaginationFeature:core.rowPaginationFeature,
+        paginatedRowModel:core.createPaginatedRowModel(),
+        columnOrderingFeature:core.columnOrderingFeature,
+        columnPinningFeature:core.columnPinningFeature,
+        columnSizingFeature:core.columnSizingFeature,
+        columnVisibilityFeature:core.columnVisibilityFeature,
+      });
+      return managedTableFeatures;
+    };
+    const appendTableRenderable = (host, value) => {
+      if (value == null || value === false) return;
+      if (value instanceof Node) {
+        host.append(value);
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach(item => appendTableRenderable(host, item));
+        return;
+      }
+      host.append(document.createTextNode(String(value)));
+    };
+    const tableColumnNames = specification => {
+      const rows = specification.rows || specification.data || [];
+      const columns = specification.columns || [];
+      if (columns.length && columns.every(column => typeof column === 'string')) return columns;
+      return Object.keys(rows[0] || {});
+    };
+    const inferTableAlign = (rows, column, configured) => {
+      if (configured) return configured;
+      const value = rows.find(row => row?.[column] != null)?.[column];
+      return typeof value === 'number' ? 'right' : 'left';
+    };
+    const normalizeInitialSorting = value => {
+      const values = Array.isArray(value) ? value : value ? [value] : [];
+      return values.map(item => {
+        if (typeof item === 'string') {
+          return {id:item.startsWith('-') ? item.slice(1) : item, desc:item.startsWith('-')};
+        }
+        return {id:String(item.id || item.column || ''), desc:Boolean(item.desc)};
+      }).filter(item => item.id);
+    };
+    const normalizeColumnPinning = options => {
+      const configured = options.pinned_columns || options.pinning || {};
+      if (Array.isArray(configured)) return {start:configured, end:[]};
+      return {
+        start:[...(configured.start || configured.left || [])],
+        end:[...(configured.end || configured.right || [])],
+      };
+    };
+    const tableColumnDefinitions = (specification, rows, options) => {
+      if (Array.isArray(specification.columnDefs)) return specification.columnDefs;
+      if (
+        Array.isArray(specification.columns)
+        && specification.columns.length
+        && specification.columns.every(column => typeof column === 'object')
+      ) return specification.columns;
+      return tableColumnNames(specification).map(column => {
+        const configuredWidth = Number(options.widths?.[column]);
+        return {
+          id:column,
+          accessorFn:row => row?.[column],
+          header:options.labels?.[column] || column,
+          cell:cell => formatTableValue(cell.getValue(), options.formats?.[column]),
+          enableSorting:options.sortable !== false,
+          ...(Number.isFinite(configuredWidth) && configuredWidth > 0
+            ? {size:configuredWidth}
+            : {}),
+          meta:{
+            datavizColumn:column,
+            datavizAlign:inferTableAlign(rows, column, options.align?.[column]),
+            datavizWrap:Boolean(options.wrap || options.wrap_columns?.includes?.(column)),
+          },
+        };
+      });
+    };
+    const tablePreparation = specification => {
+      const rows = specification.rows || specification.data || [];
+      const options = specification.options || {};
+      const displayLimit = Number(specification.limit) > 0
+        ? Number(specification.limit)
+        : 100;
+      const configuredPageSize = Number(options.page_size);
+      const pageSize = Number.isFinite(configuredPageSize) && configuredPageSize > 0
+        ? Math.floor(configuredPageSize)
+        : displayLimit;
+      const columns = tableColumnDefinitions(specification, rows, options);
+      const columnNames = columns.map(column => String(
+        column.id || column.accessorKey || column.meta?.datavizColumn || ''
+      )).filter(Boolean);
+      const hidden = new Set(options.hidden_columns || []);
+      const columnVisibility = Object.fromEntries(columnNames.map(column => [
+        column,
+        !hidden.has(column),
+      ]));
+      const configuredOrder = options.column_order || [];
+      return {
+        rows,
+        options,
+        columns,
+        pageSize,
+        paginationEnabled:Number.isFinite(configuredPageSize) && configuredPageSize > 0,
+        initialState:{
+          sorting:normalizeInitialSorting(options.initial_sort),
+          globalFilter:String(options.initial_search || ''),
+          pagination:{pageIndex:0, pageSize},
+          columnVisibility,
+          columnOrder:configuredOrder.length ? [...configuredOrder] : columnNames,
+          columnPinning:normalizeColumnPinning(options),
+        },
+        configurationKey:JSON.stringify({
+          columns:columnNames,
+          hidden:[...hidden],
+          order:configuredOrder,
+          pinning:normalizeColumnPinning(options),
+          pageSize,
+          sortable:options.sortable !== false,
+        }),
+      };
+    };
+    const applyTableCellPresentation = (node, column, options) => {
+      const meta = column.columnDef.meta || {};
+      const columnName = meta.datavizColumn || column.id;
+      node.dataset.column = columnName;
+      node.dataset.align = meta.datavizAlign || options.align?.[columnName] || 'left';
+      if (meta.datavizWrap) node.dataset.wrap = 'true';
+      const pinned = column.getIsPinned?.();
+      if (column.columnDef.size != null || pinned) {
+        node.style.width = `${column.getSize()}px`;
+        node.style.minWidth = `${column.getSize()}px`;
+        if (pinned) node.style.maxWidth = `${column.getSize()}px`;
+      }
+      if (!pinned) return;
+      node.dataset.pinned = pinned;
+      const offset = pinned === 'start'
+        ? column.getStart?.('start')
+        : column.getAfter?.('end');
+      node.style[pinned === 'start' ? 'left' : 'right'] = `${Number(offset || 0)}px`;
+    };
+    const tableMeta = (state, filteredCount, visibleCount) => {
+      const meta = document.createElement('div');
+      meta.className = 'dv-table-meta';
+      const strong = document.createElement('strong');
+      strong.textContent = String(filteredCount);
+      const label = document.createElement('span');
+      const total = state.preparation.rows.length;
+      label.textContent = `${filteredCount === total ? 'rows' : `of ${total} rows`}${
+        visibleCount < filteredCount ? ` · showing ${visibleCount}` : ''
+      }`;
+      meta.append(strong, label);
+      return meta;
+    };
+    const renderTanStackTable = state => {
+      if (state.disposed) return;
+      const {host, table, preparation} = state;
+      const {options} = preparation;
+      const activeSearch = document.activeElement?.classList?.contains('dv-table-search');
+      const searchSelection = activeSearch
+        ? [document.activeElement.selectionStart, document.activeElement.selectionEnd]
+        : null;
+      const fragment = document.createDocumentFragment();
+      const filteredRows = table.getPrePaginatedRowModel().rows;
+      const renderedRows = table.getRowModel().rows;
+      if (options.searchable === true || options.show_count === true) {
+        const toolbar = document.createElement('div');
+        toolbar.className = 'dv-table-toolbar';
+        if (options.searchable === true) {
+          const search = document.createElement('label');
+          search.className = 'dv-table-search-field';
+          const searchIcon = document.createElement('span');
+          searchIcon.className = 'dv-table-search-icon';
+          searchIcon.setAttribute('aria-hidden', 'true');
+          const input = document.createElement('input');
+          input.className = 'dv-table-search';
+          input.type = 'search';
+          input.placeholder = options.search_placeholder || 'Search rows';
+          input.setAttribute('aria-label', options.search_label || 'Search table rows');
+          input.value = String(table.store.state.globalFilter || '');
+          let composing = false;
+          input.addEventListener('compositionstart', () => { composing = true; });
+          input.addEventListener('compositionend', event => {
+            composing = false;
+            table.setGlobalFilter(event.currentTarget.value);
+          });
+          input.addEventListener('input', event => {
+            if (composing || event.isComposing) return;
+            table.setGlobalFilter(event.currentTarget.value);
+          });
+          search.append(searchIcon, input);
+          toolbar.append(search);
+        }
+        if (options.show_count === true) {
+          toolbar.append(tableMeta(state, filteredRows.length, renderedRows.length));
+        }
+        fragment.append(toolbar);
+      }
+      if (!preparation.rows.length || !filteredRows.length) {
         const empty = document.createElement('div');
         empty.className = 'dv-table-empty';
-        empty.textContent = options.empty_text || 'No rows match the current selections.';
+        empty.textContent = !preparation.rows.length
+          ? options.empty_text || 'No rows match the current selections.'
+          : options.no_results_text || 'No rows match this search.';
         fragment.append(empty);
-        body.replaceChildren(fragment);
+        host.replaceChildren(fragment);
+        if (activeSearch) {
+          const search = host.querySelector('.dv-table-search');
+          search?.focus({preventScroll:true});
+          if (searchSelection) search?.setSelectionRange?.(...searchSelection);
+        }
         return;
       }
       const wrap = document.createElement('div');
       wrap.className = 'dv-table-wrap';
-      const table = document.createElement('table');
-      table.className = `dv-table${options.striped === false ? '' : ' dv-table--striped'}${
+      wrap.dataset.tanstackTableVersion = tanstackCore().version;
+      const tableNode = document.createElement('table');
+      tableNode.className = `dv-table${options.striped === false ? '' : ' dv-table--striped'}${
         options.compact ? ' dv-table--compact' : ''
-      }`;
-      if (options.layout === 'fixed') table.style.tableLayout = 'fixed';
-      const head = table.createTHead().insertRow();
-      columns.forEach(column => {
-        const cell = document.createElement('th');
-        cell.scope = 'col';
-        cell.dataset.column = column;
-        cell.textContent = options.labels?.[column] || column;
-        if (options.align?.[column]) cell.dataset.align = options.align[column];
-        head.append(cell);
-      });
-      const tbody = table.createTBody();
-      visibleRows.forEach((row, rowIndex) => {
-        const tr = tbody.insertRow();
-        tr.dataset.rowIndex = rowIndex;
-        columns.forEach(column => {
-          const cell = tr.insertCell();
-          cell.dataset.column = column;
-          if (options.align?.[column]) cell.dataset.align = options.align[column];
-          cell.textContent = formatTableValue(row[column], options.formats?.[column]);
+      }${options.wrap ? ' dv-table--wrap' : ''}`;
+      if (options.layout === 'fixed') tableNode.style.tableLayout = 'fixed';
+      const thead = tableNode.createTHead();
+      table.getHeaderGroups().forEach(headerGroup => {
+        const row = thead.insertRow();
+        headerGroup.headers.forEach(header => {
+          if (header.rowSpan === 0) return;
+          const cell = document.createElement('th');
+          cell.scope = header.subHeaders?.length ? 'colgroup' : 'col';
+          cell.colSpan = header.colSpan;
+          if (header.rowSpan > 1) cell.rowSpan = header.rowSpan;
+          applyTableCellPresentation(cell, header.column, options);
+          const sorted = header.column.getIsSorted?.();
+          const canSort = !header.isPlaceholder && header.column.getCanSort?.();
+          if (canSort) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'dv-table-sort';
+            button.dataset.sorted = sorted || 'none';
+            const label = document.createElement('span');
+            appendTableRenderable(label, tanstackCore().FlexRender({header}));
+            const indicator = document.createElement('span');
+            indicator.className = 'dv-table-sort-indicator';
+            indicator.setAttribute('aria-hidden', 'true');
+            indicator.textContent = sorted === 'asc' ? '↑' : sorted === 'desc' ? '↓' : '↕';
+            button.append(label, indicator);
+            button.addEventListener('click', header.column.getToggleSortingHandler());
+            cell.setAttribute(
+              'aria-sort',
+              sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : 'none',
+            );
+            cell.append(button);
+          } else if (!header.isPlaceholder) {
+            appendTableRenderable(cell, tanstackCore().FlexRender({header}));
+          }
+          row.append(cell);
         });
       });
-      wrap.append(table);
+      const tbody = tableNode.createTBody();
+      const binding = state.renderContext?.controlBinding;
+      const selected = new Set(
+        (binding?.state?.values || []).map(value => JSON.stringify(value))
+      );
+      renderedRows.forEach(row => {
+        const rowNode = tbody.insertRow();
+        rowNode.dataset.rowIndex = String(row.index);
+        if (binding) {
+          const value = global.dataviz.controlActions.value(binding, row.original);
+          const active = selected.has(JSON.stringify(value));
+          rowNode.classList.toggle('is-selected', active);
+          rowNode.setAttribute('aria-selected', String(active));
+          rowNode.tabIndex = 0;
+          const select = () => {
+            runtime.metrics.renderers.interactions += 1;
+            binding.emit('select', row.original);
+          };
+          rowNode.addEventListener('click', select);
+          rowNode.addEventListener('keydown', event => {
+            if (!['Enter', ' '].includes(event.key)) return;
+            event.preventDefault();
+            select();
+          });
+        }
+        row.getVisibleCells().forEach(cell => {
+          const cellNode = rowNode.insertCell();
+          applyTableCellPresentation(cellNode, cell.column, options);
+          const rendered = tanstackCore().FlexRender({cell});
+          appendTableRenderable(
+            cellNode,
+            rendered == null ? cell.renderValue?.() : rendered,
+          );
+        });
+      });
+      const hasFooter = table.getFooterGroups().some(group => group.headers.some(
+        header => header.column.columnDef.footer != null
+      ));
+      if (hasFooter) {
+        const tfoot = tableNode.createTFoot();
+        table.getFooterGroups().forEach(footerGroup => {
+          const row = tfoot.insertRow();
+          footerGroup.headers.forEach(header => {
+            const cell = row.insertCell();
+            cell.colSpan = header.colSpan;
+            applyTableCellPresentation(cell, header.column, options);
+            appendTableRenderable(cell, tanstackCore().FlexRender({footer:header}));
+          });
+        });
+      }
+      wrap.append(tableNode);
       releaseWheelAtBoundary(wrap);
       fragment.append(wrap);
-      body.replaceChildren(fragment);
+      if (preparation.paginationEnabled && table.getPageCount() > 1) {
+        const pagination = document.createElement('nav');
+        pagination.className = 'dv-table-pagination';
+        pagination.setAttribute('aria-label', options.pagination_label || 'Table pages');
+        const previous = document.createElement('button');
+        previous.type = 'button';
+        previous.className = 'dv-table-page-button';
+        previous.textContent = '‹';
+        previous.setAttribute('aria-label', 'Previous page');
+        previous.disabled = !table.getCanPreviousPage();
+        previous.addEventListener('click', () => table.previousPage());
+        const status = document.createElement('span');
+        const pageIndex = table.store.state.pagination?.pageIndex || 0;
+        status.className = 'dv-table-page-status';
+        status.textContent = `${pageIndex + 1} / ${table.getPageCount()}`;
+        const next = document.createElement('button');
+        next.type = 'button';
+        next.className = 'dv-table-page-button';
+        next.textContent = '›';
+        next.setAttribute('aria-label', 'Next page');
+        next.disabled = !table.getCanNextPage();
+        next.addEventListener('click', () => table.nextPage());
+        pagination.append(previous, status, next);
+        fragment.append(pagination);
+      }
+      host.replaceChildren(fragment);
+      if (activeSearch) {
+        const search = host.querySelector('.dv-table-search');
+        search?.focus({preventScroll:true});
+        if (searchSelection) search?.setSelectionRange?.(...searchSelection);
+      }
     };
-    const bindTableRows = (renderContext, descriptor) => {
-      const binding = renderContext.controlBinding;
-      if (!binding) return;
-      const selected = new Set((binding.state?.values || []).map(value => JSON.stringify(value)));
-      renderContext.body.querySelectorAll('tbody tr').forEach(rowNode => {
-        const row = (descriptor.rows || [])[Number(rowNode.dataset.rowIndex)];
-        const value = global.dataviz.controlActions.value(binding, row);
-        const active = selected.has(JSON.stringify(value));
-        rowNode.classList.toggle('is-selected', active);
-        rowNode.setAttribute('aria-selected', String(active));
-        rowNode.tabIndex = 0;
-        const select = () => binding.emit('select', row);
-        rowNode.addEventListener('click', select);
-        rowNode.addEventListener('keydown', event => {
-          if (!['Enter', ' '].includes(event.key)) return;
-          event.preventDefault();
-          select();
-        });
+    const mountTanStackTable = (host, specification = {}, renderContext = null) => {
+      const core = tanstackCore();
+      const preparation = tablePreparation(specification);
+      const table = core.constructTable({
+        features:defaultTableFeatures(),
+        data:preparation.rows,
+        columns:preparation.columns,
+        initialState:preparation.initialState,
+        enableSorting:preparation.options.sortable !== false,
+        sortDescFirst:Boolean(preparation.options.sort_desc_first),
+        globalFilterFn:preparation.options.global_filter_fn || 'auto',
+        getSubRows:specification.getSubRows,
       });
+      const state = {
+        host,
+        table,
+        preparation,
+        specification,
+        renderContext,
+        subscription:null,
+        disposed:false,
+      };
+      state.subscription = table.store.subscribe(() => renderTanStackTable(state));
+      renderTanStackTable(state);
+      return state;
     };
+    const updateTanStackTable = (state, specification = {}, renderContext = null) => {
+      if (!state?.table || state.disposed) {
+        throw new Error('TanStack Table state is missing its instance');
+      }
+      const preparation = tablePreparation(specification);
+      const configurationChanged = (
+        preparation.configurationKey !== state.preparation.configurationKey
+      );
+      state.specification = specification;
+      state.renderContext = renderContext || state.renderContext;
+      state.preparation = preparation;
+      state.table.setOptions(previous => ({
+        ...previous,
+        data:preparation.rows,
+        columns:preparation.columns,
+        enableSorting:preparation.options.sortable !== false,
+        sortDescFirst:Boolean(preparation.options.sort_desc_first),
+        globalFilterFn:preparation.options.global_filter_fn || 'auto',
+        getSubRows:specification.getSubRows,
+      }));
+      if (configurationChanged) {
+        state.table.setColumnVisibility(preparation.initialState.columnVisibility);
+        state.table.setColumnOrder(preparation.initialState.columnOrder);
+        state.table.setColumnPinning(preparation.initialState.columnPinning);
+        state.table.setPageSize(preparation.pageSize);
+      }
+      const pageCount = Math.max(1, state.table.getPageCount());
+      const pageIndex = state.table.store.state.pagination?.pageIndex || 0;
+      if (pageIndex >= pageCount) state.table.setPageIndex(pageCount - 1);
+      renderTanStackTable(state);
+      return state;
+    };
+    const disposeTanStackTable = state => {
+      if (!state || state.disposed) return;
+      state.disposed = true;
+      state.subscription?.unsubscribe?.();
+      state.subscription = null;
+      state.host?.replaceChildren();
+    };
+    const tableService = Object.freeze({
+      tanstack:Object.freeze({
+        version:'9.2.4',
+        get core() { return tanstackCore(); },
+        createFeatures:features => tanstackCore().tableFeatures({
+          ...defaultTableFeatures(),
+          ...(features || {}),
+        }),
+        mount:mountTanStackTable,
+        update:updateTanStackTable,
+        resize:state => renderTanStackTable(state),
+        dispose:disposeTanStackTable,
+      }),
+    });
+    global.dataviz.tables = tableService;
     const awaitPerspectiveOperation = async (state, stage, operation) => {
       state.stage = stage;
       let timeout;
@@ -443,7 +768,10 @@
       runtime.metrics.perspective.flushed += 1;
     };
     const disposePerspective = state => {
-      if (!state || state.disposed) return;
+      if (!state) return;
+      tableService.tanstack.dispose(state.fallbackTable);
+      state.fallbackTable = null;
+      if (state.disposed) return;
       state.disposed = true;
       state.observer?.disconnect();
       state.pending = Promise.resolve(state.pending).catch(() => {}).then(async () => {
@@ -487,6 +815,7 @@
         table:null,
         viewer:null,
         observer:null,
+        fallbackTable:null,
         latestRows:rows,
         latestDescriptor:descriptor,
         mode:'loading',
@@ -500,7 +829,11 @@
           throw new Error('Perspective is not loaded; add perspective to canvas.client_libraries');
         }
         if (!state.latestRows.length) {
-          renderPlainTable(body, [], columns, descriptor.limit || 100, descriptor);
+          state.fallbackTable = tableService.tanstack.mount(
+            body,
+            {...descriptor, rows:[], columns},
+            renderContext,
+          );
           state.mode = 'empty';
           applyStatus(root, 'empty', 'empty');
           return;
@@ -600,7 +933,11 @@
         state.stage = 'fallback';
         runtime.metrics.perspective.failed += 1;
         root?.classList.remove('dv-view--perspective');
-        renderPlainTable(body, state.latestRows, columns, descriptor.limit || 100, descriptor);
+        state.fallbackTable = tableService.tanstack.mount(
+          body,
+          {...descriptor, rows:state.latestRows, columns},
+          renderContext,
+        );
         applyStatus(root, 'ready', 'table fallback');
         const viewer = state.viewer;
         const table = state.table;
@@ -635,27 +972,29 @@
         const columns = descriptor.columns || [];
         state.mode = 'empty';
         renderContext.root?.classList.remove('dv-view--perspective');
-        renderPlainTable(
+        disposePerspective(state);
+        state.fallbackTable = tableService.tanstack.mount(
           renderContext.body,
-          [],
-          columns,
-          descriptor.limit || 100,
-          descriptor,
+          {...descriptor, rows:[], columns},
+          renderContext,
         );
         applyStatus(renderContext.root, 'empty', 'empty');
         runtime.metrics.perspective.updated += 1;
-        disposePerspective(state);
         return state;
       }
       if (state.mode === 'empty' || state.mode === 'fallback') {
         const columns = descriptor.columns || Object.keys(state.latestRows[0] || {});
-        renderPlainTable(
-          renderContext.body,
-          state.latestRows,
-          columns,
-          descriptor.limit || 100,
-          descriptor,
-        );
+        state.fallbackTable = state.fallbackTable
+          ? tableService.tanstack.update(
+            state.fallbackTable,
+            {...descriptor, rows:state.latestRows, columns},
+            renderContext,
+          )
+          : tableService.tanstack.mount(
+            renderContext.body,
+            {...descriptor, rows:state.latestRows, columns},
+            renderContext,
+          );
         applyStatus(
           renderContext.root,
           state.latestRows.length ? 'ready' : 'empty',
@@ -850,59 +1189,12 @@
       if (root) root._datavizRendererPending = pending;
       return descriptor;
     };
-    const bindEchartsLegend = (chart, descriptor) => {
-      if (descriptor.legendInteraction !== 'filter') return;
-      const options = descriptor.options || {};
-      const xAxes = Array.isArray(options.xAxis) ? options.xAxis : [options.xAxis];
-      const categoryAxis = xAxes[0];
-      const sourceCategories = [...(categoryAxis?.data || [])];
-      const sourceSeries = (options.series || []).map(series => ({
-        ...series, data:[...(series.data || [])],
-      }));
-      if (
-        categoryAxis?.type !== 'category'
-        || !sourceCategories.length
-        || !sourceSeries.length
-      ) return;
-      chart.on('legendselectchanged', legendEvent => {
-        runtime.metrics.renderers.interactions += 1;
-        const categories = sourceCategories.filter((category, index) => sourceSeries.some(series => (
-          legendEvent.selected?.[series.name] !== false && series.data[index] != null
-        )));
-        const series = sourceSeries.map(item => ({
-          ...item,
-          data:categories.map(category => item.data[sourceCategories.indexOf(category)]),
-        }));
-        const nextAxes = [{...categoryAxis, data:categories}, ...xAxes.slice(1)];
-        chart.setOption({
-          xAxis:Array.isArray(options.xAxis) ? nextAxes : nextAxes[0],
-          series,
-        }, {replaceMerge:['xAxis', 'series']});
-      });
-    };
-    const syncEchartsInteractions = (state, descriptor) => {
-      const chart = state.chart;
-      // ECharts keeps its own event registry outside the option tree. Keep the
-      // registry in lockstep with every Renderer lifecycle transition instead
-      // of relying on update() to repair an incomplete initial mount.
-      chart.off('legendselectchanged');
-      bindEchartsLegend(chart, descriptor);
-      if (state.controlClickHandler) {
-        chart.off('click', state.controlClickHandler);
-        state.controlClickHandler = null;
-      }
-      if (!descriptor.controlBinding) return;
-      state.controlClickHandler = event => {
-        runtime.metrics.renderers.interactions += 1;
-        const datum = event?.data?.__datavizControlValue;
-        if (datum !== undefined) state.renderContext.controlBinding?.emit('select', {
-          __datavizControlValue:datum,
-        });
-      };
-      chart.on('click', state.controlClickHandler);
-    };
     const syncPlotlyInteractions = (state, descriptor) => {
       const chartNode = state.node;
+      if (state.controlActionFrame != null) {
+        cancelAnimationFrame(state.controlActionFrame);
+        state.controlActionFrame = null;
+      }
       if (state.controlClickHandler) {
         chartNode.removeListener?.('plotly_click', state.controlClickHandler);
         state.controlClickHandler = null;
@@ -911,26 +1203,57 @@
         chartNode.removeListener?.('plotly_selected', state.controlSelectedHandler);
         state.controlSelectedHandler = null;
       }
+      if (state.controlDoubleClickHandler) {
+        chartNode.removeListener?.('plotly_doubleclick', state.controlDoubleClickHandler);
+        state.controlDoubleClickHandler = null;
+      }
       if (!descriptor.controlBinding) return;
       state.controlClickHandler = event => {
-        runtime.metrics.renderers.interactions += 1;
         const datum = event?.points?.[0]?.customdata;
-        if (datum !== undefined) state.renderContext.controlBinding?.emit('select', {
+        if (datum === undefined) return;
+        if (state.controlActionFrame != null) {
+          cancelAnimationFrame(state.controlActionFrame);
+          state.controlActionFrame = null;
+        }
+        runtime.metrics.renderers.interactions += 1;
+        state.renderContext.controlBinding?.emit('select', {
           __datavizControlValue:datum,
         });
       };
       state.controlSelectedHandler = event => {
-        runtime.metrics.renderers.interactions += 1;
-        const data = (event?.points || []).map(point => ({
+        const keyed = new Map((event?.points || []).map(point => ({
           __datavizControlValue:point.customdata,
-        })).filter(item => item.__datavizControlValue !== undefined);
-        state.renderContext.controlBinding?.emit(
-          data.length ? 'select_many' : 'clear',
-          data,
-        );
+        })).filter(item => item.__datavizControlValue !== undefined).map(item => [
+          JSON.stringify(item.__datavizControlValue), item,
+        ]));
+        const data = [...keyed.values()];
+        // Plotly can emit an empty selection after a point click or a
+        // zero-area drag.  Clearing here races with plotly_click and makes a
+        // successful click appear to have been ignored.  Explicit empty and
+        // default restoration remain available through their own controls.
+        if (!data.length) return;
+        if (state.controlActionFrame != null) {
+          cancelAnimationFrame(state.controlActionFrame);
+        }
+        runtime.metrics.renderers.interactions += 1;
+        state.controlActionFrame = requestAnimationFrame(() => {
+          state.controlActionFrame = null;
+          state.renderContext.controlBinding?.emit('select_many', data);
+        });
+      };
+      state.controlDoubleClickHandler = () => {
+        if (state.controlActionFrame != null) {
+          cancelAnimationFrame(state.controlActionFrame);
+        }
+        runtime.metrics.renderers.interactions += 1;
+        state.controlActionFrame = requestAnimationFrame(() => {
+          state.controlActionFrame = null;
+          state.renderContext.controlBinding?.emit('reset');
+        });
       };
       chartNode.on('plotly_click', state.controlClickHandler);
       chartNode.on('plotly_selected', state.controlSelectedHandler);
+      chartNode.on('plotly_doubleclick', state.controlDoubleClickHandler);
     };
 
     runtime.registerRenderer('table', {
@@ -939,41 +1262,37 @@
       },
       mount(renderContext, descriptor) {
         renderContext.root?.classList.add('dv-view--table');
-        renderPlainTable(
+        return tableService.tanstack.mount(
           renderContext.body,
-          descriptor.rows || [],
-          descriptor.columns || Object.keys(descriptor.rows?.[0] || {}),
-          descriptor.limit || 100,
           descriptor,
+          renderContext,
         );
-        bindTableRows(renderContext, descriptor);
-        return {};
       },
       update(renderContext, descriptor, state) {
-        renderPlainTable(
-          renderContext.body,
-          descriptor.rows || [],
-          descriptor.columns || Object.keys(descriptor.rows?.[0] || {}),
-          descriptor.limit || 100,
-          descriptor,
-        );
-        bindTableRows(renderContext, descriptor);
-        return state;
+        return tableService.tanstack.update(state, descriptor, renderContext);
       },
-      dispose(renderContext) { renderContext.root?.classList.remove('dv-view--table'); },
+      dispose(renderContext, state) {
+        tableService.tanstack.dispose(state);
+        renderContext.root?.classList.remove('dv-view--table');
+      },
     });
     runtime.registerRenderer('plotly', {
       async mount(renderContext, descriptor) {
         const chartNode = document.createElement('div');
         chartNode.className = 'dv-chart dv-plotly';
         renderContext.body.append(chartNode);
-        const chart = await chartService.plotly.mount(chartNode, descriptor, renderContext.root);
+        const specification = managedPlotlyDescriptor(descriptor, renderContext);
+        const chart = await chartService.plotly.mount(
+          chartNode, specification, renderContext.root
+        );
         const state = {
           ...chart,
           descriptor,
           renderContext,
           controlClickHandler:null,
           controlSelectedHandler:null,
+          controlDoubleClickHandler:null,
+          controlActionFrame:null,
         };
         syncPlotlyInteractions(state, descriptor);
         return state;
@@ -981,35 +1300,15 @@
       async update(renderContext, descriptor, state) {
         state.descriptor = descriptor;
         state.renderContext = renderContext;
-        await chartService.plotly.update(state, descriptor, renderContext.root);
+        await chartService.plotly.update(
+          state, managedPlotlyDescriptor(descriptor, renderContext), renderContext.root
+        );
         syncPlotlyInteractions(state, descriptor);
         return state;
       },
-      dispose(_renderContext, state) { chartService.plotly.dispose(state); },
-    });
-    runtime.registerRenderer('echarts', {
-      mount(renderContext, descriptor) {
-        const chartNode = document.createElement('div');
-        chartNode.className = 'dv-chart dv-echarts';
-        renderContext.body.append(chartNode);
-        const state = {
-          ...chartService.echarts.mount(chartNode, descriptor, renderContext.root),
-          descriptor,
-          renderContext,
-          controlClickHandler:null,
-        };
-        syncEchartsInteractions(state, descriptor);
-        return state;
-      },
-      update(renderContext, descriptor, state) {
-        state.descriptor = descriptor;
-        state.renderContext = renderContext;
-        chartService.echarts.update(state, descriptor, renderContext.root);
-        syncEchartsInteractions(state, descriptor);
-        return state;
-      },
       dispose(_renderContext, state) {
-        chartService.echarts.dispose(state);
+        if (state.controlActionFrame != null) cancelAnimationFrame(state.controlActionFrame);
+        chartService.plotly.dispose(state);
       },
     });
     runtime.registerRenderer('perspective', {
@@ -1090,13 +1389,18 @@
       const key = rootNode?.dataset.viewId;
       if (!rootNode || !body || !key) return;
       const spec = services.decodeSpec(chartNode);
-      const pending = chartService.plotly.mount(chartNode, spec, rootNode).then(chart => {
+      const renderContext = context(rootNode, body, key, spec);
+      const pending = chartService.plotly.mount(
+        chartNode, managedPlotlyDescriptor(spec, renderContext), rootNode
+      ).then(chart => {
         const state = {
           ...chart,
           descriptor:spec,
-          renderContext:context(rootNode, body, key, spec),
+          renderContext,
           controlClickHandler:null,
           controlSelectedHandler:null,
+          controlDoubleClickHandler:null,
+          controlActionFrame:null,
         };
         syncPlotlyInteractions(state, spec);
         states.set(key, {
@@ -1106,28 +1410,6 @@
         return state;
       }).catch(error => showError(rootNode, key, 'plotly', 'mount', error));
       rootNode._datavizRendererPending = pending;
-    });
-    document.querySelectorAll('.dv-echarts[data-spec]').forEach(chartNode => {
-      if (!global.echarts) {
-        chartNode.innerHTML = '<div class="dv-runtime-error">ECharts.js could not be loaded.</div>';
-        return;
-      }
-      const rootNode = chartNode.closest('.dv-view');
-      const body = chartNode.closest('.dv-view-body');
-      const key = rootNode?.dataset.viewId;
-      if (!rootNode || !body || !key) return;
-      const descriptor = services.decodeSpec(chartNode);
-      const state = {
-        ...chartService.echarts.mount(chartNode, descriptor, rootNode),
-        descriptor,
-        renderContext:context(rootNode, body, key, descriptor),
-        controlClickHandler:null,
-      };
-      syncEchartsInteractions(state, descriptor);
-      states.set(key, {
-        type:'echarts', renderer:runtime.renderers.get('echarts'), state, root:rootNode, body,
-      });
-      runtime.metrics.renderers.mounts += 1;
     });
     document.querySelectorAll('.dv-perspective-bootstrap').forEach((bootstrap, index) => {
       try {

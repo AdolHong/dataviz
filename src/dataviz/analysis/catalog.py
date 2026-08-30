@@ -24,7 +24,7 @@ from dataviz.workspace.controls import scoped_control_registry
 
 
 CATALOG_POINTER_SCHEMA = "dataviz/analysis-catalog-pointer/v1"
-CATALOG_BUILDER_VERSION = 7
+CATALOG_BUILDER_VERSION = 8
 
 
 def _now() -> str:
@@ -332,9 +332,8 @@ def _output_semantics(
             ],
             "semantic_source": "declared",
         }
-    # Compatibility for pre-0.10 Dashboards: execution remains unchanged and
-    # the Catalog keeps the entry discoverable, but reports exactly which
-    # semantics are inferred so authors can migrate deliberately.
+    # Internal Outputs may omit reusable business semantics. Keep them
+    # inspectable without presenting inferred metadata as an author declaration.
     return {
         "visibility": "internal",
         "title": fallback_title.strip(),
@@ -345,7 +344,7 @@ def _output_semantics(
         "time": None,
         "measures": {},
         "relationships": [],
-        "semantic_source": "legacy-inferred",
+        "semantic_source": "inferred",
     }
 
 

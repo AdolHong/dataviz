@@ -427,37 +427,3 @@ def run_browser_outputs(
             for identifier in transform_ids
         ),
     }
-
-
-def run_browser_output(
-    workspace: LoadedWorkspace,
-    dashboard: LoadedDashboard,
-    run_result,
-    *,
-    transform_id: str,
-    output_name: str,
-    compute_parameters: dict[str, Any],
-    selection_state: dict[str, dict[str, Any]],
-    refresh: bool,
-    allow_network: bool,
-    timeout_seconds: float,
-    cache_salt: str | None = None,
-) -> dict[str, Any]:
-    """Compatibility wrapper for callers requesting one Browser Output."""
-
-    result = run_browser_outputs(
-        workspace,
-        dashboard,
-        run_result,
-        targets=[(transform_id, output_name)],
-        compute_parameters=compute_parameters,
-        selection_state=selection_state,
-        refresh=refresh,
-        allow_network=allow_network,
-        timeout_seconds=timeout_seconds,
-        cache_salt=cache_salt,
-    )
-    return {
-        **result["outputs"][0],
-        **{key: value for key, value in result.items() if key != "outputs"},
-    }

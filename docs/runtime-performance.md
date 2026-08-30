@@ -2,6 +2,8 @@
 
 本页记录可复现证据，不承诺脱离硬件、浏览器和 Dashboard 形态的统一行数上限。
 
+下述固定链路是历史基准夹具，不定义作者可选择的图表引擎；产品作者路径统一使用 Plotly。
+
 ## 固定链路
 
 基准 Workspace 位于 `benchmarks/scale-workspace`，固定执行：
@@ -10,7 +12,7 @@
 DuckDB Query(row_count)
   → Arrow IPC（3 个 int64 字段）
   → browser-js Worker groupBy（128 组）
-  → Metric + Plotly line + basic Table
+  → Metric + legacy compatibility chart + basic Table
   → dispose → about:blank → GC
 ```
 

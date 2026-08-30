@@ -1,6 +1,6 @@
 # Dataviz 当前实现索引
 
-更新时间：2026-08-28
+更新时间：2026-08-29
 
 本页帮助开发者和 AI 从产品契约定位到代码。设计语义以 [DESIGN](../DESIGN.md) 为准；字段以当前安装环境的 `dataviz schemas` 为准。
 
@@ -17,7 +17,7 @@ Dependency Contract    dataviz/dependency-contract/v5
 Browser Runtime        dataviz/runtime/v5
 Layout Contract        dataviz/layout-contract/v1
 Workspace Change       dataviz/workspace-change/v1
-Component Registry     5.4.0
+Component Registry     5.5.0
 ```
 
 这些契约独立版本化。Loader 只接受当前严格模型，不包含旧字段 alias、自动迁移或双协议执行分支。
@@ -25,7 +25,8 @@ Component Registry     5.4.0
 关键入口：
 
 - 领域模型：`src/dataviz/workspace/models.py`
-- Workspace 加载与跨文件校验：`src/dataviz/workspace/loader.py`
+- Workspace 公共加载 façade：`src/dataviz/workspace/loader.py`
+- Workspace 物理 owners：`src/dataviz/workspace/loading/`（parse/load、loaded snapshot、cross-file contract、asset validation、catalog/navigation）
 - 机器可读 Schema：`src/dataviz/schema_docs.py`
 - CLI 内置手册：`src/dataviz/documentation.py`
 - 渐进 Authoring 路由与 Workspace Scaffold profiles：`src/dataviz/documentation.py`、`src/dataviz/authoring.py`
@@ -56,7 +57,7 @@ Browser Runtime 不做拓扑排序，也不从 DOM 层级重建 Control DAG。Tr
 
 `depends_on` 的 `dashboard.<id>`、`section.<id>`、`view.<id>` 都相对目标 Control 解析，只允许当前 Dashboard、所在 Section 和自身 View。每项只声明直接父节点；Compiler 计算传递祖先/后代并拒绝未知 Selection、Compute 父节点、非法作用域和环。依赖型候选域必须来自不可变 Base table；Output 声明 Schema 时，Compiler 同时验证子字段及全部祖先字段。候选变化时，Runtime 优先保留当前有效交集；原非空选择完全失效才恢复 `initial`，用户主动空集不会被自动填充。
 
-View 的 `control_binding` 编译为独立 writer/projection 边，不参与 Control DAG 环。一个 Selection Control 最多一个 writer View；Plotly、ECharts、Table 与 Custom Renderer 只通过类型化 `select / select_many / clear` Action 写同一 canonical state。Bound View 应用目标 Control 的祖先但排除目标自身筛选，因此在空选择或单选时仍能展示完整候选上下文。Compiler 拒绝第二 writer、未知/越界 target、缺失字段、不支持的 Renderer，以及 View 级 Selection 反向决定 Section/Dashboard 候选域。
+View 的 `control_binding` 编译为独立 writer/projection 边，不参与 Control DAG 环。一个 Selection Control 最多一个 writer View；Plotly、Table 与 Custom Renderer 只通过类型化 `select / select_many / clear / reset` Action 写同一 canonical state。`clear` 表示显式空值，`reset` 恢复 Control 的初始策略。Bound View 应用目标 Control 的祖先但排除目标自身筛选，因此在空选择或单选时仍能展示完整候选上下文。Compiler 拒绝第二 writer、未知/越界 target、缺失字段、不支持的 Renderer，以及 View 级 Selection 反向决定 Section/Dashboard 候选域。
 
 环、未知 Output、浏览器 Runtime → `server-python` 的非法边和越过下游 View scope 的 Control consumer 都在编译期拒绝。Loader 只在契约无法形成时运行 recovery diagnostics，以便一次展示更多错误；它不向 Planner 或 Runtime 提供另一张图。
 
@@ -159,7 +160,7 @@ not_run → queued → loading → ready | empty | error | cancelled | unavailab
 
 ## 6. Browser Runtime 与局部更新
 
-Server 与 HTML 共享 `dataviz/runtime/v5` Manifest、Named Output Store 和 Runtime Event。`canvas-runtime.js` 是共享 Runtime 主机；`data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 分别物理拥有数据 Adapter、Renderer lifecycle、Section/Repeat 和 Presentation state，借 `dataviz:runtime-ready` 装配到主机，不在 Runtime 文件内保留第二份实现。命令式 Renderer 实例拥有其全部引擎资源；Perspective 的 Worker/Table/Viewer 不作为 Canvas 全局单例共享，实例释放时三者共同释放。异步引擎阶段具有有界终态，失败时进入结构化 Fallback/Error，而不是无限 Loading。
+Server 与 HTML 共享 `dataviz/runtime/v5` Manifest、Named Output Store 和 Runtime Event。共享主机源码按 Manifest、Value Contract、Output Store、Interactive Scheduler、Selection Binding、Renderer Lifecycle 与 bootstrap 分布在 `src/dataviz/server/runtime_src/`；`python tools/build_canvas_runtime.py` 确定性生成 Server 与 HTML 唯一加载的 `server/static/canvas-runtime.js`，`--check` 用于 CI/发布门禁。`data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 分别物理拥有数据 Adapter、Renderer lifecycle、Section/Repeat 和 Presentation state，借 `dataviz:runtime-ready` 装配到主机，不在 Runtime 源码模块中保留第二份实现。命令式 Renderer 实例拥有其全部引擎资源；Perspective 的 Worker/Table/Viewer 不作为 Canvas 全局单例共享，实例释放时三者共同释放。异步引擎阶段具有有界终态，失败时进入结构化 Fallback/Error，而不是无限 Loading。
 
 Server Header 中的 `Pipeline` 面板同时展示 Query 节点与 Interactive Transform。Query 状态来自 Run SSE；Browser Interactive 状态通过当前 iframe 的 `dataviz:interactive-status` 消息回传，并同时校验 dashboard/run/frame identity，避免跨 Dashboard 或旧 frame 污染状态。
 
@@ -199,7 +200,11 @@ validate → mount → update → dispose
 mount → update → empty → restore → interaction → resize → dispose → export
 ```
 
-Plotly、ECharts、普通 Table、Perspective、文本、图片和自定义 Renderer 都通过四个作者 hook 工作；Empty/Restore 由 View 宿主统一管理，Interaction/Resize 由 Adapter 或 Chart Service 管理，Export 复用同一 Runtime。Python 首屏 bootstrap 也注册到 View ID 状态表，不能成为不受 update/dispose 管理的旁路。页面滚动优先于图表手势：内置 Plotly 模板默认使用 `scrollZoom: false`，滚轮经过图表时仍滚动 Dashboard；只有显式配置 `view.config.scrollZoom: true` 才启用滚轮缩放。Custom Renderer 直接调用 Plotly API，不能自动继承内置模板配置，因此其 `newPlot`/`react` config 也必须默认写 `scrollZoom: false`，除非用户明确要求滚轮缩放。Perspective 自己拥有内部滚动和 WASM/Table 生命周期；只有内部确实能继续滚动时才拦截滚轮。
+Plotly、普通 Table、Perspective、文本、图片和自定义 Renderer 都通过四个作者 hook 工作；Empty/Restore 由 View 宿主统一管理，Interaction/Resize 由 Adapter 或 Chart Service 管理，Export 复用同一 Runtime。Python 首屏 bootstrap 也注册到 View ID 状态表，不能成为不受 update/dispose 管理的旁路。
+
+Plotly 是 Dataviz 唯一的作者图表接口。声明式模板负责常见字段映射，并允许通过 `options.trace`、`options.layout` 与 `config` 覆盖；可信 Custom Renderer 既可以通过 `context.charts.plotly` 继承平台生命周期，也可以使用页面内嵌的完整 Plotly.js API 实现自定义 trace、函数、事件与命令式交互。Dataviz 不维护封闭的图表能力白名单。官方文档与 Gallery 是视觉和 API 参考，项目 Recipe 只是少量完成 Dataviz 生命周期适配的样例。作者不选择图表引擎，Scaffold、focused docs 和 Gallery 也不暴露引擎分支。
+
+页面滚动优先于图表手势：Plotly 模板默认关闭 `scrollZoom`。直接调用底层 API 时必须自行承担 Theme、Resize、Update、Purge、事件解绑和滚轮所有权。Perspective 自己拥有内部滚动和 WASM/Table 生命周期；只有内部确实能继续滚动时才拦截滚轮。
 
 失败、取消与 unavailable 节点的结构化错误会进入 portable Output 状态。终态 Run 可以重新打开检查：已经完成的兄弟 View 保持 ready，受影响的 View 显示 error/cancelled/unavailable，而不是返回 500 或无限 loading。
 
@@ -250,7 +255,7 @@ Server 状态以浏览器 tab 的 `session_id` 为边界。不同 tab、Dashboar
 默认组件 → 模板参数 → Theme token/css_class → 自定义 Renderer → 完整 Canvas
 ```
 
-Component Registry v5.4 从 `src/dataviz/components/packages/` 扫描 Package。每个 Package 声明 owner、Schema、controller、adapter、功能 CSS、Story 和测试声明。`components --check` 只校验这些元数据、资产与声明，pytest/浏览器 E2E 才执行行为。21 个 Package 均为 package-owned；14 个 `control.*` Package 独立承载 Data Entry Component，声明式 View/Section、Data Pipeline 与 Presentation 已迁入各自 owner，`declarative-runtime.js` 与 Runtime 中的重复实现已经删除。
+Component Registry v5.5 从 `src/dataviz/components/packages/` 扫描 Package。每个 Package 声明 owner、Schema、controller、adapter、功能 CSS、Story 和测试声明。`components check` 只校验这些元数据、资产与声明，pytest/浏览器 E2E 才执行行为。21 个 Package 均为 package-owned；14 个 `control.*` Package 独立承载 Data Entry Component，声明式 View/Section、Data Pipeline 与 Presentation 已迁入各自 owner，`declarative-runtime.js` 与 Runtime 中的重复实现已经删除。
 
 `presentation.shell` 还拥有 `control-panel.adaptive`：Server 与导出报告共享 Query Card、自适应列和内部滚动规则。Server Header 横跨 Sidebar 与 Workbench，Dataviz 品牌按钮拥有 Sidebar disclosure，Query 节点信号灯紧随品牌；Sidebar 和 Workbench 从 Header 下方开始。Header 右侧以 Dashboard Controls 和最右侧“查询 + ▼”分段按钮结束：主按钮执行 Query，箭头开合 Query Card，不另设 Parameters 按钮。Query Parameters 位于 Workbench 顶部的正常文档流，Card 内只保留紧凑标题和 label-over-input 网格，不重复查询动作。Card 与 Canvas 共享同一个响应式水平 gutter，不设置独立最大宽度。Server 首次默认展开并记忆 tab 状态，导出报告默认折叠以优先展示分析内容。展开时推开 Canvas，页面滚动时自然离开视口，不成为遮挡分析内容的 sticky/fixed Overlay。Server 的同源 Canvas iframe 通过 Shell Scroll Bridge 与外层形成一个顺序明确的纵向阅读面。Dashboard/Section/View Controls 才属于可由外部点击或 `Esc` 关闭的 Overlay。Query 的 `columns` 是最大列数，`column_width` 是目标轨道宽度；Runtime 读取 Card body 实际宽度计算有效列数，稀疏表单保持有界轨道并在右侧留白。单个控件只有显式 `span: 2` 才跨列。Scoped Controls 默认单列，只有显式配置才进入网格。Shell/Runtime 继续统一拥有值、校验、级联和执行状态。Shell 默认文案保持操作化和紧凑；解释框架概念的长文进入 Docs/Help/Diagnostics，不永久占据 Dashboard。
 
@@ -284,10 +289,10 @@ dataviz validate WORKSPACE --dashboard DASHBOARD --format json
 
 - 这是可信单机执行环境，不是不可信代码沙箱，也不提供多租户 CPU/内存额度。
 - 通用服务端分页、按需 Record Batch 和完整浏览器列式执行尚未实现。
-- 21 个 Component Package 都已物理拥有 controller、adapter 和功能 CSS；共享 Runtime 仍较大，后续只按 Manifest、Output Store、Scheduler、Selection Binding 等主机职责继续拆分。
+- 21 个 Component Package 都已物理拥有 controller、adapter 和功能 CSS；共享 Runtime 主机也已按职责拆为构建源模块，但当前仍生成一个无模块加载开销的浏览器资产。
 - Gallery 已覆盖 Control、View、Section 七状态和真实 10/100/1,000 选项；Chromium/Firefox/WebKit 还覆盖窄视口、弹层、滚动、键盘、ARIA、Perspective 恢复和三轮 dispose 组合。
 - Token 节省是待真实任务评测的产品假设，不承诺固定数字。
 - 成对评测工具已经实现；真实重复 trial 与结果发布尚待积累。
 - 当前运行协调只支持一个 Dataviz Server 进程写一个 Workspace/报告目标；Runtime 并发上限变更需要重启。
-- Pyodide bundle 只包含 Python Runtime。Perspective 当前仍依赖 CDN；ECharts/Arrow 只有显式本地配置时离线。manifest 的可移植性结论不覆盖自定义脚本自行发起的网络请求。
+- Pyodide bundle 只包含 Python Runtime。Plotly.js 4.0.0 与 TanStack Table Core 9.2.4 都由 Dataviz 固定并直接内置，Server 与 portable HTML 共用这些浏览器资产，不安装 Python `plotly`；Arrow 只有显式配置 Workspace 本地文件时离线，Perspective 当前仍依赖 CDN。manifest 的可移植性结论不覆盖自定义脚本自行发起的网络请求。
 - Dataviz 会隔离 Adapter 并脱敏错误/日志，但可信 Python Source 仍有能力主动把秘密作为 Output 返回；这是看板作者必须遵守的边界。

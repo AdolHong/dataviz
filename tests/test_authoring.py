@@ -13,7 +13,6 @@ import yaml
 import dataviz.filesystem as filesystem
 from dataviz.authoring import (
     build_context_payload,
-    context_size,
     scaffold_catalog,
     scaffold_recipe,
     scaffold_recipes,
@@ -326,21 +325,51 @@ def test_cli_docs_resolves_analysis_plane_topics(alias: str, topic: str):
     assert payload["summary"]
 
 
-def test_plotly_wheel_docs_distinguish_declarative_and_custom_renderers():
-    wheel = DOC_TOPICS["charts"]["plotly_wheel"]
+def test_chart_docs_expose_plotly_as_the_only_author_path():
+    charts = DOC_TOPICS["charts"]
+    wheel = DOC_TOPICS["charts"]["wheel_and_zoom"]
     service = DOC_TOPICS["renderers"]["chart_service"]
 
-    assert "scrollZoom=false" in wheel["declarative_default"]
+    assert "唯一" in charts["summary"]
+    assert "数据口径" in charts["rule"]
+    assert charts["official_gallery"] == "https://plotly.com/javascript/"
+    assert charts["official_source"] == "https://github.com/plotly/plotly.js/"
+    assert charts["plotly_runtime"]["version"] == "4.0.0"
+    assert "不依赖 Python plotly" in charts["plotly_runtime"]["offline"]
+    assert "Named Output" in charts["source_adaptation"]
+    assert "不复制官方示例库" in charts["recipe_policy"]
+    assert "完整 Plotly.js" in service["native_api"]
+    assert "Plotly" in wheel["plotly_default"]
     assert "context.charts.plotly" in wheel["custom_renderer"]
-    assert "context.charts.plotly/echarts" in service["api"]
     assert "底层" in service["escape_hatch"]
+    author_payload = json.dumps({"charts": charts, "renderers": service}).lower()
+    assert "plotly" in author_payload
+    assert all(
+        "engine" not in contract.get("optional", [])
+        for contract in charts["field_matrix"].values()
+    )
+
+
+def test_table_docs_expose_tanstack_defaults_and_the_full_escape_hatch():
+    tables = DOC_TOPICS["tables"]
+    service = DOC_TOPICS["renderers"]["table_service"]
+
+    assert tables["runtime"]["package"] == "@tanstack/table-core"
+    assert tables["runtime"]["version"] == "9.2.4"
+    assert "sorting" in tables["runtime"]["default_features"]
+    assert "page_size" in tables["options"]["behavior"]
+    assert "显式启用" in tables["options"]["rule"]
+    assert "context.tables.tanstack.mount" in tables["custom_service"]["managed"]
+    assert "context.tables.tanstack.core" in tables["custom_service"]["raw"]
+    assert "完整 TanStack Table Core" in service["api"]
+    assert "Perspective" in tables["decision_rule"]
 
 
 def test_component_registry_reports_package_owned_implementations():
     catalog = component_catalog()
     report = validate_component_packages(catalog)
 
-    assert COMPONENT_REGISTRY_VERSION == "5.4.0"
+    assert COMPONENT_REGISTRY_VERSION == "5.5.0"
     assert set(component_packages()) == {
         "control.auto-complete",
         "control.cascader",
@@ -389,9 +418,9 @@ def test_component_registry_reports_package_owned_implementations():
         "packages": 21,
         "package_implemented": 21,
         "bridge_implemented": 0,
-        "components": 64,
+        "components": 65,
         "stories": 39,
-        "test_declarations": 76,
+        "test_declarations": 77,
         "errors": [],
     }
     assert set(component_index()) == set(catalog)
@@ -779,7 +808,13 @@ def test_focused_context_contains_only_the_view_dependency_closure():
     assert set(revenue["sources"]) == {"orders", "targets"}
     assert set(revenue["dataset_transforms"]) == {"sales-metrics"}
     assert revenue["dashboard_logic"]["query_parameters"][0]["id"] == "target_factor"
-    assert context_size(distribution)["utf8_bytes"] < context_size(full)["utf8_bytes"]
+    distribution_size = len(
+        json.dumps(distribution, ensure_ascii=False, sort_keys=True, default=str).encode()
+    )
+    full_size = len(
+        json.dumps(full, ensure_ascii=False, sort_keys=True, default=str).encode()
+    )
+    assert distribution_size < full_size
 
 
 def test_context_does_not_embed_file_dataset_rows():
@@ -948,8 +983,8 @@ def test_custom_renderer_scaffold_includes_style_and_contract(tmp_path: Path):
     script = (target / "assets" / "team.spark.js").read_text()
     style = (target / "assets" / "team.spark.css").read_text()
     assert 'node.className = "renderer-team-spark"' in script
-    assert "context.charts.plotly/echarts" in script
-    assert "Direct Plotly/ECharts calls" in script
+    assert "context.charts.plotly" in script
+    assert "context.tables.tanstack" in script
     assert ".renderer-team-spark" in style
     assets = yaml.safe_load((target / "presentation.asset.snippet.yaml").read_text())
     assert assets["assets"]["css"] == ["assets/team.spark.css"]
@@ -1000,7 +1035,7 @@ def test_initial_runtime_render_includes_input_free_content_views():
     )
     assert "type:view.renderer" in declarative
     assert "controlBinding:binding" in declarative
-    assert "series:groups.map(group =>" in declarative
+    assert "const traces = groups.flatMap" in declarative
 
 
 def test_runtime_v2_has_one_owner_for_each_migrated_behavior():
@@ -1050,9 +1085,8 @@ def test_component_docs_only_offer_fields_consumed_by_each_view_path():
         expected_presentation = {"min_height", "container", "css_class"}
         expected_presentation.update(
             field
-            for field in ("engine", "options", "config")
+            for field in ("options", "config")
             if field in contract["optional"]
-            and not (field == "engine" and contract.get("engine"))
         )
         assert set(component["presentation"]["options"]) == expected_presentation
 
@@ -1067,8 +1101,8 @@ def test_component_docs_only_offer_fields_consumed_by_each_view_path():
         "css_class",
         "options",
     ]
-    assert {"engine", "options", "config"} <= set(
-        line["presentation"]["options"]
-    )
+    assert {"options", "config"} <= set(line["presentation"]["options"])
+    assert "engine" not in line["logic"]["optional"]
+    assert "engine" not in line["presentation"]["options"]
     assert image["behavior"]["input"] == "Self-contained; consumes no Named Output"
-    assert radar["logic"]["engine"] == "echarts"
+    assert "engine" not in radar["logic"]

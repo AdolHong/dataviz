@@ -40,7 +40,7 @@ class AnalysisEntry(AnalysisContract):
     time: dict[str, Any] | None = None
     measures: dict[str, Any] = Field(default_factory=dict)
     relationships: list[dict[str, Any]] = Field(default_factory=list)
-    semantic_source: Literal["declared", "legacy-inferred"] | None = None
+    semantic_source: Literal["declared", "inferred"] | None = None
     semantic_status: Literal["complete", "incomplete"] | None = None
     semantic_missing: list[str] = Field(default_factory=list)
     trust_status: Literal["draft", "reviewed", "certified", "deprecated"] | None = None

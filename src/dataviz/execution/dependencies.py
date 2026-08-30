@@ -367,7 +367,7 @@ class ViewControlBindingDependency:
             "control": self.control,
             "fields": list(self.fields),
             "renderer": self.renderer,
-            "actions": ["select", "select_many", "clear"],
+            "actions": ["select", "select_many", "clear", "reset"],
         }
 
 
@@ -931,7 +931,13 @@ def compile_dashboard_dependencies(
     writer_by_control: dict[str, ViewControlBindingDependency] = {}
     scope_rank = {"dashboard": 0, "section": 1, "view": 2}
     chart_templates = {
-        "line", "bar", "stacked-bar", "pie", "scatter", "heatmap", "radar"
+        "line",
+        "bar",
+        "stacked-bar",
+        "pie",
+        "scatter",
+        "heatmap",
+        "radar",
     }
     views_by_id = {view.id: view for view in dashboard.definition.views}
     for view_id, view in views_by_id.items():
@@ -1059,7 +1065,7 @@ def compile_dashboard_dependencies(
         elif view.template == "table":
             renderer = "table"
         elif view.template in chart_templates:
-            renderer = view.engine
+            renderer = "plotly"
         else:
             raise ValidationFailure(
                 f"View {view_id} template does not support Control binding: {view.template}",

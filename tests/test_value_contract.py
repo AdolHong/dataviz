@@ -518,14 +518,14 @@ def test_view_templates_reject_ignored_fields_and_require_real_renderer_paths():
             input="source:data/main",
             x="category",
         )
-    with pytest.raises(ValidationError, match="requires engine=echarts"):
-        DeclarativeViewDefinition(
-            id="radar",
-            template="radar",
-            input="source:data/main",
-            label="entity",
-            columns=["quality", "speed"],
-        )
+    radar = DeclarativeViewDefinition(
+        id="radar",
+        template="radar",
+        input="source:data/main",
+        label="entity",
+        columns=["quality", "speed"],
+    )
+    assert radar.template == "radar"
     with pytest.raises(ValidationError, match="requires one of: input, text"):
         DeclarativeViewDefinition(id="note", template="markdown")
     with pytest.raises(ValidationError, match="does not support aggregate=none"):
@@ -536,26 +536,15 @@ def test_view_templates_reject_ignored_fields_and_require_real_renderer_paths():
             value="amount",
             aggregate="none",
         )
-    with pytest.raises(ValidationError, match="engine=echarts does not use config"):
+    with pytest.raises(ValidationError):
         DeclarativeViewDefinition(
             id="chart",
             template="bar",
-            engine="echarts",
+            engine="alternate",
             input="source:data/main",
             x="category",
             y="amount",
-            config={"responsive": True},
         )
-
-    radar = DeclarativeViewDefinition(
-        id="radar",
-        template="radar",
-        engine="echarts",
-        input="source:data/main",
-        label="entity",
-        columns=["quality", "speed"],
-    )
-    assert radar.engine == "echarts"
 
 
 def test_date_range_empty_and_open_values_have_one_canonical_shape():

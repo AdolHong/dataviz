@@ -320,7 +320,8 @@ def resolve_authoring_route(
         if selected_definition is None:
             raise ValueError(f"Unknown Component: {selected_component}")
         if selected_component in {
-            "view.custom", "renderer.custom", "service.charts", "view.renderer-lifecycle"
+            "view.custom", "renderer.custom", "service.charts", "service.tables",
+            "view.renderer-lifecycle"
         }:
             route = "custom-renderer"
         elif (
@@ -427,7 +428,6 @@ _CHART_FIELD_MATRIX = {
         for key in (
             "required",
             "optional",
-            "engine",
             "aggregate",
             "field_references",
         )
@@ -438,7 +438,7 @@ _CHART_FIELD_MATRIX = {
 }
 
 
-DOC_ALIASES = {
+DOC_TOPIC_REDIRECTS = {
     "start": "quickstart",
     "build": "quickstart",
     "analysis": "analysis-quickstart",
@@ -619,7 +619,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
         "default_output": [
             "title、purpose、grain 和 assurance 是主体；kind、Dashboard 和物理引用是次级索引。",
             "紧凑附带 Query Parameter 契约、Output 摘要、相关 View、最小执行闭包和搜索命中原因。",
-            "Source/View 命中默认投影到可复用 Output；--compact 才返回旧式单行索引。",
+            "Source/View 命中默认投影到可复用 Output，避免与可复用 Output 平铺竞争。",
         ],
         "author_contract": {
             "required_for_discovery": ["title", "purpose", "grain"],
@@ -1100,8 +1100,9 @@ timeout_seconds: 120
                 "也不复制 Pyodide 资产。snapshot/unavailable 分支同样不携带无用 Runtime。"
             ),
             "other_assets": (
-                "Pyodide bundle 不等于整页离线：Plotly 内嵌；ECharts/Arrow 只有配置本地文件时离线；"
-                "Perspective 当前仍依赖 CDN。manifest 只判断声明的 Runtime/View 资产，不分析自定义脚本请求。"
+                "Pyodide bundle 不等于整页离线：Plotly.js 与 TanStack Table Core Runtime 随 Dataviz 提供；"
+                "Arrow 只有配置本地文件时离线；Perspective 当前仍依赖 CDN。"
+                "manifest 只判断声明的 Runtime/View 资产，不分析自定义脚本请求。"
             ),
         },
         "commands": [
@@ -1196,11 +1197,11 @@ selection_inputs:
       control: section.selected_store
       field: store_id
 """,
-            "supported": ["Plotly point/select", "ECharts item click", "Table row", "typed Custom Renderer outlet"],
+            "supported": ["Plotly point/selection event", "Table row", "typed Custom Renderer outlet"],
             "rules": [
                 "Control owns values and candidate domain; it never declares highlight, row, cell, Renderer or callback.",
                 "The bound View receives candidate rows after ancestor Controls but before the target Control filters itself.",
-                "A View event can only dispatch select, select_many or clear through context.controlBinding.emit.",
+                "A View event can only dispatch select, select_many, clear or reset through context.controlBinding.emit; clear is explicit empty while reset restores the declared initial policy.",
                 "Unknown targets, a second writer, narrower reverse-scope candidate dependencies, unsupported Renderers and missing fields fail validation.",
             ],
         },
@@ -1323,7 +1324,6 @@ control_components:
             "dataviz components gallery --output component-gallery.html",
         ],
         "view_templates": list(VIEW_TEMPLATE_CONTRACTS),
-        "chart_engines": ["plotly", "echarts"],
         "lifecycle": {
             "author_hooks": ["validate", "mount", "update", "dispose"],
             "platform_matrix": [
@@ -1334,28 +1334,62 @@ control_components:
         },
         "isolation": "一个 Renderer 失败只影响自己的 View；输入没有变化时不 update。",
         "chart_service": {
-            "api": "Custom Renderer 使用 context.charts.plotly/echarts 的 mount/update/resize/dispose。",
+            "api": "Custom Renderer 使用 context.charts.plotly 的 mount/update/resize/dispose，输入是 Plotly data/layout/config。",
             "ownership": "平台统一 Theme、responsive、page-first wheel、ResizeObserver、首屏 bootstrap、更新、Empty/Restore 与释放。",
-            "escape_hatch": "直接调用底层 Plotly/ECharts 仍可用，但作者必须自行承担完整生命周期。",
+            "grammar": "声明式模板生成 Plotly traces 与 layout；作者可通过 View options.trace、options.layout 和 config 调整表达。",
+            "native_api": "可信 Custom Renderer 可直接访问页面内嵌的完整 Plotly.js API；Dataviz 不用封闭白名单限制 trace、layout、事件和命令式交互。",
+            "escape_hatch": "直接调用底层 Plotly.js API 是显式逃生口，作者自行承担 Theme、Resize、Update、事件解绑与 purge。",
+        },
+        "table_service": {
+            "api": "Custom Renderer 可使用 context.tables.tanstack.mount/update/resize/dispose 复用默认 Table，也可通过 context.tables.tanstack.core 访问完整 TanStack Table Core。",
+            "ownership": "托管入口统一 Dataviz Theme、语义 DOM、可访问性、Control Binding、滚轮边界与 Export；直接 Core 调用由作者负责 markup、订阅、重绘、事件解绑和资源释放。",
         },
     },
     "charts": {
-        "summary": "默认图表模板覆盖常见 Plotly/ECharts 场景，业务逻辑留在 Transform。",
+        "summary": "Plotly 是 Dataviz 唯一的作者图表接口；声明式模板与 Custom Renderer 逐层开放完整分析能力。",
         "field_matrix": _CHART_FIELD_MATRIX,
-        "rule": "先验证字段、聚合和 Named Output，再用 Presentation options 调视觉细节。",
-        "plotly_wheel": {
-            "declarative_default": "内置 Plotly 模板使用 scrollZoom=false；滚轮继续滚动 Dashboard 页面，不缩放图表。",
-            "custom_renderer": "Custom Renderer 使用 context.charts.plotly 时继承平台默认；直接调用底层 API 时必须自行设置。",
-            "opt_in": "只有用户明确要求图内滚轮缩放时，才在 View config、Presentation View config 或 Custom Renderer 中设置 scrollZoom: true。",
+        "rule": "先验证数据口径、字段、聚合和 Named Output，再用 Plotly trace/layout/config 调整视觉细节。",
+        "plotly_runtime": {
+            "version": "4.0.0",
+            "grammar": "内置 line/bar/stacked-bar/pie/scatter/heatmap/radar 都生成 Plotly traces 与 layout。",
+            "native": "复杂视觉由 Custom Renderer 复用 context.charts.plotly，或直接调用完整 Plotly.js API。",
+            "interaction": "图例、点击、框选、套索与缩放使用 Plotly 事件和 config；页面滚动仍由 Dashboard 优先处理。",
+            "offline": "Plotly.js 4.0.0 作为固定浏览器资产随 Dataviz 提供；Server 与 portable HTML 使用同一份 JS，不依赖 Python plotly 包。",
         },
+        "official_gallery": "https://plotly.com/javascript/",
+        "official_source": "https://github.com/plotly/plotly.js/",
+        "gallery_guidance": "先确定需要回答的分析问题，再从 Plotly 官方示例选择 trace 类型，并接入 Named Output、Controls 与 Renderer 生命周期。",
+        "source_adaptation": "官方源码可能自行准备 DOM、数据和事件；接入时必须改用 Named Output、声明资产并遵守 Dataviz 生命周期。",
+        "recipe_policy": "Dataviz Recipe 只提供少量经过验证的起点，不复制官方示例库、不形成能力白名单，也不替代 Plotly 文档。",
         "service_example": "const state = await context.charts.plotly.mount(node, {data, layout, config});",
+        "wheel_and_zoom": {
+            "plotly_default": "内置 Plotly 模板关闭 scrollZoom。未绑定 Selection 的图不显示工具栏；绑定 Selection 的图只显示矩形选择、套索选择和恢复默认选择。下载图片不默认出现。",
+            "explicit_zoom": "缩放、平移和坐标轴恢复不进入默认工具栏；有明确分析需求时通过 config 覆盖，但不得默认截获 Dashboard 的连续滚动。",
+            "custom_renderer": "Custom Renderer 使用 context.charts.plotly；只有明确需求时才启用 scrollZoom。",
+        },
     },
     "tables": {
-        "summary": "普通 Table 用于可定制展示；Perspective 用于排序、筛选和透视分析。",
+        "summary": "Table 是默认数据表达组件；Perspective 只用于赋予终端用户临时分组、聚合、透视和多维探索能力。",
         "templates": {
-            "table": "自定义列、格式、对齐、紧凑度和条纹样式。",
-            "perspective": "Perspective v5 Web Component；拥有独立分析 UI 和配置。",
+            "table": "本地固定 TanStack Table Core + Dataviz 默认语义 DOM/CSS；无需 React 或运行时 CDN。",
+            "perspective": "Perspective v5 Web Component；拥有独立的自助分析 UI 和配置。",
         },
+        "runtime": {
+            "package": "@tanstack/table-core",
+            "version": "9.2.4",
+            "default_features": ["sorting", "global search", "pagination", "column visibility", "column order", "column pinning", "column sizing"],
+            "offline": "Server 与 portable HTML 共用 Dataviz 本地打包的固定版本资产。",
+        },
+        "options": {
+            "presentation": ["labels", "formats", "align", "widths", "striped", "compact", "wrap", "layout", "show_count"],
+            "behavior": ["sortable", "initial_sort", "sort_desc_first", "searchable", "initial_search", "page_size", "hidden_columns", "column_order", "pinned_columns"],
+            "rule": "默认只显示表头和数据；show_count、搜索框和分页都必须由作者显式启用。",
+        },
+        "custom_service": {
+            "managed": "context.tables.tanstack.mount(node, {data, columns, options}) 返回可 update/resize/dispose 的托管 state。",
+            "raw": "context.tables.tanstack.core 暴露 constructTable、tableFeatures、ColumnDef 所需函数和完整 feature/plugin 原语；作者可完全自定义 markup 与 CSS。",
+        },
+        "decision_rule": "明细、排行、对账、格式化、排序、搜索、分页和行选择使用 Table；只有看板使用者需要现场改变分析维度或聚合方式时使用 Perspective。",
         "scroll": "表格和 Perspective 仅在内部仍可滚动时消费滚轮；边界把滚轮交还页面。",
     },
     "repeated-views": {
@@ -1570,7 +1604,7 @@ assets:
             "选择一个明确方向；默认沿用 business，不同时混合 business/editorial/terminal 的视觉语法。",
             "先写 Presentation YAML，再写最少量 Dashboard 自有 CSS；不修改数据逻辑。",
             "运行 dataviz validate，并在 Gallery/真实数据/窄视口下检查 Ready、Empty、Error 和弹层状态。",
-            "确认 Server 与导出 HTML 的 Shell 一致，Plotly/ECharts/Table/Perspective 均继承 Dashboard Theme Token。",
+            "确认 Server 与导出 HTML 的 Shell 一致，Plotly/Table/Perspective 均继承 Dashboard Theme Token。",
         ],
         "acceptance_checklist": [
             "首屏通过状态灯知道 Pipeline 健康度，需要时点击具体节点查看证据。",
@@ -1786,7 +1820,7 @@ assets:
 
 def resolve_doc_topic(topic: str) -> str:
     normalized = topic.strip().lower()
-    return DOC_ALIASES.get(normalized, normalized)
+    return DOC_TOPIC_REDIRECTS.get(normalized, normalized)
 
 
 def docs_catalog(search: str | None = None) -> dict[str, dict[str, Any]]:

@@ -74,7 +74,6 @@ class RuntimeDefinition(Model):
     # reports. Accepting arbitrary strings here used to imply a configurability
     # that the renderer never implemented.
     plotly_js: Literal["bundled"] = "bundled"
-    echarts_js: str = "https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"
     arrow_js: str = "https://cdn.jsdelivr.net/npm/apache-arrow@21.1.0/Arrow.es2015.min.js"
     perspective_version: str = "5.2.0"
     pyodide_version: str = "314.0.4"
@@ -349,7 +348,7 @@ class SectionDefinition(Model):
 class CanvasDefinition(Model):
     template: str | None = None
     use_default_style: bool = True
-    client_libraries: list[Literal["plotly", "echarts", "perspective"]] = Field(default_factory=list)
+    client_libraries: list[Literal["plotly", "perspective"]] = Field(default_factory=list)
     styles: list[str] = Field(default_factory=list)
     scripts: list[str] = Field(default_factory=list)
     inputs: list[str] = Field(default_factory=list)
@@ -388,7 +387,6 @@ class PresentationViewDefinition(Model):
     min_height: int | None = Field(None, ge=1)
     container: Literal["panel", "metric", "chart", "table", "plain", "elevated"] | None = None
     css_class: str = ""
-    engine: Literal["plotly", "echarts"] | None = None
     options: dict[str, Any] = Field(default_factory=dict)
     config: dict[str, Any] = Field(default_factory=dict)
     controls: PresentationControlPanelDefinition | None = None
@@ -520,7 +518,7 @@ class PresentationAssetsDefinition(Model):
 class PresentationCanvasDefinition(Model):
     template: str | None = None
     use_default_style: bool | None = None
-    client_libraries: list[Literal["plotly", "echarts", "perspective"]] = Field(default_factory=list)
+    client_libraries: list[Literal["plotly", "perspective"]] = Field(default_factory=list)
 
 
 class PresentationControlPanelDefinition(Model):
@@ -596,7 +594,6 @@ class DeclarativeViewDefinition(Model):
         "custom",
     ]
     renderer: str | None = None
-    engine: Literal["plotly", "echarts"] = "plotly"
     input: str | None = None
     inputs: dict[StableId, str] = Field(default_factory=dict)
     x: str | None = None

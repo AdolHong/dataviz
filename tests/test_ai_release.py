@@ -71,6 +71,16 @@ def test_visual_check_has_a_dedicated_extra_and_copyable_missing_dependency_hint
     assert "ai-dataviz[visual-check]" in result.output
 
 
+def test_plotly_is_a_direct_browser_asset_not_a_python_dependency():
+    metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    dependencies = metadata["project"]["dependencies"]
+
+    assert not any(requirement.lower().startswith("plotly") for requirement in dependencies)
+    result = CliRunner().invoke(app, ["version", "--format", "json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["plotly_js"] == "4.0.0"
+
+
 def _init_workspace(path: Path) -> Path:
     result = CliRunner().invoke(app, ["init", str(path)])
     assert result.exit_code == 0, result.output
@@ -105,7 +115,7 @@ def test_generated_schema_cli_uses_strict_installed_models():
 
     view = schema_model_contract("view", full=True)
     assert view["template_contracts"]["table"]["required"] == ["input"]
-    assert view["template_contracts"]["radar"]["engine"] == "echarts"
+    assert "engine" not in view["template_contracts"]["radar"]
     assert (
         view["json_schema"]["x-dataviz-template-contracts"]
         == view["template_contracts"]
@@ -191,7 +201,7 @@ def test_authoring_evaluation_is_not_exposed_or_shipped_by_the_product():
     assert not any(path.startswith("tools/authoring-evaluation/") for path in included)
 
 
-def test_current_design_and_plan_only_document_the_012_cli_contract():
+def test_current_design_and_plan_only_document_the_current_cli_contract():
     documents = {
         name: (ROOT / name).read_text(encoding="utf-8")
         for name in ("DESIGN.md", "plan.md")
@@ -208,10 +218,24 @@ def test_current_design_and_plan_only_document_the_012_cli_contract():
     )
     for name, content in documents.items():
         assert not any(term in content for term in forbidden), name
-        assert "catalog search" in content
-        assert "catalog describe" in content
-        assert "run_succeeded" in content
-        assert "0.12.0" in content
+    design = documents["DESIGN.md"]
+    assert "catalog search" in design
+    assert "catalog describe" in design
+    assert "run_succeeded" in design
+    package_version = tomllib.loads(
+        (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]["version"]
+    assert package_version in documents["plan.md"]
+
+
+def test_current_user_docs_do_not_advertise_removed_cli_surfaces():
+    documents = [
+        (ROOT / "README.md").read_text(encoding="utf-8"),
+        (ROOT / "docs/analysis-plane.md").read_text(encoding="utf-8"),
+    ]
+    forbidden = ("dataviz analyze ", "`inspect-layout`", "--compact")
+    for content in documents:
+        assert not any(term in content for term in forbidden)
 
 
 def test_release_zip_keeps_previous_archive_and_checksum_if_publish_fails(
@@ -256,6 +280,7 @@ def test_release_inputs_exclude_local_credentials_and_reject_symlinks(
         "pyproject.toml",
         "setup.py",
         "README.md",
+        "dataviz-skill.md",
         "DESIGN.md",
         "plan.md",
         "MANIFEST.in",
@@ -280,6 +305,13 @@ def test_release_inputs_exclude_local_credentials_and_reject_symlinks(
 
 def test_release_version_sources_match():
     release_zip.verify_release_version()
+
+
+def test_release_source_archives_include_the_skill_and_browser_runtimes():
+    included = {path.relative_to(ROOT).as_posix() for path in release_zip.included_files()}
+    assert "dataviz-skill.md" in included
+    assert "src/dataviz/vendor/plotly/plotly-4.0.0.min.js" in included
+    assert "src/dataviz/vendor/plotly/LICENSE" in included
 
 
 def test_reference_frontend_adapter_is_exportable_and_has_no_canvas_runtime_dependency(

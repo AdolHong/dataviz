@@ -9,6 +9,4 @@ context:
   currency: CNY
 runtime:
   max_workers: 4
-  plotly_js: bundled
-  echarts_js: https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js
 folders: []

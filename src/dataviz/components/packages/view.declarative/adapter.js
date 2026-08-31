@@ -9,6 +9,7 @@
 
     const states = new Map();
     let perspectiveSerial = 0;
+    let tableSearchSerial = 0;
     let disposed = false;
     const perspectiveOperationTimeoutMs = Math.max(
       100,
@@ -23,9 +24,10 @@
       return {
         ...binding,
         emit:(action, data = null) => global.dataviz.controlActions.dispatch({
-          view_id:key,
+          action_id:crypto.randomUUID(),
+          source_view:key,
           control:binding.control,
-          generation:generation ?? root?._datavizRenderGeneration ?? 0,
+          generation:root?._datavizRenderGeneration ?? generation ?? 0,
           action,
           data,
         }),
@@ -188,6 +190,16 @@
       scrollZoom:false,
       ...config,
     });
+    const plotlyStructuralSignature = specification => JSON.stringify({
+      data:(specification?.data || []).map(trace => Object.fromEntries(
+        Object.entries(trace || {}).filter(([key]) => key !== 'selectedpoints')
+      )),
+      layout:specification?.layout || {},
+      config:specification?.config || {},
+    }, (_key, value) => typeof value === 'function' ? String(value) : value);
+    const plotlySelectedPoints = specification => (
+      (specification?.data || []).map(trace => trace?.selectedpoints ?? null)
+    );
     const plotlyRestoreSelectionIcon = {
       width:24,
       height:24,
@@ -247,6 +259,25 @@
         },
         async update(state, specification = {}, root = state?.node?.closest?.('.dv-view')) {
           if (!state?.node) throw new Error('Plotly chart state is missing its host');
+          const selectionOnly = Boolean(
+            state.specification?.controlBinding
+            && specification.controlBinding
+            && plotlyStructuralSignature(state.specification)
+              === plotlyStructuralSignature(specification)
+          );
+          if (selectionOnly) {
+            const previousSelection = plotlySelectedPoints(state.specification);
+            const nextSelection = plotlySelectedPoints(specification);
+            if (JSON.stringify(previousSelection) !== JSON.stringify(nextSelection)) {
+              await global.Plotly.restyle(
+                state.node,
+                {selectedpoints:nextSelection},
+                nextSelection.map((_value, index) => index),
+              );
+            }
+            state.specification = specification;
+            return state;
+          }
           await global.Plotly.react(
             state.node,
             specification.data || [],
@@ -494,6 +525,10 @@
           const input = document.createElement('input');
           input.className = 'dv-table-search';
           input.type = 'search';
+          const searchOwner = String(state.renderContext?.viewId || 'table')
+            .replace(/[^A-Za-z0-9_-]+/g, '-');
+          state.searchInputId ||= `dataviz-view-${searchOwner}-search-${++tableSearchSerial}`;
+          input.id = state.searchInputId;
           input.placeholder = options.search_placeholder || 'Search rows';
           input.setAttribute('aria-label', options.search_label || 'Search table rows');
           input.value = String(table.store.state.globalFilter || '');
@@ -1116,6 +1151,18 @@
       applyStatus(root, 'error', 'renderer error');
       console.error(`[dataviz:${key}:${type}:${phase}]`, detail);
     };
+    const recordRendererOutcome = (root, generation, promise) => {
+      const normalized = Promise.resolve(promise);
+      if (root) root._datavizRendererOutcome = {generation, promise:normalized};
+      return normalized;
+    };
+    const rendererCompletion = (root, generation) => {
+      const outcome = root?._datavizRendererOutcome;
+      if (!outcome || Number(outcome.generation) !== Number(generation)) {
+        return Promise.resolve({status:'superseded', generation});
+      }
+      return outcome.promise;
+    };
     const renderInto = (root, key, producer) => {
       const previousStatus = root?.dataset.viewStatus || null;
       setRendererSignal(root, 'loading', {active:true});
@@ -1130,30 +1177,43 @@
         descriptor = producer();
         if (descriptor == null) {
           empty(root, key);
+          recordRendererOutcome(root, generation, {
+            status:'ready', terminal:'empty', generation,
+          });
           return null;
         }
         if (descriptor.empty === true) {
           empty(root, key, descriptor.emptyMessage);
+          recordRendererOutcome(root, generation, {
+            status:'ready', terminal:'empty', generation,
+          });
           return descriptor;
         }
       } catch (error) {
         showError(root, key, 'descriptor', 'produce', error);
+        recordRendererOutcome(root, generation, {status:'error', generation, error});
         return null;
       }
       const type = descriptor.type || 'text';
       const renderer = runtime.renderers.get(type);
       if (!renderer) {
-        showError(root, key, type, 'lookup', new Error(`Unknown Renderer: ${type}`));
+        const error = new Error(`Unknown Renderer: ${type}`);
+        showError(root, key, type, 'lookup', error);
+        recordRendererOutcome(root, generation, {status:'error', generation, error});
         return null;
       }
       const previous = root?._datavizRendererPending || Promise.resolve();
       const pending = Promise.resolve(previous).catch(() => {}).then(async () => {
-        if (root?._datavizRenderGeneration !== generation) return;
+        if (root?._datavizRenderGeneration !== generation) {
+          return {status:'superseded', generation};
+        }
         const started = performance.now();
         let phase = 'validate';
         try {
           await renderer.validate?.(descriptor);
-          if (root?._datavizRenderGeneration !== generation) return;
+          if (root?._datavizRenderGeneration !== generation) {
+            return {status:'superseded', generation};
+          }
           const mounted = states.get(key);
           if (mounted && mounted.type === type && mounted.root === root && renderer.update) {
             phase = 'update';
@@ -1162,6 +1222,10 @@
               descriptor,
               mounted.state,
             ) ?? mounted.state;
+            await mounted.state?.pending;
+            if (root?._datavizRenderGeneration !== generation) {
+              return {status:'superseded', generation};
+            }
             runtime.metrics.renderers.updates += 1;
           } else {
             if (mounted) disposeRenderer(mounted.root, key);
@@ -1172,9 +1236,10 @@
               context(root, body, key, descriptor, generation),
               descriptor,
             );
+            await state?.pending;
             if (root?._datavizRenderGeneration !== generation) {
               await renderer.dispose?.(context(root, body, key, descriptor, generation), state);
-              return;
+              return {status:'superseded', generation};
             }
             states.set(key, {type, renderer, state, root, body});
             runtime.metrics.renderers.mounts += 1;
@@ -1182,16 +1247,62 @@
           }
           runtime.rendererErrors.delete(key);
           if (type !== 'perspective') applyStatus(root, 'ready', type);
+          return {status:'ready', generation};
         } catch (error) {
           if (root?._datavizRenderGeneration === generation) {
             showError(root, key, type, phase, error);
           }
+          return {status:'error', generation, error};
         } finally {
           runtime.metrics.renderers.totalMs += performance.now() - started;
         }
       });
       if (root) root._datavizRendererPending = pending;
+      recordRendererOutcome(root, generation, pending);
       return descriptor;
+    };
+    const plotlyRenderedPointHit = (chartNode, clientX, clientY) => {
+      const definitions = [
+        {layer:'.barlayer', traceType:'bar', point:'.point', slop:0},
+        {layer:'.scatterlayer', traceType:'scatter', point:'.point', slop:4},
+      ];
+      let best = null;
+      for (const definition of definitions) {
+        const traceIndexes = (chartNode.data || []).flatMap((trace, index) => (
+          trace?.type === definition.traceType ? [index] : []
+        ));
+        const traceNodes = chartNode.querySelectorAll(`${definition.layer} .trace`);
+        for (const [renderedTraceIndex, traceNode] of [...traceNodes].entries()) {
+          const traceIndex = traceIndexes[renderedTraceIndex];
+          const trace = chartNode.data?.[traceIndex];
+          if (!trace || !Array.isArray(trace.customdata)) continue;
+          const pointNodes = traceNode.querySelectorAll(definition.point);
+          for (const [pointIndex, pointNode] of [...pointNodes].entries()) {
+            const value = trace.customdata[pointIndex];
+            if (value === undefined) continue;
+            const box = pointNode.getBoundingClientRect();
+            const left = box.left - definition.slop;
+            const right = box.right + definition.slop;
+            const top = box.top - definition.slop;
+            const bottom = box.bottom + definition.slop;
+            if (clientX < left || clientX > right || clientY < top || clientY > bottom) {
+              continue;
+            }
+            const dx = clientX - (box.left + box.width / 2);
+            const dy = clientY - (box.top + box.height / 2);
+            const distance = dx * dx + dy * dy;
+            if (!best || distance < best.distance) {
+              best = {value:structuredClone(value), distance};
+            }
+          }
+        }
+      }
+      return best;
+    };
+    const clearPlotlyPointerFallback = state => {
+      if (state.controlPointerFallbackFrame == null) return;
+      cancelAnimationFrame(state.controlPointerFallbackFrame);
+      state.controlPointerFallbackFrame = null;
     };
     const syncPlotlyInteractions = (state, descriptor) => {
       const chartNode = state.node;
@@ -1207,13 +1318,25 @@
         chartNode.removeListener?.('plotly_selected', state.controlSelectedHandler);
         state.controlSelectedHandler = null;
       }
-      if (state.controlDoubleClickHandler) {
-        chartNode.removeListener?.('plotly_doubleclick', state.controlDoubleClickHandler);
-        state.controlDoubleClickHandler = null;
+      if (state.controlPointerDownHandler) {
+        chartNode.removeEventListener('pointerdown', state.controlPointerDownHandler, true);
+        state.controlPointerDownHandler = null;
       }
-      if (!descriptor.controlBinding) return;
-      state.controlClickHandler = event => {
-        const datum = event?.points?.[0]?.customdata;
+      if (state.controlPointerUpHandler) {
+        document.removeEventListener('pointerup', state.controlPointerUpHandler, true);
+        state.controlPointerUpHandler = null;
+      }
+      if (state.controlPointerCancelHandler) {
+        document.removeEventListener('pointercancel', state.controlPointerCancelHandler, true);
+        state.controlPointerCancelHandler = null;
+      }
+      if (!descriptor.controlBinding) {
+        state.controlPointerCandidate = null;
+        state.controlPointerRelease = null;
+        clearPlotlyPointerFallback(state);
+        return;
+      }
+      const emitSelection = datum => {
         if (datum === undefined) return;
         if (state.controlActionFrame != null) {
           cancelAnimationFrame(state.controlActionFrame);
@@ -1223,6 +1346,61 @@
         state.renderContext.controlBinding?.emit('select', {
           __datavizControlValue:datum,
         });
+      };
+      state.controlPointerDownHandler = event => {
+        if (event.button !== 0 || event.isPrimary === false) return;
+        const hit = plotlyRenderedPointHit(chartNode, event.clientX, event.clientY);
+        state.controlPointerCandidate = hit ? {
+          value:hit.value,
+          pointerId:event.pointerId,
+          clientX:event.clientX,
+          clientY:event.clientY,
+          consumed:false,
+        } : null;
+      };
+      state.controlPointerUpHandler = event => {
+        const candidate = state.controlPointerCandidate;
+        state.controlPointerCandidate = null;
+        if (!candidate || candidate.pointerId !== event.pointerId || candidate.consumed) return;
+        const movement = Math.hypot(
+          event.clientX - candidate.clientX,
+          event.clientY - candidate.clientY,
+        );
+        if (movement > 6) return;
+        state.controlPointerRelease = {
+          ...candidate,
+          releasedAt:performance.now(),
+        };
+        clearPlotlyPointerFallback(state);
+        state.controlPointerFallbackFrame = requestAnimationFrame(() => {
+          state.controlPointerFallbackFrame = null;
+          const pending = state.controlPointerRelease;
+          state.controlPointerRelease = null;
+          if (!pending || pending.consumed) return;
+          state.controlPointerFallbackSuppressionUntil = performance.now() + 250;
+          emitSelection(pending.value);
+        });
+      };
+      state.controlPointerCancelHandler = () => {
+        state.controlPointerCandidate = null;
+        state.controlPointerRelease = null;
+        clearPlotlyPointerFallback(state);
+      };
+      state.controlClickHandler = event => {
+        const pointerHit = state.controlPointerRelease || state.controlPointerCandidate;
+        if (pointerHit) {
+          pointerHit.consumed = true;
+          state.controlPointerRelease = null;
+          state.controlPointerCandidate = null;
+          clearPlotlyPointerFallback(state);
+          emitSelection(pointerHit.value);
+          return;
+        }
+        if (performance.now() < (state.controlPointerFallbackSuppressionUntil || 0)) {
+          state.controlPointerFallbackSuppressionUntil = 0;
+          return;
+        }
+        emitSelection(event?.points?.[0]?.customdata);
       };
       state.controlSelectedHandler = event => {
         const keyed = new Map((event?.points || []).map(point => ({
@@ -1245,19 +1423,11 @@
           state.renderContext.controlBinding?.emit('select_many', data);
         });
       };
-      state.controlDoubleClickHandler = () => {
-        if (state.controlActionFrame != null) {
-          cancelAnimationFrame(state.controlActionFrame);
-        }
-        runtime.metrics.renderers.interactions += 1;
-        state.controlActionFrame = requestAnimationFrame(() => {
-          state.controlActionFrame = null;
-          state.renderContext.controlBinding?.emit('reset');
-        });
-      };
+      chartNode.addEventListener('pointerdown', state.controlPointerDownHandler, true);
+      document.addEventListener('pointerup', state.controlPointerUpHandler, true);
+      document.addEventListener('pointercancel', state.controlPointerCancelHandler, true);
       chartNode.on('plotly_click', state.controlClickHandler);
       chartNode.on('plotly_selected', state.controlSelectedHandler);
-      chartNode.on('plotly_doubleclick', state.controlDoubleClickHandler);
     };
 
     runtime.registerRenderer('table', {
@@ -1295,8 +1465,14 @@
           renderContext,
           controlClickHandler:null,
           controlSelectedHandler:null,
-          controlDoubleClickHandler:null,
           controlActionFrame:null,
+          controlPointerDownHandler:null,
+          controlPointerUpHandler:null,
+          controlPointerCancelHandler:null,
+          controlPointerCandidate:null,
+          controlPointerRelease:null,
+          controlPointerFallbackFrame:null,
+          controlPointerFallbackSuppressionUntil:0,
         };
         syncPlotlyInteractions(state, descriptor);
         return state;
@@ -1312,6 +1488,16 @@
       },
       dispose(_renderContext, state) {
         if (state.controlActionFrame != null) cancelAnimationFrame(state.controlActionFrame);
+        if (state.controlPointerDownHandler) {
+          state.node?.removeEventListener('pointerdown', state.controlPointerDownHandler, true);
+        }
+        if (state.controlPointerUpHandler) {
+          document.removeEventListener('pointerup', state.controlPointerUpHandler, true);
+        }
+        if (state.controlPointerCancelHandler) {
+          document.removeEventListener('pointercancel', state.controlPointerCancelHandler, true);
+        }
+        clearPlotlyPointerFallback(state);
         chartService.plotly.dispose(state);
       },
     });
@@ -1350,7 +1536,7 @@
     });
 
     const adapter = {
-      protocol:'dataviz/runtime/v6',
+      protocol:'dataviz/runtime/v9',
       lifecycle:Object.freeze({
         hooks:Object.freeze(['validate', 'mount', 'update', 'dispose']),
         phases:Object.freeze([
@@ -1363,6 +1549,7 @@
       setStatus:applyStatus,
       renderInto,
       render:(id, producer) => renderInto(node(id), id, producer),
+      completion:rendererCompletion,
       waiting,
       empty,
       unavailable,
@@ -1403,7 +1590,6 @@
           renderContext,
           controlClickHandler:null,
           controlSelectedHandler:null,
-          controlDoubleClickHandler:null,
           controlActionFrame:null,
         };
         syncPlotlyInteractions(state, spec);

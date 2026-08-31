@@ -1,0 +1,99 @@
+{
+  "schema": "dataviz/p1d-linked-brushing-characterization/v1",
+  "status": "implemented",
+  "use_case": {
+    "dashboard": "chart-gallery",
+    "question": "从省份收入排名或订单-收入关系中选择同一组省份，并让所有关联视图使用同一个焦点集合。",
+    "control": "dashboard:chart-gallery/province",
+    "writers": [
+      {
+        "view": "ranking",
+        "gesture": "bar click or multi-select",
+        "field": "province"
+      },
+      {
+        "view": "scatter",
+        "gesture": "point click, box select or lasso select",
+        "field": "province"
+      }
+    ],
+    "consumers": ["trend", "ranking", "composition", "scatter", "records"]
+  },
+  "initial_state": {
+    "value": ["广东", "湖南", "福建", "浙江"],
+    "intent": "explicit",
+    "revision": 0
+  },
+  "actions": [
+    {
+      "action_id": "ranking-select-guangdong",
+      "source_view": "ranking",
+      "action": "select",
+      "payload": "广东",
+      "expected": {
+        "value": ["广东"],
+        "intent": "explicit",
+        "revision": 1,
+        "last_source_view": "ranking"
+      }
+    },
+    {
+      "action_id": "scatter-lasso-hunan-zhejiang",
+      "source_view": "scatter",
+      "action": "select_many",
+      "payload": ["湖南", "浙江"],
+      "expected": {
+        "value": ["湖南", "浙江"],
+        "intent": "explicit",
+        "revision": 2,
+        "last_source_view": "scatter"
+      }
+    },
+    {
+      "action_id": "ranking-clear",
+      "source_view": "ranking",
+      "action": "clear",
+      "expected": {
+        "value": [],
+        "intent": "explicit",
+        "revision": 3,
+        "last_source_view": "ranking"
+      }
+    },
+    {
+      "action_id": "scatter-reset",
+      "source_view": "scatter",
+      "action": "reset",
+      "expected": {
+        "value": ["广东", "湖南", "福建", "浙江"],
+        "intent": "explicit",
+        "revision": 4,
+        "last_source_view": "scatter"
+      }
+    }
+  ],
+  "invariants": {
+    "select_semantics": "replace",
+    "implicit_union": false,
+    "programmatic_projection_emits_action": false,
+    "stale_generation_is_rejected": true,
+    "rejection_keeps_source_view": true,
+    "result_evidence_keeps_source_view_for_applied_revision": true
+  },
+  "version_decision": {
+    "dashboard": {"from": 12, "to": 13},
+    "dependency_contract": {"from": 9, "to": 10},
+    "runtime": {"from": 8, "to": 9},
+    "state_snapshot": {"from": 3, "to": 4},
+    "analysis_result": {"from": 2, "to": 3},
+    "analysis_evidence": {"from": 2, "to": 3},
+    "unchanged": [
+      "workspace",
+      "source",
+      "dataset_transform",
+      "interactive_transform",
+      "layout_contract",
+      "parameter_domain"
+    ]
+  }
+}

@@ -6,6 +6,10 @@ from typing import Any
 from pydantic import BaseModel, TypeAdapter
 
 from dataviz import __version__
+from dataviz.protocols import (
+    CURRENT_PROTOCOL_SCHEMAS,
+    protocol_registry,
+)
 from dataviz.analysis.contracts import (
     AnalysisCatalog as AnalysisCatalogContract,
     AnalysisDescribe,
@@ -46,7 +50,7 @@ from dataviz.workspace.models import (
 )
 
 
-SCHEMA_CATALOG_VERSION = "dataviz/schema-catalog/v8"
+SCHEMA_CATALOG_VERSION = "dataviz/schema-catalog/v9"
 SchemaProvider = type[BaseModel] | TypeAdapter
 
 
@@ -88,14 +92,17 @@ SCHEMA_MODELS: OrderedDict[str, SchemaProvider] = OrderedDict(
 
 
 CURRENT_SCHEMAS = {
-    "workspace": "dataviz/workspace/v1",
-    "dashboard": "dataviz/dashboard/v11",
-    "parameter_domain": "dataviz/parameter-domain/v1",
-    "presentation": "dataviz/presentation/v2",
-    "source": "dataviz/source/v3",
-    "dataset_transform": "dataviz/dataset-transform/v3",
-    "interactive_transform": "dataviz/interactive-transform/v3",
-    "runtime": "dataviz/runtime/v6",
+    key: CURRENT_PROTOCOL_SCHEMAS[key]
+    for key in (
+        "workspace",
+        "dashboard",
+        "parameter_domain",
+        "presentation",
+        "source",
+        "dataset_transform",
+        "interactive_transform",
+        "runtime",
+    )
 }
 
 
@@ -281,6 +288,7 @@ def schema_catalog(*, full: bool = False) -> dict[str, Any]:
         "models": {
             name: schema_model_contract(name, full=full) for name in SCHEMA_MODELS
         },
+        "protocol_registry": protocol_registry(),
         "generation": (
             "Generated from the installed Pydantic models; use Component Registry "
             "for behavior, semantic DOM and style contracts."

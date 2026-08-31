@@ -1,7 +1,7 @@
 // Owner: Runtime protocol, manifest normalization, and shared constants.
-const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v6';
+const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v9';
 const DATAVIZ_INTERACTIVE_WORKER_PROTOCOL = 'dataviz/interactive-worker/v1';
-const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v7';
+const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v10';
 if (window.dataviz.protocol?.schema !== DATAVIZ_RUNTIME_PROTOCOL) {
   throw new Error(`Unsupported Dataviz Runtime protocol: ${window.dataviz.protocol?.schema || 'missing'}`);
 }
@@ -109,6 +109,8 @@ const datavizParameterBinding = binding => typeof binding === 'string'
   ? {parameter:String(binding)}
   : {
       parameter:String(binding?.parameter || ''),
+      ...(binding?.projection && binding.projection !== 'value'
+        ? {projection:String(binding.projection)} : {}),
       ...(binding?.part ? {part:String(binding.part)} : {}),
     };
 const datavizParameterInputSignature = inputs => JSON.stringify(
@@ -121,10 +123,20 @@ const datavizParameterInputSignature = inputs => JSON.stringify(
 const datavizProjectParameterInputs = inputs => Object.fromEntries(
   Object.entries(inputs || {}).map(([alias, rawBinding]) => {
     const binding = datavizParameterBinding(rawBinding);
+    if (binding.projection === 'intent') {
+      return [alias, window.dataviz.query_parameter_intents?.[binding.parameter] || 'explicit'];
+    }
     let value = window.dataviz.query_parameters?.[binding.parameter];
+    if (binding.projection === 'present') {
+      return [alias, !datavizIsEmptyValue(value)];
+    }
     if (binding.part) {
       if (!Array.isArray(value) || value.length !== 2) {
-        throw new Error(`Query input ${alias} cannot read ${binding.part} from ${binding.parameter}`);
+        const error = new Error(
+          `Query input ${alias} cannot read ${binding.part} from ${binding.parameter}`
+        );
+        error.code = 'query_input_projection_failed';
+        throw error;
       }
       value = value[binding.part === 'start' ? 0 : 1];
     }
@@ -134,8 +146,173 @@ const datavizProjectParameterInputs = inputs => Object.fromEntries(
 const datavizOutputContractSignature = (transformId, outputs) => JSON.stringify(
   Object.keys(outputs || {}).map(name => `interactive:${transformId}/${name}`).sort()
 );
+const datavizManifestContractError = (code, message, details = {}) => {
+  const error = new Error(message);
+  error.code = code;
+  error.details = {code, ...details};
+  return error;
+};
+const datavizIsEmptyValue = value => (
+  value == null || value === '' || (Array.isArray(value) && value.length === 0)
+);
+const datavizCanonicalJsonValue = (value, stack = new WeakSet()) => {
+  if (value == null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw datavizManifestContractError('invalid_number', 'numeric value must be finite');
+    }
+    if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
+      throw datavizManifestContractError(
+        'unsafe_integer',
+        'integer exceeds the exact JavaScript range; model identifiers as strings',
+      );
+    }
+    return value;
+  }
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value !== 'object') {
+    throw datavizManifestContractError('not_json_serializable', 'value must be JSON-serializable');
+  }
+  if (stack.has(value)) {
+    throw datavizManifestContractError('not_json_serializable', 'value must not contain cycles');
+  }
+  stack.add(value);
+  try {
+    if (Array.isArray(value)) {
+      return value.map(item => datavizCanonicalJsonValue(item, stack));
+    }
+    const result = {};
+    Object.keys(value).sort().forEach(key => {
+      const item = value[key];
+      if (typeof item === 'undefined' || typeof item === 'function' || typeof item === 'symbol') {
+        throw datavizManifestContractError('not_json_serializable', 'value must be JSON-serializable');
+      }
+      result[key] = datavizCanonicalJsonValue(item, stack);
+    });
+    return result;
+  } finally {
+    stack.delete(value);
+  }
+};
 const datavizValueSignature = value => {
   if (value?.__datavizArrowOutput) return `arrow:${value.descriptor?.content_hash || value.descriptor?.row_count || 'table'}`;
-  try { return JSON.stringify(value); }
-  catch { return String(value); }
+  return JSON.stringify(datavizCanonicalJsonValue(value));
+};
+const datavizOrderedControlOperators = new Set(['between', 'gte', 'lte', 'gt', 'lt']);
+const datavizControlOperatorsByType = {
+  text:new Set(['equals', 'in', 'contains']),
+  integer:new Set(['equals', 'in', ...datavizOrderedControlOperators]),
+  number:new Set(['equals', 'in', ...datavizOrderedControlOperators]),
+  date:new Set(['equals', 'in', ...datavizOrderedControlOperators]),
+  boolean:new Set(['equals', 'in']),
+};
+const datavizValidateControlOperator = (operator, valueType) => {
+  if (!datavizControlOperatorsByType[valueType]?.has(operator)) {
+    throw datavizManifestContractError(
+      'control_filter_operator_incompatible',
+      `Control filter operator ${operator} is not valid for ${valueType}`,
+      {operator, value_type:valueType},
+    );
+  }
+};
+const datavizCoerceFilterValue = (value, valueType, role) => {
+  if (value == null) return null;
+  const invalid = () => datavizManifestContractError(
+    'control_filter_value_invalid',
+    `Control filter ${role} cannot be converted to ${valueType}`,
+    {value_type:valueType, role, value},
+  );
+  if (valueType === 'text') return String(value);
+  if (valueType === 'boolean') {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string' && ['true', 'false'].includes(value.trim().toLowerCase())) {
+      return value.trim().toLowerCase() === 'true';
+    }
+    throw invalid();
+  }
+  if (valueType === 'integer' || valueType === 'number') {
+    if (typeof value === 'boolean' || value === '') throw invalid();
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || (valueType === 'integer' && !Number.isInteger(numeric))) {
+      throw invalid();
+    }
+    return numeric;
+  }
+  if (valueType === 'date') {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return value.toISOString().slice(0, 10);
+    }
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) throw invalid();
+    const normalized = value.trim();
+    const parsed = new Date(`${normalized}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== normalized) throw invalid();
+    return normalized;
+  }
+  throw invalid();
+};
+const datavizTypedControlMatch = ({actual, value, operator, valueType}) => {
+  datavizValidateControlOperator(operator, valueType);
+  if (actual == null) return false;
+  const comparable = datavizCoerceFilterValue(actual, valueType, 'field');
+  const bound = item => datavizCoerceFilterValue(item, valueType, 'bound');
+  if (operator === 'in') {
+    return (Array.isArray(value) ? value : [value]).map(bound).some(item => item === comparable);
+  }
+  if (operator === 'between') {
+    const range = Array.isArray(value) ? value : [];
+    const lower = range[0] == null || range[0] === '' ? null : bound(range[0]);
+    const upper = range[1] == null || range[1] === '' ? null : bound(range[1]);
+    return (lower == null || comparable >= lower) && (upper == null || comparable <= upper);
+  }
+  if (operator === 'contains') return comparable.includes(bound(value));
+  const expected = bound(value);
+  if (operator === 'gte') return comparable >= expected;
+  if (operator === 'lte') return comparable <= expected;
+  if (operator === 'gt') return comparable > expected;
+  if (operator === 'lt') return comparable < expected;
+  return comparable === expected;
+};
+const datavizPathControlMatch = ({row, fields, value}) => {
+  const paths = Array.isArray(value?.[0]) ? value : [value];
+  return paths.some(path => Array.isArray(path) && path.length === fields.length
+    && fields.every((field, index) => String(row?.[field] ?? '') === String(path[index] ?? '')));
+};
+const datavizValidateOutputDestination = ({producerRuntime, outputKind, destination}) => {
+  if (producerRuntime === 'browser-js'
+      && ['image', 'file'].includes(outputKind)
+      && ['portable_snapshot', 'cli_result'].includes(destination)) {
+    throw datavizManifestContractError(
+      'output_destination_unsupported',
+      `${producerRuntime} ${outputKind} cannot be materialized for ${destination}`,
+      {
+        producer_runtime:producerRuntime,
+        output_kind:outputKind,
+        destination,
+        required_capability:'browser_asset_materializer',
+      },
+    );
+  }
+  return 'supported';
+};
+const datavizNormalizeConsumerRevision = (effective, applied) => {
+  const valid = value => Number.isInteger(value) && value >= 0;
+  if (!valid(effective) || (applied != null && !valid(applied))) {
+    throw datavizManifestContractError(
+      'consumer_applied_revision_invalid',
+      'Consumer applied revision must be a non-negative integer',
+      {effective_revision:effective, applied_revision:applied},
+    );
+  }
+  if (applied != null && applied > effective) {
+    throw datavizManifestContractError(
+      'consumer_applied_revision_ahead',
+      'Consumer applied revision cannot exceed the effective revision',
+      {effective_revision:effective, applied_revision:applied},
+    );
+  }
+  return {
+    effective_revision:effective,
+    applied_revision:applied ?? null,
+    stale:applied !== effective,
+  };
 };

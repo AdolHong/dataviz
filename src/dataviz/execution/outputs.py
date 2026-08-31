@@ -21,6 +21,52 @@ from dataviz.workspace.models import ColumnDefinition, OutputDefinition
 
 OutputBundle = dict[str, ArtifactDescriptor]
 
+OUTPUT_KINDS = frozenset(
+    {"table", "scalar", "object", "text", "chart", "image", "html", "file"}
+)
+OUTPUT_DESTINATIONS = frozenset(
+    {
+        "server_artifact",
+        "live_canvas",
+        "portable_interactive",
+        "portable_snapshot",
+        "cli_result",
+        "share_page",
+    }
+)
+
+
+def validate_output_destination(
+    *, producer_runtime: str, output_kind: str, destination: str
+) -> None:
+    """Fail before execution when a logical Output cannot reach its destination."""
+
+    if output_kind not in OUTPUT_KINDS or destination not in OUTPUT_DESTINATIONS:
+        raise ExecutionFailure(
+            "Unknown Output capability boundary",
+            details={
+                "code": "output_destination_unknown",
+                "producer_runtime": producer_runtime,
+                "output_kind": output_kind,
+                "destination": destination,
+            },
+        )
+    if (
+        producer_runtime == "browser-js"
+        and output_kind in {"image", "file"}
+        and destination in {"portable_snapshot", "cli_result"}
+    ):
+        raise ExecutionFailure(
+            f"{producer_runtime} {output_kind} cannot be materialized for {destination}",
+            details={
+                "code": "output_destination_unsupported",
+                "producer_runtime": producer_runtime,
+                "output_kind": output_kind,
+                "destination": destination,
+                "required_capability": "browser_asset_materializer",
+            },
+        )
+
 
 def _artifact_id(node_id: str, output_name: str) -> str:
     raw = node_id if output_name == "main" else f"{node_id}__{output_name}"

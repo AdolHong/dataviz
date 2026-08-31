@@ -54,7 +54,7 @@ def resolve_control_values(definition, provided=None):
 def test_relative_date_defaults_resolve_once_in_workspace_timezone_and_project_parts():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v11",
+            "schema": "dataviz/dashboard/v13",
             "id": "relative-dates",
             "query_parameters": [
                 {
@@ -214,7 +214,7 @@ def test_date_range_default_allows_fixed_and_relative_endpoints():
     dashboard = SimpleNamespace(
         definition=DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v11",
+                "schema": "dataviz/dashboard/v13",
                 "id": "mixed-date-range",
                 "query_parameters": [definition.model_dump(mode="json")],
             }
@@ -292,7 +292,7 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
 
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v11",
+            "schema": "dataviz/dashboard/v13",
             "id": "option-intents",
             "controls": [
                 {
@@ -345,7 +345,7 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
 
     required_inferred = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v11",
+            "schema": "dataviz/dashboard/v13",
             "id": "required-inferred",
             "controls": [
                 {
@@ -380,7 +380,7 @@ def test_select_initial_policies_are_shared_by_query_parameters_and_controls():
     ]
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v11",
+            "schema": "dataviz/dashboard/v13",
             "id": "select-initials",
             "query_parameters": [
                 {
@@ -435,7 +435,7 @@ def test_select_initial_policies_are_shared_by_query_parameters_and_controls():
 def test_non_select_inputs_share_typed_defaults_without_select_reconciliation():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v11",
+            "schema": "dataviz/dashboard/v13",
             "id": "typed-input-defaults",
             "query_parameters": [
                 {
@@ -793,7 +793,7 @@ def test_portable_numbers_and_dates_reject_cross_runtime_ambiguities():
 def test_query_and_control_resolvers_share_strict_contracts():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v11",
+            "schema": "dataviz/dashboard/v13",
             "id": "contract",
             "query_parameters": [{"id": "batch", "type": "single_input", "value_type": "integer", "default": 7}],
             "controls": [
@@ -902,7 +902,7 @@ def test_typed_choice_values_round_trip_to_the_declared_json_value():
 def test_browser_cache_is_tab_local_while_server_cache_can_be_workspace_scoped():
     with pytest.raises(ValidationError, match="Browser Runtime cache supports only"):
         InteractiveTransformDefinition(
-            schema="dataviz/interactive-transform/v3",
+            schema="dataviz/interactive-transform/v4",
             id="browser",
             runtime="browser-js",
             code="transform.js",
@@ -916,7 +916,7 @@ def test_browser_cache_is_tab_local_while_server_cache_can_be_workspace_scoped()
         )
 
     server = InteractiveTransformDefinition(
-        schema="dataviz/interactive-transform/v3",
+        schema="dataviz/interactive-transform/v4",
         id="server",
         runtime="server-python",
         code="transform.py",

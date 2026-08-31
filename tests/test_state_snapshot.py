@@ -13,6 +13,7 @@ from dataviz.workspace import load_workspace
 
 ROOT = Path(__file__).resolve().parents[1]
 MINIMAL = ROOT / "examples" / "minimal-workspace"
+SHOWCASE = ROOT / "examples" / "feature-showcase"
 
 
 def test_state_snapshot_separates_committed_and_draft_values():
@@ -31,7 +32,7 @@ def test_state_snapshot_separates_committed_and_draft_values():
         },
     )
 
-    assert snapshot["schema"] == "dataviz/state-snapshot/v2"
+    assert snapshot["schema"] == "dataviz/state-snapshot/v4"
     parameter = next(
         item for item in snapshot["items"] if item["entry_type"] == "query_parameter"
     )
@@ -56,7 +57,7 @@ def test_default_canvas_embeds_snapshot_and_summary_hosts():
 
     assert dashboard.presentation is not None
     assert dashboard.presentation.state_summary.enabled is False
-    assert '"schema": "dataviz/state-snapshot/v2"' in rendered
+    assert '"schema": "dataviz/state-snapshot/v4"' in rendered
     assert 'data-state-summary-scope="dashboard"' in rendered
     assert 'data-state-summary-scope="section"' in rendered
     assert 'data-state-summary-scope="view"' in rendered
@@ -85,6 +86,18 @@ def test_consumer_revisions_distinguish_effective_and_applied_state():
             },
             "transforms": {},
         },
+        {
+            "views": {
+                "revenue-trend": {
+                    "dashboard:sales-overview/region": {
+                        "intent": "explicit",
+                        "value": ["华南"],
+                        "revision": 2,
+                    }
+                }
+            },
+            "transforms": {},
+        },
     )
 
     trend = evidence["views"]["revenue-trend"]
@@ -98,6 +111,14 @@ def test_consumer_revisions_distinguish_effective_and_applied_state():
                 "stale": True,
             }
         },
+        "applied_control_state": {
+            "dashboard:sales-overview/region": {
+                "intent": "explicit",
+                "value": ["华南"],
+                "revision": 2,
+            }
+        },
+        "applied_writer_provenance": {},
     }
     assert "unknown-view" not in evidence["views"]
     assert evidence["views"]["total-revenue"]["controls"][
@@ -126,6 +147,79 @@ def test_consumer_revision_cannot_be_ahead_of_effective_state():
                 },
                 "transforms": {},
             },
+            {
+                "views": {
+                    "revenue-trend": {
+                        "dashboard:sales-overview/region": {
+                            "intent": "explicit",
+                            "value": ["华东"],
+                            "revision": 4,
+                        }
+                    }
+                },
+                "transforms": {},
+            },
         )
 
     assert raised.value.details["code"] == "consumer_applied_revision_ahead"
+
+
+def test_consumer_revision_seals_valid_writer_provenance():
+    dashboard = load_workspace(SHOWCASE).dashboard("chart-gallery")
+    key = "dashboard:chart-gallery/province"
+    state = {"value": ["广东"], "intent": "explicit", "revision": 1}
+    evidence = normalize_consumer_revisions(
+        dashboard,
+        {key: state},
+        {"views": {"trend": {key: 1}}, "transforms": {}},
+        {"views": {"trend": {key: state}}, "transforms": {}},
+        {
+            "views": {
+                "trend": {
+                    key: {
+                        "revision": 1,
+                        "action_id": "ranking-select-guangdong",
+                        "source_view": "ranking",
+                        "action": "select",
+                    }
+                }
+            },
+            "transforms": {},
+        },
+    )
+
+    assert evidence["views"]["trend"]["applied_writer_provenance"][key] == {
+        "revision": 1,
+        "action_id": "ranking-select-guangdong",
+        "source_view": "ranking",
+        "action": "select",
+    }
+
+
+def test_consumer_revision_rejects_unbound_writer_source_view():
+    dashboard = load_workspace(SHOWCASE).dashboard("chart-gallery")
+    key = "dashboard:chart-gallery/province"
+    state = {"value": ["广东"], "intent": "explicit", "revision": 1}
+
+    with pytest.raises(ValidationFailure) as raised:
+        normalize_consumer_revisions(
+            dashboard,
+            {key: state},
+            {"views": {"trend": {key: 1}}, "transforms": {}},
+            {"views": {"trend": {key: state}}, "transforms": {}},
+            {
+                "views": {
+                    "trend": {
+                        key: {
+                            "revision": 1,
+                            "action_id": "forged",
+                            "source_view": "trend",
+                            "action": "select",
+                        }
+                    }
+                },
+                "transforms": {},
+            },
+        )
+
+    assert raised.value.details["code"] == "control_writer_source_view_invalid"

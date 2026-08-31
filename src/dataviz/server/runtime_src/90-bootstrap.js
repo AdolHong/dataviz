@@ -158,7 +158,6 @@ document.querySelectorAll('[data-control-apply]').forEach(button => {
   button.addEventListener('click', () => window.dataviz.applyControls({
     apply:true,
     keys:JSON.parse(button.dataset.controlKeys || '[]'),
-    manualTargets:JSON.parse(button.dataset.manualTargets || '[]'),
   }).catch(error => {
     console.error('[dataviz:control:apply]', error);
   }));

@@ -9,7 +9,9 @@ from typer.testing import CliRunner
 
 from dataviz.artifacts import ArtifactStore
 from dataviz.cli import app
+from dataviz.errors import ExecutionFailure, ValidationFailure
 from dataviz.execution import Executor
+import dataviz.execution.parameter_domains as parameter_domains
 from dataviz.execution.parameter_domains import (
     ParameterDomainCache,
     resolve_parameter_domains,
@@ -34,7 +36,7 @@ def _workspace(root: Path) -> Path:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v11
+        """schema: dataviz/dashboard/v13
 kind: dashboard
 id: domain-lab
 title: Domain lab
@@ -121,7 +123,18 @@ def test_shared_domain_projects_cascading_choices_and_reconciles_values(tmp_path
     workspace = load_workspace(root)
     dashboard = workspace.dashboard("domain-lab")
     assert validate_workspace(workspace) == []
-    assert dashboard.parameter_domain_contract.as_dict()["order"] == ["province", "city"]
+    contract = dashboard.parameter_domain_contract.as_dict()
+    assert contract["schema"] == "dataviz/parameter-domain-contract/v2"
+    assert contract["order"] == ["province", "city"]
+    assert contract["projection_dependencies"] == {
+        "province": [],
+        "city": ["province"],
+    }
+    assert contract["projection_descendants"] == {
+        "province": ["city"],
+        "city": [],
+    }
+    assert contract["query_domains"] == {"province": [], "city": []}
 
     initial = resolve_parameter_domains(
         workspace,
@@ -136,6 +149,22 @@ def test_shared_domain_projects_cascading_choices_and_reconciles_values(tmp_path
     assert [item["label"] for item in initial.choices["province"]] == ["广东", "湖南"]
     assert [item["value"] for item in initial.choices["city"]] == ["SZ", "GZ"]
     assert list(initial.domains) == ["locations"]
+    payload = initial.as_dict()
+    assert payload["schema"] == "dataviz/parameter-domain-resolution/v2"
+    client_projection = payload["client_projection"]
+    assert client_projection["contract_hash"] == contract["contract_hash"]
+    assert list(client_projection["parameters"]) == ["city"]
+    assert client_projection["capacity"]["rows"] == 3
+    assert client_projection["capacity"]["max_rows"] == 50_000
+    assert client_projection["capacity"]["max_serialized_bytes"] == 8 * 1024 * 1024
+    assert client_projection["parameters"]["city"]["rows"][0] == {
+        "signature": '"SZ"',
+        "choice": {"value": "SZ", "label": "深圳"},
+        "parents": {"province": '"GD"'},
+    }
+    serialized_projection = json.dumps(client_projection, ensure_ascii=False)
+    assert "province_name" not in serialized_projection
+    assert "locations.sql" not in serialized_projection
 
     cascaded = resolve_parameter_domains(
         workspace,
@@ -149,6 +178,104 @@ def test_shared_domain_projects_cascading_choices_and_reconciles_values(tmp_path
     )
     assert cascaded.values == {"province": ["HN"], "city": ["CS"]}
     assert [item["value"] for item in cascaded.choices["city"]] == ["CS"]
+
+
+def test_contract_separates_query_edges_from_local_projection_edges(tmp_path: Path):
+    root = _workspace(tmp_path / "workspace")
+    dashboard_path = root / "dashboards/domain-lab/dashboard.yaml"
+    dashboard_yaml = dashboard_path.read_text(encoding="utf-8")
+    dashboard_path.write_text(
+        dashboard_yaml.replace(
+            "query_parameters:\n",
+            "query_parameters:\n"
+            "  - id: search\n"
+            "    type: single_input\n"
+            "    value_type: text\n"
+            "    default: ''\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    domain_path = root / "dashboards/domain-lab/parameter_domains/locations.yaml"
+    domain_yaml = domain_path.read_text(encoding="utf-8")
+    domain_path.write_text(
+        domain_yaml.replace(
+            "code: locations.sql\n",
+            "code: locations.sql\nquery_inputs:\n  search_term: search\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    dashboard = load_workspace(root).dashboard("domain-lab")
+    contract = dashboard.parameter_domain_contract.as_dict()
+
+    assert contract["projection_descendants"]["province"] == ["city"]
+    assert contract["query_domains"]["search"] == ["locations"]
+    assert contract["domain_input_bindings"] == {
+        "locations": {"search_term": {"parameter": "search"}}
+    }
+    assert contract["dependencies"]["city"] == ["province", "search"]
+
+
+def test_contract_rejects_same_parent_domain_projection_and_query_edge(tmp_path: Path):
+    root = _workspace(tmp_path / "workspace")
+    domain_path = root / "dashboards/domain-lab/parameter_domains/locations.yaml"
+    domain_yaml = domain_path.read_text(encoding="utf-8")
+    domain_path.write_text(
+        domain_yaml.replace(
+            "code: locations.sql\n",
+            "code: locations.sql\nquery_inputs:\n  province_filter: province\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    dashboard = load_workspace(root).dashboard("domain-lab")
+    with pytest.raises(ValidationFailure) as raised:
+        _ = dashboard.parameter_domain_contract
+
+    assert raised.value.details == {
+        "code": "parameter_domain_dependency_mode_conflict",
+        "domain": "locations",
+        "parameter": "city",
+        "parents": ["province"],
+    }
+
+
+@pytest.mark.parametrize(
+    "limit_name",
+    [
+        "PARAMETER_DOMAIN_CLIENT_PROJECTION_MAX_ROWS",
+        "PARAMETER_DOMAIN_CLIENT_PROJECTION_MAX_BYTES",
+    ],
+)
+def test_client_projection_capacity_fails_without_truncation_or_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    limit_name: str,
+):
+    root = _workspace(tmp_path / "workspace")
+    workspace = load_workspace(root)
+    monkeypatch.setattr(parameter_domains, limit_name, 1)
+
+    with pytest.raises(ExecutionFailure) as raised:
+        resolve_parameter_domains(
+            workspace,
+            workspace.dashboard("domain-lab"),
+            {},
+            timezone_name="UTC",
+            initialized_parameters=set(),
+            strict=False,
+        )
+
+    details = raised.value.details
+    assert details["code"] == "parameter_domain_client_projection_limit"
+    assert details["rows"] == 3
+    assert details["serialized_bytes"] > 1
+    assert details["domains"] == ["locations"]
+    assert details["consumers"] == ["city"]
+    assert "query_inputs" in details["suggestions"][0]
 
 
 def test_explicit_empty_selection_survives_domain_refresh(tmp_path: Path):
@@ -235,7 +362,7 @@ def test_static_single_or_multiple_parent_filters_two_fields_from_one_domain(
     root = _workspace(tmp_path / "workspace")
     dashboard_path = root / "dashboards/domain-lab/dashboard.yaml"
     dashboard_path.write_text(
-        f"""schema: dataviz/dashboard/v11
+        f"""schema: dataviz/dashboard/v13
 kind: dashboard
 id: domain-lab
 title: Shared item candidates
@@ -332,13 +459,7 @@ sections:
 def test_executor_accepts_typed_values_without_executing_the_ui_domain(tmp_path: Path):
     root = _workspace(tmp_path / "workspace")
     workspace = load_workspace(root)
-    domain_sql = (
-        root
-        / "dashboards"
-        / "domain-lab"
-        / "parameter_domains"
-        / "locations.sql"
-    )
+    domain_sql = root / "dashboards" / "domain-lab" / "parameter_domains" / "locations.sql"
     domain_sql.write_text("this is deliberately not executable SQL", encoding="utf-8")
 
     result = Executor(workspace).run(
@@ -359,9 +480,7 @@ def test_executor_accepts_typed_values_without_executing_the_ui_domain(tmp_path:
         "province": "all_available",
         "city": "explicit",
     }
-    frame = ArtifactStore(root, result.run_id).read_table(
-        result.outputs["source:metrics/main"]
-    )
+    frame = ArtifactStore(root, result.run_id).read_table(result.outputs["source:metrics/main"])
     assert list(frame.columns[-2:]) == ["province_intent", "city_intent"]
     assert result.nodes["source:metrics"].status == "empty"
 

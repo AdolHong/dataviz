@@ -11,6 +11,7 @@ from dataviz.value_contract import (
     initial_control_value,
     is_empty_control_value,
     normalize_control_value,
+    select_initial_contract,
 )
 
 
@@ -91,12 +92,11 @@ def resolve_query_parameter_intents(
     for parameter_id, definition in registry.items():
         intent = provided_intents.get(parameter_id)
         if intent is None:
-            initial = getattr(definition, "initial", None)
             intent = (
                 "all_available"
                 if parameter_id not in provided_values
                 and definition.type == "multiple_select"
-                and getattr(initial, "mode", None) == "all"
+                and select_initial_contract(definition)["mode"] == "all"
                 else "explicit"
             )
         if intent not in {"all_available", "explicit"}:

@@ -1,4 +1,4 @@
-schema: dataviz/interactive-transform/v3
+schema: dataviz/interactive-transform/v4
 kind: interactive_transform
 id: latest-metrics
 name: 最新季度指标

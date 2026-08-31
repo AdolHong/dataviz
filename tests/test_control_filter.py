@@ -13,6 +13,7 @@ def _filter(
     field: str | None = None,
     path_fields: list[str] | None = None,
     operator: str = "auto",
+    value_type: str = "text",
 ):
     return {
         "id": control_id,
@@ -20,6 +21,7 @@ def _filter(
             "id": control_id,
 
             "type": control_type,
+            "value_type": value_type,
             "field": field,
             "path_fields": path_fields or [],
         },
@@ -92,12 +94,14 @@ def test_control_filters_support_path_date_and_numeric_contracts():
             control_id="day",
             value=["2026-08-21", "2026-08-23"],
             control_type="range_input",
+            value_type="date",
             field="day",
         ),
         _filter(
             control_id="minimum",
             value=25,
             control_type="single_input",
+            value_type="number",
             field="value",
             operator="gte",
         ),

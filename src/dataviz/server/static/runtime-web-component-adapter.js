@@ -1,7 +1,7 @@
 (function installDatavizWebComponentAdapter(global) {
   'use strict';
 
-  const PROTOCOL = 'dataviz/runtime/v6';
+  const PROTOCOL = 'dataviz/runtime/v9';
   const canonical = reference => {
     const raw = String(reference || '').trim();
     if (!raw) throw new Error('Output reference cannot be empty');
@@ -19,6 +19,83 @@
     : [item.consumer_binding?.field].filter(Boolean);
   const canApply = (row, item) => row && typeof row === 'object'
     && fields(item).every(field => Object.prototype.hasOwnProperty.call(row, field));
+  const contractError = (code, message, details = {}) => {
+    const error = new Error(message);
+    error.code = code;
+    error.details = {code, ...details};
+    return error;
+  };
+  const orderedOperators = new Set(['between', 'gte', 'lte', 'gt', 'lt']);
+  const operatorsByType = {
+    text:new Set(['equals', 'in', 'contains']),
+    integer:new Set(['equals', 'in', ...orderedOperators]),
+    number:new Set(['equals', 'in', ...orderedOperators]),
+    date:new Set(['equals', 'in', ...orderedOperators]),
+    boolean:new Set(['equals', 'in']),
+  };
+  const coerce = (value, valueType, role) => {
+    if (value == null) return null;
+    const invalid = () => contractError(
+      'control_filter_value_invalid',
+      `Control filter ${role} cannot be converted to ${valueType}`,
+      {value_type:valueType, role, value},
+    );
+    if (valueType === 'text') return String(value);
+    if (valueType === 'boolean') {
+      if (typeof value === 'boolean') return value;
+      if (typeof value === 'string' && ['true', 'false'].includes(value.trim().toLowerCase())) {
+        return value.trim().toLowerCase() === 'true';
+      }
+      throw invalid();
+    }
+    if (valueType === 'integer' || valueType === 'number') {
+      if (typeof value === 'boolean' || value === '') throw invalid();
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric) || (valueType === 'integer' && !Number.isInteger(numeric))) {
+        throw invalid();
+      }
+      return numeric;
+    }
+    if (valueType === 'date') {
+      if (value instanceof Date && !Number.isNaN(value.getTime())) {
+        return value.toISOString().slice(0, 10);
+      }
+      if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) throw invalid();
+      const normalized = value.trim();
+      const parsed = new Date(`${normalized}T00:00:00Z`);
+      if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== normalized) throw invalid();
+      return normalized;
+    }
+    throw invalid();
+  };
+  const typedMatch = (actual, value, operator, valueType) => {
+    if (!operatorsByType[valueType]?.has(operator)) {
+      throw contractError(
+        'control_filter_operator_incompatible',
+        `Control filter operator ${operator} is not valid for ${valueType}`,
+        {operator, value_type:valueType},
+      );
+    }
+    if (actual == null) return false;
+    const comparable = coerce(actual, valueType, 'field');
+    const bound = item => coerce(item, valueType, 'bound');
+    if (operator === 'in') {
+      return (Array.isArray(value) ? value : [value]).map(bound).some(item => item === comparable);
+    }
+    if (operator === 'between') {
+      const range = Array.isArray(value) ? value : [];
+      const lower = range[0] == null || range[0] === '' ? null : bound(range[0]);
+      const upper = range[1] == null || range[1] === '' ? null : bound(range[1]);
+      return (lower == null || comparable >= lower) && (upper == null || comparable <= upper);
+    }
+    if (operator === 'contains') return comparable.includes(bound(value));
+    const expected = bound(value);
+    if (operator === 'gte') return comparable >= expected;
+    if (operator === 'lte') return comparable <= expected;
+    if (operator === 'gt') return comparable > expected;
+    if (operator === 'lt') return comparable < expected;
+    return comparable === expected;
+  };
   const projectedValue = (item, state) => {
     return structuredClone(state?.value);
   };
@@ -40,18 +117,12 @@
       ? (['multiple_input', 'multiple_select'].includes(item.definition?.type) ? 'in'
         : item.definition?.type === 'range_input' ? 'between' : 'equals')
       : item.consumer_binding?.operator;
-    if (operator === 'in') return (Array.isArray(value) ? value : [value]).map(String).includes(String(actual));
-    if (operator === 'between') {
-      const range = Array.isArray(value) ? value : [];
-      return (!range[0] || String(actual) >= String(range[0]))
-        && (!range[1] || String(actual) <= String(range[1]));
-    }
-    if (operator === 'contains') return String(actual ?? '').includes(String(value ?? ''));
-    if (operator === 'gte') return Number(actual) >= Number(value);
-    if (operator === 'lte') return Number(actual) <= Number(value);
-    if (operator === 'gt') return Number(actual) > Number(value);
-    if (operator === 'lt') return Number(actual) < Number(value);
-    return String(actual ?? '') === String(value ?? '');
+    return typedMatch(
+      actual,
+      value,
+      operator,
+      String(item.definition?.value_type || 'text'),
+    );
   };
 
   class DatavizRuntimeV3Client {

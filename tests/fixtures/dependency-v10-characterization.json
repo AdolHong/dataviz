@@ -1,0 +1,117 @@
+{
+  "schema": "dataviz/dependency-characterization/v1",
+  "cases": {
+    "chart-gallery": {
+      "workspace": "examples/feature-showcase",
+      "dashboard": "chart-gallery",
+      "contract_sha256": "add155dc94cbed32d66aad91a19d85855a8a280518bd36405bf8a07c059884a2",
+      "runtime_manifest_sha256": "cce4c8bd5a9d1d265751f53eca7f0296e324066347a602717322524245776f64",
+      "layout_sha256": "c8433e5bbfcecdd0d6e5c8f3481a7ac7db31dea86d510afd9096c76d92a1de3d",
+      "query_plan": {
+        "targets": ["source:metrics"],
+        "nodes": {
+          "source:metrics": {
+            "kind": "source",
+            "dependencies": [],
+            "inputs": {},
+            "parameter_inputs": {}
+          }
+        }
+      },
+      "interactive_plans": {
+        "latest-metrics": [
+          {
+            "id": "interactive:latest-metrics",
+            "dependencies": [],
+            "inputs": {"metrics": "source:metrics/main"},
+            "query_inputs": {},
+            "control_inputs": {
+              "city_count": {
+                "control": "dashboard:chart-gallery/radar_city_count",
+                "mode": "value",
+                "projection": "value"
+              },
+              "province": {
+                "control": "dashboard:chart-gallery/province",
+                "mode": "filter",
+                "field": "province",
+                "inputs": ["metrics"],
+                "empty": "match_none",
+                "operator": "auto"
+              }
+            }
+          }
+        ]
+      },
+      "catalog_entry_count": 9,
+      "catalog_entries_sha256": "a6e646dda3c871107fcea3cc591fe021f136b3c64bb68f47391a8f64eb40bf9a"
+    },
+    "cascade-explorer": {
+      "workspace": "examples/feature-showcase",
+      "dashboard": "cascade-explorer",
+      "contract_sha256": "cf6ba79fd5ad2a279ce49da695b047db91c3ed49501d602201394da273f83ed1",
+      "runtime_manifest_sha256": "5bfd2ca92664405d8ab59f9aaf4c3b1d5072077ede66d894b45f8e824132e14e",
+      "layout_sha256": "550392e9d89938206e21e37f56558499fe1c63553b66e3039179ee78469805ca",
+      "query_plan": {
+        "targets": ["source:bundled-file", "source:cities", "source:uploaded-file"],
+        "nodes": {
+          "source:cities": {"kind": "source", "dependencies": [], "inputs": {}, "parameter_inputs": {}},
+          "source:uploaded-file": {"kind": "source", "dependencies": [], "inputs": {}, "parameter_inputs": {}},
+          "source:bundled-file": {"kind": "source", "dependencies": [], "inputs": {}, "parameter_inputs": {}}
+        }
+      },
+      "interactive_plans": {}
+    },
+    "progressive": {
+      "workspace": "tests/fixtures/progressive-workspace",
+      "dashboard": "progressive",
+      "contract_sha256": "4aea1499ea31770861d90bed16dd6544bdec0f09046a931666dc372a41a6416c",
+      "runtime_manifest_sha256": "bcd70939c3d5c3ae6c4160e7eb807a86f8502b08c823587e84fe7a1616fd7610",
+      "layout_sha256": "c7355951d7c97a4b7f91bc8396310bbcde785245edab1cf5a83aa836bf12118b",
+      "query_plan": {
+        "targets": ["source:fast", "source:slow"],
+        "nodes": {
+          "source:fast": {"kind": "source", "dependencies": [], "inputs": {}, "parameter_inputs": {}},
+          "source:slow": {"kind": "source", "dependencies": [], "inputs": {}, "parameter_inputs": {}}
+        }
+      },
+      "interactive_plans": {}
+    },
+    "worker-runtime": {
+      "workspace": "tests/fixtures/browser-worker-workspace",
+      "dashboard": "worker-runtime",
+      "contract_sha256": "075de250d7b6b4d7cb0357ec0ba7f7715b08eba3dd63f893becdf290a5247496",
+      "runtime_manifest_sha256": "30efa1c509343ce11bdb4d1271fefd8670f19a0c650c22763b9cbd98b38efcf4",
+      "layout_sha256": "a618bc2ded27a298072e5c0760581e8547b1068eea657b5c0bfd4d5563689ea4",
+      "query_plan": {
+        "targets": ["source:raw"],
+        "nodes": {
+          "source:raw": {"kind": "source", "dependencies": [], "inputs": {}, "parameter_inputs": {}}
+        }
+      },
+      "interactive_plans": {
+        "scaled": [
+          {
+            "id": "interactive:scaled",
+            "dependencies": [],
+            "inputs": {"rows": "source:raw/main"},
+            "query_inputs": {},
+            "control_inputs": {
+              "delay_ms": {
+                "control": "dashboard:worker-runtime/delay_ms",
+                "mode": "value",
+                "projection": "value"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "diagnostics": {
+    "server_after_browser": "server_interactive_depends_on_browser",
+    "control_outside_scope": "interactive_control_out_of_scope",
+    "unknown_query_parameter": "query_parameter_unknown",
+    "control_dependency_cycle": "control_dependency_cycle"
+  }
+}

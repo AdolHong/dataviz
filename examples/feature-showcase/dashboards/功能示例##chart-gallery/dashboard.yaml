@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v11
+schema: dataviz/dashboard/v13
 kind: dashboard
 id: chart-gallery
 title: 多图表陈列室
@@ -48,13 +48,16 @@ views:
         empty: match_none
 
   - id: ranking
-    title: 城市收入排行
+    title: 省份收入排行
     input: source:metrics/main
     template: bar
-    x: city
+    x: province
     y: revenue
     aggregate: sum
     sort: revenue
+    control_binding:
+      control: dashboard.province
+      field: province
     control_inputs: *province_filter
 
   - id: composition
@@ -68,7 +71,7 @@ views:
 
   - id: scatter
     title: Plotly 区间探索
-    description: 使用工具栏矩形或套索选择数据点；双击图表或点击恢复按钮回到默认选择。
+    description: 点击数据点，或使用工具栏矩形、套索选择；双击恢复坐标缩放，恢复按钮则恢复默认 Control 选择。
     input: source:metrics/main
     template: scatter
     x: orders

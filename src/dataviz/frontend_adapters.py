@@ -28,7 +28,7 @@ def frontend_adapter_catalog() -> dict[str, dict[str, Any]]:
             "protocol": RUNTIME_PROTOCOL_SCHEMA,
             "purpose": (
                 "Framework-independent reference client and <dataviz-output> element "
-                "that consume only the public runtime/v4 manifest."
+                f"that consume only the public {RUNTIME_PROTOCOL_SCHEMA} manifest."
             ),
             "dependency": "none",
             "server_url": "/runtime/web-component-adapter.js",

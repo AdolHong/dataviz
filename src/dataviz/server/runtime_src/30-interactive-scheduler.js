@@ -13,7 +13,7 @@ Object.assign(datavizRuntime, {
     this.activeTransforms.forEach(controller => controller.cancel(reason));
     this.activeTransforms.clear();
   },
-  executeBrowserRuntime(id, item, inputValues) {
+  executeBrowserRuntime(id, item, inputValues, options = {}) {
     const requestId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
     const timeoutMs = Math.max(1, Number(item.spec.timeout_seconds || 30) * 1000);
     this.activeTransforms.get(id)?.cancel('Superseded by a newer generation');
@@ -87,7 +87,11 @@ Object.assign(datavizRuntime, {
         worker:true,
       })));
       this.activeTransforms.set(id, controller);
-      const prepared = datavizPrepareControlInputs(this.transformControlInputs(id), inputValues);
+      const prepared = datavizPrepareControlInputs(
+        this.transformControlInputs(id),
+        inputValues,
+        options.controlState,
+      );
       worker.postMessage({
         protocol:DATAVIZ_INTERACTIVE_WORKER_PROTOCOL,
         type:'execute',
@@ -138,7 +142,7 @@ Object.assign(datavizRuntime, {
           session_id:endpoint.session_id,
           transform_id:id,
           generation:options.generation,
-          control_state:datavizControlStateSnapshot(),
+          control_state:structuredClone(options.controlState || {}),
         }),
       });
       if (!started.ok) throw new Error(`Server Compute request failed (${started.status}): ${await started.text()}`);
@@ -198,7 +202,7 @@ Object.assign(datavizRuntime, {
       if (this.activeTransforms.get(id) === controller) this.activeTransforms.delete(id);
     }
   },
-  transformCacheKey(id, item, inputValues) {
+  transformCacheKey(id, item, inputValues, controlState) {
     return JSON.stringify({
       id,
       runtime:item.spec.runtime,
@@ -214,13 +218,13 @@ Object.assign(datavizRuntime, {
       control_state:Object.fromEntries(
         Object.values(this.transformControlInputs(id)).map(binding => [
           binding.control,
-          datavizControlEntry(binding.control),
+          datavizControlEntryFrom(controlState, binding.control),
         ])
       ),
     });
   },
-  async executeTransform(id, item, inputValues, generation) {
-    const key = this.transformCacheKey(id, item, inputValues);
+  async executeTransform(id, item, inputValues, generation, controlState) {
+    const key = this.transformCacheKey(id, item, inputValues, controlState);
     if (item.spec.cache?.mode !== 'none' && this.interactionCache.has(key)) {
       this.metrics.interactiveTransforms.cacheHits += 1;
       return datavizCacheClone(this.interactionCache.get(key));
@@ -232,8 +236,8 @@ Object.assign(datavizRuntime, {
       const adapter = this.interactiveAdapters[item.spec.runtime];
       if (!adapter) throw new Error(`Unsupported Interactive Runtime: ${item.spec.runtime}`);
       adapter.validate(item);
-      const prepared = await adapter.prepare(item, inputValues);
-      const value = await adapter.execute(id, item, prepared, {generation});
+      const prepared = await adapter.prepare(item, inputValues, {controlState});
+      const value = await adapter.execute(id, item, prepared, {generation, controlState});
       if (item.spec.cache?.mode !== 'none') {
         this.interactionCache.set(key, datavizCacheClone(value));
       }
@@ -418,6 +422,15 @@ Object.assign(datavizRuntime, {
             spec.runtime === 'server-python'
             && window.dataviz.interaction?.query_snapshot_available === false
           ) return;
+          const executionControlState = datavizControlStateSnapshot();
+          const capturedControlState = datavizCaptureConsumerControlState(
+            this.transformControlInputs(id),
+            executionControlState,
+          );
+          const capturedWriterProvenance = datavizCaptureConsumerWriterProvenance(
+            this.transformControlInputs(id),
+            capturedControlState,
+          );
           this.markTransformLoading(id);
           const inputValues = Object.fromEntries(
             Object.entries(references).map(([name, reference]) => [name, outputs[reference]])
@@ -439,7 +452,13 @@ Object.assign(datavizRuntime, {
               'interactive_input_kind_mismatch',
             );
           });
-          const bundle = await this.executeTransform(id, item, inputValues, request);
+          const bundle = await this.executeTransform(
+            id,
+            item,
+            inputValues,
+            request,
+            executionControlState,
+          );
           if (this.transformRequests.get(id) !== request) return;
           if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) {
             throw new Error(`Interactive Transform ${id} must return a Named Output object`);
@@ -476,12 +495,11 @@ Object.assign(datavizRuntime, {
             }
           });
           this.transformErrors.delete(id);
-          window.dataviz.applied_revisions ||= {views:{}, transforms:{}};
-          window.dataviz.applied_revisions.transforms[id] = Object.fromEntries(
-            Object.values(this.transformControlInputs(id)).map(binding => [
-              binding.control,
-              Number(datavizControlEntry(binding.control)?.revision || 0),
-            ])
+          datavizCommitConsumerControlState(
+            'transforms',
+            id,
+            capturedControlState,
+            capturedWriterProvenance,
           );
           if (localChanged.size) {
             renderOutputDelta(localChanged);

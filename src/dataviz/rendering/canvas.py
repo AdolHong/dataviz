@@ -249,6 +249,13 @@ class CanvasRenderer:
         session_id: str | None = None,
         control_state: dict[str, dict[str, Any]] | None = None,
         applied_revisions: dict[str, dict[str, dict[str, int]]] | None = None,
+        applied_control_state: (
+            dict[str, dict[str, dict[str, dict[str, Any]]]] | None
+        ) = None,
+        control_writer_provenance: dict[str, dict[str, Any]] | None = None,
+        applied_writer_provenance: (
+            dict[str, dict[str, dict[str, dict[str, Any]]]] | None
+        ) = None,
         derived_outputs: dict[str, Any] | None = None,
         snapshot_interactions: set[str] | None = None,
         frame_id: str | None = None,
@@ -470,6 +477,9 @@ class CanvasRenderer:
             control_state=resolved_control_state,
             draft_control_state=resolved_control_state,
             applied_revisions=applied_revisions,
+            applied_control_state=applied_control_state,
+            control_writer_provenance=control_writer_provenance,
+            applied_writer_provenance=applied_writer_provenance,
         )
         meta = {
             "protocol": {
@@ -484,13 +494,18 @@ class CanvasRenderer:
             "query_parameters": result.query_parameters,
             "query_parameter_intents": result.query_parameter_intents,
             "control_state": resolved_control_state,
-            "applied_control_state": dict(resolved_control_state),
             "control_definitions": {
                 item.key: item.definition.model_dump(mode="json")
                 for item in scoped_control_registry(dashboard.definition).values()
             },
             "draft_control_state": dict(resolved_control_state),
-            "applied_revisions": {"views": {}, "transforms": {}},
+            "applied_revisions": applied_revisions
+            or {"views": {}, "transforms": {}},
+            "consumer_applied_control_state": applied_control_state
+            or {"views": {}, "transforms": {}},
+            "control_writer_provenance": control_writer_provenance or {},
+            "consumer_applied_writer_provenance": applied_writer_provenance
+            or {"views": {}, "transforms": {}},
             "state_snapshot": state_snapshot,
             "state_summary": state_summary,
             "dependency_contract": dependency_contract.runtime_manifest(),
@@ -1607,6 +1622,13 @@ class CanvasRenderer:
         *,
         control_state: dict[str, dict[str, Any]] | None = None,
         applied_revisions: dict[str, dict[str, dict[str, int]]] | None = None,
+        applied_control_state: (
+            dict[str, dict[str, dict[str, dict[str, Any]]]] | None
+        ) = None,
+        control_writer_provenance: dict[str, dict[str, Any]] | None = None,
+        applied_writer_provenance: (
+            dict[str, dict[str, dict[str, dict[str, Any]]]] | None
+        ) = None,
         derived_outputs: dict[str, Any] | None = None,
         snapshot_interactions: set[str] | None = None,
     ) -> Path:
@@ -1635,6 +1657,9 @@ class CanvasRenderer:
                 asset_mode="inline",
                 control_state=resolved_control_state,
                 applied_revisions=applied_revisions,
+                applied_control_state=applied_control_state,
+                control_writer_provenance=control_writer_provenance,
+                applied_writer_provenance=applied_writer_provenance,
                 derived_outputs=derived_outputs,
                 snapshot_interactions=snapshot_interactions,
                 dependency_contract=dependency_contract,
@@ -1654,6 +1679,8 @@ class CanvasRenderer:
                             dashboard,
                             resolved_control_state,
                             applied_revisions,
+                            applied_control_state,
+                            applied_writer_provenance,
                         ),
                     },
                     "derived_outputs": {

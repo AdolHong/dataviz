@@ -53,6 +53,7 @@ Object.assign(datavizRuntime, {
   initializePortable() {
     if (this.initializationPromise) return this.initializationPromise;
     this.initializationPromise = (async () => {
+      const checkpoint = await datavizAwaitControlRestore();
       // Establish the immutable Base Output snapshot before reconciling dynamic
       // Control domains. Hydration may publish Arrow tables, but no View or
       // Interactive branch is allowed to observe a half-initialized Control state.
@@ -62,13 +63,20 @@ Object.assign(datavizRuntime, {
       } finally {
         this.initializing = false;
       }
-      await window.dataviz.applyControls();
+      // Establish initial domains before applying the all-or-nothing checkpoint,
+      // then reconcile descendants once against the restored parent values.
+      refreshControlOptionDomains();
+      if (checkpoint) setControlInputs(checkpoint);
+      await window.dataviz.applyControls({
+        awaitConsumers:false,
+        publishSnapshot:false,
+      });
+      const snapshot = datavizMarkControlReady();
       // Canvas ready is a lifecycle contract, not a script-load notification.
-      // The parent may restore tab-local Controls only after Base Outputs,
-      // dynamic option domains and the first canonical Control snapshot agree.
+      // Consumers may still be loading; readiness means typed actions are safe.
       datavizPostToParent({
         type:'dataviz:canvas-ready',
-        control_state:datavizControlStateSnapshot(),
+        snapshot,
       });
     })();
     return this.initializationPromise;
@@ -85,7 +93,6 @@ Object.assign(datavizRuntime, {
         node.textContent = datavizControlImpactLabel(impact);
       });
     });
-    if (changed) datavizPostToParent({type:'dataviz:control-impact-changed', controls});
     return controls;
   },
 });

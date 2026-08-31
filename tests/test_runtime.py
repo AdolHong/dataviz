@@ -396,7 +396,8 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert "option.selected = !option.selected;" in report
     assert "dv-checkbox-group__toolbar" not in report
     assert "normalizeAll" not in report
-    assert "await datavizRuntime.runTransforms(changed, [], {" in report
+    assert "const transformPromise = datavizRuntime.runTransforms(changed, [], {" in report
+    assert "options.awaitConsumers === false" in report
     assert "changedControlKeys:changed || Object.keys(current)" in report
     assert "if (!relevant && missingOutput && this.activeTransforms.has(id)) return;" in report
     assert "refreshControlOptionDomains();\n  readControlInputs(" in report
@@ -423,7 +424,10 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert "const createPerspective" in report
     assert "const syncPlotlyInteractions =" in report
     assert "plotly_selected" in report
-    assert "plotly_doubleclick" in report
+    # Plotly.js 4 itself contains the event name; Dataviz must not install a
+    # second custom double-click handler on top of the library behavior.
+    assert ".on('plotly_doubleclick'" not in report
+    assert '.on("plotly_doubleclick"' not in report
     assert "state.table.replace(state.latestRows)" in report
 
 

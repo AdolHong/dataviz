@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v11
+schema: dataviz/dashboard/v13
 kind: dashboard
 id: parameter-domain-lab
 title: 动态参数域

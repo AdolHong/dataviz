@@ -7,9 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from dataviz.errors import ValidationFailure
-
-
-TARGET_REFERENCE_SCHEMA = "dataviz/target-reference/v1"
+from dataviz.protocols import TARGET_REFERENCE_SCHEMA
 
 TargetKind = Literal[
     "dashboard",
@@ -26,7 +24,7 @@ class TargetReferenceContract(BaseModel):
 
     model_config = ConfigDict(extra="forbid", populate_by_name=False)
 
-    schema_: Literal["dataviz/target-reference/v1"] = Field(alias="schema")
+    schema_: Literal[TARGET_REFERENCE_SCHEMA] = Field(alias="schema")
     kind: TargetKind
     dashboard: str
     reference: str

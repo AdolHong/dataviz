@@ -96,7 +96,7 @@
     }
   }
 
-  function selectedWorkerInputs(item, inputs, services) {
+  function selectedWorkerInputs(item, inputs, services, options = {}) {
     const transformInputs = global.dataviz.dependency_contract
       ?.interactive?.control_inputs?.[item.spec.id] || {};
     const filters = Object.values(transformInputs)
@@ -104,7 +104,8 @@
       .map(binding => ({
         binding,
         contract:global.dataviz.dependency_contract.controls[binding.control],
-        state:global.dataviz.control.state(binding.control),
+        state:options.controlState?.[binding.control]
+          || global.dataviz.control.state(binding.control),
       }));
     const prepared = Object.fromEntries(
       Object.entries(inputs).map(([name, value]) => [name, services.workerValue(value)])
@@ -163,8 +164,12 @@
         validate:item => {
           if (typeof item.source?.code !== 'string') throw new Error('browser-js code is missing');
         },
-        prepare:async (item, inputs) => selectedWorkerInputs(item, inputs, services),
-        execute:(id, item, inputs) => runtime.executeBrowserRuntime(id, item, inputs),
+        prepare:async (item, inputs, options) => selectedWorkerInputs(
+          item, inputs, services, options,
+        ),
+        execute:(id, item, inputs, options) => runtime.executeBrowserRuntime(
+          id, item, inputs, options,
+        ),
         cancel,
         dispose:() => {},
       },
@@ -195,14 +200,14 @@
   }
 
   root.dataPipeline = {
-    protocol:'dataviz/runtime/v6',
+    protocol:'dataviz/runtime/v9',
     createInteractiveAdapters,
     createDataApi,
     selectedWorkerInputs,
   };
   root.descriptors = root.descriptors || new Map();
   root.descriptors.set('data.pipeline', {
-    protocol:'dataviz/runtime/v6',
+    protocol:'dataviz/runtime/v9',
     owns:['interactive-adapters', 'data-frame'],
   });
 })(window);

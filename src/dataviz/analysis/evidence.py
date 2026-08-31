@@ -20,10 +20,13 @@ from dataviz.analysis.contracts import (
     AssertionPromotionProposal,
     NewOutputPromotionProposal,
     SemanticsPromotionProposal,
+    validate_analysis_evidence_producer,
+    validate_analysis_promotion_producer,
     validate_analysis_result,
 )
 from dataviz.errors import ValidationFailure
 from dataviz.filesystem import atomic_write_text
+from dataviz.protocols import ANALYSIS_EVIDENCE_SCHEMA
 from dataviz.semantic_validation import validate_workspace_semantics
 from dataviz.workspace import load_workspace, validate_workspace
 
@@ -90,30 +93,42 @@ def create_analysis_evidence(
                     "source_truncated": bool(output.get("truncated")),
                 }
             )
-    evidence = AnalysisEvidence(
-        schema="dataviz/analysis-evidence/v1",
-        evidence_id=evidence_id,
-        created_at=datetime.now(timezone.utc).isoformat(),
-        status=status,
-        question=question.strip(),
-        conclusions=[value.strip() for value in conclusions if value.strip()],
-        assertions=[value.strip() for value in (assertions or []) if value.strip()],
-        result_hash=result_hash,
-        result_source=result_source,
-        generated_by=generated_by.strip(),
-        reviewer=reviewer.strip(),
-        target=validated.get("target") or {},
-        outputs=output_evidence,
-        lineage=validated.get("lineage", {}),
-        consumer_revisions=validated.get(
-            "consumer_revisions", {"views": {}, "transforms": {}}
-        ),
-        snapshot=snapshots,
+    evidence = AnalysisEvidence.model_validate(
+        validate_analysis_evidence_producer(
+            {
+                "schema": ANALYSIS_EVIDENCE_SCHEMA,
+                "evidence_id": evidence_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "status": status,
+                "question": question.strip(),
+                "conclusions": [
+                    value.strip() for value in conclusions if value.strip()
+                ],
+                "assertions": [
+                    value.strip() for value in (assertions or []) if value.strip()
+                ],
+                "result_hash": result_hash,
+                "result_source": result_source,
+                "generated_by": generated_by.strip(),
+                "reviewer": reviewer.strip(),
+                "target": validated.get("target") or {},
+                "outputs": output_evidence,
+                "lineage": validated.get("lineage", {}),
+                "consumer_revisions": validated.get(
+                    "consumer_revisions", {"views": {}, "transforms": {}}
+                ),
+                "snapshot": snapshots,
+            }
+        )
     )
     destination = root / ".dataviz" / "analysis-evidence" / f"{evidence_id}.json"
     atomic_write_text(
         destination,
-        json.dumps(evidence.model_dump(mode="json", by_alias=True), ensure_ascii=False, indent=2)
+        json.dumps(
+            evidence.model_dump(mode="json", by_alias=True, exclude_none=True),
+            ensure_ascii=False,
+            indent=2,
+        )
         + "\n",
     )
     return evidence, destination
@@ -414,12 +429,16 @@ def build_promotion_preview(
             valid = not any(item.get("level") == "error" for item in diagnostics)
     finally:
         temporary.cleanup()
-    return AnalysisPromotion(
-        schema="dataviz/analysis-promotion/v1",
-        status="ready" if valid else "invalid",
-        kind=kind,
-        evidence_id=evidence.evidence_id,
-        operations=operations,
-        diagnostics=diagnostics,
-        workspace_valid=valid,
+    return AnalysisPromotion.model_validate(
+        validate_analysis_promotion_producer(
+            {
+                "schema": "dataviz/analysis-promotion/v1",
+                "status": "ready" if valid else "invalid",
+                "kind": kind,
+                "evidence_id": evidence.evidence_id,
+                "operations": operations,
+                "diagnostics": diagnostics,
+                "workspace_valid": valid,
+            }
+        )
     )

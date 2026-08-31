@@ -76,7 +76,7 @@ outputs:
         dashboard = root / "dashboards" / dashboard_id
         (dashboard / "sources").mkdir(parents=True)
         (dashboard / "dashboard.yaml").write_text(
-            f"""schema: dataviz/dashboard/v11
+            f"""schema: dataviz/dashboard/v13
 kind: dashboard
 id: {dashboard_id}
 title: {dashboard_id}

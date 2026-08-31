@@ -258,7 +258,7 @@ def test_run_cli_reads_an_explicit_named_source_output():
     assert result.exit_code == 0, result.stdout
     payload = json.loads(result.stdout)
     assert payload["target"]["reference"] == "sales-overview::source:sales/main"
-    assert payload["schema"] == "dataviz/analysis-result/v1"
+    assert payload["schema"] == "dataviz/analysis-result/v3"
     assert len(payload["outputs"][0]["preview"]) == 1
     assert payload["outputs"][0]["truncated"] is True
     assert payload["result_id"].startswith("result_")
@@ -272,7 +272,7 @@ def test_run_cli_reads_an_explicit_named_source_output():
     )
     assert debug.exit_code == 0, debug.stdout
     debug_payload = json.loads(debug.stdout)
-    assert debug_payload["schema"] == "dataviz/analysis-result/v1"
+    assert debug_payload["schema"] == "dataviz/analysis-result/v3"
     assert debug_payload["outputs"][0]["kind"] == "table"
     assert debug_payload["nodes"]["source:sales"]["diagnostics"]
 
@@ -916,7 +916,7 @@ def test_removed_schema_fields_are_rejected(removed_fragment):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v11",
+                "schema": "dataviz/dashboard/v13",
                 "kind": "dashboard",
                 "id": "strict",
                 **removed_fragment,
@@ -930,7 +930,7 @@ def test_interactive_transform_rejects_old_unscoped_input_maps(removed_field):
     with pytest.raises(ValidationError) as failure:
         InteractiveTransformDefinition.model_validate(
             {
-                "schema": "dataviz/interactive-transform/v3",
+                "schema": "dataviz/interactive-transform/v4",
                 "kind": "interactive_transform",
                 "id": "strict",
                 "runtime": "browser-js",
@@ -977,7 +977,7 @@ def test_layout_and_view_bounds_are_enforced(fragment, location):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v11",
+                "schema": "dataviz/dashboard/v13",
                 "kind": "dashboard",
                 "id": "strict",
                 **fragment,
@@ -1021,8 +1021,8 @@ def test_default_renderer_builds_templates_and_portable_report(tmp_path: Path):
     assert "Optional presentation-only polish" in report
     assert "min-height:420px" in report
     assert "global.dataviz?.view_specs" in report
-    assert '"schema": "dataviz/runtime/v6"' in report
-    assert '"schema": "dataviz/dependency-contract/v7"' in report
+    assert '"schema": "dataviz/runtime/v9"' in report
+    assert '"schema": "dataviz/dependency-contract/v10"' in report
     assert 'data-view-pipeline-node="source:sales"' in report
     assert 'data-view-renderer-signal data-status="not_run" hidden' in report
     assert 'class="dv-view-type-label">plotly</small>' in report

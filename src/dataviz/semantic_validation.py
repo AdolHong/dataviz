@@ -88,8 +88,7 @@ def validate_dashboard_semantics(dashboard: LoadedDashboard) -> list[Diagnostic]
         consumers = set(control.affected_views) | set(control.transform_consumers)
         consumers.update(control.content_fields)
         consumers.update(control.dependency_descendants)
-        if control.writer_view:
-            consumers.add(control.writer_view)
+        consumers.update(edge.view_id for edge in control.writer_edges)
         if consumers:
             continue
         diagnostics.append(

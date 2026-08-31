@@ -1,0 +1,59 @@
+{
+  "family": "input-binding",
+  "cases": [
+    {
+      "id": "canonical-binding-keeps-projection",
+      "operation": "canonicalize",
+      "input": {"binding": {"parameter": "items", "projection": "intent"}},
+      "expected": {"parameter": "items", "projection": "intent"}
+    },
+    {
+      "id": "signature-keeps-projection",
+      "operation": "signature",
+      "input": {"inputs": {"present": {"parameter": "items", "projection": "present"}, "value": "items"}},
+      "expected": "{\"present\":{\"parameter\":\"items\",\"projection\":\"present\"},\"value\":{\"parameter\":\"items\"}}"
+    },
+    {
+      "id": "value",
+      "operation": "project",
+      "input": {"binding": {"parameter": "amount"}, "value": 0, "intent": "explicit"},
+      "expected": 0
+    },
+    {
+      "id": "present-zero",
+      "operation": "project",
+      "input": {"binding": {"parameter": "amount", "projection": "present"}, "value": 0, "intent": "explicit"},
+      "expected": true
+    },
+    {
+      "id": "present-false",
+      "operation": "project",
+      "input": {"binding": {"parameter": "enabled", "projection": "present"}, "value": false, "intent": "explicit"},
+      "expected": true
+    },
+    {
+      "id": "present-empty-list",
+      "operation": "project",
+      "input": {"binding": {"parameter": "items", "projection": "present"}, "value": [], "intent": "explicit"},
+      "expected": false
+    },
+    {
+      "id": "intent-all",
+      "operation": "project",
+      "input": {"binding": {"parameter": "items", "projection": "intent"}, "value": ["a", "b"], "intent": "all_available"},
+      "expected": "all_available"
+    },
+    {
+      "id": "range-start",
+      "operation": "project",
+      "input": {"binding": {"parameter": "window", "part": "start"}, "value": ["2026-01-01", "2026-01-31"], "intent": "explicit"},
+      "expected": "2026-01-01"
+    },
+    {
+      "id": "range-part-invalid",
+      "operation": "project",
+      "input": {"binding": {"parameter": "window", "part": "end"}, "value": "2026-01-01", "intent": "explicit"},
+      "expected_error_code": "query_input_projection_failed"
+    }
+  ]
+}

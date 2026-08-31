@@ -721,7 +721,9 @@ def test_server_run_and_canvas():
                     "intent": "explicit",
                     "value": ["East"],
                     "revision": 1,
-                }
+                },
+                "section:pulse/min_revenue": {"value": 0, "revision": 0},
+                "view:detail/min_orders": {"value": 0, "revision": 0},
             },
         },
     )
@@ -810,6 +812,17 @@ def test_shared_result_is_persisted_outside_dashboards_and_survives_restart(
                         "scaled": {"dashboard:worker-runtime/delay_ms": 0}
                     },
                 },
+                "applied_control_state": {
+                    "views": {},
+                    "transforms": {
+                        "scaled": {
+                            "dashboard:worker-runtime/delay_ms": {
+                                "value": 5,
+                                "revision": 0,
+                            }
+                        }
+                    },
+                },
                 "snapshot_outputs": {},
             },
         )
@@ -839,6 +852,13 @@ def test_shared_result_is_persisted_outside_dashboards_and_survives_restart(
                 "stale": False,
             }
         },
+        "applied_control_state": {
+            "dashboard:worker-runtime/delay_ms": {
+                "value": 5,
+                "revision": 0,
+            }
+        },
+        "applied_writer_provenance": {},
     }
     sealed = json.loads(
         (
@@ -942,6 +962,20 @@ def test_shared_result_adds_server_python_interaction_but_html_export_rejects_it
             },
             "snapshot_outputs": {},
         }
+        noncanonical_report = client.post(
+            "/api/dashboards/worker-runtime/report",
+            json={
+                **report_request,
+                "control_state": {
+                    "dashboard:worker-runtime/delay_ms": {"value": 5}
+                },
+            },
+        )
+        assert noncanonical_report.status_code == 422
+        assert (
+            noncanonical_report.json()["detail"]["details"]["code"]
+            == "control_state_not_canonical"
+        )
         exported = client.post(
             "/api/dashboards/worker-runtime/report", json=report_request
         )
@@ -967,6 +1001,22 @@ def test_shared_result_adds_server_python_interaction_but_html_export_rejects_it
         assert run_match and session_match
         restored_run_id = run_match.group(1)
         shared_session = session_match.group(1)
+        noncanonical = restarted.post(
+            f"/api/runs/{restored_run_id}/interactions",
+            json={
+                "session_id": shared_session,
+                "transform_id": "scaled",
+                "generation": 1,
+                "control_state": {
+                    "dashboard:worker-runtime/delay_ms": {"value": 6}
+                },
+            },
+        )
+        assert noncanonical.status_code == 422
+        assert (
+            noncanonical.json()["detail"]["details"]["code"]
+            == "control_state_not_canonical"
+        )
         started = restarted.post(
             f"/api/runs/{restored_run_id}/interactions",
             json={
@@ -1101,7 +1151,12 @@ def test_server_app_controls_are_browser_only():
     query_block = script[script.index("async function runDashboard"):script.index("function listen")]
     assert "session_id: state.sessionId" in query_block
     assert "selections()" not in query_block
-    assert "dataviz:set-controls" in script
+    assert "dataviz:control-action" in script
+    assert "dataviz:control-apply" in script
+    assert "dataviz:control-hello" in script
+    assert "dataviz:restore-checkpoint" in script
+    assert "dataviz:control-snapshot" in script
+    assert "dataviz:set-controls" not in script
     assert "dashboardStates: new Map()" in script
     assert "BroadcastChannel" in script
     assert "dataviz:canvas-interaction" in script
@@ -1110,10 +1165,10 @@ def test_server_app_controls_are_browser_only():
     assert "sameCanvasIdentity(event.data, identity)" in script
     assert "frame_id=" in script
     assert "closeHeaderPopovers();" in script
-    assert "filter(([key]) => validKeys.has(key))" in script
-    assert "const incoming = {...(event.data.control_state || {})};" in script
-    assert "Number(local[key].revision || 0) > Number(incoming[key]?.revision || 0)" in script
-    assert "state.controlState = incoming;" in script
+    assert "controlCheckpoint: null" in script
+    assert "base_control_version:runtime.controlVersion" in script
+    assert "controlStateFromValue" not in script
+    assert "Number(local[key].revision || 0)" not in script
     assert "state.canvasSelections" not in script
     assert "/static/app.js?v=" in template
     select_block = script[script.index("function selectDashboard"):script.index("function queryParameters")]
@@ -1154,7 +1209,7 @@ def test_query_parameters_are_an_inline_query_card_toggled_by_the_header_run_con
     assert "setQueryParametersOpen(true, {persist: true})" in script
     assert "Escape" not in script[
         script.index("function setQueryParametersOpen"):
-        script.index("function dashboardControlState")
+        script.index("function dashboardControl(")
     ]
 
 
@@ -1591,7 +1646,7 @@ def test_fast_dag_branch_publishes_output_before_slow_branch_finishes(
         encoding="utf-8",
     )
     (dashboard_root / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v11
+        """schema: dataviz/dashboard/v13
 kind: dashboard
 id: progressive
 title: Progressive branches
@@ -1636,7 +1691,7 @@ def transform(context):
         encoding="utf-8",
     )
     (dashboard_root / "transforms" / "fast-summary.yaml").write_text(
-        """schema: dataviz/interactive-transform/v3
+        """schema: dataviz/interactive-transform/v4
 kind: interactive_transform
 id: fast-summary
 runtime: server-python
@@ -1998,7 +2053,7 @@ def test_query_cancel_is_tab_scoped_and_same_dashboard_run_supersedes(tmp_path: 
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v11
+        """schema: dataviz/dashboard/v13
 kind: dashboard
 id: slow
 title: Slow

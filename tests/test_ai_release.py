@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 
 from dataviz.cli import _require_remote_bind_opt_in, app
 from dataviz.frontend_adapters import frontend_adapter_catalog, frontend_adapter_source
+from dataviz.protocols import CURRENT_PROTOCOL_SCHEMAS
 from dataviz.schema_docs import CURRENT_SCHEMAS, schema_catalog, schema_model_contract
 from dataviz.workspace import load_workspace
 from dataviz.workspace.models import (
@@ -78,7 +79,9 @@ def test_plotly_is_a_direct_browser_asset_not_a_python_dependency():
     assert not any(requirement.lower().startswith("plotly") for requirement in dependencies)
     result = CliRunner().invoke(app, ["version", "--format", "json"])
     assert result.exit_code == 0, result.output
-    assert json.loads(result.output)["plotly_js"] == "4.0.0"
+    payload = json.loads(result.output)
+    assert payload["plotly_js"] == "4.0.0"
+    assert payload["protocols"] == CURRENT_PROTOCOL_SCHEMAS
 
 
 def _init_workspace(path: Path) -> Path:
@@ -124,7 +127,7 @@ def test_generated_schema_cli_uses_strict_installed_models():
 
 def test_dsl_schema_versions_are_literals_not_descriptive_strings():
     assert DashboardDefinition.model_validate(
-        {"schema": "dataviz/dashboard/v11", "kind": "dashboard", "id": "current"}
+        {"schema": "dataviz/dashboard/v13", "kind": "dashboard", "id": "current"}
     ).id == "current"
     with pytest.raises(ValidationError):
         DashboardDefinition.model_validate(
@@ -156,7 +159,7 @@ def test_machine_identifiers_are_portable_and_unambiguous(identifier: str):
     with pytest.raises(ValidationError):
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v11",
+                "schema": "dataviz/dashboard/v13",
                 "kind": "dashboard",
                 "id": identifier,
             }
@@ -178,7 +181,7 @@ def test_old_dashboard_is_rejected_and_no_migration_command_is_exposed(tmp_path:
     entry = next(item for item in workspace.catalog if item.id == "hello")
     assert entry.status == "invalid"
     assert any(
-        "dataviz/dashboard/v11" in str(item.details)
+        "dataviz/dashboard/v13" in str(item.details)
         for item in workspace.load_diagnostics
         if item.code == "dashboard_invalid"
     )
@@ -324,7 +327,7 @@ def test_reference_frontend_adapter_is_exportable_and_has_no_canvas_runtime_depe
         app, ["frontend-adapters", "web-component", "--output", str(output)]
     )
 
-    assert catalog["web-component"]["protocol"] == "dataviz/runtime/v6"
+    assert catalog["web-component"]["protocol"] == "dataviz/runtime/v9"
     assert catalog["web-component"]["dependency"] == "none"
     assert "DatavizRuntimeV3Client" in source
     assert "datavizRuntime." not in source

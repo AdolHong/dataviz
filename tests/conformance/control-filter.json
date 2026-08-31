@@ -1,0 +1,113 @@
+{
+  "family": "control-filter",
+  "cases": [
+    {
+      "id": "between-zero-bound",
+      "operation": "filter",
+      "input": {"value_type": "integer", "operator": "between", "value": [0, 8], "rows": [-1, 0, 5, 9]},
+      "expected": [0, 5]
+    },
+    {
+      "id": "numeric-order-is-not-lexical",
+      "operation": "filter",
+      "input": {"value_type": "number", "operator": "between", "value": [2, 10], "rows": [1, 2, 9, 10, 11]},
+      "expected": [2, 9, 10]
+    },
+    {
+      "id": "negative-number-between",
+      "operation": "filter",
+      "input": {"value_type": "number", "operator": "between", "value": [-10, -2], "rows": [-11, -10, -5, -2, 0]},
+      "expected": [-10, -5, -2]
+    },
+    {
+      "id": "date-between-open-end",
+      "operation": "filter",
+      "input": {"value_type": "date", "operator": "between", "value": ["2026-01-02", null], "rows": ["2026-01-01", "2026-01-02", "2026-02-01", null]},
+      "expected": ["2026-01-02", "2026-02-01"]
+    },
+    {
+      "id": "text-contains",
+      "operation": "filter",
+      "input": {"value_type": "text", "operator": "contains", "value": "深", "rows": ["深圳", "广州", null]},
+      "expected": ["深圳"]
+    },
+    {
+      "id": "text-equals",
+      "operation": "filter",
+      "input": {"value_type": "text", "operator": "equals", "value": "深圳", "rows": ["深圳", "广州", null]},
+      "expected": ["深圳"]
+    },
+    {
+      "id": "auto-multiple-is-in",
+      "operation": "filter",
+      "input": {"value_type": "integer", "control_type": "multiple_select", "operator": "auto", "value": [2, 10], "rows": [1, 2, 10]},
+      "expected": [2, 10]
+    },
+    {
+      "id": "numeric-lte",
+      "operation": "filter",
+      "input": {"value_type": "number", "operator": "lte", "value": 2, "rows": [1, 2, 3]},
+      "expected": [1, 2]
+    },
+    {
+      "id": "numeric-gt",
+      "operation": "filter",
+      "input": {"value_type": "integer", "operator": "gt", "value": 2, "rows": [1, 2, 3]},
+      "expected": [3]
+    },
+    {
+      "id": "date-lt",
+      "operation": "filter",
+      "input": {"value_type": "date", "operator": "lt", "value": "2026-02-01", "rows": ["2026-01-31", "2026-02-01"]},
+      "expected": ["2026-01-31"]
+    },
+    {
+      "id": "boolean-in",
+      "operation": "filter",
+      "input": {"value_type": "boolean", "operator": "in", "value": [false], "rows": [true, false, "false", null]},
+      "expected": [false, "false"]
+    },
+    {
+      "id": "text-ordering-rejected",
+      "operation": "filter",
+      "input": {"value_type": "text", "operator": "gte", "value": "b", "rows": ["a", "b"]},
+      "expected_error_code": "control_filter_operator_incompatible"
+    },
+    {
+      "id": "boolean-ordering-rejected",
+      "operation": "filter",
+      "input": {"value_type": "boolean", "operator": "between", "value": [false, true], "rows": [false, true]},
+      "expected_error_code": "control_filter_operator_incompatible"
+    },
+    {
+      "id": "invalid-number-field",
+      "operation": "filter",
+      "input": {"value_type": "number", "operator": "gte", "value": 2, "rows": [1, "oops"]},
+      "expected_error_code": "control_filter_value_invalid"
+    },
+    {
+      "id": "invalid-date-bound",
+      "operation": "filter",
+      "input": {"value_type": "date", "operator": "gte", "value": "2026-02-31", "rows": ["2026-02-01"]},
+      "expected_error_code": "control_filter_value_invalid"
+    },
+    {
+      "id": "empty-match-none",
+      "operation": "filter",
+      "input": {"value_type": "text", "operator": "equals", "empty": "match_none", "value": "", "rows": ["", "a"]},
+      "expected": []
+    },
+    {
+      "id": "empty-passthrough",
+      "operation": "filter",
+      "input": {"value_type": "text", "operator": "equals", "empty": "passthrough", "value": [], "rows": ["a", "b"]},
+      "expected": ["a", "b"]
+    },
+    {
+      "id": "path-fields",
+      "operation": "path_filter",
+      "input": {"value": [["south", "sz"]], "rows": [["south", "sz"], ["south", "gz"], ["north", "bj"]]},
+      "expected": [["south", "sz"]]
+    }
+  ]
+}

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from functools import partial
 import base64
 import hashlib
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import threading
@@ -18,10 +18,14 @@ from dataviz.errors import ExecutionFailure
 from dataviz.execution import InteractionExecutor
 from dataviz.rendering import CanvasRenderer
 from dataviz.state_snapshot import (
+    applied_control_state_for_consumers,
     applied_revisions_for_consumers,
+    merge_applied_control_state,
     merge_applied_revisions,
+    merge_applied_writer_provenance,
     normalize_consumer_revisions,
 )
+from dataviz.value_contract import json_value_signature
 from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace
 from dataviz.workspace.models import (
     CanvasDefinition,
@@ -155,7 +159,7 @@ def _local_report_server(directory: Path):
         server.server_close()
 
 
-def run_browser_outputs(
+def _run_browser_outputs_sync(
     workspace: LoadedWorkspace,
     dashboard: LoadedDashboard,
     run_result,
@@ -384,7 +388,7 @@ def run_browser_outputs(
         else:
             value = item["value"]
         content_hash = hashlib.sha256(
-            json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+            json_value_signature(value).encode("utf-8")
         ).hexdigest()
         outputs.append(
             {
@@ -405,6 +409,17 @@ def run_browser_outputs(
             transform_ids=set(server_interaction_ids),
         ),
     )
+    applied_control_state = merge_applied_control_state(
+        state_snapshot.get("applied_control_state", {}),
+        applied_control_state_for_consumers(
+            dashboard,
+            control_state,
+            transform_ids=set(server_interaction_ids),
+        ),
+    )
+    applied_writer_provenance = merge_applied_writer_provenance(
+        state_snapshot.get("applied_writer_provenance", {})
+    )
     return {
         "outputs": outputs,
         "duration_ms": round(report_ms + browser_ms, 2),
@@ -421,9 +436,52 @@ def run_browser_outputs(
         "console_errors": console_errors,
         "server_interactions": server_interaction_ids,
         "applied_revisions": applied_revisions,
+        "applied_control_state": applied_control_state,
+        "applied_writer_provenance": applied_writer_provenance,
         "consumer_revisions": normalize_consumer_revisions(
             dashboard,
             control_state,
             applied_revisions,
+            applied_control_state,
+            applied_writer_provenance,
         ),
     }
+
+
+def run_browser_outputs(
+    workspace: LoadedWorkspace,
+    dashboard: LoadedDashboard,
+    run_result,
+    *,
+    targets: list[tuple[str, str]],
+    control_state: dict[str, dict[str, Any]],
+    refresh: bool,
+    allow_network: bool,
+    timeout_seconds: float,
+    cache_salt: str | None = None,
+) -> dict[str, Any]:
+    """Run the synchronous Playwright session outside any caller event loop.
+
+    ``run_analysis`` is deliberately a synchronous application boundary, but it
+    can be reused by async hosts and by processes that already own a Playwright
+    loop. Playwright's Sync API rejects those callers when entered on the same
+    thread, so the browser session has one explicit thread boundary here.
+    """
+
+    with ThreadPoolExecutor(
+        max_workers=1,
+        thread_name_prefix="dataviz-browser-analysis",
+    ) as executor:
+        future = executor.submit(
+            _run_browser_outputs_sync,
+            workspace,
+            dashboard,
+            run_result,
+            targets=targets,
+            control_state=control_state,
+            refresh=refresh,
+            allow_network=allow_network,
+            timeout_seconds=timeout_seconds,
+            cache_salt=cache_salt,
+        )
+        return future.result()

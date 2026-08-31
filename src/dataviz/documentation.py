@@ -2,6 +2,18 @@ from __future__ import annotations
 
 from typing import Any
 
+from dataviz.protocols import (
+    CURRENT_PROTOCOL_SCHEMAS,
+    DASHBOARD_SCHEMA,
+    DATASET_TRANSFORM_SCHEMA,
+    DEPENDENCY_CONTRACT_SCHEMA,
+    INTERACTIVE_TRANSFORM_SCHEMA,
+    LAYOUT_CONTRACT_SCHEMA,
+    RUNTIME_PROTOCOL_SCHEMA,
+    STATE_SNAPSHOT_SCHEMA,
+    TARGET_REFERENCE_SCHEMA,
+    WORKSPACE_CHANGE_SCHEMA,
+)
 from dataviz.view_contracts import VIEW_TEMPLATE_CONTRACTS
 
 
@@ -175,7 +187,7 @@ views:
   - {id: scaled, title: Scaled values, template: table, input: interactive:scale/main}
 
 # transforms/scale.yaml
-schema: dataviz/interactive-transform/v3
+schema: dataviz/interactive-transform/v4
 id: scale
 runtime: browser-js
 code: scale.js
@@ -633,7 +645,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
     },
     "target-references": {
         "summary": "Target Reference v1 是 Catalog、run、Result 和 Evidence 共用的可读物理坐标。",
-        "schema": "dataviz/target-reference/v1",
+        "schema": TARGET_REFERENCE_SCHEMA,
         "grammar": [
             "<dashboard-id>",
             "<dashboard-id>::source:<source-id>",
@@ -742,7 +754,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
         },
         "execution": {
             "compiled_contract": (
-                "每个 Dashboard load snapshot 以并发安全方式只编译并缓存一份 dataviz/dependency-contract/v7；"
+                f"每个 Dashboard load snapshot 以并发安全方式只编译并缓存一份 {DEPENDENCY_CONTRACT_SCHEMA}；"
                 "Query planner、Interactive executor、Canvas、Server API 与浏览器 Runtime 都消费同一个对象。"
             ),
             "query_dag": "Source 与 Dataset Transform；完成的独立分支立即发布 Base Output。",
@@ -767,7 +779,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "dataviz inspect dependencies <workspace> <dashboard-id>",
             "dataviz inspect dependencies <workspace> <dashboard-id> --format json",
         ],
-        "schema": "dataviz/dependency-contract/v7",
+        "schema": DEPENDENCY_CONTRACT_SCHEMA,
         "graphs": {
             "query": (
                 "Query Parameter → Source/Dataset Transform → immutable Base Named Output；"
@@ -837,7 +849,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "dataviz serve <workspace> --port 8080",
             "dataviz serve <workspace> --port 8080 --no-watch",
         ],
-        "event_schema": "dataviz/workspace-change/v1",
+        "event_schema": WORKSPACE_CHANGE_SCHEMA,
         "impact_matrix": {
             "navigation": "Dashboard 目录新增、移除、改名；只更新导航。",
             "canvas": "内容、View、Presentation、CSS/JS；重载 Canvas 并保留 Run/Controls/滚动。",
@@ -857,9 +869,9 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
     },
     "dashboard": {
         "summary": "dashboard.yaml 是分析逻辑；presentation.yaml 是可删除的视觉覆盖。",
-        "schema": "dataviz/dashboard/v11",
+        "schema": DASHBOARD_SCHEMA,
         "state_summary": {
-            "schema": "dataviz/state-snapshot/v2",
+            "schema": STATE_SNAPSHOT_SCHEMA,
             "behavior": "Runtime 始终维护已提交 Query、Control current/applied state 与各 consumer 的 applied revision；State Snapshot 按编译契约规范化 effective/applied/stale，Result 与 Evidence 继承该审计证据，但默认不把它机械复述到画布。",
             "presentation": "仅在确有分析价值时设置 presentation.state_summary.enabled: true；items 可按 canonical Control key 调整 label/order/hidden/formatter，且不允许改写状态值。",
         },
@@ -868,7 +880,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "id": "CLI、DAG、API 与 Presentation 使用的稳定程序身份。",
             "title": "页面内容，可与文件夹名不同；为空时回退到文件夹末级名称。",
         },
-        "minimal_example": """schema: dataviz/dashboard/v11
+        "minimal_example": """schema: dataviz/dashboard/v13
 kind: dashboard
 id: sales-overview
 title: 销售概览
@@ -907,7 +919,7 @@ sections:
     },
     "layout-contract": {
         "summary": "Dashboard owns page structure; the compiler emits the only deterministic Layout Contract consumed by every renderer.",
-        "schema": "dataviz/layout-contract/v1",
+        "schema": LAYOUT_CONTRACT_SCHEMA,
         "example": """layout: {template: overview, columns: 12, gap: 18}
 views:
   - {id: trend, template: line, input: source:sales/main, x: day, y: revenue, span: 8}
@@ -952,15 +964,15 @@ query_parameters:
 """,
             "rules": [
                 "Parameter Domain 只在正式 Query 前解析候选，不产生 Named Output、Result 或 Catalog 条目。",
-                "Server 执行 Domain SQL；外层 Query Panel Shell 只填充候选、级联和协调草稿，不进入 Canvas/browser-js Interactive Runtime。",
+                "Server 执行 Domain SQL 并返回有界 snapshot；外层 Query Panel Shell 对 options.depends_on 只做同 snapshot 本地投影，只有 Domain query_inputs 的有效值变化才请求新 snapshot，不进入 Canvas/browser-js Interactive Runtime。",
                 "AI 可按需运行 dataviz parameters options，把原始多列 Domain 表封存为 options_id；终端默认预览 10 行、显式上限 100 行，后续 parameters filter 从快照筛选、选列和分页，不重跑 SQL。",
                 "dataviz run 不执行 Domain，也不把候选表当作成员白名单；options_id 不是 Result。",
                 "父参数可以是 static 单选或多选；同一有界 Domain 表可投影 province、city 等多个候选池，每个 value_field 都按 canonical value 自动去重；不需要级联的投影不要声明 depends_on。",
-                "Parameter Domain 的候选池必须有界并适合一次完整加载；候选值过多说明参数抽象不合适，应缩小业务层级，或让已知 ID 使用 multiple_input，而不是继续扩张候选组件。",
+                "Parameter Domain 的候选池必须有界并适合一次完整加载；client relation projection 必须在 50000 records / 8 MiB 内完整下发，超限不截断、不回退到逐次 Resolver，应改用 query_inputs 缩小 snapshot、拆分 Domain，或让已知 ID 使用 multiple_input。",
                 "父参数为空时子候选为空，不把未选择偷偷解释成全部；允许这种空状态时，依赖子参数通常也应 required: false。",
                 "候选变化优先保留有效交集；原非空选择完全失效才恢复 initial；可选参数的主动空集保持为空。",
                 "Query Card 的 reload 只刷新候选，不执行正式 Query，也不清空仍有效的选择。",
-                "每次成功 Query 都封存 committed {values, intents}；Revert 把这份完整目标一次性交给 Resolver，按依赖拓扑事务式恢复全部级联字段，不执行 Query，也不回退 initial。",
+                "每次成功 Query 都封存 committed {values, intents}；Revert 在相同 Domain input signature 下本地事务式恢复，signature 不同时才明确请求 committed snapshot；两者都不执行正式 Query，也不把候选表写进 committed state。",
                 "Revert 遇到最新 Domain 已缺失的 committed value 时保留该值并显示为 unavailable；候选是编辑建议，不是 Source 参数白名单。",
                 "Domain 失败只禁用当前 Dashboard 的查询；切换 Dashboard 会取消旧请求，损坏的草稿不能锁住 Shell 导航。",
                 "portable HTML 与分享链接只携带已提交 Query Parameter values/intents，不嵌入或执行 Parameter Domain。",
@@ -1041,7 +1053,7 @@ query_parameters:
     },
     "dataset-transforms": {
         "summary": "Dataset Transform 在 Query DAG 中加工取数结果，并固化为 Base Output。",
-        "schema": "dataviz/dataset-transform/v3",
+        "schema": DATASET_TRANSFORM_SCHEMA,
         "runtime": "server-python",
         "example": """schema: dataviz/dataset-transform/v3
 kind: dataset_transform
@@ -1070,7 +1082,7 @@ timeout_seconds: 120
     },
     "interactive-transforms": {
         "summary": "Interactive Transform 在不可变 Query Run 上按编译后的 Control consumer bindings 重算 Derived Output。",
-        "schema": "dataviz/interactive-transform/v3",
+        "schema": INTERACTIVE_TRANSFORM_SCHEMA,
         "common_fields": ["runtime", "inputs", "query_inputs", "control_inputs", "trigger", "export", "outputs"],
         "runtimes": {
             "browser-js": "JavaScript Web Worker；Server 与 HTML 共用；支持 Promise、progress、timeout、cancel。",
@@ -1133,6 +1145,18 @@ timeout_seconds: 120
         "consumer_modes": {
             "filter": "对指定 View/Transform 输入应用字段筛选；empty 必须选择 passthrough 或 match_none。",
             "value": "把 Control 值、present 状态或 intent 投影为 Interactive Transform 的局部 alias。",
+        },
+        "filter_operators_by_value_type": {
+            "text": ["equals", "in", "contains"],
+            "integer": ["equals", "in", "between", "gte", "lte", "gt", "lt"],
+            "number": ["equals", "in", "between", "gte", "lte", "gt", "lt"],
+            "date": ["equals", "in", "between", "gte", "lte", "gt", "lt"],
+            "boolean": ["equals", "in"],
+            "rules": (
+                "比较类型只来自 Control.value_type；number/integer 使用数值比较，date 使用规范 ISO 日期，"
+                "text 不做词法排序，boolean 不做有序比较。between 的 null 端点表示开放边界，0 不是空值；"
+                "字段或 bound 不可转换时返回稳定错误，不按行猜类型。"
+            ),
         },
         "dashboard_example": """controls:
   - id: region
@@ -1216,7 +1240,7 @@ timeout_seconds: 120
                 "Control owns values and candidate domain; it never declares highlight, row, cell, Renderer or callback.",
                 "The bound View receives candidate rows after ancestor Controls but before the target Control filters itself.",
                 "A View event can only dispatch select, select_many, clear or reset through context.controlBinding.emit; clear is explicit empty while reset restores the declared initial policy.",
-                "Unknown targets, a second writer, narrower reverse-scope candidate dependencies, unsupported Renderers and missing fields fail validation.",
+                "Unknown targets, duplicate writer edges from one View, narrower reverse-scope candidate dependencies, ambiguous aggregate mappings, unsupported Renderers and missing fields fail validation; multiple valid Views may write the same Control.",
             ],
         },
         "dynamic_option_example": """controls:
@@ -1724,19 +1748,22 @@ assets:
     "strict-schema": {
         "summary": "只接受当前 DSL；不提供 deprecated 层、字段别名、自动迁移或双协议 Runtime。",
         "current": {
-            "dashboard": "dataviz/dashboard/v11",
-            "parameter_domain": "dataviz/parameter-domain/v1",
-            "presentation": "dataviz/presentation/v2",
-            "source": "dataviz/source/v3",
-            "runtime": "dataviz/runtime/v6",
-            "dependency_contract": "dataviz/dependency-contract/v7",
-            "dataset_transform": "dataviz/dataset-transform/v3",
-            "interactive_transform": "dataviz/interactive-transform/v3",
-            "target_reference": "dataviz/target-reference/v1",
-            "analysis_result": "dataviz/analysis-result/v1",
-            "analysis_evidence": "dataviz/analysis-evidence/v1",
-            "layout_contract": "dataviz/layout-contract/v1",
-            "state_snapshot": "dataviz/state-snapshot/v2",
+            key: CURRENT_PROTOCOL_SCHEMAS[key]
+            for key in (
+                "dashboard",
+                "parameter_domain",
+                "presentation",
+                "source",
+                "runtime",
+                "dependency_contract",
+                "dataset_transform",
+                "interactive_transform",
+                "target_reference",
+                "analysis_result",
+                "analysis_evidence",
+                "layout_contract",
+                "state_snapshot",
+            )
         },
         "browser_assets": {
             "plotly_js": "4.0.0（直接内置，不安装 Python plotly）",
@@ -1749,7 +1776,7 @@ assets:
         ],
     },
     "frontend-adapters": {
-        "summary": "前端实现只消费 dataviz/runtime/v6 Manifest/Event/Output，不读取 Python 内部对象。",
+        "summary": f"前端实现只消费 {RUNTIME_PROTOCOL_SCHEMA} Manifest/Event/Output，不读取 Python 内部对象。",
         "commands": [
             "dataviz frontend-adapters --format json",
             "dataviz frontend-adapters web-component --output runtime-adapter.js",

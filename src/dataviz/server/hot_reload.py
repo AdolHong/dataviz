@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from dataviz.execution.fingerprint import query_contract_fingerprint
 from dataviz.execution.node_support import hash_path
 from dataviz.execution.plan import compile_plan
+from dataviz.protocols import WORKSPACE_CHANGE_SCHEMA
 from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace
 
 
@@ -303,7 +304,7 @@ class WorkspaceChangeEvent:
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "schema": "dataviz/workspace-change/v1",
+            "schema": WORKSPACE_CHANGE_SCHEMA,
             "revision": self.revision,
             "status": self.status,
             "changes": [

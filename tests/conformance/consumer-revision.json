@@ -1,0 +1,12 @@
+{
+  "family": "consumer-revision",
+  "cases": [
+    {"id": "current", "operation": "revision", "input": {"effective": 2, "applied": 2}, "expected": {"effective_revision": 2, "applied_revision": 2, "stale": false}},
+    {"id": "missing-is-stale", "operation": "revision", "input": {"effective": 2, "applied": null}, "expected": {"effective_revision": 2, "applied_revision": null, "stale": true}},
+    {"id": "older-is-stale", "operation": "revision", "input": {"effective": 3, "applied": 2}, "expected": {"effective_revision": 3, "applied_revision": 2, "stale": true}},
+    {"id": "ahead", "operation": "revision", "input": {"effective": 2, "applied": 3}, "expected_error_code": "consumer_applied_revision_ahead"},
+    {"id": "negative", "operation": "revision", "input": {"effective": 2, "applied": -1}, "expected_error_code": "consumer_applied_revision_invalid"},
+    {"id": "boolean", "operation": "revision", "input": {"effective": 2, "applied": {"$boolean": true}}, "expected_error_code": "consumer_applied_revision_invalid"},
+    {"id": "fraction", "operation": "revision", "input": {"effective": 2, "applied": 1.5}, "expected_error_code": "consumer_applied_revision_invalid"}
+  ]
+}

@@ -15,8 +15,14 @@ from dataviz.analysis.contracts import (
     AnalysisPromotion,
     AnalysisResult,
     validate_analysis_catalog,
+    validate_analysis_catalog_producer,
     validate_analysis_describe,
+    validate_analysis_describe_producer,
+    validate_analysis_evidence_producer,
+    validate_analysis_entry_producer,
+    validate_analysis_promotion_producer,
     validate_analysis_result,
+    validate_analysis_result_producer,
 )
 from dataviz.analysis.overlay import (
     ANALYSIS_OVERLAY_SCHEMA,
@@ -42,6 +48,7 @@ from dataviz.analysis.usage import (
     record_usage,
     record_usage_best_effort,
 )
+from dataviz.analysis.runner import RunRequest, run_analysis
 
 __all__ = [
     "ANALYSIS_CATALOG_SCHEMA",
@@ -56,8 +63,14 @@ __all__ = [
     "AnalysisPromotion",
     "AnalysisResult",
     "validate_analysis_catalog",
+    "validate_analysis_catalog_producer",
     "validate_analysis_describe",
+    "validate_analysis_describe_producer",
+    "validate_analysis_evidence_producer",
+    "validate_analysis_entry_producer",
+    "validate_analysis_promotion_producer",
     "validate_analysis_result",
+    "validate_analysis_result_producer",
     "ANALYSIS_OVERLAY_SCHEMA",
     "AnalysisVariant",
     "build_analysis_variant",
@@ -74,4 +87,6 @@ __all__ = [
     "read_usage_best_effort",
     "record_usage",
     "record_usage_best_effort",
+    "RunRequest",
+    "run_analysis",
 ]

@@ -26,7 +26,7 @@ SESSION_B = "interactive-tab-b"
 
 def test_interactive_trigger_defaults_follow_runtime():
     base = {
-        "schema": "dataviz/interactive-transform/v3",
+        "schema": "dataviz/interactive-transform/v4",
         "id": "runtime-default",
         "code": "transform.py",
         "export": {"mode": "snapshot"},
@@ -45,7 +45,7 @@ def test_interactive_transform_rejects_retired_browser_python_runtime():
     with pytest.raises(ValueError, match="browser-python"):
         InteractiveTransformDefinition.model_validate(
             {
-                "schema": "dataviz/interactive-transform/v3",
+                "schema": "dataviz/interactive-transform/v4",
                 "id": "retired-runtime",
                 "runtime": "browser-python",
                 "code": "transform.py",
@@ -90,12 +90,18 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v11
+        """schema: dataviz/dashboard/v13
 kind: dashboard
 id: interactive
 title: Interactive contract
 query_parameters:
   - {id: batch, type: single_input, value_type: integer, default: 7}
+  - id: items
+    type: multiple_select
+    value_type: text
+    options:
+      mode: static
+      choices: [{label: A, value: a}, {label: B, value: b}]
 controls:
   - {id: factor, type: single_input, value_type: integer, default: 2}
   - {id: delay, type: single_input, value_type: number, default: 0}
@@ -128,14 +134,17 @@ sections:
         encoding="utf-8",
     )
     (dashboard / "transforms" / "summary.yaml").write_text(
-        f"""schema: dataviz/interactive-transform/v3
+        f"""schema: dataviz/interactive-transform/v4
 kind: interactive_transform
 id: summary
 runtime: server-python
 code: summary.py
 inputs:
   rows: source:raw/main
-query_inputs: {{batch: batch}}
+query_inputs:
+  batch: batch
+  items_present: {{parameter: items, projection: present}}
+  items_intent: {{parameter: items, projection: intent}}
 control_inputs:
   factor: {{mode: value, control: dashboard.factor}}
   delay: {{mode: value, control: dashboard.delay}}
@@ -163,6 +172,8 @@ def transform(context):
     context.progress(0.1, "started")
     time.sleep(float(context.control_inputs["delay"]))
     frame = context.table("rows").copy()
+    assert context.query_inputs["items_present"] is True
+    assert context.query_inputs["items_intent"] == "all_available"
     selected = context.control_inputs["region"]
     context.log("applying region selection", selected=selected)
     if selected:
@@ -197,7 +208,7 @@ def test_one_control_can_feed_auto_and_apply_consumers(tmp_path: Path):
         encoding="utf-8",
     )
     (dashboard_root / "transforms" / "preview.yaml").write_text(
-        """schema: dataviz/interactive-transform/v3
+        """schema: dataviz/interactive-transform/v4
 kind: interactive_transform
 id: preview
 runtime: browser-js
@@ -252,7 +263,7 @@ def test_server_interactive_transform_has_isolated_context_named_outputs_and_cac
     store = ArtifactStore(workspace.root, run.run_id)
     frame = store.read_table(first.outputs["interactive:summary/main"])
     assert first.status == "ready"
-    assert first.query_parameters == {"batch": 11}
+    assert first.query_parameters == {"batch": 11, "items": ["a", "b"]}
     assert first.control_state == interaction_state(factor=3, delay=0, region="north")
     assert frame.to_dict(orient="records") == [
         {"region": "north", "value": 6, "batch": 11}
@@ -655,7 +666,7 @@ def test_server_interactive_dependency_is_reused_once_per_generation_chain(
         encoding="utf-8",
     )
     (dashboard_root / "transforms" / "downstream.yaml").write_text(
-        """schema: dataviz/interactive-transform/v3
+        """schema: dataviz/interactive-transform/v4
 kind: interactive_transform
 id: downstream
 runtime: server-python

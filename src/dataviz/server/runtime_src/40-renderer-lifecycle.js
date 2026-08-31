@@ -24,6 +24,7 @@ Object.assign(datavizRuntime, {
   },
   renderViews(context) {
     const affected = context.affectedViewIds == null ? null : new Set(context.affectedViewIds);
+    const completions = [];
     this.views.forEach((definition, id) => {
       if (affected && !affected.has(id)) return;
       const references = Object.values(definition.inputs).map(canonicalOutputReference);
@@ -69,16 +70,37 @@ Object.assign(datavizRuntime, {
         );
         return;
       }
-      definition.render(window.dataviz, context);
-      window.dataviz.applied_revisions ||= {views:{}, transforms:{}};
       const bindings = window.dataviz.dependency_contract?.views?.[id]?.control_inputs || {};
-      window.dataviz.applied_revisions.views[id] = Object.fromEntries(
-        Object.values(bindings).map(binding => [
-          binding.control,
-          Number(datavizControlEntry(binding.control)?.revision || 0),
-        ])
+      const capturedControlState = datavizCaptureConsumerControlState(bindings);
+      const capturedWriterProvenance = datavizCaptureConsumerWriterProvenance(
+        bindings,
+        capturedControlState,
       );
+      const root = this.viewAdapter?.node(id);
+      try {
+        definition.render(window.dataviz, context);
+      } catch (error) {
+        console.error(`[dataviz:${id}:render]`, error);
+        return;
+      }
+      const generation = Number(root?._datavizRenderGeneration || 0);
+      const completion = this.viewAdapter?.completion(root, generation)
+        || Promise.resolve({status:'ready', generation});
+      completions.push(Promise.resolve(completion).then(outcome => {
+        if (
+          outcome?.status !== 'ready'
+          || Number(root?._datavizRenderGeneration || 0) !== generation
+        ) return outcome;
+        datavizCommitConsumerControlState(
+          'views',
+          id,
+          capturedControlState,
+          capturedWriterProvenance,
+        );
+        return outcome;
+      }));
     });
+    return Promise.allSettled(completions);
   },
   async publishOutputs(bundle) {
     const outputs = window.dataviz.portable?.outputs || {};
@@ -104,6 +126,7 @@ Object.assign(datavizRuntime, {
       detail:{changed:[...changedOutputs], failed:[]},
     }));
     this.publishControlImpacts();
+    if (datavizControlChannel.phase === 'ready') datavizPublishControlSnapshot(null);
     return changedOutputs;
   },
   collectSnapshotOutputs() {
@@ -141,6 +164,7 @@ Object.assign(datavizRuntime, {
       detail:{changed:[...changedOutputs], failed:[...changed]},
     }));
     this.publishControlImpacts();
+    if (datavizControlChannel.phase === 'ready') datavizPublishControlSnapshot(null);
     return changedOutputs;
   },
 });

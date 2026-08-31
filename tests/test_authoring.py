@@ -148,10 +148,10 @@ def test_machine_readable_component_examples_use_canonical_output_references():
 
 def test_machine_readable_documentation_examples_match_current_schemas():
     providers = {
-        "dataviz/dashboard/v11": DashboardDefinition,
+        "dataviz/dashboard/v13": DashboardDefinition,
         "dataviz/source/v3": SOURCE_DEFINITION_ADAPTER,
         "dataviz/dataset-transform/v3": DatasetTransformDefinition,
-        "dataviz/interactive-transform/v3": InteractiveTransformDefinition,
+        "dataviz/interactive-transform/v4": InteractiveTransformDefinition,
         "dataviz/presentation/v2": PresentationDefinition,
     }
     examples: list[tuple[str, dict[str, object]]] = []
@@ -437,7 +437,7 @@ def test_version_docs_match_the_current_runtime_and_release_gate():
     release = DOC_TOPICS["versioning-release"]
 
     assert strict["current"]["layout_contract"] == "dataviz/layout-contract/v1"
-    assert strict["current"]["state_snapshot"] == "dataviz/state-snapshot/v2"
+    assert strict["current"]["state_snapshot"] == "dataviz/state-snapshot/v4"
     assert strict["browser_assets"] == {
         "plotly_js": "4.0.0（直接内置，不安装 Python plotly）",
         "tanstack_table_core": "9.2.4（直接内置）",
@@ -989,7 +989,7 @@ def test_coordinate_layout_fields_are_strictly_rejected(layout):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v11",
+                "schema": "dataviz/dashboard/v13",
                 "kind": "dashboard",
                 "id": "strict",
                 "layout": layout,

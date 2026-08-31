@@ -1,0 +1,11 @@
+{
+  "family": "value-signature",
+  "cases": [
+    {"id": "object-key-order", "operation": "signature", "input": {"b": 2, "a": 1}, "expected": "{\"a\":1,\"b\":2}"},
+    {"id": "zero-false-null", "operation": "signature", "input": [0, false, null, ""], "expected": "[0,false,null,\"\"]"},
+    {"id": "max-safe-integer", "operation": "signature", "input": 9007199254740991, "expected": "9007199254740991"},
+    {"id": "unsafe-integer", "operation": "signature", "input": {"$integer": "9007199254740992"}, "expected_error_code": "unsafe_integer"},
+    {"id": "non-finite", "operation": "signature", "input": {"$number": "NaN"}, "expected_error_code": "invalid_number"},
+    {"id": "unsupported", "operation": "signature", "input": {"$unsupported": "function"}, "expected_error_code": "not_json_serializable"}
+  ]
+}

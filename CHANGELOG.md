@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- 保留 Plotly 原生快速双击恢复 zoom scale，但 `plotly_doubleclick` 不再被 Dataviz 解释为 Control `reset`；Control 恢复只由工具栏中明确的 “Restore default selection” action 触发。Bound writer 在数据、layout 与 config 未变而仅 `selectedpoints` 改变时改用 `Plotly.restyle()`，不再以完整 `Plotly.react()` 重建 marker 命中层，避免散点重绘窗口吞掉下一次正常慢速点击。
+- 修复 `chart-gallery` 连续点击省份收入柱形或订单/收入散点时偶发无响应：View writer action 的 render generation 现在只在同步入队时做准入校验，已经合法入队的 action 不再被前一个 action 引起的同 writer 自重绘误判为 `stale_view_generation`；writer DOM 实例真正被替换/移除和初始即过期的 action 仍会拒绝。真实 Chromium 覆盖重叠 Plotly action、柱形/散点连续鼠标切换与既有 portable provenance。
+- TanStack Table 搜索框现在在 Renderer state 生命周期内保持唯一稳定 `id`，避免 `records` View 每次重绘时 Chrome 重复报告 “A form field element should have an id or name attribute”；该浏览器告警与 Control action 竞态本来没有执行因果关系。
+- P1-B 将 `dependencies.py` 的 canonical derivation 按 Query/Interactive 图与 binding、Output/View 输入、Control writer/domain/impact、跨 Runtime invariant、reverse index 和 Query Parameter impact 提取为私有函数；`compile_dashboard_dependencies()` 仍只组装既有 Dependency Contract v10。`LoadedDashboard` 继续分别惰性持有 Dependency、Layout 与 Parameter Domain Contract，没有新增 `CompiledDashboard`、phase/service class、中间 cache、公开 DTO 或版本轴。
+- 新增语言无关 Dependency v10 characterization fixture，冻结四个真实 Dashboard 的 v10 Contract、Layout v1、Runtime Manifest、Query/Interactive ExecutionPlan、Catalog/inspect projection 与关键 diagnostics；补充独立 lazy ownership、并发首次编译和失败不缓存 partial fact 的门禁。P1-B 不改变作者 DSL、公开/persisted/private wire shape，因此不升级协议。
+- P1-D 将多 View linked brushing 作为一次明确契约迁移落地：Dashboard v13 允许多个 View 写同一 Control，Dependency Contract v10 输出按声明顺序稳定的 writer edges，Runtime v9 的 action/rejection 携带并校验 source View；所有 writer 仍只向唯一 ControlRuntime 发送 replace/set 语义的 typed action，不引入隐式 union、反馈事件总线或第二 reducer。
+- State Snapshot v4 与 Analysis Result/Evidence v3 封存 current/applied writer provenance；consumer 只在对应 generation 真正成功时推进启动时捕获的 action/source View 证据。`chart-gallery` 的排名与散点共同驱动省份 Control，并由 Server、portable HTML 与不可变 Result 的真实 Chromium 回归验证选择、清空、重置、伪造 source 和 stale generation 边界。
+- P1-A 将 Server/portable Control 状态收敛到同一 Canvas-hosted ControlRuntime：Shell 只发送 typed `set/apply`、镜像 operational snapshot 与可丢弃 checkpoint，不再推进 revision、协调 Control domain 或执行 per-key winner merge。private lockstep `postMessage` 逐消息校验 origin/source/dashboard/run/frame identity，并对重复 action、stale version、迟到 restore、错误 payload 与断连给出确定结果。
+- Consumer 在 generation 启动时捕获完整 Control state，只有当前 View Renderer Ready 或 Transform 成功才推进 applied evidence；superseded、迟到 Ready、error/cancel/timeout 保留旧 evidence。Dependency Contract v9、Runtime v8、State Snapshot v3 与 Analysis Result/Evidence v2 一次迁移，Result/Export 可用 per-consumer `applied_control_state` 自包含证明实际结果值；Server Python 以 `control_state_not_canonical` 拒绝非完整 canonical snapshot。
+- 建立 canonical protocol inventory/change record，并新增语言无关 `input-binding / control-filter / value-signature / consumer-revision / output-capability` conformance corpus；Python、Canvas Runtime 与 Web Component Adapter 共同消费同一组 expected/error code。
+- 补齐 Query Input `value/present/intent/range part` 全链路，Browser binding signature 保留 projection，server-python Interactive 读取所属 immutable Query Run 的 parameter intents；`present(0)` 与 `present(false)` 均为 true。
+- typed comparison 一次迁移到 Dashboard v12、Interactive Transform v4、Dependency Contract v8 与 Runtime v7：number/integer 数值比较、date 规范日期比较、text 拒绝词法排序、boolean 仅允许 equals/in，并统一零端点、空值和转换错误。
+- canonical value signature 与 consumer revision 在三端共享安全整数、非有限数、序列化、stale/ahead 等边界；生成后的单一 Runtime bundle 额外执行 JavaScript 语法门禁。
+- Browser `image/file` 在 portable snapshot 与 CLI Result 进入执行前返回结构化 `output_destination_unsupported`；live/portable interactive display 不被错误禁止。Browser Result 的 `text/html` 改为原生 bytes、MIME、扩展名与持久化 content hash，不再封装成 JSON 字符串。
+
 ## 0.15.0 — 2026-08-31
 
 - 删除受限且职责重叠的浏览器 Python Runtime；Interactive Transform 只保留用于便携端侧数据加工的 `browser-js` 与用于完整 Python 生态和复杂计算的 `server-python`，同时移除相关 Worker、依赖校验、资产分发、导出分支、脚手架和测试夹具。

@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v11
+schema: dataviz/dashboard/v13
 kind: dashboard
 id: progressive
 title: Progressive branch check

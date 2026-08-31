@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from dataviz.components import component_index
+from dataviz.protocols import RUNTIME_PROTOCOL_SCHEMA
 from dataviz.view_contracts import VIEW_TEMPLATE_CONTRACTS
 
 
@@ -301,7 +302,6 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
 
 
 COMPONENT_REGISTRY_VERSION = "5.6.0"
-RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v6"
 
 
 def _generated_component_templates() -> dict[str, dict[str, Any]]:

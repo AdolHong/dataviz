@@ -1,0 +1,18 @@
+{
+  "family": "output-capability",
+  "cases": [
+    {"id": "browser-live-image", "operation": "capability", "input": {"producer_runtime": "browser-js", "output_kind": "image", "destination": "live_canvas"}, "expected": "supported"},
+    {"id": "browser-portable-interactive-image", "operation": "capability", "input": {"producer_runtime": "browser-js", "output_kind": "image", "destination": "portable_interactive"}, "expected": "supported"},
+    {"id": "browser-snapshot-image", "operation": "capability", "input": {"producer_runtime": "browser-js", "output_kind": "image", "destination": "portable_snapshot"}, "expected_error_code": "output_destination_unsupported"},
+    {"id": "browser-result-file", "operation": "capability", "input": {"producer_runtime": "browser-js", "output_kind": "file", "destination": "cli_result"}, "expected_error_code": "output_destination_unsupported"},
+    {"id": "browser-result-html", "operation": "capability", "input": {"producer_runtime": "browser-js", "output_kind": "html", "destination": "cli_result"}, "expected": "supported"},
+    {"id": "browser-result-table", "operation": "capability", "input": {"producer_runtime": "browser-js", "output_kind": "table", "destination": "cli_result"}, "expected": "supported"},
+    {"id": "browser-result-scalar", "operation": "capability", "input": {"producer_runtime": "browser-js", "output_kind": "scalar", "destination": "cli_result"}, "expected": "supported"},
+    {"id": "browser-result-object", "operation": "capability", "input": {"producer_runtime": "browser-js", "output_kind": "object", "destination": "cli_result"}, "expected": "supported"},
+    {"id": "browser-result-text", "operation": "capability", "input": {"producer_runtime": "browser-js", "output_kind": "text", "destination": "cli_result"}, "expected": "supported"},
+    {"id": "browser-result-chart", "operation": "capability", "input": {"producer_runtime": "browser-js", "output_kind": "chart", "destination": "cli_result"}, "expected": "supported"},
+    {"id": "browser-share-image-display-only", "operation": "capability", "input": {"producer_runtime": "browser-js", "output_kind": "image", "destination": "share_page"}, "expected": "supported"},
+    {"id": "browser-share-file-display-only", "operation": "capability", "input": {"producer_runtime": "browser-js", "output_kind": "file", "destination": "share_page"}, "expected": "supported"},
+    {"id": "server-artifact-file", "operation": "capability", "input": {"producer_runtime": "server-python", "output_kind": "file", "destination": "server_artifact"}, "expected": "supported"}
+  ]
+}

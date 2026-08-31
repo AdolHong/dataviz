@@ -17,6 +17,7 @@ from dataviz.analysis.contracts import (
     AnalysisEntry,
     AnalysisResult,
 )
+from dataviz.analysis.results import AnalysisResultStore
 from dataviz.cli import app
 from dataviz.errors import ValidationFailure
 from dataviz.target_reference import TargetReferenceContract, parse_target_reference
@@ -25,6 +26,40 @@ from dataviz.workspace.models import OutputDefinition
 
 FEATURE_SHOWCASE = Path("examples/feature-showcase")
 SALES_WORKSPACE = Path("examples/sales-workspace")
+
+
+@pytest.mark.parametrize(("kind", "suffix"), [("text", ".txt"), ("html", ".html")])
+def test_analysis_result_stores_text_and_html_as_native_bytes(
+    tmp_path: Path, kind: str, suffix: str
+):
+    store = AnalysisResultStore(tmp_path)
+    reference = f"sample::interactive:content/{kind}"
+    value = "<strong>hello</strong>" if kind == "html" else "hello"
+    published = store.publish(
+        {
+            "schema": "dataviz/analysis-result/v3",
+            "status": "ready",
+            "outputs": [
+                {
+                    "reference": reference,
+                    "kind": kind,
+                    "content_hash": hashlib.sha256(
+                        json.dumps(value).encode("utf-8")
+                    ).hexdigest(),
+                }
+            ],
+        },
+        {reference: {"kind": kind, "value": value}},
+    )
+    output = published["outputs"][0]
+    assert output["storage"]["path"].endswith(suffix)
+    manifest = store.load(published["result_id"])
+    assert store.read_output(manifest, output) == (value, None)
+    artifact = tmp_path / ".dataviz" / "results" / published["result_id"] / output[
+        "storage"
+    ]["path"]
+    assert output["content_hash"] == hashlib.sha256(artifact.read_bytes()).hexdigest()
+    assert output["logical_value_hash"] != output["content_hash"]
 
 
 @pytest.mark.parametrize(
@@ -64,7 +99,7 @@ title: Analysis tests
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v11
+        """schema: dataviz/dashboard/v13
 kind: dashboard
 id: analysis
 title: Analysis
@@ -86,7 +121,7 @@ sections:
         "name,revenue\nA,10\nB,20\n", encoding="utf-8"
     )
     (dashboard / "transforms" / "doubled.yaml").write_text(
-        """schema: dataviz/interactive-transform/v3
+        """schema: dataviz/interactive-transform/v4
 kind: interactive_transform
 id: doubled
 name: 加倍收入
@@ -172,7 +207,7 @@ def test_analysis_contracts_publish_machine_json_schemas():
         "dataviz/analysis-describe/v1"
     )
     assert AnalysisResult.model_json_schema()["properties"]["schema"]["const"] == (
-        "dataviz/analysis-result/v1"
+        "dataviz/analysis-result/v3"
     )
 
 
@@ -361,7 +396,7 @@ def test_analysis_cli_all_show_and_run_base_output(isolated_workspace):
     )
     assert executed.exit_code == 0, executed.output
     result = json.loads(executed.output)
-    assert result["schema"] == "dataviz/analysis-result/v1"
+    assert result["schema"] == "dataviz/analysis-result/v3"
     assert result["status"] == "ready"
     assert result["outputs"][0]["rows"] == 1
     assert result["lineage"]["query_nodes"] == ["source:date-window"]
@@ -480,6 +515,55 @@ def test_analysis_cli_runs_server_derived_output(tmp_path: Path):
     assert payload["lineage"]["interactive_nodes"] == ["interactive:doubled"]
 
 
+def test_browser_asset_result_fails_preflight_before_query_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    workspace = _build_server_derived_workspace(tmp_path / "workspace")
+    transform_path = workspace / "dashboards/analysis/transforms/doubled.yaml"
+    transform = yaml.safe_load(transform_path.read_text(encoding="utf-8"))
+    transform.update(
+        {
+            "runtime": "browser-js",
+            "code": "doubled.js",
+            "export": {"mode": "snapshot"},
+            "outputs": {"main": {"kind": "image"}},
+        }
+    )
+    transform_path.write_text(
+        yaml.safe_dump(transform, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    (transform_path.parent / "doubled.js").write_text(
+        "export default () => ({main:'data:image/png;base64,AA=='});\n",
+        encoding="utf-8",
+    )
+
+    def must_not_execute(*_args, **_kwargs):
+        raise AssertionError("Output destination preflight must run before Query")
+
+    monkeypatch.setattr("dataviz.cli.Executor.run", must_not_execute)
+    result = CliRunner().invoke(
+        app,
+        [
+            "run",
+            str(workspace),
+            "analysis::interactive:doubled/main",
+            "--format",
+            "json",
+        ],
+    )
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    assert payload["error"]["code"] == "output_destination_unsupported"
+    assert payload["error"]["details"] == {
+        "code": "output_destination_unsupported",
+        "producer_runtime": "browser-js",
+        "output_kind": "image",
+        "destination": "cli_result",
+        "required_capability": "browser_asset_materializer",
+    }
+
+
 def test_analysis_cli_batches_base_and_server_outputs_in_one_query_run(tmp_path: Path):
     workspace = _build_server_derived_workspace(tmp_path / "workspace")
     dashboard_path = workspace / "dashboards/analysis/dashboard.yaml"
@@ -492,7 +576,7 @@ def test_analysis_cli_batches_base_and_server_outputs_in_one_query_run(tmp_path:
     )
     transform_root = workspace / "dashboards/analysis/transforms"
     (transform_root / "tripled.yaml").write_text(
-        """schema: dataviz/interactive-transform/v3
+        """schema: dataviz/interactive-transform/v4
 kind: interactive_transform
 id: tripled
 name: 三倍收入
@@ -577,6 +661,20 @@ def test_analysis_evidence_preserves_consumer_revision_audit(tmp_path: Path):
                         "stale": True,
                     }
                 },
+                "applied_control_state": {
+                    "dashboard:sales/scenario": {
+                        "value": "baseline",
+                        "revision": 5,
+                    }
+                },
+                "applied_writer_provenance": {
+                    "dashboard:sales/scenario": {
+                        "revision": 5,
+                        "action_id": "scenario-select",
+                        "source_view": "scenario-picker",
+                        "action": "select",
+                    }
+                },
             }
         },
     }
@@ -584,7 +682,7 @@ def test_analysis_evidence_preserves_consumer_revision_audit(tmp_path: Path):
     evidence, destination = create_analysis_evidence(
         workspace,
         {
-            "schema": "dataviz/analysis-result/v1",
+            "schema": "dataviz/analysis-result/v3",
             "status": "ready",
             "target": {"reference": "sales::interactive:forecast/main"},
             "consumer_revisions": consumer_revisions,
@@ -598,7 +696,35 @@ def test_analysis_evidence_preserves_consumer_revision_audit(tmp_path: Path):
     )
 
     assert destination.is_file()
-    assert evidence.consumer_revisions == consumer_revisions
+    assert evidence.consumer_revisions.model_dump(
+        mode="json", exclude_none=True
+    ) == consumer_revisions
+
+
+def test_analysis_result_rejects_inconsistent_consumer_revision_audit():
+    with pytest.raises(ValueError, match="stale flag"):
+        AnalysisResult.model_validate(
+            {
+                "schema": "dataviz/analysis-result/v3",
+                "status": "ready",
+                "consumer_revisions": {
+                    "views": {
+                        "summary": {
+                            "trigger": "auto",
+                            "stale": False,
+                            "controls": {
+                                "dashboard:sales/region": {
+                                    "effective_revision": 4,
+                                    "applied_revision": 3,
+                                    "stale": False,
+                                }
+                            },
+                        }
+                    },
+                    "transforms": {},
+                },
+            }
+        )
 
 
 def test_analysis_evidence_and_promote_preview_do_not_mutate_workspace(tmp_path: Path):

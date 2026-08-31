@@ -25,24 +25,27 @@ import pandas as pd
 
 from dataviz import __version__
 from dataviz.analysis import (
-    analysis_reference_closure,
-    build_analysis_variant,
     build_promotion_preview,
     create_analysis_evidence,
     ensure_analysis_catalog,
     inspect_analysis_closure,
     load_analysis_evidence,
     load_promotion_proposal,
-    output_analysis_usage,
-    record_usage_best_effort,
-    validate_analysis_catalog,
-    validate_analysis_describe,
-    validate_analysis_result,
+    validate_analysis_catalog_producer,
+    validate_analysis_describe_producer,
+    validate_analysis_result_producer,
 )
-from dataviz.analysis.browser import run_browser_outputs
 from dataviz.analysis.parameter_options import ParameterOptionsStore
 from dataviz.analysis.results import AnalysisResultStore, result_manifest_hash
-from dataviz.auth import AdapterResolver
+from dataviz.analysis.runner import (
+    RunRequest,
+    analysis_artifact_binding,
+    analysis_artifact_payload,
+    analysis_artifact_value,
+    analysis_entry_summary,
+    run_analysis,
+    seal_analysis_result,
+)
 from dataviz.authoring import (
     build_context_payload,
     scaffold_catalog,
@@ -74,8 +77,16 @@ from dataviz.execution.dependencies import (
 from dataviz.execution.parameter_domains import resolve_parameter_domains
 from dataviz.maintenance import cleanup_workspace_storage
 from dataviz.plotly_runtime import PLOTLY_JS_VERSION
+from dataviz.protocols import (
+    ANALYSIS_CATALOG_SCHEMA,
+    ANALYSIS_DESCRIBE_SCHEMA,
+    ANALYSIS_RESULT_SCHEMA,
+    CURRENT_PROTOCOL_SCHEMAS,
+    WORKSPACE_CHANGE_SCHEMA,
+)
 from dataviz.rendering import CanvasRenderer, template_catalog
 from dataviz.state_snapshot import (
+    applied_control_state_for_consumers,
     applied_revisions_for_consumers,
     normalize_consumer_revisions,
 )
@@ -88,7 +99,6 @@ from dataviz.validation import format_validation_text, validate_preflight
 from dataviz.workspace import load_workspace
 from dataviz.input_state import state_from_values
 from dataviz.semantic_validation import validate_dashboard_semantics
-from dataviz.workspace.controls import scoped_control_registry
 
 
 app = typer.Typer(
@@ -609,9 +619,9 @@ def handle_error(exc: Exception) -> None:
                 else "analysis_internal_error"
             )
         print_json(
-            validate_analysis_result(
+            validate_analysis_result_producer(
                 {
-                    "schema": "dataviz/analysis-result/v1",
+                    "schema": ANALYSIS_RESULT_SCHEMA,
                     "status": "failed",
                     "error": error,
                     "next_actions": [
@@ -792,7 +802,7 @@ dataviz catalog describe . 'hello::source:data/main'
 dataviz run . 'hello::source:data/main'
 ```
 """,
-        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v11
+        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v13
 kind: dashboard
 id: hello
 title: Hello dashboard
@@ -1424,8 +1434,9 @@ def version(output_format: str = typer.Option("json", "--format", help="json or 
         "dependency_contract": DEPENDENCY_CONTRACT_SCHEMA,
         "component_registry": template_catalog()["component_registry_version"],
         "runtime_protocol": template_catalog()["runtime_protocol"],
+        "protocols": dict(CURRENT_PROTOCOL_SCHEMAS),
         "plotly_js": PLOTLY_JS_VERSION,
-        "workspace_change_protocol": "dataviz/workspace-change/v1",
+        "workspace_change_protocol": WORKSPACE_CHANGE_SCHEMA,
     }
     if output_format == "json":
         print_json(payload)
@@ -1445,7 +1456,7 @@ def frontend_adapters(
     ),
     output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
 ) -> None:
-    """Inspect frontend implementations that consume dataviz/runtime/v6."""
+    """Inspect frontend implementations that consume dataviz/runtime/v9."""
     if output_format not in {"markdown", "json"}:
         raise typer.BadParameter("--format must be markdown or json")
     catalog = frontend_adapter_catalog()
@@ -1998,47 +2009,7 @@ def benchmark(
 
 
 def _analysis_entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: entry.get(key)
-        for key in (
-            "schema",
-            "reference",
-            "kind",
-            "stage",
-            "title",
-            "purpose",
-            "grain",
-            "caveats",
-            "visibility",
-            "assurance",
-            "time",
-            "measures",
-            "relationships",
-            "semantic_source",
-            "semantic_status",
-            "semantic_missing",
-            "trust_status",
-            "runtime",
-            "source_type",
-            "query_parameters",
-            "parameter_contracts",
-            "controls",
-            "control_contracts",
-            "output",
-            "outputs",
-            "inputs",
-            "base_inputs",
-            "upstream_outputs",
-            "downstream_views",
-            "match_reasons",
-            "equivalence_hash",
-            "representative",
-            "occurrence_count",
-            "references",
-            "usage",
-        )
-        if entry.get(key) not in (None, "", (), [])
-    } | {"dashboard": entry["dashboard"]}
+    return analysis_entry_summary(entry)
 
 
 def _analysis_parameter_text(entry: dict[str, Any]) -> str:
@@ -2194,8 +2165,8 @@ def _analysis_catalog_payload(catalog, entries: list[dict[str, Any]]) -> dict[st
         for entry in entries
         if entry.get("semantic_status") == "incomplete"
     ]
-    return validate_analysis_catalog({
-        "schema": "dataviz/analysis-catalog/v1",
+    return validate_analysis_catalog_producer({
+        "schema": ANALYSIS_CATALOG_SCHEMA,
         "generation": catalog.generation,
         "count": len(entries),
         "entries": [_analysis_entry_summary(entry) for entry in entries],
@@ -2218,10 +2189,6 @@ def _analysis_catalog_payload(catalog, entries: list[dict[str, Any]]) -> dict[st
     })
 
 
-def _analysis_local_reference(entry: dict[str, Any]) -> str:
-    return entry["reference"].split("::", 1)[1]
-
-
 def _analysis_validate_kind(kind: str | None) -> str | None:
     if kind in {None, "all"}:
         return None
@@ -2241,50 +2208,8 @@ def _analysis_validate_kind(kind: str | None) -> str | None:
     return normalized
 
 
-def _analysis_reachable_nodes(dashboard, entry: dict[str, Any]) -> set[str]:
-    references = (
-        entry.get("inputs", {}).values()
-        if entry.get("kind") == "view"
-        else [entry["reference"]]
-    )
-    return analysis_reference_closure(dashboard, references)
-
-
-def _analysis_overlay_payload(variant) -> dict[str, Any]:
-    return {
-        "schema": "dataviz/analysis-overlay-result/v1",
-        "analysis_run_id": variant.analysis_run_id,
-        "overlay_hash": variant.overlay_hash,
-        "manifest": str(variant.manifest_path),
-        "changes": variant.manifest["changes"],
-    }
-
-
 def _analysis_artifact_binding(loaded, dashboard, entry, store, artifact) -> dict[str, Any]:
-    node_id = str(entry.get("node_id") or "")
-    if node_id.startswith("source:"):
-        source_id = node_id.split(":", 1)[1]
-        definition_path, definition = dashboard.sources[source_id]
-        if definition.type == "file":
-            if definition.adapter:
-                path = AdapterResolver(loaded.root).resolve_path(
-                    definition.adapter,
-                    definition.path,
-                    dashboard.definition.adapters,
-                )
-            else:
-                path = (definition_path.parent / definition.path).resolve()
-            return {
-                "source_path": path,
-                "format": definition.format or path.suffix.lstrip(".").lower(),
-                "options": definition.options,
-                "content_hash": sha256_file(path),
-            }
-    return {
-        "artifact_path": store.resolve(artifact),
-        "format": artifact.format,
-        "content_hash": artifact.content_hash,
-    }
+    return analysis_artifact_binding(loaded, dashboard, entry, store, artifact)
 
 
 def _analysis_result_text(payload: dict[str, Any]) -> None:
@@ -2322,58 +2247,6 @@ def _analysis_result_text(payload: dict[str, Any]) -> None:
     typer.echo("Next:")
     for action in payload.get("next_actions", []):
         typer.echo(f"  {action}")
-
-
-def _publish_analysis_result(
-    workspace: Path,
-    payload: dict[str, Any],
-    bindings: dict[str, dict[str, Any]],
-    *,
-    output_format: str,
-) -> dict[str, Any]:
-    normalized = dict(payload)
-    if normalized.get("status") == "error":
-        normalized["status"] = "failed"
-    validated = validate_analysis_result(normalized)
-    store = AnalysisResultStore(workspace)
-    published = validate_analysis_result(store.publish(validated, bindings))
-    if output_format == "json":
-        print_json(published)
-    else:
-        _analysis_result_text(published)
-    return published
-
-
-def _publish_failed_result(
-    workspace: Path,
-    *,
-    target: dict[str, Any],
-    generation: str | None,
-    query_parameters: dict[str, Any],
-    error: dict[str, Any],
-    output_format: str,
-    status: str = "failed",
-    lineage: dict[str, Any] | None = None,
-    provenance: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Seal a terminal execution failure; preflight failures never call this helper."""
-
-    payload = {
-        "schema": "dataviz/analysis-result/v1",
-        "status": status,
-        "generation": generation,
-        "target": _analysis_entry_summary(target),
-        "query_parameters": query_parameters,
-        "effective_controls": {},
-        "outputs": [],
-        "lineage": lineage or {},
-        "provenance": provenance or {},
-        "timing": {},
-        "error": error,
-    }
-    return _publish_analysis_result(
-        workspace, payload, {}, output_format=output_format
-    )
 
 
 @evidence_app.command("create")
@@ -2871,9 +2744,9 @@ def catalog_describe(
                         },
                     }
                 )
-        payload = validate_analysis_describe(
+        payload = validate_analysis_describe_producer(
             {
-                "schema": "dataviz/analysis-describe/v1",
+                "schema": ANALYSIS_DESCRIBE_SCHEMA,
                 "generation": catalog.generation,
                 "count": len(items),
                 "items": items,
@@ -2913,38 +2786,7 @@ def catalog_describe(
 
 
 def _analysis_artifact_value(store: ArtifactStore, artifact, limit: int) -> tuple[Any, bool]:
-    value = store.read_value(artifact)
-    truncated = False
-    if artifact.kind == "table":
-        frame = value.head(limit)
-        truncated = int(artifact.metadata.get("row_count", 0)) > limit
-        value = json.loads(frame.to_json(orient="records", date_format="iso"))
-    return value, truncated
-
-
-def _analysis_artifact_evidence(reference: str, artifact) -> dict[str, Any]:
-    return {
-        "reference": reference,
-        "artifact_id": artifact.artifact_id,
-        "kind": artifact.kind,
-        "rows": artifact.metadata.get("row_count"),
-        "content_hash": artifact.content_hash,
-    }
-
-
-def _analysis_record_success(
-    workspace: Path,
-    entries: list[dict[str, Any]],
-) -> None:
-    """Best-effort usage projection; never changes Analysis command success."""
-
-    references = {
-        entry["reference"]
-        for entry in entries
-        if entry.get("kind") in {"base_output", "derived_output"}
-    }
-    for reference in sorted(references):
-        record_usage_best_effort(workspace, output_analysis_usage(reference))
+    return analysis_artifact_value(store, artifact, limit)
 
 
 @result_app.command("list")
@@ -3159,21 +3001,6 @@ def result_export(
         handle_error(exc)
 
 
-def _analysis_target_payload(
-    requested: dict[str, Any], executed: dict[str, Any]
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {"target": _analysis_entry_summary(requested)}
-    if requested["reference"] != executed["reference"]:
-        payload["resolved_target"] = _analysis_entry_summary(executed)
-        payload["presentation"] = requested.get("presentation", {})
-        payload["view_input"] = {
-            name: reference
-            for name, reference in requested.get("inputs", {}).items()
-            if reference == executed["reference"]
-        }
-    return payload
-
-
 def _analysis_artifact_payload(
     *,
     entry: dict[str, Any],
@@ -3183,749 +3010,14 @@ def _analysis_artifact_payload(
     run_id: str,
     duration_ms: int | None,
 ) -> dict[str, Any]:
-    return {
-        "reference": entry["reference"],
-        "kind": artifact.kind,
-        "rows": artifact.metadata.get("row_count"),
-        "schema": artifact.schema_ or [],
-        "content_hash": artifact.content_hash,
-        "duration_ms": duration_ms,
-        "preview": value,
-        "truncated": truncated,
-        "run_id": run_id,
-    }
-
-
-def _run_target(
-    workspace: Path,
-    reference: str,
-    *,
-    also: list[str] | None,
-    query_param: list[str] | None,
-    control: list[str] | None,
-    output_name: str | None,
-    runtime: str,
-    output_format: str,
-    limit: int,
-    refresh: bool,
-    refresh_catalog: bool,
-    allow_network: bool,
-    timeout_seconds: float,
-    detail: str,
-    overlay: str | None,
-    dry_run: bool,
-) -> None:
-    """Execute one Source, Base/Derived Output, or View data contract."""
-    variant = None
-    catalog = None
-    requested_entry: dict[str, Any] | None = None
-    query_values: dict[str, Any] = {}
-    execution_started = False
-    result_published = False
-    try:
-        if output_format not in {"json", "text"}:
-            raise typer.BadParameter("--format must be text or json")
-        if runtime not in {"auto", "server", "browser"}:
-            raise typer.BadParameter("--runtime must be auto, server, or browser")
-        detail = _result_detail(detail)
-        catalog = ensure_analysis_catalog(workspace, refresh=refresh_catalog)
-        parsed_reference = parse_target_reference(reference)
-        if parsed_reference.kind == "dashboard":
-            raise typer.BadParameter("Dashboard targets are handled by `dataviz run` directly")
-        entry = catalog.resolve(parsed_reference.canonical)
-        requested_entry = entry
-        additional_entries = [
-            catalog.resolve(parse_target_reference(value).canonical)
-            for value in (also or [])
-        ]
-
-        if entry["kind"] == "view":
-            inputs = entry.get("inputs", {})
-            if output_name is not None:
-                if output_name not in inputs:
-                    raise typer.BadParameter(
-                        "Unknown View input; choose " + "|".join(sorted(inputs))
-                    )
-                view_entries = [catalog.resolve(inputs[output_name])]
-            else:
-                view_entries = [catalog.resolve(value) for value in inputs.values()]
-            if not view_entries:
-                raise typer.BadParameter("This View has no executable data inputs")
-            entry = view_entries[0]
-            additional_entries = [*view_entries[1:], *additional_entries]
-            output_name = None
-
-        if additional_entries:
-            batch = [entry, *additional_entries]
-            if len({item["dashboard"]["id"] for item in batch}) != 1:
-                raise typer.BadParameter("--also targets must belong to the same Dashboard")
-            kinds = {item["kind"] for item in batch}
-            if kinds == {"base_output"}:
-                pass
-            elif kinds == {"derived_output"}:
-                runtime_groups = {
-                    "server" if item["runtime"] == "server-python" else "browser"
-                    for item in batch
-                }
-                if len(runtime_groups) != 1:
-                    raise typer.BadParameter(
-                        "--also cannot mix top-level Server and Browser Derived Outputs"
-                    )
-            else:
-                raise typer.BadParameter(
-                    "--also requires all targets to be Base Outputs or all to be Derived Outputs"
-                )
-
-        loaded = load_workspace(workspace)
-        dashboard_id = entry["dashboard"]["id"]
-        dashboard = loaded.dashboard(dashboard_id)
-        if dry_run and overlay is None:
-            raise typer.BadParameter("--dry-run requires --overlay")
-        if overlay is not None:
-            reachable_nodes = set().union(
-                *(
-                    _analysis_reachable_nodes(dashboard, item)
-                    for item in [entry, *additional_entries]
-                )
-            )
-            variant = build_analysis_variant(
-                loaded,
-                dashboard,
-                overlay,
-                reachable_nodes=reachable_nodes,
-            )
-            dashboard = variant.dashboard
-            if dry_run:
-                variant.write_manifest(
-                    status="explained",
-                    evidence={"target": entry["reference"], "reachable_nodes": sorted(reachable_nodes)},
-                )
-                print_json(
-                    {
-                        "schema": "dataviz/analysis-overlay-explanation/v1",
-                        "status": "ready",
-                        **_analysis_target_payload(requested_entry, entry),
-                        "reachable_nodes": sorted(reachable_nodes),
-                        "overlay": _analysis_overlay_payload(variant),
-                    }
-                )
-                return
-            variant.write_manifest(
-                status="running",
-                evidence={"target": entry["reference"], "reachable_nodes": sorted(reachable_nodes)},
-            )
-        query_values = parse_params(query_param)
-        control_values = parse_params(control)
-        executor_options = (
-            {
-                "cache_namespace": variant.cache_namespace,
-                "cache_salt": variant.overlay_hash,
-            }
-            if variant is not None
-            else {}
-        )
-
-        if entry["kind"] in {"source", "base_output"}:
-            if control_values:
-                raise typer.BadParameter("Base execution does not accept --control")
-            if runtime == "browser":
-                raise typer.BadParameter("Source and Base Outputs execute on the server")
-            if entry["kind"] == "source":
-                source_outputs = {
-                    value.rsplit("/", 1)[1]: value.split("::", 1)[1]
-                    for value in entry.get("outputs", ())
-                }
-                if output_name:
-                    if output_name not in source_outputs:
-                        raise typer.BadParameter(
-                            f"Unknown Source Output {output_name}; choose "
-                            + "|".join(sorted(source_outputs))
-                        )
-                    target_references = [source_outputs[output_name]]
-                else:
-                    target_references = list(source_outputs.values())
-            else:
-                if output_name:
-                    raise typer.BadParameter("Base Output references already identify one output")
-                target_references = [
-                    _analysis_local_reference(item)
-                    for item in [entry, *additional_entries]
-                ]
-            query_started = time.perf_counter()
-            execution_started = True
-            result = Executor(loaded, **executor_options).run(
-                dashboard_id,
-                query_parameters=query_values,
-                targets=target_references,
-                refresh=refresh,
-                run_id=variant.analysis_run_id if variant is not None else None,
-                _dashboard=dashboard,
-            )
-            query_ms = round((time.perf_counter() - query_started) * 1000, 2)
-            artifacts = [
-                (target, result.outputs.get(target)) for target in target_references
-            ]
-            missing = [target for target, artifact in artifacts if artifact is None]
-            if missing:
-                node = result.nodes.get(missing[0].split("/", 1)[0])
-                if variant is not None:
-                    variant.write_manifest(
-                        status="error",
-                        evidence={"run_id": result.run_id, "missing_outputs": missing},
-                    )
-                result_published = True
-                _publish_failed_result(
-                    workspace,
-                    target=requested_entry,
-                    generation=catalog.generation,
-                    query_parameters=result.query_parameters,
-                    error=(
-                        node.error
-                        if node
-                        else {
-                            "code": "analysis_output_unavailable",
-                            "message": "Named Output was not produced",
-                        }
-                    ),
-                    output_format=output_format,
-                    lineage={
-                        "query_nodes": result.query_nodes,
-                        "query_targets": result.query_targets,
-                    },
-                    provenance={"query_contract_hash": result.query_contract_hash},
-                )
-                raise typer.Exit(1)
-            store = ArtifactStore(loaded.root, result.run_id)
-            outputs = []
-            result_bindings: dict[str, dict[str, Any]] = {}
-            for local_reference, artifact in artifacts:
-                assert artifact is not None
-                value, truncated = _analysis_artifact_value(store, artifact, limit)
-                target_entry = catalog.resolve(
-                    f"{dashboard_id}::{local_reference}"
-                )
-                node = result.nodes.get(local_reference.split("/", 1)[0])
-                outputs.append(
-                    _analysis_artifact_payload(
-                        entry=target_entry,
-                        artifact=artifact,
-                        value=value,
-                        truncated=truncated,
-                        run_id=result.run_id,
-                        duration_ms=node.duration_ms if node else None,
-                    )
-                )
-                result_bindings[target_entry["reference"]] = _analysis_artifact_binding(
-                    loaded, dashboard, target_entry, store, artifact
-                )
-            payload: dict[str, Any] = {
-                "schema": "dataviz/analysis-result/v1",
-                "status": result.status,
-                "generation": catalog.generation,
-                **_analysis_target_payload(requested_entry, entry),
-                "query_parameters": result.query_parameters,
-                "query_parameter_intents": result.query_parameter_intents,
-                "effective_controls": {},
-                "outputs": outputs,
-                "lineage": {
-                    "query_nodes": result.query_nodes,
-                    "query_targets": result.query_targets,
-                },
-                "provenance": {
-                    "catalog_generation": catalog.generation,
-                    "definition_hash": entry.get("definition_hash"),
-                    "query_contract_hash": result.query_contract_hash,
-                    "artifacts": [
-                        _analysis_artifact_evidence(reference, artifact)
-                        for reference, artifact in sorted(result.outputs.items())
-                    ],
-                },
-                "timing": {"query_ms": query_ms},
-            }
-            if variant is not None:
-                payload["overlay"] = _analysis_overlay_payload(variant)
-            if detail == "debug":
-                payload["nodes"] = {
-                    key: value.model_dump(mode="json", by_alias=True)
-                    for key, value in result.nodes.items()
-                }
-            elif detail == "full":
-                payload["execution"] = result.model_dump(mode="json", by_alias=True)
-            if variant is not None:
-                variant.write_manifest(status="ready", evidence={"run_id": result.run_id})
-            _analysis_record_success(workspace, [entry, *additional_entries])
-            result_published = True
-            _publish_analysis_result(
-                workspace, payload, result_bindings, output_format=output_format
-            )
-            return
-
-        if entry["kind"] != "derived_output":
-            raise typer.BadParameter(f"Analysis target cannot be executed: {entry['kind']}")
-        declared_runtime = entry["runtime"]
-        if runtime == "server" and declared_runtime != "server-python":
-            raise typer.BadParameter(
-                f"{declared_runtime} requires --runtime browser or auto"
-            )
-        if runtime == "browser" and declared_runtime == "server-python":
-            raise typer.BadParameter(
-                "server-python requires --runtime server or auto"
-            )
-        execution_entries = [entry, *additional_entries]
-        base_targets = list(
-            dict.fromkeys(
-                value.split("::", 1)[1]
-                for item in execution_entries
-                for value in item.get("base_inputs", ())
-            )
-        )
-        query_started = time.perf_counter()
-        execution_started = True
-        run_result = Executor(loaded, **executor_options).run(
-            dashboard_id,
-            query_parameters=query_values,
-            targets=base_targets,
-            refresh=refresh,
-            run_id=variant.analysis_run_id if variant is not None else None,
-            _dashboard=dashboard,
-        )
-        query_ms = round((time.perf_counter() - query_started) * 1000, 2)
-        controls = scoped_control_registry(dashboard.definition)
-        unknown_controls = sorted(set(control_values) - set(controls))
-        if unknown_controls:
-            raise typer.BadParameter(
-                "Unknown Control key: " + ", ".join(unknown_controls)
-            )
-        control_state = state_from_values(
-            dashboard.definition,
-            control_values,
-            phase=(
-                "canvas-hydration"
-                if declared_runtime != "server-python"
-                else "execution"
-            ),
-        )
-        if declared_runtime != "server-python":
-            browser_batch = run_browser_outputs(
-                loaded,
-                dashboard,
-                run_result,
-                targets=[
-                    (item["node_id"].split(":", 1)[1], item["output_name"])
-                    for item in execution_entries
-                ],
-                control_state=control_state,
-                refresh=refresh,
-                allow_network=allow_network,
-                timeout_seconds=timeout_seconds,
-                cache_salt=variant.overlay_hash if variant is not None else None,
-            )
-            browser_results = browser_batch["outputs"]
-            output_payloads = []
-            result_bindings: dict[str, dict[str, Any]] = {}
-            for target_entry, extracted in zip(
-                execution_entries, browser_results, strict=True
-            ):
-                extracted_rows = extracted["rows"]
-                extracted_value = extracted["value"]
-                output_payloads.append(
-                    {
-                        "reference": target_entry["reference"],
-                        "kind": extracted["kind"],
-                        "rows": extracted_rows,
-                        "schema": extracted["schema"],
-                        "content_hash": extracted["content_hash"],
-                        "transport": extracted.get("transport", "json"),
-                        "duration_ms": browser_batch["duration_ms"],
-                        "preview": (
-                            extracted_value[:limit]
-                            if extracted["kind"] == "table"
-                            else extracted_value
-                        ),
-                        "truncated": bool(
-                            extracted_rows is not None and extracted_rows > limit
-                        ),
-                        "run_id": run_result.run_id,
-                    }
-                )
-                result_bindings[target_entry["reference"]] = {
-                    "value": extracted_value,
-                    "kind": extracted["kind"],
-                }
-            payload = {
-                "schema": "dataviz/analysis-result/v1",
-                "status": "ready",
-                "generation": catalog.generation,
-                **_analysis_target_payload(requested_entry, entry),
-                "query_parameters": run_result.query_parameters,
-                "query_parameter_intents": run_result.query_parameter_intents,
-                "effective_controls": control_state,
-                "consumer_revisions": browser_batch["consumer_revisions"],
-                "outputs": output_payloads,
-                "lineage": {
-                    "query_nodes": run_result.query_nodes,
-                    "interactive_nodes": entry.get("upstream_outputs", [])
-                    + [entry["reference"]],
-                    "base_inputs": entry.get("base_inputs", []),
-                    "server_interactions": browser_batch["server_interactions"],
-                },
-                "provenance": {
-                    "catalog_generation": catalog.generation,
-                    "definition_hash": entry.get("definition_hash"),
-                    "query_contract_hash": run_result.query_contract_hash,
-                    "base_artifacts": [
-                        _analysis_artifact_evidence(reference, artifact)
-                        for reference, artifact in sorted(run_result.outputs.items())
-                    ],
-                    "runtime": declared_runtime,
-                },
-                "timing": {
-                    "query_ms": query_ms,
-                    **browser_batch["timing"],
-                },
-            }
-            if variant is not None:
-                payload["overlay"] = _analysis_overlay_payload(variant)
-            if detail in {"debug", "full"}:
-                payload["browser"] = {
-                    "timing": browser_batch["timing"],
-                    "metrics": browser_batch["metrics"],
-                    "console_errors": browser_batch["console_errors"],
-                    "network_allowed": allow_network,
-                }
-            if detail == "full":
-                payload["execution"] = {
-                    "query": run_result.model_dump(mode="json", by_alias=True),
-                }
-            if variant is not None:
-                variant.write_manifest(status="ready", evidence={"run_id": run_result.run_id})
-            _analysis_record_success(workspace, execution_entries)
-            result_published = True
-            _publish_analysis_result(
-                workspace, payload, result_bindings, output_format=output_format
-            )
-            return
-        interaction_started = time.perf_counter()
-        interaction_executor = InteractionExecutor(loaded, **executor_options)
-        interactions = []
-        for target_entry in execution_entries:
-            target_transform_id = target_entry["node_id"].split(":", 1)[1]
-            interaction = interaction_executor.execute(
-                run_result,
-                target_transform_id,
-                control_state=control_state,
-                refresh=refresh,
-                _dashboard=dashboard,
-            )
-            local_reference = _analysis_local_reference(target_entry)
-            artifact = interaction.outputs.get(local_reference)
-            if artifact is None:
-                node = interaction.nodes.get(target_entry["node_id"])
-                if variant is not None:
-                    variant.write_manifest(
-                        status="error",
-                        evidence={
-                            "run_id": run_result.run_id,
-                            "interaction_status": interaction.status,
-                            "target": target_entry["reference"],
-                        },
-                    )
-                result_published = True
-                _publish_failed_result(
-                    workspace,
-                    target=requested_entry,
-                    generation=catalog.generation,
-                    query_parameters=run_result.query_parameters,
-                    error=(
-                        node.error
-                        if node
-                        else {
-                            "code": "analysis_output_unavailable",
-                            "message": "Interactive Output was not produced",
-                        }
-                    ),
-                    output_format=output_format,
-                    lineage={
-                        "query_nodes": run_result.query_nodes,
-                        "interactive_nodes": list(interaction.nodes),
-                    },
-                    provenance={"query_contract_hash": run_result.query_contract_hash},
-                )
-                raise typer.Exit(1)
-            interactions.append((target_entry, interaction, artifact))
-        interaction_ms = round((time.perf_counter() - interaction_started) * 1000, 2)
-        store = ArtifactStore(loaded.root, run_result.run_id)
-        output_payloads = []
-        result_bindings: dict[str, dict[str, Any]] = {}
-        for target_entry, interaction, artifact in interactions:
-            value, truncated = _analysis_artifact_value(store, artifact, limit)
-            node = interaction.nodes.get(target_entry["node_id"])
-            output_payload = _analysis_artifact_payload(
-                entry=target_entry,
-                artifact=artifact,
-                value=value,
-                truncated=truncated,
-                run_id=run_result.run_id,
-                duration_ms=node.duration_ms if node else None,
-            )
-            output_payloads.append(output_payload)
-            result_bindings[target_entry["reference"]] = _analysis_artifact_binding(
-                loaded, dashboard, target_entry, store, artifact
-            )
-        last_interaction = interactions[-1][1]
-        interactive_nodes = list(
-            dict.fromkeys(
-                node_id
-                for _target_entry, interaction, _artifact in interactions
-                for node_id in interaction.nodes
-            )
-        )
-        applied_revisions = applied_revisions_for_consumers(
-            dashboard,
-            last_interaction.control_state,
-            transform_ids={
-                node_id.split(":", 1)[1]
-                for node_id in interactive_nodes
-                if node_id.startswith("interactive:")
-            },
-        )
-        payload = {
-            "schema": "dataviz/analysis-result/v1",
-            "status": "ready",
-            "generation": catalog.generation,
-            **_analysis_target_payload(requested_entry, entry),
-            "query_parameters": run_result.query_parameters,
-            "query_parameter_intents": run_result.query_parameter_intents,
-            "effective_controls": last_interaction.control_state,
-            "consumer_revisions": normalize_consumer_revisions(
-                dashboard,
-                last_interaction.control_state,
-                applied_revisions,
-            ),
-            "outputs": output_payloads,
-            "lineage": {
-                "query_nodes": run_result.query_nodes,
-                "interactive_nodes": interactive_nodes,
-                "base_inputs": list(
-                    dict.fromkeys(
-                        value
-                        for target_entry in execution_entries
-                        for value in target_entry.get("base_inputs", [])
-                    )
-                ),
-            },
-            "provenance": {
-                "catalog_generation": catalog.generation,
-                "definition_hashes": {
-                    target_entry["reference"]: target_entry.get("definition_hash")
-                    for target_entry in execution_entries
-                },
-                "query_contract_hash": run_result.query_contract_hash,
-                "base_artifacts": [
-                    _analysis_artifact_evidence(reference, artifact)
-                    for reference, artifact in sorted(run_result.outputs.items())
-                ],
-                "runtime": "server-python",
-            },
-            "timing": {
-                "query_ms": query_ms,
-                "interactive_ms": interaction_ms,
-            },
-        }
-        if variant is not None:
-            payload["overlay"] = _analysis_overlay_payload(variant)
-        if detail == "debug":
-            payload["nodes"] = {
-                "query": {
-                    key: value.model_dump(mode="json", by_alias=True)
-                    for key, value in run_result.nodes.items()
-                },
-                "interactive": [
-                    {
-                        "target": target_entry["reference"],
-                        "nodes": {
-                            key: value.model_dump(mode="json", by_alias=True)
-                            for key, value in interaction.nodes.items()
-                        },
-                    }
-                    for target_entry, interaction, _artifact in interactions
-                ],
-            }
-        elif detail == "full":
-            payload["execution"] = {
-                "query": run_result.model_dump(mode="json", by_alias=True),
-                "interactions": [
-                    interaction.model_dump(mode="json", by_alias=True)
-                    for _target_entry, interaction, _artifact in interactions
-                ],
-            }
-        if variant is not None:
-            variant.write_manifest(status="ready", evidence={"run_id": run_result.run_id})
-        _analysis_record_success(workspace, execution_entries)
-        result_published = True
-        _publish_analysis_result(
-            workspace, payload, result_bindings, output_format=output_format
-        )
-    except typer.Exit:
-        raise
-    except (KeyboardInterrupt, click.Abort) as exc:
-        if variant is not None:
-            variant.write_manifest(
-                status="cancelled",
-                evidence={"error_type": type(exc).__name__, "message": "Execution cancelled"},
-            )
-        if (
-            execution_started
-            and not result_published
-            and requested_entry is not None
-            and catalog is not None
-        ):
-            _publish_failed_result(
-                workspace,
-                target=requested_entry,
-                generation=catalog.generation,
-                query_parameters=query_values,
-                error={"code": "execution_cancelled", "message": "Execution cancelled"},
-                output_format=output_format,
-                status="cancelled",
-            )
-        raise typer.Exit(130) from exc
-    except Exception as exc:
-        if variant is not None:
-            variant.write_manifest(
-                status="error",
-                evidence={"error_type": type(exc).__name__, "message": str(exc)},
-            )
-        if (
-            execution_started
-            and not result_published
-            and requested_entry is not None
-            and catalog is not None
-        ):
-            error = (
-                exc.as_dict()
-                if isinstance(exc, DatavizError)
-                else {"type": type(exc).__name__, "message": str(exc)}
-            )
-            try:
-                _publish_failed_result(
-                    workspace,
-                    target=requested_entry,
-                    generation=catalog.generation,
-                    query_parameters=query_values,
-                    error=error,
-                    output_format=output_format,
-                )
-            except Exception:
-                pass
-            else:
-                raise typer.Exit(1) from exc
-        handle_error(exc)
-
-
-def _run_dashboard_target(
-    workspace: Path,
-    dashboard_id: str,
-    *,
-    query_param: list[str] | None,
-    refresh: bool,
-    preview_rows: int,
-    output_format: str,
-    detail: str,
-) -> dict[str, Any]:
-    loaded = load_workspace(workspace)
-    dashboard = loaded.dashboard(dashboard_id)
-    started = time.perf_counter()
-    execution = Executor(loaded).run(
-        dashboard_id,
-        query_parameters=parse_params(query_param),
-        refresh=refresh,
+    return analysis_artifact_payload(
+        entry=entry,
+        artifact=artifact,
+        value=value,
+        truncated=truncated,
+        run_id=run_id,
+        duration_ms=duration_ms,
     )
-    catalog = ensure_analysis_catalog(workspace)
-    store = ArtifactStore(loaded.root, execution.run_id)
-    outputs: list[dict[str, Any]] = []
-    bindings: dict[str, dict[str, Any]] = {}
-    for local_reference, artifact in sorted(execution.outputs.items()):
-        canonical = f"{dashboard_id}::{local_reference}"
-        try:
-            entry = catalog.resolve(canonical)
-        except Exception:
-            continue
-        value, truncated = _analysis_artifact_value(store, artifact, preview_rows)
-        node = execution.nodes.get(local_reference.split("/", 1)[0])
-        outputs.append(
-            _analysis_artifact_payload(
-                entry=entry,
-                artifact=artifact,
-                value=value,
-                truncated=truncated,
-                run_id=execution.run_id,
-                duration_ms=node.duration_ms if node else None,
-            )
-        )
-        bindings[canonical] = _analysis_artifact_binding(
-            loaded, dashboard, entry, store, artifact
-        )
-    if execution.status in {"ready", "partial"}:
-        report_source = (
-            loaded.root / ".dataviz" / "runs" / execution.run_id / "dashboard-result.html"
-        )
-        try:
-            CanvasRenderer(loaded).write_report(dashboard, execution, report_source)
-            bindings["__report__"] = {"source_path": report_source}
-        except Exception:
-            # Data Results remain valid even when their optional Presentation snapshot fails.
-            pass
-    payload: dict[str, Any] = {
-        "schema": "dataviz/analysis-result/v1",
-        "status": execution.status,
-        "generation": catalog.generation,
-        "target": {
-            "reference": dashboard_id,
-            "kind": "dashboard",
-            "title": dashboard.title,
-            "dashboard": {
-                "id": dashboard_id,
-                "title": dashboard.title,
-                "path": dashboard.root.relative_to(loaded.root).as_posix(),
-            },
-        },
-        "query_parameters": execution.query_parameters,
-        "effective_controls": {},
-        "outputs": outputs,
-        "lineage": {
-            "query_nodes": execution.query_nodes,
-            "query_targets": execution.query_targets,
-        },
-        "provenance": {
-            "catalog_generation": catalog.generation,
-            "query_contract_hash": execution.query_contract_hash,
-            "artifacts": [
-                _analysis_artifact_evidence(reference, artifact)
-                for reference, artifact in sorted(execution.outputs.items())
-            ],
-        },
-        "renderability": {
-            "kind": "dashboard",
-            "renderable": execution.status in {"ready", "partial"},
-            "dashboard": dashboard_id,
-        },
-        "timing": {"query_ms": round((time.perf_counter() - started) * 1000, 2)},
-    }
-    failed_nodes = [node for node in execution.nodes.values() if node.status == "error"]
-    if failed_nodes:
-        payload["error"] = failed_nodes[0].error
-    if detail == "full":
-        payload["execution"] = execution.model_dump(mode="json", by_alias=True)
-    elif detail == "debug":
-        payload["nodes"] = {
-            key: value.model_dump(mode="json", by_alias=True)
-            for key, value in execution.nodes.items()
-        }
-    published = _publish_analysis_result(
-        workspace, payload, bindings, output_format=output_format
-    )
-    return published
 
 
 @app.command()
@@ -3953,43 +3045,39 @@ def run(
     """Execute a Dashboard or canonical data Target and seal one immutable Result."""
     try:
         parsed = parse_target_reference(target)
-        if parsed.kind == "dashboard":
-            if any((also, control, output_name, overlay, dry_run)):
-                raise typer.BadParameter(
-                    "Dashboard targets do not accept --also, --control, --output, or --overlay"
-                )
-            published = _run_dashboard_target(
-                workspace,
-                parsed.dashboard,
-                query_param=query_param,
-                refresh=refresh,
+        if output_format not in {"json", "text"}:
+            raise typer.BadParameter("--format must be text or json")
+        published = run_analysis(
+            RunRequest(
+                workspace=workspace,
+                target=parsed.canonical,
+                also=tuple(also or ()),
+                query_parameters=parse_params(query_param),
+                controls=parse_params(control),
+                output_name=output_name,
+                runtime=runtime,
                 preview_rows=preview_rows,
-                output_format=output_format,
+                refresh=refresh,
+                refresh_catalog=refresh_catalog,
+                allow_network=allow_network,
+                timeout_seconds=timeout_seconds,
                 detail=_result_detail(detail),
+                overlay=Path(overlay) if overlay is not None else None,
+                dry_run=dry_run,
             )
-            if published["status"] != "ready" and not (
-                allow_partial and published["status"] == "partial"
-            ):
-                raise typer.Exit(1)
-            return
-        _run_target(
-            workspace=workspace,
-            reference=parsed.canonical,
-            also=also,
-            query_param=query_param,
-            control=control,
-            output_name=output_name,
-            runtime=runtime,
-            output_format=output_format,
-            limit=preview_rows,
-            refresh=refresh,
-            refresh_catalog=refresh_catalog,
-            allow_network=allow_network,
-            timeout_seconds=timeout_seconds,
-            detail=detail,
-            overlay=overlay,
-            dry_run=dry_run,
         )
+        if published.get("schema") == "dataviz/analysis-overlay-explanation/v1":
+            print_json(published)
+            return
+        if output_format == "json":
+            print_json(published)
+        else:
+            _analysis_result_text(published)
+        status = published["status"]
+        if status == "cancelled":
+            raise typer.Exit(130)
+        if status != "ready" and not (allow_partial and status == "partial"):
+            raise typer.Exit(1)
     except typer.Exit:
         raise
     except Exception as exc:
@@ -4097,12 +3185,20 @@ def report(
                 value.interaction_id for value in interaction_results
             },
         )
+        applied_control_state = applied_control_state_for_consumers(
+            loaded_dashboard,
+            resolved_control_state,
+            transform_ids={
+                value.interaction_id for value in interaction_results
+            },
+        )
         path = CanvasRenderer(loaded).write_report(
             loaded_dashboard,
             result,
             output.resolve(),
             control_state=resolved_control_state,
             applied_revisions=applied_revisions,
+            applied_control_state=applied_control_state,
             derived_outputs=derived_outputs,
             snapshot_interactions=snapshot_interactions,
         )
@@ -4134,10 +3230,10 @@ def report(
             result_bindings[canonical] = _analysis_artifact_binding(
                 loaded, loaded_dashboard, entry, artifact_store, artifact
             )
-        sealed = AnalysisResultStore(workspace).publish(
-            validate_analysis_result(
-                {
-                    "schema": "dataviz/analysis-result/v1",
+        sealed = seal_analysis_result(
+            workspace,
+            {
+                    "schema": ANALYSIS_RESULT_SCHEMA,
                     "status": result.status,
                     "generation": catalog.generation,
                     "target": {
@@ -4156,6 +3252,7 @@ def report(
                         loaded_dashboard,
                         resolved_control_state,
                         applied_revisions,
+                        applied_control_state,
                     ),
                     "outputs": result_outputs,
                     "lineage": {
@@ -4174,8 +3271,7 @@ def report(
                         "dashboard": dashboard,
                     },
                     "timing": {},
-                }
-            ),
+                },
             result_bindings,
         )
         print_json(

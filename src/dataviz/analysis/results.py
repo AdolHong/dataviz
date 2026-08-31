@@ -184,7 +184,15 @@ class AnalysisResultStore:
                 stored = self._materialize_output(
                     outputs_root, storage_name, output, binding
                 )
-                manifest_outputs.append({**output, "storage": stored})
+                published_output = {
+                    **output,
+                    "content_hash": stored["content_hash"],
+                    "storage": stored,
+                }
+                logical_hash = output.get("content_hash")
+                if logical_hash and logical_hash != stored["content_hash"]:
+                    published_output["logical_value_hash"] = logical_hash
+                manifest_outputs.append(published_output)
             immutable_result = dict(result)
             immutable_result["result_id"] = result_id
             immutable_result["result_path"] = (
@@ -302,6 +310,11 @@ class AnalysisResultStore:
             destination = outputs_root / f"{storage_name}.parquet"
             frame.to_parquet(destination, index=False)
             format_name = "parquet"
+        elif kind in {"text", "html"}:
+            suffix = ".html" if kind == "html" else ".txt"
+            destination = outputs_root / f"{storage_name}{suffix}"
+            atomic_write_text(destination, str(value))
+            format_name = kind
         else:
             destination = outputs_root / f"{storage_name}.json"
             atomic_write_text(
@@ -516,6 +529,8 @@ class AnalysisResultStore:
                 )
             if output.get("kind") == "table":
                 value = pd.read_parquet(path)
+            elif output.get("kind") in {"text", "html"}:
+                value = path.read_text(encoding="utf-8")
             else:
                 value = json.loads(path.read_text(encoding="utf-8"))
         if output.get("kind") == "table":

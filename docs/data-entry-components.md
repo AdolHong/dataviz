@@ -94,8 +94,8 @@ Select 不使用 `default`，而是统一使用 `initial`。多选支持 `all/em
 | `single_input` | `default` 或空值 | 保留用户输入；按 text / bool / integer / number / date 类型与边界校验 |
 | `multiple_input` | `default` 列表或空列表 | 保留完整列表；校验元素类型、去重和 `max_items` |
 | `range_input` | `default: [start, end]` 或空范围 | 两个端点作为一个值提交；校验类型、顺序、边界和 `allow_empty` |
-| `single_select` | `initial: first | empty | value` | 动态候选变化时执行交集保留与回退 |
-| `multiple_select` | `initial: all | empty | values` | 动态候选变化时执行意图跟随、交集保留与回退 |
+| `single_select` | `initial: first | empty | value` | 候选变化时保留有效值；原非空值完全失效才按 `initial` 恢复 |
+| `multiple_select` | `initial: all | empty | values` | 候选变化时跟随 intent、保留有效交集；完全失效才按 `initial` 恢复 |
 
 `Slider`、`InputNumber`、`DatePicker`、`Checkbox` 等只是上述逻辑类型的展示组件，不另造初始化语义。`min` 不是默认值，`false` 和“今天”也不会被 Runtime 擅自推断；如果必填输入未声明 `default`，它会保持空值并在提交时提示补充。这样修改候选域只协调 Select，修改展示组件或约束不会悄悄重置用户已经输入的业务值。
 

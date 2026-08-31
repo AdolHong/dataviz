@@ -247,7 +247,7 @@ def load_dashboard(path: Path) -> LoadedDashboard:
             transform_path = definition_path
             try:
                 transform = InteractiveTransformDefinition.model_validate(
-                    {"schema": "dataviz/interactive-transform/v3", **transform_entry}
+                    {"schema": "dataviz/interactive-transform/v4", **transform_entry}
                 )
             except ValidationError as exc:
                 raise WorkspaceError(

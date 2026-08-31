@@ -14,7 +14,7 @@ from typing import Any, Iterator
 from dataviz.analysis.contracts import (
     ANALYSIS_CATALOG_SCHEMA,
     ANALYSIS_ENTRY_SCHEMA,
-    validate_analysis_entry,
+    validate_analysis_entry_producer,
 )
 from dataviz.analysis.usage import output_analysis_usage, read_usage_best_effort
 from dataviz.errors import ValidationFailure
@@ -611,7 +611,7 @@ def _dashboard_entries(
         entry["semantic_missing"] = missing
         entry["trust_status"] = entry.get("assurance", {}).get("status", "draft")
 
-    entries = [validate_analysis_entry(entry) for entry in entries]
+    entries = [validate_analysis_entry_producer(entry) for entry in entries]
     return entries
 
 

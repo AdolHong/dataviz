@@ -734,7 +734,7 @@ def _profile_files(profile: str, item_id: str) -> dict[str, str]:
         "runtime": {"browser_table_transport": "json"},
     }
     dashboard: dict[str, Any] = {
-        "schema": "dataviz/dashboard/v11",
+        "schema": "dataviz/dashboard/v13",
         "kind": "dashboard",
         "id": item_id,
         "title": item_id.replace("-", " ").title(),
@@ -804,7 +804,7 @@ def _profile_files(profile: str, item_id: str) -> dict[str, str]:
         )
         files[f"{dashboard_root}/transforms/scaled.yaml"] = _yaml(
             {
-                "schema": "dataviz/interactive-transform/v3",
+                "schema": "dataviz/interactive-transform/v4",
                 "kind": "interactive_transform",
                 "id": "scaled",
                 "runtime": "browser-js",
@@ -899,7 +899,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         files = {
             "dashboard.yaml": _yaml(
                 {
-                    "schema": "dataviz/dashboard/v11",
+                    "schema": "dataviz/dashboard/v13",
                     "kind": "dashboard",
                     "id": item_id,
                     "title": item_id.replace("-", " ").title(),
@@ -999,7 +999,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         files = {
             f"{item_id}.yaml": _yaml(
                 {
-                    "schema": "dataviz/interactive-transform/v3",
+                    "schema": "dataviz/interactive-transform/v4",
                     "kind": "interactive_transform",
                     "id": item_id,
                     "runtime": runtime,

@@ -1,3 +1,12 @@
+import {
+  isEmptyParameterDomainValue,
+  parameterDomainFailure,
+  parameterDomainSignature,
+  projectParameterDomainRelation,
+  resolveLocalParameterDomainValue,
+  withUnavailableParameterDomainChoices,
+} from './parameter-domain-projection.js';
+
 const state = {
   payload: null,
   dashboard: null,
@@ -12,6 +21,7 @@ const state = {
   workspaceRevision: 0,
   workspaceEventSource: null,
   workspaceNoticeTimer: null,
+  parameterDomainTimer: null,
   hotReloadEnabled: false,
 };
 const $ = (selector) => document.querySelector(selector);
@@ -24,7 +34,14 @@ function runtimeFor(dashboardId) {
       committedQuerySnapshot: null,
       queryParameterValues: null,
       queryParametersOpen: null,
-      controlState: {},
+      controlCheckpoint: null,
+      controlVersion: null,
+      controlProjection: [],
+      controlConnected: false,
+      controlContractHash: null,
+      controlDraftActions: new Map(),
+      controlActionQueue: Promise.resolve(),
+      controlPendingRequests: new Map(),
       controlImpacts: {},
       eventSource: null,
       nodeErrors: {},
@@ -45,6 +62,9 @@ function runtimeFor(dashboardId) {
       queryDomainRequestGeneration: 0,
       queryDomainController: null,
       queryDomainInitialized: [],
+      queryDomainProjection: null,
+      queryDomainInputSignatures: null,
+      queryDomainRootChoices: {},
       queryParameterIntents: {},
     });
   }
@@ -73,7 +93,6 @@ for (const property of [
   'committedQuerySnapshot',
   'eventSource',
   'nodeErrors',
-  'controlState',
 ]) {
   Object.defineProperty(state, property, {
     get() { return activeRuntime()?.[property] ?? (property.endsWith('Errors') || property.endsWith('State') ? {} : null); },
@@ -202,6 +221,9 @@ function sameCanvasIdentity(left, right) {
 function loadCanvasFrame(dashboardId, runId = null) {
   const frame = $('#canvas-frame');
   const runtime = runtimeFor(dashboardId);
+  disconnectControlChannel(runtime, 'control_frame_replaced');
+  runtime.controlContractHash = null;
+  runtime.controlProjection = [];
   const restoreScrollY = Number(runtime.canvasScrollY || 0);
   const frameId = `frame_${crypto.randomUUID().replaceAll('-', '')}`;
   frame.dataset.dashboardId = dashboardId;
@@ -278,14 +300,14 @@ function saveTabUiState() {
       queryParameterValues: runtime.queryParameterValues,
       committedQuerySnapshot: runtime.committedQuerySnapshot,
       queryParametersOpen: runtime.queryParametersOpen,
-      controlState: runtime.controlState,
+      controlCheckpoint: runtime.controlCheckpoint,
       queryDomainGeneration: runtime.queryDomainGeneration,
       queryDomainInitialized: runtime.queryDomainInitialized,
       queryParameterIntents: runtime.queryParameterIntents,
     };
   }
   sessionStorage.setItem(
-    `dataviz.tab-ui.v3.${state.sessionId}`,
+    `dataviz.tab-ui.v4.${state.sessionId}`,
     JSON.stringify({
       activeDashboardId: state.dashboard?.id || state.preferredDashboardId,
       sidebar: {
@@ -321,7 +343,7 @@ function applySidebarState({persist = false} = {}) {
 
 function restoreTabUiState() {
   try {
-    const saved = JSON.parse(sessionStorage.getItem(`dataviz.tab-ui.v3.${state.sessionId}`) || '{}');
+    const saved = JSON.parse(sessionStorage.getItem(`dataviz.tab-ui.v4.${state.sessionId}`) || '{}');
     state.preferredDashboardId = saved.activeDashboardId || null;
     state.sidebarWidthCustomized = Boolean(saved.sidebar?.customized);
     state.sidebarWidth = state.sidebarWidthCustomized
@@ -1210,6 +1232,11 @@ async function reportRequestContext() {
       control_state:snapshot.controlState,
       snapshot_outputs:snapshot.outputs,
       applied_revisions:snapshot.stateSnapshot.applied_revisions || {},
+      applied_control_state:snapshot.stateSnapshot.applied_control_state || {},
+      control_writer_provenance:
+        snapshot.stateSnapshot.control_writer_provenance || {},
+      applied_writer_provenance:
+        snapshot.stateSnapshot.applied_writer_provenance || {},
     },
   };
 }
@@ -1230,7 +1257,7 @@ async function copyPlainText(value) {
 }
 
 function setShareEnabled(enabled) {
-  const active = Boolean(enabled);
+  const active = Boolean(enabled) && Boolean(activeRuntime()?.controlConnected);
   const hasServerInteractive = (state.dashboard?.nodes || []).some(
     (node) => node.type === 'interactive_transform' && node.subtype === 'server-python'
   );
@@ -1614,149 +1641,129 @@ function dashboardControl(key) {
   ) || null;
 }
 
+function checkpointControls(runtime = activeRuntime()) {
+  const expectedHash = state.dashboard?.dependency_contract?.control_contract_hash || null;
+  const checkpoint = runtime?.controlCheckpoint;
+  return checkpoint?.control_contract_hash === expectedHash
+    ? checkpoint.controls || {}
+    : {};
+}
+
 function controlValueFromState(_definition, entry) {
   return structuredClone(entry?.value ?? null);
 }
 
-function controlStateFromValue(definition, value, intent = 'explicit') {
-  return {
-    value:structuredClone(value),
-    revision:0,
-    intent: intent === 'all_available' && definition?.type === 'multiple_select'
-      ? 'all_available'
-      : 'explicit',
-  };
-}
-
-function dashboardControlState() {
-  const form = $('#dashboard-control-form');
-  const values = formValues(form);
-  const runtime = activeRuntime();
-  const remembered = runtime?.controlState || {};
-  for (const input of form.elements) {
-    const control = dashboardControl(input.name);
-    if (!control) continue;
-    if (
-      input instanceof HTMLSelectElement
-      && input.options.length === 0
-      && Object.prototype.hasOwnProperty.call(remembered, input.name)
-    ) continue;
-    const intent = input instanceof HTMLSelectElement && input.multiple
-      ? (window.datavizComponents?.controls?.inferSelectionIntent?.(input) || 'explicit')
-      : 'explicit';
-    const previous = remembered[input.name];
-    const candidate = {
-      ...controlStateFromValue(control.definition, values[input.name], intent),
-      revision:Number(previous?.revision || 0),
-    };
-    if (
-      JSON.stringify(previous?.value) === JSON.stringify(candidate.value)
-      && previous?.intent === candidate.intent
-    ) continue;
-    remembered[input.name] = {
-      ...candidate,
-      revision:Number(previous?.revision || 0) + 1,
-    };
-  }
-  return remembered;
-}
-
 function captureDashboardControlIntent(event) {
   const input = event?.target;
-  if (!(input instanceof HTMLSelectElement) || !input.multiple || !input.name) return;
-  const intent = window.datavizComponents?.controls?.consumeSelectionIntent?.(input);
-  const runtime = activeRuntime();
-  const control = dashboardControl(input.name);
-  if (intent && runtime && control) {
-    const previous = runtime.controlState[input.name];
-    runtime.controlState[input.name] = {
-      ...controlStateFromValue(
-      control.definition,
-      formValues($('#dashboard-control-form'))[input.name],
-      intent,
-      ),
-      revision:Number(previous?.revision || 0) + 1,
-    };
+  if (!(input instanceof HTMLSelectElement) || !input.multiple || !input.name) {
+    return 'explicit';
   }
+  return window.datavizComponents?.controls?.consumeSelectionIntent?.(input)
+    || window.datavizComponents?.controls?.inferSelectionIntent?.(input)
+    || 'explicit';
 }
 
 function syncDashboardControlOptions(controls = []) {
   const form = $('#dashboard-control-form');
-  let changed = false;
-  let synchronized = false;
   for (const control of controls) {
-    if (!control.observed) continue;
     const input = form.elements.namedItem(control.key);
     if (!(input instanceof HTMLSelectElement)) continue;
-    const definition = state.dashboard?.controls.find(
-      item => item.key === control.key,
-    )?.definition;
     const options = control.options || [];
     const signature = JSON.stringify(options);
-    if (input.dataset.runtimeOptionsSignature === signature) continue;
-    const runtime = activeRuntime();
-    const previousState = runtime?.controlState?.[control.key] || control.initial_state || {
-      intent:'explicit', value:null, revision:0,
-    };
-    const previous = controlValueFromState(definition, previousState);
-    const previousValues = input.multiple && Array.isArray(previous) ? previous : [previous];
-    const typed = options.some(option => typeof option.value !== 'string');
-    input.dataset.valueEncoding = typed ? 'json' : 'string';
-    const encode = value => typed ? JSON.stringify(value) : String(value);
-    const selectedValues = previousValues
-      .filter(value => value != null && value !== '')
-      .map(encode);
-    const initialPolicy = definition?.initial || {
-      mode:definition?.type === 'multiple_select' ? 'all' : 'first',
-    };
-    const initialValues = (
-      initialPolicy.mode === 'values'
-        ? initialPolicy.values || []
-        : initialPolicy.mode === 'value'
-          ? [initialPolicy.value]
-          : []
-    ).map(encode);
-    const nodes = [];
-    if (!input.multiple) {
-      const empty = document.createElement('option');
-      empty.value = '';
-      empty.hidden = true;
-      empty.dataset.emptyOption = 'true';
-      nodes.push(empty);
+    if (input.dataset.runtimeOptionsSignature !== signature) {
+      const typed = options.some(option => typeof option.value !== 'string');
+      input.dataset.valueEncoding = typed ? 'json' : 'string';
+      const nodes = [];
+      if (!input.multiple) {
+        const empty = document.createElement('option');
+        empty.value = '';
+        empty.hidden = true;
+        empty.dataset.emptyOption = 'true';
+        nodes.push(empty);
+      }
+      for (const item of options) {
+        const option = document.createElement('option');
+        option.value = typed ? JSON.stringify(item.value) : String(item.value);
+        option.textContent = item.label ?? String(item.value);
+        option.disabled = item.available === false;
+        if (item.group) option.dataset.group = item.group;
+        if (item.description) option.dataset.description = item.description;
+        if (item.keywords?.length) option.dataset.keywords = item.keywords.join(' ');
+        nodes.push(option);
+      }
+      input.replaceChildren(...nodes);
+      input.dataset.runtimeOptionsSignature = signature;
     }
-    for (const item of options) {
-      const option = document.createElement('option');
-      option.value = typed ? JSON.stringify(item.value) : String(item.value);
-      option.textContent = item.label ?? String(item.value);
-      option.disabled = item.available === false;
-      if (item.group) option.dataset.group = item.group;
-      if (item.description) option.dataset.description = item.description;
-      if (item.keywords?.length) option.dataset.keywords = item.keywords.join(' ');
-      nodes.push(option);
-    }
-    const reconciled = window.datavizComponents?.controls?.reconcileOptionDomain?.(
-      input,
-      nodes,
-      {
-        selectedValues,
-        intent:previousState.intent,
-        required:Boolean(definition?.required),
-        initial:{mode:initialPolicy.mode, values:initialValues},
-      },
-    );
-    if (!reconciled) input.replaceChildren(...nodes);
-    input.dataset.runtimeOptionsSignature = signature;
-    input._syncChoiceControl?.();
-    synchronized = true;
-    const current = formValues(form)[control.key];
-    if (JSON.stringify(previous) !== JSON.stringify(current)) changed = true;
+    input.dataset.runtimeAvailability = control.availability || 'static';
+    input.disabled = !activeRuntime()?.controlConnected || Boolean(control.disabled);
+    setFormInputError(input, control.validation?.message || '');
   }
-  if (!synchronized) return;
   const runtime = activeRuntime();
-  if (runtime) dashboardControlState();
+  setFormValues(
+    form,
+    Object.fromEntries(controls
+      .filter(control => !runtime?.controlDraftActions.has(control.key))
+      .map(control => [
+      control.key,
+      controlValueFromState(dashboardControl(control.key)?.definition, control.state),
+      ])),
+  );
+  for (const input of form.elements) input._syncChoiceControl?.();
+}
+
+function syncDashboardControlForm(runtime = activeRuntime()) {
+  if (!runtime) return;
+  const controls = runtime.controlCheckpoint?.controls || {};
+  setFormValues(
+    $('#dashboard-control-form'),
+    Object.fromEntries(dashboardControls()
+      .filter(control => !runtime.controlDraftActions.has(control.key))
+      .map(control => [
+        control.key,
+        controlValueFromState(control.definition, controls[control.key]),
+      ])),
+  );
+  for (const input of $('#dashboard-control-form').elements) input._syncChoiceControl?.();
+}
+
+function applyControlOperationalSnapshot(snapshot, {ready = false} = {}) {
+  const runtime = activeRuntime();
+  if (
+    !runtime
+    || !snapshot
+    || !Number.isSafeInteger(snapshot.control_version)
+    || snapshot.control_version < 0
+    || typeof snapshot.current_controls !== 'object'
+    || Array.isArray(snapshot.current_controls)
+  ) return false;
+  // An idempotent retry can legitimately receive the original cached response
+  // after later actions have already advanced the Runtime. Never let that old
+  // acknowledgement roll the Shell's confirmed mirror backwards.
+  if (
+    Number.isSafeInteger(runtime.controlVersion)
+    && snapshot.control_version < runtime.controlVersion
+  ) return true;
+  const contractHash = runtime.controlContractHash
+    || state.dashboard?.dependency_contract?.control_contract_hash
+    || null;
+  runtime.controlVersion = snapshot.control_version;
+  runtime.controlCheckpoint = {
+    control_contract_hash:contractHash,
+    controls:structuredClone(snapshot.current_controls),
+  };
+  runtime.controlProjection = structuredClone(snapshot.dashboard_controls || []);
+  if (ready) runtime.controlConnected = true;
+  setControlsEnabled(Boolean(runtime.runId) && runtime.controlConnected);
+  syncDashboardControlOptions(runtime.controlProjection);
+  syncDashboardControlForm(runtime);
+  syncDashboardControlImpacts(
+    runtime.controlProjection.map(item => item.impact).filter(Boolean),
+  );
+  setComputeState();
+  setShareEnabled(Boolean(runtime.runId) && runtime.controlConnected);
   updateDashboardControlSummary();
   saveTabUiState();
-  if (changed) scheduleCanvasControls();
+  return true;
 }
 
 function nodeRow(node) {
@@ -1787,6 +1794,8 @@ function setNodeStatus(node, status) {
 }
 
 function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {}) {
+  window.clearTimeout(state.parameterDomainTimer);
+  state.parameterDomainTimer = null;
   if (state.dashboard) {
     const previous = activeRuntime();
     previous.queryDomainController?.abort();
@@ -1794,7 +1803,6 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
     previous.queryDomainPending = false;
     previous.queryDomainRequestGeneration += 1;
     try { previous.queryParameterValues = queryParameters(); } catch (_) {}
-    try { dashboardControlState(); } catch (_) {}
     try { previous.canvasScrollY = $('#canvas-frame').contentWindow.scrollY || 0; } catch (_) { previous.canvasScrollY = 0; }
     saveTabUiState();
   }
@@ -1802,6 +1810,9 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
   state.dashboard = state.payload.dashboards.find((item) => item.id === id);
   state.preferredDashboardId = id;
   const runtime = activeRuntime();
+  runtime.queryDomainProjection = null;
+  runtime.queryDomainInputSignatures = null;
+  runtime.queryDomainRootChoices = {};
   for (const parameter of state.dashboard.query_parameters || []) {
     if (Object.prototype.hasOwnProperty.call(runtime.queryParameterIntents, parameter.id)) continue;
     runtime.queryParameterIntents[parameter.id] = (
@@ -1834,13 +1845,6 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
     runtime.queryParametersOpen = true;
   }
   setQueryParametersOpen(runtime.queryParametersOpen);
-  for (const control of controls) {
-    if (!Object.prototype.hasOwnProperty.call(runtime.controlState, control.key)) {
-      runtime.controlState[control.key] = structuredClone(
-        control.initial_state || {intent:'explicit', value:null, revision:0},
-      );
-    }
-  }
   window.datavizComponents?.hydrate(document);
   syncQueryParameterSelectionIntents();
   let locationValues = {};
@@ -1886,7 +1890,10 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
     $('#dashboard-control-form'),
     Object.fromEntries(controls.map(control => [
       control.key,
-      controlValueFromState(control.definition, runtime.controlState[control.key]),
+      controlValueFromState(
+        control.definition,
+        checkpointControls(runtime)[control.key] || control.initial_state,
+      ),
     ])),
   );
   updateDashboardControlSummary();
@@ -1901,13 +1908,13 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
   $('#query-diagnostics-label').textContent = runnable ? runtime.queryLabel : state.dashboard.status;
   $('#run-message').textContent = runnable ? runtime.message : (state.dashboard.message || 'Dashboard unavailable.');
   setQueryState();
-  setControlsEnabled(Boolean(runtime.runId));
+  setControlsEnabled(Boolean(runtime.runId) && runtime.controlConnected);
   setComputeState();
   loadCanvasFrame(id, runtime.pendingRunId || runtime.runId);
   $('#run-button').disabled = !runnable;
   $('#run-button').classList.toggle('is-cancelling', Boolean(runtime.pendingRunId));
   setRunButtonLabel(runtime.pendingRunId ? '取消' : '查询');
-  setShareEnabled(Boolean(runtime.runId));
+  setShareEnabled(Boolean(runtime.runId) && runtime.controlConnected);
   saveTabUiState();
   if (dynamicQueryParameters().length) {
     runtime.queryDomainReady = false;
@@ -1944,6 +1951,184 @@ function dynamicQueryParameters() {
   return (state.dashboard?.query_parameters || []).filter(
     parameter => parameter.options?.mode === 'domain',
   );
+}
+
+function parameterDomainProjectedInput(binding, values, intents) {
+  const parameterId = binding?.parameter;
+  const value = values?.[parameterId];
+  if (binding?.projection === 'intent') return intents?.[parameterId] || 'explicit';
+  if (binding?.projection === 'present') return !isEmptyParameterDomainValue(value);
+  if (binding?.part != null) {
+    if (!Array.isArray(value) || value.length !== 2) {
+      throw parameterDomainFailure(
+        'query_input_projection_failed',
+        `Parameter Domain input cannot read ${binding.part} from ${parameterId}`,
+      );
+    }
+    return value[binding.part === 'start' ? 0 : 1];
+  }
+  return value;
+}
+
+function parameterDomainInputSignatures(values, intents) {
+  const bindingsByDomain = state.dashboard?.parameter_domain_contract?.domain_input_bindings || {};
+  return Object.fromEntries(Object.entries(bindingsByDomain).map(([domainId, bindings]) => [
+    domainId,
+    parameterDomainSignature(Object.fromEntries(
+      Object.keys(bindings || {}).sort().map(alias => [
+        alias,
+        parameterDomainProjectedInput(bindings[alias], values, intents),
+      ]),
+    )),
+  ]));
+}
+
+function parameterDomainSnapshotMatches(values, intents) {
+  const runtime = activeRuntime();
+  if (!runtime?.queryDomainInputSignatures) return false;
+  const desired = parameterDomainInputSignatures(values, intents);
+  return Object.keys(desired).every(
+    domainId => desired[domainId] === runtime.queryDomainInputSignatures[domainId],
+  ) && Object.keys(runtime.queryDomainInputSignatures).every(
+    domainId => desired[domainId] === runtime.queryDomainInputSignatures[domainId],
+  );
+}
+
+function validateParameterDomainClientProjection(projection, contract) {
+  if (!projection || typeof projection !== 'object') {
+    throw parameterDomainFailure(
+      'parameter_domain_client_projection_missing',
+      'Parameter Domain response omitted its complete client projection',
+    );
+  }
+  if (contract?.schema !== 'dataviz/parameter-domain-contract/v2') {
+    throw parameterDomainFailure(
+      'parameter_domain_contract_unsupported',
+      `Unsupported Parameter Domain Contract: ${contract?.schema || 'missing'}`,
+    );
+  }
+  if (
+    projection.contract_schema !== contract.schema
+    || !contract.contract_hash
+    || projection.contract_hash !== contract.contract_hash
+  ) {
+    throw parameterDomainFailure(
+      'parameter_domain_contract_drift',
+      'Parameter Domain projection does not match the active Contract',
+    );
+  }
+  const parameters = projection.parameters;
+  const capacity = projection.capacity;
+  if (!parameters || typeof parameters !== 'object' || !capacity) {
+    throw parameterDomainFailure(
+      'parameter_domain_client_projection_invalid',
+      'Parameter Domain client projection is incomplete',
+    );
+  }
+  for (const [parameterId, parents] of Object.entries(contract.projection_dependencies || {})) {
+    if ((parents || []).length && !parameters[parameterId]) {
+      throw parameterDomainFailure(
+        'parameter_domain_client_projection_missing',
+        `Parameter Domain projection is missing consumer ${parameterId}`,
+      );
+    }
+  }
+  const rows = Object.values(parameters).reduce(
+    (total, entry) => total + (Array.isArray(entry?.rows) ? entry.rows.length : 0),
+    0,
+  );
+  const serializedBytes = new TextEncoder().encode(parameterDomainSignature({
+    contract_schema:projection.contract_schema,
+    contract_hash:projection.contract_hash,
+    parameters,
+  })).byteLength;
+  if (
+    rows !== capacity.rows
+    || serializedBytes !== capacity.serialized_bytes
+    || rows > capacity.max_rows
+    || serializedBytes > capacity.max_serialized_bytes
+  ) {
+    throw parameterDomainFailure(
+      'parameter_domain_client_projection_capacity_invalid',
+      'Parameter Domain projection capacity metadata is inconsistent',
+    );
+  }
+  return projection;
+}
+
+function projectParameterDomainChoices(parameter, values, projection = null) {
+  const snapshot = projection || activeRuntime()?.queryDomainProjection;
+  const contract = state.dashboard?.parameter_domain_contract || {};
+  const entry = snapshot?.parameters?.[parameter.id];
+  const expectedParents = contract.projection_dependencies?.[parameter.id] || [];
+  if (!entry || entry.domain !== parameter.options?.source) {
+    throw parameterDomainFailure(
+      'parameter_domain_client_projection_missing',
+      `Parameter Domain projection is missing consumer ${parameter.id}`,
+    );
+  }
+  return projectParameterDomainRelation({
+    entry,
+    expectedParents,
+    values,
+    parameterId:parameter.id,
+  });
+}
+
+function calculateLocalParameterDomainTransaction(
+  values,
+  intents,
+  parameterIds,
+  {preserveUnavailable = false} = {},
+) {
+  const contract = state.dashboard?.parameter_domain_contract || {};
+  const definitions = new Map(
+    (state.dashboard?.query_parameters || []).map(parameter => [parameter.id, parameter]),
+  );
+  const affected = new Set(parameterIds || []);
+  const nextValues = structuredClone(values || {});
+  const nextIntents = structuredClone(intents || {});
+  const choices = {};
+  for (const parameterId of contract.order || []) {
+    if (!affected.has(parameterId)) continue;
+    const parameter = definitions.get(parameterId);
+    if (!parameter || parameter.options?.mode !== 'domain') continue;
+    let parameterChoices = projectParameterDomainChoices(parameter, nextValues);
+    const resolved = resolveLocalParameterDomainValue(
+      parameter,
+      parameterChoices,
+      nextValues[parameterId],
+      nextIntents[parameterId],
+      {preserveUnavailable},
+    );
+    if (preserveUnavailable) {
+      parameterChoices = withUnavailableParameterDomainChoices(
+        parameter, parameterChoices, resolved.value,
+      );
+    }
+    choices[parameterId] = parameterChoices;
+    nextValues[parameterId] = resolved.value;
+    nextIntents[parameterId] = resolved.intent;
+  }
+  return {values:nextValues, intents:nextIntents, choices};
+}
+
+function applyParameterDomainTransaction(transaction) {
+  const runtime = activeRuntime();
+  if (!runtime) return;
+  runtime.queryParameterIntents = structuredClone(transaction.intents || {});
+  for (const parameter of dynamicQueryParameters()) {
+    if (!Object.prototype.hasOwnProperty.call(transaction.choices || {}, parameter.id)) continue;
+    replaceParameterDomainOptions(parameter, transaction.choices[parameter.id], {sync:false});
+  }
+  syncQueryParameterSelectionIntents({sync:false});
+  setFormValues($('#parameter-form'), transaction.values || {}, {sync:false});
+  window.datavizComponents?.controls?.sync($('#parameter-form'));
+  runtime.queryParameterValues = structuredClone(transaction.values || {});
+  runtime.queryDomainInitialized = [...new Set([
+    ...(runtime.queryDomainInitialized || []),
+    ...Object.keys(transaction.choices || {}),
+  ])];
 }
 
 function syncQueryParameterSelectionIntents({sync = true} = {}) {
@@ -2018,6 +2203,62 @@ function replaceParameterDomainOptions(parameter, choices, {sync = true} = {}) {
   if (sync) input._syncChoiceControl?.();
 }
 
+function parameterDomainResponseTransaction(response) {
+  const contract = state.dashboard?.parameter_domain_contract;
+  if (response?.schema !== 'dataviz/parameter-domain-resolution/v2') {
+    throw parameterDomainFailure(
+      'parameter_domain_resolution_unsupported',
+      `Unsupported Parameter Domain Resolution: ${response?.schema || 'missing'}`,
+    );
+  }
+  if (
+    !contract?.contract_hash
+    || response.contract?.contract_hash !== contract.contract_hash
+    || response.contract?.schema !== contract.schema
+  ) {
+    throw parameterDomainFailure(
+      'parameter_domain_contract_drift',
+      'Parameter Domain response does not match the active Dashboard Contract',
+    );
+  }
+  const projection = validateParameterDomainClientProjection(
+    response.client_projection,
+    contract,
+  );
+  const values = structuredClone(response.query_parameters || {});
+  const intents = structuredClone(response.intents || {});
+  const choices = {};
+  const rootChoices = {};
+  for (const parameter of dynamicQueryParameters()) {
+    const parents = contract.projection_dependencies?.[parameter.id] || [];
+    const serverChoices = structuredClone(response.choices?.[parameter.id] || []);
+    if (!parents.length) {
+      choices[parameter.id] = serverChoices;
+      rootChoices[parameter.id] = serverChoices.filter(choice => !choice.unavailable);
+      continue;
+    }
+    let projectedChoices = projectParameterDomainChoices(parameter, values, projection);
+    if (serverChoices.some(choice => choice.unavailable)) {
+      projectedChoices = withUnavailableParameterDomainChoices(
+        parameter, projectedChoices, values[parameter.id],
+      );
+    }
+    if (parameterDomainSignature(projectedChoices) !== parameterDomainSignature(serverChoices)) {
+      throw parameterDomainFailure(
+        'parameter_domain_projection_drift',
+        `Server and browser projections disagree for ${parameter.id}`,
+      );
+    }
+    choices[parameter.id] = projectedChoices;
+  }
+  return {
+    transaction:{values, intents, choices},
+    projection,
+    rootChoices,
+    inputSignatures:parameterDomainInputSignatures(values, intents),
+  };
+}
+
 async function resolveQueryParameterDomains({
   refresh = false,
   announce = false,
@@ -2030,6 +2271,8 @@ async function resolveQueryParameterDomains({
     updateParameterDomainUi();
     return;
   }
+  window.clearTimeout(state.parameterDomainTimer);
+  state.parameterDomainTimer = null;
   runtime.queryDomainController?.abort();
   const controller = new AbortController();
   const requestGeneration = runtime.queryDomainRequestGeneration + 1;
@@ -2070,20 +2313,11 @@ async function resolveQueryParameterDomains({
       state.dashboard?.id !== dashboard.id
       || runtime.queryDomainRequestGeneration !== requestGeneration
     ) return;
-    runtime.queryParameterIntents = targetSnapshot
-      ? {...(response.intents || {})}
-      : {...runtime.queryParameterIntents, ...(response.intents || {})};
-    for (const parameter of dynamic) {
-      replaceParameterDomainOptions(
-        parameter,
-        response.choices?.[parameter.id] || [],
-        {sync:false},
-      );
-    }
-    syncQueryParameterSelectionIntents({sync:false});
-    setFormValues($('#parameter-form'), response.query_parameters || {}, {sync:false});
-    window.datavizComponents?.controls?.sync($('#parameter-form'));
-    runtime.queryParameterValues = queryParameters();
+    const resolved = parameterDomainResponseTransaction(response);
+    runtime.queryDomainProjection = resolved.projection;
+    runtime.queryDomainRootChoices = resolved.rootChoices;
+    runtime.queryDomainInputSignatures = resolved.inputSignatures;
+    applyParameterDomainTransaction(resolved.transaction);
     runtime.queryDomainInitialized = dynamic.map(parameter => parameter.id);
     runtime.queryDomainGeneration = response.generation;
     runtime.queryDomainReady = true;
@@ -2118,9 +2352,60 @@ async function resolveQueryParameterDomains({
 function scheduleParameterDomainResolution() {
   window.clearTimeout(state.parameterDomainTimer);
   state.parameterDomainTimer = window.setTimeout(
-    () => resolveQueryParameterDomains(),
+    () => {
+      state.parameterDomainTimer = null;
+      void resolveQueryParameterDomains();
+    },
     120,
   );
+}
+
+function reconcileParameterDomainSnapshotDemand(values, intents) {
+  const runtime = activeRuntime();
+  if (!runtime) return;
+  if (parameterDomainSnapshotMatches(values, intents)) {
+    window.clearTimeout(state.parameterDomainTimer);
+    state.parameterDomainTimer = null;
+    runtime.queryDomainReady = true;
+  } else {
+    runtime.queryDomainReady = false;
+    scheduleParameterDomainResolution();
+  }
+  updateParameterDomainUi();
+}
+
+function localCommittedParameterDomainTransaction(snapshot) {
+  const runtime = activeRuntime();
+  if (!runtime?.queryDomainProjection) {
+    throw parameterDomainFailure(
+      'parameter_domain_client_projection_missing',
+      'Cannot restore Query Parameters without the current complete Domain projection',
+    );
+  }
+  const contract = state.dashboard?.parameter_domain_contract || {};
+  const projectionConsumers = Object.entries(contract.projection_dependencies || {})
+    .filter(([_parameterId, parents]) => (parents || []).length)
+    .map(([parameterId]) => parameterId);
+  const transaction = calculateLocalParameterDomainTransaction(
+    structuredClone(snapshot.values || {}),
+    structuredClone(snapshot.intents || {}),
+    projectionConsumers,
+    {preserveUnavailable:true},
+  );
+  for (const parameter of dynamicQueryParameters()) {
+    if ((contract.projection_dependencies?.[parameter.id] || []).length) continue;
+    const choices = runtime.queryDomainRootChoices?.[parameter.id];
+    if (!Array.isArray(choices)) {
+      throw parameterDomainFailure(
+        'parameter_domain_client_projection_missing',
+        `Current Domain snapshot is missing root choices for ${parameter.id}`,
+      );
+    }
+    transaction.choices[parameter.id] = withUnavailableParameterDomainChoices(
+      parameter, choices, transaction.values[parameter.id],
+    );
+  }
+  return transaction;
 }
 
 async function revertQueryParameters() {
@@ -2128,7 +2413,28 @@ async function revertQueryParameters() {
   const snapshot = runtime?.committedQuerySnapshot;
   if (!runtime || !snapshot || runtime.queryDomainPending) return;
   if (dynamicQueryParameters().length) {
-    await resolveQueryParameterDomains({targetSnapshot:snapshot, announce:true});
+    if (!parameterDomainSnapshotMatches(snapshot.values || {}, snapshot.intents || {})) {
+      await resolveQueryParameterDomains({targetSnapshot:snapshot, announce:true});
+      return;
+    }
+    try {
+      applyParameterDomainTransaction(localCommittedParameterDomainTransaction(snapshot));
+      runtime.queryDomainReady = true;
+    } catch (error) {
+      runtime.queryDomainReady = false;
+      runtime.message = `参数选项本地投影失败：${error.message}`;
+      setQueryState(runtime.message);
+      showShortcutToast(runtime.message);
+      updateParameterDomainUi();
+      return;
+    }
+    window.clearTimeout(state.parameterDomainTimer);
+    state.parameterDomainTimer = null;
+    saveTabUiState();
+    syncDashboardLocation('replace');
+    setQueryState();
+    syncCanvasQueryDraft();
+    showShortcutToast('已恢复已应用参数');
     return;
   }
   runtime.queryParameterIntents = structuredClone(snapshot.intents || {});
@@ -2237,16 +2543,6 @@ function normalizeFormInput(input) {
   if (input.tagName === 'SELECT') return input.value === '' ? null : decode(input.value);
   if (input.value === '') return null;
   return normalizeFormScalar(definition, input.value);
-}
-
-function controlState() {
-  dashboardControlState();
-  const values = activeRuntime()?.controlState || {};
-  const validKeys = new Set(
-    (state.dashboard?.controls || [])
-      .map(control => control.key),
-  );
-  return Object.fromEntries(Object.entries(values).filter(([key]) => validKeys.has(key)));
 }
 
 function formValues(form) {
@@ -2473,8 +2769,9 @@ async function finishRun(runId, dashboardId) {
 }
 
 function setControlsEnabled(enabled) {
+  const active = Boolean(enabled) && Boolean(activeRuntime()?.controlConnected);
   for (const input of $('#dashboard-control-form').elements) {
-    input.disabled = !enabled;
+    input.disabled = !active;
     input._syncChoiceControl?.();
   }
 }
@@ -2484,45 +2781,137 @@ function setComputeState() {
   const actionable = (state.dashboard?.nodes || []).some(
     (node) => node.type === 'interactive_transform' && node.trigger !== 'auto',
   );
-  const enabled = Boolean(runtime?.runId) && actionable;
+  const enabled = Boolean(runtime?.runId) && runtime.controlConnected && actionable;
   $('#dashboard-control-actions').hidden = !actionable;
   const status = $('#control-state');
   status.dataset.stale = 'false';
   status.textContent = !runtime?.runId
     ? 'Run query before analysis.'
+    : !runtime.controlConnected ? 'Control Runtime disconnected.'
     : actionable ? 'Ready to run on demand.' : 'Results are current.';
   $('#control-apply').disabled = !enabled;
   updateDashboardControlSummary();
 }
 
-function sendControls(
-  states,
-  {commit = false, apply = false, manualTargets = [], controlKeys = null} = {},
-) {
-  if (!state.runId && !state.pendingRunId) return;
-  postCanvasMessage({
-    type: 'dataviz:set-controls',
-    control_state: states,
-    commit,
-    apply,
-    manual_targets: manualTargets,
-    control_keys: controlKeys,
+function disconnectControlChannel(runtime = activeRuntime(), code = 'control_channel_disconnected') {
+  if (!runtime) return;
+  runtime.controlConnected = false;
+  runtime.controlVersion = null;
+  for (const [actionId, pending] of runtime.controlPendingRequests) {
+    clearTimeout(pending.timer);
+    pending.resolve({
+      type:'dataviz:action-rejected',
+      action_id:actionId,
+      source_view:null,
+      code,
+    });
+  }
+  runtime.controlPendingRequests.clear();
+  runtime.controlDraftActions.clear();
+  if (runtime === activeRuntime()) {
+    setControlsEnabled(false);
+    setComputeState();
+    setShareEnabled(false);
+  }
+}
+
+function waitForControlResponse(runtime, actionId) {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => {
+      runtime.controlPendingRequests.delete(actionId);
+      disconnectControlChannel(runtime, 'control_channel_timeout');
+      resolve({
+        type:'dataviz:action-rejected',
+        action_id:actionId,
+        source_view:null,
+        code:'control_channel_timeout',
+      });
+    }, 5000);
+    runtime.controlPendingRequests.set(actionId, {resolve, timer});
   });
 }
 
-function applyDashboardControls() {
+function resolveControlResponse(runtime, payload) {
+  const actionId = payload?.action_id || payload?.snapshot?.caused_by_action_id;
+  if (!actionId) return;
+  const pending = runtime.controlPendingRequests.get(actionId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  runtime.controlPendingRequests.delete(actionId);
+  pending.resolve(payload);
+}
+
+function sendHostControlCommand(type, payload, {retryStale = true} = {}) {
   const runtime = activeRuntime();
-  if (!runtime?.runId) return;
-  const controlKeys = dashboardControls().map(control => control.key);
-  const manualTargets = (state.dashboard?.nodes || [])
-    .filter((node) => node.type === 'interactive_transform' && node.trigger === 'manual')
-    .map((node) => node.local_id);
-  dashboardControlState();
-  sendControls(runtime.controlState, {
-    commit: true,
-    apply: true,
-    manualTargets,
-    controlKeys,
+  if (!runtime) return Promise.reject(new Error('Control Runtime is unavailable'));
+  const identity = canvasIdentity();
+  const execute = async () => {
+    for (let attempt = 0; attempt < (retryStale ? 2 : 1); attempt += 1) {
+      if (
+        !runtime.controlConnected
+        || !Number.isSafeInteger(runtime.controlVersion)
+        || !sameCanvasIdentity(canvasIdentity(), identity)
+      ) throw new Error('Control Runtime is disconnected');
+      const actionId = crypto.randomUUID();
+      const response = waitForControlResponse(runtime, actionId);
+      if (!postCanvasMessage({
+        type,
+        action_id:actionId,
+        source_view:null,
+        base_control_version:runtime.controlVersion,
+        ...payload,
+      })) {
+        disconnectControlChannel(runtime);
+      }
+      const result = await response;
+      if (result.type !== 'dataviz:action-rejected') return result;
+      if (result.code === 'stale_control_version' && attempt === 0 && retryStale) continue;
+      const error = new Error(`Control action rejected: ${result.code}`);
+      error.code = result.code;
+      throw error;
+    }
+    throw new Error('Control action could not be committed');
+  };
+  runtime.controlActionQueue = runtime.controlActionQueue
+    .catch(() => undefined)
+    .then(execute);
+  return runtime.controlActionQueue;
+}
+
+function flushDashboardControlDrafts() {
+  const runtime = activeRuntime();
+  if (!runtime?.controlConnected) return Promise.resolve([]);
+  const tasks = [];
+  for (const [key, draft] of runtime.controlDraftActions) {
+    if (draft.queued) continue;
+    draft.queued = true;
+    const task = sendHostControlCommand('dataviz:control-action', {
+      action:{
+        type:'set',
+        control:key,
+        value:structuredClone(draft.value),
+        intent:draft.intent,
+      },
+    }).then(() => {
+      if (runtime.controlDraftActions.get(key) === draft) {
+        runtime.controlDraftActions.delete(key);
+        syncDashboardControlForm(runtime);
+      }
+    }).catch(error => {
+      if (runtime.controlDraftActions.get(key) === draft) draft.queued = false;
+      throw error;
+    });
+    tasks.push(task);
+  }
+  return Promise.all(tasks);
+}
+
+async function applyDashboardControls() {
+  const runtime = activeRuntime();
+  if (!runtime?.runId || !runtime.controlConnected) return;
+  await flushDashboardControlDrafts();
+  await sendHostControlCommand('dataviz:control-apply', {
+    keys:dashboardControls().map(control => control.key),
   });
 }
 
@@ -2600,28 +2989,13 @@ function closeHeaderPopovers(except = null) {
   window.datavizComponents?.overlay.closeAll({except, group: 'popover'});
 }
 
-function applyCanvasControls() {
-  if (!state.runId && !state.pendingRunId) return;
-  dashboardControlState();
-  const runtime = activeRuntime();
-  const dashboardKeys = new Set(dashboardControls().map(control => control.key));
-  const controlPatch = Object.fromEntries(
-    Object.entries(runtime?.controlState || {}).filter(([key]) => dashboardKeys.has(key)),
-  );
-  postCanvasMessage({
-    type:'dataviz:set-controls',
-    // After bootstrap the Header owns Dashboard Controls only. Sending its
-    // asynchronous full shadow would overwrite newer Section/View writes made
-    // inside the Canvas. The Canvas merges this owner-scoped patch, reconciles
-    // downstream domains, then returns one complete canonical snapshot.
-    control_state:controlPatch,
-    commit:true,
-  });
-}
-
 function scheduleCanvasControls() {
   window.clearTimeout(state.controlTimer);
-  state.controlTimer = window.setTimeout(applyCanvasControls, 80);
+  state.controlTimer = window.setTimeout(() => {
+    flushDashboardControlDrafts().catch(error => {
+      showShortcutToast(error.message);
+    });
+  }, 80);
 }
 
 function inspectorElement(tag, className = '', text = '') {
@@ -3499,6 +3873,7 @@ $('#workspace-update-action').addEventListener('click', () => {
 });
 const onQueryDraft = event => {
   event.target?.setCustomValidity?.('');
+  let domainProjectionError = null;
   let values;
   try { values = queryParameters(); }
   catch (_error) {
@@ -3506,7 +3881,6 @@ const onQueryDraft = event => {
     return;
   }
   const runtime = activeRuntime();
-  if (runtime) runtime.queryParameterValues = values;
   const input = event.target;
   if (runtime && input?.name) {
     if (input instanceof HTMLSelectElement && input.multiple) {
@@ -3521,50 +3895,118 @@ const onQueryDraft = event => {
       ...(runtime.queryDomainInitialized || []), input.name,
     ])];
   }
+  if (runtime) {
+    const descendants = input?.name
+      ? state.dashboard?.parameter_domain_contract?.projection_descendants?.[input.name] || []
+      : [];
+    try {
+      if (descendants.length) {
+        const transaction = calculateLocalParameterDomainTransaction(
+          values,
+          runtime.queryParameterIntents,
+          descendants,
+        );
+        applyParameterDomainTransaction(transaction);
+        values = transaction.values;
+      } else {
+        runtime.queryParameterValues = structuredClone(values);
+      }
+      if (dynamicQueryParameters().length) {
+        reconcileParameterDomainSnapshotDemand(values, runtime.queryParameterIntents);
+      }
+    } catch (error) {
+      runtime.queryParameterValues = structuredClone(values);
+      runtime.queryDomainReady = false;
+      runtime.message = `参数选项本地投影失败：${error.message}`;
+      domainProjectionError = runtime.message;
+      showShortcutToast(runtime.message);
+      updateParameterDomainUi();
+    }
+  }
   saveTabUiState();
   syncDashboardLocation('replace');
-  setQueryState();
+  setQueryState(domainProjectionError);
   syncCanvasQueryDraft();
-  const dependencies = state.dashboard?.parameter_domain_contract?.dependencies || {};
-  if (input?.name && Object.values(dependencies).some(items => items.includes(input.name))) {
-    if (runtime) runtime.queryDomainReady = false;
-    updateParameterDomainUi();
-    scheduleParameterDomainResolution();
-  }
 };
 $('#parameter-form').addEventListener('input', onQueryDraft);
 $('#parameter-form').addEventListener('change', onQueryDraft);
 const onDashboardControlDraft = event => {
-  captureDashboardControlIntent(event);
-  try { dashboardControlState(); }
+  const runtime = activeRuntime();
+  const input = event.target;
+  if (!runtime?.controlConnected || !input?.name || !dashboardControl(input.name)) return;
+  const intent = captureDashboardControlIntent(event);
+  let values;
+  try { values = formValues($('#dashboard-control-form')); }
   catch (_error) { return; }
-  saveTabUiState();
+  runtime.controlDraftActions.set(input.name, {
+    value:structuredClone(values[input.name]),
+    intent,
+    queued:false,
+  });
   updateDashboardControlSummary();
   scheduleCanvasControls();
 };
 $('#dashboard-control-form').addEventListener('input', onDashboardControlDraft);
-$('#control-apply').addEventListener('click', applyDashboardControls);
+$('#control-apply').addEventListener('click', () => {
+  applyDashboardControls().catch(error => showShortcutToast(error.message));
+});
 $('#dashboard-control-form').addEventListener('change', onDashboardControlDraft);
 document.addEventListener('click', (event) => {
   if (!event.target.closest('#nav-context-menu')) hideNavMenu();
 });
 window.addEventListener('message', (event) => {
   if (!isCurrentCanvasMessage(event)) return;
+  if (event.data?.type === 'dataviz:control-hello') {
+    const runtime = activeRuntime();
+    if (!runtime) return;
+    const expectedHash = state.dashboard?.dependency_contract?.control_contract_hash || null;
+    runtime.controlContractHash = event.data.control_contract_hash || null;
+    const checkpoint = (
+      runtime.controlContractHash === expectedHash
+      && runtime.controlCheckpoint?.control_contract_hash === expectedHash
+    ) ? structuredClone(runtime.controlCheckpoint) : null;
+    if (runtime.controlCheckpoint && !checkpoint) runtime.controlCheckpoint = null;
+    postCanvasMessage({type:'dataviz:restore-checkpoint', checkpoint});
+    return;
+  }
   if (event.data?.type === 'dataviz:canvas-ready') {
     const runtime = activeRuntime();
     const frame = $('#canvas-frame');
     if (!runtime) return;
-    // Fresh Canvas defaults seed missing keys; remembered tab-local canonical
-    // state wins on reload. Invalid/removed keys are filtered before sending.
-    runtime.controlState = {
-      ...(event.data.control_state || {}),
-      ...(runtime.controlState || {}),
-    };
+    if (!applyControlOperationalSnapshot(event.data.snapshot, {ready:true})) {
+      disconnectControlChannel(runtime, 'control_snapshot_invalid');
+      return;
+    }
     frame.dataset.runtimeReady = 'true';
-    saveTabUiState();
-    applyCanvasControls();
     syncCanvasInteraction();
     syncCanvasQueryDraft();
+    return;
+  }
+  if (event.data?.type === 'dataviz:control-snapshot') {
+    const runtime = activeRuntime();
+    if (!runtime) return;
+    if (!applyControlOperationalSnapshot(event.data.snapshot)) {
+      disconnectControlChannel(runtime, 'control_snapshot_invalid');
+      return;
+    }
+    resolveControlResponse(runtime, event.data);
+    return;
+  }
+  if (event.data?.type === 'dataviz:action-rejected') {
+    const runtime = activeRuntime();
+    if (!runtime) return;
+    if (
+      event.data.snapshot
+      && !applyControlOperationalSnapshot(event.data.snapshot)
+    ) {
+      disconnectControlChannel(runtime, 'control_snapshot_invalid');
+      return;
+    }
+    resolveControlResponse(runtime, event.data);
+    if (!event.data.action_id && event.data.code !== 'restore_window_closed') {
+      runtime.message = `Control checkpoint ignored: ${event.data.code}`;
+      $('#run-message').textContent = runtime.message;
+    }
     return;
   }
   if (event.data?.type === 'dataviz:canvas-interaction') {
@@ -3604,44 +4046,6 @@ window.addEventListener('message', (event) => {
       $('#run-message').textContent = runtime.message;
     }
     return;
-  }
-  if (event.data?.type === 'dataviz:control-options-changed') {
-    syncDashboardControlOptions(event.data.controls || []);
-    return;
-  }
-  if (event.data?.type === 'dataviz:control-impact-changed') {
-    syncDashboardControlImpacts(event.data.controls || []);
-    return;
-  }
-  if (event.data?.type === 'dataviz:controls-changed') {
-    const runtime = activeRuntime();
-    if (!runtime) return;
-    // Canvas messages contain the complete canonical state. Replacing it also
-    // removes keys restored from sessionStorage after a Control is renamed.
-    const incoming = {...(event.data.control_state || {})};
-    const local = runtime.controlState || {};
-    const dashboardKeys = new Set(dashboardControls().map(control => control.key));
-    dashboardKeys.forEach(key => {
-      if (
-        local[key]
-        && Number(local[key].revision || 0) > Number(incoming[key]?.revision || 0)
-      ) incoming[key] = local[key];
-    });
-    state.controlState = incoming;
-    runtime.controlState = state.controlState;
-    const controls = dashboardControls();
-    setFormValues(
-      $('#dashboard-control-form'),
-      Object.fromEntries(controls.map(control => [
-        control.key,
-        controlValueFromState(control.definition, state.controlState[control.key]),
-      ])),
-    );
-    for (const input of $('#dashboard-control-form').elements) {
-      input._syncChoiceControl?.();
-    }
-    updateDashboardControlSummary();
-    saveTabUiState();
   }
 });
 $('#sidebar-toggle').addEventListener('click', toggleSidebar);

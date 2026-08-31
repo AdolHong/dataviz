@@ -482,7 +482,9 @@ class InteractionExecutor:
                 dashboard_root=dashboard.root,
                 run_id=run.run_id,
                 query_inputs=project_query_inputs(
-                    node.query_inputs, run.query_parameters
+                    node.query_inputs,
+                    run.query_parameters,
+                    run.query_parameter_intents,
                 ),
                 control_inputs=control_values,
                 control_state={
@@ -701,7 +703,7 @@ class InteractionExecutor:
             if path.exists():
                 files[f"dependency:{dependency}"] = hash_path(path)
         payload = {
-            "protocol": "dataviz/interactive-transform/v3",
+            "protocol": "dataviz/interactive-transform/v4",
             "definition": node.definition.model_dump(mode="json", by_alias=True),
             "files": files,
             "inputs": {

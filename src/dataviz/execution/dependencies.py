@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 from typing import Any, Iterable, Literal, TYPE_CHECKING
 
 from dataviz.content_templates import (
@@ -10,6 +12,7 @@ from dataviz.content_templates import (
 )
 from dataviz.errors import ValidationFailure
 from dataviz.execution.references import parse_output_reference
+from dataviz.execution.control_filter import OPERATORS_BY_VALUE_TYPE
 from dataviz.execution.parameters import (
     control_input_contract,
     control_input_control,
@@ -24,6 +27,7 @@ from dataviz.workspace.controls import (
     scoped_control_registry,
 )
 from dataviz.input_state import initial_input_state
+from dataviz.protocols import DEPENDENCY_CONTRACT_SCHEMA
 from dataviz.workspace.models import (
     InferredOptionDomainDefinition,
     ViewControlBindingDefinition,
@@ -31,9 +35,6 @@ from dataviz.workspace.models import (
 
 if TYPE_CHECKING:
     from dataviz.workspace.loader import LoadedDashboard
-
-
-DEPENDENCY_CONTRACT_SCHEMA = "dataviz/dependency-contract/v7"
 
 
 def _topological_order(
@@ -49,20 +50,12 @@ def _topological_order(
         if dependency not in pending
     )
     if unknown:
-        raise ValidationFailure(
-            f"{label} references unknown dependencies: {', '.join(unknown)}"
-        )
+        raise ValidationFailure(f"{label} references unknown dependencies: {', '.join(unknown)}")
     order: list[str] = []
     while pending:
-        ready = sorted(
-            node
-            for node, dependencies in pending.items()
-            if not dependencies
-        )
+        ready = sorted(node for node, dependencies in pending.items() if not dependencies)
         if not ready:
-            raise ValidationFailure(
-                f"{label} contains a cycle: {', '.join(sorted(pending))}"
-            )
+            raise ValidationFailure(f"{label} contains a cycle: {', '.join(sorted(pending))}")
         order.extend(ready)
         for node in ready:
             pending.pop(node)
@@ -213,17 +206,11 @@ def _resolve_control_reference(
 def _control_value_fields(item: EffectiveControl) -> tuple[str, ...]:
     """Return the default datum fields written by one bound View."""
 
-    return tuple(
-        item.definition.path_fields
-        or [item.definition.field or item.id]
-    )
+    return tuple(item.definition.path_fields or [item.definition.field or item.id])
 
 
 def _declared_outputs(kind: str, identifier: str, definition: Any) -> tuple[str, ...]:
-    return tuple(
-        f"{kind}:{identifier}/{name}"
-        for name in definition.outputs
-    )
+    return tuple(f"{kind}:{identifier}/{name}" for name in definition.outputs)
 
 
 def _require_declared_references(
@@ -232,14 +219,10 @@ def _require_declared_references(
     *,
     label: str,
 ) -> None:
-    canonical = {
-        parse_output_reference(reference).canonical for reference in references
-    }
+    canonical = {parse_output_reference(reference).canonical for reference in references}
     unknown = sorted(canonical - declared)
     if unknown:
-        raise ValidationFailure(
-            f"{label} references unknown Named Outputs: {', '.join(unknown)}"
-        )
+        raise ValidationFailure(f"{label} references unknown Named Outputs: {', '.join(unknown)}")
 
 
 def _output_dependency_closure(
@@ -258,9 +241,7 @@ def _output_dependency_closure(
         if identifier in interactive:
             continue
         if identifier not in interactive_inputs:
-            raise ValidationFailure(
-                f"Unknown Interactive Transform dependency: {identifier}"
-            )
+            raise ValidationFailure(f"Unknown Interactive Transform dependency: {identifier}")
         interactive.add(identifier)
         pending.extend(interactive_inputs[identifier].values())
     return interactive, base
@@ -314,14 +295,10 @@ class QueryParameterDependency:
     def as_dict(self) -> dict[str, Any]:
         return {
             "direct_query_nodes": list(self.direct_query_nodes),
-            "direct_interactive_transforms": list(
-                self.direct_interactive_transforms
-            ),
+            "direct_interactive_transforms": list(self.direct_interactive_transforms),
             "content_fields": list(self.content_fields),
             "affected_query_nodes": list(self.affected_query_nodes),
-            "affected_interactive_transforms": list(
-                self.affected_interactive_transforms
-            ),
+            "affected_interactive_transforms": list(self.affected_interactive_transforms),
             "affected_option_controls": list(self.affected_option_controls),
             "affected_views": list(self.affected_views),
         }
@@ -359,6 +336,7 @@ class ViewControlBindingDependency:
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "source_view": self.view_id,
             "control": self.control,
             "fields": list(self.fields),
             "renderer": self.renderer,
@@ -377,8 +355,7 @@ class ControlDependency:
     runtime_checked_views: tuple[str, ...]
     non_data_views: tuple[str, ...]
     direct_view_bindings: dict[str, ControlFilterDependency]
-    writer_view: str | None
-    writer_fields: tuple[str, ...]
+    writer_edges: tuple[ViewControlBindingDependency, ...]
     transform_consumers: tuple[str, ...]
     transform_inputs: dict[str, tuple[str, ...]]
     derived_views: tuple[str, ...]
@@ -407,8 +384,7 @@ class ControlDependency:
                 view_id: dependency.as_dict()
                 for view_id, dependency in self.direct_view_bindings.items()
             },
-            "writer_view": self.writer_view,
-            "writer_fields": list(self.writer_fields),
+            "writer_edges": [edge.as_dict() for edge in self.writer_edges],
             "transform_consumers": list(self.transform_consumers),
             "transform_inputs": {
                 transform_id: list(aliases)
@@ -426,6 +402,142 @@ class ControlDependency:
             "definition": self.definition,
             "initial_state": self.initial_state,
         }
+
+
+def _validate_typed_filter_binding(
+    *,
+    binding: dict[str, Any],
+    definition: Any,
+    consumer: str,
+    alias: str,
+) -> None:
+    if binding.get("mode") != "filter":
+        return
+    raw_fields = binding.get("field")
+    fields = raw_fields if isinstance(raw_fields, list) else [raw_fields]
+    operator = str(binding.get("operator") or "auto")
+    if len(fields) > 1:
+        if operator not in {"auto", "in", "equals"}:
+            raise ValidationFailure(
+                f"Path filter {consumer}.{alias} does not support {operator}",
+                details={
+                    "code": "control_filter_operator_incompatible",
+                    "consumer": consumer,
+                    "alias": alias,
+                    "operator": operator,
+                    "value_type": definition.value_type,
+                },
+            )
+        return
+    if operator == "auto":
+        if definition.type in {"multiple_input", "multiple_select"}:
+            operator = "in"
+        elif definition.type == "range_input":
+            operator = "between"
+        else:
+            operator = "equals"
+    if operator not in OPERATORS_BY_VALUE_TYPE[definition.value_type]:
+        raise ValidationFailure(
+            f"Control filter {consumer}.{alias} uses {operator} with {definition.value_type}",
+            details={
+                "code": "control_filter_operator_incompatible",
+                "consumer": consumer,
+                "alias": alias,
+                "operator": operator,
+                "value_type": definition.value_type,
+            },
+        )
+
+
+def _validate_filter_schema_type(
+    *,
+    binding: dict[str, Any],
+    definition: Any,
+    consumer: str,
+    alias: str,
+    inputs: dict[str, str],
+    output_definitions: dict[str, Any],
+) -> None:
+    if binding.get("mode") != "filter" or isinstance(binding.get("field"), list):
+        return
+    field = str(binding["field"])
+    compatible_tokens = {
+        "text": ("str", "string", "object", "utf8"),
+        "integer": ("int", "uint"),
+        "number": ("int", "uint", "float", "double", "decimal"),
+        "boolean": ("bool",),
+        "date": ("date", "datetime", "timestamp"),
+    }[definition.value_type]
+    for input_alias in binding.get("inputs", ()):
+        reference = inputs.get(input_alias)
+        output = output_definitions.get(reference or "")
+        column = next(
+            (item for item in getattr(output, "schema_", ()) if item.name == field and item.dtype),
+            None,
+        )
+        if column is None:
+            continue
+        dtype = str(column.dtype).casefold()
+        if not any(token in dtype for token in compatible_tokens):
+            raise ValidationFailure(
+                f"Control filter {consumer}.{alias} expects {definition.value_type}, "
+                f"but {reference}.{field} declares {column.dtype}",
+                details={
+                    "code": "control_filter_schema_type_incompatible",
+                    "consumer": consumer,
+                    "alias": alias,
+                    "input": input_alias,
+                    "reference": reference,
+                    "field": field,
+                    "value_type": definition.value_type,
+                    "dtype": column.dtype,
+                },
+            )
+
+
+def _validate_writer_schema_type(
+    *,
+    fields: tuple[str, ...],
+    definition: Any,
+    view_id: str,
+    references: tuple[str, ...],
+    output_definitions: dict[str, Any],
+) -> None:
+    compatible_tokens = {
+        "text": ("str", "string", "object", "utf8"),
+        "integer": ("int", "uint"),
+        "number": ("int", "uint", "float", "double", "decimal"),
+        "boolean": ("bool",),
+        "date": ("date", "datetime", "timestamp"),
+    }[definition.value_type]
+    for reference in references:
+        output = output_definitions.get(reference)
+        for field in fields:
+            column = next(
+                (
+                    item
+                    for item in getattr(output, "schema_", ())
+                    if item.name == field and item.dtype
+                ),
+                None,
+            )
+            if column is None:
+                continue
+            dtype = str(column.dtype).casefold()
+            if any(token in dtype for token in compatible_tokens):
+                continue
+            raise ValidationFailure(
+                f"View {view_id} writer expects {definition.value_type}, "
+                f"but {reference}.{field} declares {column.dtype}",
+                details={
+                    "code": "view_control_binding_schema_type_incompatible",
+                    "view": view_id,
+                    "reference": reference,
+                    "field": field,
+                    "value_type": definition.value_type,
+                    "dtype": column.dtype,
+                },
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -447,6 +559,7 @@ class DashboardDependencyContract:
     interactive_inputs: dict[str, dict[str, str]]
     interactive_outputs: dict[str, tuple[str, ...]]
     interactive_runtimes: dict[str, str]
+    interactive_triggers: dict[str, str]
     interactive_parameter_inputs: dict[str, dict[str, dict[str, Any]]]
     interactive_control_inputs: dict[str, dict[str, dict[str, Any]]]
     interactive_order: tuple[str, ...]
@@ -503,16 +616,12 @@ class DashboardDependencyContract:
             selected.add(identifier)
 
         include(target)
-        return tuple(
-            identifier for identifier in self.interactive_order if identifier in selected
-        )
+        return tuple(identifier for identifier in self.interactive_order if identifier in selected)
 
     def interactive_ancestors(self, target: str) -> set[str]:
         return set(self.interactive_closure(target)) - {target}
 
-    def output_closure(
-        self, references: Iterable[str]
-    ) -> tuple[set[str], set[str]]:
+    def output_closure(self, references: Iterable[str]) -> tuple[set[str], set[str]]:
         """Resolve presentation references into Interactive nodes and Base Outputs."""
 
         return _output_dependency_closure(references, self.interactive_inputs)
@@ -521,9 +630,7 @@ class DashboardDependencyContract:
         required: set[str] = set()
         for identifier in self.reachable_interactive_order:
             if self.interactive_runtimes[identifier] == "server-python":
-                _, base = self.output_closure(
-                    self.interactive_inputs[identifier].values()
-                )
+                _, base = self.output_closure(self.interactive_inputs[identifier].values())
                 required.update(base)
         return required
 
@@ -546,6 +653,83 @@ class DashboardDependencyContract:
         )
         return tuple((*query_nodes, *interactive_nodes))
 
+    def control_contract_projection(self) -> dict[str, Any]:
+        """Return the compiler-owned checkpoint compatibility boundary.
+
+        Presentation-only text is deliberately excluded: changing a label must
+        not invalidate a tab-local Control checkpoint.  Reducer inputs,
+        writer/consumer bindings, option domains and trigger policy are all
+        included because changing any of them changes how a restored value is
+        interpreted or consumed.
+        """
+
+        presentation_fields = {
+            "description",
+            "help",
+            "help_text",
+            "label",
+            "placeholder",
+            "presentation",
+        }
+        controls: dict[str, Any] = {}
+        for key in self.control_order:
+            dependency = self.controls[key]
+            controls[key] = {
+                "origin": dependency.origin,
+                "owner_id": dependency.owner_id,
+                "definition": {
+                    field: value
+                    for field, value in dependency.definition.items()
+                    if field not in presentation_fields
+                },
+                "initial_state": dependency.initial_state,
+                "depends_on": list(dependency.depends_on),
+                "option_domain_references": list(dependency.option_domain_references),
+                "writer_edges": [edge.as_dict() for edge in dependency.writer_edges],
+                "direct_view_bindings": {
+                    view_id: binding.as_dict()
+                    for view_id, binding in sorted(dependency.direct_view_bindings.items())
+                },
+                "transform_inputs": {
+                    transform_id: list(aliases)
+                    for transform_id, aliases in sorted(dependency.transform_inputs.items())
+                },
+            }
+        return {
+            "control_order": list(self.control_order),
+            "controls": controls,
+            "views": {
+                view_id: {
+                    "control_inputs": dict(self.view_control_inputs.get(view_id, {})),
+                    "control_binding": (
+                        self.view_control_bindings[view_id].as_dict()
+                        if view_id in self.view_control_bindings
+                        else None
+                    ),
+                }
+                for view_id in sorted(self.view_inputs)
+                if self.view_control_inputs.get(view_id) or view_id in self.view_control_bindings
+            },
+            "transforms": {
+                identifier: {
+                    "trigger": self.interactive_triggers[identifier],
+                    "control_inputs": dict(self.interactive_control_inputs.get(identifier, {})),
+                }
+                for identifier in self.reachable_interactive_order
+                if self.interactive_control_inputs.get(identifier)
+            },
+        }
+
+    @property
+    def control_contract_hash(self) -> str:
+        payload = json.dumps(
+            self.control_contract_projection(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
     def runtime_manifest(self) -> dict[str, Any]:
         reachable = set(self.reachable_interactive_order)
         output_views = {
@@ -555,6 +739,7 @@ class DashboardDependencyContract:
         }
         return {
             "schema": DEPENDENCY_CONTRACT_SCHEMA,
+            "control_contract_hash": self.control_contract_hash,
             "initialization": [
                 "base_outputs",
                 "control_option_domains",
@@ -612,14 +797,8 @@ class DashboardDependencyContract:
                 }
                 for view_id, inputs in self.view_inputs.items()
             },
-            "outputs": {
-                reference: {"views": views}
-                for reference, views in output_views.items()
-            },
-            "controls": {
-                key: dependency.as_dict()
-                for key, dependency in self.controls.items()
-            },
+            "outputs": {reference: {"views": views} for reference, views in output_views.items()},
+            "controls": {key: dependency.as_dict() for key, dependency in self.controls.items()},
             "control_order": list(self.control_order),
         }
 
@@ -633,60 +812,49 @@ class DashboardDependencyContract:
                     key: list(value) for key, value in self.query_dependencies.items()
                 },
                 "data_inputs": self.data_inputs,
-                "outputs": {
-                    key: list(value) for key, value in self.query_outputs.items()
-                },
+                "outputs": {key: list(value) for key, value in self.query_outputs.items()},
                 "order": list(self.query_order),
                 "parameter_inputs": self.parameter_inputs,
                 "parameter_consumers": {
-                    key: list(value)
-                    for key, value in self.query_parameter_consumers.items()
+                    key: list(value) for key, value in self.query_parameter_consumers.items()
                 },
                 "parameters": {
-                    key: value.as_dict()
-                    for key, value in self.query_parameters.items()
+                    key: value.as_dict() for key, value in self.query_parameters.items()
                 },
                 "downstream_views": {
-                    key: list(value)
-                    for key, value in self.query_node_downstream_views.items()
+                    key: list(value) for key, value in self.query_node_downstream_views.items()
                 },
                 "option_controls": {
-                    key: list(value)
-                    for key, value in self.query_node_option_controls.items()
+                    key: list(value) for key, value in self.query_node_option_controls.items()
                 },
                 "presentation_roots": list(self.presentation_roots),
                 "base_output_roots": list(self.base_output_roots),
             },
             "interactive": {
                 "dependencies": {
-                    key: list(value)
-                    for key, value in self.interactive_dependencies.items()
+                    key: list(value) for key, value in self.interactive_dependencies.items()
                 },
                 "inputs": self.interactive_inputs,
-                "outputs": {
-                    key: list(value)
-                    for key, value in self.interactive_outputs.items()
-                },
+                "outputs": {key: list(value) for key, value in self.interactive_outputs.items()},
                 "runtimes": dict(self.interactive_runtimes),
+                "triggers": dict(self.interactive_triggers),
                 "parameter_inputs": self.interactive_parameter_inputs,
                 "control_inputs": self.interactive_control_inputs,
                 "order": list(self.interactive_order),
                 "reachable_order": list(self.reachable_interactive_order),
                 "direct_views": {
-                    key: list(value)
-                    for key, value in self.transform_direct_views.items()
+                    key: list(value) for key, value in self.transform_direct_views.items()
                 },
                 "downstream_views": {
-                    key: list(value)
-                    for key, value in self.transform_downstream_views.items()
+                    key: list(value) for key, value in self.transform_downstream_views.items()
                 },
             },
             "views": {
                 key: {
                     "inputs": value,
                     "pipeline_nodes": list(self.view_pipeline_nodes(key)),
-                      "controls": list(self.view_controls.get(key, ())),
-                      "control_inputs": dict(self.view_control_inputs.get(key, {})),
+                    "controls": list(self.view_controls.get(key, ())),
+                    "control_inputs": dict(self.view_control_inputs.get(key, {})),
                     "control_binding": (
                         self.view_control_bindings[key].as_dict()
                         if key in self.view_control_bindings
@@ -696,23 +864,26 @@ class DashboardDependencyContract:
                 for key, value in self.view_inputs.items()
             },
             "outputs": {
-                key: {"views": list(value)}
-                for key, value in self.output_view_consumers.items()
+                key: {"views": list(value)} for key, value in self.output_view_consumers.items()
             },
             "control_option_domains": {
-                  key: list(value)
-                  for key, value in self.control_option_domains.items()
-              },
-            "controls": {
-                key: value.as_dict() for key, value in self.controls.items()
+                key: list(value) for key, value in self.control_option_domains.items()
             },
+            "controls": {key: value.as_dict() for key, value in self.controls.items()},
             "control_order": list(self.control_order),
+            "control_contract_hash": self.control_contract_hash,
         }
 
 
-def compile_dashboard_dependencies(
+def _compile_query_graph(
     dashboard: LoadedDashboard,
-) -> DashboardDependencyContract:
+) -> tuple[
+    dict[str, set[str]],
+    dict[str, dict[str, str]],
+    dict[str, tuple[str, ...]],
+    tuple[str, ...],
+    set[str],
+]:
     query_dependencies: dict[str, set[str]] = {}
     data_inputs: dict[str, dict[str, str]] = {}
     query_outputs: dict[str, tuple[str, ...]] = {}
@@ -728,15 +899,12 @@ def compile_dashboard_dependencies(
             for alias, reference in definition.inputs.items()
         }
         query_dependencies[node_id] = {
-            parse_output_reference(reference).node_id
-            for reference in data_inputs[node_id].values()
+            parse_output_reference(reference).node_id for reference in data_inputs[node_id].values()
         }
         query_outputs[node_id] = _declared_outputs("dataset", identifier, definition)
     query_order = _topological_order(query_dependencies, label="Query DAG")
     query_output_references = {
-        reference
-        for references in query_outputs.values()
-        for reference in references
+        reference for references in query_outputs.values() for reference in references
     }
     _require_declared_references(
         (
@@ -747,7 +915,25 @@ def compile_dashboard_dependencies(
         query_output_references,
         label="Query DAG",
     )
+    return (
+        query_dependencies,
+        data_inputs,
+        query_outputs,
+        query_order,
+        query_output_references,
+    )
 
+
+def _compile_interactive_graph(
+    dashboard: LoadedDashboard,
+    query_output_references: set[str],
+) -> tuple[
+    dict[str, dict[str, str]],
+    dict[str, set[str]],
+    tuple[str, ...],
+    dict[str, tuple[str, ...]],
+    set[str],
+]:
     interactive_inputs = {
         identifier: {
             alias: parse_output_reference(reference).canonical
@@ -758,10 +944,7 @@ def compile_dashboard_dependencies(
     interactive_dependencies = {
         identifier: {
             parsed.node_id.split(":", 1)[1]
-            for parsed in (
-                parse_output_reference(reference)
-                for reference in inputs.values()
-            )
+            for parsed in (parse_output_reference(reference) for reference in inputs.values())
             if parsed.node_id.startswith("interactive:")
         }
         for identifier, inputs in interactive_inputs.items()
@@ -775,21 +958,36 @@ def compile_dashboard_dependencies(
         for identifier, (_, definition) in dashboard.interactive_transforms.items()
     }
     interactive_output_references = {
-        reference
-        for references in interactive_outputs.values()
-        for reference in references
+        reference for references in interactive_outputs.values() for reference in references
     }
     _require_declared_references(
-        (
-            reference
-            for inputs in interactive_inputs.values()
-            for reference in inputs.values()
-        ),
+        (reference for inputs in interactive_inputs.values() for reference in inputs.values()),
         query_output_references | interactive_output_references,
         label="Interactive DAG",
     )
+    return (
+        interactive_inputs,
+        interactive_dependencies,
+        interactive_order,
+        interactive_outputs,
+        interactive_output_references,
+    )
+
+
+def _compile_interactive_bindings(
+    dashboard: LoadedDashboard,
+) -> tuple[
+    dict[str, str],
+    dict[str, str],
+    dict[str, dict[str, dict[str, Any]]],
+    dict[str, dict[str, dict[str, Any]]],
+]:
     interactive_runtimes = {
         identifier: definition.runtime
+        for identifier, (_, definition) in dashboard.interactive_transforms.items()
+    }
+    interactive_triggers = {
+        identifier: definition.trigger
         for identifier, (_, definition) in dashboard.interactive_transforms.items()
     }
     interactive_parameter_inputs = {
@@ -812,6 +1010,15 @@ def compile_dashboard_dependencies(
         }
         for identifier, (_, definition) in dashboard.interactive_transforms.items()
     }
+    return (
+        interactive_runtimes,
+        interactive_triggers,
+        interactive_parameter_inputs,
+        interactive_control_inputs,
+    )
+
+
+def _compile_output_definitions(dashboard: LoadedDashboard) -> dict[str, Any]:
     output_definitions = {
         f"source:{identifier}/{name}": output
         for identifier, (_, definition) in dashboard.sources.items()
@@ -831,6 +1038,10 @@ def compile_dashboard_dependencies(
             for name, output in definition.outputs.items()
         }
     )
+    return output_definitions
+
+
+def _compile_view_inputs(dashboard: LoadedDashboard) -> dict[str, dict[str, str]]:
     view_inputs = {
         view.id: {
             alias: parse_output_reference(reference).canonical
@@ -846,17 +1057,16 @@ def compile_dashboard_dependencies(
             continue
         view_id = section.repeat.view or next(iter(section.views), None)
         if view_id and section.repeat.input:
-            view_inputs[view_id] = {
-                "main": parse_output_reference(section.repeat.input).canonical
-            }
+            view_inputs[view_id] = {"main": parse_output_reference(section.repeat.input).canonical}
+    return view_inputs
 
-    registry = scoped_control_registry(dashboard.definition)
-    section_for_view = {
-        view_id: section
-        for section in dashboard.definition.sections
-        for view_id in section.views
-    }
-    view_control_inputs = {
+
+def _compile_view_control_inputs(
+    dashboard: LoadedDashboard,
+    *,
+    section_for_view: dict[str, Any],
+) -> dict[str, dict[str, dict[str, Any]]]:
+    return {
         view.id: {
             alias: {
                 **control_input_contract(binding),
@@ -871,76 +1081,32 @@ def compile_dashboard_dependencies(
         }
         for view in dashboard.definition.views
     }
-    (
-        control_dependencies,
-        control_ancestors,
-        control_descendants,
-        control_order,
-    ) = _compile_control_dependency_graph(
-        dashboard.definition.id,
-        registry,
-        section_for_view,
-    )
-    option_domains: dict[str, set[str]] = {key: set() for key in registry}
-    explicit_option_roots: list[str] = []
-    for key, item in registry.items():
-        options = item.definition.options
-        if isinstance(options, InferredOptionDomainDefinition) and options.source:
-            reference = parse_output_reference(options.source).canonical
-            option_domains[key].add(reference)
-            explicit_option_roots.append(reference)
 
-    presentation_roots = [
-        reference
-        for inputs in view_inputs.values()
-        for reference in inputs.values()
-    ]
-    presentation_roots.extend(
-        parse_output_reference(reference).canonical
-        for reference in dashboard.definition.canvas.inputs
-    )
-    presentation_roots.extend(explicit_option_roots)
-    _require_declared_references(
-        presentation_roots,
-        query_output_references | interactive_output_references,
-        label="Presentation",
-    )
-    for key, references in option_domains.items():
-        for reference in references:
-            parsed = parse_output_reference(reference)
-            if parsed.node_id.startswith("interactive:"):
-                raise ValidationFailure(
-                    f"Control {key} option domain must use an immutable Base Output",
-                    details={
-                        "code": "control_option_domain_invalid",
-                        "control": key,
-                        "reference": reference,
-                    },
-                )
-            if output_definitions[reference].kind != "table":
-                raise ValidationFailure(
-                    f"Control {key} option domain must reference a table Output",
-                    details={
-                        "code": "control_option_domain_kind",
-                        "control": key,
-                        "reference": reference,
-                        "kind": output_definitions[reference].kind,
-                    },
-                )
 
-    reachable_interactive, base_output_roots = _output_dependency_closure(
-        presentation_roots,
-        interactive_inputs,
-    )
-
+def _compile_effective_control_views(
+    dashboard: LoadedDashboard,
+) -> tuple[
+    dict[str, tuple[EffectiveControl, ...]],
+    dict[str, tuple[str, ...]],
+]:
     effective_controls = compile_control_contract(dashboard.definition)
-    view_control_contract = {
-        view_id: tuple(items) for view_id, items in effective_controls.items()
-    }
-    view_controls = {
-        view_id: tuple(item.key for item in items)
-        for view_id, items in effective_controls.items()
-    }
+    return (
+        {view_id: tuple(items) for view_id, items in effective_controls.items()},
+        {
+            view_id: tuple(item.key for item in items)
+            for view_id, items in effective_controls.items()
+        },
+    )
+
+
+def _validate_view_control_inputs(
+    *,
+    registry: dict[str, EffectiveControl],
+    view_control_inputs: dict[str, dict[str, dict[str, Any]]],
+    view_controls: dict[str, tuple[str, ...]],
+    view_inputs: dict[str, dict[str, str]],
+    output_definitions: dict[str, Any],
+) -> None:
     for view_id, bindings in view_control_inputs.items():
         for alias, binding in bindings.items():
             control_key = binding["control"]
@@ -964,8 +1130,39 @@ def compile_dashboard_dependencies(
                         "control": control_key,
                     },
                 )
+            _validate_typed_filter_binding(
+                binding=binding,
+                definition=registry[control_key].definition,
+                consumer=f"view:{view_id}",
+                alias=alias,
+            )
+            _validate_filter_schema_type(
+                binding=binding,
+                definition=registry[control_key].definition,
+                consumer=f"view:{view_id}",
+                alias=alias,
+                inputs=view_inputs.get(view_id, {}),
+                output_definitions=output_definitions,
+            )
+
+
+def _compile_writer_edges(
+    dashboard: LoadedDashboard,
+    *,
+    registry: dict[str, EffectiveControl],
+    section_for_view: dict[str, Any],
+    view_control_inputs: dict[str, dict[str, dict[str, Any]]],
+    view_controls: dict[str, tuple[str, ...]],
+    view_inputs: dict[str, dict[str, str]],
+    output_definitions: dict[str, Any],
+) -> tuple[
+    dict[str, ViewControlBindingDependency],
+    dict[str, list[ViewControlBindingDependency]],
+]:
     view_control_bindings: dict[str, ViewControlBindingDependency] = {}
-    writer_by_control: dict[str, ViewControlBindingDependency] = {}
+    writers_by_control: dict[str, list[ViewControlBindingDependency]] = {
+        key: [] for key in registry
+    }
     scope_rank = {"dashboard": 0, "section": 1, "view": 2}
     chart_templates = {
         "line",
@@ -1012,22 +1209,12 @@ def compile_dashboard_dependencies(
                     "control": control_key,
                 },
             )
-        previous_writer = writer_by_control.get(control_key)
-        if previous_writer is not None:
-            raise ValidationFailure(
-                f"Control {control_key} has more than one writer View",
-                details={
-                    "code": "view_control_binding_writer_conflict",
-                    "control": control_key,
-                    "views": [previous_writer.view_id, view_id],
-                },
-            )
         narrower = sorted(
-            binding["control"]
-            for binding in view_control_inputs.get(view_id, {}).values()
-            if binding.get("mode") == "filter"
-            and binding["control"] != control_key
-            and scope_rank[registry[binding["control"]].origin] > scope_rank[target.origin]
+            item["control"]
+            for item in view_control_inputs.get(view_id, {}).values()
+            if item.get("mode") == "filter"
+            and item["control"] != control_key
+            and scope_rank[registry[item["control"]].origin] > scope_rank[target.origin]
         )
         if narrower:
             raise ValidationFailure(
@@ -1040,25 +1227,18 @@ def compile_dashboard_dependencies(
                     "narrower_controls": narrower,
                 },
             )
-        fields = tuple(
-            [binding.field]
-            if binding.field
-            else _control_value_fields(target)
-        )
+        fields = tuple([binding.field] if binding.field else _control_value_fields(target))
         value_fields = (
             [view.z]
             if view.template == "heatmap"
-            else (
-                list(view.y)
-                if isinstance(view.y, list)
-                else [view.y or view.value or view.z]
-            )
+            else (list(view.y) if isinstance(view.y, list) else [view.y or view.value or view.z])
         )
         value_fields = [field for field in value_fields if field]
         group_fields = [
             field
             for field in (
-                [view.x, view.y] if view.template == "heatmap"
+                [view.x, view.y]
+                if view.template == "heatmap"
                 else [view.x or view.label, view.series]
             )
             if isinstance(field, str) and field
@@ -1068,11 +1248,7 @@ def compile_dashboard_dependencies(
             if view.template == "metric"
             else (
                 view.aggregate
-                or (
-                    "none"
-                    if view.template in {"scatter", "table", "perspective"}
-                    else "sum"
-                )
+                or ("none" if view.template in {"scatter", "table", "perspective"} else "sum")
             )
         )
         if operation != "none" and value_fields and not set(fields) <= set(group_fields):
@@ -1123,6 +1299,13 @@ def compile_dashboard_dependencies(
                     "references": list(references),
                 },
             )
+        _validate_writer_schema_type(
+            fields=fields,
+            definition=target.definition,
+            view_id=view_id,
+            references=references,
+            output_definitions=output_definitions,
+        )
         compiled_binding = ViewControlBindingDependency(
             view_id=view_id,
             control=control_key,
@@ -1130,8 +1313,88 @@ def compile_dashboard_dependencies(
             renderer=renderer,
         )
         view_control_bindings[view_id] = compiled_binding
-        writer_by_control[control_key] = compiled_binding
-    for view_id, items in effective_controls.items():
+        writers_by_control[control_key].append(compiled_binding)
+    return view_control_bindings, writers_by_control
+
+
+def _compile_presentation_roots(
+    dashboard: LoadedDashboard,
+    *,
+    registry: dict[str, EffectiveControl],
+    view_inputs: dict[str, dict[str, str]],
+    interactive_inputs: dict[str, dict[str, str]],
+    output_definitions: dict[str, Any],
+    declared_outputs: set[str],
+) -> tuple[dict[str, set[str]], list[str], set[str], set[str]]:
+    option_domains: dict[str, set[str]] = {key: set() for key in registry}
+    explicit_option_roots: list[str] = []
+    for key, item in registry.items():
+        options = item.definition.options
+        if isinstance(options, InferredOptionDomainDefinition) and options.source:
+            reference = parse_output_reference(options.source).canonical
+            option_domains[key].add(reference)
+            explicit_option_roots.append(reference)
+
+    presentation_roots = [
+        reference for inputs in view_inputs.values() for reference in inputs.values()
+    ]
+    presentation_roots.extend(
+        parse_output_reference(reference).canonical
+        for reference in dashboard.definition.canvas.inputs
+    )
+    presentation_roots.extend(explicit_option_roots)
+    _require_declared_references(
+        presentation_roots,
+        declared_outputs,
+        label="Presentation",
+    )
+    for key, references in option_domains.items():
+        for reference in references:
+            parsed = parse_output_reference(reference)
+            if parsed.node_id.startswith("interactive:"):
+                raise ValidationFailure(
+                    f"Control {key} option domain must use an immutable Base Output",
+                    details={
+                        "code": "control_option_domain_invalid",
+                        "control": key,
+                        "reference": reference,
+                    },
+                )
+            if output_definitions[reference].kind != "table":
+                raise ValidationFailure(
+                    f"Control {key} option domain must reference a table Output",
+                    details={
+                        "code": "control_option_domain_kind",
+                        "control": key,
+                        "reference": reference,
+                        "kind": output_definitions[reference].kind,
+                    },
+                )
+
+    reachable_interactive, base_output_roots = _output_dependency_closure(
+        presentation_roots,
+        interactive_inputs,
+    )
+    return (
+        option_domains,
+        presentation_roots,
+        reachable_interactive,
+        base_output_roots,
+    )
+
+
+def _complete_option_domains(
+    *,
+    option_domains: dict[str, set[str]],
+    view_control_contract: dict[str, tuple[EffectiveControl, ...]],
+    view_inputs: dict[str, dict[str, str]],
+    interactive_inputs: dict[str, dict[str, str]],
+    control_dependencies: dict[str, set[str]],
+    control_ancestors: dict[str, set[str]],
+    output_definitions: dict[str, Any],
+) -> dict[str, set[str]]:
+    completed = {key: set(references) for key, references in option_domains.items()}
+    for view_id, items in view_control_contract.items():
         _, inferred = _output_dependency_closure(
             view_inputs.get(view_id, {}).values(),
             interactive_inputs,
@@ -1139,8 +1402,7 @@ def compile_dashboard_dependencies(
         for item in items:
             options = item.definition.options
             dynamic_domain = (
-                isinstance(options, InferredOptionDomainDefinition)
-                and not options.source
+                isinstance(options, InferredOptionDomainDefinition) and not options.source
             )
             dependent_static_domain = (
                 options is not None
@@ -1148,24 +1410,20 @@ def compile_dashboard_dependencies(
                 and bool(control_dependencies[item.key])
             )
             if dynamic_domain or dependent_static_domain:
-                option_domains[item.key].update(inferred)
+                completed[item.key].update(inferred)
 
-    # Explicit Control dependencies are executable only when the child has an
-    # immutable table relation from which its candidate values can be derived.
-    # This is intentionally part of the Dependency Compiler: ``validate`` and
-    # the browser must not maintain separate interpretations of the same edge.
     effective_by_view_and_key = {
         (view_id, item.key): item
-        for view_id, items in effective_controls.items()
+        for view_id, items in view_control_contract.items()
         for item in items
     }
     for key, dependencies in control_dependencies.items():
         if not dependencies:
             continue
-        references = option_domains[key]
+        references = completed[key]
         if not references:
             raise ValidationFailure(
-                  f"Dependent Control {key} has no Base Output option domain",
+                f"Dependent Control {key} has no Base Output option domain",
                 details={
                     "code": "control_dependency_option_domain_missing",
                     "control": key,
@@ -1173,23 +1431,18 @@ def compile_dashboard_dependencies(
                 },
             )
 
-        # If every candidate Output declares a schema, validate the complete
-        # relation now: child fields plus every effective transitive ancestor.
-        # A schema-less Output remains runtime-checked because validate does not
-        # execute arbitrary queries merely to inspect their rows.
         declared_domains = [
             {column.name for column in output_definitions[reference].schema_}
             for reference in references
             if output_definitions[reference].schema_
         ]
         has_runtime_schema = any(
-            not output_definitions[reference].schema_
-            for reference in references
+            not output_definitions[reference].schema_ for reference in references
         )
         if has_runtime_schema:
             continue
         required_field_sets: list[set[str]] = []
-        for view_id, items in effective_controls.items():
+        for view_id, items in view_control_contract.items():
             target = next((item for item in items if item.key == key), None)
             if target is None:
                 continue
@@ -1212,21 +1465,30 @@ def compile_dashboard_dependencies(
                     "depends_on": sorted(dependencies),
                     "dependency_ancestors": sorted(control_ancestors[key]),
                     "references": sorted(references),
-                    "required_field_sets": [
-                        sorted(fields) for fields in required_field_sets
-                    ],
-                    "declared_domains": [
-                        sorted(fields) for fields in declared_domains
-                    ],
+                    "required_field_sets": [sorted(fields) for fields in required_field_sets],
+                    "declared_domains": [sorted(fields) for fields in declared_domains],
                 },
             )
+    return completed
 
+
+def _compile_reverse_indexes(
+    *,
+    interactive_dependencies: dict[str, set[str]],
+    interactive_order: tuple[str, ...],
+    declared_outputs: set[str],
+    view_inputs: dict[str, dict[str, str]],
+) -> tuple[
+    dict[str, set[str]],
+    dict[str, set[str]],
+    dict[str, set[str]],
+    dict[str, tuple[str, ...]],
+]:
     direct_transform_views: dict[str, set[str]] = {
         identifier: set() for identifier in interactive_dependencies
     }
     output_view_consumers: dict[str, set[str]] = {
-        reference: set()
-        for reference in query_output_references | interactive_output_references
+        reference: set() for reference in declared_outputs
     }
     for view_id, inputs in view_inputs.items():
         for reference in inputs.values():
@@ -1248,17 +1510,37 @@ def compile_dashboard_dependencies(
         for current in _downstream_closure([identifier], transform_consumers):
             views.update(direct_transform_views[current])
         transform_downstream_views[identifier] = tuple(sorted(views))
+    return (
+        direct_transform_views,
+        output_view_consumers,
+        transform_consumers,
+        transform_downstream_views,
+    )
 
+
+def _compile_control_impacts(
+    dashboard: LoadedDashboard,
+    *,
+    registry: dict[str, EffectiveControl],
+    view_control_contract: dict[str, tuple[EffectiveControl, ...]],
+    view_control_inputs: dict[str, dict[str, dict[str, Any]]],
+    view_inputs: dict[str, dict[str, str]],
+    interactive_inputs: dict[str, dict[str, str]],
+    interactive_control_inputs: dict[str, dict[str, dict[str, Any]]],
+    output_definitions: dict[str, Any],
+    writers_by_control: dict[str, list[ViewControlBindingDependency]],
+    option_domains: dict[str, set[str]],
+    control_dependencies: dict[str, set[str]],
+    control_ancestors: dict[str, set[str]],
+    control_descendants: dict[str, set[str]],
+    transform_downstream_views: dict[str, tuple[str, ...]],
+) -> dict[str, ControlDependency]:
     scope_views_by_control: dict[str, set[str]] = {key: set() for key in registry}
-    for view_id, items in effective_controls.items():
+    for view_id, items in view_control_contract.items():
         for item in items:
             scope_views_by_control[item.key].add(view_id)
-    transform_consumers_by_control: dict[str, set[str]] = {
-        key: set() for key in registry
-    }
-    transform_inputs_by_control: dict[str, dict[str, set[str]]] = {
-        key: {} for key in registry
-    }
+    transform_consumers_by_control: dict[str, set[str]] = {key: set() for key in registry}
+    transform_inputs_by_control: dict[str, dict[str, set[str]]] = {key: {} for key in registry}
     for identifier, bindings in interactive_control_inputs.items():
         available_inputs = set(interactive_inputs[identifier])
         for alias, binding in bindings.items():
@@ -1285,8 +1567,23 @@ def compile_dashboard_dependencies(
                         "inputs": unknown_inputs,
                     },
                 )
+            _validate_typed_filter_binding(
+                binding=binding,
+                definition=registry[key].definition,
+                consumer=f"interactive:{identifier}",
+                alias=alias,
+            )
+            _validate_filter_schema_type(
+                binding=binding,
+                definition=registry[key].definition,
+                consumer=f"interactive:{identifier}",
+                alias=alias,
+                inputs=interactive_inputs[identifier],
+                output_definitions=output_definitions,
+            )
             transform_consumers_by_control[key].add(identifier)
             transform_inputs_by_control[key].setdefault(identifier, set()).add(alias)
+
     content_fields_by_control: dict[str, set[str]] = {key: set() for key in registry}
     content_views_by_control: dict[str, set[str]] = {key: set() for key in registry}
     repeat_views_by_control: dict[str, set[str]] = {key: set() for key in registry}
@@ -1363,17 +1660,12 @@ def compile_dashboard_dependencies(
                 ]
                 declared = any(
                     all(
-                        any(
-                            column.name == field and column.required
-                            for column in output.schema_
-                        )
+                        any(column.name == field and column.required for column in output.schema_)
                         for field in fields
                     )
                     for output in table_outputs
                 )
-                applicability: Literal[
-                    "declared", "runtime", "not_applicable"
-                ]
+                applicability: Literal["declared", "runtime", "not_applicable"]
                 if declared:
                     applicability = "declared"
                 elif table_outputs:
@@ -1426,16 +1718,7 @@ def compile_dashboard_dependencies(
             runtime_checked_views=tuple(sorted(runtime_checked_views)),
             non_data_views=tuple(sorted(non_data_views)),
             direct_view_bindings=direct_view_bindings,
-            writer_view=(
-                writer_by_control[key].view_id
-                if key in writer_by_control
-                else None
-            ),
-            writer_fields=(
-                writer_by_control[key].fields
-                if key in writer_by_control
-                else ()
-            ),
+            writer_edges=tuple(writers_by_control[key]),
             transform_consumers=tuple(sorted(transform_consumers_by_control[key])),
             transform_inputs={
                 transform_id: tuple(sorted(aliases))
@@ -1451,7 +1734,7 @@ def compile_dashboard_dependencies(
                     | derived_views
                     | content_views
                     | repeat_views_by_control[key]
-                    | ({writer_by_control[key].view_id} if key in writer_by_control else set())
+                    | {edge.view_id for edge in writers_by_control[key]}
                 )
             ),
             option_domain_references=tuple(sorted(option_domains[key])),
@@ -1464,10 +1747,18 @@ def compile_dashboard_dependencies(
                 allow_unresolved_inferred=True,
             ).as_dict(),
         )
+    return controls
 
-    # A compiled contract is executable by construction. Cross-runtime edges and
-    # scoped Control consumers are rejected here, rather than being left as a
-    # second graph interpretation owned only by ``dataviz validate``.
+
+def _validate_execution_edges(
+    *,
+    interactive_order: tuple[str, ...],
+    interactive_runtimes: dict[str, str],
+    interactive_dependencies: dict[str, set[str]],
+    transform_downstream_views: dict[str, tuple[str, ...]],
+    interactive_control_inputs: dict[str, dict[str, dict[str, Any]]],
+    controls: dict[str, ControlDependency],
+) -> None:
     for identifier in interactive_order:
         if interactive_runtimes[identifier] == "server-python":
             browser_ancestors = sorted(
@@ -1492,9 +1783,7 @@ def compile_dashboard_dependencies(
         for alias, binding in interactive_control_inputs[identifier].items():
             control_key = binding["control"]
             input_mode = binding["mode"]
-            outside_scope = sorted(
-                downstream_views - set(controls[control_key].scope_views)
-            )
+            outside_scope = sorted(downstream_views - set(controls[control_key].scope_views))
             if outside_scope:
                 raise ValidationFailure(
                     f"Control {control_key} is outside downstream View scope: "
@@ -1509,6 +1798,26 @@ def compile_dashboard_dependencies(
                     },
                 )
 
+
+def _compile_query_parameter_impacts(
+    dashboard: LoadedDashboard,
+    *,
+    query_dependencies: dict[str, set[str]],
+    query_outputs: dict[str, tuple[str, ...]],
+    query_order: tuple[str, ...],
+    interactive_inputs: dict[str, dict[str, str]],
+    transform_consumers: dict[str, set[str]],
+    transform_downstream_views: dict[str, tuple[str, ...]],
+    output_view_consumers: dict[str, set[str]],
+    option_domains: dict[str, set[str]],
+    controls: dict[str, ControlDependency],
+) -> tuple[
+    dict[str, dict[str, dict[str, Any]]],
+    dict[str, set[str]],
+    dict[str, QueryParameterDependency],
+    dict[str, tuple[str, ...]],
+    dict[str, tuple[str, ...]],
+]:
     parameter_inputs = {
         **{
             f"source:{identifier}": {
@@ -1544,9 +1853,7 @@ def compile_dashboard_dependencies(
         for key in inspect_content_template(template).query_parameters:
             query_parameter_consumers.setdefault(key, set()).add(f"content:{field}")
 
-    declared_query_parameters = {
-        item.id for item in dashboard.definition.query_parameters
-    }
+    declared_query_parameters = {item.id for item in dashboard.definition.query_parameters}
     unknown_query_parameters = {
         key: sorted(consumers)
         for key, consumers in query_parameter_consumers.items()
@@ -1562,9 +1869,7 @@ def compile_dashboard_dependencies(
             },
         )
 
-    query_consumers: dict[str, set[str]] = {
-        node_id: set() for node_id in query_dependencies
-    }
+    query_consumers: dict[str, set[str]] = {node_id: set() for node_id in query_dependencies}
     for node_id, dependencies in query_dependencies.items():
         for dependency in dependencies:
             query_consumers[dependency].add(node_id)
@@ -1611,27 +1916,16 @@ def compile_dashboard_dependencies(
         )
 
     query_parameters: dict[str, QueryParameterDependency] = {}
-    for key in query_parameter_consumers:
-        consumers = query_parameter_consumers[key]
-        direct_query = {
-            value
-            for value in consumers
-            if value.startswith(("source:", "dataset:"))
-        }
+    for key, consumers in query_parameter_consumers.items():
+        direct_query = {value for value in consumers if value.startswith(("source:", "dataset:"))}
         direct_interactive = {
-            value.split(":", 1)[1]
-            for value in consumers
-            if value.startswith("interactive:")
+            value.split(":", 1)[1] for value in consumers if value.startswith("interactive:")
         }
         content_fields = {
-            value.split(":", 1)[1]
-            for value in consumers
-            if value.startswith("content:")
+            value.split(":", 1)[1] for value in consumers if value.startswith("content:")
         }
         affected_query = {
-            affected
-            for node_id in direct_query
-            for affected in query_node_affected_nodes[node_id]
+            affected for node_id in direct_query for affected in query_node_affected_nodes[node_id]
         }
         affected_interactive = set(direct_interactive)
         affected_interactive.update(
@@ -1644,9 +1938,7 @@ def compile_dashboard_dependencies(
             transform_consumers,
         )
         affected_views = {
-            view_id
-            for node_id in direct_query
-            for view_id in query_node_downstream_views[node_id]
+            view_id for node_id in direct_query for view_id in query_node_downstream_views[node_id]
         }
         affected_views.update(
             view_id
@@ -1659,14 +1951,8 @@ def compile_dashboard_dependencies(
             if field.startswith("views.") and len(field.split(".", 2)) > 1
         )
         affected_option_controls = {
-            control
-            for node_id in direct_query
-            for control in query_node_option_controls[node_id]
+            control for node_id in direct_query for control in query_node_option_controls[node_id]
         }
-        # A new Query snapshot may change an inferred option universe. Control
-        # reconciliation can then change every View/Transform in that Control's
-        # compiled impact closure, even when the option-domain Output is not a
-        # View input itself.
         affected_views.update(
             view_id
             for control in affected_option_controls
@@ -1682,20 +1968,166 @@ def compile_dashboard_dependencies(
             affected_option_controls=tuple(sorted(affected_option_controls)),
             affected_views=tuple(sorted(affected_views)),
         )
+    return (
+        parameter_inputs,
+        query_parameter_consumers,
+        query_parameters,
+        query_node_downstream_views,
+        query_node_option_controls,
+    )
+
+
+def compile_dashboard_dependencies(
+    dashboard: LoadedDashboard,
+) -> DashboardDependencyContract:
+    (
+        query_dependencies,
+        data_inputs,
+        query_outputs,
+        query_order,
+        query_output_references,
+    ) = _compile_query_graph(dashboard)
+    (
+        interactive_inputs,
+        interactive_dependencies,
+        interactive_order,
+        interactive_outputs,
+        interactive_output_references,
+    ) = _compile_interactive_graph(dashboard, query_output_references)
+    (
+        interactive_runtimes,
+        interactive_triggers,
+        interactive_parameter_inputs,
+        interactive_control_inputs,
+    ) = _compile_interactive_bindings(dashboard)
+    output_definitions = _compile_output_definitions(dashboard)
+    view_inputs = _compile_view_inputs(dashboard)
+
+    registry = scoped_control_registry(dashboard.definition)
+    section_for_view = {
+        view_id: section for section in dashboard.definition.sections for view_id in section.views
+    }
+    view_control_inputs = _compile_view_control_inputs(
+        dashboard,
+        section_for_view=section_for_view,
+    )
+    (
+        control_dependencies,
+        control_ancestors,
+        control_descendants,
+        control_order,
+    ) = _compile_control_dependency_graph(
+        dashboard.definition.id,
+        registry,
+        section_for_view,
+    )
+    view_control_contract, view_controls = _compile_effective_control_views(dashboard)
+    _validate_view_control_inputs(
+        registry=registry,
+        view_control_inputs=view_control_inputs,
+        view_controls=view_controls,
+        view_inputs=view_inputs,
+        output_definitions=output_definitions,
+    )
+    (
+        option_domains,
+        presentation_roots,
+        reachable_interactive,
+        base_output_roots,
+    ) = _compile_presentation_roots(
+        dashboard,
+        registry=registry,
+        view_inputs=view_inputs,
+        interactive_inputs=interactive_inputs,
+        output_definitions=output_definitions,
+        declared_outputs=query_output_references | interactive_output_references,
+    )
+    view_control_bindings, writers_by_control = _compile_writer_edges(
+        dashboard,
+        registry=registry,
+        section_for_view=section_for_view,
+        view_control_inputs=view_control_inputs,
+        view_controls=view_controls,
+        view_inputs=view_inputs,
+        output_definitions=output_definitions,
+    )
+    option_domains = _complete_option_domains(
+        option_domains=option_domains,
+        view_control_contract=view_control_contract,
+        view_inputs=view_inputs,
+        interactive_inputs=interactive_inputs,
+        control_dependencies=control_dependencies,
+        control_ancestors=control_ancestors,
+        output_definitions=output_definitions,
+    )
+
+    (
+        direct_transform_views,
+        output_view_consumers,
+        transform_consumers,
+        transform_downstream_views,
+    ) = _compile_reverse_indexes(
+        interactive_dependencies=interactive_dependencies,
+        interactive_order=interactive_order,
+        declared_outputs=query_output_references | interactive_output_references,
+        view_inputs=view_inputs,
+    )
+
+    controls = _compile_control_impacts(
+        dashboard,
+        registry=registry,
+        view_control_contract=view_control_contract,
+        view_control_inputs=view_control_inputs,
+        view_inputs=view_inputs,
+        interactive_inputs=interactive_inputs,
+        interactive_control_inputs=interactive_control_inputs,
+        output_definitions=output_definitions,
+        writers_by_control=writers_by_control,
+        option_domains=option_domains,
+        control_dependencies=control_dependencies,
+        control_ancestors=control_ancestors,
+        control_descendants=control_descendants,
+        transform_downstream_views=transform_downstream_views,
+    )
+
+    _validate_execution_edges(
+        interactive_order=interactive_order,
+        interactive_runtimes=interactive_runtimes,
+        interactive_dependencies=interactive_dependencies,
+        transform_downstream_views=transform_downstream_views,
+        interactive_control_inputs=interactive_control_inputs,
+        controls=controls,
+    )
+
+    (
+        parameter_inputs,
+        query_parameter_consumers,
+        query_parameters,
+        query_node_downstream_views,
+        query_node_option_controls,
+    ) = _compile_query_parameter_impacts(
+        dashboard,
+        query_dependencies=query_dependencies,
+        query_outputs=query_outputs,
+        query_order=query_order,
+        interactive_inputs=interactive_inputs,
+        transform_consumers=transform_consumers,
+        transform_downstream_views=transform_downstream_views,
+        output_view_consumers=output_view_consumers,
+        option_domains=option_domains,
+        controls=controls,
+    )
 
     return DashboardDependencyContract(
         dashboard_id=dashboard.definition.id,
         parameter_domain_contract=dashboard.parameter_domain_contract.as_dict(),
-        query_dependencies={
-            key: tuple(sorted(value)) for key, value in query_dependencies.items()
-        },
+        query_dependencies={key: tuple(sorted(value)) for key, value in query_dependencies.items()},
         data_inputs=data_inputs,
         query_outputs=query_outputs,
         query_order=query_order,
         parameter_inputs=parameter_inputs,
         query_parameter_consumers={
-            key: tuple(sorted(value))
-            for key, value in query_parameter_consumers.items()
+            key: tuple(sorted(value)) for key, value in query_parameter_consumers.items()
         },
         query_parameters=query_parameters,
         query_node_downstream_views=query_node_downstream_views,
@@ -1703,19 +2135,17 @@ def compile_dashboard_dependencies(
         presentation_roots=tuple(sorted(set(presentation_roots))),
         base_output_roots=tuple(sorted(base_output_roots)),
         interactive_dependencies={
-            key: tuple(sorted(value))
-            for key, value in interactive_dependencies.items()
+            key: tuple(sorted(value)) for key, value in interactive_dependencies.items()
         },
         interactive_inputs=interactive_inputs,
         interactive_outputs=interactive_outputs,
         interactive_runtimes=interactive_runtimes,
+        interactive_triggers=interactive_triggers,
         interactive_parameter_inputs=interactive_parameter_inputs,
         interactive_control_inputs=interactive_control_inputs,
         interactive_order=interactive_order,
         reachable_interactive_order=tuple(
-            identifier
-            for identifier in interactive_order
-            if identifier in reachable_interactive
+            identifier for identifier in interactive_order if identifier in reachable_interactive
         ),
         transform_direct_views={
             key: tuple(sorted(value)) for key, value in direct_transform_views.items()
@@ -1727,12 +2157,9 @@ def compile_dashboard_dependencies(
         view_control_inputs=view_control_inputs,
         view_control_bindings=view_control_bindings,
         output_view_consumers={
-            key: tuple(sorted(value))
-            for key, value in output_view_consumers.items()
+            key: tuple(sorted(value)) for key, value in output_view_consumers.items()
         },
-        control_option_domains={
-            key: tuple(sorted(value)) for key, value in option_domains.items()
-        },
+        control_option_domains={key: tuple(sorted(value)) for key, value in option_domains.items()},
         control_order=control_order,
         controls=controls,
     )

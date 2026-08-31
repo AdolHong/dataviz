@@ -7,12 +7,14 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from dataviz.analysis import ensure_analysis_catalog
+from dataviz.analysis import RunRequest, ensure_analysis_catalog, run_analysis
 from dataviz.cli import app
 
 
 @pytest.mark.e2e
-def test_analysis_cli_reuses_browser_runtime_for_derived_output(isolated_workspace):
+def test_run_analysis_reuses_real_chromium_for_browser_derived_output(
+    isolated_workspace,
+):
     workspace = isolated_workspace(Path("tests/fixtures/browser-worker-workspace"))
     catalog = ensure_analysis_catalog(workspace)
     entry = next(
@@ -20,27 +22,43 @@ def test_analysis_cli_reuses_browser_runtime_for_derived_output(isolated_workspa
         for item in catalog.entries
         if item["reference"] == "worker-runtime::interactive:scaled/main"
     )
-    result = CliRunner().invoke(
-        app,
-        [
-            "run",
-            str(workspace),
-            entry["reference"],
-            "--control",
-            "dashboard:worker-runtime/delay_ms=0",
-            "--preview-rows",
-            "1",
-            "--detail",
-            "debug",
-            "--format",
-            "json",
-        ],
+    payload = run_analysis(
+        RunRequest(
+            workspace=workspace,
+            target=entry["reference"],
+            controls={"dashboard:worker-runtime/delay_ms": 0},
+            preview_rows=1,
+            detail="debug",
+        )
     )
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
-    assert payload["status"] == "ready"
+
+    assert payload["status"] == "ready", json.dumps(
+        payload, ensure_ascii=False, indent=2
+    )
+    assert payload["result_id"].startswith("result_")
     assert payload["target"]["runtime"] == "browser-js"
-    assert payload["effective_controls"]["dashboard:worker-runtime/delay_ms"]["value"] == 0
+    assert (
+        payload["effective_controls"]["dashboard:worker-runtime/delay_ms"]["value"]
+        == 0
+    )
+    assert payload["consumer_revisions"]["transforms"]["scaled"] == {
+        "trigger": "auto",
+        "stale": False,
+        "controls": {
+            "dashboard:worker-runtime/delay_ms": {
+                "effective_revision": 0,
+                "applied_revision": 0,
+                "stale": False,
+            }
+        },
+        "applied_control_state": {
+            "dashboard:worker-runtime/delay_ms": {
+                "value": 0,
+                "revision": 0,
+            }
+        },
+        "applied_writer_provenance": {},
+    }
     assert payload["outputs"][0]["kind"] == "table"
     assert payload["outputs"][0]["rows"] == 2
     assert payload["outputs"][0]["preview"] == [{"name": "alpha", "value": 10}]

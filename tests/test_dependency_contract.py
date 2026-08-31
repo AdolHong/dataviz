@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import json
 from pathlib import Path
 import shutil
 import time
@@ -25,6 +26,11 @@ SALES = ROOT / "examples" / "sales-workspace"
 WORKER = ROOT / "tests" / "fixtures" / "browser-worker-workspace"
 PROGRESSIVE = ROOT / "tests" / "fixtures" / "progressive-workspace"
 MINIMAL = ROOT / "examples" / "minimal-workspace"
+FROZEN_DIAGNOSTICS = json.loads(
+    (ROOT / "tests" / "fixtures" / "dependency-v10-characterization.json").read_text(
+        encoding="utf-8"
+    )
+)["diagnostics"]
 
 
 def _copy_cascade_workspace(tmp_path: Path) -> tuple[Path, Path, dict]:
@@ -68,6 +74,44 @@ def test_query_graph_and_progressive_targets_share_one_compiled_closure():
     assert set(compile_plan(dashboard, targets=["source:fast"]).nodes) == {"source:fast"}
 
 
+def test_dependency_compiler_rejects_operator_incompatible_with_control_type(
+    tmp_path: Path,
+):
+    workspace = tmp_path / "typed-filter"
+    shutil.copytree(MINIMAL, workspace)
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    definition["views"][0]["control_inputs"]["region"]["operator"] = "gte"
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    dashboard = load_workspace(workspace).dashboard("sales-overview")
+    with pytest.raises(ValidationFailure) as raised:
+        _ = dashboard.dependency_contract
+    assert raised.value.details["code"] == "control_filter_operator_incompatible"
+
+
+def test_dependency_compiler_checks_declared_output_dtype_when_available(
+    tmp_path: Path,
+):
+    workspace = tmp_path / "typed-schema"
+    shutil.copytree(MINIMAL, workspace)
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    definition["sources"][0]["outputs"]["main"]["schema"] = [{"name": "region", "dtype": "int64"}]
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    dashboard = load_workspace(workspace).dashboard("sales-overview")
+    with pytest.raises(ValidationFailure) as raised:
+        _ = dashboard.dependency_contract
+    assert raised.value.details["code"] == "control_filter_schema_type_incompatible"
+
+
 def test_dependency_contract_compiles_once_under_concurrent_first_access(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -88,6 +132,53 @@ def test_dependency_contract_compiles_once_under_concurrent_first_access(
 
     assert calls == 1
     assert all(contract is contracts[0] for contract in contracts)
+
+
+def test_loaded_dashboard_keeps_contract_derivations_independently_lazy():
+    dashboard = load_workspace(PROGRESSIVE).dashboard("progressive")
+
+    assert dashboard._dependency_contract is None
+    assert dashboard._layout_contract is None
+    assert dashboard._parameter_domain_contract is None
+
+    layout = dashboard.layout_contract
+
+    assert dashboard._layout_contract is layout
+    assert dashboard._dependency_contract is None
+    assert dashboard._parameter_domain_contract is None
+
+    parameter_domains = dashboard.parameter_domain_contract
+
+    assert dashboard._parameter_domain_contract is parameter_domains
+    assert dashboard._dependency_contract is None
+    assert dashboard._layout_contract is layout
+
+    dependencies = dashboard.dependency_contract
+
+    assert dashboard._dependency_contract is dependencies
+    assert dashboard._layout_contract is layout
+    assert dashboard._parameter_domain_contract is parameter_domains
+
+
+def test_failed_dependency_derivation_never_caches_partial_runtime_facts(
+    tmp_path: Path,
+):
+    workspace = tmp_path / "invalid-dependency"
+    shutil.copytree(MINIMAL, workspace)
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    definition["sources"][0]["query_inputs"]["min_query_revenue"] = "missing"
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    dashboard = load_workspace(workspace).dashboard("sales-overview")
+
+    for _ in range(2):
+        with pytest.raises(ValidationFailure) as caught:
+            _ = dashboard.dependency_contract
+        assert caught.value.as_dict()["code"] == FROZEN_DIAGNOSTICS["unknown_query_parameter"]
+        assert dashboard._dependency_contract is None
 
 
 def test_selection_domains_and_control_effects_are_explicit():
@@ -132,7 +223,7 @@ def test_selection_domains_and_control_effects_are_explicit():
     assert district.direct_view_bindings["city-detail"].input_references == ("source:cities/main",)
 
 
-def test_view_control_binding_compiles_one_writer_and_projection_edge(tmp_path: Path):
+def test_view_control_binding_compiles_ordered_writer_edges(tmp_path: Path):
     workspace, _, _ = _copy_bound_view_workspace(tmp_path)
     contract = load_workspace(workspace).dashboard("sales-overview").dependency_contract
 
@@ -141,15 +232,22 @@ def test_view_control_binding_compiles_one_writer_and_projection_edge(tmp_path: 
     assert binding.fields == ("region",)
     assert binding.renderer == "plotly"
     control = contract.controls["dashboard:sales-overview/region"]
-    assert control.writer_view == "region-comparison"
-    assert control.writer_fields == ("region",)
+    assert [edge.as_dict() for edge in control.writer_edges] == [
+        {
+            "source_view": "region-comparison",
+            "control": "dashboard:sales-overview/region",
+            "fields": ["region"],
+            "renderer": "plotly",
+            "actions": ["select", "select_many", "clear", "reset"],
+        }
+    ]
     assert "region-comparison" in control.affected_views
     assert contract.runtime_manifest()["views"]["region-comparison"]["control_binding"][
         "actions"
     ] == ["select", "select_many", "clear", "reset"]
 
 
-def test_view_control_binding_rejects_a_second_writer(tmp_path: Path):
+def test_view_control_binding_accepts_a_second_valid_writer(tmp_path: Path):
     workspace, dashboard_path, definition = _copy_bound_view_workspace(tmp_path)
     second = next(item for item in definition["views"] if item["id"] == "revenue-trend")
     second["control_binding"] = "dashboard.region"
@@ -158,9 +256,27 @@ def test_view_control_binding_rejects_a_second_writer(tmp_path: Path):
         encoding="utf-8",
     )
 
-    with pytest.raises(ValidationFailure) as caught:
+    contract = load_workspace(workspace).dashboard("sales-overview").dependency_contract
+    assert [
+        edge.view_id for edge in contract.controls["dashboard:sales-overview/region"].writer_edges
+    ] == ["revenue-trend", "region-comparison"]
+
+
+def test_view_control_binding_rejects_declared_writer_value_type_mismatch(
+    tmp_path: Path,
+):
+    workspace, dashboard_path, definition = _copy_bound_view_workspace(tmp_path)
+    definition["sources"][0]["outputs"]["main"]["schema"] = [{"name": "region", "dtype": "int64"}]
+    for view in definition["views"]:
+        view.pop("control_inputs", None)
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationFailure) as raised:
         _ = load_workspace(workspace).dashboard("sales-overview").dependency_contract
-    assert caught.value.as_dict()["code"] == "view_control_binding_writer_conflict"
+    assert raised.value.details["code"] == "view_control_binding_schema_type_incompatible"
 
 
 def test_view_control_binding_rejects_narrower_candidate_selection(tmp_path: Path):
@@ -169,7 +285,6 @@ def test_view_control_binding_rejects_narrower_candidate_selection(tmp_path: Pat
     view["controls"] = [
         {
             "id": "city",
-
             "type": "single_select",
             "value_type": "text",
             "field": "city",
@@ -202,7 +317,6 @@ def test_same_view_dependencies_compile_direct_edges_transitive_closure_and_orde
     controls[0:0] = [
         {
             "id": "dow",
-
             "field": "city",
             "type": "single_select",
             "value_type": "text",
@@ -217,7 +331,6 @@ def test_same_view_dependencies_compile_direct_edges_transitive_closure_and_orde
         },
         {
             "id": "dates",
-
             "field": "district",
             "type": "multiple_select",
             "value_type": "text",
@@ -287,14 +400,12 @@ def test_control_dependencies_accept_typed_parent_and_report_full_cycle(
         [
             {
                 "id": "seed",
-
                 "type": "single_input",
                 "value_type": "integer",
                 "default": 42,
             },
             {
                 "id": "dow",
-
                 "field": "city",
                 "type": "multiple_select",
                 "value_type": "text",
@@ -309,9 +420,7 @@ def test_control_dependencies_accept_typed_parent_and_report_full_cycle(
     )
     dashboard = load_workspace(workspace).dashboard("cascade-explorer")
     contract = dashboard.dependency_contract
-    assert contract.controls["view:city-detail/dow"].depends_on == (
-        "view:city-detail/seed",
-    )
+    assert contract.controls["view:city-detail/dow"].depends_on == ("view:city-detail/seed",)
 
     definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
     controls = _city_detail(definition)["controls"]
@@ -320,7 +429,6 @@ def test_control_dependencies_accept_typed_parent_and_report_full_cycle(
         [
             {
                 "id": "first",
-
                 "field": "city",
                 "type": "multiple_select",
                 "value_type": "text",
@@ -329,7 +437,6 @@ def test_control_dependencies_accept_typed_parent_and_report_full_cycle(
             },
             {
                 "id": "second",
-
                 "field": "district",
                 "type": "multiple_select",
                 "value_type": "text",
@@ -346,7 +453,7 @@ def test_control_dependencies_accept_typed_parent_and_report_full_cycle(
     with pytest.raises(ValidationFailure) as caught:
         _ = dashboard.dependency_contract
     payload = caught.value.as_dict()
-    assert payload["code"] == "control_dependency_cycle"
+    assert payload["code"] == FROZEN_DIAGNOSTICS["control_dependency_cycle"]
     assert payload["details"]["cycle"] == [
         "view:city-detail/first",
         "view:city-detail/second",
@@ -374,9 +481,7 @@ def test_control_paths_distinguish_direct_and_derived_consumers():
     assert province.transform_consumers == ("latest-metrics",)
     assert province.transform_inputs == {"latest-metrics": ("province",)}
     assert province.derived_views == ("radial",)
-    assert province.direct_views == tuple(
-        sorted(set(contract.view_inputs) - {"radial"})
-    )
+    assert province.direct_views == tuple(sorted(set(contract.view_inputs) - {"radial"}))
     assert province.affected_views == tuple(sorted(contract.view_inputs))
 
 
@@ -462,7 +567,7 @@ def test_dependency_contract_is_directly_inspectable_by_ai_and_humans():
 
     assert machine.exit_code == 0, machine.stdout
     assert machine.stdout.lstrip().startswith("{")
-    assert '"schema": "dataviz/dependency-contract/v7"' in machine.stdout
+    assert '"schema": "dataviz/dependency-contract/v10"' in machine.stdout
     assert human.exit_code == 0, human.stdout
     assert "Query DAG" in human.stdout
     assert "Query Parameters" in human.stdout
@@ -485,7 +590,7 @@ def test_dependency_contract_rejects_server_runtime_after_browser_runtime(
         encoding="utf-8",
     )
     (dashboard_root / "transforms" / "server.yaml").write_text(
-        """schema: dataviz/interactive-transform/v3
+        """schema: dataviz/interactive-transform/v4
 kind: interactive_transform
 id: server
 runtime: server-python
@@ -505,7 +610,7 @@ outputs: {main: {kind: table}}
     with pytest.raises(ValidationFailure) as caught:
         _ = dashboard.dependency_contract
 
-    assert caught.value.as_dict()["code"] == "server_interactive_depends_on_browser"
+    assert caught.value.as_dict()["code"] == FROZEN_DIAGNOSTICS["server_after_browser"]
 
 
 def test_dependency_contract_rejects_control_consumed_outside_its_scope(
@@ -538,4 +643,24 @@ def test_dependency_contract_rejects_control_consumed_outside_its_scope(
     with pytest.raises(ValidationFailure) as caught:
         _ = dashboard.dependency_contract
 
-    assert caught.value.as_dict()["code"] == "interactive_control_out_of_scope"
+    assert caught.value.as_dict()["code"] == FROZEN_DIAGNOSTICS["control_outside_scope"]
+
+
+def test_dependency_contract_keeps_unknown_query_parameter_diagnostic(
+    tmp_path: Path,
+):
+    workspace = tmp_path / "unknown-query-parameter"
+    shutil.copytree(MINIMAL, workspace)
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    definition["sources"][0]["query_inputs"]["min_query_revenue"] = "missing"
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    dashboard = load_workspace(workspace).dashboard("sales-overview")
+    with pytest.raises(ValidationFailure) as caught:
+        _ = dashboard.dependency_contract
+
+    assert caught.value.as_dict()["code"] == FROZEN_DIAGNOSTICS["unknown_query_parameter"]

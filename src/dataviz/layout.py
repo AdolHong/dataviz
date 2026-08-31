@@ -5,13 +5,10 @@ from math import ceil
 from typing import Any, Literal, TYPE_CHECKING
 
 from dataviz.errors import ValidationFailure
+from dataviz.protocols import LAYOUT_CONTRACT_SCHEMA
 
 if TYPE_CHECKING:
     from dataviz.workspace.loader import LoadedDashboard
-
-
-LAYOUT_CONTRACT_SCHEMA = "dataviz/layout-contract/v1"
-
 
 @dataclass(frozen=True, slots=True)
 class LayoutPlacement:

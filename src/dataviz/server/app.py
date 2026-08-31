@@ -29,18 +29,18 @@ from dataviz.artifacts import ArtifactDescriptor, ArtifactStore
 from dataviz.analysis import (
     ensure_analysis_catalog,
     refresh_analysis_catalog_async,
-    validate_analysis_result,
+    validate_analysis_result_producer,
 )
 from dataviz.analysis.results import AnalysisResultStore
 from dataviz.components import component_runtime_assets
 from dataviz.content_templates import (
     interpolate_dashboard_content,
 )
-from dataviz.errors import DatavizError, WorkspaceError
+from dataviz.errors import DatavizError, ExecutionFailure, WorkspaceError
 from dataviz.execution.results import RunResult
 from dataviz.execution.interactive import InteractionExecutor
 from dataviz.execution.fingerprint import ensure_query_run_compatible
-from dataviz.execution.outputs import normalize_outputs
+from dataviz.execution.outputs import normalize_outputs, validate_output_destination
 from dataviz.execution.parameter_domains import (
     ParameterDomainCache,
     resolve_parameter_domains,
@@ -49,6 +49,7 @@ from dataviz.execution.parameters import resolve_parameter_default
 from dataviz.execution.references import parse_output_reference
 from dataviz.filesystem import atomic_copy_file, atomic_write_text
 from dataviz.plotly_runtime import PLOTLY_JS_VERSION, get_plotlyjs
+from dataviz.protocols import ANALYSIS_RESULT_SCHEMA
 from dataviz.rendering import CanvasRenderer
 from dataviz.server.hot_reload import (
     WorkspaceChangeJournal,
@@ -139,6 +140,15 @@ class ReportRequest(ApiRequest):
     applied_revisions: dict[str, dict[str, dict[str, int]]] = Field(
         default_factory=dict
     )
+    applied_control_state: dict[
+        str, dict[str, dict[str, dict[str, Any]]]
+    ] = Field(default_factory=dict)
+    control_writer_provenance: dict[str, dict[str, Any]] = Field(
+        default_factory=dict
+    )
+    applied_writer_provenance: dict[
+        str, dict[str, dict[str, dict[str, Any]]]
+    ] = Field(default_factory=dict)
     destination: Literal["download", "share"] = "download"
 
 
@@ -354,6 +364,29 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         if not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", value or ""):
             raise HTTPException(422, "Invalid or missing browser-tab session id")
         return value
+
+    def require_canonical_control_state(
+        definition,
+        provided: dict[str, dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
+        canonical = resolve_control_states(definition, provided)
+        def signature(value):
+            return json.dumps(
+                value,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+
+        if signature(provided) != signature(canonical):
+            raise ExecutionFailure(
+                "Control state is not canonical",
+                details={
+                    "code": "control_state_not_canonical",
+                    "action": "Send the complete ControlRuntime snapshot",
+                },
+            )
+        return canonical
 
     def find_node_artifact(
         nodes: dict[str, Any], artifact_id: str
@@ -1145,12 +1178,23 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         session_id = checked_session(request.session_id)
         snapshot = refresh_workspace()
         try:
+            query_record = manager.get(run_id, session_id)
+            if query_record is None:
+                raise ExecutionFailure(
+                    "Query Run is unavailable in this browser-tab session",
+                    details={"code": "query_run_unavailable"},
+                )
+            dashboard = snapshot.dashboard(query_record.dashboard_id)
+            canonical_control_state = require_canonical_control_state(
+                dashboard.definition,
+                request.control_state,
+            )
             record = manager.start_interaction(
                 run_id,
                 session_id=session_id,
                 target=request.transform_id,
                 generation=request.generation,
-                control_state=request.control_state,
+                control_state=canonical_control_state,
                 refresh=request.refresh,
                 _workspace=snapshot,
             )
@@ -1574,7 +1618,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         except DatavizError as error:
             raise HTTPException(409, error.as_dict()) from error
         try:
-            resolved_control_state = resolve_control_states(
+            resolved_control_state = require_canonical_control_state(
                 dashboard.definition,
                 request.control_state,
             )
@@ -1582,7 +1626,11 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 dashboard,
                 resolved_control_state,
                 request.applied_revisions,
+                request.applied_control_state,
+                request.applied_writer_provenance,
             )
+        except DatavizError as error:
+            raise HTTPException(422, error.as_dict()) from error
         except Exception as error:
             raise HTTPException(422, f"Invalid report state: {error}") from error
         derived_outputs = {}
@@ -1650,6 +1698,18 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             for transform_id in snapshot_interactions
             if dashboard.interactive_transforms[transform_id][1].runtime == "browser-js"
         }
+        if request.destination != "share":
+            try:
+                for transform_id in sorted(browser_snapshot_ids):
+                    definition = dashboard.interactive_transforms[transform_id][1]
+                    for output in definition.outputs.values():
+                        validate_output_destination(
+                            producer_runtime="browser-js",
+                            output_kind=output.kind,
+                            destination="portable_snapshot",
+                        )
+            except ExecutionFailure as error:
+                raise HTTPException(422, error.as_dict()) from error
         allowed_snapshot_references = {
             f"interactive:{transform_id}/{name}"
             for transform_id in browser_snapshot_ids
@@ -1845,9 +1905,9 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                         "content_hash": descriptor.content_hash,
                     }
                 sealed = AnalysisResultStore(workspace_root).publish(
-                    validate_analysis_result(
+                    validate_analysis_result_producer(
                         {
-                            "schema": "dataviz/analysis-result/v1",
+                            "schema": ANALYSIS_RESULT_SCHEMA,
                             "status": result.status,
                             "generation": catalog.generation,
                             "target": {
@@ -1903,6 +1963,9 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             asset_mode="inline",
             control_state=resolved_control_state,
             applied_revisions=request.applied_revisions,
+            applied_control_state=request.applied_control_state,
+            control_writer_provenance=request.control_writer_provenance,
+            applied_writer_provenance=request.applied_writer_provenance,
             derived_outputs=derived_outputs,
             snapshot_interactions=snapshot_interactions,
         )

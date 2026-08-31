@@ -14,6 +14,15 @@ from pydantic import (
 )
 
 from dataviz.identifiers import STABLE_ID_PATTERN, StableId
+from dataviz.protocols import (
+    DASHBOARD_SCHEMA,
+    DATASET_TRANSFORM_SCHEMA,
+    INTERACTIVE_TRANSFORM_SCHEMA,
+    PARAMETER_DOMAIN_SCHEMA,
+    PRESENTATION_SCHEMA,
+    SOURCE_SCHEMA,
+    WORKSPACE_SCHEMA,
+)
 from dataviz.relative_dates import is_relative_date_default
 from dataviz.value_contract import validate_control_definition
 from dataviz.view_contracts import validate_view_contract
@@ -102,7 +111,7 @@ class RuntimeDefinition(Model):
     cache_retention_seconds: int | None = Field(2_592_000, ge=1)
 
 class WorkspaceDefinition(Model):
-    schema_: Literal["dataviz/workspace/v1"] = Field(alias="schema")
+    schema_: Literal[WORKSPACE_SCHEMA] = Field(alias="schema")
     kind: Literal["workspace"] = "workspace"
     id: StableId
     title: str
@@ -591,7 +600,7 @@ class PresentationStateSummaryDefinition(Model):
 
 
 class PresentationDefinition(Model):
-    schema_: Literal["dataviz/presentation/v2"] = Field(alias="schema")
+    schema_: Literal[PRESENTATION_SCHEMA] = Field(alias="schema")
     kind: Literal["presentation"] = "presentation"
     dashboard: StableId
     theme: PresentationThemeDefinition = Field(default_factory=PresentationThemeDefinition)
@@ -667,7 +676,7 @@ class DeclarativeViewDefinition(Model):
 
 
 class DashboardDefinition(Model):
-    schema_: Literal["dataviz/dashboard/v11"] = Field(alias="schema")
+    schema_: Literal[DASHBOARD_SCHEMA] = Field(alias="schema")
     kind: Literal["dashboard"] = "dashboard"
     id: StableId
     title: str = ""
@@ -873,7 +882,7 @@ class CacheDefinition(Model):
 class ParameterDomainDefinition(Model):
     """A bounded SQL table used only to resolve Query Parameter domains."""
 
-    schema_: Literal["dataviz/parameter-domain/v1"] = Field(alias="schema")
+    schema_: Literal[PARAMETER_DOMAIN_SCHEMA] = Field(alias="schema")
     kind: Literal["parameter_domain"] = "parameter_domain"
     id: StableId
     name: str | None = None
@@ -902,7 +911,7 @@ class ParameterDomainDefinition(Model):
 class _SourceDefinition(Model):
     """Fields shared by every strict Source variant."""
 
-    schema_: Literal["dataviz/source/v3"] = Field(alias="schema")
+    schema_: Literal[SOURCE_SCHEMA] = Field(alias="schema")
     kind: Literal["source"] = "source"
     id: StableId
     name: str | None = None
@@ -973,7 +982,7 @@ SOURCE_DEFINITION_ADAPTER = TypeAdapter(SourceDefinition)
 
 
 class DatasetTransformDefinition(Model):
-    schema_: Literal["dataviz/dataset-transform/v3"] = Field(alias="schema")
+    schema_: Literal[DATASET_TRANSFORM_SCHEMA] = Field(alias="schema")
     kind: Literal["dataset_transform"] = "dataset_transform"
     id: StableId
     name: str | None = None
@@ -1008,7 +1017,7 @@ class InteractiveExportDefinition(Model):
 
 
 class InteractiveTransformDefinition(Model):
-    schema_: Literal["dataviz/interactive-transform/v3"] = Field(alias="schema")
+    schema_: Literal[INTERACTIVE_TRANSFORM_SCHEMA] = Field(alias="schema")
     kind: Literal["interactive_transform"] = "interactive_transform"
     id: StableId
     name: str | None = None

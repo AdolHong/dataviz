@@ -2,18 +2,9 @@
 
 ## 独立版本
 
-Dataviz 同时维护八类版本：
+Dataviz 分别维护 Python package、文件 DSL、Compiler Contract、状态快照、Browser Runtime、Analysis Result/Evidence、Server 事件和 Component Registry 的版本。它们不会因为 package 发布补丁版本而机械同步升级。
 
-- Python package：当前 `ai-dataviz 0.15.0`。
-- 文件 DSL：Workspace v1、Dashboard v11、Parameter Domain v1、Presentation v2、Source/Dataset/Interactive Transform v3。
-- Dashboard 依赖协议：`dataviz/dependency-contract/v7`。
-- Dashboard 布局协议：`dataviz/layout-contract/v1`。
-- 状态快照协议：`dataviz/state-snapshot/v2`。
-- 浏览器协议：`dataviz/runtime/v6`。
-- Server 热更新协议：`dataviz/workspace-change/v1`。
-- Component Registry：当前 `5.6.0`。
-
-它们不会因为 package 发布补丁版本而机械同步升级。安装环境的权威清单来自：
+安装环境的当前权威清单来自：
 
 ```bash
 dataviz version

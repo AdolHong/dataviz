@@ -4,13 +4,15 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
+from dataviz.errors import ValidationFailure
+from dataviz.protocols import (
+    ANALYSIS_CATALOG_SCHEMA,
+    ANALYSIS_DESCRIBE_SCHEMA,
+    ANALYSIS_ENTRY_SCHEMA,
+    ANALYSIS_EVIDENCE_SCHEMA,
+    ANALYSIS_RESULT_SCHEMA,
+)
 from dataviz.workspace.models import OutputSemanticsDefinition
-
-
-ANALYSIS_ENTRY_SCHEMA = "dataviz/analysis-entry/v1"
-ANALYSIS_CATALOG_SCHEMA = "dataviz/analysis-catalog/v1"
-ANALYSIS_RESULT_SCHEMA = "dataviz/analysis-result/v1"
-ANALYSIS_DESCRIBE_SCHEMA = "dataviz/analysis-describe/v1"
 
 
 class AnalysisContract(BaseModel):
@@ -26,7 +28,7 @@ class AnalysisDashboardReference(AnalysisContract):
 
 
 class AnalysisEntry(AnalysisContract):
-    schema_: Literal["dataviz/analysis-entry/v1"] = Field(alias="schema")
+    schema_: Literal[ANALYSIS_ENTRY_SCHEMA] = Field(alias="schema")
     reference: str
     dashboard: AnalysisDashboardReference
     kind: Literal["source", "base_output", "derived_output", "view"]
@@ -46,9 +48,29 @@ class AnalysisEntry(AnalysisContract):
     trust_status: Literal["draft", "reviewed", "certified", "deprecated"] | None = None
     runtime: Any = None
     source_type: str | None = None
+    source_types: list[str] | None = None
+    adapters: list[str] | None = None
     query_parameters: list[str] = Field(default_factory=list)
+    query_bindings: dict[str, Any] | None = None
+    parameter_contracts: list[dict[str, Any]] = Field(default_factory=list)
     controls: list[str] = Field(default_factory=list)
+    control_contracts: list[dict[str, Any]] = Field(default_factory=list)
+    output: dict[str, Any] | None = None
+    outputs: list[Any] = Field(default_factory=list)
+    inputs: dict[str, str] = Field(default_factory=dict)
+    node_id: str | None = None
+    output_name: str | None = None
+    view_id: str | None = None
+    presentation: dict[str, Any] | None = None
+    base_inputs: list[str] = Field(default_factory=list)
+    upstream_outputs: list[str] = Field(default_factory=list)
+    downstream_views: list[str] = Field(default_factory=list)
+    match_reasons: list[Any] = Field(default_factory=list)
     equivalence_hash: str | None = None
+    definition_path: str | None = None
+    code_paths: list[str] | None = None
+    implementation_assets: list[dict[str, Any]] | None = None
+    definition_hash: str | None = None
     representative: dict[str, str] | None = None
     occurrence_count: int | None = Field(default=None, ge=1)
     references: list[dict[str, Any]] = Field(default_factory=list)
@@ -56,7 +78,7 @@ class AnalysisEntry(AnalysisContract):
 
 
 class AnalysisCatalog(AnalysisContract):
-    schema_: Literal["dataviz/analysis-catalog/v1"] = Field(alias="schema")
+    schema_: Literal[ANALYSIS_CATALOG_SCHEMA] = Field(alias="schema")
     generation: str
     count: int = Field(ge=0)
     entries: list[AnalysisEntry]
@@ -75,7 +97,7 @@ class AnalysisDescribeItem(AnalysisContract):
 
 
 class AnalysisDescribe(AnalysisContract):
-    schema_: Literal["dataviz/analysis-describe/v1"] = Field(alias="schema")
+    schema_: Literal[ANALYSIS_DESCRIBE_SCHEMA] = Field(alias="schema")
     generation: str
     count: int = Field(ge=0)
     items: list[AnalysisDescribeItem]
@@ -91,10 +113,94 @@ class AnalysisOutputResult(AnalysisContract):
     preview: Any = None
     truncated: bool = False
     run_id: str
+    transport: str | None = None
+    storage: dict[str, Any] | None = None
+    logical_value_hash: str | None = None
+
+
+class AnalysisControlRevision(AnalysisContract):
+    effective_revision: int = Field(ge=0)
+    applied_revision: int | None = Field(default=None, ge=0)
+    stale: bool
+
+    @model_validator(mode="after")
+    def validate_revision_order_and_staleness(self):
+        if (
+            self.applied_revision is not None
+            and self.applied_revision > self.effective_revision
+        ):
+            raise ValueError("applied revision cannot exceed effective revision")
+        if self.stale != (self.applied_revision != self.effective_revision):
+            raise ValueError("Control stale flag must match its revision delta")
+        return self
+
+
+class AnalysisAppliedControlState(AnalysisContract):
+    value: Any
+    revision: int = Field(ge=0)
+    intent: Literal["all_available", "explicit"] | None = None
+
+
+class AnalysisWriterProvenance(AnalysisContract):
+    revision: int = Field(ge=0)
+    action_id: str = Field(min_length=1, max_length=128)
+    source_view: str = Field(min_length=1)
+    action: Literal["select", "select_many", "clear", "reset"]
+
+
+class AnalysisConsumerRevision(AnalysisContract):
+    trigger: Literal["auto", "apply", "manual"]
+    stale: bool
+    controls: dict[str, AnalysisControlRevision] = Field(min_length=1)
+    applied_control_state: dict[str, AnalysisAppliedControlState] = Field(
+        default_factory=dict
+    )
+    applied_writer_provenance: dict[str, AnalysisWriterProvenance] = Field(
+        default_factory=dict
+    )
+
+    @model_validator(mode="after")
+    def validate_consumer_staleness(self):
+        if self.stale != any(value.stale for value in self.controls.values()):
+            raise ValueError("Consumer stale flag must match its Control revisions")
+        expected = {
+            key
+            for key, value in self.controls.items()
+            if value.applied_revision is not None
+        }
+        if set(self.applied_control_state) != expected:
+            raise ValueError(
+                "consumer applied Control state must cover every applied revision"
+            )
+        if any(
+            self.applied_control_state[key].revision
+            != self.controls[key].applied_revision
+            for key in expected
+        ):
+            raise ValueError(
+                "consumer applied Control state revision must match applied revision"
+            )
+        if not set(self.applied_writer_provenance) <= expected:
+            raise ValueError(
+                "consumer writer provenance must reference an applied Control state"
+            )
+        if any(
+            value.revision != self.applied_control_state[key].revision
+            for key, value in self.applied_writer_provenance.items()
+        ):
+            raise ValueError(
+                "consumer writer provenance revision must match applied Control state"
+            )
+        return self
+
+
+class AnalysisConsumerRevisions(AnalysisContract):
+    views: dict[str, AnalysisConsumerRevision] = Field(default_factory=dict)
+    transforms: dict[str, AnalysisConsumerRevision] = Field(default_factory=dict)
 
 
 class AnalysisResult(AnalysisContract):
-    schema_: Literal["dataviz/analysis-result/v1"] = Field(alias="schema")
+    schema_: Literal[ANALYSIS_RESULT_SCHEMA] = Field(alias="schema")
     status: Literal["ready", "partial", "failed", "cancelled"]
     generation: str | None = None
     target: AnalysisEntry | dict[str, Any] | None = None
@@ -103,8 +209,8 @@ class AnalysisResult(AnalysisContract):
         default_factory=dict
     )
     effective_controls: dict[str, Any] = Field(default_factory=dict)
-    consumer_revisions: dict[str, dict[str, dict[str, Any]]] = Field(
-        default_factory=lambda: {"views": {}, "transforms": {}}
+    consumer_revisions: AnalysisConsumerRevisions = Field(
+        default_factory=AnalysisConsumerRevisions
     )
     outputs: list[AnalysisOutputResult] = Field(default_factory=list)
     lineage: dict[str, Any] = Field(default_factory=dict)
@@ -112,10 +218,20 @@ class AnalysisResult(AnalysisContract):
     timing: dict[str, Any] = Field(default_factory=dict)
     next_actions: list[str] = Field(default_factory=list)
     error: dict[str, Any] | None = None
+    resolved_target: AnalysisEntry | dict[str, Any] | None = None
+    presentation: dict[str, Any] = Field(default_factory=dict)
+    view_input: dict[str, str] = Field(default_factory=dict)
+    renderability: dict[str, Any] = Field(default_factory=dict)
+    overlay: dict[str, Any] | None = None
+    nodes: dict[str, Any] | None = None
+    browser: dict[str, Any] | None = None
+    execution: dict[str, Any] | None = None
+    result_id: str | None = None
+    result_path: str | None = None
 
 
 class AnalysisEvidence(AnalysisContract):
-    schema_: Literal["dataviz/analysis-evidence/v1"] = Field(alias="schema")
+    schema_: Literal[ANALYSIS_EVIDENCE_SCHEMA] = Field(alias="schema")
     evidence_id: str
     created_at: str
     status: Literal["draft", "reviewed"] = "draft"
@@ -129,8 +245,8 @@ class AnalysisEvidence(AnalysisContract):
     target: dict[str, Any]
     outputs: list[dict[str, Any]]
     lineage: dict[str, Any]
-    consumer_revisions: dict[str, dict[str, dict[str, Any]]] = Field(
-        default_factory=lambda: {"views": {}, "transforms": {}}
+    consumer_revisions: AnalysisConsumerRevisions = Field(
+        default_factory=AnalysisConsumerRevisions
     )
     snapshot: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -201,6 +317,70 @@ def validate_analysis_describe(value: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_analysis_result(value: dict[str, Any]) -> dict[str, Any]:
+    """Read a persisted Result while retaining forward-compatible fields."""
+
     return AnalysisResult.model_validate(value).model_dump(
         mode="json", by_alias=True, exclude_none=True
     )
+
+
+def _reject_producer_extras(value: Any, *, path: str = "result") -> None:
+    if isinstance(value, BaseModel):
+        if value.model_extra:
+            fields = sorted(value.model_extra)
+            raise ValidationFailure(
+                f"Analysis producer emitted unknown field(s) at {path}: "
+                + ", ".join(fields),
+                details={
+                    "code": "analysis_producer_unknown_field",
+                    "path": path,
+                    "fields": fields,
+                },
+            )
+        for name in type(value).model_fields:
+            _reject_producer_extras(getattr(value, name), path=f"{path}.{name}")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _reject_producer_extras(item, path=f"{path}[{index}]")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _reject_producer_extras(item, path=f"{path}.{key}")
+
+
+def _validate_analysis_producer(
+    model_type: type[BaseModel],
+    value: dict[str, Any],
+    *,
+    path: str,
+) -> dict[str, Any]:
+    model = model_type.model_validate(value)
+    _reject_producer_extras(model, path=path)
+    return model.model_dump(mode="json", by_alias=True, exclude_none=True)
+
+
+def validate_analysis_entry_producer(value: dict[str, Any]) -> dict[str, Any]:
+    return _validate_analysis_producer(AnalysisEntry, value, path="entry")
+
+
+def validate_analysis_catalog_producer(value: dict[str, Any]) -> dict[str, Any]:
+    return _validate_analysis_producer(AnalysisCatalog, value, path="catalog")
+
+
+def validate_analysis_describe_producer(value: dict[str, Any]) -> dict[str, Any]:
+    return _validate_analysis_producer(AnalysisDescribe, value, path="describe")
+
+
+def validate_analysis_result_producer(value: dict[str, Any]) -> dict[str, Any]:
+    """Validate Dataviz-produced Results without weakening tolerant readers."""
+
+    return _validate_analysis_producer(AnalysisResult, value, path="result")
+
+
+def validate_analysis_evidence_producer(value: dict[str, Any]) -> dict[str, Any]:
+    return _validate_analysis_producer(AnalysisEvidence, value, path="evidence")
+
+
+def validate_analysis_promotion_producer(value: dict[str, Any]) -> dict[str, Any]:
+    return _validate_analysis_producer(AnalysisPromotion, value, path="promotion")

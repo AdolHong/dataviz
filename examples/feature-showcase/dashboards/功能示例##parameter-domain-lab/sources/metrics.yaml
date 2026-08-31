@@ -1,0 +1,23 @@
+schema: dataviz/source/v3
+kind: source
+id: metrics
+name: 城市经营指标
+description: 使用已经提交的省市参数执行正式 Query。
+type: sql
+adapter: warehouse
+code: metrics.sql
+query_inputs:
+  provinces: provinces
+  province_intent: {parameter: provinces, projection: intent}
+  cities: cities
+  city_intent: {parameter: cities, projection: intent}
+outputs:
+  main:
+    kind: table
+    semantics:
+      visibility: public
+      title: 省市经营指标
+      purpose: 比较动态参数候选所选城市的收入与订单。
+      grain: 每行代表一个城市。
+      assurance: {status: draft}
+cache: {mode: session}

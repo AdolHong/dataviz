@@ -1,6 +1,6 @@
 // Owner: shared Runtime host state and public registration surface.
 const datavizRuntime = window.datavizRuntime = {
-  protocol: 'dataviz/runtime/v5',
+  protocol: 'dataviz/runtime/v6',
   transforms: new Map(),
   views: new Map(),
   renderers: new Map(),
@@ -47,11 +47,8 @@ const datavizRuntime = window.datavizRuntime = {
       throw new Error(`Interactive Transform ${spec.id} inputs differ from the compiled dependency contract`);
     }
     const interactiveContract = window.dataviz.dependency_contract.interactive;
-    if (datavizControlInputSignature(spec.selection_inputs) !== datavizControlInputSignature(interactiveContract.selection_inputs?.[spec.id])) {
-      throw new Error(`Interactive Transform ${spec.id} Selection inputs differ from the compiled dependency contract`);
-    }
-    if (datavizControlInputSignature(spec.compute_inputs) !== datavizControlInputSignature(interactiveContract.compute_inputs?.[spec.id])) {
-      throw new Error(`Interactive Transform ${spec.id} Compute inputs differ from the compiled dependency contract`);
+    if (datavizControlInputSignature(spec.control_inputs) !== datavizControlInputSignature(interactiveContract.control_inputs?.[spec.id])) {
+      throw new Error(`Interactive Transform ${spec.id} Control inputs differ from the compiled dependency contract`);
     }
     if (datavizParameterInputSignature(spec.query_inputs) !== datavizParameterInputSignature(interactiveContract.parameter_inputs?.[spec.id])) {
       throw new Error(`Interactive Transform ${spec.id} Query Parameter inputs differ from the compiled dependency contract`);
@@ -83,22 +80,14 @@ const datavizRuntime = window.datavizRuntime = {
   },
   configureSnapshotControls() {
     const snapshotIds = new Set(window.dataviz.snapshot_interactions || []);
-    const selectionKeys = new Set();
-    const computeKeys = new Set();
+    const controlKeys = new Set();
     snapshotIds.forEach(id => {
-      Object.values(this.transformSelectionInputs(id)).forEach(key => selectionKeys.add(key));
-      Object.values(this.transformComputeInputs(id)).forEach(key => computeKeys.add(key));
+      Object.values(this.transformControlInputs(id)).forEach(binding => controlKeys.add(binding.control));
     });
-    selectionKeys.forEach(key => {
-      document.querySelectorAll(`[data-selection-key="${CSS.escape(key)}"]`).forEach(control => {
-        control.dataset.selectionFrozen = 'true';
+    controlKeys.forEach(key => {
+      document.querySelectorAll(`[data-control-key="${CSS.escape(key)}"]`).forEach(control => {
+        control.dataset.controlFrozen = 'true';
         control.setAttribute('aria-label', `${control.getAttribute('aria-label') || key} · fixed snapshot`);
-        control.querySelectorAll('input,select,button').forEach(input => { input.disabled = true; });
-      });
-    });
-    computeKeys.forEach(key => {
-      document.querySelectorAll(`[data-compute-key="${CSS.escape(key)}"]`).forEach(control => {
-        control.dataset.computeFrozen = 'true';
         control.querySelectorAll('input,select,button').forEach(input => { input.disabled = true; });
       });
     });
@@ -127,11 +116,8 @@ const datavizRuntime = window.datavizRuntime = {
     }
     return inputs;
   },
-  transformSelectionInputs(id) {
-    return window.dataviz.dependency_contract?.interactive?.selection_inputs?.[id] || {};
-  },
-  transformComputeInputs(id) {
-    return window.dataviz.dependency_contract?.interactive?.compute_inputs?.[id] || {};
+  transformControlInputs(id) {
+    return window.dataviz.dependency_contract?.interactive?.control_inputs?.[id] || {};
   },
   transformParameterInputs(id) {
     return window.dataviz.dependency_contract?.interactive?.parameter_inputs?.[id] || {};

@@ -1,31 +1,31 @@
 // Owner: DOM/bootstrap event wiring after every Runtime owner is registered.
-let datavizSelectionScheduled = false;
-let datavizSelectionQueue = Promise.resolve();
-const scheduleDatavizSelection = event => {
+let datavizControlScheduled = false;
+let datavizControlQueue = Promise.resolve();
+const scheduleDatavizControl = event => {
   // Capture the user's native control value before asynchronous initialization
   // or option-domain reconciliation can rebuild the underlying <select>.
   try {
-    datavizCaptureSelectionIntent(event?.currentTarget || event?.target);
-    readSelectionInputs();
+    datavizCaptureControlIntent(event?.currentTarget || event?.target);
+    readControlInputs();
   } catch (error) {
-    console.error('[dataviz:selections]', error);
+    console.error('[dataviz:controls]', error);
     return;
   }
-  if (datavizSelectionScheduled) return;
-  datavizSelectionScheduled = true;
+  if (datavizControlScheduled) return;
+  datavizControlScheduled = true;
   queueMicrotask(() => {
-    datavizSelectionScheduled = false;
+    datavizControlScheduled = false;
     // A native select emits both input and change for one user action. Coalesce
     // that event pair in the current task, then serialize any later actions
-    // behind the in-flight Interactive branch. Selection is an immediate data
+    // behind the in-flight Interactive branch. Control state is an immediate data
     // contract; it must not depend on a browser timer being scheduled promptly.
     const initialization = datavizRuntime.initializationPromise || Promise.resolve();
-    datavizSelectionQueue = Promise.all([
-      datavizSelectionQueue.catch(() => undefined),
+    datavizControlQueue = Promise.all([
+      datavizControlQueue.catch(() => undefined),
       initialization.catch(() => undefined),
     ])
-      .then(() => window.dataviz.applySelections())
-      .catch(error => console.error('[dataviz:selections]', error));
+      .then(() => window.dataviz.applyControls())
+      .catch(error => console.error('[dataviz:controls]', error));
   });
 };
 const datavizEscape = value => String(value ?? '')
@@ -150,42 +150,20 @@ document.addEventListener('keydown', event => {
   }
 });
 window.datavizComponents?.hydrate(document);
-document.querySelectorAll('[data-selection-input]').forEach(input => {
-  input.addEventListener('input', scheduleDatavizSelection);
-  input.addEventListener('change', scheduleDatavizSelection);
+document.querySelectorAll('[data-control-state-input]').forEach(input => {
+  input.addEventListener('input', scheduleDatavizControl);
+  input.addEventListener('change', scheduleDatavizControl);
 });
-let datavizComputeTimer;
-document.querySelectorAll('[data-compute-input]').forEach(input => {
-  const onDraft = () => {
-    readComputeInputs();
-    const changed = syncComputeDirtyState();
-    const key = input.closest('[data-compute-key]')?.dataset.computeKey || input.dataset.computeInput;
-    const trigger = input.dataset.computeTrigger || input.closest('[data-compute-trigger]')?.dataset.computeTrigger;
-    if (trigger !== 'auto' || !key || !changed.includes(key)) return;
-    clearTimeout(datavizComputeTimer);
-    const consumers = (
-      window.dataviz.dependency_contract?.controls?.[key]?.transform_consumers || []
-    ).map(id => datavizRuntime.transforms.get(id)).filter(
-      item => item?.spec.trigger === 'auto'
-    );
-    const delay = Math.max(0, ...consumers.map(item => Number(item.spec.debounce_ms || 0)));
-    datavizComputeTimer = setTimeout(() => window.dataviz.applyCompute({keys:[key]}).catch(error => {
-      console.error('[dataviz:compute:auto]', error);
-    }), delay);
-  };
-  input.addEventListener('input', onDraft);
-  input.addEventListener('change', onDraft);
-});
-document.querySelectorAll('[data-compute-apply]').forEach(button => {
+document.querySelectorAll('[data-control-apply]').forEach(button => {
   button.addEventListener('click', () => window.dataviz.applyControls({
     apply:true,
     keys:JSON.parse(button.dataset.controlKeys || '[]'),
     manualTargets:JSON.parse(button.dataset.manualTargets || '[]'),
   }).catch(error => {
-    console.error('[dataviz:compute:apply]', error);
+    console.error('[dataviz:control:apply]', error);
   }));
 });
-syncComputeDirtyState();
+syncControlDirtyState();
 if (window.dataviz.asset_mode === 'server') {
   document.querySelectorAll('.dv-context-controls[data-editor-owner] > summary').forEach(trigger => {
     trigger.addEventListener('contextmenu', event => {
@@ -230,10 +208,10 @@ Object.entries(window.dataviz.portable?.output_errors || {}).forEach(([reference
     datavizRuntimeError(failure),
   );
 });
-window.dataviz.getViewSelections = viewId => {
-  const contract = datavizViewSelectionContract(viewId);
+window.dataviz.getViewControls = viewId => {
+  const contract = datavizViewControlContract(viewId);
   return Object.fromEntries(
-    contract.map(item => [item.id, datavizSelectionValue(item.key)])
+    contract.map(item => [item.id, datavizControlValue(item.key)])
   );
 };
 window.datavizRuntimeServices = Object.freeze({
@@ -241,8 +219,8 @@ window.datavizRuntimeServices = Object.freeze({
   tableRows:datavizTableRows,
   numericAggregate:datavizNumericAggregate,
   workerValue:datavizWorkerValue,
-  selectionCanApply:datavizSelectionCanApply,
-  selectionMatches:datavizSelectionMatches,
+  controlCanApply:datavizControlCanApply,
+  controlMatches:datavizControlMatches,
   runtimeError:datavizRuntimeError,
   escape:datavizEscape,
   decodeSpec:node => JSON.parse(new TextDecoder().decode(Uint8Array.from(

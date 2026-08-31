@@ -1,5 +1,5 @@
 async function transform(context) {
-  const delay = Number(context.compute_params.delay_ms || 0);
+  const delay = Number(context.control_inputs.delay_ms || 0);
   await new Promise(resolve => setTimeout(resolve, delay));
   return {
     main: context.inputs.rows.map(row => ({

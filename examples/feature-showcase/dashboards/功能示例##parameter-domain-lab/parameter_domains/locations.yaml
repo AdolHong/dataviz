@@ -1,0 +1,10 @@
+schema: dataviz/parameter-domain/v1
+kind: parameter_domain
+id: locations
+name: 省市参数候选
+description: 一次查询返回省份与城市字段，供两个 Query Parameter 共享。
+type: sql
+adapter: warehouse
+code: locations.sql
+max_rows: 100
+cache: {mode: session}

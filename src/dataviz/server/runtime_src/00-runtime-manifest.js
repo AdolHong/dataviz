@@ -1,7 +1,7 @@
 // Owner: Runtime protocol, manifest normalization, and shared constants.
-const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v5';
+const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v6';
 const DATAVIZ_INTERACTIVE_WORKER_PROTOCOL = 'dataviz/interactive-worker/v1';
-const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v5';
+const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v7';
 if (window.dataviz.protocol?.schema !== DATAVIZ_RUNTIME_PROTOCOL) {
   throw new Error(`Unsupported Dataviz Runtime protocol: ${window.dataviz.protocol?.schema || 'missing'}`);
 }
@@ -76,10 +76,32 @@ const datavizInputContractSignature = inputs => JSON.stringify(
       .sort(([left], [right]) => left.localeCompare(right))
   )
 );
+const datavizCanonicalControlReference = reference => {
+  const raw = String(reference || '').trim();
+  if (raw.startsWith('dashboard.')) {
+    return `dashboard:${window.dataviz.dashboard_id}/${raw.slice('dashboard.'.length)}`;
+  }
+  return raw;
+};
 const datavizControlInputSignature = inputs => JSON.stringify(
   Object.fromEntries(
     Object.entries(inputs || {})
-      .map(([alias, key]) => [alias, String(key)])
+      .map(([alias, raw]) => {
+        const binding = typeof raw === 'string'
+          ? {mode:'value', control:datavizCanonicalControlReference(raw), projection:'value'}
+          : {
+              mode:String(raw?.mode || 'value'),
+              control:datavizCanonicalControlReference(raw?.control),
+              ...((raw?.mode || 'value') === 'value'
+                ? {projection:String(raw?.projection || 'value')}
+                : raw?.projection ? {projection:String(raw.projection)} : {}),
+              ...(raw?.field ? {field:raw.field} : {}),
+              ...(raw?.inputs ? {inputs:[...raw.inputs]} : {}),
+              ...(raw?.empty ? {empty:String(raw.empty)} : {}),
+              ...(raw?.operator ? {operator:String(raw.operator)} : {}),
+            };
+        return [alias, binding];
+      })
       .sort(([left], [right]) => left.localeCompare(right))
   )
 );

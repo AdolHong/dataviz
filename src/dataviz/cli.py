@@ -21,6 +21,7 @@ from typing import Any
 import typer
 import yaml
 import click
+import pandas as pd
 
 from dataviz import __version__
 from dataviz.analysis import (
@@ -39,6 +40,7 @@ from dataviz.analysis import (
     validate_analysis_result,
 )
 from dataviz.analysis.browser import run_browser_outputs
+from dataviz.analysis.parameter_options import ParameterOptionsStore
 from dataviz.analysis.results import AnalysisResultStore, result_manifest_hash
 from dataviz.auth import AdapterResolver
 from dataviz.authoring import (
@@ -69,9 +71,14 @@ from dataviz.execution import Executor, InteractionExecutor
 from dataviz.execution.dependencies import (
     DEPENDENCY_CONTRACT_SCHEMA,
 )
+from dataviz.execution.parameter_domains import resolve_parameter_domains
 from dataviz.maintenance import cleanup_workspace_storage
 from dataviz.plotly_runtime import PLOTLY_JS_VERSION
 from dataviz.rendering import CanvasRenderer, template_catalog
+from dataviz.state_snapshot import (
+    applied_revisions_for_consumers,
+    normalize_consumer_revisions,
+)
 from dataviz.renderer_contract import run_renderer_contract
 from dataviz.schema_docs import CURRENT_SCHEMAS, schema_catalog, schema_model_contract
 from dataviz.server import create_app
@@ -79,13 +86,9 @@ from dataviz.templates import component_catalog
 from dataviz.target_reference import parse_target_reference
 from dataviz.validation import format_validation_text, validate_preflight
 from dataviz.workspace import load_workspace
-from dataviz.selection_state import state_from_explicit_values
+from dataviz.input_state import state_from_values
 from dataviz.semantic_validation import validate_dashboard_semantics
-from dataviz.workspace.controls import (
-    project_selection_values,
-    resolve_compute_values,
-    scoped_control_registry,
-)
+from dataviz.workspace.controls import scoped_control_registry
 
 
 app = typer.Typer(
@@ -130,6 +133,14 @@ benchmark_app = typer.Typer(
     help="Measure observable Dataviz runtime performance.",
     no_args_is_help=True,
 )
+parameters_app = typer.Typer(
+    name="parameters",
+    help=(
+        "Optionally inspect live Query Parameter candidates; data execution never "
+        "depends on this discovery step."
+    ),
+    no_args_is_help=True,
+)
 app.add_typer(catalog_app, name="catalog")
 app.add_typer(result_app, name="result")
 app.add_typer(evidence_app, name="evidence")
@@ -137,6 +148,7 @@ app.add_typer(inspect_app, name="inspect")
 app.add_typer(components_app, name="components")
 app.add_typer(renderer_app, name="renderer")
 app.add_typer(benchmark_app, name="benchmark")
+app.add_typer(parameters_app, name="parameters")
 GALLERY_WORKSPACE = Path(__file__).resolve().parent / "gallery"
 
 
@@ -780,14 +792,13 @@ dataviz catalog describe . 'hello::source:data/main'
 dataviz run . 'hello::source:data/main'
 ```
 """,
-        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v9
+        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v11
 kind: dashboard
 id: hello
 title: Hello dashboard
 description: A minimal self-contained canvas
 controls:
   - id: category
-    kind: selection
     type: multiple_select
     value_type: text
     initial: {mode: values, values: [A, B, C]}
@@ -821,6 +832,8 @@ views:
     x: category
     y: value
     aggregate: sum
+    control_inputs:
+      category: {mode: filter, control: dashboard.category, field: category, inputs: [main], empty: match_none}
 sections:
   - id: overview
     title: Overview
@@ -838,7 +851,7 @@ theme:
 
 
 @app.command("tree")
-def list_dashboards(
+def tree_workspace(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     output_format: str = typer.Option("text", "--format", help="text or json"),
 ) -> None:
@@ -1432,7 +1445,7 @@ def frontend_adapters(
     ),
     output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
 ) -> None:
-    """Inspect frontend implementations that consume dataviz/runtime/v5."""
+    """Inspect frontend implementations that consume dataviz/runtime/v6."""
     if output_format not in {"markdown", "json"}:
         raise typer.BadParameter("--format must be markdown or json")
     catalog = frontend_adapter_catalog()
@@ -1471,62 +1484,29 @@ def frontend_adapters(
 
 @components_app.command("list")
 def components(
-    name: str | None = typer.Argument(None, help="Component name, for example control.cascader"),
     category: str | None = typer.Option(
         None,
         "--category",
         help="Filter by data-entry, view, section, layout, theme, renderer, runtime, data, or presentation",
     ),
     output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
-    check_packages: bool = typer.Option(
-        False,
-        "--check",
-        help="Validate package metadata/assets and report explicit bridge ownership",
-    ),
 ) -> None:
-    """Browse component contracts, examples, semantic DOM and style tokens."""
+    """List installed Component contracts, optionally filtered by category."""
     if output_format not in {"markdown", "json"}:
         raise typer.BadParameter("--format must be markdown or json")
     catalog = component_catalog(category)
-    if check_packages:
-        report = validate_component_packages(component_catalog().keys())
-        if output_format == "json":
-            print_json(report)
-        else:
-            status = "PASS" if report["valid"] else "FAIL"
-            typer.echo(f"# Component Package check · {status}\n")
-            typer.echo(
-                f"{report['packages']} packages · {report['components']} components · "
-                f"{report['stories']} stories · {report['test_declarations']} test declarations · "
-                f"{report['package_implemented']} package-owned / "
-                f"{report['bridge_implemented']} bridged"
-            )
-            typer.echo(
-                "\nThis check validates package metadata, assets and test declarations; "
-                "pytest/E2E executes behavior."
-            )
-            for error in report["errors"]:
-                typer.echo(f"- {error}")
-        if not report["valid"]:
-            raise typer.Exit(1)
-        return
-    if name is None:
-        if output_format == "json":
-            print_json(catalog)
-            return
-        typer.echo("# Dataviz component templates\n")
-        for component_name, definition in catalog.items():
-            typer.echo(f"- {component_name}: {definition['purpose']}")
-        typer.echo("\nRun `dataviz components <name>` for the complete contract and example.")
-        return
-    definition = component_catalog().get(name)
-    if definition is None:
-        raise typer.BadParameter(
-            f"Unknown component: {name}. Available: {', '.join(component_catalog())}"
-        )
     if output_format == "json":
-        print_json({"name": name, **definition})
+        print_json(catalog)
         return
+    typer.echo("# Dataviz component templates\n")
+    for component_name, definition in catalog.items():
+        typer.echo(f"- {component_name}: {definition['purpose']}")
+    typer.echo(
+        "\nRun `dataviz components show <name>` for the complete contract and example."
+    )
+
+
+def _print_component_definition(name: str, definition: dict[str, Any]) -> None:
     typer.echo(f"# {name}\n")
     typer.echo(f"{definition['purpose']}\n")
     if definition.get("use_when"):
@@ -1556,13 +1536,17 @@ def component_show(
     output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
 ) -> None:
     """Show one Component contract, example, semantic DOM, and style tokens."""
-
-    components(
-        name=name,
-        category=None,
-        output_format=output_format,
-        check_packages=False,
-    )
+    if output_format not in {"markdown", "json"}:
+        raise typer.BadParameter("--format must be markdown or json")
+    definition = component_catalog().get(name)
+    if definition is None:
+        raise typer.BadParameter(
+            f"Unknown component: {name}. Available: {', '.join(component_catalog())}"
+        )
+    if output_format == "json":
+        print_json({"name": name, **definition})
+        return
+    _print_component_definition(name, definition)
 
 
 @components_app.command("check")
@@ -1570,13 +1554,28 @@ def component_check(
     output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
 ) -> None:
     """Validate every installed Component Package and its declared assets."""
-
-    components(
-        name=None,
-        category=None,
-        output_format=output_format,
-        check_packages=True,
-    )
+    if output_format not in {"markdown", "json"}:
+        raise typer.BadParameter("--format must be markdown or json")
+    report = validate_component_packages(component_catalog().keys())
+    if output_format == "json":
+        print_json(report)
+    else:
+        status = "PASS" if report["valid"] else "FAIL"
+        typer.echo(f"# Component Package check · {status}\n")
+        typer.echo(
+            f"{report['packages']} packages · {report['components']} components · "
+            f"{report['stories']} stories · {report['test_declarations']} test declarations · "
+            f"{report['package_implemented']} package-owned / "
+            f"{report['bridge_implemented']} bridged"
+        )
+        typer.echo(
+            "\nThis check validates package metadata, assets and test declarations; "
+            "pytest/E2E executes behavior."
+        )
+        for error in report["errors"]:
+            typer.echo(f"- {error}")
+    if not report["valid"]:
+        raise typer.Exit(1)
 
 
 @components_app.command("gallery")
@@ -1756,15 +1755,9 @@ def dependencies_command(
                     transform_id
                 ].items()
             ) or "none"
-            selections = ", ".join(
-                f"{alias}={key}"
-                for alias, key in contract.interactive_selection_inputs[
-                    transform_id
-                ].items()
-            ) or "none"
-            computes = ", ".join(
-                f"{alias}={key}"
-                for alias, key in contract.interactive_compute_inputs[
+            control_inputs = ", ".join(
+                f"{alias}={binding['control']} ({binding['mode']})"
+                for alias, binding in contract.interactive_control_inputs[
                     transform_id
                 ].items()
             ) or "none"
@@ -1772,7 +1765,7 @@ def dependencies_command(
             typer.echo(
                 f"- `{transform_id}` ({contract.interactive_runtimes[transform_id]}) "
                 f"← nodes: {dependencies}; inputs: {inputs}; "
-                f"Selections: {selections}; Compute: {computes}; "
+                f"Control inputs: {control_inputs}; "
                 f"downstream Views: {views}"
             )
         typer.echo("\n## Controls\n")
@@ -1787,7 +1780,7 @@ def dependencies_command(
             direct_dependencies = ", ".join(dependency.depends_on) or "none"
             ancestors = ", ".join(dependency.dependency_ancestors) or "none"
             typer.echo(
-                f"- `{key}` ({dependency.kind}) · scope: {scope}; "
+                f"- `{key}` · scope: {scope}; "
                 f"direct data Views: {direct} (runtime field check: {runtime_checked}); "
                 f"depends on: {direct_dependencies}; effective ancestors: {ancestors}; "
                 f"Transforms: {transforms}; "
@@ -2468,6 +2461,191 @@ def evidence_promote(
         handle_error(exc)
 
 
+@parameters_app.command("options")
+def parameter_options(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    dashboard_id: str = typer.Argument(..., help="Dashboard id"),
+    parameters: list[str] | None = typer.Option(
+        None,
+        "--parameter",
+        help="Return one dynamic Query Parameter; repeat to select several",
+    ),
+    query_param: list[str] | None = typer.Option(
+        None,
+        "--query-param",
+        help="Optional parent/input value as name=JSON; repeat as needed",
+    ),
+    preview_rows: int = typer.Option(10, "--preview-rows", min=1, max=100),
+    output_format: str = typer.Option("text", "--format", help="text or json"),
+) -> None:
+    """Execute and seal live candidate tables; print only a bounded preview."""
+
+    try:
+        if output_format not in {"text", "json"}:
+            raise typer.BadParameter("--format must be text or json")
+        loaded = load_workspace(workspace)
+        dashboard = loaded.dashboard(dashboard_id)
+        supplied = parse_params(query_param)
+        resolution = resolve_parameter_domains(
+            loaded,
+            dashboard,
+            supplied,
+            timezone_name=loaded.definition.context.timezone,
+            initialized_parameters=set(supplied),
+            strict=False,
+        )
+        available = list(resolution.choices)
+        selected = list(dict.fromkeys(parameters or available))
+        unknown = [parameter for parameter in selected if parameter not in resolution.choices]
+        if unknown:
+            raise typer.BadParameter(
+                "Unknown dynamic Query Parameter(s): " + ", ".join(unknown)
+            )
+        if not selected:
+            if output_format == "json":
+                print_json(
+                    {
+                        "schema": "dataviz/parameter-options/v1",
+                        "status": "ready",
+                        "dashboard": dashboard_id,
+                        "tables": [],
+                        "note": "This Dashboard has no dynamic Query Parameter candidates.",
+                    }
+                )
+            else:
+                typer.echo(f"{dashboard_id}: no dynamic Query Parameter candidates")
+            return
+        definitions = {
+            item.id: item for item in dashboard.definition.query_parameters
+        }
+        domain_ids = {
+            definitions[parameter].options.source for parameter in selected
+        }
+        snapshot = ParameterOptionsStore(workspace).publish(
+            dashboard=dashboard_id,
+            generation=resolution.as_dict()["generation"],
+            query_parameters=supplied,
+            frames={
+                domain_id: frame
+                for domain_id, frame in resolution.frames.items()
+                if domain_id in domain_ids
+            },
+            metadata=resolution.domains,
+        )
+        tables: list[dict[str, Any]] = []
+        for table in snapshot["tables"]:
+            frame = resolution.frames[table["domain"]]
+            tables.append(
+                {
+                    **table,
+                    "preview_rows": min(preview_rows, len(frame)),
+                    "truncated": len(frame) > preview_rows,
+                    "preview": frame.head(preview_rows).to_dict(orient="records"),
+                }
+            )
+        payload = {
+            "schema": "dataviz/parameter-options/v1",
+            "status": "ready",
+            "options_id": snapshot["options_id"],
+            "options_path": snapshot["options_path"],
+            "dashboard": dashboard_id,
+            "generation": snapshot["generation"],
+            "query_parameters": supplied,
+            "tables": tables,
+            "note": (
+                "Candidate discovery is optional and this snapshot is immutable; "
+                "dataviz run does not execute or enforce Parameter Domains."
+            ),
+        }
+        if output_format == "json":
+            print_json(payload)
+            return
+        typer.echo(f"READY\nOptions: {snapshot['options_id']}\nPath: {snapshot['options_path']}")
+        for table in tables:
+            typer.echo(f"\n{table['domain']} · {table['rows']} rows")
+            frame = pd.DataFrame(table["preview"])
+            if not frame.empty:
+                typer.echo(frame.to_string(index=False))
+            if table["truncated"]:
+                typer.echo(f"… preview limited to {preview_rows} rows")
+        quoted_workspace = json.dumps(str(workspace.resolve()), ensure_ascii=False)
+        typer.echo("\nNext:")
+        for table in tables:
+            typer.echo(
+                f"  dataviz parameters filter {quoted_workspace} "
+                f"{snapshot['options_id']} --domain {table['domain']}"
+            )
+        typer.echo("\nOptional discovery only; dataviz run does not query this Domain.")
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        handle_error(exc)
+
+
+@parameters_app.command("filter")
+def parameter_options_filter(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    options_id: str = typer.Argument(..., help="Immutable options snapshot id"),
+    domain: str | None = typer.Option(None, "--domain"),
+    where: list[str] | None = typer.Option(
+        None,
+        "--where",
+        help="Filter a raw Domain column as name=JSON; repeat as needed",
+    ),
+    columns: list[str] | None = typer.Option(
+        None,
+        "--column",
+        help="Return one raw Domain column; repeat as needed",
+    ),
+    offset: int = typer.Option(0, "--offset", min=0),
+    limit: int = typer.Option(10, "--limit", min=1, max=100),
+    output_format: str = typer.Option("text", "--format", help="text or json"),
+) -> None:
+    """Filter one sealed candidate table without executing its SQL again."""
+
+    try:
+        if output_format not in {"text", "json"}:
+            raise typer.BadParameter("--format must be text or json")
+        store = ParameterOptionsStore(workspace)
+        manifest = store.load(options_id)
+        domain_id, frame, total = store.read(
+            manifest,
+            domain=domain,
+            filters=parse_params(where),
+            columns=columns,
+            offset=offset,
+            limit=limit,
+        )
+        payload = {
+            "schema": "dataviz/parameter-options-page/v1",
+            "status": "ready",
+            "options_id": options_id,
+            "domain": domain_id,
+            "offset": offset,
+            "limit": limit,
+            "total": total,
+            "truncated": offset + limit < total,
+            "rows": frame.to_dict(orient="records"),
+        }
+        if output_format == "json":
+            print_json(payload)
+            return
+        typer.echo(
+            f"{options_id} · {domain_id} · {total} matching rows · "
+            f"showing {offset}..{min(offset + len(frame), total)}"
+        )
+        if frame.empty:
+            typer.echo("No matching candidates")
+        else:
+            typer.echo(frame.to_string(index=False))
+        if payload["truncated"]:
+            typer.echo(f"… use --offset {offset + limit} --limit {limit} for more")
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        handle_error(exc)
+
+
 @catalog_app.command("list")
 def catalog_list(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
@@ -2754,14 +2932,6 @@ def _analysis_artifact_evidence(reference: str, artifact) -> dict[str, Any]:
     }
 
 
-def _analysis_next_actions(workspace: Path, entry: dict[str, Any]) -> list[str]:
-    quoted_workspace = shlex.quote(str(workspace))
-    return [
-        f"dataviz catalog describe {quoted_workspace} {entry['reference']} --detail debug",
-        f"dataviz run {quoted_workspace} {entry['reference']}",
-    ]
-
-
 def _analysis_record_success(
     workspace: Path,
     entries: list[dict[str, Any]],
@@ -2915,6 +3085,9 @@ def result_inspect(
             "target": manifest["result"].get("target"),
             "query_parameters": manifest["result"].get("query_parameters", {}),
             "effective_controls": manifest["result"].get("effective_controls", {}),
+            "consumer_revisions": manifest["result"].get(
+                "consumer_revisions", {"views": {}, "transforms": {}}
+            ),
             "outputs": [
                 {
                     key: item.get(key)
@@ -3024,40 +3197,23 @@ def _analysis_artifact_payload(
 
 
 def _run_target(
-    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
-    reference: str = typer.Argument(..., help="Canonical Target Reference"),
-    also: list[str] | None = typer.Option(
-        None,
-        "--also",
-        help="Repeat to extract compatible Outputs in one shared execution",
-    ),
-    query_param: list[str] | None = typer.Option(None, "--query-param", help="Repeat key=value"),
-    control: list[str] | None = typer.Option(None, "--control", help="Repeat canonical-control-key=value"),
-    output_name: str | None = typer.Option(None, "--output", help="Source Output name"),
-    runtime: str = typer.Option("auto", "--runtime", help="auto, server, or browser"),
-    output_format: str = typer.Option(
-        "text", "--format", help="text or json"
-    ),
-    limit: int = typer.Option(10, "--preview-rows", min=1),
-    refresh: bool = typer.Option(False, "--refresh"),
-    refresh_catalog: bool = typer.Option(False, "--refresh-catalog"),
-    allow_network: bool = typer.Option(
-        False,
-        "--allow-network",
-        help="Allow external HTTP(S), for example CDN Pyodide; disabled by default",
-    ),
-    timeout_seconds: float = typer.Option(60.0, "--timeout", min=1.0, help="Browser execution timeout in seconds"),
-    detail: str = typer.Option("summary", "--detail", help="summary, debug, or full"),
-    overlay: str | None = typer.Option(
-        None,
-        "--overlay",
-        help="One-run Analysis Overlay YAML/JSON file, or - for stdin",
-    ),
-    dry_run: bool = typer.Option(
-        False,
-        "--dry-run",
-        help="Validate and explain an Analysis Overlay without executing data",
-    ),
+    workspace: Path,
+    reference: str,
+    *,
+    also: list[str] | None,
+    query_param: list[str] | None,
+    control: list[str] | None,
+    output_name: str | None,
+    runtime: str,
+    output_format: str,
+    limit: int,
+    refresh: bool,
+    refresh_catalog: bool,
+    allow_network: bool,
+    timeout_seconds: float,
+    detail: str,
+    overlay: str | None,
+    dry_run: bool,
 ) -> None:
     """Execute one Source, Base/Derived Output, or View data contract."""
     variant = None
@@ -3268,6 +3424,7 @@ def _run_target(
                 "generation": catalog.generation,
                 **_analysis_target_payload(requested_entry, entry),
                 "query_parameters": result.query_parameters,
+                "query_parameter_intents": result.query_parameter_intents,
                 "effective_controls": {},
                 "outputs": outputs,
                 "lineage": {
@@ -3284,7 +3441,6 @@ def _run_target(
                     ],
                 },
                 "timing": {"query_ms": query_ms},
-                "next_actions": _analysis_next_actions(workspace, requested_entry),
             }
             if variant is not None:
                 payload["overlay"] = _analysis_overlay_payload(variant)
@@ -3340,19 +3496,9 @@ def _run_target(
             raise typer.BadParameter(
                 "Unknown Control key: " + ", ".join(unknown_controls)
             )
-        selection_values = {
-            key: value
-            for key, value in control_values.items()
-            if controls[key].kind == "selection"
-        }
-        compute_values = {
-            key: value
-            for key, value in control_values.items()
-            if controls[key].kind == "compute"
-        }
-        selection_state = state_from_explicit_values(
+        control_state = state_from_values(
             dashboard.definition,
-            selection_values,
+            control_values,
             phase=(
                 "canvas-hydration"
                 if declared_runtime != "server-python"
@@ -3368,8 +3514,7 @@ def _run_target(
                     (item["node_id"].split(":", 1)[1], item["output_name"])
                     for item in execution_entries
                 ],
-                compute_parameters=compute_values,
-                selection_state=selection_state,
+                control_state=control_state,
                 refresh=refresh,
                 allow_network=allow_network,
                 timeout_seconds=timeout_seconds,
@@ -3413,12 +3558,9 @@ def _run_target(
                 "generation": catalog.generation,
                 **_analysis_target_payload(requested_entry, entry),
                 "query_parameters": run_result.query_parameters,
-                "effective_controls": {
-                    "selection": selection_state,
-                    "compute": resolve_compute_values(
-                        dashboard.definition, compute_values
-                    ),
-                },
+                "query_parameter_intents": run_result.query_parameter_intents,
+                "effective_controls": control_state,
+                "consumer_revisions": browser_batch["consumer_revisions"],
                 "outputs": output_payloads,
                 "lineage": {
                     "query_nodes": run_result.query_nodes,
@@ -3441,7 +3583,6 @@ def _run_target(
                     "query_ms": query_ms,
                     **browser_batch["timing"],
                 },
-                "next_actions": _analysis_next_actions(workspace, requested_entry),
             }
             if variant is not None:
                 payload["overlay"] = _analysis_overlay_payload(variant)
@@ -3451,7 +3592,6 @@ def _run_target(
                     "metrics": browser_batch["metrics"],
                     "console_errors": browser_batch["console_errors"],
                     "network_allowed": allow_network,
-                    "pyodide_loaded": browser_batch["pyodide_loaded"],
                 }
             if detail == "full":
                 payload["execution"] = {
@@ -3473,8 +3613,7 @@ def _run_target(
             interaction = interaction_executor.execute(
                 run_result,
                 target_transform_id,
-                compute_parameters=compute_values,
-                selection_state=selection_state,
+                control_state=control_state,
                 refresh=refresh,
                 _dashboard=dashboard,
             )
@@ -3541,16 +3680,28 @@ def _run_target(
                 for node_id in interaction.nodes
             )
         )
+        applied_revisions = applied_revisions_for_consumers(
+            dashboard,
+            last_interaction.control_state,
+            transform_ids={
+                node_id.split(":", 1)[1]
+                for node_id in interactive_nodes
+                if node_id.startswith("interactive:")
+            },
+        )
         payload = {
             "schema": "dataviz/analysis-result/v1",
             "status": "ready",
             "generation": catalog.generation,
             **_analysis_target_payload(requested_entry, entry),
             "query_parameters": run_result.query_parameters,
-            "effective_controls": {
-                "selection": last_interaction.selection_state,
-                "compute": last_interaction.compute_parameters,
-            },
+            "query_parameter_intents": run_result.query_parameter_intents,
+            "effective_controls": last_interaction.control_state,
+            "consumer_revisions": normalize_consumer_revisions(
+                dashboard,
+                last_interaction.control_state,
+                applied_revisions,
+            ),
             "outputs": output_payloads,
             "lineage": {
                 "query_nodes": run_result.query_nodes,
@@ -3580,7 +3731,6 @@ def _run_target(
                 "query_ms": query_ms,
                 "interactive_ms": interaction_ms,
             },
-            "next_actions": _analysis_next_actions(workspace, requested_entry),
         }
         if variant is not None:
             payload["overlay"] = _analysis_overlay_payload(variant)
@@ -3852,8 +4002,7 @@ def report(
     target: str = typer.Argument(..., help="Result id or Dashboard id convenience target"),
     output: Path = typer.Option(..., "--output"),
     query_param: list[str] | None = typer.Option(None, "--query-param"),
-    compute_param: list[str] | None = typer.Option(None, "--compute-param"),
-    selection: list[str] | None = typer.Option(None, "--selection"),
+    control: list[str] | None = typer.Option(None, "--control"),
     refresh: bool = typer.Option(False, "--refresh"),
     allow_partial: bool = typer.Option(False, "--allow-partial"),
 ) -> None:
@@ -3893,18 +4042,10 @@ def report(
             print_json(result)
             raise typer.Exit(1)
         loaded_dashboard = loaded.dashboard(dashboard)
-        compute_values = resolve_compute_values(
+        resolved_control_state = state_from_values(
             loaded_dashboard.definition,
-            parse_params(compute_param),
-        )
-        resolved_selection_state = state_from_explicit_values(
-            loaded_dashboard.definition,
-            parse_params(selection),
+            parse_params(control),
             phase="canvas-hydration",
-        )
-        selection_values = project_selection_values(
-            loaded_dashboard.definition,
-            resolved_selection_state,
         )
         interactive_ids = loaded_dashboard.dependency_contract.reachable_interactive_order
         derived_outputs = {}
@@ -3918,7 +4059,7 @@ def report(
             transform_id
             for transform_id in snapshot_interactions
             if loaded_dashboard.interactive_transforms[transform_id][1].runtime
-            in {"browser-js", "browser-python"}
+            == "browser-js"
         )
         if browser_snapshot_ids:
             raise ExecutionFailure(
@@ -3941,8 +4082,7 @@ def report(
             interaction = interaction_executor.execute(
                 result,
                 transform_id,
-                compute_parameters=compute_values,
-                selection_state=resolved_selection_state,
+                control_state=resolved_control_state,
                 refresh=refresh,
             )
             interaction_results.append(interaction)
@@ -3950,12 +4090,19 @@ def report(
                 print_json(interaction)
                 raise typer.Exit(1)
             derived_outputs.update(interaction.outputs)
+        applied_revisions = applied_revisions_for_consumers(
+            loaded_dashboard,
+            resolved_control_state,
+            transform_ids={
+                value.interaction_id for value in interaction_results
+            },
+        )
         path = CanvasRenderer(loaded).write_report(
             loaded_dashboard,
             result,
             output.resolve(),
-            compute_parameters=compute_values,
-            selection_state=resolved_selection_state,
+            control_state=resolved_control_state,
+            applied_revisions=applied_revisions,
             derived_outputs=derived_outputs,
             snapshot_interactions=snapshot_interactions,
         )
@@ -4004,10 +4151,12 @@ def report(
                         },
                     },
                     "query_parameters": result.query_parameters,
-                    "effective_controls": {
-                        "selection": resolved_selection_state,
-                        "compute": compute_values,
-                    },
+                    "effective_controls": resolved_control_state,
+                    "consumer_revisions": normalize_consumer_revisions(
+                        loaded_dashboard,
+                        resolved_control_state,
+                        applied_revisions,
+                    ),
                     "outputs": result_outputs,
                     "lineage": {
                         "query_nodes": result.query_nodes,
@@ -4040,9 +4189,7 @@ def report(
                 "portability_scope": manifest["portability_scope"],
                 "network_dependencies": manifest["network_dependencies"],
                 "query_parameters": result.query_parameters,
-                "compute_parameters": compute_values,
-                "selection_state": resolved_selection_state,
-                "selection_values": selection_values,
+                "control_state": resolved_control_state,
                 "snapshot_interactions": [
                     value.interaction_id for value in interaction_results
                 ],
@@ -4056,7 +4203,7 @@ def report(
 
 
 @app.command("prune")
-def clean_workspace(
+def prune_workspace(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     apply: bool = typer.Option(
         False,
@@ -4066,7 +4213,7 @@ def clean_workspace(
     all_state: bool = typer.Option(
         False,
         "--all",
-        help="Select every unprotected Result, Run, and cache entry.",
+        help="Select every unprotected Result, Run, options snapshot, and cache entry.",
     ),
     keep_runs: int | None = typer.Option(
         None,
@@ -4084,7 +4231,7 @@ def clean_workspace(
         None,
         "--keep-cache-entries",
         min=0,
-        help="Override the number of newest persistent cache entries to retain.",
+        help="Override newest persistent cache and options snapshots to retain.",
     ),
     cache_max_age_hours: float | None = typer.Option(
         None,
@@ -4108,7 +4255,7 @@ def clean_workspace(
     include_cache: bool = typer.Option(True, "--cache/--no-cache"),
     include_results: bool = typer.Option(True, "--results/--no-results"),
 ) -> None:
-    """Preview or remove old Results, Run Artifacts, and persistent caches."""
+    """Preview or remove old Results, Runs, options snapshots, and caches."""
     try:
         loaded = load_workspace(workspace)
         runtime = loaded.definition.runtime

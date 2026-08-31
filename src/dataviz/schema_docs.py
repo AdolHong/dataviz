@@ -22,13 +22,14 @@ from dataviz.view_contracts import VIEW_TEMPLATE_CONTRACTS
 from dataviz.workspace.models import (
     AdapterDefinition,
     CacheDefinition,
-    ComputeControlDefinition,
+    ControlDefinition,
     DashboardDefinition,
     DatasetTransformDefinition,
     DeclarativeViewDefinition,
     LayoutDefinition,
     OutputDefinition,
     OutputSemanticsDefinition,
+    ParameterDomainDefinition,
     InteractiveExportDefinition,
     InteractiveTransformDefinition,
     PresentationDefinition,
@@ -39,14 +40,13 @@ from dataviz.workspace.models import (
     RuntimeDefinition,
     ScopedControlDefinition,
     SectionDefinition,
-    SelectionControlDefinition,
     SOURCE_DEFINITION_ADAPTER,
     ThemeDefinition,
     WorkspaceDefinition,
 )
 
 
-SCHEMA_CATALOG_VERSION = "dataviz/schema-catalog/v7"
+SCHEMA_CATALOG_VERSION = "dataviz/schema-catalog/v8"
 SchemaProvider = type[BaseModel] | TypeAdapter
 
 
@@ -62,10 +62,10 @@ SCHEMA_MODELS: OrderedDict[str, SchemaProvider] = OrderedDict(
         ("interactive-export", InteractiveExportDefinition),
         ("adapter", AdapterDefinition),
         ("query-parameter", QueryParameterDefinition),
+        ("parameter-domain", ParameterDomainDefinition),
         ("query-input", QueryInputProjectionDefinition),
         ("scoped-control", TypeAdapter(ScopedControlDefinition)),
-        ("compute-control", ComputeControlDefinition),
-        ("selection-control", SelectionControlDefinition),
+        ("control", ControlDefinition),
         ("section", SectionDefinition),
         ("repeat", RepeatDefinition),
         ("view", DeclarativeViewDefinition),
@@ -89,12 +89,13 @@ SCHEMA_MODELS: OrderedDict[str, SchemaProvider] = OrderedDict(
 
 CURRENT_SCHEMAS = {
     "workspace": "dataviz/workspace/v1",
-    "dashboard": "dataviz/dashboard/v9",
+    "dashboard": "dataviz/dashboard/v11",
+    "parameter_domain": "dataviz/parameter-domain/v1",
     "presentation": "dataviz/presentation/v2",
-    "source": "dataviz/source/v2",
-    "dataset_transform": "dataviz/dataset-transform/v2",
-    "interactive_transform": "dataviz/interactive-transform/v2",
-    "runtime": "dataviz/runtime/v5",
+    "source": "dataviz/source/v3",
+    "dataset_transform": "dataviz/dataset-transform/v3",
+    "interactive_transform": "dataviz/interactive-transform/v3",
+    "runtime": "dataviz/runtime/v6",
 }
 
 

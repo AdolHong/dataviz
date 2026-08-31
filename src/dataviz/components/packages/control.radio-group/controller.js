@@ -25,14 +25,18 @@
       group.replaceChildren();
       options.forEach((option, index) => {
         const unavailable = Boolean(option.disabled);
-        if (unavailable && control.dataset.showUnavailable !== 'true') return;
+        if (
+          unavailable
+          && option.dataset.preserveValue !== 'true'
+          && control.dataset.showUnavailable !== 'true'
+        ) return;
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = `dv-radio-group__option${option.selected && !unavailable ? ' is-selected' : ''}`;
+        button.className = `dv-radio-group__option${option.selected ? ' is-selected' : ''}${unavailable ? ' is-unavailable' : ''}`;
         button.dataset.value = option.value;
         button.textContent = option.textContent;
         button.setAttribute('role', 'radio');
-        button.setAttribute('aria-checked', String(option.selected && !unavailable));
+        button.setAttribute('aria-checked', String(option.selected));
         button.tabIndex = option.selected || (!api.selectedOptions(input).length && index === 0) ? 0 : -1;
         button.disabled = input.disabled || unavailable;
         button.addEventListener('click', () => choose(option));

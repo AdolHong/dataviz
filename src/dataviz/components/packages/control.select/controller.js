@@ -96,9 +96,9 @@
       const button = document.createElement('button');
       button.type = 'button';
       button.id = `${input.id || 'dv-select'}-option-${index}`;
-      button.className = `dv-choice-option${option.selected && !option.disabled ? ' is-selected' : ''}${index === active ? ' is-active' : ''}`;
+      button.className = `dv-choice-option${option.selected ? ' is-selected' : ''}${option.dataset.unavailable === 'true' ? ' is-unavailable' : ''}${index === active ? ' is-active' : ''}`;
       button.setAttribute('role', 'option');
-      button.setAttribute('aria-selected', String(option.selected && !option.disabled));
+      button.setAttribute('aria-selected', String(option.selected));
       button.disabled = input.disabled || option.disabled || capped;
       const copy = document.createElement('span');
       copy.className = 'dv-select-option__copy';
@@ -205,7 +205,11 @@
       if (!searchEnabled) search.value = '';
       const query = search.value.trim().toLocaleLowerCase();
       filtered = allOptions.filter(option => {
-        if (option.disabled && control.dataset.showUnavailable !== 'true') return false;
+        if (
+          option.disabled
+          && option.dataset.preserveValue !== 'true'
+          && control.dataset.showUnavailable !== 'true'
+        ) return false;
         if (control.dataset.hideSelected === 'true' && option.selected) return false;
         return !query || api.optionSearchText(option).includes(query);
       });

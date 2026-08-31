@@ -50,8 +50,7 @@ def _diagnostic_category(item: Diagnostic) -> str:
     ):
         return "presentation-assets"
     if (
-        code.startswith("pyodide_")
-        or code.startswith("runtime_asset_")
+        code.startswith("runtime_asset_")
         or "python_dependencies" in field
         or "code_dependencies" in field
         or "dependency" in message
@@ -87,17 +86,17 @@ def _hint_for(item: Diagnostic) -> str:
         return "Keep Source assets inside the Dashboard folder, or use a file Adapter whose root contains the data file."
     if code == "view_field_unknown":
         return "Fix the View field name or declare it in the main table Output schema; dynamic Outputs may omit schema only when static field checking is impossible."
-    if code == "selection_field_unknown":
-        return "Fix the Selection path/binding field or declare it in the selected View input table schema."
-    if code.startswith("selection_option_domain_"):
+    if code == "control_filter_field_unknown":
+        return "Fix the Control filter field or declare it in the consumed View input table schema."
+    if code.startswith("control_option_domain_"):
         return (
             "Use `options: {mode: static, choices: [...]}` for a closed enum, or "
             "`options: {mode: infer, source: source:sales/main}` for a data-derived "
-            "domain. Interactive Outputs are invalid because they may depend on this Selection."
+            "domain. Interactive Outputs are invalid because they may depend on this Control."
         )
     if code.startswith("control_dependency_"):
         return (
-            "Declare only direct Selection parents with scoped references such as "
+            "Declare only direct Control parents with scoped references such as "
             "`dashboard.province`, `section.city`, or `view.dow`. A child may only "
             "reference its current Dashboard, containing Section, or own View; its "
             "immutable option-domain table must expose the child and ancestor fields."
@@ -120,21 +119,10 @@ def _hint_for(item: Diagnostic) -> str:
         return "Fix the relative path or add the missing file, then run this preflight again."
     if "unknown query parameter" in item.message.lower():
         return "Bind this node's `query_inputs` entry to a declared Dashboard `query_parameters` id, or remove it."
-    if code.startswith("pyodide_bundle_"):
-        return (
-            "Use the complete official Pyodide distribution at "
-            "`runtime.pyodide_bundle_path`; it must include the core Runtime, "
-            "matching package.json, pyodide-lock.json, and every locked package "
-            "in the declared dependency closure."
-        )
-    if code.startswith("pyodide_"):
-        return "Use a Pyodide/WASM or pure-Python dependency, switch to browser-js, or run the Interactive Transform as server-python."
     if code.startswith("runtime_asset_"):
         return "Use an http(s) URL, or keep the UTF-8 JavaScript file inside the Workspace and reference it with a relative path."
     if code in {"dataset_cycle", "interactive_cycle"}:
         return "Break the reported dependency cycle; every input must point to an earlier explicit Named Output."
-    if code == "compute_trigger_ambiguous":
-        return "Use one trigger policy for every Interactive Transform that consumes this Compute Control."
     if field.startswith(("inputs", "views", "sections")) or "reference" in item.message.lower():
         return "Use `dataviz inspect context <workspace> <dashboard-id> --format json` to inspect valid node and Output ids."
     if "python_dependencies" in field:

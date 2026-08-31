@@ -125,24 +125,73 @@ def test_cleanup_removes_empty_tab_cache_namespaces(tmp_path: Path):
     assert (root / ".dataviz" / "cache").exists()
 
 
+def test_cleanup_treats_parameter_options_snapshots_as_bounded_cache(tmp_path: Path):
+    root = _workspace(tmp_path / "workspace")
+    now = time.time()
+    options_root = root / ".dataviz" / "parameter-options"
+    _entry(options_root / "options_20260830_000000_aaaaaaaaaa", now)
+    _entry(options_root / "options_20260801_000000_bbbbbbbbbb", now - 100)
+
+    preview = cleanup_workspace_storage(
+        root,
+        max_runs=None,
+        run_max_age_seconds=None,
+        max_cache_entries=1,
+        cache_max_age_seconds=None,
+        now=now,
+    )
+
+    assert [item["relative_path"] for item in preview["parameter_options"]] == [
+        "options_20260801_000000_bbbbbbbbbb"
+    ]
+    assert preview["candidate_count"] == 1
+
+    applied = cleanup_workspace_storage(
+        root,
+        max_runs=None,
+        run_max_age_seconds=None,
+        max_cache_entries=1,
+        cache_max_age_seconds=None,
+        now=now,
+        apply=True,
+    )
+
+    assert applied["deleted_count"] == 1
+    assert not (options_root / "options_20260801_000000_bbbbbbbbbb").exists()
+    assert (options_root / "options_20260830_000000_aaaaaaaaaa").exists()
+
+
 def test_clean_cli_previews_then_applies_all_state(tmp_path: Path):
     root = _workspace(tmp_path / "workspace")
     _entry(root / ".dataviz" / "runs" / "run_old", time.time() - 100)
+    _entry(
+        root
+        / ".dataviz"
+        / "parameter-options"
+        / "options_20260801_000000_aaaaaaaaaa",
+        time.time() - 100,
+    )
     runner = CliRunner()
 
     preview = runner.invoke(app, ["prune", str(root), "--all"])
     assert preview.exit_code == 0, preview.output
     preview_payload = json.loads(preview.output)
     assert preview_payload["mode"] == "dry-run"
-    assert preview_payload["candidate_count"] == 1
+    assert preview_payload["candidate_count"] == 2
     assert (root / ".dataviz" / "runs" / "run_old").exists()
 
     applied = runner.invoke(app, ["prune", str(root), "--all", "--apply"])
     assert applied.exit_code == 0, applied.output
     applied_payload = json.loads(applied.output)
     assert applied_payload["mode"] == "apply"
-    assert applied_payload["deleted_count"] == 1
+    assert applied_payload["deleted_count"] == 2
     assert not (root / ".dataviz" / "runs" / "run_old").exists()
+    assert not (
+        root
+        / ".dataviz"
+        / "parameter-options"
+        / "options_20260801_000000_aaaaaaaaaa"
+    ).exists()
 
 
 def test_run_manager_bounds_completed_records_and_their_artifacts(tmp_path: Path):

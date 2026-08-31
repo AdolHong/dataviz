@@ -11,4 +11,4 @@ tests:
   - id: runtime.control.dynamic-domain-intent
     component: runtime.control
     kind: browser
-    assertions: [all-available-expands-with-domain, explicit-selection-keeps-valid-intersection]
+    assertions: [all-available-expands-with-domain, all-available-renders-one-semantic-summary, explicit-selection-keeps-valid-intersection]

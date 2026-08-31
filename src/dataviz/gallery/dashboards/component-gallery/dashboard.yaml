@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v9
+schema: dataviz/dashboard/v11
 kind: dashboard
 id: component-gallery
 title: Component Gallery
@@ -18,7 +18,6 @@ sources:
 
 controls:
   - id: region
-    kind: selection
     field: region
     type: multiple_select
     value_type: text
@@ -31,7 +30,6 @@ controls:
         - {label: South, value: South}
         - {label: North, value: North}
   - id: analyst-note
-    kind: compute
     type: single_input
     value_type: text
     label: Analyst note
@@ -39,7 +37,6 @@ controls:
     placeholder: Add a short analysis note
     max_length: 120
   - id: scenario-name
-    kind: compute
     type: single_input
     value_type: text
     label: Scenario name
@@ -50,7 +47,6 @@ controls:
       - {label: Upside, value: Upside}
       - {label: Downside, value: Downside}
   - id: sample-size
-    kind: compute
     type: single_input
     value_type: integer
     label: Sample size
@@ -59,19 +55,16 @@ controls:
     max: 100
     step: 10
   - id: include-returns
-    kind: compute
     type: single_input
     value_type: boolean
     label: Include returns
     default: false
   - id: live-preview
-    kind: compute
     type: single_input
     value_type: boolean
     label: Live preview
     default: true
   - id: as-of-date
-    kind: compute
     type: single_input
     value_type: date
     label: As-of date
@@ -79,7 +72,6 @@ controls:
     min_date: "2026-01-01"
     max_date: "2026-12-31"
   - id: confidence
-    kind: compute
     type: single_input
     value_type: number
     label: Confidence
@@ -88,14 +80,12 @@ controls:
     max: 1
     step: 0.05
   - id: scenario-tags
-    kind: compute
     type: multiple_input
     value_type: text
     label: Scenario tags
     default: [baseline, reviewed]
     max_items: 6
   - id: confidence-band
-    kind: compute
     type: range_input
     value_type: number
     label: Confidence band
@@ -131,7 +121,6 @@ views:
       formats: {revenue: currency, orders: number}
     controls:
       - id: product
-        kind: selection
         field: product
         type: multiple_select
         value_type: text
@@ -145,7 +134,6 @@ views:
             - {label: Comet, value: Comet, group: New, description: Growth line}
             - {label: Delta, value: Delta, group: New, description: Growth line}
       - id: category-focus
-        kind: selection
         field: category
         type: single_select
         value_type: text
@@ -157,7 +145,6 @@ views:
             - {label: Hardware, value: Hardware}
             - {label: Software, value: Software}
       - id: location
-        kind: selection
         field: district
         path_fields: [province, city, district]
         type: multiple_select
@@ -165,7 +152,6 @@ views:
         label: Province / city / district
         options: {mode: infer}
       - id: location-tree
-        kind: selection
         field: district
         path_fields: [province, city, district]
         type: multiple_select
@@ -173,14 +159,12 @@ views:
         label: Location tree
         options: {mode: infer}
       - id: date-window
-        kind: selection
         field: date
         type: range_input
         value_type: date
         label: Date window
         default: ["2026-01-01", "2026-03-01"]
       - id: store-virtual
-        kind: selection
         field: store_id
         type: multiple_select
         value_type: text
@@ -204,9 +188,22 @@ views:
     template: image
     url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 420'%3E%3Crect width='800' height='420' fill='%231a237e'/%3E%3Ccircle cx='610' cy='120' r='82' fill='%2326a69a'/%3E%3Cpath d='M0 350L250 130L430 290L800 40V420H0Z' fill='%233949ab'/%3E%3Ctext x='44' y='78' fill='%23ffffff' font-family='sans-serif' font-size='42'%3EIMAGE VIEW%3C/text%3E%3C/svg%3E"
     span: 4
-  - {id: custom-specimen, title: Custom renderer, template: custom, renderer: gallery.spark, input: source:gallery-data/main, span: 4}
+  - id: custom-specimen
+    title: Custom renderer
+    template: custom
+    renderer: gallery.spark
+    input: source:gallery-data/main
+    span: 4
+    control_inputs:
+      region: {mode: filter, control: dashboard.region, field: region, inputs: [main], empty: match_none}
   - {id: all-store-trend, title: Store trend blueprint, template: line, input: source:gallery-data/main, x: month, y: revenue, aggregate: sum}
-  - {id: selected-store-trend, title: Selected store blueprint, template: line, input: source:gallery-data/main, x: month, y: revenue, aggregate: sum}
+  - id: selected-store-trend
+    title: Selected store blueprint
+    template: line
+    input: source:gallery-data/main
+    x: month
+    y: revenue
+    aggregate: sum
 
 sections:
   - id: metrics
@@ -221,7 +218,6 @@ sections:
     template: grid
     controls:
       - id: category
-        kind: selection
         field: category
         type: multiple_select
         value_type: text
@@ -268,7 +264,6 @@ sections:
     columns: 2
     controls:
       - id: stores
-        kind: selection
         field: store_id
         type: multiple_select
         value_type: text
@@ -285,7 +280,7 @@ sections:
     repeat:
       view: selected-store-trend
       by: [store_id]
-      selection: stores
+      control: stores
       title: "Selected {store_id}"
       empty_text: Choose stores to create comparison charts.
 

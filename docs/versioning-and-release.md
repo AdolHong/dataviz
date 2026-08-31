@@ -2,15 +2,16 @@
 
 ## 独立版本
 
-Dataviz 同时维护七类版本：
+Dataviz 同时维护八类版本：
 
-- Python package：当前 `ai-dataviz 0.12.2`。
-- 文件 DSL：Workspace v1、Dashboard v9、Presentation v2、Source v2、Dataset/Interactive Transform v2。
-- Dashboard 依赖协议：`dataviz/dependency-contract/v5`。
+- Python package：当前 `ai-dataviz 0.15.0`。
+- 文件 DSL：Workspace v1、Dashboard v11、Parameter Domain v1、Presentation v2、Source/Dataset/Interactive Transform v3。
+- Dashboard 依赖协议：`dataviz/dependency-contract/v7`。
 - Dashboard 布局协议：`dataviz/layout-contract/v1`。
-- 浏览器协议：`dataviz/runtime/v5`。
+- 状态快照协议：`dataviz/state-snapshot/v2`。
+- 浏览器协议：`dataviz/runtime/v6`。
 - Server 热更新协议：`dataviz/workspace-change/v1`。
-- Component Registry：当前 `5.5.0`。
+- Component Registry：当前 `5.6.0`。
 
 它们不会因为 package 发布补丁版本而机械同步升级。安装环境的权威清单来自：
 
@@ -39,7 +40,7 @@ Component Registry 只在公开组件契约变化时升级；单个 Package 可�
 最低门禁：
 
 1. Python 3.11、3.12、3.13、3.14 运行 unit/contract tests。
-2. 快速迭代期默认在 Chromium 运行完整真实 Runtime 测试，包括 Query/Interaction isolation、三 Runtime、Overlay、Selection、Renderer 和 HTML Export。进入稳定发布期、修改跨浏览器敏感行为，或发布者明确要求时，再在 Firefox、WebKit 重复同一套完整 E2E；单浏览器门禁不代表跨浏览器兼容承诺已重新验证。
+2. 快速迭代期默认在 Chromium 运行完整真实 Runtime 测试，包括 Query/Interaction isolation、两种 Interactive Runtime、Overlay、Control writer/consumer binding、Renderer 和 HTML Export。进入稳定发布期、修改跨浏览器敏感行为，或发布者明确要求时，再在 Firefox、WebKit 重复同一套完整 E2E；单浏览器门禁不代表跨浏览器兼容承诺已重新验证。
 3. `dataviz components check` 的 Package 元数据/资产/测试声明检查通过；组件行为由前两项 pytest 与浏览器 E2E 执行。
 4. 四个代表性 Workspace 通过 `validate`，并至少执行一个 Query/Report smoke。
 5. wheel、sdist 和 pip-installable ZIP 分别进入干净 venv，运行 `version`、`schemas`、`components check`、`init`、`validate` 和 `report`。

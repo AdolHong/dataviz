@@ -20,6 +20,7 @@ from dataviz.execution.node_support import hash_path, output_status, package_fin
 from dataviz.execution.outputs import normalize_outputs, validate_table_schema
 from dataviz.execution.parameters import (
     project_query_inputs,
+    resolve_query_parameter_intents,
     resolve_query_parameter_values,
 )
 from dataviz.execution.plan import PlanNode, compile_plan
@@ -129,6 +130,7 @@ class Executor:
         dashboard_id: str,
         *,
         query_parameters: dict[str, Any] | None = None,
+        query_parameter_intents: dict[str, str] | None = None,
         targets: list[str] | None = None,
         refresh: bool = False,
         observer: EventObserver | None = None,
@@ -145,6 +147,11 @@ class Executor:
             dashboard,
             query_parameters,
             timezone_name=workspace_definition.context.timezone,
+        )
+        parameter_intents = resolve_query_parameter_intents(
+            dashboard.definition.query_parameters,
+            query_parameters,
+            query_parameter_intents,
         )
         # Adapter files are an editable Workspace boundary. Resolve one immutable
         # snapshot per Run instead of retaining the first values seen by a tab.
@@ -164,6 +171,7 @@ class Executor:
             query_nodes=sorted(plan.nodes),
             query_contract_hash=query_contract_fingerprint(dashboard, plan.nodes),
             query_parameters=parameters,
+            query_parameter_intents=parameter_intents,
             nodes={
                 node_id: NodeResult(node_id=node_id, node_type=node.kind, status="not_run")
                 for node_id, node in plan.nodes.items()
@@ -719,10 +727,13 @@ class Executor:
             workspace_root=self.workspace.root,
             dashboard_root=dashboard.root,
             run_id=run_result.run_id,
-            query_inputs=project_query_inputs(node.parameter_inputs, parameters),
-            compute_params={},
-            selections={},
-            selection_state={},
+            query_inputs=project_query_inputs(
+                node.parameter_inputs,
+                parameters,
+                run_result.query_parameter_intents,
+            ),
+            control_inputs={},
+            control_state={},
             inputs=inputs,
             store=store,
             adapter=adapter,
@@ -784,7 +795,11 @@ class Executor:
             "dashboard": dashboard.definition.id,
             "node": node.id,
             "definition": definition.model_dump(mode="json", by_alias=True),
-            "query_inputs": project_query_inputs(node.parameter_inputs, parameters),
+            "query_inputs": project_query_inputs(
+                node.parameter_inputs,
+                parameters,
+                result.query_parameter_intents,
+            ),
             "files": files,
             "upstream": upstream,
             "adapter": (

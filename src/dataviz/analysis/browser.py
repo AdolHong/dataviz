@@ -17,6 +17,11 @@ from urllib.parse import urlparse
 from dataviz.errors import ExecutionFailure
 from dataviz.execution import InteractionExecutor
 from dataviz.rendering import CanvasRenderer
+from dataviz.state_snapshot import (
+    applied_revisions_for_consumers,
+    merge_applied_revisions,
+    normalize_consumer_revisions,
+)
 from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace
 from dataviz.workspace.models import (
     CanvasDefinition,
@@ -96,17 +101,11 @@ def _analysis_dashboard(
         path, transform = transforms[transform_id]
         if transform.runtime == "server-python":
             continue
-        assets = None
-        if transform.runtime == "browser-python":
-            assets = workspace.definition.runtime.pyodide_asset_policy
         transforms[transform_id] = (
             path,
             transform.model_copy(
                 update={
-                    "export": InteractiveExportDefinition(
-                        mode="interactive",
-                        assets=assets,
-                    )
+                    "export": InteractiveExportDefinition(mode="interactive")
                 }
             ),
         )
@@ -162,8 +161,7 @@ def run_browser_outputs(
     run_result,
     *,
     targets: list[tuple[str, str]],
-    compute_parameters: dict[str, Any],
-    selection_state: dict[str, dict[str, Any]],
+    control_state: dict[str, dict[str, Any]],
     refresh: bool,
     allow_network: bool,
     timeout_seconds: float,
@@ -195,8 +193,7 @@ def run_browser_outputs(
         interaction = interaction_executor.execute(
             run_result,
             identifier,
-            compute_parameters=compute_parameters,
-            selection_state=selection_state,
+            control_state=control_state,
             refresh=refresh,
             _dashboard=dashboard,
         )
@@ -231,8 +228,7 @@ def run_browser_outputs(
             analysis_dashboard,
             run_result,
             Path(directory) / "analysis.html",
-            compute_parameters=compute_parameters,
-            selection_state=selection_state,
+            control_state=control_state,
             derived_outputs=derived_outputs,
             snapshot_interactions=snapshot_interactions,
         )
@@ -358,6 +354,7 @@ def run_browser_outputs(
                     ]
                 },
             )
+            state_snapshot = page.evaluate("datavizBuildStateSnapshot()")
             extraction_ms = round((time.perf_counter() - extraction_started) * 1000, 2)
             context.close()
             browser.close()
@@ -366,13 +363,6 @@ def run_browser_outputs(
     failed = next((item for item in extracted if item.get("error")), None)
     if failed is not None:
         error = failed["error"]
-        failed_transform = failed["reference"].split("/", 1)[0].split(":", 1)[1]
-        if (
-            dashboard.interactive_transforms[failed_transform][1].runtime == "browser-python"
-            and not allow_network
-            and workspace.definition.runtime.pyodide_asset_policy == "cdn"
-        ):
-            error["action"] = "Repeat with --allow-network or configure a bundled Pyodide Runtime."
         raise ExecutionFailure(
             f"Browser Analysis failed: {error.get('message', 'unknown error')}",
             details={
@@ -407,6 +397,14 @@ def run_browser_outputs(
                 "transport": transport,
             }
         )
+    applied_revisions = merge_applied_revisions(
+        state_snapshot.get("applied_revisions", {}),
+        applied_revisions_for_consumers(
+            dashboard,
+            control_state,
+            transform_ids=set(server_interaction_ids),
+        ),
+    )
     return {
         "outputs": outputs,
         "duration_ms": round(report_ms + browser_ms, 2),
@@ -422,8 +420,10 @@ def run_browser_outputs(
         "metrics": extracted[-1].get("metrics", {}) if extracted else {},
         "console_errors": console_errors,
         "server_interactions": server_interaction_ids,
-        "pyodide_loaded": any(
-            dashboard.interactive_transforms[identifier][1].runtime == "browser-python"
-            for identifier in transform_ids
+        "applied_revisions": applied_revisions,
+        "consumer_revisions": normalize_consumer_revisions(
+            dashboard,
+            control_state,
+            applied_revisions,
         ),
     }

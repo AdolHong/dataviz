@@ -16,14 +16,13 @@ from dataviz.execution import Executor
 from dataviz.rendering import CanvasRenderer, template_catalog
 from dataviz.workspace import load_workspace, validate_workspace
 from dataviz.workspace.models import (
-    ComputeControlDefinition,
+    ControlDefinition,
     DashboardDefinition,
     InteractiveTransformDefinition,
     PresentationDefinition,
     PresentationControlPanelDefinition,
     PresentationControlComponentDefinition,
     QueryParameterDefinition,
-    SelectionControlDefinition,
     WorkspaceDefinition,
 )
 from dataviz.workspace.controls import compile_control_contract
@@ -90,7 +89,8 @@ def test_repeat_templates_share_one_dataset_and_render_dynamic_instances(tmp_pat
     assert 'dv-section--small-multiples' in report
     assert 'dv-section--selection-gallery' in report
     assert 'data-repeat-section="all-stores"' in report
-    assert 'data-cascader-view="selected-store-trend"' in report
+    assert '"view": "selected-store-trend"' in report
+    assert '"path_fields": ["region", "city", "store_id"]' in report
     assert "global.dataviz?.repeat_specs" in report
     assert "typeof IntersectionObserver === 'undefined'" in report
     assert 'class DatavizArrowOutput' in report
@@ -160,14 +160,14 @@ def test_cli_docs_provide_onboarding_chart_recipes_and_error_recovery():
     assert interpolation_docs["content_interpolation"]["parameter_syntax"] == (
         "{{ parameters.<id> }}"
     )
-    assert "最近一次 Run query" in (
+    assert "最近一次 RUN" in (
         interpolation_docs["content_interpolation"]["lifecycle"]["query_parameter"]
     )
     assert interpolation_docs["content_interpolation"]["control_syntax"]["section"] == (
         "{{ controls.section.<section-id>.<control-id> }}"
     )
     assert "即时更新" in (
-        interpolation_docs["content_interpolation"]["lifecycle"]["selection_control"]
+        interpolation_docs["content_interpolation"]["lifecycle"]["control"]
     )
     runtime_docs = CliRunner().invoke(app, ["docs", "runtime-limits", "--format", "json"])
     assert runtime_docs.exit_code == 0
@@ -234,6 +234,11 @@ def test_init_creates_declarative_dashboard_without_frontend_scaffold(tmp_path: 
     assert "dataviz authoring" not in readme
     assert "dataviz analyze" not in readme
     assert validate_workspace(workspace) == []
+    strict = CliRunner().invoke(
+        app,
+        ["validate", str(destination), "--strict", "--format", "json"],
+    )
+    assert strict.exit_code == 0, strict.output
 
 
 def test_run_cli_reads_an_explicit_named_source_output():
@@ -519,30 +524,29 @@ def test_control_component_presentation_is_visual_only():
 def test_control_component_auto_resolution_is_deterministic_and_unknown_names_are_rejected():
     choices = [{"label": str(index), "value": index} for index in range(9)]
     assert resolve_control_component(
-        SelectionControlDefinition(
-            id="status", kind="selection", type="single_select", value_type="integer",
+        ControlDefinition(
+            id="status", type="single_select", value_type="integer",
             options={"mode": "static", "choices": choices[:4]},
         )
     )["component"] == "radio-group"
     assert resolve_control_component(
-        SelectionControlDefinition(
-            id="region", kind="selection", type="multiple_select", value_type="integer",
+        ControlDefinition(
+            id="region", type="multiple_select", value_type="integer",
             options={"mode": "static", "choices": choices[:5]},
         )
     )["component"] == "checkbox-group"
     flat = resolve_control_component(
-        SelectionControlDefinition(
-            id="store", kind="selection", type="multiple_select", value_type="integer",
+        ControlDefinition(
+            id="store", type="multiple_select", value_type="integer",
             options={"mode": "static", "choices": choices[:6]},
         )
     )
     assert flat["component"] == "select"
     assert flat["virtual"] == "auto"
     assert resolve_control_component(
-        SelectionControlDefinition(
+        ControlDefinition(
             id="district",
-            kind="selection",
-            type="multiple_select", value_type="text",
+                        type="multiple_select", value_type="text",
             path_fields=["province", "city", "district"],
             options={"mode": "infer"},
         )
@@ -572,48 +576,44 @@ def test_control_component_auto_resolution_is_deterministic_and_unknown_names_ar
             None,
             "auto-complete",
         ),
-        (ComputeControlDefinition(id="count", kind="compute", type="single_input", value_type="integer"), None, "input-number"),
-        (ComputeControlDefinition(id="enabled", kind="compute", type="single_input", value_type="boolean"), None, "checkbox"),
+        (ControlDefinition(id="count", type="single_input", value_type="integer"), None, "input-number"),
+        (ControlDefinition(id="enabled", type="single_input", value_type="boolean"), None, "checkbox"),
         (
-            ComputeControlDefinition(id="live", kind="compute", type="single_input", value_type="boolean"),
+            ControlDefinition(id="live", type="single_input", value_type="boolean"),
             PresentationControlComponentDefinition(component="switch"),
             "switch",
         ),
         (
-            SelectionControlDefinition(
+            ControlDefinition(
                 id="mode",
-                kind="selection",
-                type="single_select", value_type="text",
+                                type="single_select", value_type="text",
                 options={"mode": "static", "choices": [{"label": "A", "value": "a"}, {"label": "B", "value": "b"}]},
             ),
             None,
             "radio-group",
         ),
         (
-            SelectionControlDefinition(
+            ControlDefinition(
                 id="store",
-                kind="selection",
-                type="single_select", value_type="integer",
+                                type="single_select", value_type="integer",
                 options={"mode": "static", "choices": [{"label": str(index), "value": index} for index in range(5)]},
             ),
             None,
             "select",
         ),
         (
-            SelectionControlDefinition(
+            ControlDefinition(
                 id="regions",
-                kind="selection",
-                type="multiple_select", value_type="text",
+                                type="multiple_select", value_type="text",
                 options={"mode": "static", "choices": [{"label": "A", "value": "a"}, {"label": "B", "value": "b"}]},
             ),
             None,
             "checkbox-group",
         ),
         (
-            SelectionControlDefinition(
+            ControlDefinition(
                 id="district",
-                kind="selection",
-                type="multiple_select", value_type="text",
+                                type="multiple_select", value_type="text",
                 path_fields=["province", "city", "district"],
                 options={"mode": "infer"},
             ),
@@ -621,10 +621,9 @@ def test_control_component_auto_resolution_is_deterministic_and_unknown_names_ar
             "cascader",
         ),
         (
-            SelectionControlDefinition(
+            ControlDefinition(
                 id="tree",
-                kind="selection",
-                type="multiple_select", value_type="text",
+                                type="multiple_select", value_type="text",
                 path_fields=["province", "city"],
                 options={"mode": "infer"},
             ),
@@ -635,10 +634,10 @@ def test_control_component_auto_resolution_is_deterministic_and_unknown_names_ar
         (QueryParameterDefinition(id="period", type="range_input", value_type="date"), None, "range-picker"),
         (QueryParameterDefinition(id="tags", type="multiple_input", value_type="text"), None, "multiple-input"),
         (QueryParameterDefinition(id="days", type="multiple_input", value_type="date"), None, "multiple-input"),
-        (ComputeControlDefinition(id="count", kind="compute", type="range_input", value_type="integer"), None, "slider"),
-        (ComputeControlDefinition(id="band", kind="compute", type="range_input", value_type="number"), None, "slider"),
+        (ControlDefinition(id="count", type="range_input", value_type="integer"), None, "slider"),
+        (ControlDefinition(id="band", type="range_input", value_type="number"), None, "slider"),
         (
-            ComputeControlDefinition(id="threshold", kind="compute", type="single_input", value_type="number"),
+            ControlDefinition(id="threshold", type="single_input", value_type="number"),
             PresentationControlComponentDefinition(component="slider"),
             "slider",
         ),
@@ -665,10 +664,9 @@ def test_data_entry_components_reject_semantically_incompatible_configuration():
         )
     with pytest.raises(ValueError, match="require cascader or tree-select"):
         resolve_control_component(
-            SelectionControlDefinition(
+            ControlDefinition(
                 id="district",
-                kind="selection",
-                type="multiple_select", value_type="text",
+                                type="multiple_select", value_type="text",
                 path_fields=["province", "city", "district"],
                 options={"mode": "infer"},
             ),
@@ -705,10 +703,9 @@ def test_portable_control_markup_supports_search_and_hidden_unavailable_options(
 
 def test_portable_cascader_declares_data_driven_path_levels():
     workspace = load_workspace(WORKSPACE)
-    definition = SelectionControlDefinition(
+    definition = ControlDefinition(
         id="district",
-        kind="selection",
-        label="District",
+                label="District",
         type="multiple_select", value_type="text",
         path_fields=["province", "city", "district"],
         options={"mode": "infer"},
@@ -817,7 +814,7 @@ def test_dashboard_definition_assets_cannot_escape_dashboard_folder(tmp_path: Pa
     dashboard_root = root / "dashboards" / "sales-overview"
     outside = root / "outside-source.yaml"
     outside.write_text(
-        """schema: dataviz/source/v2
+        """schema: dataviz/source/v3
 kind: source
 id: outside
 type: file
@@ -882,18 +879,19 @@ def test_declarative_control_contract_uses_field_binding():
     contract = compile_control_contract(dashboard.definition)
 
     assert set(contract) == set(dashboard.views)
-    assert all(selections[0].binding.field == "region" for selections in contract.values())
-    assert all(selections[0].origin == "dashboard" for selections in contract.values())
+    assert all(controls[0].definition.field == "region" for controls in contract.values())
+    assert all(controls[0].origin == "dashboard" for controls in contract.values())
 
 
-def test_declarative_renderer_limits_selection_redraw_to_affected_views():
+def test_declarative_renderer_limits_control_redraw_to_affected_views():
     workspace = load_workspace(WORKSPACE)
     dashboard = workspace.dashboard("sales-overview")
     result = Executor(workspace).run("sales-overview")
     rendered = CanvasRenderer(workspace).render(dashboard, result, asset_mode="server")
 
     assert "affected.has(id)" in rendered
-    assert "affectedViews(changedSelectionKeys, new Set())" in rendered
+    assert "affectedViews(changedControlKeys" in rendered
+    assert "affectedViews(changed, new Set())" in rendered
     assert "datavizRuntime.renderViews" in rendered
     assert "window.datavizClient" not in rendered
 
@@ -918,7 +916,7 @@ def test_removed_schema_fields_are_rejected(removed_fragment):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v9",
+                "schema": "dataviz/dashboard/v11",
                 "kind": "dashboard",
                 "id": "strict",
                 **removed_fragment,
@@ -932,7 +930,7 @@ def test_interactive_transform_rejects_old_unscoped_input_maps(removed_field):
     with pytest.raises(ValidationError) as failure:
         InteractiveTransformDefinition.model_validate(
             {
-                "schema": "dataviz/interactive-transform/v2",
+                "schema": "dataviz/interactive-transform/v3",
                 "kind": "interactive_transform",
                 "id": "strict",
                 "runtime": "browser-js",
@@ -979,7 +977,7 @@ def test_layout_and_view_bounds_are_enforced(fragment, location):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v9",
+                "schema": "dataviz/dashboard/v11",
                 "kind": "dashboard",
                 "id": "strict",
                 **fragment,
@@ -990,8 +988,8 @@ def test_layout_and_view_bounds_are_enforced(fragment, location):
 
 def test_selection_contract_is_include_only():
     with pytest.raises(ValidationError):
-        SelectionControlDefinition.model_validate(
-            {"id": "region", "kind": "selection", "type": "multiple_select", "value_type": "text", "mode": "exclude"}
+        ControlDefinition.model_validate(
+            {"id": "region", "type": "multiple_select", "value_type": "text", "mode": "exclude"}
         )
 
 
@@ -1023,8 +1021,8 @@ def test_default_renderer_builds_templates_and_portable_report(tmp_path: Path):
     assert "Optional presentation-only polish" in report
     assert "min-height:420px" in report
     assert "global.dataviz?.view_specs" in report
-    assert '"schema": "dataviz/runtime/v5"' in report
-    assert '"schema": "dataviz/dependency-contract/v5"' in report
+    assert '"schema": "dataviz/runtime/v6"' in report
+    assert '"schema": "dataviz/dependency-contract/v7"' in report
     assert 'data-view-pipeline-node="source:sales"' in report
     assert 'data-view-renderer-signal data-status="not_run" hidden' in report
     assert 'class="dv-view-type-label">plotly</small>' in report

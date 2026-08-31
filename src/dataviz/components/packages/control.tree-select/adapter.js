@@ -48,12 +48,8 @@
       return [...new Map(values.filter(path => Array.isArray(path) && path.length === levels.length).map(path => [JSON.stringify(path), path])).values()];
     };
     const rebuildNative = values => {
-      const selectionKey = control.closest('[data-selection-key]')?.dataset.selectionKey;
-      const computeKey = control.closest('[data-compute-key]')?.dataset.computeKey;
-      const key = selectionKey || computeKey;
-      const stored = selectionKey
-        ? global.dataviz?.selection?.value?.(selectionKey)
-        : global.dataviz?.compute_parameters?.[key];
+      const key = control.closest('[data-control-key]')?.dataset.controlKey;
+      const stored = global.dataviz?.control?.value?.(key);
       const storedPaths = input.multiple
         ? (Array.isArray(stored) ? stored : [])
         : (Array.isArray(stored) && stored.length ? [stored] : []);
@@ -67,8 +63,8 @@
         option.selected = previous.has(option.value);
         return option;
       });
-      if (selectionKey && global.dataviz?.selection?.reconcileOptionDomain) {
-        global.dataviz.selection.reconcileOptionDomain(input, nodes, {
+      if (key && global.dataviz?.control?.reconcileOptionDomain) {
+        global.dataviz.control.reconcileOptionDomain(input, nodes, {
           selectedValues:[...previous],
           required:control.dataset.required === 'true',
         });
@@ -203,6 +199,6 @@
     return {sync: () => render(true), overlay};
   });
   function selectionKeyFor(input) {
-    return input?.closest('[data-selection-key]')?.dataset.selectionKey || null;
+    return input?.closest('[data-control-key]')?.dataset.controlKey || null;
   }
 })(window);

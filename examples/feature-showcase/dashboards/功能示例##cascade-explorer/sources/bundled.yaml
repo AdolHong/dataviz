@@ -1,4 +1,4 @@
-schema: dataviz/source/v2
+schema: dataviz/source/v3
 kind: source
 id: bundled-file
 name: 看板内置 CSV

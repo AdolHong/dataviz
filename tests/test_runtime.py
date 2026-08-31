@@ -8,7 +8,6 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-import dataviz.rendering.canvas as canvas_module
 from dataviz.cli import app
 from dataviz.execution import Executor
 from dataviz.execution.fingerprint import ensure_query_run_compatible
@@ -283,7 +282,7 @@ def test_default_run_executes_sources_and_dataset_transforms():
     }
 
 
-def test_three_level_selections_are_browser_state_and_do_not_enter_query_run():
+def test_three_level_controls_are_browser_state_and_do_not_enter_query_run():
     workspace = load_workspace(WORKSPACE)
     dashboard = workspace.dashboard("sales")
     contract = compile_control_contract(dashboard.definition)
@@ -304,22 +303,23 @@ def test_three_level_selections_are_browser_state_and_do_not_enter_query_run():
     report = CanvasRenderer(workspace).render(
         dashboard,
         filtered,
-        selection_state={
+        control_state={
             "dashboard:sales/region": {
                 "intent": "explicit",
-                "values": ["North"],
+                "value": ["North"],
+                "revision": 1,
             },
             "section:pulse/min_revenue": {
-                "intent": "explicit",
-                "values": [15000],
+                "value": 15000,
+                "revision": 1,
             },
             "view:detail/min_orders": {
-                "intent": "explicit",
-                "values": [120],
+                "value": 120,
+                "revision": 1,
             },
         },
     )
-    assert '"dashboard:sales/region": {"intent": "explicit", "values": ["North"]}' in report
+    assert '"dashboard:sales/region": {"value": ["North"], "revision": 1, "intent": "explicit"}' in report
 
 
 def test_custom_canvas_and_report(tmp_path: Path):
@@ -374,7 +374,7 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert "View controls</strong><small>" not in report
     assert 'data-control-origin="section"' in report
     assert 'data-control-origin="view"' in report
-    assert "data-selection-input=\"dashboard:sales/region\"" in report
+    assert "data-control-state-input=\"dashboard:sales/region\"" in report
     assert 'data-component-package="runtime.overlay"' in report
     assert "installDatavizOverlay" in report
     assert "typeof event.composedPath === 'function'" in report
@@ -385,7 +385,7 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert "canvasTop <= 1 && shellTop > 1" in report
     assert '"dependency_contract": {' in report
     assert '"views": {"revenue": {"inputs":' in report
-    assert "const refreshSelectionOptionDomains = () =>" in report
+    assert "const refreshControlOptionDomains = () =>" in report
     assert "dependency_contract?.control_order" in report
     assert "dependency_ancestors" in report
     assert "Commit each compiled Control" in report
@@ -396,15 +396,15 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert "option.selected = !option.selected;" in report
     assert "dv-checkbox-group__toolbar" not in report
     assert "normalizeAll" not in report
-    assert "await datavizRuntime.runTransforms(changedSelectionKeys, [], {" in report
-    assert "changedComputeKeys: previous == null ? null : []" in report
+    assert "await datavizRuntime.runTransforms(changed, [], {" in report
+    assert "changedControlKeys:changed || Object.keys(current)" in report
     assert "if (!relevant && missingOutput && this.activeTransforms.has(id)) return;" in report
-    assert "refreshSelectionOptionDomains();\n  readSelectionInputs();" in report
-    assert "affectedViews(changedSelectionKeys, new Set())" in report
-    assert "changedSelectionKeys == null || changedSelectionKeys.length" in report
-    assert "datavizSelectionCanApply" in report
+    assert "refreshControlOptionDomains();\n  readControlInputs(" in report
+    assert "affectedViews(changed, new Set())" in report
+    assert "changedControlKeys == null" in report
+    assert "datavizControlCanApply" in report
     assert "dataset does not expose the selected field" in report
-    assert "state.selection.matches(row, item, state.selection.state(item.key))" in report
+    assert "state.control.state(controlKey)" in report
     assert "document.documentElement.dataset.selecting" not in report
     assert '"source:orders/main": [' in report
     assert '"dataset:sales-metrics/trend": [' in report
@@ -425,8 +425,6 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert "plotly_selected" in report
     assert "plotly_doubleclick" in report
     assert "state.table.replace(state.latestRows)" in report
-    assert "window.datavizInteractivePythonWorkerSource=" not in report
-    assert '"pyodide_index_url"' not in report
 
 
 def test_declarative_charts_load_the_plotly_runtime():
@@ -457,167 +455,18 @@ def test_report_cli_exposes_the_scoped_portability_claim(tmp_path: Path):
     assert payload["portability_scope"] == "declared-runtime-and-view-assets"
 
 
-def test_report_export_rejects_runtime_bundle_outside_workspace(
-    tmp_path: Path,
-    monkeypatch,
-):
-    root = tmp_path / "workspace"
-    shutil.copytree(WORKSPACE, root)
-    workspace = load_workspace(root)
-    dashboard = workspace.dashboard("sales")
-    result = Executor(workspace).run("sales")
-    renderer = CanvasRenderer(workspace)
-
-    outside_bundle = tmp_path / "outside-pyodide"
-    outside_bundle.mkdir()
-    workspace.definition.runtime.pyodide_bundle_path = "../outside-pyodide"
-    monkeypatch.setattr(
-        renderer, "_browser_python_export_assets", lambda _, **__: "bundle"
-    )
-    with pytest.raises(ExecutionFailure) as bundle_failure:
-        renderer.write_report(dashboard, result, tmp_path / "outside.html")
-    assert bundle_failure.value.details["code"] == "runtime_asset_outside_workspace"
-    assert bundle_failure.value.details["field"] == "runtime.pyodide_bundle_path"
-
-
-def test_report_export_rejects_symlinked_runtime_bundle_assets(
-    tmp_path: Path,
-    monkeypatch,
-):
-    root = tmp_path / "workspace"
-    shutil.copytree(WORKSPACE, root)
-    bundle = root / "pyodide"
-    bundle.mkdir()
-    outside = tmp_path / "outside-runtime.js"
-    outside.write_text("secret runtime", encoding="utf-8")
-    link = bundle / "runtime.js"
-    try:
-        link.symlink_to(outside)
-    except OSError as error:  # pragma: no cover - platform policy may forbid symlinks
-        pytest.skip(f"Symlinks are unavailable: {error}")
-    workspace = load_workspace(root)
-    dashboard = workspace.dashboard("sales")
-    result = Executor(workspace).run("sales")
-    workspace.definition.runtime.pyodide_bundle_path = "pyodide"
-    renderer = CanvasRenderer(workspace)
-    monkeypatch.setattr(
-        renderer, "_browser_python_export_assets", lambda _, **__: "bundle"
-    )
-
-    with pytest.raises(ExecutionFailure) as failure:
-        renderer.write_report(dashboard, result, tmp_path / "report.html")
-
-    assert failure.value.details["code"] == "pyodide_bundle_symlink_unsupported"
-    assert failure.value.details["symlinks"] == ["runtime.js"]
-    assert not (tmp_path / "report.assets").exists()
-
-
-def test_report_export_atomically_replaces_local_runtime_assets(
-    tmp_path: Path,
-    monkeypatch,
-):
-    root = tmp_path / "workspace"
-    shutil.copytree(WORKSPACE, root)
-    bundle = root / "pyodide"
-    bundle.mkdir()
-    (bundle / "runtime.js").write_text("first", encoding="utf-8")
-    (bundle / "stale.js").write_text("stale", encoding="utf-8")
-    workspace = load_workspace(root)
-    dashboard = workspace.dashboard("sales")
-    result = Executor(workspace).run("sales")
-    workspace.definition.runtime.pyodide_bundle_path = "pyodide"
-    renderer = CanvasRenderer(workspace)
-    monkeypatch.setattr(
-        renderer, "_browser_python_export_assets", lambda _, **__: "bundle"
-    )
-    output = tmp_path / "report.html"
-
-    renderer.write_report(dashboard, result, output)
-    assets = tmp_path / "report.assets" / "pyodide"
-    assert (assets / "runtime.js").read_text(encoding="utf-8") == "first"
-    assert (assets / "stale.js").exists()
-
-    (bundle / "runtime.js").write_text("second", encoding="utf-8")
-    (bundle / "stale.js").unlink()
-    (bundle / "fresh.js").write_text("fresh", encoding="utf-8")
-    renderer.write_report(dashboard, result, output)
-
-    assert (assets / "runtime.js").read_text(encoding="utf-8") == "second"
-    assert not (assets / "stale.js").exists()
-    assert (assets / "fresh.js").exists()
-
-    previous_report = output.read_text(encoding="utf-8")
-    previous_runtime = (assets / "runtime.js").read_text(encoding="utf-8")
-    (bundle / "runtime.js").write_text("unpublished", encoding="utf-8")
-    monkeypatch.setattr(
-        renderer,
-        "render",
-        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("render failed")),
-    )
-
-    with pytest.raises(RuntimeError, match="render failed"):
-        renderer.write_report(dashboard, result, output)
-
-    assert output.read_text(encoding="utf-8") == previous_report
-    assert (assets / "runtime.js").read_text(encoding="utf-8") == previous_runtime
-    assert not list(tmp_path.glob(".report.assets.*.tmp"))
-
-
-def test_report_export_rolls_back_assets_and_manifest_when_html_publish_fails(
-    tmp_path: Path,
-    monkeypatch,
-):
-    root = tmp_path / "workspace"
-    shutil.copytree(WORKSPACE, root)
-    bundle = root / "pyodide"
-    bundle.mkdir()
-    (bundle / "runtime.js").write_text("first", encoding="utf-8")
-    workspace = load_workspace(root)
-    dashboard = workspace.dashboard("sales")
-    result = Executor(workspace).run("sales")
-    workspace.definition.runtime.pyodide_bundle_path = "pyodide"
-    renderer = CanvasRenderer(workspace)
-    monkeypatch.setattr(
-        renderer, "_browser_python_export_assets", lambda _, **__: "bundle"
-    )
-    output = tmp_path / "report.html"
-    renderer.write_report(dashboard, result, output)
-
-    assets = tmp_path / "report.assets" / "pyodide"
-    manifest = output.with_suffix(".html.manifest.json")
-    previous_report = output.read_bytes()
-    previous_manifest = manifest.read_bytes()
-    previous_runtime = (assets / "runtime.js").read_bytes()
-    (bundle / "runtime.js").write_text("second", encoding="utf-8")
-    original_write = canvas_module.atomic_write_text
-
-    def fail_html_publish(path: Path, content: str, *, encoding: str = "utf-8"):
-        if path == output:
-            raise OSError("simulated HTML publish failure")
-        return original_write(path, content, encoding=encoding)
-
-    monkeypatch.setattr(canvas_module, "atomic_write_text", fail_html_publish)
-
-    with pytest.raises(OSError, match="simulated HTML publish failure"):
-        renderer.write_report(dashboard, result, output)
-
-    assert output.read_bytes() == previous_report
-    assert manifest.read_bytes() == previous_manifest
-    assert (assets / "runtime.js").read_bytes() == previous_runtime
-    assert not list(tmp_path.glob(".report.assets.*.backup"))
-
-
-def test_report_selection_is_initial_state_not_an_export_cut(tmp_path: Path):
+def test_report_control_is_initial_state_not_an_export_cut(tmp_path: Path):
     workspace = load_workspace(WORKSPACE)
     result = Executor(workspace).run("sales")
     output = CanvasRenderer(workspace).write_report(
         workspace.dashboard("sales"),
         result,
         tmp_path / "interactive.html",
-        selection_state={
+        control_state={
             "dashboard:sales/region": {
                 "intent": "explicit",
-                "values": ["East"],
+                "value": ["East"],
+                "revision": 1,
             }
         },
     )

@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v9
+schema: dataviz/dashboard/v11
 kind: dashboard
 id: source-lab
 title: 数据源实验室
@@ -9,7 +9,6 @@ adapters:
   warehouse: demo-duckdb
 controls:
   - id: day
-    kind: selection
     field: day
     type: multiple_select
     value_type: text
@@ -46,6 +45,8 @@ views:
     x: timestamp
     y: [actual, forecast]
     aggregate: none
+    control_inputs:
+      day: {mode: filter, control: dashboard.day, field: day, inputs: [main], empty: match_none}
 
   - id: accuracy
     title: 日均绝对误差
@@ -54,6 +55,8 @@ views:
     x: day
     y: error
     aggregate: mean
+    control_inputs:
+      day: {mode: filter, control: dashboard.day, field: day, inputs: [main], empty: match_none}
 
   - id: sql-matrix
     title: DuckDB 查询明细
@@ -61,6 +64,8 @@ views:
     template: table
     columns: [id, val, val2, val3, val4]
     limit: 30
+    control_inputs:
+      day: {mode: filter, control: dashboard.day, field: day, inputs: [main], empty: match_none}
 
 sections:
   - {id: pulse, title: 预测脉冲, views: [forecast-line, accuracy]}

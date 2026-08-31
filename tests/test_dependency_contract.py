@@ -169,7 +169,7 @@ def test_view_control_binding_rejects_narrower_candidate_selection(tmp_path: Pat
     view["controls"] = [
         {
             "id": "city",
-            "kind": "selection",
+
             "type": "single_select",
             "value_type": "text",
             "field": "city",
@@ -177,6 +177,13 @@ def test_view_control_binding_rejects_narrower_candidate_selection(tmp_path: Pat
             "options": {"mode": "infer"},
         }
     ]
+    view.setdefault("control_inputs", {})["city"] = {
+        "mode": "filter",
+        "control": "view.city",
+        "field": "city",
+        "inputs": ["main"],
+        "empty": "passthrough",
+    }
     dashboard_path.write_text(
         yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
@@ -195,7 +202,7 @@ def test_same_view_dependencies_compile_direct_edges_transitive_closure_and_orde
     controls[0:0] = [
         {
             "id": "dow",
-            "kind": "selection",
+
             "field": "city",
             "type": "single_select",
             "value_type": "text",
@@ -210,7 +217,7 @@ def test_same_view_dependencies_compile_direct_edges_transitive_closure_and_orde
         },
         {
             "id": "dates",
-            "kind": "selection",
+
             "field": "district",
             "type": "multiple_select",
             "value_type": "text",
@@ -271,7 +278,7 @@ def test_control_dependencies_reject_invalid_scope_and_unknown_parent(
     assert caught.value.as_dict()["code"] == expected_code
 
 
-def test_control_dependencies_reject_compute_parent_and_report_full_cycle(
+def test_control_dependencies_accept_typed_parent_and_report_full_cycle(
     tmp_path: Path,
 ):
     workspace, dashboard_path, definition = _copy_cascade_workspace(tmp_path)
@@ -280,14 +287,14 @@ def test_control_dependencies_reject_compute_parent_and_report_full_cycle(
         [
             {
                 "id": "seed",
-                "kind": "compute",
+
                 "type": "single_input",
                 "value_type": "integer",
                 "default": 42,
             },
             {
                 "id": "dow",
-                "kind": "selection",
+
                 "field": "city",
                 "type": "multiple_select",
                 "value_type": "text",
@@ -301,18 +308,19 @@ def test_control_dependencies_reject_compute_parent_and_report_full_cycle(
         encoding="utf-8",
     )
     dashboard = load_workspace(workspace).dashboard("cascade-explorer")
-    with pytest.raises(ValidationFailure) as caught:
-        _ = dashboard.dependency_contract
-    assert caught.value.as_dict()["code"] == "control_dependency_kind_invalid"
+    contract = dashboard.dependency_contract
+    assert contract.controls["view:city-detail/dow"].depends_on == (
+        "view:city-detail/seed",
+    )
 
     definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
     controls = _city_detail(definition)["controls"]
-    controls.pop()  # dow with the invalid Compute parent
+    controls.pop()  # dow from the typed-parent case
     controls.extend(
         [
             {
                 "id": "first",
-                "kind": "selection",
+
                 "field": "city",
                 "type": "multiple_select",
                 "value_type": "text",
@@ -321,7 +329,7 @@ def test_control_dependencies_reject_compute_parent_and_report_full_cycle(
             },
             {
                 "id": "second",
-                "kind": "selection",
+
                 "field": "district",
                 "type": "multiple_select",
                 "value_type": "text",
@@ -346,7 +354,7 @@ def test_control_dependencies_reject_compute_parent_and_report_full_cycle(
     ]
 
 
-def test_compute_and_selection_paths_distinguish_direct_and_derived_views():
+def test_control_paths_distinguish_direct_and_derived_consumers():
     dashboard = load_workspace(FEATURES).dashboard("chart-gallery")
     contract = dashboard.dependency_contract
 
@@ -355,19 +363,21 @@ def test_compute_and_selection_paths_distinguish_direct_and_derived_views():
     assert contract.transform_direct_views["latest-metrics"] == ("radial",)
     assert contract.transform_downstream_views["latest-metrics"] == ("radial",)
 
-    compute = contract.controls["dashboard:chart-gallery/radar_city_count"]
-    assert compute.direct_views == ()
-    assert compute.transform_consumers == ("latest-metrics",)
-    assert compute.transform_inputs == {"latest-metrics": ("city_count",)}
-    assert compute.derived_views == ("radial",)
-    assert compute.affected_views == ("radial",)
+    city_count = contract.controls["dashboard:chart-gallery/radar_city_count"]
+    assert city_count.direct_views == ()
+    assert city_count.transform_consumers == ("latest-metrics",)
+    assert city_count.transform_inputs == {"latest-metrics": ("city_count",)}
+    assert city_count.derived_views == ("radial",)
+    assert city_count.affected_views == ("radial",)
 
-    selection = contract.controls["dashboard:chart-gallery/province"]
-    assert selection.transform_consumers == ("latest-metrics",)
-    assert selection.transform_inputs == {"latest-metrics": ("province",)}
-    assert selection.derived_views == ("radial",)
-    assert selection.direct_views == tuple(sorted(contract.view_inputs))
-    assert selection.affected_views == selection.direct_views
+    province = contract.controls["dashboard:chart-gallery/province"]
+    assert province.transform_consumers == ("latest-metrics",)
+    assert province.transform_inputs == {"latest-metrics": ("province",)}
+    assert province.derived_views == ("radial",)
+    assert province.direct_views == tuple(
+        sorted(set(contract.view_inputs) - {"radial"})
+    )
+    assert province.affected_views == tuple(sorted(contract.view_inputs))
 
 
 def test_runtime_manifest_is_a_projection_of_the_same_contract():
@@ -380,8 +390,14 @@ def test_runtime_manifest_is_a_projection_of_the_same_contract():
     assert manifest["interactive"]["inputs"] == {"scaled": {"rows": "source:raw/main"}}
     assert manifest["interactive"]["outputs"] == {"scaled": ["interactive:scaled/main"]}
     assert manifest["interactive"]["dependencies"] == {"scaled": []}
-    assert manifest["interactive"]["compute_inputs"] == {
-        "scaled": {"delay_ms": "dashboard:worker-runtime/delay_ms"}
+    assert manifest["interactive"]["control_inputs"] == {
+        "scaled": {
+            "delay_ms": {
+                "control": "dashboard:worker-runtime/delay_ms",
+                "mode": "value",
+                "projection": "value",
+            }
+        }
     }
     assert manifest["views"]["scaled-table"]["inputs"] == {"main": "interactive:scaled/main"}
     assert manifest["views"]["scaled-table"]["pipeline_nodes"] == [
@@ -392,10 +408,10 @@ def test_runtime_manifest_is_a_projection_of_the_same_contract():
         "source:raw",
         "interactive:scaled",
     )
-    compute = manifest["controls"]["dashboard:worker-runtime/delay_ms"]
-    assert compute["direct_views"] == []
-    assert compute["derived_views"] == ["scaled-table"]
-    assert compute["affected_views"] == ["scaled-table"]
+    delay = manifest["controls"]["dashboard:worker-runtime/delay_ms"]
+    assert delay["direct_views"] == []
+    assert delay["derived_views"] == ["scaled-table"]
+    assert delay["affected_views"] == ["scaled-table"]
 
 
 def test_query_parameter_consumers_are_compiled_once():
@@ -446,7 +462,7 @@ def test_dependency_contract_is_directly_inspectable_by_ai_and_humans():
 
     assert machine.exit_code == 0, machine.stdout
     assert machine.stdout.lstrip().startswith("{")
-    assert '"schema": "dataviz/dependency-contract/v5"' in machine.stdout
+    assert '"schema": "dataviz/dependency-contract/v7"' in machine.stdout
     assert human.exit_code == 0, human.stdout
     assert "Query DAG" in human.stdout
     assert "Query Parameters" in human.stdout
@@ -469,7 +485,7 @@ def test_dependency_contract_rejects_server_runtime_after_browser_runtime(
         encoding="utf-8",
     )
     (dashboard_root / "transforms" / "server.yaml").write_text(
-        """schema: dataviz/interactive-transform/v2
+        """schema: dataviz/interactive-transform/v3
 kind: interactive_transform
 id: server
 runtime: server-python
@@ -505,7 +521,7 @@ def test_dependency_contract_rejects_control_consumed_outside_its_scope(
   - id: hidden-controls
     title: Hidden controls
     controls:
-      - {id: rogue, kind: compute, type: single_input, value_type: integer, default: 1}
+      - {id: rogue, type: single_input, value_type: integer, default: 1}
 """,
         encoding="utf-8",
     )

@@ -5,7 +5,6 @@ import shutil
 from pathlib import Path
 
 import pytest
-import yaml
 from typer.testing import CliRunner
 
 from dataviz.analysis import ensure_analysis_catalog
@@ -41,9 +40,7 @@ def test_analysis_cli_reuses_browser_runtime_for_derived_output(isolated_workspa
     payload = json.loads(result.output)
     assert payload["status"] == "ready"
     assert payload["target"]["runtime"] == "browser-js"
-    assert payload["effective_controls"]["compute"] == {
-        "dashboard:worker-runtime/delay_ms": 0
-    }
+    assert payload["effective_controls"]["dashboard:worker-runtime/delay_ms"]["value"] == 0
     assert payload["outputs"][0]["kind"] == "table"
     assert payload["outputs"][0]["rows"] == 2
     assert payload["outputs"][0]["preview"] == [{"name": "alpha", "value": 10}]
@@ -222,81 +219,6 @@ replacements:
         {"name": "beta", "value": 14},
     ]
     assert payload["overlay"]["changes"][0]["target"] == "interactive:scaled"
-
-
-@pytest.mark.e2e
-def test_analysis_cli_executes_browser_python_in_bundled_runtime(isolated_workspace):
-    workspace = isolated_workspace(
-        Path("tests/fixtures/browser-python-analysis-workspace")
-    )
-    catalog = ensure_analysis_catalog(workspace)
-    entry = next(
-        item
-        for item in catalog.entries
-        if item["reference"] == "browser-python::interactive:scaled/main"
-    )
-    result = CliRunner().invoke(
-        app,
-        [
-            "run",
-            str(workspace),
-            entry["reference"],
-            "--control",
-            "dashboard:browser-python/factor=4",
-            "--format",
-            "json",
-        ],
-    )
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
-    assert payload["target"]["runtime"] == "browser-python"
-    assert payload["outputs"][0]["preview"] == [
-        {"name": "alpha", "value": 4},
-        {"name": "beta", "value": 8},
-    ]
-
-
-@pytest.mark.e2e
-def test_analysis_cli_explains_blocked_cdn_browser_python(tmp_path: Path):
-    workspace = tmp_path / "browser-python-analysis-workspace"
-    shutil.copytree(Path("tests/fixtures/browser-python-analysis-workspace"), workspace)
-    workspace_path = workspace / "workspace.yaml"
-    definition = yaml.safe_load(workspace_path.read_text(encoding="utf-8"))
-    definition["runtime"] = {
-        "pyodide_asset_policy": "cdn",
-        "browser_table_transport": "json",
-    }
-    workspace_path.write_text(
-        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
-        encoding="utf-8",
-    )
-    catalog = ensure_analysis_catalog(workspace)
-    entry = next(
-        item
-        for item in catalog.entries
-        if item["reference"] == "browser-python::interactive:scaled/main"
-    )
-
-    result = CliRunner().invoke(
-        app,
-        [
-            "run",
-            str(workspace),
-            entry["reference"],
-            "--control",
-            "dashboard:browser-python/factor=4",
-            "--timeout",
-            "5",
-            "--format",
-            "json",
-        ],
-    )
-
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
-    assert payload["status"] == "failed"
-    assert "--allow-network" in json.dumps(payload, ensure_ascii=False)
-    assert "bundled Pyodide" in json.dumps(payload, ensure_ascii=False)
 
 
 @pytest.mark.e2e

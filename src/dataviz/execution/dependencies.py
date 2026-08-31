@@ -11,6 +11,8 @@ from dataviz.content_templates import (
 from dataviz.errors import ValidationFailure
 from dataviz.execution.references import parse_output_reference
 from dataviz.execution.parameters import (
+    control_input_contract,
+    control_input_control,
     query_input_contract,
     query_input_parameter,
 )
@@ -18,9 +20,10 @@ from dataviz.workspace.controls import (
     EffectiveControl,
     canonical_control_key,
     compile_control_contract,
+    resolve_dashboard_control_reference,
     scoped_control_registry,
 )
-from dataviz.selection_state import initial_selection_state
+from dataviz.input_state import initial_input_state
 from dataviz.workspace.models import (
     InferredOptionDomainDefinition,
     ViewControlBindingDefinition,
@@ -30,7 +33,7 @@ if TYPE_CHECKING:
     from dataviz.workspace.loader import LoadedDashboard
 
 
-DEPENDENCY_CONTRACT_SCHEMA = "dataviz/dependency-contract/v5"
+DEPENDENCY_CONTRACT_SCHEMA = "dataviz/dependency-contract/v7"
 
 
 def _topological_order(
@@ -109,7 +112,7 @@ def _compile_control_dependency_graph(
     dict[str, set[str]],
     tuple[str, ...],
 ]:
-    """Resolve scoped references and compile one explicit Selection DAG."""
+    """Resolve scoped references and compile one option-domain DAG."""
 
     dependencies: dict[str, set[str]] = {key: set() for key in registry}
 
@@ -151,16 +154,6 @@ def _compile_control_dependency_graph(
                         "control": target.key,
                         "dependency": reference,
                         "resolved_key": dependency_key,
-                    },
-                )
-            if dependency.kind != "selection":
-                raise ValidationFailure(
-                    f"Control {target.key} dependency must be a Selection: {reference}",
-                    details={
-                        "code": "control_dependency_kind_invalid",
-                        "control": target.key,
-                        "dependency": dependency_key,
-                        "kind": dependency.kind,
                     },
                 )
             dependencies[target.key].add(dependency_key)
@@ -217,16 +210,12 @@ def _resolve_control_reference(
     return canonical_control_key(scope, owner_id, control_id)
 
 
-def _selection_fields(item: EffectiveControl) -> tuple[str, ...]:
-    """Return the row fields required by one effective Selection binding."""
+def _control_value_fields(item: EffectiveControl) -> tuple[str, ...]:
+    """Return the default datum fields written by one bound View."""
 
     return tuple(
         item.definition.path_fields
-        or [
-            item.binding.field
-            if item.binding is not None and item.binding.field
-            else item.id
-        ]
+        or [item.definition.field or item.id]
     )
 
 
@@ -339,17 +328,23 @@ class QueryParameterDependency:
 
 
 @dataclass(frozen=True, slots=True)
-class SelectionViewDependency:
+class ControlFilterDependency:
     view_id: str
+    alias: str
     fields: tuple[str, ...]
     operator: str
+    empty: str
+    input_aliases: tuple[str, ...]
     input_references: tuple[str, ...]
     applicability: Literal["declared", "runtime", "not_applicable"]
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "alias": self.alias,
             "fields": list(self.fields),
             "operator": self.operator,
+            "empty": self.empty,
+            "input_aliases": list(self.input_aliases),
             "input_references": list(self.input_references),
             "applicability": self.applicability,
         }
@@ -374,7 +369,6 @@ class ViewControlBindingDependency:
 @dataclass(frozen=True, slots=True)
 class ControlDependency:
     key: str
-    kind: str
     origin: str
     owner_id: str
     scope_views: tuple[str, ...]
@@ -382,7 +376,7 @@ class ControlDependency:
     declared_direct_views: tuple[str, ...]
     runtime_checked_views: tuple[str, ...]
     non_data_views: tuple[str, ...]
-    direct_view_bindings: dict[str, SelectionViewDependency]
+    direct_view_bindings: dict[str, ControlFilterDependency]
     writer_view: str | None
     writer_fields: tuple[str, ...]
     transform_consumers: tuple[str, ...]
@@ -390,19 +384,18 @@ class ControlDependency:
     derived_views: tuple[str, ...]
     content_fields: tuple[str, ...]
     content_views: tuple[str, ...]
+    repeat_views: tuple[str, ...]
     affected_views: tuple[str, ...]
     option_domain_references: tuple[str, ...]
     depends_on: tuple[str, ...]
     dependency_ancestors: tuple[str, ...]
     dependency_descendants: tuple[str, ...]
     definition: dict[str, Any]
-    binding: dict[str, Any] | None
-    initial_state: dict[str, Any] | None
+    initial_state: dict[str, Any]
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "key": self.key,
-            "kind": self.kind,
             "origin": self.origin,
             "owner_id": self.owner_id,
             "scope_views": list(self.scope_views),
@@ -424,13 +417,13 @@ class ControlDependency:
             "derived_views": list(self.derived_views),
             "content_fields": list(self.content_fields),
             "content_views": list(self.content_views),
+            "repeat_views": list(self.repeat_views),
             "affected_views": list(self.affected_views),
             "option_domain_references": list(self.option_domain_references),
             "depends_on": list(self.depends_on),
             "dependency_ancestors": list(self.dependency_ancestors),
             "dependency_descendants": list(self.dependency_descendants),
             "definition": self.definition,
-            "binding": self.binding,
             "initial_state": self.initial_state,
         }
 
@@ -438,6 +431,7 @@ class ControlDependency:
 @dataclass(frozen=True, slots=True)
 class DashboardDependencyContract:
     dashboard_id: str
+    parameter_domain_contract: dict[str, Any]
     query_dependencies: dict[str, tuple[str, ...]]
     data_inputs: dict[str, dict[str, str]]
     query_outputs: dict[str, tuple[str, ...]]
@@ -454,8 +448,7 @@ class DashboardDependencyContract:
     interactive_outputs: dict[str, tuple[str, ...]]
     interactive_runtimes: dict[str, str]
     interactive_parameter_inputs: dict[str, dict[str, dict[str, Any]]]
-    interactive_selection_inputs: dict[str, dict[str, str]]
-    interactive_compute_inputs: dict[str, dict[str, str]]
+    interactive_control_inputs: dict[str, dict[str, dict[str, Any]]]
     interactive_order: tuple[str, ...]
     reachable_interactive_order: tuple[str, ...]
     transform_direct_views: dict[str, tuple[str, ...]]
@@ -463,18 +456,23 @@ class DashboardDependencyContract:
     view_inputs: dict[str, dict[str, str]]
     view_controls: dict[str, tuple[str, ...]]
     view_control_contract: dict[str, tuple[EffectiveControl, ...]]
+    view_control_inputs: dict[str, dict[str, dict[str, Any]]]
     view_control_bindings: dict[str, ViewControlBindingDependency]
     output_view_consumers: dict[str, tuple[str, ...]]
-    selection_option_domains: dict[str, tuple[str, ...]]
+    control_option_domains: dict[str, tuple[str, ...]]
     control_order: tuple[str, ...]
     controls: dict[str, ControlDependency]
 
-    def view_selection_contract(self, view_id: str) -> tuple[dict[str, Any], ...]:
-        return tuple(
-            item.as_dict()
-            for item in self.view_control_contract.get(view_id, ())
-            if item.kind == "selection"
-        )
+    def view_filter_contract(self, view_id: str) -> tuple[dict[str, Any], ...]:
+        bindings = self.view_control_inputs.get(view_id, {})
+        registry = {item.key: item for item in self.view_control_contract.get(view_id, ())}
+        result: list[dict[str, Any]] = []
+        for alias, binding in bindings.items():
+            if binding.get("mode") != "filter":
+                continue
+            item = registry[binding["control"]]
+            result.append({**item.as_dict(), "alias": alias, "consumer_binding": binding})
+        return tuple(result)
 
     def query_closure(self, targets: Iterable[str]) -> set[str]:
         selected: set[str] = set()
@@ -559,7 +557,7 @@ class DashboardDependencyContract:
             "schema": DEPENDENCY_CONTRACT_SCHEMA,
             "initialization": [
                 "base_outputs",
-                "selection_option_domains",
+                "control_option_domains",
                 "canonical_controls",
                 "base_views",
                 "interactive_transforms",
@@ -578,12 +576,8 @@ class DashboardDependencyContract:
                     identifier: dict(self.interactive_parameter_inputs[identifier])
                     for identifier in self.reachable_interactive_order
                 },
-                "selection_inputs": {
-                    identifier: dict(self.interactive_selection_inputs[identifier])
-                    for identifier in self.reachable_interactive_order
-                },
-                "compute_inputs": {
-                    identifier: dict(self.interactive_compute_inputs[identifier])
+                "control_inputs": {
+                    identifier: dict(self.interactive_control_inputs[identifier])
                     for identifier in self.reachable_interactive_order
                 },
                 "dependencies": {
@@ -608,9 +602,8 @@ class DashboardDependencyContract:
                     "inputs": dict(inputs),
                     "pipeline_nodes": list(self.view_pipeline_nodes(view_id)),
                     "controls": list(self.view_controls.get(view_id, ())),
-                    "selection_contract": list(
-                        self.view_selection_contract(view_id)
-                    ),
+                    "control_inputs": dict(self.view_control_inputs.get(view_id, {})),
+                    "filter_contract": list(self.view_filter_contract(view_id)),
                     "control_binding": (
                         self.view_control_bindings[view_id].as_dict()
                         if view_id in self.view_control_bindings
@@ -635,6 +628,7 @@ class DashboardDependencyContract:
             "schema": DEPENDENCY_CONTRACT_SCHEMA,
             "dashboard": self.dashboard_id,
             "query": {
+                "parameter_domains": self.parameter_domain_contract,
                 "dependencies": {
                     key: list(value) for key, value in self.query_dependencies.items()
                 },
@@ -675,8 +669,7 @@ class DashboardDependencyContract:
                 },
                 "runtimes": dict(self.interactive_runtimes),
                 "parameter_inputs": self.interactive_parameter_inputs,
-                "selection_inputs": self.interactive_selection_inputs,
-                "compute_inputs": self.interactive_compute_inputs,
+                "control_inputs": self.interactive_control_inputs,
                 "order": list(self.interactive_order),
                 "reachable_order": list(self.reachable_interactive_order),
                 "direct_views": {
@@ -692,7 +685,8 @@ class DashboardDependencyContract:
                 key: {
                     "inputs": value,
                     "pipeline_nodes": list(self.view_pipeline_nodes(key)),
-                    "controls": list(self.view_controls.get(key, ())),
+                      "controls": list(self.view_controls.get(key, ())),
+                      "control_inputs": dict(self.view_control_inputs.get(key, {})),
                     "control_binding": (
                         self.view_control_bindings[key].as_dict()
                         if key in self.view_control_bindings
@@ -705,10 +699,10 @@ class DashboardDependencyContract:
                 key: {"views": list(value)}
                 for key, value in self.output_view_consumers.items()
             },
-            "selection_option_domains": {
-                key: list(value)
-                for key, value in self.selection_option_domains.items()
-            },
+            "control_option_domains": {
+                  key: list(value)
+                  for key, value in self.control_option_domains.items()
+              },
             "controls": {
                 key: value.as_dict() for key, value in self.controls.items()
             },
@@ -805,12 +799,17 @@ def compile_dashboard_dependencies(
         }
         for identifier, (_, definition) in dashboard.interactive_transforms.items()
     }
-    interactive_selection_inputs = {
-        identifier: dict(definition.selection_inputs)
-        for identifier, (_, definition) in dashboard.interactive_transforms.items()
-    }
-    interactive_compute_inputs = {
-        identifier: dict(definition.compute_inputs)
+    interactive_control_inputs = {
+        identifier: {
+            alias: {
+                **control_input_contract(binding),
+                "control": resolve_dashboard_control_reference(
+                    control_input_contract(binding)["control"],
+                    dashboard.definition.id,
+                ),
+            }
+            for alias, binding in definition.control_inputs.items()
+        }
         for identifier, (_, definition) in dashboard.interactive_transforms.items()
     }
     output_definitions = {
@@ -857,6 +856,21 @@ def compile_dashboard_dependencies(
         for section in dashboard.definition.sections
         for view_id in section.views
     }
+    view_control_inputs = {
+        view.id: {
+            alias: {
+                **control_input_contract(binding),
+                "control": _resolve_control_reference(
+                    control_input_control(binding),
+                    dashboard_id=dashboard.definition.id,
+                    view_id=view.id,
+                    section_for_view=section_for_view,
+                ),
+            }
+            for alias, binding in view.control_inputs.items()
+        }
+        for view in dashboard.definition.views
+    }
     (
         control_dependencies,
         control_ancestors,
@@ -896,18 +910,18 @@ def compile_dashboard_dependencies(
             parsed = parse_output_reference(reference)
             if parsed.node_id.startswith("interactive:"):
                 raise ValidationFailure(
-                    f"Selection {key} option domain must use an immutable Base Output",
+                    f"Control {key} option domain must use an immutable Base Output",
                     details={
-                        "code": "selection_option_domain_invalid",
+                        "code": "control_option_domain_invalid",
                         "control": key,
                         "reference": reference,
                     },
                 )
             if output_definitions[reference].kind != "table":
                 raise ValidationFailure(
-                    f"Selection {key} option domain must reference a table Output",
+                    f"Control {key} option domain must reference a table Output",
                     details={
-                        "code": "selection_option_domain_kind",
+                        "code": "control_option_domain_kind",
                         "control": key,
                         "reference": reference,
                         "kind": output_definitions[reference].kind,
@@ -927,6 +941,29 @@ def compile_dashboard_dependencies(
         view_id: tuple(item.key for item in items)
         for view_id, items in effective_controls.items()
     }
+    for view_id, bindings in view_control_inputs.items():
+        for alias, binding in bindings.items():
+            control_key = binding["control"]
+            if control_key not in registry:
+                raise ValidationFailure(
+                    f"View {view_id} references unknown Control: {control_key}",
+                    details={
+                        "code": "view_control_input_unknown",
+                        "view": view_id,
+                        "alias": alias,
+                        "control": control_key,
+                    },
+                )
+            if control_key not in view_controls.get(view_id, ()):
+                raise ValidationFailure(
+                    f"Control {control_key} is outside View {view_id} scope",
+                    details={
+                        "code": "view_control_input_out_of_scope",
+                        "view": view_id,
+                        "alias": alias,
+                        "control": control_key,
+                    },
+                )
     view_control_bindings: dict[str, ViewControlBindingDependency] = {}
     writer_by_control: dict[str, ViewControlBindingDependency] = {}
     scope_rank = {"dashboard": 0, "section": 1, "view": 2}
@@ -966,16 +1003,6 @@ def compile_dashboard_dependencies(
                     "resolved_key": control_key,
                 },
             )
-        if target.kind != "selection":
-            raise ValidationFailure(
-                f"View {view_id} can only bind a Selection Control: {control_key}",
-                details={
-                    "code": "view_control_binding_kind_invalid",
-                    "view": view_id,
-                    "control": control_key,
-                    "kind": target.kind,
-                },
-            )
         if control_key not in view_controls.get(view_id, ()):
             raise ValidationFailure(
                 f"Control {control_key} is outside View {view_id} scope",
@@ -996,11 +1023,11 @@ def compile_dashboard_dependencies(
                 },
             )
         narrower = sorted(
-            item.key
-            for item in view_control_contract[view_id]
-            if item.kind == "selection"
-            and item.key != control_key
-            and scope_rank[item.origin] > scope_rank[target.origin]
+            binding["control"]
+            for binding in view_control_inputs.get(view_id, {}).values()
+            if binding.get("mode") == "filter"
+            and binding["control"] != control_key
+            and scope_rank[registry[binding["control"]].origin] > scope_rank[target.origin]
         )
         if narrower:
             raise ValidationFailure(
@@ -1016,7 +1043,7 @@ def compile_dashboard_dependencies(
         fields = tuple(
             [binding.field]
             if binding.field
-            else _selection_fields(target)
+            else _control_value_fields(target)
         )
         value_fields = (
             [view.z]
@@ -1111,8 +1138,6 @@ def compile_dashboard_dependencies(
         )
         for item in items:
             options = item.definition.options
-            if item.kind != "selection":
-                continue
             dynamic_domain = (
                 isinstance(options, InferredOptionDomainDefinition)
                 and not options.source
@@ -1140,7 +1165,7 @@ def compile_dashboard_dependencies(
         references = option_domains[key]
         if not references:
             raise ValidationFailure(
-                f"Dependent Selection {key} has no Base Output option domain",
+                  f"Dependent Control {key} has no Base Output option domain",
                 details={
                     "code": "control_dependency_option_domain_missing",
                     "control": key,
@@ -1168,18 +1193,18 @@ def compile_dashboard_dependencies(
             target = next((item for item in items if item.key == key), None)
             if target is None:
                 continue
-            required = set(_selection_fields(target))
+            required = set(_control_value_fields(target))
             for dependency_key in control_ancestors[key]:
                 ancestor = effective_by_view_and_key.get((view_id, dependency_key))
                 if ancestor is not None:
-                    required.update(_selection_fields(ancestor))
+                    required.update(_control_value_fields(ancestor))
             required_field_sets.append(required)
         if required_field_sets and not all(
             any(fields <= declared for declared in declared_domains)
             for fields in required_field_sets
         ):
             raise ValidationFailure(
-                f"Dependent Selection {key} option domain does not declare the "
+                f"Dependent Control {key} option domain does not declare the "
                 "fields required by its dependency relation",
                 details={
                     "code": "control_dependency_field_unknown",
@@ -1234,29 +1259,46 @@ def compile_dashboard_dependencies(
     transform_inputs_by_control: dict[str, dict[str, set[str]]] = {
         key: {} for key in registry
     }
-    for identifier, (_, definition) in dashboard.interactive_transforms.items():
-        for kind, inputs in (
-            ("selection", definition.selection_inputs),
-            ("compute", definition.compute_inputs),
-        ):
-            for alias, key in inputs.items():
-                item = registry.get(key)
-                if item is None:
-                    raise ValidationFailure(
-                        f"Interactive Transform {identifier} references unknown "
-                        f"Control: {key}"
-                    )
-                if item.kind != kind:
-                    raise ValidationFailure(
-                        f"Interactive Transform {identifier} uses {key} as {kind}, "
-                        f"but it is {item.kind}"
-                    )
-                transform_consumers_by_control[key].add(identifier)
-                transform_inputs_by_control[key].setdefault(identifier, set()).add(
-                    alias
+    for identifier, bindings in interactive_control_inputs.items():
+        available_inputs = set(interactive_inputs[identifier])
+        for alias, binding in bindings.items():
+            key = binding["control"]
+            if key not in registry:
+                raise ValidationFailure(
+                    f"Interactive Transform {identifier} references unknown Control: {key}",
+                    details={
+                        "code": "interactive_control_unknown",
+                        "transform": identifier,
+                        "alias": alias,
+                        "control": key,
+                    },
                 )
+            unknown_inputs = sorted(set(binding.get("inputs", ())) - available_inputs)
+            if unknown_inputs:
+                raise ValidationFailure(
+                    f"Interactive Transform {identifier} filter {alias} references "
+                    "unknown inputs: " + ", ".join(unknown_inputs),
+                    details={
+                        "code": "interactive_control_filter_input_unknown",
+                        "transform": identifier,
+                        "alias": alias,
+                        "inputs": unknown_inputs,
+                    },
+                )
+            transform_consumers_by_control[key].add(identifier)
+            transform_inputs_by_control[key].setdefault(identifier, set()).add(alias)
     content_fields_by_control: dict[str, set[str]] = {key: set() for key in registry}
     content_views_by_control: dict[str, set[str]] = {key: set() for key in registry}
+    repeat_views_by_control: dict[str, set[str]] = {key: set() for key in registry}
+    for section in dashboard.definition.sections:
+        if not section.repeat or not section.repeat.control:
+            continue
+        key = f"section:{section.id}/{section.repeat.control}"
+        if key not in repeat_views_by_control:
+            continue
+        view_id = section.repeat.view or (section.views[0] if section.views else None)
+        if view_id:
+            repeat_views_by_control[key].add(view_id)
     content_contract = content_control_contract(dashboard.definition)
     for field, template in content_template_fields(dashboard.definition):
         inspection = inspect_content_template(template)
@@ -1278,23 +1320,42 @@ def compile_dashboard_dependencies(
     controls: dict[str, ControlDependency] = {}
     for key, item in registry.items():
         scope_views = scope_views_by_control[key]
-        direct_view_bindings: dict[str, SelectionViewDependency] = {}
-        if item.kind == "selection":
-            for view_id in sorted(scope_views):
-                effective = next(
-                    control
-                    for control in view_control_contract[view_id]
-                    if control.key == key
+        direct_view_bindings: dict[str, ControlFilterDependency] = {}
+        for view_id in sorted(scope_views):
+            matches = [
+                (alias, binding)
+                for alias, binding in view_control_inputs.get(view_id, {}).items()
+                if binding.get("mode") == "filter" and binding["control"] == key
+            ]
+            if len(matches) > 1:
+                raise ValidationFailure(
+                    f"View {view_id} declares multiple filters for Control {key}",
+                    details={
+                        "code": "view_control_filter_duplicate",
+                        "view": view_id,
+                        "control": key,
+                        "aliases": [alias for alias, _ in matches],
+                    },
                 )
-                fields = tuple(
-                    effective.definition.path_fields
-                    or [
-                        effective.binding.field
-                        if effective.binding and effective.binding.field
-                        else effective.id
-                    ]
+            for alias, binding in matches:
+                raw_fields = binding["field"]
+                fields = tuple(raw_fields if isinstance(raw_fields, list) else [raw_fields])
+                input_aliases = tuple(binding["inputs"])
+                unknown_inputs = sorted(set(input_aliases) - set(view_inputs.get(view_id, {})))
+                if unknown_inputs:
+                    raise ValidationFailure(
+                        f"View {view_id} filter {alias} references unknown inputs: "
+                        + ", ".join(unknown_inputs),
+                        details={
+                            "code": "view_control_filter_input_unknown",
+                            "view": view_id,
+                            "alias": alias,
+                            "inputs": unknown_inputs,
+                        },
+                    )
+                references = tuple(
+                    view_inputs[view_id][input_alias] for input_alias in input_aliases
                 )
-                references = tuple(sorted(view_inputs.get(view_id, {}).values()))
                 table_outputs = [
                     output_definitions[reference]
                     for reference in references
@@ -1319,14 +1380,13 @@ def compile_dashboard_dependencies(
                     applicability = "runtime"
                 else:
                     applicability = "not_applicable"
-                direct_view_bindings[view_id] = SelectionViewDependency(
+                direct_view_bindings[view_id] = ControlFilterDependency(
                     view_id=view_id,
+                    alias=alias,
                     fields=fields,
-                    operator=(
-                        effective.binding.operator
-                        if effective.binding is not None
-                        else "auto"
-                    ),
+                    operator=binding.get("operator", "auto"),
+                    empty=binding["empty"],
+                    input_aliases=input_aliases,
                     input_references=references,
                     applicability=applicability,
                 )
@@ -1358,7 +1418,6 @@ def compile_dashboard_dependencies(
         content_views = content_views_by_control[key]
         controls[key] = ControlDependency(
             key=key,
-            kind=item.kind,
             origin=item.origin,
             owner_id=item.owner_id,
             scope_views=tuple(sorted(scope_views)),
@@ -1385,11 +1444,13 @@ def compile_dashboard_dependencies(
             derived_views=tuple(sorted(derived_views)),
             content_fields=tuple(sorted(content_fields_by_control[key])),
             content_views=tuple(sorted(content_views)),
+            repeat_views=tuple(sorted(repeat_views_by_control[key])),
             affected_views=tuple(
                 sorted(
                     direct_views
                     | derived_views
                     | content_views
+                    | repeat_views_by_control[key]
                     | ({writer_by_control[key].view_id} if key in writer_by_control else set())
                 )
             ),
@@ -1398,19 +1459,10 @@ def compile_dashboard_dependencies(
             dependency_ancestors=tuple(sorted(control_ancestors[key])),
             dependency_descendants=tuple(sorted(control_descendants[key])),
             definition=item.definition.model_dump(mode="json", by_alias=True),
-            binding=(
-                item.binding.model_dump(mode="json")
-                if item.binding is not None
-                else None
-            ),
-            initial_state=(
-                initial_selection_state(
-                    item.definition,
-                    allow_unresolved_inferred=True,
-                ).as_dict()
-                if item.kind == "selection"
-                else None
-            ),
+            initial_state=initial_input_state(
+                item.definition,
+                allow_unresolved_inferred=True,
+            ).as_dict(),
         )
 
     # A compiled contract is executable by construction. Cross-runtime edges and
@@ -1424,8 +1476,7 @@ def compile_dashboard_dependencies(
                     interactive_dependencies[identifier],
                     interactive_dependencies,
                 )
-                if interactive_runtimes[ancestor]
-                in {"browser-js", "browser-python"}
+                if interactive_runtimes[ancestor] == "browser-js"
             )
             if browser_ancestors:
                 raise ValidationFailure(
@@ -1438,27 +1489,25 @@ def compile_dashboard_dependencies(
                     },
                 )
         downstream_views = set(transform_downstream_views[identifier])
-        for kind, inputs in (
-            ("selection", interactive_selection_inputs[identifier]),
-            ("compute", interactive_compute_inputs[identifier]),
-        ):
-            for alias, control_key in inputs.items():
-                outside_scope = sorted(
-                    downstream_views - set(controls[control_key].scope_views)
+        for alias, binding in interactive_control_inputs[identifier].items():
+            control_key = binding["control"]
+            input_mode = binding["mode"]
+            outside_scope = sorted(
+                downstream_views - set(controls[control_key].scope_views)
+            )
+            if outside_scope:
+                raise ValidationFailure(
+                    f"Control {control_key} is outside downstream View scope: "
+                    + ", ".join(outside_scope),
+                    details={
+                        "code": "interactive_control_out_of_scope",
+                        "transform": identifier,
+                        "input_mode": input_mode,
+                        "alias": alias,
+                        "control": control_key,
+                        "views": outside_scope,
+                    },
                 )
-                if outside_scope:
-                    raise ValidationFailure(
-                        f"Control {control_key} is outside downstream View scope: "
-                        + ", ".join(outside_scope),
-                        details={
-                            "code": "interactive_control_out_of_scope",
-                            "transform": identifier,
-                            "input_kind": kind,
-                            "alias": alias,
-                            "control": control_key,
-                            "views": outside_scope,
-                        },
-                    )
 
     parameter_inputs = {
         **{
@@ -1636,6 +1685,7 @@ def compile_dashboard_dependencies(
 
     return DashboardDependencyContract(
         dashboard_id=dashboard.definition.id,
+        parameter_domain_contract=dashboard.parameter_domain_contract.as_dict(),
         query_dependencies={
             key: tuple(sorted(value)) for key, value in query_dependencies.items()
         },
@@ -1660,8 +1710,7 @@ def compile_dashboard_dependencies(
         interactive_outputs=interactive_outputs,
         interactive_runtimes=interactive_runtimes,
         interactive_parameter_inputs=interactive_parameter_inputs,
-        interactive_selection_inputs=interactive_selection_inputs,
-        interactive_compute_inputs=interactive_compute_inputs,
+        interactive_control_inputs=interactive_control_inputs,
         interactive_order=interactive_order,
         reachable_interactive_order=tuple(
             identifier
@@ -1675,12 +1724,13 @@ def compile_dashboard_dependencies(
         view_inputs=view_inputs,
         view_controls=view_controls,
         view_control_contract=view_control_contract,
+        view_control_inputs=view_control_inputs,
         view_control_bindings=view_control_bindings,
         output_view_consumers={
             key: tuple(sorted(value))
             for key, value in output_view_consumers.items()
         },
-        selection_option_domains={
+        control_option_domains={
             key: tuple(sorted(value)) for key, value in option_domains.items()
         },
         control_order=control_order,

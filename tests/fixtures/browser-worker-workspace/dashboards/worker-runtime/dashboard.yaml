@@ -1,11 +1,10 @@
-schema: dataviz/dashboard/v9
+schema: dataviz/dashboard/v11
 kind: dashboard
 id: worker-runtime
 title: Browser JS Interactive Worker
 
 controls:
   - id: delay_ms
-    kind: compute
     label: Worker delay
     type: single_input
     value_type: number

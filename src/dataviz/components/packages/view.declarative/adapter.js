@@ -576,8 +576,12 @@
       });
       const tbody = tableNode.createTBody();
       const binding = state.renderContext?.controlBinding;
+      const bindingValue = binding?.state?.value;
+      const bindingValues = Array.isArray(bindingValue)
+        ? bindingValue
+        : bindingValue == null ? [] : [bindingValue];
       const selected = new Set(
-        (binding?.state?.values || []).map(value => JSON.stringify(value))
+        bindingValues.map(value => JSON.stringify(value))
       );
       renderedRows.forEach(row => {
         const rowNode = tbody.insertRow();
@@ -1346,7 +1350,7 @@
     });
 
     const adapter = {
-      protocol:'dataviz/runtime/v5',
+      protocol:'dataviz/runtime/v6',
       lifecycle:Object.freeze({
         hooks:Object.freeze(['validate', 'mount', 'update', 'dispose']),
         phases:Object.freeze([

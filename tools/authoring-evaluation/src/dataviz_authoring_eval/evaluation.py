@@ -165,7 +165,7 @@ AUTHORING_TASKS: dict[str, dict[str, Any]] = {
         "purpose": "Measure Runtime/export choices without conflating them with data loading.",
         "brief": (
             "From one immutable Base Output, implement a Compute Control consumed by browser-js, "
-            "browser-python and server-python branches. Show their Derived Outputs side by side."
+            "and server-python branches. Show their Derived Outputs side by side."
         ),
         "acceptance": [
             {
@@ -178,14 +178,14 @@ AUTHORING_TASKS: dict[str, dict[str, Any]] = {
             },
             {
                 "id": "browser-export",
-                "criterion": "browser-js/browser-python remain interactive in export.",
+                "criterion": "browser-js remains interactive in export.",
             },
             {
                 "id": "server-export-boundary",
                 "criterion": "server-python is explicitly snapshot or unavailable in export.",
             },
         ],
-        "dataviz_focus": ["interactive-transforms", "browser-python", "export"],
+        "dataviz_focus": ["interactive-transforms", "browser-js", "server-python", "export"],
     },
     "custom-renderer": {
         "title": "Custom Renderer escape hatch",

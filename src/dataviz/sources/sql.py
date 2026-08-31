@@ -20,6 +20,7 @@ from dataviz.errors import (
     QueryTimeoutFailure,
     SourceFailure,
 )
+from dataviz.execution.parameters import query_input_contract
 from dataviz.sources.base import SourceRequest
 from dataviz.sql_contract import resolve_sql_preview
 from dataviz.redaction import adapter_secret_values, redact_text, redact_value
@@ -371,11 +372,7 @@ class SqlSourceRunner:
                 "resolved_sql": resolve_sql_preview(statement, parameters),
                 "parameters": parameters,
                 "input_bindings": {
-                    alias: (
-                        {"parameter": binding}
-                        if isinstance(binding, str)
-                        else binding.model_dump(mode="json", exclude_none=True)
-                    )
+                    alias: query_input_contract(binding)
                     for alias, binding in definition.query_inputs.items()
                 },
                 "timeout_seconds": timeout_seconds,

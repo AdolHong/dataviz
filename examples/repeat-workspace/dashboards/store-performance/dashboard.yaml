@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v9
+schema: dataviz/dashboard/v11
 kind: dashboard
 id: store-performance
 title: 百店业绩巡检
@@ -47,7 +47,6 @@ sections:
     columns: 2
     controls:
       - id: stores
-        kind: selection
         label: 选择门店
         type: multiple_select
         value_type: text
@@ -60,7 +59,7 @@ sections:
     repeat:
       view: selected-store-trend
       by: [store_id]
-      selection: stores
+      control: stores
       title: "{store_name} · {city}"
       render: lazy
 

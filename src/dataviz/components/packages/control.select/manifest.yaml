@@ -1,6 +1,6 @@
 schema: dataviz/component-package/v1
 package: control.select
-version: 3.0.0
+version: 3.1.0
 category: data-entry
 purpose: One flat single- or multi-select with search, grouping, tag summary and automatic virtualization.
 implementation: {mode: package, sources: []}
@@ -19,7 +19,7 @@ components:
     presentation:
       component: select
       options: [search, virtual, search_threshold, virtual_threshold, max_tag_count, hide_selected, search_placeholder, select_all_label, invert_label, clear_label, show_unavailable, css_class]
-    behavior: {canonical_state: native_select, search: full_list, virtual: automatic, option_groups: true, single: {synthetic_options: false, bulk_actions: false}, multiple: {explicit_all: preserved, bulk_action: select_all_then_invert, clear: only_when_allowed}}
+    behavior: {canonical_state: native_select, search: full_list, virtual: automatic, option_groups: true, unavailable: selected committed values remain visible and read-only, single: {synthetic_options: false, bulk_actions: false}, multiple: {explicit_all: preserved, bulk_action: select_all_then_invert, clear: only_when_allowed}}
     semantic_dom: [.dv-select, .dv-choice-trigger, .dv-control-panel, .dv-select-panel, .dv-select-options, .dv-select-group, .dv-choice-option]
     tokens: [--dv-accent, --dv-green, --dv-ink, --dv-line, --dv-panel, --dv-overlay-surface]
 runtime: {controller: controller.js, adapter: adapter.js, style: style.css}

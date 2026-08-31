@@ -98,14 +98,14 @@
 
   function selectedWorkerInputs(item, inputs, services) {
     const transformInputs = global.dataviz.dependency_contract
-      ?.interactive?.selection_inputs?.[item.spec.id] || {};
-    const filters = Object.entries(transformInputs).map(
-      ([alias, key]) => ({
-        alias,
-        contract:global.dataviz.dependency_contract.controls[key],
-        state:global.dataviz.selection.state(key),
-      })
-    );
+      ?.interactive?.control_inputs?.[item.spec.id] || {};
+    const filters = Object.values(transformInputs)
+      .filter(binding => binding.mode === 'filter')
+      .map(binding => ({
+        binding,
+        contract:global.dataviz.dependency_contract.controls[binding.control],
+        state:global.dataviz.control.state(binding.control),
+      }));
     const prepared = Object.fromEntries(
       Object.entries(inputs).map(([name, value]) => [name, services.workerValue(value)])
     );
@@ -115,18 +115,15 @@
       if (!Array.isArray(rows) || !rows.some(row => row && typeof row === 'object' && !Array.isArray(row))) {
         return rows;
       }
-      return rows.filter(row => filters.every(({contract, state}) => (
-        services.selectionMatches(row, contract, state)
+      return rows.filter(row => filters.every(({binding, contract, state}) => (
+        services.controlMatches(row, {...contract, consumer_binding:binding}, state)
       )));
     };
     const filterColumnar = table => {
       const columns = table?.columns || {};
       const length = Number(table?.length || 0);
-      const applicable = filters.filter(({contract}) => {
-        const definition = contract.definition || {};
-        const fields = (definition.path_fields || []).length
-          ? definition.path_fields
-          : [contract.binding?.field || definition.field || contract.id];
+      const applicable = filters.filter(({binding}) => {
+        const fields = Array.isArray(binding.field) ? binding.field : [binding.field];
         return fields.every(field => Object.prototype.hasOwnProperty.call(columns, field));
       });
       if (!applicable.length || !length) return table;
@@ -135,7 +132,9 @@
         const row = Object.fromEntries(
           Object.entries(columns).map(([name, values]) => [name, values[index]])
         );
-        if (applicable.every(({contract, state}) => services.selectionMatches(row, contract, state))) {
+        if (applicable.every(({binding, contract, state}) => services.controlMatches(
+          row, {...contract, consumer_binding:binding}, state
+        ))) {
           indices.push(index);
         }
       }
@@ -169,15 +168,6 @@
         cancel,
         dispose:() => {},
       },
-      'browser-python': {
-        validate:item => {
-          if (typeof item.source?.code !== 'string') throw new Error('browser-python code is missing');
-        },
-        prepare:async (item, inputs) => selectedWorkerInputs(item, inputs, services),
-        execute:(id, item, inputs) => runtime.executeBrowserRuntime(id, item, inputs),
-        cancel,
-        dispose:() => {},
-      },
       'server-python': {
         validate:item => {
           if (item.spec.export?.mode === 'interactive') {
@@ -205,14 +195,14 @@
   }
 
   root.dataPipeline = {
-    protocol:'dataviz/runtime/v5',
+    protocol:'dataviz/runtime/v6',
     createInteractiveAdapters,
     createDataApi,
     selectedWorkerInputs,
   };
   root.descriptors = root.descriptors || new Map();
   root.descriptors.set('data.pipeline', {
-    protocol:'dataviz/runtime/v5',
+    protocol:'dataviz/runtime/v6',
     owns:['interactive-adapters', 'data-frame'],
   });
 })(window);

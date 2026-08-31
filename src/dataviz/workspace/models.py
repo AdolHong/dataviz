@@ -43,7 +43,16 @@ class QueryInputProjectionDefinition(Model):
     """Bind one node-local input name to a canonical Query Parameter value."""
 
     parameter: StableId
+    projection: Literal["value", "present", "intent"] = "value"
     part: Literal["start", "end"] | None = None
+
+    @model_validator(mode="after")
+    def validate_projection(self):
+        if self.projection != "value" and self.part is not None:
+            raise ValueError(
+                f"query input projection={self.projection} cannot use part"
+            )
+        return self
 
 
 QueryInputBindingDefinition = StableId | QueryInputProjectionDefinition
@@ -76,10 +85,6 @@ class RuntimeDefinition(Model):
     plotly_js: Literal["bundled"] = "bundled"
     arrow_js: str = "https://cdn.jsdelivr.net/npm/apache-arrow@21.1.0/Arrow.es2015.min.js"
     perspective_version: str = "5.2.0"
-    pyodide_version: str = "314.0.4"
-    pyodide_asset_policy: Literal["cdn", "bundle"] = "cdn"
-    pyodide_index_url: str = "https://cdn.jsdelivr.net/pyodide/v314.0.4/full/"
-    pyodide_bundle_path: str | None = None
     browser_table_transport: Literal["auto", "json", "arrow"] = "auto"
     arrow_min_rows: int = Field(2_000, ge=1)
     arrow_chunk_bytes: int = Field(524_288, ge=65_536, le=8_388_608)
@@ -95,15 +100,6 @@ class RuntimeDefinition(Model):
     run_retention_seconds: int | None = Field(604_800, ge=1)
     max_retained_cache_entries: int = Field(500, ge=1)
     cache_retention_seconds: int | None = Field(2_592_000, ge=1)
-
-    @model_validator(mode="after")
-    def validate_pyodide_assets(self):
-        if self.pyodide_asset_policy == "bundle" and not self.pyodide_bundle_path:
-            raise ValueError(
-                "runtime.pyodide_bundle_path is required when pyodide_asset_policy=bundle"
-            )
-        return self
-
 
 class WorkspaceDefinition(Model):
     schema_: Literal["dataviz/workspace/v1"] = Field(alias="schema")
@@ -145,8 +141,33 @@ class InferredOptionDomainDefinition(Model):
     )
 
 
+class ParameterDomainParentDefinition(Model):
+    """Filter one Parameter Domain projection by a direct parent draft value."""
+
+    field: str = Field(min_length=1)
+
+
+class ParameterDomainOptionDefinition(Model):
+    """Project one Query Parameter's choices from a shared pre-query table."""
+
+    mode: Literal["domain"]
+    source: StableId
+    value_field: str = Field(min_length=1)
+    label_field: str | None = Field(default=None, min_length=1)
+    description_field: str | None = Field(default=None, min_length=1)
+    group_field: str | None = Field(default=None, min_length=1)
+    keywords_field: str | None = Field(default=None, min_length=1)
+    sort_field: str | None = Field(default=None, min_length=1)
+    disabled_field: str | None = Field(default=None, min_length=1)
+    depends_on: dict[StableId, ParameterDomainParentDefinition] = Field(
+        default_factory=dict
+    )
+
+
 OptionDomainDefinition = Annotated[
-    StaticOptionDomainDefinition | InferredOptionDomainDefinition,
+    StaticOptionDomainDefinition
+    | InferredOptionDomainDefinition
+    | ParameterDomainOptionDefinition,
     Field(discriminator="mode"),
 ]
 
@@ -184,7 +205,7 @@ ControlDependencyReference = Annotated[
 
 
 class ViewControlBindingDefinition(Model):
-    """Bind one View interaction outlet to one canonical Selection Control."""
+    """Bind one View interaction outlet to one canonical Control state."""
 
     control: ControlDependencyReference
     field: str | None = None
@@ -228,38 +249,19 @@ class QueryParameterDefinition(_ValueControlDefinition):
     """State that creates a new immutable Query Run when committed."""
 
     @model_validator(mode="after")
-    def validate_static_choices(self):
+    def validate_option_domain(self):
         if self.type in {"single_select", "multiple_select"} and not isinstance(
-            self.options, StaticOptionDomainDefinition
+            self.options,
+            (StaticOptionDomainDefinition, ParameterDomainOptionDefinition),
         ):
             raise ValueError(
-                "Query Parameter select controls require options.mode=static"
+                "Query Parameter select controls require options.mode=static or options.mode=domain"
             )
         return self
 
 
-class ComputeControlDefinition(_ValueControlDefinition):
-    """Scoped state used by Interactive Transforms after a Query Run exists."""
-
-    kind: Literal["compute"]
-
-    @model_validator(mode="after")
-    def validate_static_choices(self):
-        if is_relative_date_default(self.default):
-            raise ValueError("relative defaults are only valid for Query Parameters")
-        if self.type in {"single_select", "multiple_select"} and not isinstance(
-            self.options, StaticOptionDomainDefinition
-        ):
-            raise ValueError(
-                "Compute select controls require options.mode=static"
-            )
-        return self
-
-
-class SelectionControlDefinition(_ValueControlDefinition):
-    """A scoped include-only data selection applied after Query completes."""
-
-    kind: Literal["selection"]
+class ControlDefinition(_ValueControlDefinition):
+    """Typed post-query state; consumer bindings own filter/value semantics."""
 
     field: str | None = None
     path_fields: list[str] = Field(default_factory=list, min_length=0)
@@ -271,25 +273,36 @@ class SelectionControlDefinition(_ValueControlDefinition):
             raise ValueError("relative defaults are only valid for Query Parameters")
         if self.type in {"single_select", "multiple_select"} and self.options is None:
             raise ValueError(
-                "Selection select controls require options.mode=static or options.mode=infer"
+                "Control select inputs require options.mode=static or options.mode=infer"
             )
         if self.depends_on and self.type not in {"single_select", "multiple_select"}:
             raise ValueError(
-                "Selection depends_on is only valid for single_select or multiple_select controls"
+                "Control depends_on is only valid for single_select or multiple_select inputs"
             )
         if len(self.depends_on) != len(set(self.depends_on)):
-            raise ValueError("Selection depends_on cannot contain duplicate references")
+            raise ValueError("Control depends_on cannot contain duplicate references")
         return self
 
 
-ScopedControlDefinition = Annotated[
-    SelectionControlDefinition | ComputeControlDefinition,
-    Field(discriminator="kind"),
-]
+ScopedControlDefinition = ControlDefinition
 
 
-class SelectionBindingDefinition(Model):
-    field: str | None = None
+class ControlValueInputDefinition(Model):
+    """Pass one Control projection to a consumer-local alias."""
+
+    mode: Literal["value"] = "value"
+    control: str = Field(min_length=1)
+    projection: Literal["value", "present", "intent"] = "value"
+
+
+class ControlFilterInputDefinition(Model):
+    """Apply one Control as an include filter to explicit table inputs."""
+
+    mode: Literal["filter"]
+    control: str = Field(min_length=1)
+    field: str | list[str]
+    inputs: list[StableId] = Field(min_length=1)
+    empty: Literal["passthrough", "match_none"]
     operator: Literal[
         "auto",
         "equals",
@@ -302,6 +315,24 @@ class SelectionBindingDefinition(Model):
         "lt",
     ] = "auto"
 
+    @model_validator(mode="after")
+    def validate_fields(self):
+        values = self.field if isinstance(self.field, list) else [self.field]
+        if not values or any(not str(value).strip() for value in values):
+            raise ValueError("filter field must contain one or more non-empty names")
+        if len(values) != len(set(values)):
+            raise ValueError("filter field cannot contain duplicates")
+        if len(self.inputs) != len(set(self.inputs)):
+            raise ValueError("filter inputs cannot contain duplicates")
+        return self
+
+
+ControlInputObjectDefinition = Annotated[
+    ControlValueInputDefinition | ControlFilterInputDefinition,
+    Field(discriminator="mode"),
+]
+ControlInputBindingDefinition = str | ControlInputObjectDefinition
+
 
 class RepeatDefinition(Model):
     """Create multiple instances from one declarative View blueprint."""
@@ -309,7 +340,7 @@ class RepeatDefinition(Model):
     view: StableId | None = None
     input: str | None = None
     by: list[str] = Field(min_length=1)
-    selection: str | None = None
+    control: str | None = None
     title: str = "{value}"
     limit: int | None = Field(None, ge=1)
     order_by: str | None = None
@@ -613,7 +644,9 @@ class DeclarativeViewDefinition(Model):
     options: dict[str, Any] = Field(default_factory=dict)
     config: dict[str, Any] = Field(default_factory=dict)
     controls: list[ScopedControlDefinition] = Field(default_factory=list)
-    selection_bindings: dict[str, str | SelectionBindingDefinition] = Field(default_factory=dict)
+    control_inputs: dict[StableId, ControlInputBindingDefinition] = Field(
+        default_factory=dict
+    )
     control_binding: ControlDependencyReference | ViewControlBindingDefinition | None = None
 
     @property
@@ -634,7 +667,7 @@ class DeclarativeViewDefinition(Model):
 
 
 class DashboardDefinition(Model):
-    schema_: Literal["dataviz/dashboard/v9"] = Field(alias="schema")
+    schema_: Literal["dataviz/dashboard/v11"] = Field(alias="schema")
     kind: Literal["dashboard"] = "dashboard"
     id: StableId
     title: str = ""
@@ -643,6 +676,7 @@ class DashboardDefinition(Model):
     context: dict[str, Any] = Field(default_factory=dict)
     assumptions: list[str] = Field(default_factory=list)
     adapters: dict[StableId, StableId] = Field(default_factory=dict)
+    parameter_domains: list[str | dict[str, Any]] = Field(default_factory=list)
     query_parameters: list[QueryParameterDefinition] = Field(default_factory=list)
     controls: list[ScopedControlDefinition] = Field(default_factory=list)
     sections: list[SectionDefinition] = Field(default_factory=list)
@@ -836,10 +870,39 @@ class CacheDefinition(Model):
         return self
 
 
+class ParameterDomainDefinition(Model):
+    """A bounded SQL table used only to resolve Query Parameter domains."""
+
+    schema_: Literal["dataviz/parameter-domain/v1"] = Field(alias="schema")
+    kind: Literal["parameter_domain"] = "parameter_domain"
+    id: StableId
+    name: str | None = None
+    description: str = ""
+    type: Literal["sql"] = "sql"
+    adapter: StableId
+    code: str
+    query_inputs: dict[StableId, QueryInputBindingDefinition] = Field(
+        default_factory=dict
+    )
+    timeout_seconds: float = Field(30.0, gt=0)
+    timeout_retries: int = Field(0, ge=0, le=5)
+    max_rows: int = Field(10_000, ge=1, le=100_000)
+    cache: CacheDefinition = Field(default_factory=CacheDefinition)
+
+    @model_validator(mode="after")
+    def require_session_bounded_cache(self):
+        if self.cache.mode == "persistent" or self.cache.scope == "workspace":
+            raise ValueError(
+                "Parameter Domain cache must be tab/session bounded; "
+                "persistent and workspace scope are not supported"
+            )
+        return self
+
+
 class _SourceDefinition(Model):
     """Fields shared by every strict Source variant."""
 
-    schema_: Literal["dataviz/source/v2"] = Field(alias="schema")
+    schema_: Literal["dataviz/source/v3"] = Field(alias="schema")
     kind: Literal["source"] = "source"
     id: StableId
     name: str | None = None
@@ -910,7 +973,7 @@ SOURCE_DEFINITION_ADAPTER = TypeAdapter(SourceDefinition)
 
 
 class DatasetTransformDefinition(Model):
-    schema_: Literal["dataviz/dataset-transform/v2"] = Field(alias="schema")
+    schema_: Literal["dataviz/dataset-transform/v3"] = Field(alias="schema")
     kind: Literal["dataset_transform"] = "dataset_transform"
     id: StableId
     name: str | None = None
@@ -935,7 +998,6 @@ class DatasetTransformDefinition(Model):
 
 class InteractiveExportDefinition(Model):
     mode: Literal["interactive", "snapshot", "unavailable"]
-    assets: Literal["cdn", "bundle"] | None = None
     reason: str = ""
 
     @model_validator(mode="after")
@@ -946,19 +1008,20 @@ class InteractiveExportDefinition(Model):
 
 
 class InteractiveTransformDefinition(Model):
-    schema_: Literal["dataviz/interactive-transform/v2"] = Field(alias="schema")
+    schema_: Literal["dataviz/interactive-transform/v3"] = Field(alias="schema")
     kind: Literal["interactive_transform"] = "interactive_transform"
     id: StableId
     name: str | None = None
     description: str = ""
-    runtime: Literal["server-python", "browser-python", "browser-js"]
+    runtime: Literal["server-python", "browser-js"]
     code: str
     entrypoint: str = "transform"
     inputs: dict[StableId, str] = Field(default_factory=dict)
     input_schemas: dict[StableId, list[ColumnDefinition]] = Field(default_factory=dict)
     query_inputs: dict[StableId, QueryInputBindingDefinition] = Field(default_factory=dict)
-    selection_inputs: dict[StableId, str] = Field(default_factory=dict)
-    compute_inputs: dict[StableId, str] = Field(default_factory=dict)
+    control_inputs: dict[StableId, ControlInputBindingDefinition] = Field(
+        default_factory=dict
+    )
     trigger: Literal["apply", "auto", "manual"] = "auto"
     debounce_ms: int = Field(300, ge=0, le=10_000)
     export: InteractiveExportDefinition
@@ -987,22 +1050,7 @@ class InteractiveTransformDefinition(Model):
             )
         if self.runtime == "browser-js" and self.python_dependencies:
             raise ValueError("browser-js cannot declare python_dependencies")
-        if self.runtime == "browser-js" and self.export.assets is not None:
-            raise ValueError("browser-js does not use export.assets")
-        if (
-            self.runtime == "browser-python"
-            and self.export.mode == "interactive"
-            and self.export.assets is None
-        ):
-            raise ValueError(
-                "browser-python with export.mode=interactive must declare "
-                "export.assets as cdn or bundle"
-            )
-        if self.runtime != "browser-python" and self.export.assets is not None:
-            raise ValueError("export.assets is only valid for browser-python")
-        if self.export.mode != "interactive" and self.export.assets is not None:
-            raise ValueError("export.assets is only valid when export.mode is interactive")
-        if self.runtime in {"browser-js", "browser-python"} and (
+        if self.runtime == "browser-js" and (
             self.cache.mode not in {"none", "session"} or self.cache.scope != "tab"
         ):
             raise ValueError(

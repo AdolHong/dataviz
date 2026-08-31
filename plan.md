@@ -1,6 +1,6 @@
 # Dataviz 实施计划
 
-更新时间：2026-08-30
+更新时间：2026-08-31
 
 稳定设计见 [DESIGN](DESIGN.md)，代码入口见 [当前实现索引](docs/product-architecture.md)，使用者入口见 [README](README.md)，已完成的版本工作见 [CHANGELOG](CHANGELOG.md)。本文件只记录当前基线、尚未完成的工作与按真实需求触发的候选项，不再重复保存历史迁移清单。
 
@@ -8,28 +8,31 @@
 
 | 领域 | 状态 | 当前结论 |
 | --- | --- | --- |
-| 数据执行架构 | 已完成 | Query DAG、Interactive DAG、Control/View 影响关系、Named Output、三种 Interactive Runtime、状态隔离和导出边界共用一份版本化 Dependency Contract。 |
-| Selection 与 Linked Views | 已完成 | `{intent, values}` 是唯一 Selection 状态；Control Panel、Plotly、Table、Custom Renderer、tab 恢复、HTML 与三种 Interactive Runtime 共用 resolver。 |
-| Layout 与最终配置 | 已完成 | Dashboard v9 拥有结构；Layout Contract v1、Semantic Validation、`inspect layout`、Server、HTML 与 AI context 使用同一编译结果。 |
+| 数据执行架构 | 已完成 | Query DAG、Interactive DAG、Control/View 影响关系、Named Output、两种 Interactive Runtime、状态隔离和导出边界共用一份版本化 Dependency Contract。 |
+| Control 与 Linked Views | 已完成 | `{value, revision, intent?}` 是统一 Control state；Control Panel、Plotly、Table、Custom Renderer、tab 恢复、HTML 与两种 Interactive Runtime 共用 reducer，View selection gesture 只是 writer。 |
+| Input State / Consumer Binding | 已完成 | Query Parameter 与 Control 保留两个生命周期入口并共用 typed state；Control 删除 `kind`，View/Interactive Transform 通过 `control_inputs.mode: filter | value` 显式消费。 |
+| Layout 与最终配置 | 已完成 | Dashboard v11 拥有结构；Layout Contract v1、Semantic Validation、`inspect layout`、Server、HTML 与 AI context 使用同一编译结果。 |
 | Renderer 与组件 | 当前范围已完成 | Plotly 是唯一作者图表接口；普通 Table 使用 TanStack Table Core；Perspective 只用于终端用户现场多维探索；21 个 Component Package 均为 package-owned。 |
 | AI Analysis Plane | 当前范围已完成 | `catalog → run → result → evidence`、物理 Target Reference、不可变 Result、Overlay、Evidence 与 Promote dry-run 已落地。 |
 | AI 开发效率评测 | 工具完成，真实试验暂缓 | 维护者评测工具已与正式产品隔离；没有真实成对试验前不发布 Token 或效率结论。 |
 | 规模与浏览器可靠性 | 当前范围已完成 | 固定 10K/100K/1M 基准和三浏览器契约矩阵已有可复现证据；快速迭代发布默认执行 Chromium 全套，稳定发布、跨浏览器敏感变更或明确要求时再执行 Firefox/WebKit。 |
-| 0.12.2 发布 | 本地发布完成 | 421 项非浏览器测试、52 项 Chromium E2E、四个 Workspace、21 个 Component Package、三种归档内容审计与独立 Python 3.12 安装冒烟均通过。 |
+| Query Parameter 与 Domain | 当前范围已完成 | Query 前置 Domain 提供有界候选、同表多字段去重与直接级联；成功 Query 封存 `{values, intents}`，Revert 通过当前拓扑事务式恢复并保留 unavailable committed value，不执行 Query。候选过多时重构参数或使用 `multiple_input`。 |
+| 当前发行基线 | 0.15.0 本地发行完成 | Input State / Consumer Binding 断代、browser-python 删除、Domain Revert 与三浏览器 Runtime 回归已完成；wheel、sdist、ZIP 均通过独立安装与 `init → strict validate → report` 验收。 |
 
-当前开发基线：Package `0.12.2`、Python 3.11–3.14、Dashboard `dataviz/dashboard/v9`、Presentation `dataviz/presentation/v2`、Source/Dataset/Interactive Transform `v2`、Dependency Contract `v5`、Layout Contract `v1`、State Snapshot `v1`、Browser Runtime `dataviz/runtime/v5`、Component Registry `5.5.0`。这些破坏式契约只接受当前严格字段，不保留旧字段兼容名、自动迁移或第二套 Runtime。
+当前开发基线：Package `0.15.0`、Python 3.11–3.14、Dashboard `dataviz/dashboard/v11`、Parameter Domain `dataviz/parameter-domain/v1`、Presentation `dataviz/presentation/v2`、Source/Dataset/Interactive Transform `v3`、Dependency Contract `v7`、Layout Contract `v1`、State Snapshot `v2`、Browser Runtime `dataviz/runtime/v6`、Component Registry `5.6.0`。这些破坏式契约只接受当前严格字段，不保留旧字段兼容名、自动迁移或第二套 Runtime。
 
 ## 当前优先级
 
-### P0：完成 0.12.2 本地发行门禁
+### P1：Input State 与 Consumer Binding 重构
 
-- [x] 检查生成资产没有漂移：Canvas Runtime 与 TanStack Table Runtime 均通过构建器 `--check`，生成 JavaScript 通过语法检查。
-- [x] 运行 Ruff 与完整 Python 测试套件；失败必须修复或记录为明确阻塞，不能沿用旧版本测试数字。
-- [x] 按快速迭代门禁在 Chromium 运行完整 E2E 契约套件；Firefox/WebKit 留给稳定发布、跨浏览器敏感变更或明确要求的发布轮次。
-- [x] 对全部示例 Workspace 执行 strict validate，并运行 21 个 Component Package 检查。
-- [x] 重新构建 wheel、sdist 与 pip ZIP，审计归档不包含 `.dataviz`、凭据、虚拟环境、维护者评测实现或构建缓存。
-- [x] 在干净 Python 3.12 环境完成 `install → version → components → init → validate → report` 冒烟，记录 SHA-256，并确认三种归档均报告 0.12.2。
-- [x] 同步 CHANGELOG 的最终门禁结果；以上证据完成后，将 0.12.2 标记为本地发布完成。
+- [x] 冻结目标概念：不新增作者可见的通用 `states:`；Query Parameter 与 scoped Control 共用 canonical value、候选型集合 intent、revision 和恢复规则，但继续隔离 Query/Interactive 生命周期。
+- [x] 冻结最小 binding：projection 只有 `value / present / intent`，consumer mode 只有 `value / filter`；filter 必须声明字段、目标输入与 `empty: passthrough | match_none`，当前不增加 exclude、任意 predicate 或 Filter Group。
+- [x] 同步升级 Dashboard v11、Source/Dataset/Interactive Transform v3、Dependency Contract v7、State Snapshot v2 与 Browser Runtime v6：Control 删除 `kind`，`selection_inputs / compute_inputs` 合并为 `control_inputs`，不保留双协议 Runtime。
+- [x] 扩展 Query/Control input projection：实现 `present`；候选型集合使用可选 intent，自由集合 `multiple_input` 只保存 list value。
+- [x] Compiler 生成唯一 producer/state/consumer binding graph；`inspect dependencies` 展示 mode、projection、field、empty、trigger 与影响闭包，并保持稳定错误码。
+- [x] 补齐每个 consumer 的 effective/applied revision 证据：Runtime 原始 `applied_revisions` 由当前 Dependency Contract 规范化为 `consumer_revisions`，State Snapshot、HTML/Share、CLI Browser/Server 执行、Result inspect 与 Evidence 使用同一审计结构；未知或超前 revision 不进入封存事实。
+- [x] View/Plotly/Table/Custom Renderer 的点击、框选与行选只发送类型化 writer action；Bound View selected projection 与其他 consumer filter 分离，继续拒绝第二 writer、旧 generation 和反馈循环。
+- [x] 一次性迁移示例、Scaffold、CLI docs、`dataviz-skill.md`、分析运行上下文、非浏览器测试与 Chromium/Firefox/WebKit 行为回归，并完成 applied revision 证据收口。
 
 ### P2：验证 AI 开发效率
 
@@ -51,7 +54,7 @@
 
 - 通用服务端分页或按需 Record Batch；需要由原始大表 View 的独立基准触发。
 - `number-range`、month/quarter/year 日期控件、Transfer、Entity Picker 或 Drawer。
-- 单文件内联 Pyodide、多套命名 Presentation、HTML Analysis Capsule、HTML Output 提取或远程分享链接分析。
+- 多套命名 Presentation、HTML Analysis Capsule、HTML Output 提取或远程分享链接分析。
 - 多进程共同写一个 Workspace、内建账号体系、多租户资源配额或不可信代码沙箱。
 - 自动 Apply Promote、自动 certified，或绕开人工审阅的知识写回。
 
@@ -59,7 +62,7 @@
 
 - 旧实验契约兼容层、自动迁移或双协议 Runtime。
 - 可编辑数据逻辑、依赖、布局或样式的通用网页开发器；Mosaic、坐标布局和旧 Widget 协议。
-- 让 Pyodide/Python 直接操作 DOM 或成为第二套 View Renderer。
+- 让 Python 直接操作 DOM 或成为第二套 View Renderer。
 - Interactive Transform 隐式访问 Adapter 或重新查询 Source。
 - 为 Analysis Plane 复制 Dependency Contract、Query Executor、InteractionExecutor 或 Browser Runtime。
 - 让 AI 通过图像像素反推本可直接读取的 Base/Derived Output。

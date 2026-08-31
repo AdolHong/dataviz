@@ -200,7 +200,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
         "use_when": "Users need searchable or hierarchical multi-selection before comparing entities",
         "logic": {
             "template": "selection-gallery",
-            "fields": ["controls", "views", "repeat.by", "repeat.selection"],
+            "fields": ["controls", "views", "repeat.by", "repeat.control"],
             "recommended_components": ["control.select", "control.cascader", "control.tree-select"],
         },
         "behavior": {
@@ -254,29 +254,13 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
             "kind": "interactive_transform",
             "runtime": "browser-js",
             "fields": ["id", "runtime", "code", "inputs", "export", "outputs"],
-            "optional": ["entrypoint", "query_inputs", "compute_inputs", "selection_inputs", "trigger", "debounce_ms", "timeout_seconds", "cache"],
+            "optional": ["entrypoint", "query_inputs", "control_inputs", "trigger", "debounce_ms", "timeout_seconds", "cache"],
         },
         "behavior": {
             "contract": "Pure serializable sync/async function returning a Named Output object",
             "invalidation": "Only declared Selection dependencies and downstream Views update",
             "execution": "Dedicated Web Worker with cancellation and a hard timeout",
             "registration": "window.datavizRuntime.registerInteractiveTransform(spec, {code, entrypoint})",
-        },
-    },
-    "interactive-transform.browser-python": {
-        "category": "transform",
-        "purpose": "Derive portable Named Outputs with Python in a Pyodide module Worker",
-        "logic": {
-            "kind": "interactive_transform",
-            "runtime": "browser-python",
-            "fields": ["id", "runtime", "code", "inputs", "export", "outputs"],
-            "optional": ["entrypoint", "query_inputs", "compute_inputs", "selection_inputs", "python_dependencies", "code_dependencies", "trigger", "debounce_ms", "timeout_seconds", "cache"],
-        },
-        "behavior": {
-            "contract": "Python returns only serializable Named Outputs; JavaScript owns rendering",
-            "isolation": "Fresh module Worker per generation with Pyodide interrupt and terminate fallback",
-            "transport": "Tables enter Python as columnar data and may become pandas DataFrames on demand",
-            "export": "interactive export declares cdn or bundle assets explicitly",
         },
     },
     "interactive-transform.server-python": {
@@ -286,7 +270,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
             "kind": "interactive_transform",
             "runtime": "server-python",
             "fields": ["id", "runtime", "code", "inputs", "export", "outputs"],
-            "optional": ["entrypoint", "query_inputs", "compute_inputs", "selection_inputs", "python_dependencies", "code_dependencies", "trigger", "debounce_ms", "timeout_seconds", "cache"],
+            "optional": ["entrypoint", "query_inputs", "control_inputs", "python_dependencies", "code_dependencies", "trigger", "debounce_ms", "timeout_seconds", "cache"],
         },
         "behavior": {
             "adapter": "Unavailable by contract; Interactive Transform cannot query new data",
@@ -316,8 +300,8 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
 }
 
 
-COMPONENT_REGISTRY_VERSION = "5.5.0"
-RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v5"
+COMPONENT_REGISTRY_VERSION = "5.6.0"
+RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v6"
 
 
 def _generated_component_templates() -> dict[str, dict[str, Any]]:
@@ -377,7 +361,7 @@ def _generated_component_templates() -> dict[str, dict[str, Any]]:
             "logic": {
                 "template": name,
                 "fields": ["id", "views"],
-                "optional": ["title", "description", "selections", "columns", "repeat"],
+                "optional": ["title", "description", "controls", "columns", "repeat"],
             },
             "presentation": {"options": ["template", "columns", "css_class"]},
             "behavior": {

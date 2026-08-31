@@ -10,7 +10,7 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from dataviz.analysis import ensure_analysis_catalog
+from dataviz.analysis import create_analysis_evidence, ensure_analysis_catalog
 from dataviz.analysis.contracts import (
     AnalysisCatalog,
     AnalysisDescribe,
@@ -64,7 +64,7 @@ title: Analysis tests
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v9
+        """schema: dataviz/dashboard/v11
 kind: dashboard
 id: analysis
 title: Analysis
@@ -86,7 +86,7 @@ sections:
         "name,revenue\nA,10\nB,20\n", encoding="utf-8"
     )
     (dashboard / "transforms" / "doubled.yaml").write_text(
-        """schema: dataviz/interactive-transform/v2
+        """schema: dataviz/interactive-transform/v3
 kind: interactive_transform
 id: doubled
 name: 加倍收入
@@ -492,7 +492,7 @@ def test_analysis_cli_batches_base_and_server_outputs_in_one_query_run(tmp_path:
     )
     transform_root = workspace / "dashboards/analysis/transforms"
     (transform_root / "tripled.yaml").write_text(
-        """schema: dataviz/interactive-transform/v2
+        """schema: dataviz/interactive-transform/v3
 kind: interactive_transform
 id: tripled
 name: 三倍收入
@@ -559,6 +559,46 @@ outputs:
     ]
     assert len({item["run_id"] for item in server_payload["outputs"]}) == 1
     assert server_payload["lineage"]["query_nodes"] == ["source:rows"]
+
+
+def test_analysis_evidence_preserves_consumer_revision_audit(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    consumer_revisions = {
+        "views": {},
+        "transforms": {
+            "forecast": {
+                "trigger": "manual",
+                "stale": True,
+                "controls": {
+                    "dashboard:sales/scenario": {
+                        "effective_revision": 7,
+                        "applied_revision": 5,
+                        "stale": True,
+                    }
+                },
+            }
+        },
+    }
+
+    evidence, destination = create_analysis_evidence(
+        workspace,
+        {
+            "schema": "dataviz/analysis-result/v1",
+            "status": "ready",
+            "target": {"reference": "sales::interactive:forecast/main"},
+            "consumer_revisions": consumer_revisions,
+            "outputs": [],
+            "lineage": {},
+        },
+        result_source="result_test",
+        question="预测是否使用了最新情景？",
+        conclusions=["尚未应用最新情景。"],
+        generated_by="pytest",
+    )
+
+    assert destination.is_file()
+    assert evidence.consumer_revisions == consumer_revisions
 
 
 def test_analysis_evidence_and_promote_preview_do_not_mutate_workspace(tmp_path: Path):
@@ -698,7 +738,7 @@ include_snapshot: true
                 "files": {
                     "dashboards/analysis/dashboard.yaml": promoted_dashboard,
                     "dashboards/analysis/sources/rows-copy.yaml": (
-                        "schema: dataviz/source/v2\n"
+                        "schema: dataviz/source/v3\n"
                         "kind: source\n"
                         "id: rows-copy\n"
                         "name: 收入副本\n"

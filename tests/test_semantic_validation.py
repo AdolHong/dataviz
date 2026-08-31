@@ -49,7 +49,7 @@ def test_unused_control_is_a_strict_warning(tmp_path: Path):
     definition["controls"].append(
         {
             "id": "unused_note",
-            "kind": "compute",
+
             "type": "single_input", "value_type": "text",
             "label": "Unused",
             "default": "x",

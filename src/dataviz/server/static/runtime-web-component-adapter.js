@@ -1,7 +1,7 @@
 (function installDatavizWebComponentAdapter(global) {
   'use strict';
 
-  const PROTOCOL = 'dataviz/runtime/v5';
+  const PROTOCOL = 'dataviz/runtime/v6';
   const canonical = reference => {
     const raw = String(reference || '').trim();
     if (!raw) throw new Error('Output reference cannot be empty');
@@ -14,33 +14,32 @@
     if (value?.__datavizArrowOutput && typeof value.rows === 'function') return value.rows();
     return Array.isArray(value) ? value : [];
   };
-  const fields = item => item.definition?.path_fields?.length
-    ? item.definition.path_fields
-    : [item.binding?.field || item.id];
+  const fields = item => Array.isArray(item.consumer_binding?.field)
+    ? item.consumer_binding.field
+    : [item.consumer_binding?.field].filter(Boolean);
   const canApply = (row, item) => row && typeof row === 'object'
     && fields(item).every(field => Object.prototype.hasOwnProperty.call(row, field));
   const projectedValue = (item, state) => {
-    const values = Array.isArray(state?.values) ? state.values : [];
-    if (['multiple_input', 'multiple_select'].includes(item.definition?.type)) return values;
-    if (item.definition?.type === 'range_input') return values.length ? values[0] : [];
-    return values.length ? values[0] : null;
+    return structuredClone(state?.value);
   };
   const matches = (row, item, state) => {
     if (!canApply(row, item)) return true;
     const value = projectedValue(item, state);
-    if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) return false;
-    const pathFields = item.definition?.path_fields || [];
-    if (pathFields.length) {
+    if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) {
+      return item.consumer_binding?.empty === 'passthrough';
+    }
+    const pathFields = fields(item);
+    if (pathFields.length > 1) {
       const paths = Array.isArray(value?.[0]) ? value : [value];
       return paths.some(path => pathFields.every(
         (field, index) => String(row[field] ?? '') === String(path[index] ?? ''),
       ));
     }
-    const actual = row[item.binding?.field || item.id];
-    const operator = item.binding?.operator === 'auto'
+    const actual = row[pathFields[0]];
+    const operator = item.consumer_binding?.operator === 'auto'
       ? (['multiple_input', 'multiple_select'].includes(item.definition?.type) ? 'in'
         : item.definition?.type === 'range_input' ? 'between' : 'equals')
-      : item.binding?.operator;
+      : item.consumer_binding?.operator;
     if (operator === 'in') return (Array.isArray(value) ? value : [value]).map(String).includes(String(actual));
     if (operator === 'between') {
       const range = Array.isArray(value) ? value : [];
@@ -76,9 +75,9 @@
       const references = this.viewInputReferences(id);
       const reference = references[input] || Object.values(references)[0];
       const source = rows(this.output(reference));
-      const contract = this.manifest.dependency_contract?.views?.[id]?.selection_contract || [];
+      const contract = this.manifest.dependency_contract?.views?.[id]?.filter_contract || [];
       return source.filter(row => contract.every(item => matches(
-        row, item, this.manifest.selection_state?.[item.key],
+        row, item, this.manifest.control_state?.[item.key],
       )));
     }
   }
@@ -90,12 +89,12 @@
   class DatavizOutputElement extends HTMLElement {
     connectedCallback() {
       this._listener = () => this.render();
-      ['dataviz:ready', 'dataviz:selectionchange', 'dataviz:outputschange']
+      ['dataviz:ready', 'dataviz:controlchange', 'dataviz:outputschange']
         .forEach(name => global.addEventListener(name, this._listener));
       this.render();
     }
     disconnectedCallback() {
-      ['dataviz:ready', 'dataviz:selectionchange', 'dataviz:outputschange']
+      ['dataviz:ready', 'dataviz:controlchange', 'dataviz:outputschange']
         .forEach(name => global.removeEventListener(name, this._listener));
     }
     render() {

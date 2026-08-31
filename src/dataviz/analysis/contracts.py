@@ -99,7 +99,13 @@ class AnalysisResult(AnalysisContract):
     generation: str | None = None
     target: AnalysisEntry | dict[str, Any] | None = None
     query_parameters: dict[str, Any] = Field(default_factory=dict)
+    query_parameter_intents: dict[str, Literal["all_available", "explicit"]] = Field(
+        default_factory=dict
+    )
     effective_controls: dict[str, Any] = Field(default_factory=dict)
+    consumer_revisions: dict[str, dict[str, dict[str, Any]]] = Field(
+        default_factory=lambda: {"views": {}, "transforms": {}}
+    )
     outputs: list[AnalysisOutputResult] = Field(default_factory=list)
     lineage: dict[str, Any] = Field(default_factory=dict)
     provenance: dict[str, Any] = Field(default_factory=dict)
@@ -123,6 +129,9 @@ class AnalysisEvidence(AnalysisContract):
     target: dict[str, Any]
     outputs: list[dict[str, Any]]
     lineage: dict[str, Any]
+    consumer_revisions: dict[str, dict[str, dict[str, Any]]] = Field(
+        default_factory=lambda: {"views": {}, "transforms": {}}
+    )
     snapshot: list[dict[str, Any]] = Field(default_factory=list)
 
     @model_validator(mode="after")

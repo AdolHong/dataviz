@@ -15,6 +15,7 @@ from dataviz.workspace.models import (
     DatasetTransformDefinition,
     DeclarativeViewDefinition,
     InteractiveTransformDefinition,
+    ParameterDomainDefinition,
     PresentationDefinition,
     SOURCE_DEFINITION_ADAPTER,
     SourceDefinition,
@@ -95,7 +96,7 @@ def parse_source_definition(path: Path) -> SourceDefinition:
             "Schema header is required for a standalone definition",
             file=path,
             details={
-                "expected": "dataviz/source/v2",
+                "expected": "dataviz/source/v3",
                 "docs": "dataviz schemas source --full --format json",
             },
         )
@@ -143,8 +144,36 @@ def load_dashboard(path: Path) -> LoadedDashboard:
             else:
                 presentation = candidate
     sources: dict[str, tuple[Path, SourceDefinition]] = {}
+    parameter_domains: dict[str, tuple[Path, ParameterDomainDefinition]] = {}
     dataset_transforms: dict[str, tuple[Path, DatasetTransformDefinition]] = {}
     interactive_transforms: dict[str, tuple[Path, InteractiveTransformDefinition]] = {}
+
+    for domain_entry in definition.parameter_domains:
+        if isinstance(domain_entry, str):
+            domain_path = _require_dashboard_asset(
+                root, root, domain_entry, "Parameter Domain definition"
+            )
+            domain = parse_model(ParameterDomainDefinition, domain_path)
+        else:
+            domain_path = definition_path
+            try:
+                domain = ParameterDomainDefinition.model_validate(
+                    {"schema": "dataviz/parameter-domain/v1", **domain_entry}
+                )
+            except ValidationError as exc:
+                raise WorkspaceError(
+                    "Inline Parameter Domain schema validation failed",
+                    file=definition_path,
+                    details=_validation_errors(exc),
+                ) from exc
+        if domain.id in parameter_domains:
+            raise WorkspaceError(
+                f"Duplicate Parameter Domain id: {domain.id}", file=domain_path
+            )
+        _require_dashboard_asset(
+            root, domain_path.parent, domain.code, "Parameter Domain SQL"
+        )
+        parameter_domains[domain.id] = (domain_path, domain)
 
     for source_entry in definition.sources:
         if isinstance(source_entry, str):
@@ -154,7 +183,7 @@ def load_dashboard(path: Path) -> LoadedDashboard:
             source_path = definition_path
             try:
                 source = SOURCE_DEFINITION_ADAPTER.validate_python(
-                    {"schema": "dataviz/source/v2", **source_entry}
+                    {"schema": "dataviz/source/v3", **source_entry}
                 )
             except ValidationError as exc:
                 raise WorkspaceError(
@@ -184,7 +213,7 @@ def load_dashboard(path: Path) -> LoadedDashboard:
             transform_path = definition_path
             try:
                 transform = DatasetTransformDefinition.model_validate(
-                    {"schema": "dataviz/dataset-transform/v2", **transform_entry}
+                    {"schema": "dataviz/dataset-transform/v3", **transform_entry}
                 )
             except ValidationError as exc:
                 raise WorkspaceError(
@@ -218,7 +247,7 @@ def load_dashboard(path: Path) -> LoadedDashboard:
             transform_path = definition_path
             try:
                 transform = InteractiveTransformDefinition.model_validate(
-                    {"schema": "dataviz/interactive-transform/v2", **transform_entry}
+                    {"schema": "dataviz/interactive-transform/v3", **transform_entry}
                 )
             except ValidationError as exc:
                 raise WorkspaceError(
@@ -289,6 +318,7 @@ def load_dashboard(path: Path) -> LoadedDashboard:
         definition=definition,
         logic_definition=logic_definition,
         sources=sources,
+        parameter_domains=parameter_domains,
         dataset_transforms=dataset_transforms,
         interactive_transforms=interactive_transforms,
         views=views,

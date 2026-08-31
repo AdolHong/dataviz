@@ -1,4 +1,4 @@
-schema: dataviz/dataset-transform/v2
+schema: dataviz/dataset-transform/v3
 kind: dataset_transform
 id: sales-metrics
 name: 销售衍生指标

@@ -98,7 +98,7 @@ VIEW_COMMON_FIELDS = {
     "span",
     "template",
     "controls",
-    "selection_bindings",
+    "control_inputs",
     "control_binding",
 }
 

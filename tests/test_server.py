@@ -441,29 +441,6 @@ def test_workspace_api_resolves_relative_query_defaults_to_concrete_tab_values(
     assert tuple(record["result"]["query_parameters"]["job_date_range"]) in expected
 
 
-def test_server_never_serves_a_pyodide_bundle_outside_the_workspace(tmp_path: Path):
-    root = tmp_path / "workspace"
-    shutil.copytree(MINIMAL_WORKSPACE, root)
-    outside = tmp_path / "outside-pyodide"
-    outside.mkdir()
-    (outside / "runtime.js").write_text("outside", encoding="utf-8")
-    workspace_path = root / "workspace.yaml"
-    definition = yaml.safe_load(workspace_path.read_text(encoding="utf-8"))
-    definition["runtime"] = {
-        **definition.get("runtime", {}),
-        "pyodide_bundle_path": "../outside-pyodide",
-    }
-    workspace_path.write_text(
-        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
-        encoding="utf-8",
-    )
-
-    response = TestClient(create_app(root)).get("/runtime/pyodide/runtime.js")
-
-    assert response.status_code == 404
-    assert response.json()["detail"] == "Pyodide bundle is outside the Workspace"
-
-
 def test_queued_query_can_be_cancelled_before_a_global_slot_is_available(
     tmp_path: Path,
 ):
@@ -679,9 +656,7 @@ def test_server_run_and_canvas():
         "section",
         "view",
     }
-    assert {item["kind"] for item in summary["dashboards"][0]["controls"]} == {
-        "selection"
-    }
+    assert all("kind" not in item for item in summary["dashboards"][0]["controls"])
     assert all(
         "runtime_checked_views" in item
         and "declared_direct_views" in item
@@ -741,10 +716,11 @@ def test_server_run_and_canvas():
         json={
             "session_id": SESSION_A,
             "run_id": run_id,
-            "selection_state": {
+            "control_state": {
                 "dashboard:sales/region": {
                     "intent": "explicit",
-                    "values": ["East"],
+                    "value": ["East"],
+                    "revision": 1,
                 }
             },
         },
@@ -754,7 +730,7 @@ def test_server_run_and_canvas():
     assert '<option value="East" selected>' in report.text
     assert '<option value="West">' in report.text
     assert '"region": "West"' in report.text
-    assert '"dashboard:sales/region": {"intent": "explicit", "values": ["East"]}' in report.text
+    assert '"dashboard:sales/region": {"value": ["East"], "revision": 1, "intent": "explicit"}' in report.text
 
 
 def test_initial_canvas_uses_a_quiet_waiting_state():
@@ -822,8 +798,18 @@ def test_shared_result_is_persisted_outside_dashboards_and_survives_restart(
             json={
                 "session_id": session_id,
                 "run_id": run_id,
-                "selection_state": {},
-                "compute_parameters": {"dashboard:worker-runtime/delay_ms": 5},
+                "control_state": {
+                    "dashboard:worker-runtime/delay_ms": {
+                        "value": 5,
+                        "revision": 0,
+                    }
+                },
+                "applied_revisions": {
+                    "views": {},
+                    "transforms": {
+                        "scaled": {"dashboard:worker-runtime/delay_ms": 0}
+                    },
+                },
                 "snapshot_outputs": {},
             },
         )
@@ -843,6 +829,27 @@ def test_shared_result_is_persisted_outside_dashboards_and_survives_restart(
     assert manifest["schema"] == "dataviz/shared-cache/v1"
     assert manifest["dashboard_id"] == "worker-runtime"
     assert manifest["run_id"] == run_id
+    assert manifest["consumer_revisions"]["transforms"]["scaled"] == {
+        "trigger": "auto",
+        "stale": False,
+        "controls": {
+            "dashboard:worker-runtime/delay_ms": {
+                "effective_revision": 0,
+                "applied_revision": 0,
+                "stale": False,
+            }
+        },
+    }
+    sealed = json.loads(
+        (
+            root
+            / ".dataviz"
+            / "results"
+            / payload["result_id"]
+            / "manifest.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert sealed["result"]["consumer_revisions"] == manifest["consumer_revisions"]
 
     # A new application instance has no in-memory Run, but the persistent
     # Query snapshot is rehydrated into an interactive shared page.
@@ -883,7 +890,7 @@ def test_shared_result_adds_server_python_interaction_but_html_export_rejects_it
     transform_path.with_name("scaled.py").write_text(
         """def transform(context):
     frame = context.table("rows").copy()
-    frame["value"] = frame["value"] * context.compute_params["delay_ms"]
+    frame["value"] = frame["value"] * context.control_inputs["delay_ms"]
     return {"main": frame}
 """,
         encoding="utf-8",
@@ -927,8 +934,12 @@ def test_shared_result_adds_server_python_interaction_but_html_export_rejects_it
         report_request = {
             "session_id": session_id,
             "run_id": run_id,
-            "selection_state": {},
-            "compute_parameters": {"dashboard:worker-runtime/delay_ms": 5},
+            "control_state": {
+                "dashboard:worker-runtime/delay_ms": {
+                    "value": 5,
+                    "revision": 0,
+                }
+            },
             "snapshot_outputs": {},
         }
         exported = client.post(
@@ -962,8 +973,12 @@ def test_shared_result_adds_server_python_interaction_but_html_export_rejects_it
                 "session_id": shared_session,
                 "transform_id": "scaled",
                 "generation": 1,
-                "compute_parameters": {"dashboard:worker-runtime/delay_ms": 6},
-                "selection_state": {},
+                "control_state": {
+                    "dashboard:worker-runtime/delay_ms": {
+                        "value": 6,
+                        "revision": 1,
+                    }
+                },
             },
         )
         assert started.status_code == 200, started.text
@@ -1080,13 +1095,13 @@ def test_server_rescans_physical_dashboard_names_without_aliases(tmp_path: Path)
     assert dashboard["path"].endswith("团队分析##销售看板")
 
 
-def test_server_app_selections_are_browser_only():
+def test_server_app_controls_are_browser_only():
     template = (ROOT / "src" / "dataviz" / "server" / "templates" / "index.html").read_text()
     script = (ROOT / "src" / "dataviz" / "server" / "static" / "app.js").read_text()
     query_block = script[script.index("async function runDashboard"):script.index("function listen")]
     assert "session_id: state.sessionId" in query_block
     assert "selections()" not in query_block
-    assert "dataviz:set-selections" in script
+    assert "dataviz:set-controls" in script
     assert "dashboardStates: new Map()" in script
     assert "BroadcastChannel" in script
     assert "dataviz:canvas-interaction" in script
@@ -1096,7 +1111,9 @@ def test_server_app_selections_are_browser_only():
     assert "frame_id=" in script
     assert "closeHeaderPopovers();" in script
     assert "filter(([key]) => validKeys.has(key))" in script
-    assert "state.selectionState = {...(event.data.selection_state || {})};" in script
+    assert "const incoming = {...(event.data.control_state || {})};" in script
+    assert "Number(local[key].revision || 0) > Number(incoming[key]?.revision || 0)" in script
+    assert "state.controlState = incoming;" in script
     assert "state.canvasSelections" not in script
     assert "/static/app.js?v=" in template
     select_block = script[script.index("function selectDashboard"):script.index("function queryParameters")]
@@ -1137,7 +1154,7 @@ def test_query_parameters_are_an_inline_query_card_toggled_by_the_header_run_con
     assert "setQueryParametersOpen(true, {persist: true})" in script
     assert "Escape" not in script[
         script.index("function setQueryParametersOpen"):
-        script.index("function dashboardSelectionState")
+        script.index("function dashboardControlState")
     ]
 
 
@@ -1153,7 +1170,6 @@ def test_control_trays_show_business_fields_without_runtime_taxonomy():
     assert '<header><span>DATA</span>' not in template
     assert '<header><span>DATA</span>' not in canvas_renderer
     assert '<header><span>LOGIC</span>' not in canvas_renderer
-    assert "data-control-impact-count hidden" in canvas_renderer
     assert "<span hidden data-control-impact-count>" in script
     assert "grid-template-rows: minmax(0, 1fr) auto" in package_style
     assert "background: transparent;\n  border: 0;" in package_style
@@ -1575,7 +1591,7 @@ def test_fast_dag_branch_publishes_output_before_slow_branch_finishes(
         encoding="utf-8",
     )
     (dashboard_root / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v9
+        """schema: dataviz/dashboard/v11
 kind: dashboard
 id: progressive
 title: Progressive branches
@@ -1596,7 +1612,7 @@ sections:
         encoding="utf-8",
     )
     (dashboard_root / "transforms" / "combine.yaml").write_text(
-        """schema: dataviz/dataset-transform/v2
+        """schema: dataviz/dataset-transform/v3
 kind: dataset_transform
 id: combine
 runtime: server-python
@@ -1620,7 +1636,7 @@ def transform(context):
         encoding="utf-8",
     )
     (dashboard_root / "transforms" / "fast-summary.yaml").write_text(
-        """schema: dataviz/interactive-transform/v2
+        """schema: dataviz/interactive-transform/v3
 kind: interactive_transform
 id: fast-summary
 runtime: server-python
@@ -1700,8 +1716,7 @@ cache: {mode: none}
             "session_id": SESSION_A,
             "transform_id": "fast-summary",
             "generation": 1,
-            "compute_parameters": {},
-            "selection_state": {},
+            "control_state": {},
         },
     )
     assert interaction.status_code == 200, interaction.text
@@ -1983,7 +1998,7 @@ def test_query_cancel_is_tab_scoped_and_same_dashboard_run_supersedes(tmp_path: 
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v9
+        """schema: dataviz/dashboard/v11
 kind: dashboard
 id: slow
 title: Slow
@@ -1998,7 +2013,7 @@ sections:
         encoding="utf-8",
     )
     (dashboard / "sources" / "slow.yaml").write_text(
-        """schema: dataviz/source/v2
+        """schema: dataviz/source/v3
 kind: source
 id: slow
 type: python

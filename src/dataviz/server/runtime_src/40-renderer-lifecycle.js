@@ -1,22 +1,23 @@
 // Owner: affected-view resolution and Renderer mount/update lifecycle.
 Object.assign(datavizRuntime, {
-  affectedViews(changedSelectionKeys, changedOutputs = new Set()) {
-    // A null Selection delta is the first render, not an empty update. Render
+  affectedViews(changedControlKeys, changedOutputs = new Set()) {
+    // A null Control delta is the first render, not an empty update. Render
     // every registered host so input-free Markdown/Image Views become ready and
     // data-backed Views can enter their branch-local waiting state.
-    if (changedSelectionKeys == null) return null;
-    const changedSelections = new Set(changedSelectionKeys || []);
+    if (changedControlKeys == null) return null;
+    const changedControls = new Set(changedControlKeys || []);
     const outputs = changedOutputs || new Set();
     const affected = new Set();
-    changedSelections.forEach(key => {
+    changedControls.forEach(key => {
       const dependency = window.dataviz.dependency_contract?.controls?.[key];
       (dependency?.direct_views || []).forEach(viewId => {
-        const item = datavizViewSelectionContract(viewId)
+        const item = datavizViewControlContract(viewId)
           .find(candidate => candidate.key === key);
-        if (item && datavizSelectionViewApplicability(viewId, item) !== 'not_applicable') {
+        if (item && datavizControlViewApplicability(viewId, item) !== 'not_applicable') {
           affected.add(viewId);
         }
       });
+      (dependency?.repeat_views || []).forEach(viewId => affected.add(viewId));
     });
     outputs.forEach(reference => this.outputViews(reference).forEach(viewId => affected.add(viewId)));
     return [...affected];
@@ -69,6 +70,14 @@ Object.assign(datavizRuntime, {
         return;
       }
       definition.render(window.dataviz, context);
+      window.dataviz.applied_revisions ||= {views:{}, transforms:{}};
+      const bindings = window.dataviz.dependency_contract?.views?.[id]?.control_inputs || {};
+      window.dataviz.applied_revisions.views[id] = Object.fromEntries(
+        Object.values(bindings).map(binding => [
+          binding.control,
+          Number(datavizControlEntry(binding.control)?.revision || 0),
+        ])
+      );
     });
   },
   async publishOutputs(bundle) {
@@ -87,10 +96,10 @@ Object.assign(datavizRuntime, {
     Object.assign(window.dataviz.portable.output_kinds, bundle.output_kinds || {});
     Object.assign(window.dataviz.portable.output_schemas, bundle.output_schemas || {});
     if (!changed.size || this.initializing) return changed;
-    refreshSelectionOptionDomains();
+    refreshControlOptionDomains();
     const affectedViewIds = this.affectedViews([], changed);
-    this.renderViews({initial:false, changedSelectionKeys:[], affectedViewIds});
-    const changedOutputs = await this.runTransforms([], changed, {changedComputeKeys: []});
+    this.renderViews({initial:false, changedControlKeys:[], affectedViewIds});
+    const changedOutputs = await this.runTransforms([], changed);
     window.dispatchEvent(new CustomEvent('dataviz:outputschange', {
       detail:{changed:[...changedOutputs], failed:[]},
     }));
@@ -126,8 +135,8 @@ Object.assign(datavizRuntime, {
     });
     if (this.initializing) return changed;
     const affectedViewIds = this.affectedViews([], changed);
-    this.renderViews({initial:false, changedSelectionKeys:[], affectedViewIds});
-    const changedOutputs = await this.runTransforms([], changed, {changedComputeKeys: []});
+    this.renderViews({initial:false, changedControlKeys:[], affectedViewIds});
+    const changedOutputs = await this.runTransforms([], changed);
     window.dispatchEvent(new CustomEvent('dataviz:outputschange', {
       detail:{changed:[...changedOutputs], failed:[...changed]},
     }));

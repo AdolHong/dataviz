@@ -1,6 +1,6 @@
 schema: dataviz/component-package/v1
 package: runtime.control
-version: 2.1.0
+version: 2.3.0
 category: runtime
 purpose: Shared canonical-value bridge, lifecycle and keyboard utilities for Data Entry components.
 implementation: {mode: package, sources: []}
@@ -15,7 +15,7 @@ components:
       enhancement: progressive
       overlay_surface: opaque_by_default
       ownership: value and scope semantics remain outside the component
-      dynamic_domain_intent: all_available expands with its option domain; explicit keeps only the valid intersection
+      dynamic_domain_intent: normal reconciliation expands all_available and intersects explicit; committed-snapshot restoration preserves missing values as unavailable and renders all_available as one semantic 全选 summary
     semantic_dom: [.dv-control, '[data-control-component]', '[data-control-input]', '[data-control-mount]', .dv-control-panel]
     tokens: [--dv-accent, --dv-green, --dv-ink, --dv-line, --dv-panel, --dv-overlay-surface]
 runtime:

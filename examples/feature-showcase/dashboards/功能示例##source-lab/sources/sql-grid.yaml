@@ -1,4 +1,4 @@
-schema: dataviz/source/v2
+schema: dataviz/source/v3
 kind: source
 id: sql-grid
 name: DuckDB 数据矩阵

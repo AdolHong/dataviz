@@ -1,4 +1,4 @@
-schema: dataviz/source/v2
+schema: dataviz/source/v3
 kind: source
 id: forecast
 name: Python 预测数据

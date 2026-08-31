@@ -1,6 +1,6 @@
 # Dataviz 当前实现索引
 
-更新时间：2026-08-29
+更新时间：2026-08-31
 
 本页帮助开发者和 AI 从产品契约定位到代码。设计语义以 [DESIGN](../DESIGN.md) 为准；字段以当前安装环境的 `dataviz schemas` 为准。
 
@@ -8,16 +8,17 @@
 
 ```text
 Workspace              dataviz/workspace/v1
-Dashboard              dataviz/dashboard/v9
+Dashboard              dataviz/dashboard/v11
 Presentation           dataviz/presentation/v2
-Source                 dataviz/source/v2
-Dataset Transform      dataviz/dataset-transform/v2
-Interactive Transform  dataviz/interactive-transform/v2
-Dependency Contract    dataviz/dependency-contract/v5
-Browser Runtime        dataviz/runtime/v5
+Source                 dataviz/source/v3
+Dataset Transform      dataviz/dataset-transform/v3
+Interactive Transform  dataviz/interactive-transform/v3
+Dependency Contract    dataviz/dependency-contract/v7
+State Snapshot         dataviz/state-snapshot/v2
+Browser Runtime        dataviz/runtime/v6
 Layout Contract        dataviz/layout-contract/v1
 Workspace Change       dataviz/workspace-change/v1
-Component Registry     5.5.0
+Component Registry     5.6.0
 ```
 
 这些契约独立版本化。Loader 只接受当前严格模型，不包含旧字段 alias、自动迁移或双协议执行分支。
@@ -32,36 +33,36 @@ Component Registry     5.5.0
 - 渐进 Authoring 路由与 Workspace Scaffold profiles：`src/dataviz/documentation.py`、`src/dataviz/authoring.py`
 - Dashboard 依赖契约编译：`src/dataviz/execution/dependencies.py`
 - Dashboard 布局契约编译：`src/dataviz/layout.py`
-- Canonical Selection State：`src/dataviz/selection_state.py`
-- Selection option-domain 投影：`src/dataviz/workspace/selection_domains.py`
+- Canonical Input State：`src/dataviz/input_state.py`
+- Control value/filter consumer：`src/dataviz/execution/control_filter.py`
 - Analysis Catalog、Evidence、Promote 与执行：`src/dataviz/analysis/`
 - Analysis 使用统计：`src/dataviz/analysis/usage.py`（`.dataviz/usage.sqlite`，best-effort，不进入 fingerprint）
 
 ## 2. 单一 Dependency Contract
 
-Dashboard 快照的 `dependency_contract` 属性以并发安全的首次初始化惰性编译并缓存唯一的 `dataviz/dependency-contract/v5`；热更新创建新快照和新契约。同一快照的所有消费者读取同一个对象。它同时拥有：
+Dashboard 快照的 `dependency_contract` 属性以并发安全的首次初始化惰性编译并缓存唯一的 `dataviz/dependency-contract/v7`；热更新创建新快照和新契约。同一快照的所有消费者读取同一个对象。它同时拥有：
 
 ```text
 Query Parameter → Query Node inputs/dependencies/outputs → downstream Views
 Base/Derived Output → Interactive inputs/dependencies/outputs
 Control → direct dependencies/transitive closure/domain/View/Transform/content edges
-View user event → one Selection Control writer binding
+View user event → one Control writer binding
 Named Output → View consumers
 ```
 
-`execution.plan`、`execution.interactive`、Loader 跨文件校验、Canvas、Server Pipeline、HTML manifest、Web Component Adapter、AI context 与 `dataviz inspect dependencies` 都只消费这份契约。`workspace.selection_domains` 只是轻量只读投影，不再拥有独立递归算法。
+`execution.plan`、`execution.interactive`、Loader 跨文件校验、Canvas、Server Pipeline、HTML manifest、Web Component Adapter、AI context 与 `dataviz inspect dependencies` 都只消费这份契约。不存在第二套按 Control 类型推断边的依赖图。
 
 编译结果还保存每个 Query Parameter 的最终影响闭包：需要重跑的 Query 节点、随后失效的 Interactive 分支、option Control、内容字段和 View。Control 则分别保存直接数据筛选、Interactive consumer、派生 View 与内容边，避免把“结构 scope”误说成“每次一定重绘”。
 
-Browser Runtime 不做拓扑排序，也不从 DOM 层级重建 Control DAG。Transform/View 注册会核对编译后的 data inputs、Query/Selection/Compute inputs 和 Output names，但注册 payload 只作 drift assertion；Interactive 调度、View waiting 和 Renderer 取数继续消费 Contract。Control 候选关系使用 Compiler 生成的 `control_order`、`depends_on` 与 `dependency_ancestors`。因此 DSL、Server 和 Browser 对同一条边产生分歧时会立刻失败，而不是显示部分正确的页面。
+Browser Runtime 不做拓扑排序，也不从 DOM 层级重建 Control DAG。Transform/View 注册会核对编译后的 data inputs、`control_inputs` 和 Output names，但注册 payload 只作 drift assertion；Interactive 调度、View waiting 和 Renderer 取数继续消费 Contract。Control 候选关系使用 Compiler 生成的 `control_order`、`depends_on` 与 `dependency_ancestors`。因此 DSL、Server 和 Browser 对同一条边产生分歧时会立刻失败，而不是显示部分正确的页面。
 
-`depends_on` 的 `dashboard.<id>`、`section.<id>`、`view.<id>` 都相对目标 Control 解析，只允许当前 Dashboard、所在 Section 和自身 View。每项只声明直接父节点；Compiler 计算传递祖先/后代并拒绝未知 Selection、Compute 父节点、非法作用域和环。依赖型候选域必须来自不可变 Base table；Output 声明 Schema 时，Compiler 同时验证子字段及全部祖先字段。候选变化时，Runtime 优先保留当前有效交集；原非空选择完全失效才恢复 `initial`，用户主动空集不会被自动填充。
+`depends_on` 的 `dashboard.<id>`、`section.<id>`、`view.<id>` 都相对目标 Control 解析，只允许当前 Dashboard、所在 Section 和自身 View。每项只声明直接父节点；Compiler 计算传递祖先/后代并拒绝未知父节点、非法作用域和环。依赖型候选域必须来自不可变 Base table；Output 声明 Schema 时，Compiler 同时验证子字段及全部祖先字段。候选变化时，Runtime 优先保留当前有效交集；原非空选择完全失效才恢复 `initial`，用户主动空集不会被自动填充。
 
-View 的 `control_binding` 编译为独立 writer/projection 边，不参与 Control DAG 环。一个 Selection Control 最多一个 writer View；Plotly、Table 与 Custom Renderer 只通过类型化 `select / select_many / clear / reset` Action 写同一 canonical state。`clear` 表示显式空值，`reset` 恢复 Control 的初始策略。Bound View 应用目标 Control 的祖先但排除目标自身筛选，因此在空选择或单选时仍能展示完整候选上下文。Compiler 拒绝第二 writer、未知/越界 target、缺失字段、不支持的 Renderer，以及 View 级 Selection 反向决定 Section/Dashboard 候选域。
+View 的 `control_binding` 编译为独立 writer/projection 边，不参与 Control DAG 环。一个 Control 最多一个 writer View；Plotly、Table 与 Custom Renderer 只通过类型化 `select / select_many / clear / reset` Action 写同一 canonical state。`clear` 表示显式空值，`reset` 恢复 Control 的初始策略。Bound View 应用目标 Control 的祖先但排除目标自身筛选，因此在空选择或单选时仍能展示完整候选上下文。Compiler 拒绝第二 writer、未知/越界 target、缺失字段、不支持的 Renderer，以及 View writer 反向决定 Section/Dashboard 候选域。
 
 环、未知 Output、浏览器 Runtime → `server-python` 的非法边和越过下游 View scope 的 Control consumer 都在编译期拒绝。Loader 只在契约无法形成时运行 recovery diagnostics，以便一次展示更多错误；它不向 Planner 或 Runtime 提供另一张图。
 
-Selection 的结构 scope 与数据适用性分开报告。`direct_view_bindings` 记录字段、operator、输入 Output 和 `declared | runtime | not_applicable`：Output schema 能保证字段时静态确认，否则在表格水合后按真实字段收窄；非表格 View 不进入直接数据重绘。`affected_views` 是保守上界，不伪装成每次交互的精确结果。
+Control 的结构 scope 与数据适用性分开报告。`direct_view_bindings` 记录字段、operator、输入 Output 和 `declared | runtime | not_applicable`：Output schema 能保证字段时静态确认，否则在表格水合后按真实字段收窄；非表格 View 不进入直接数据重绘。`affected_views` 是保守上界，不伪装成每次交互的精确结果。
 
 检查入口：
 
@@ -87,7 +88,9 @@ Query Parameter → Source → Dataset Transform → Base Named Output
 - Artifact 与 Named Output：`src/dataviz/artifacts/`、`src/dataviz/execution/outputs.py`
 - 缓存：`src/dataviz/execution/cache.py`
 
-Query Run 固化 Query Parameter 和 Base Output。scoped Controls 不进入这张 DAG。每个 Query 节点以 `query_inputs` 声明自己可读的本地 alias；结构化绑定可把一个 `range_input/date` 投影为 `start`/`end` 两个标量。相对日期默认值先按 Workspace IANA 时区解析为具体 ISO 日期，再进入 Run、缓存和执行上下文。节点按依赖闭包并发，Output 完成后立即发布；无关分支不互相等待。
+Query Run 固化 Query Parameter values/intents 和 Base Output。scoped Controls 不进入这张 DAG。每个 Query 节点以 `query_inputs` 声明自己可读的本地 alias；结构化绑定可把一个 `range_input/date` 投影为 `start`/`end` 两个标量，也可用 `projection: intent` 读取 `multiple_select` 的 `all_available | explicit`。相对日期默认值先按 Workspace IANA 时区解析为具体 ISO 日期，再进入 Run、缓存和执行上下文。节点按依赖闭包并发，Output 完成后立即发布；无关分支不互相等待。
+
+网页动态候选位于这张 DAG 之前：`Parameter Domain SQL → 候选表 → Query Parameter draft → Query DAG`。一个低/中基数的有界 Domain 表可以同时投影多个参数字段；每个 `value_field` 按 canonical value 自动去重，只有真实级联才声明直接父参数。SQL、Adapter、缓存和类型核验由 Server Parameter Resolver 负责；浏览器外层 Query Panel Shell 只负责候选展示、草稿协调与手动 reload。AI 可按需通过 `dataviz parameters options` 查询同一候选：原始多列表封存为 Workspace 内 immutable `options_id`，终端仅预览 10 行，后续 `parameters filter` 基于快照筛选/选列/分页且不重跑 SQL。Parameter Domain 候选必须适合一次完整加载；数十万 `item_nbr` 等实体应改用更粗的业务层级，或在用户已知 ID 时使用 `multiple_input`。`dataviz run` 只消费调用方传入或无需 Domain 即可物化的参数值，绝不隐式查询或按候选成员拦截执行。Domain 失败只禁用当前 Dashboard 的 Query，不得阻断全局导航。Parameter Domain 与 Canvas Interactive Runtime 没有执行边，不进入 browser-js 或 Renderer；Result、portable HTML 与分享缓存只保留已提交的参数 values/intents，不包含 Domain 实现或候选表。
 
 File、SQL、Python 是 Source 的三种入口。SQL 默认单次超时 120 秒，明确超时后立即额外重试一次；Source 可以覆盖 `timeout_seconds` 与 `timeout_retries`。SQL 面板保存参数化 statement、Resolved SQL、bound parameters、Adapter、耗时、重试和 hash 证据，但不公开凭证。
 
@@ -104,11 +107,10 @@ Base/Derived Output + committed Query snapshot + scoped Control deltas
 ```
 
 - 服务端计划与执行：`src/dataviz/execution/interactive.py`
-- Server Selection 输入裁剪：`src/dataviz/execution/selection_filter.py`
+- Server Control filter/value 投影：`src/dataviz/execution/control_filter.py`
 - Browser 控制器：`src/dataviz/server/static/canvas-runtime.js`
-- Browser Selection/Compute 边界：`src/dataviz/components/packages/data.pipeline/`
+- Browser Control 状态桥：`src/dataviz/components/packages/runtime.control/`
 - browser-js Worker：`src/dataviz/server/static/interactive-js-worker.js`
-- browser-python Worker：`src/dataviz/server/static/interactive-python-worker.mjs`
 - Server Run/generation 隔离：`src/dataviz/server/manager.py`
 
 公共 Runtime Adapter 生命周期是：
@@ -117,13 +119,12 @@ Base/Derived Output + committed Query snapshot + scoped Control deltas
 validate → prepare → execute → cancel → dispose
 ```
 
-三种 Runtime 都只返回声明的 Named Output，不访问 Renderer DOM，也没有 Adapter：
+两种 Runtime 都只返回声明的 Named Output，不访问 Renderer DOM，也没有 Adapter：
 
 - `server-python`：独立进程，适合本机原生依赖；HTML 只能 snapshot/unavailable。
-- `browser-python`：Pyodide module Worker；HTML 可继续计算。
 - `browser-js`：Web Worker；默认的轻量浏览器计算路径。
 
-能等价实现且输入适合浏览器时，默认选择 `browser-js → browser-python → server-python`。这是可移植性、启动成本与部署复杂度的建议顺序；原生依赖、求解器或大规模计算仍直接使用 server-python。
+浏览器内 snapshot 数据加工和便携交互使用 `browser-js`；完整 Python 生态、复杂模型、求解器或大规模计算直接使用 `server-python`。
 
 每次交互以 `tab + dashboard + query run + transform + generation` 隔离。较新的 generation 只 supersede 相同分支的旧任务；迟到请求会收到 `interaction_generation_stale`，不能覆盖新结果。
 
@@ -131,11 +132,11 @@ Interaction endpoint 从 Query Run 建立时就属于该 Run，不以整次 Quer
 
 `execution.plan.server_interactive_base_references()` 在 Query 建立时分类可达 `server-python` 分支所需的 Base Output，并通过 Run API 暴露 `server_interactive_inputs`。数据只保存一份：所有 Query Artifact 位于 Workspace `.dataviz/runs/<run-id>/artifacts/`，不进入 Dashboard；RunManager 用 `tab session + dashboard + run` 控制访问，Interactive Executor 再按 canonical Output reference 读取。Source/Dataset 的 NodeCache key 包含 Dashboard 与节点 ID，默认 tab namespace 位于 `.dataviz/cache/tabs/<session-hash>/`。因此页面刷新可以恢复同一 Run，跨 tab 访问被拒绝，交互执行也没有 Source Runner 回退路径。
 
-`trigger` 支持 `apply`、`auto` 和 `manual`。Interactive Transform 用 `selection_inputs` / `compute_inputs` 把代码局部 alias 映射到 canonical Control key。`data.pipeline` 在 Runtime Adapter 边界先把 Selection include 契约应用到所有具有相应字段的表输入，然后才调用 browser-js/browser-python Compute；server-python 在 `ExecutionContext.table/input` 边界做同样的裁剪。Compute Control 区分 draft/committed，内容绑定和 provenance 只描述真正产生当前结果的 committed state。
+`trigger` 支持 `apply`、`auto` 和 `manual`。Interactive Transform 只用 `control_inputs`：`mode: value` 把一个 projection 传给代码，`mode: filter` 对明确列出的 table input 应用字段、operator 和空值策略。同一 Control 可以同时被自动预览和显式 Apply 的消费者读取；Runtime 分别记录 current state、applied state 和各 View/Transform 的 applied revision，内容绑定与 provenance 只描述真正产生当前结果的状态。
 
-Select 用 `options.mode=static|infer` 明确候选域所有权。动态域不从派生 View Output 建立；Dependency Compiler 会把每个 `infer` Selection 沿消费 View 的 Interactive 输入追溯到 Base Output，显式 `options.source` 也只能引用 `source:` / `dataset:` 表格 Output，并作为 Query reachability root。带显式 `depends_on` 的 static Select 同样绑定 Base option domain，但只允许声明的封闭 choices。Query、Selection 与 Compute Select 共用 `initial`：多选为 `all/empty/values`，单选为 `first/empty/value`；非 Select 输入使用 `default`。Canvas 首次启动按 `hydrate Base → reconcile Controls in control_order → commit canonical snapshot → render → run Interactive` 执行，避免必填空 `<select>` 抹掉 canonical state并阻断整页。`dataviz:canvas-ready` 只在这一初始化事务完成后发布；Server Shell 再按当前 frame identity 恢复 tab-local Control state，避免 iframe load、Query ready 与用户输入之间形成竞态。
+Select 用 `options.mode=static|infer` 明确候选域所有权。动态域不从派生 View Output 建立；Dependency Compiler 会把每个 `infer` Control 沿消费 View 的 Interactive 输入追溯到 Base Output，显式 `options.source` 也只能引用 `source:` / `dataset:` 表格 Output，并作为 Query reachability root。带显式 `depends_on` 的 static Select 同样绑定 Base option domain，但只允许声明的封闭 choices。Query Parameter 与 Control Select 共用 `initial`：多选为 `all/empty/values`，单选为 `first/empty/value`；非 Select 输入使用 `default`。Canvas 首次启动按 `hydrate Base → reconcile Controls in control_order → commit canonical snapshot → render → run Interactive` 执行，避免必填空 `<select>` 抹掉 canonical state并阻断整页。`dataviz:canvas-ready` 只在这一初始化事务完成后发布；Server Shell 再按当前 frame identity 恢复 tab-local Control state，避免 iframe load、Query ready 与用户输入之间形成竞态。
 
-首次握手后，父页面只发送其拥有的 Dashboard Control patch；Canvas 拥有 Section/View 状态的协调与完整 canonical snapshot。parent selection epoch 防止旧 Canvas snapshot 恢复更新前的 Dashboard 值，owner-scoped patch 则防止延迟 Header 消息覆盖 Canvas 刚提交的 Section/View 值。这一协议与 dashboard/run/frame identity 校验共同定义 tab 内的双向同步边界。
+首次握手后，父页面只发送其拥有的 Dashboard Control patch；Canvas 拥有 Section/View 状态的协调与完整 canonical snapshot。parent control epoch 防止旧 Canvas snapshot 恢复更新前的 Dashboard 值，owner-scoped patch 则防止延迟 Header 消息覆盖 Canvas 刚提交的 Section/View 值。这一协议与 dashboard/run/frame identity 校验共同定义 tab 内的双向同步边界。
 
 ## 5. Output、状态和证据
 
@@ -160,21 +161,21 @@ not_run → queued → loading → ready | empty | error | cancelled | unavailab
 
 ## 6. Browser Runtime 与局部更新
 
-Server 与 HTML 共享 `dataviz/runtime/v5` Manifest、Named Output Store 和 Runtime Event。共享主机源码按 Manifest、Value Contract、Output Store、Interactive Scheduler、Selection Binding、Renderer Lifecycle 与 bootstrap 分布在 `src/dataviz/server/runtime_src/`；`python tools/build_canvas_runtime.py` 确定性生成 Server 与 HTML 唯一加载的 `server/static/canvas-runtime.js`，`--check` 用于 CI/发布门禁。`data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 分别物理拥有数据 Adapter、Renderer lifecycle、Section/Repeat 和 Presentation state，借 `dataviz:runtime-ready` 装配到主机，不在 Runtime 源码模块中保留第二份实现。命令式 Renderer 实例拥有其全部引擎资源；Perspective 的 Worker/Table/Viewer 不作为 Canvas 全局单例共享，实例释放时三者共同释放。异步引擎阶段具有有界终态，失败时进入结构化 Fallback/Error，而不是无限 Loading。
+Server 与 HTML 共享 `dataviz/runtime/v6` Manifest、Named Output Store 和 Runtime Event。共享主机源码按 Manifest、Value Contract、Output Store、Interactive Scheduler、Control Binding、Renderer Lifecycle 与 bootstrap 分布在 `src/dataviz/server/runtime_src/`；`python tools/build_canvas_runtime.py` 确定性生成 Server 与 HTML 唯一加载的 `server/static/canvas-runtime.js`，`--check` 用于 CI/发布门禁。`runtime.control`、`data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 分别物理拥有输入协调、数据 Adapter、Renderer lifecycle、Section/Repeat 和 Presentation state，借 `dataviz:runtime-ready` 装配到主机，不在 Runtime 源码模块中保留第二份实现。命令式 Renderer 实例拥有其全部引擎资源；Perspective 的 Worker/Table/Viewer 不作为 Canvas 全局单例共享，实例释放时三者共同释放。异步引擎阶段具有有界终态，失败时进入结构化 Fallback/Error，而不是无限 Loading。
 
 Server Header 中的 `Pipeline` 面板同时展示 Query 节点与 Interactive Transform。Query 状态来自 Run SSE；Browser Interactive 状态通过当前 iframe 的 `dataviz:interactive-status` 消息回传，并同时校验 dashboard/run/frame identity，避免跨 Dashboard 或旧 frame 污染状态。
 
 Runtime 根据显式依赖建立反向索引：
 
 - Query Output 就绪时只启动刚满足依赖的 Interactive Transform 和 View。
-- Selection-kind Control 只筛选字段适用且位于其作用域内的 View。
+- `mode: filter` binding 只筛选字段适用且位于其作用域内的 View。
 - View Control 不重绘兄弟 View。
-- Compute-kind Control 只失效声明消费它的 Interactive Transform 下游。
+- `mode: value` binding 只失效声明消费它的 Interactive Transform 下游。
 - 新 Run 可以显示 stale 旧结果，但不会把两个 Run 的 Output 静默混合。
 
 父页面与 Canvas 的消息同时校验 origin、source、`dashboard_id`、`run_id` 和 `frame_id`。Canvas ready 后主动握手；Query 到达终态时父页面只更新 Interaction endpoint，不重新加载 iframe。
 
-Runtime 将 Selection-kind、Compute-kind 和 Output 视为三种独立 delta。统一的 Controls authoring/UI 入口不会合并这些调度语义。调用方必须显式传递“全部变化”“部分变化”或“没有变化”，不能用省略参数混淆语义。缺失 Derived Output 只负责首次启动分支；若分支已经 active，无关 Output 发布不会取消或重复启动它。Output signature 未变化时也不会继续传播或重绘。
+Runtime 将 Control state delta 与 Output delta 分开；具体效果来自每个消费者自己的 `control_inputs` binding，而不是 Control 的全局 kind。调用方必须显式传递“全部变化”“部分变化”或“没有变化”，不能用省略参数混淆语义。缺失 Derived Output 只负责首次启动分支；若分支已经 active，无关 Output 发布不会取消或重复启动它。Output signature 未变化时也不会继续传播或重绘。
 
 大 Table 的传输可使用 Arrow IPC/columnar envelope；浏览器按需解码。部分通用 Data Entry Component 和 Renderer 首次消费时仍会物化 JavaScript 行对象，当前不承诺完整的浏览器列式查询引擎。
 
@@ -218,15 +219,6 @@ Interactive Transform 必须声明：
 
 Server 页面导出时会向 Canvas 请求 canonical snapshot；请求按当前 Dashboard contract 清除 sessionStorage 中可能遗留的未知 key。可达 Interactive DAG 中只要存在 `server-python`，HTML Export 就返回 `html_export_server_runtime_unavailable`，并引导创建分享链接；独立 HTML 不会把 Server Runtime 伪造成 snapshot。
 
-browser-python 的 interactive export 支持：
-
-- `cdn`：HTML 保存 Pyodide index URL，首次交互时按需加载；
-- `bundle`：CLI 生成 HTML、`<stem>.assets/pyodide/` 和 manifest，Server 返回包含它们的 ZIP；解压后通过 HTTP 打开。
-
-Pyodide Worker、URL 和资产按可执行分支裁剪。没有 browser-python，或分支已经 snapshot/unavailable 时，不携带无用 Python Runtime。
-
-本地 bundle 必须是版本匹配的完整 Pyodide 分发根目录。静态预检通过 `package.json` 核对 Runtime 版本，按 Emscripten 目标环境解析 dependency marker，检查核心 loader/WASM/stdlib/lockfile，并从 `micropip` 与声明依赖出发验证 lockfile 传递闭包、wheel 文件和必需 SHA-256；这保证 `bundle` 表示无需外网且可验证的运行包，而不只是把 `pyodide.mjs` 复制进报告。
-
 CLI 无浏览器上下文时不会替用户伪造 browser snapshot。需要当前页面交互状态的报告由 Server 页面导出；确定性的默认状态报告可以使用 `dataviz report`。
 
 ## 8. Workspace、Adapter 和隔离
@@ -239,7 +231,7 @@ CLI 无浏览器上下文时不会替用户伪造 browser snapshot。需要当�
 
 Server 状态以浏览器 tab 的 `session_id` 为边界。不同 tab、Dashboard、用户、Query Run 和 Interaction generation 不共享草稿、取消信号或运行证据。内容寻址缓存可以复用相同输入的结果，但不会共享交互状态。
 
-分享结果属于 Workspace Runtime 数据而不是 Dashboard 源码。每个 `/shared/<share-id>` 对应 `shared_caches/<dashboard>_<timestamp>_<run>/`，其中只保存 manifest、Query Result 和经过哈希校验的 Artifact。分享页锁定 Query Parameter，不提供 Run；Browser JS/Pyodide 在端侧执行，Server Python Interactive Transform 通过既有 Interaction API 执行。Server 重启时把持久化结果恢复为当前浏览器会话独享的合成 Run，不能把 generation、取消信号或草稿跨浏览器共享。v1 不做过期和自动清理。
+分享结果属于 Workspace Runtime 数据而不是 Dashboard 源码。每个 `/shared/<share-id>` 对应 `shared_caches/<dashboard>_<timestamp>_<run>/`，其中只保存 manifest、Query Result 和经过哈希校验的 Artifact。分享页锁定 Query Parameter，不提供 Run；Browser JS 在端侧执行，Server Python Interactive Transform 通过既有 Interaction API 执行。Server 重启时把持久化结果恢复为当前浏览器会话独享的合成 Run，不能把 generation、取消信号或草稿跨浏览器共享。v1 不做过期和自动清理。
 
 开发态 Hot Reload 位于 `src/dataviz/server/hot_reload.py`：dependency-free watcher 只做 stat 扫描并忽略 `.dataviz`/虚拟环境/构建目录，debounce 后根据已解析声明和实际引用资产计算 Workspace semantic snapshot，把变化分成 navigation、canvas、analysis、query、server 或 invalid；无关临时文件不会重载 Canvas。`server/app.py` 原子发布完整快照并提供 Workspace SSE；Query 请求会先 flush 尚未发布的文件批次，并返回所捕获的 revision。`server/static/app.js` 保留 tab 状态、处理增量刷新并在真正晚于 Run 的 Query Contract 变化时进入 Outdated。活动 Run 始终继续使用启动快照，页面恢复时 `/api/session/runs` 会再次核验当前 Contract。
 
@@ -266,9 +258,9 @@ Shell 还拥有独立于 Dashboard Theme 的稳定视觉 token。Server 与导�
 `dataviz validate` 不查询数据，覆盖：
 
 - 严格 Schema、重复 ID、路径与 Adapter。
-- SQL 参数、Python/Pyodide 依赖。
+- SQL 参数与 Python 依赖。
 - Query/Interactive DAG、Output 引用与环。
-- 三类状态的 namespace 和作用域。
+- Query Parameter 与 scoped Control 的 namespace、writer 和 consumer 作用域。
 - trigger/export/Runtime 组合。
 - Presentation、Component 和内容绑定。
 
@@ -294,5 +286,5 @@ dataviz validate WORKSPACE --dashboard DASHBOARD --format json
 - Token 节省是待真实任务评测的产品假设，不承诺固定数字。
 - 成对评测工具已经实现；真实重复 trial 与结果发布尚待积累。
 - 当前运行协调只支持一个 Dataviz Server 进程写一个 Workspace/报告目标；Runtime 并发上限变更需要重启。
-- Pyodide bundle 只包含 Python Runtime。Plotly.js 4.0.0 与 TanStack Table Core 9.2.4 都由 Dataviz 固定并直接内置，Server 与 portable HTML 共用这些浏览器资产，不安装 Python `plotly`；Arrow 只有显式配置 Workspace 本地文件时离线，Perspective 当前仍依赖 CDN。manifest 的可移植性结论不覆盖自定义脚本自行发起的网络请求。
+- Plotly.js 4.0.0 与 TanStack Table Core 9.2.4 都由 Dataviz 固定并直接内置，Server 与 portable HTML 共用这些浏览器资产，不安装 Python `plotly`；Arrow 只有显式配置 Workspace 本地文件时离线，Perspective 当前仍依赖 CDN。manifest 的可移植性结论不覆盖自定义脚本自行发起的网络请求。
 - Dataviz 会隔离 Adapter 并脱敏错误/日志，但可信 Python Source 仍有能力主动把秘密作为 Output 返回；这是看板作者必须遵守的边界。

@@ -400,8 +400,7 @@ def _dependency_context_payload(
         "outputs",
         "runtimes",
         "parameter_inputs",
-        "selection_inputs",
-        "compute_inputs",
+        "control_inputs",
         "direct_views",
         "downstream_views",
     ):
@@ -425,9 +424,9 @@ def _dependency_context_payload(
         if selected_reference(key)
         or any(view_id in view_ids for view_id in value["views"])
     }
-    payload["selection_option_domains"] = {
+    payload["control_option_domains"] = {
         key: value
-        for key, value in payload["selection_option_domains"].items()
+        for key, value in payload["control_option_domains"].items()
         if key in control_keys
     }
     payload["controls"] = {
@@ -510,8 +509,10 @@ def build_context_payload(
         key
         for identifier in interactive_ids
         for key in {
-            *dependency_contract.interactive_compute_inputs[identifier].values(),
-            *dependency_contract.interactive_selection_inputs[identifier].values(),
+            binding["control"]
+            for binding in dependency_contract.interactive_control_inputs[
+                identifier
+            ].values()
         }
     )
     control_keys.update(f"query:{parameter}" for parameter in relevant_params)
@@ -684,7 +685,6 @@ def scaffold_recipes() -> tuple[str, ...]:
         "source.python",
         "dataset-transform.server-python",
         "interactive-transform.browser-js",
-        "interactive-transform.browser-python",
         "interactive-transform.server-python",
         "renderer.custom",
         *(f"view.{value}" for value in VIEW_TEMPLATES),
@@ -734,7 +734,7 @@ def _profile_files(profile: str, item_id: str) -> dict[str, str]:
         "runtime": {"browser_table_transport": "json"},
     }
     dashboard: dict[str, Any] = {
-        "schema": "dataviz/dashboard/v9",
+        "schema": "dataviz/dashboard/v11",
         "kind": "dashboard",
         "id": item_id,
         "title": item_id.replace("-", " ").title(),
@@ -781,7 +781,6 @@ def _profile_files(profile: str, item_id: str) -> dict[str, str]:
                 "controls": [
                     {
                         "id": "factor",
-                        "kind": "compute",
                         "label": "Factor",
                         "type": "single_input",
                         "value_type": "number",
@@ -805,13 +804,13 @@ def _profile_files(profile: str, item_id: str) -> dict[str, str]:
         )
         files[f"{dashboard_root}/transforms/scaled.yaml"] = _yaml(
             {
-                "schema": "dataviz/interactive-transform/v2",
+                "schema": "dataviz/interactive-transform/v3",
                 "kind": "interactive_transform",
                 "id": "scaled",
                 "runtime": "browser-js",
                 "code": "scaled.js",
                 "inputs": {"rows": "source:data/main"},
-                "compute_inputs": {"factor": f"dashboard:{item_id}/factor"},
+                "control_inputs": {"factor": f"dashboard:{item_id}/factor"},
                 "trigger": "auto",
                 "export": {"mode": "interactive"},
                 "outputs": {
@@ -825,7 +824,7 @@ def _profile_files(profile: str, item_id: str) -> dict[str, str]:
         )
         files[f"{dashboard_root}/transforms/scaled.js"] = (
             "function transform(context) {\n"
-            "  const factor = Number(context.compute_params.factor ?? 1);\n"
+            "  const factor = Number(context.control_inputs.factor ?? 1);\n"
             "  return {main: context.inputs.rows.map(row => ({\n"
             "    ...row, value: Number(row.value) * factor,\n"
             "  }))};\n"
@@ -900,7 +899,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         files = {
             "dashboard.yaml": _yaml(
                 {
-                    "schema": "dataviz/dashboard/v9",
+                    "schema": "dataviz/dashboard/v11",
                     "kind": "dashboard",
                     "id": item_id,
                     "title": item_id.replace("-", " ").title(),
@@ -939,7 +938,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
     elif recipe in {"source.file", "source.sql", "source.python"}:
         source_type = recipe.split(".", 1)[1]
         definition: dict[str, Any] = {
-            "schema": "dataviz/source/v2",
+            "schema": "dataviz/source/v3",
             "kind": "source",
             "id": item_id,
             "type": source_type,
@@ -970,7 +969,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         files = {
             f"{item_id}.yaml": _yaml(
                 {
-                    "schema": "dataviz/dataset-transform/v2",
+                    "schema": "dataviz/dataset-transform/v3",
                     "kind": "dataset_transform",
                     "id": item_id,
                     "runtime": "server-python",
@@ -993,7 +992,6 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         }
     elif recipe in {
         "interactive-transform.browser-js",
-        "interactive-transform.browser-python",
         "interactive-transform.server-python",
     }:
         runtime = recipe.rsplit(".", 1)[1]
@@ -1001,19 +999,16 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         files = {
             f"{item_id}.yaml": _yaml(
                 {
-                    "schema": "dataviz/interactive-transform/v2",
+                    "schema": "dataviz/interactive-transform/v3",
                     "kind": "interactive_transform",
                     "id": item_id,
                     "runtime": runtime,
                     "code": f"{item_id}.{suffix}",
                     "inputs": {"data": "source:data/main"},
-                    "compute_inputs": {},
-                    "selection_inputs": {},
+                    "control_inputs": {},
                     "trigger": "apply" if runtime == "server-python" else "auto",
                     "export": (
-                        {"mode": "interactive", "assets": "cdn"}
-                        if runtime == "browser-python"
-                        else {"mode": "interactive"}
+                        {"mode": "interactive"}
                         if runtime == "browser-js"
                         else {"mode": "snapshot"}
                     ),
@@ -1092,7 +1087,6 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
             definition["controls"] = [
                 {
                     "id": "groups",
-                    "kind": "selection",
                     "field": "entity_id",
                     "type": "multiple_select", "value_type": "text",
                     "label": "Groups",
@@ -1100,7 +1094,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                     "options": {"mode": "infer"},
                 }
             ]
-            definition["repeat"]["selection"] = "groups"
+            definition["repeat"]["control"] = "groups"
         files = {"dashboard.section.snippet.yaml": _yaml([definition])}
     elif recipe.startswith("control."):
         component = recipe.split(".", 1)[1]
@@ -1109,7 +1103,6 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         label = item_id.replace("-", " ").title()
         control: dict[str, Any] = {
             "id": item_id,
-            "kind": "compute",
             "type": "single_input", "value_type": "text",
             "label": label,
             "default": "",
@@ -1192,7 +1185,6 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
             control.pop("default")
             control.update(
                 {
-                    "kind": "selection",
                     "type": "multiple_select", "value_type": "text",
                     "field": "district",
                     "path_fields": ["province", "city", "district"],

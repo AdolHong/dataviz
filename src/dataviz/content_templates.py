@@ -12,9 +12,9 @@ from dataviz.workspace.controls import canonical_control_key
 if TYPE_CHECKING:
     from dataviz.workspace.models import (
         DashboardDefinition,
+        ControlDefinition,
         QueryParameterDefinition,
         ScopedControlDefinition,
-        SelectionControlDefinition,
     )
 
 
@@ -28,7 +28,7 @@ _SCOPED_CONTROL_EXPRESSION = re.compile(
     rf"controls\.(section|view)\.({_CONTENT_ID})\.({_CONTENT_ID})"
 )
 
-SelectionOrigin = Literal["dashboard", "section", "view"]
+ControlOrigin = Literal["dashboard", "section", "view"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +42,7 @@ class ContentTemplateInspection:
 class ContentControl:
     expression: str
     key: str
-    origin: SelectionOrigin
+    origin: ControlOrigin
     owner_id: str
     control_id: str
     definition: ScopedControlDefinition
@@ -100,7 +100,7 @@ def inspect_content_template(value: str) -> ContentTemplateInspection:
 
 def _parse_control_expression(
     expression: str,
-) -> tuple[SelectionOrigin, str | None, str] | None:
+) -> tuple[ControlOrigin, str | None, str] | None:
     dashboard = _DASHBOARD_CONTROL_EXPRESSION.fullmatch(expression)
     if dashboard:
         return "dashboard", None, dashboard.group(2)
@@ -291,8 +291,8 @@ def format_parameter_value(
     return str(value)
 
 
-def format_selection_value(value: Any, definition: SelectionControlDefinition) -> str:
-    """Format browser Selection state as compact human-facing context."""
+def format_control_value(value: Any, definition: ControlDefinition) -> str:
+    """Format one Control value as compact human-facing context."""
     if value is None or value == "" or value == []:
         return "全部"
     if definition.type == "range_input" and definition.value_type == "date":
@@ -333,13 +333,12 @@ def render_content_template(
     value: str,
     definition: DashboardDefinition,
     query_parameters: dict[str, Any] | None = None,
-    compute_parameters: dict[str, Any] | None = None,
-    selections: dict[str, Any] | None = None,
+    control_state: dict[str, dict[str, Any]] | None = None,
     *,
     field: str | None = None,
     preserve_dynamic: bool = False,
 ) -> str:
-    """Render the safe Parameter and Selection content DSL."""
+    """Render the safe Query Parameter and Control content DSL."""
     inspection = inspect_content_template(value)
     parameter_definitions = {item.id: item for item in definition.query_parameters}
     control_contract = content_control_contract(definition)
@@ -365,8 +364,7 @@ def render_content_template(
         raise ValueError("; ".join(errors))
 
     parameter_values = query_parameters or {}
-    compute_values = compute_parameters or {}
-    selection_values = selections or {}
+    states = control_state or {}
 
     def replace(match: re.Match[str]) -> str:
         expression = match.group(1).strip()
@@ -381,17 +379,11 @@ def render_content_template(
         control = control_contract[expression]
         if preserve_dynamic:
             return f"{{{{ {expression} }}}}"
-        values = (
-            selection_values
-            if control.definition.kind == "selection"
-            else compute_values
-        )
-        resolved = values.get(
-            control.key, initial_control_value(control.definition)
-        )
-        if control.definition.kind == "selection":
-            return format_selection_value(resolved, control.definition)
-        return format_parameter_value(resolved, control.definition)
+        entry = states.get(control.key, {})
+        if entry.get("intent") == "all_available":
+            return "全部"
+        resolved = entry.get("value", initial_control_value(control.definition))
+        return format_control_value(resolved, control.definition)
 
     return _TOKEN.sub(replace, value)
 
@@ -400,7 +392,7 @@ def build_content_bindings(
     definition: DashboardDefinition,
     query_parameters: dict[str, Any] | None,
 ) -> dict[str, dict[str, Any]]:
-    """Compile Selection/Compute-dependent content into a runtime manifest."""
+    """Compile Control-dependent content into a runtime manifest."""
     contract = content_control_contract(definition)
     bindings: dict[str, dict[str, Any]] = {}
     for field, value in content_template_fields(definition):
@@ -421,7 +413,6 @@ def build_content_bindings(
                 {
                     "expression": expression,
                     "key": control.key,
-                    "kind": control.definition.kind,
                     "origin": control.origin,
                     "owner_id": control.owner_id,
                     "control_id": control.control_id,
@@ -439,23 +430,20 @@ def build_content_bindings(
 def interpolate_dashboard_content(
     definition: DashboardDefinition,
     query_parameters: dict[str, Any] | None,
-    compute_parameters: dict[str, Any] | None = None,
-    selections: dict[str, Any] | None = None,
+    control_state: dict[str, dict[str, Any]] | None = None,
     *,
     fallback_title: str | None = None,
 ) -> DashboardDefinition:
     """Return a copy with safe human-facing content fields interpolated."""
     parameter_values = query_parameters or {}
-    compute_values = compute_parameters or {}
-    selection_values = selections or {}
+    states = control_state or {}
 
     def render(value: str, field: str) -> str:
         return render_content_template(
             value,
             definition,
             parameter_values,
-            compute_values,
-            selection_values,
+            states,
             field=field,
         )
 

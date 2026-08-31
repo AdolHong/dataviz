@@ -1,4 +1,4 @@
-schema: dataviz/interactive-transform/v2
+schema: dataviz/interactive-transform/v3
 kind: interactive_transform
 id: latest-metrics
 name: 最新季度指标
@@ -9,10 +9,14 @@ runtime: browser-js
 inputs:
   metrics: source:metrics/main
 query_inputs: {}
-compute_inputs:
+control_inputs:
   city_count: dashboard:chart-gallery/radar_city_count
-selection_inputs:
-  province: dashboard:chart-gallery/province
+  province:
+    mode: filter
+    control: dashboard:chart-gallery/province
+    field: province
+    inputs: [metrics]
+    empty: match_none
 trigger: auto
 export: {mode: interactive}
 outputs:

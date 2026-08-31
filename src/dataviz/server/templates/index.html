@@ -42,14 +42,11 @@
           </summary>
           <div class="header-control__popover header-control__popover--controls">
             <div class="dashboard-control-groups">
-              <section id="dashboard-selection-group" class="dashboard-control-group" data-control-kind="selection">
-                <form id="dashboard-selection-form" class="selection-form"></form>
-              </section>
-              <section id="dashboard-compute-group" class="dashboard-control-group" data-control-kind="compute">
-                <form id="compute-parameter-form" class="parameter-form"></form>
+              <section id="dashboard-control-group" class="dashboard-control-group">
+                <form id="dashboard-control-form" class="control-form"></form>
               </section>
             </div>
-            <footer id="dashboard-compute-actions" class="compute-actions"><span id="compute-state">Results are current.</span><button id="compute-apply" class="button button--run" type="button" disabled>RUN</button></footer>
+            <footer id="dashboard-control-actions" class="control-actions"><span id="control-state">Results are current.</span><button id="control-apply" class="button button--run" type="button" disabled>RUN</button></footer>
           </div>
         </details>
         <div id="query-run-control" class="query-run-control">
@@ -82,6 +79,14 @@
         <div class="dv-query-card">
           <header class="dv-query-card__header">
             <h2>查询参数</h2>
+            <span class="query-parameter-actions">
+              <button id="query-parameters-revert" class="query-domain-reload" type="button" aria-label="恢复已应用参数" title="恢复已应用参数" hidden>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7 4 12l5 5M5 12h8a6 6 0 1 1-6 6"/></svg>
+              </button>
+              <button id="query-parameter-options-reload" class="query-domain-reload" type="button" aria-label="刷新参数选项" title="刷新参数选项" hidden>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"/></svg>
+              </button>
+            </span>
           </header>
           <div id="query-parameters-panel" class="header-control__popover header-control__popover--query query-parameters-panel dv-query-card__body" data-control-panel-body>
             <form id="parameter-form" class="parameter-form"></form>

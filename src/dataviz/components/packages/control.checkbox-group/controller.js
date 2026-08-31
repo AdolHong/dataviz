@@ -23,13 +23,17 @@
       optionsHost.replaceChildren();
       options.forEach(option => {
         const unavailable = Boolean(option.disabled);
-        if (unavailable && control.dataset.showUnavailable !== 'true') return;
+        if (
+          unavailable
+          && option.dataset.preserveValue !== 'true'
+          && control.dataset.showUnavailable !== 'true'
+        ) return;
         const capped = Boolean(maxSelected && selected.length >= maxSelected && !option.selected);
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = `dv-checkbox-option${option.selected && !unavailable ? ' is-selected' : ''}`;
+        button.className = `dv-checkbox-option${option.selected ? ' is-selected' : ''}${unavailable ? ' is-unavailable' : ''}`;
         button.dataset.value = option.value;
-        button.setAttribute('aria-pressed', String(option.selected && !unavailable));
+        button.setAttribute('aria-pressed', String(option.selected));
         button.disabled = input.disabled || unavailable || capped;
         const mark = document.createElement('i');
         mark.setAttribute('aria-hidden', 'true');

@@ -9,7 +9,7 @@ import yaml
 from dataviz.content_templates import (
     build_content_bindings,
     format_parameter_value,
-    format_selection_value,
+    format_control_value,
     inspect_content_template,
     interpolate_dashboard_content,
 )
@@ -19,7 +19,7 @@ from dataviz.workspace import load_workspace, validate_workspace
 from dataviz.workspace.models import (
     DashboardDefinition,
     QueryParameterDefinition,
-    SelectionControlDefinition,
+    ControlDefinition,
 )
 
 
@@ -64,13 +64,13 @@ def test_parameter_content_templates_format_human_facing_values():
 def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v9",
+            "schema": "dataviz/dashboard/v11",
             "id": "hourly-sales",
             "title": "小时销售",
             "controls": [
                 {
                     "id": "region",
-                    "kind": "selection",
+
                     "type": "single_select", "value_type": "text",
                     "initial": {"mode": "value", "value": "south"},
                     "options": {
@@ -87,7 +87,7 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
                     "controls": [
                         {
                             "id": "dow",
-                            "kind": "selection",
+
                             "type": "single_select", "value_type": "integer",
                             "initial": {"mode": "value", "value": 5},
                             "options": {
@@ -113,8 +113,14 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
             ],
         }
     )
-    selected = {"section:night_analysis/dow": 4}
-    resolved = interpolate_dashboard_content(definition, {}, {}, selected)
+    control_state = {
+        "section:night_analysis/dow": {
+            "value": 4,
+            "revision": 1,
+            "intent": "explicit",
+        }
+    }
+    resolved = interpolate_dashboard_content(definition, {}, control_state)
     bindings = build_content_bindings(definition, {})
 
     assert resolved.sections[0].title == "周四各小时销售分析"
@@ -131,10 +137,10 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
         "owner_id": "night_analysis",
         "property": "title",
     }
-    selection = SelectionControlDefinition.model_validate(
+    selection = ControlDefinition.model_validate(
         {
             "id": "dow",
-            "kind": "selection",
+
                 "type": "multiple_select", "value_type": "integer",
             "options": {
                 "mode": "static",
@@ -145,13 +151,13 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
             },
         }
     )
-    assert format_selection_value([4, 5], selection) == "全部"
+    assert format_control_value([4, 5], selection) == "全部"
 
 
 def test_interpolation_is_limited_to_declarative_content_fields():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v9",
+            "schema": "dataviz/dashboard/v11",
             "id": "hourly-sales",
             "title": "商品 {{ parameters.product_id }}",
             "subtitle": "{{ parameters.period }}",
@@ -256,7 +262,7 @@ def test_custom_canvas_content_helper_keeps_selection_binding(tmp_path: Path):
     trend["controls"] = [
         {
             "id": "dow",
-            "kind": "selection",
+
             "field": "region",
             "type": "single_select", "value_type": "text",
             "initial": {"mode": "value", "value": "华东"},
@@ -300,7 +306,7 @@ def test_validate_rejects_unknown_and_executable_content_expressions(tmp_path: P
     definition["sections"][1]["controls"] = [
         {
             "id": "dow",
-            "kind": "selection",
+
             "type": "single_select", "value_type": "integer",
             "options": {
                 "mode": "static",

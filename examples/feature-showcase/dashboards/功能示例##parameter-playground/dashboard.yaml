@@ -1,8 +1,8 @@
-schema: dataviz/dashboard/v9
+schema: dataviz/dashboard/v11
 kind: dashboard
 id: parameter-playground
 title: 参数试验场
-description: Query Parameter 决定重新取数；Selection-kind Control 只改变已经拿到的数据样本。
+description: Query Parameter 决定重新取数；Control 通过显式 filter consumer 只改变已经拿到的数据样本。
 context:
   grain: 每个生成序号一行，记录分组、数值和派生分数
 adapters: {warehouse: demo-duckdb}
@@ -11,7 +11,6 @@ query_parameters:
   - {id: row_count, type: single_input, value_type: number, label: 行数, default: 12}
 controls:
   - id: segment
-    kind: selection
     field: segment
     type: multiple_select
     value_type: text
@@ -33,6 +32,8 @@ views:
     y: value
     series: segment
     aggregate: none
+    control_inputs: &segment_filter
+      segment: {mode: filter, control: dashboard.segment, field: segment, inputs: [main], empty: match_none}
 
   - id: parameter-table
     title: 当前数据集快照
@@ -40,6 +41,7 @@ views:
     template: table
     columns: [id, segment, value, score]
     limit: 100
+    control_inputs: *segment_filter
 
 sections:
   - {id: experiment, title: 参数实验, views: [parameter-line, parameter-table]}

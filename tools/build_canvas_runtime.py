@@ -17,7 +17,7 @@ PARTS = (
     "40-renderer-lifecycle.js",
     "50-output-store.js",
     "60-renderer-disposal.js",
-    "70-selection-binding.js",
+    "70-control-binding.js",
     "80-state-and-live-scheduler.js",
     "90-bootstrap.js",
 )

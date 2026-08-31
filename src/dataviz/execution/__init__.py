@@ -4,7 +4,7 @@ __all__ = [
     "InteractionResult",
     "NodeResult",
     "RunResult",
-    "resolve_compute_values",
+    "resolve_control_states",
     "resolve_query_parameters",
 ]
 
@@ -25,12 +25,12 @@ def __getattr__(name: str):
             "NodeResult": NodeResult,
             "RunResult": RunResult,
         }[name]
-    if name in {"InteractionExecutor", "resolve_compute_values"}:
+    if name in {"InteractionExecutor", "resolve_control_states"}:
         from dataviz.execution.interactive import InteractionExecutor
-        from dataviz.workspace.controls import resolve_compute_values
+        from dataviz.workspace.controls import resolve_control_states
 
         return {
             "InteractionExecutor": InteractionExecutor,
-            "resolve_compute_values": resolve_compute_values,
+            "resolve_control_states": resolve_control_states,
         }[name]
     raise AttributeError(name)

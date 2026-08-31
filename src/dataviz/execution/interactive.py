@@ -26,6 +26,7 @@ from dataviz.execution.parameters import project_query_inputs
 from dataviz.execution.python_process import execute_python_node
 from dataviz.execution.references import OutputReference, parse_output_reference
 from dataviz.execution.results import InteractionResult, NodeResult, RunResult
+from dataviz.input_state import project_control_state
 from dataviz.redaction import redact_text, redact_value
 from dataviz.workspace.loader import (
     LoadedDashboard,
@@ -33,9 +34,7 @@ from dataviz.workspace.loader import (
     dashboard_validation_diagnostics,
 )
 from dataviz.workspace.controls import (
-    project_selection_values,
-    resolve_compute_values,
-    resolve_selection_states,
+    resolve_control_states,
     scoped_control_registry,
 )
 
@@ -56,8 +55,7 @@ class InteractivePlanNode:
     inputs: dict[str, OutputReference]
     dependencies: set[str]
     query_inputs: dict[str, Any]
-    selection_inputs: dict[str, str]
-    compute_inputs: dict[str, str]
+    control_inputs: dict[str, dict[str, Any]]
 
 
 def normalize_interactive_target(value: str) -> str:
@@ -97,8 +95,7 @@ def compile_interactive_plan(
                 for dependency in contract.interactive_dependencies[identifier]
             },
             query_inputs=dict(contract.interactive_parameter_inputs[identifier]),
-            selection_inputs=dict(contract.interactive_selection_inputs[identifier]),
-            compute_inputs=dict(contract.interactive_compute_inputs[identifier]),
+            control_inputs=dict(contract.interactive_control_inputs[identifier]),
         )
         for identifier in ordered
     ]
@@ -189,8 +186,7 @@ class InteractionExecutor:
         run: RunResult,
         target: str,
         *,
-        compute_parameters: dict[str, Any] | None = None,
-        selection_state: dict[str, dict[str, Any]] | None = None,
+        control_state: dict[str, dict[str, Any]] | None = None,
         generation: int = 1,
         interaction_id: str | None = None,
         refresh: bool = False,
@@ -250,12 +246,8 @@ class InteractionExecutor:
                 },
             )
         interaction_id = interaction_id or f"ix_{uuid.uuid4().hex[:16]}"
-        compute_values = resolve_compute_values(
-            dashboard.definition,
-            compute_parameters,
-        )
-        resolved_selection_state = resolve_selection_states(
-            dashboard.definition, selection_state
+        resolved_control_state = resolve_control_states(
+            dashboard.definition, control_state
         )
         result = InteractionResult(
             interaction_id=interaction_id,
@@ -266,8 +258,8 @@ class InteractionExecutor:
             target=target_id,
             status="loading",
             query_parameters=dict(run.query_parameters),
-            compute_parameters=compute_values,
-            selection_state=resolved_selection_state,
+            query_parameter_intents=dict(run.query_parameter_intents),
+            control_state=resolved_control_state,
             nodes={
                 node.id: NodeResult(
                     node_id=node.id,
@@ -466,22 +458,24 @@ class InteractionExecutor:
                         },
                     )
                 inputs[name] = descriptor
-            selection_registry = scoped_control_registry(
-                dashboard.definition,
-                kind="selection",
-            )
-            selection_value_map = project_selection_values(
-                dashboard.definition,
-                interaction.selection_state,
-            )
-            selection_filters = tuple(
+            control_registry = scoped_control_registry(dashboard.definition)
+            control_values = {
+                alias: project_control_state(
+                    interaction.control_state[binding["control"]],
+                    binding.get("projection", "value"),
+                )
+                for alias, binding in node.control_inputs.items()
+            }
+            control_filters = tuple(
                 {
-                    **selection_registry[control_key].as_dict(),
+                    **control_registry[binding["control"]].as_dict(),
                     "alias": alias,
-                    "state": interaction.selection_state.get(control_key),
-                    "value": selection_value_map.get(control_key),
+                    "state": interaction.control_state[binding["control"]],
+                    "value": interaction.control_state[binding["control"]]["value"],
+                    "consumer_binding": binding,
                 }
-                for alias, control_key in node.selection_inputs.items()
+                for alias, binding in node.control_inputs.items()
+                if binding.get("mode") == "filter"
             )
             context = ExecutionContext(
                 workspace_root=self.workspace.root,
@@ -490,19 +484,12 @@ class InteractionExecutor:
                 query_inputs=project_query_inputs(
                     node.query_inputs, run.query_parameters
                 ),
-                compute_params={
-                    alias: interaction.compute_parameters.get(control_key)
-                    for alias, control_key in node.compute_inputs.items()
+                control_inputs=control_values,
+                control_state={
+                    alias: interaction.control_state[binding["control"]]
+                    for alias, binding in node.control_inputs.items()
                 },
-                selections={
-                    alias: selection_value_map.get(control_key)
-                    for alias, control_key in node.selection_inputs.items()
-                },
-                selection_state={
-                    alias: interaction.selection_state.get(control_key, {})
-                    for alias, control_key in node.selection_inputs.items()
-                },
-                selection_filters=selection_filters,
+                control_filters=control_filters,
                 inputs=inputs,
                 store=store,
                 adapter=None,
@@ -524,9 +511,8 @@ class InteractionExecutor:
                 "generation": interaction.generation,
                 "cache_key": cache_key,
                 "query_inputs": context.query_inputs,
-                "compute_parameters": context.compute_params,
-                "selection_state": context.selection_state,
-                "selections": context.selections,
+                "control_inputs": context.control_inputs,
+                "control_state": context.control_state,
                 "inputs": {
                     name: {
                         "reference": node.inputs[name].canonical,
@@ -715,7 +701,7 @@ class InteractionExecutor:
             if path.exists():
                 files[f"dependency:{dependency}"] = hash_path(path)
         payload = {
-            "protocol": "dataviz/interactive-transform/v2",
+            "protocol": "dataviz/interactive-transform/v3",
             "definition": node.definition.model_dump(mode="json", by_alias=True),
             "files": files,
             "inputs": {
@@ -723,8 +709,7 @@ class InteractionExecutor:
                 for name, descriptor in context.inputs.items()
             },
             "query_inputs": context.query_inputs,
-            "compute_parameters": context.compute_params,
-            "selections": context.selections,
+            "control_inputs": context.control_inputs,
             "runtime": package_fingerprint(node.definition.python_dependencies),
         }
         return self.cache.key(payload)

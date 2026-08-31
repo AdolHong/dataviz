@@ -1,4 +1,4 @@
-schema: dataviz/interactive-transform/v2
+schema: dataviz/interactive-transform/v3
 kind: interactive_transform
 id: summarize
 runtime: browser-js

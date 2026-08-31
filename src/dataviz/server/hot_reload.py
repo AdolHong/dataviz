@@ -129,13 +129,13 @@ def _analysis_signature(dashboard: LoadedDashboard) -> str:
                     item.model_dump(mode="json", by_alias=True)
                     for item in view.controls
                 ],
-                "selection_bindings": {
+                "control_inputs": {
                     key: (
                         value
                         if isinstance(value, str)
                         else value.model_dump(mode="json", by_alias=True)
                     )
-                    for key, value in view.selection_bindings.items()
+                    for key, value in view.control_inputs.items()
                 },
             }
             for view in logic.views

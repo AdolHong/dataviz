@@ -26,7 +26,7 @@ SESSION_B = "interactive-tab-b"
 
 def test_interactive_trigger_defaults_follow_runtime():
     base = {
-        "schema": "dataviz/interactive-transform/v2",
+        "schema": "dataviz/interactive-transform/v3",
         "id": "runtime-default",
         "code": "transform.py",
         "export": {"mode": "snapshot"},
@@ -35,21 +35,36 @@ def test_interactive_trigger_defaults_follow_runtime():
     browser = InteractiveTransformDefinition.model_validate(
         base | {"runtime": "browser-js", "code": "transform.js", "export": {"mode": "interactive"}}
     )
-    pyodide = InteractiveTransformDefinition.model_validate(
-        base | {"runtime": "browser-python", "export": {"mode": "interactive", "assets": "cdn"}}
-    )
     server = InteractiveTransformDefinition.model_validate(base | {"runtime": "server-python"})
 
     assert browser.trigger == "auto"
-    assert pyodide.trigger == "auto"
     assert server.trigger == "apply"
 
 
-def region_state(value: str) -> dict[str, dict[str, object]]:
+def test_interactive_transform_rejects_retired_browser_python_runtime():
+    with pytest.raises(ValueError, match="browser-python"):
+        InteractiveTransformDefinition.model_validate(
+            {
+                "schema": "dataviz/interactive-transform/v3",
+                "id": "retired-runtime",
+                "runtime": "browser-python",
+                "code": "transform.py",
+                "export": {"mode": "interactive"},
+                "outputs": {"main": {"kind": "table"}},
+            }
+        )
+
+
+def interaction_state(
+    *, factor: int = 2, delay: float = 0, region: str = "north"
+) -> dict[str, dict[str, object]]:
     return {
+        "dashboard:interactive/factor": {"value": factor, "revision": 0},
+        "dashboard:interactive/delay": {"value": delay, "revision": 0},
         "dashboard:interactive/region": {
             "intent": "explicit",
-            "values": [value],
+            "value": [region],
+            "revision": 0,
         }
     }
 
@@ -75,17 +90,16 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v9
+        """schema: dataviz/dashboard/v11
 kind: dashboard
 id: interactive
 title: Interactive contract
 query_parameters:
   - {id: batch, type: single_input, value_type: integer, default: 7}
 controls:
-  - {id: factor, kind: compute, type: single_input, value_type: integer, default: 2}
-  - {id: delay, kind: compute, type: single_input, value_type: number, default: 0}
+  - {id: factor, type: single_input, value_type: integer, default: 2}
+  - {id: delay, type: single_input, value_type: number, default: 0}
   - id: region
-    kind: selection
     type: multiple_select
     value_type: text
     field: region
@@ -114,7 +128,7 @@ sections:
         encoding="utf-8",
     )
     (dashboard / "transforms" / "summary.yaml").write_text(
-        f"""schema: dataviz/interactive-transform/v2
+        f"""schema: dataviz/interactive-transform/v3
 kind: interactive_transform
 id: summary
 runtime: server-python
@@ -122,11 +136,10 @@ code: summary.py
 inputs:
   rows: source:raw/main
 query_inputs: {{batch: batch}}
-compute_inputs:
-  factor: dashboard:interactive/factor
-  delay: dashboard:interactive/delay
-selection_inputs:
-  region: dashboard:interactive/region
+control_inputs:
+  factor: {{mode: value, control: dashboard.factor}}
+  delay: {{mode: value, control: dashboard.delay}}
+  region: {{mode: filter, control: dashboard.region, field: region, inputs: [rows], empty: match_none}}
 trigger: apply
 export: {{mode: snapshot}}
 outputs:
@@ -148,13 +161,13 @@ cache: {{mode: session}}
 def transform(context):
     assert context.adapter is None
     context.progress(0.1, "started")
-    time.sleep(float(context.compute_params["delay"]))
+    time.sleep(float(context.control_inputs["delay"]))
     frame = context.table("rows").copy()
-    selected = context.selections["region"]
+    selected = context.control_inputs["region"]
     context.log("applying region selection", selected=selected)
     if selected:
         assert frame["region"].tolist() == selected
-    frame["value"] = frame["value"] * int(context.compute_params["factor"])
+    frame["value"] = frame["value"] * int(context.control_inputs["factor"])
     frame["batch"] = int(context.query_inputs["batch"])
     context.progress(1.0, "complete")
     return {"main": frame, "total": int(frame["value"].sum())}
@@ -173,6 +186,47 @@ def wait_for(predicate, *, timeout: float = 6) -> None:
     raise AssertionError("Timed out waiting for asynchronous execution")
 
 
+def test_one_control_can_feed_auto_and_apply_consumers(tmp_path: Path):
+    root = build_interactive_workspace(tmp_path / "workspace")
+    dashboard_root = root / "dashboards" / "interactive"
+    dashboard_path = dashboard_root / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    definition["interactive_transforms"].append("transforms/preview.yaml")
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    (dashboard_root / "transforms" / "preview.yaml").write_text(
+        """schema: dataviz/interactive-transform/v3
+kind: interactive_transform
+id: preview
+runtime: browser-js
+code: preview.js
+inputs: {rows: source:raw/main}
+control_inputs:
+  factor: {mode: value, control: dashboard.factor}
+trigger: auto
+export: {mode: interactive}
+outputs: {main: {kind: table}}
+""",
+        encoding="utf-8",
+    )
+    (dashboard_root / "transforms" / "preview.js").write_text(
+        "export default context => ({main: context.inputs.rows});\n",
+        encoding="utf-8",
+    )
+
+    workspace = load_workspace(root)
+    assert validate_workspace(workspace) == []
+    control = workspace.dashboard("interactive").dependency_contract.controls[
+        "dashboard:interactive/factor"
+    ]
+    assert control.transform_consumers == (
+        "preview",
+        "summary",
+    )
+
+
 def test_server_interactive_transform_has_isolated_context_named_outputs_and_cache(
     tmp_path: Path,
 ):
@@ -186,23 +240,20 @@ def test_server_interactive_transform_has_isolated_context_named_outputs_and_cac
     first = executor.execute(
         run,
         "summary",
-        compute_parameters={"dashboard:interactive/factor": 3, "dashboard:interactive/delay": 0},
-        selection_state=region_state("north"),
+        control_state=interaction_state(factor=3, delay=0, region="north"),
         observer=events.append,
     )
     second = executor.execute(
         run,
         "summary",
-        compute_parameters={"dashboard:interactive/factor": 3, "dashboard:interactive/delay": 0},
-        selection_state=region_state("north"),
+        control_state=interaction_state(factor=3, delay=0, region="north"),
     )
 
     store = ArtifactStore(workspace.root, run.run_id)
     frame = store.read_table(first.outputs["interactive:summary/main"])
     assert first.status == "ready"
     assert first.query_parameters == {"batch": 11}
-    assert first.compute_parameters == {"dashboard:interactive/factor": 3, "dashboard:interactive/delay": 0}
-    assert first.selection_state == region_state("north")
+    assert first.control_state == interaction_state(factor=3, delay=0, region="north")
     assert frame.to_dict(orient="records") == [
         {"region": "north", "value": 6, "batch": 11}
     ]
@@ -257,8 +308,7 @@ def test_server_interactive_inputs_are_classified_and_reuse_the_tab_run_snapshot
             session_id=SESSION_B,
             target="summary",
             generation=1,
-            compute_parameters={"dashboard:interactive/factor": 4, "dashboard:interactive/delay": 0},
-            selection_state=region_state("north"),
+            control_state=interaction_state(factor=4, delay=0, region="north"),
         )
 
     interaction = manager.start_interaction(
@@ -266,8 +316,7 @@ def test_server_interactive_inputs_are_classified_and_reuse_the_tab_run_snapshot
         session_id=SESSION_A,
         target="summary",
         generation=1,
-        compute_parameters={"dashboard:interactive/factor": 4, "dashboard:interactive/delay": 0},
-        selection_state=region_state("north"),
+        control_state=interaction_state(factor=4, delay=0, region="north"),
     )
     wait_for(lambda: interaction.status in {"ready", "error", "cancelled"})
 
@@ -383,7 +432,7 @@ def test_server_interactive_timeout_and_cancel_are_process_hard_boundaries(
     timeout_result = InteractionExecutor(workspace).execute(
         run,
         "summary",
-        compute_parameters={"dashboard:interactive/factor": 2, "dashboard:interactive/delay": 2},
+        control_state=interaction_state(factor=2, delay=2),
     )
     timeout_node = timeout_result.nodes["interactive:summary"]
     assert timeout_result.status == "error"
@@ -405,7 +454,7 @@ def test_server_interactive_timeout_and_cancel_are_process_hard_boundaries(
             InteractionExecutor(workspace).execute(
                 run,
                 "summary",
-                compute_parameters={"dashboard:interactive/factor": 2, "dashboard:interactive/delay": 5},
+                control_state=interaction_state(factor=2, delay=5),
                 cancel_event=cancel_event,
                 observer=events.append,
             ),
@@ -434,16 +483,14 @@ def test_interaction_generations_are_isolated_by_tab_dashboard_and_query_run(
         session_id=SESSION_A,
         target="summary",
         generation=1,
-        compute_parameters={"dashboard:interactive/factor": 2, "dashboard:interactive/delay": 5},
-        selection_state=region_state("north"),
+        control_state=interaction_state(factor=2, delay=5, region="north"),
     )
     first_b = manager.start_interaction(
         run_b.run_id,
         session_id=SESSION_B,
         target="summary",
         generation=1,
-        compute_parameters={"dashboard:interactive/factor": 4, "dashboard:interactive/delay": 0.2},
-        selection_state=region_state("south"),
+        control_state=interaction_state(factor=4, delay=0.2, region="south"),
     )
     wait_for(lambda: any(event["event"] == "node_progress" for event in first_a.events))
     second_a = manager.start_interaction(
@@ -451,8 +498,7 @@ def test_interaction_generations_are_isolated_by_tab_dashboard_and_query_run(
         session_id=SESSION_A,
         target="summary",
         generation=2,
-        compute_parameters={"dashboard:interactive/factor": 3, "dashboard:interactive/delay": 0},
-        selection_state=region_state("north"),
+        control_state=interaction_state(factor=3, delay=0, region="north"),
     )
     wait_for(
         lambda: all(
@@ -491,8 +537,7 @@ def test_server_interactions_are_globally_bounded_on_one_machine(tmp_path: Path)
         session_id=SESSION_A,
         target="summary",
         generation=1,
-        compute_parameters={"dashboard:interactive/factor": 2, "dashboard:interactive/delay": 0.4},
-        selection_state=region_state("north"),
+        control_state=interaction_state(factor=2, delay=0.4, region="north"),
     )
     wait_for(lambda: first.status == "loading")
     second = manager.start_interaction(
@@ -500,8 +545,7 @@ def test_server_interactions_are_globally_bounded_on_one_machine(tmp_path: Path)
         session_id=SESSION_B,
         target="summary",
         generation=1,
-        compute_parameters={"dashboard:interactive/factor": 3, "dashboard:interactive/delay": 0},
-        selection_state=region_state("south"),
+        control_state=interaction_state(factor=3, delay=0, region="south"),
     )
 
     time.sleep(0.08)
@@ -528,8 +572,7 @@ def test_queued_server_interaction_can_be_cancelled_before_slot_is_available(
             session_id=SESSION_A,
             target="summary",
             generation=1,
-            compute_parameters={"dashboard:interactive/factor": 2, "dashboard:interactive/delay": 0},
-            selection_state=region_state("north"),
+            control_state=interaction_state(factor=2, delay=0, region="north"),
         )
         manager.cancel_interaction(interaction.interaction_id, SESSION_A)
         wait_for(lambda: interaction.status == "cancelled", timeout=1)
@@ -574,8 +617,7 @@ def test_server_rejects_interaction_when_query_contract_changed(
             "session_id": SESSION_A,
             "transform_id": "summary",
             "generation": 1,
-            "compute_parameters": {"dashboard:interactive/factor": 2, "dashboard:interactive/delay": 0},
-            "selection_state": {},
+            "control_state": interaction_state(factor=2, delay=0),
         },
     )
 
@@ -613,17 +655,16 @@ def test_server_interactive_dependency_is_reused_once_per_generation_chain(
         encoding="utf-8",
     )
     (dashboard_root / "transforms" / "downstream.yaml").write_text(
-        """schema: dataviz/interactive-transform/v2
+        """schema: dataviz/interactive-transform/v3
 kind: interactive_transform
 id: downstream
 runtime: server-python
 code: downstream.py
 inputs: {rows: interactive:summary/main}
-compute_inputs:
-  factor: dashboard:interactive/factor
-  delay: dashboard:interactive/delay
-selection_inputs:
-  region: dashboard:interactive/region
+control_inputs:
+  factor: {mode: value, control: dashboard.factor}
+  delay: {mode: value, control: dashboard.delay}
+  region: {mode: filter, control: dashboard.region, field: region, inputs: [rows], empty: match_none}
 trigger: apply
 export: {mode: snapshot}
 outputs: {total: {kind: scalar}}
@@ -648,8 +689,7 @@ cache: {mode: none}
         session_id=SESSION_A,
         target="summary",
         generation=1,
-        compute_parameters={"dashboard:interactive/factor": 2, "dashboard:interactive/delay": 0},
-        selection_state=region_state("north"),
+        control_state=interaction_state(factor=2, delay=0, region="north"),
     )
     wait_for(lambda: upstream.status == "ready")
     downstream = manager.start_interaction(
@@ -657,8 +697,7 @@ cache: {mode: none}
         session_id=SESSION_A,
         target="downstream",
         generation=1,
-        compute_parameters={"dashboard:interactive/factor": 2, "dashboard:interactive/delay": 0},
-        selection_state=region_state("north"),
+        control_state=interaction_state(factor=2, delay=0, region="north"),
     )
     wait_for(lambda: downstream.status == "ready")
 
@@ -678,8 +717,7 @@ cache: {mode: none}
         session_id=SESSION_A,
         target="downstream",
         generation=2,
-        compute_parameters={"dashboard:interactive/factor": 2, "dashboard:interactive/delay": 0},
-        selection_state=region_state("north"),
+        control_state=interaction_state(factor=2, delay=0, region="north"),
     )
     wait_for(lambda: recovered.status == "ready")
 
@@ -714,8 +752,7 @@ def test_server_report_rejects_server_python_and_recommends_share(tmp_path: Path
         json={
             "session_id": SESSION_A,
             "run_id": run_id,
-            "compute_parameters": {"dashboard:interactive/factor": 3, "dashboard:interactive/delay": 0},
-            "selection_state": region_state("north"),
+            "control_state": interaction_state(factor=3, delay=0, region="north"),
         },
     )
 
@@ -735,8 +772,7 @@ def test_interaction_api_rejects_out_of_order_generation_without_cancelling_late
     request = {
         "session_id": SESSION_A,
         "transform_id": "summary",
-        "compute_parameters": {"dashboard:interactive/factor": 3, "dashboard:interactive/delay": 0.2},
-        "selection_state": region_state("north"),
+        "control_state": interaction_state(factor=3, delay=0.2, region="north"),
     }
 
     latest = client.post(
@@ -798,8 +834,7 @@ def test_browser_snapshot_requires_current_canvas_outputs_and_embeds_them(
     state = {
         "session_id": SESSION_A,
         "run_id": run_id,
-        "compute_parameters": {"dashboard:interactive/factor": 3, "dashboard:interactive/delay": 0},
-        "selection_state": region_state("north"),
+        "control_state": interaction_state(factor=3, delay=0, region="north"),
     }
 
     missing = client.post(

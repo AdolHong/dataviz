@@ -44,21 +44,23 @@
     if (!binding) return null;
     return {
       ...binding,
-      state:structuredClone(state.selection.state(binding.control)),
+      state:structuredClone(state.control.state(binding.control)),
       values:rows.map(row => bindingValue(binding, row)),
     };
   };
   const bindingValueSignature = value => JSON.stringify(value);
   const bindingSelected = (binding, value) => new Set(
-    (binding?.state?.values || []).map(bindingValueSignature)
+    (Array.isArray(binding?.state?.value) ? binding.state.value : [binding?.state?.value])
+      .filter(value => value != null)
+      .map(bindingValueSignature)
   ).has(bindingValueSignature(value));
   const selectRows = (view, state) => {
-    const contract = state.dependency_contract?.views?.[view.id]?.selection_contract || [];
+    const contract = state.dependency_contract?.views?.[view.id]?.filter_contract || [];
     const boundControl = controlBinding(view, state)?.control;
     const reference = mainInputReference(view, state);
     return state.data.table(reference).rows().filter(row => contract.every(item => (
       item.key === boundControl
-      || state.selection.matches(row, item, state.selection.state(item.key))
+      || state.control.matches(row, item, state.control.state(item.key))
     )));
   };
   const aggregate = (rows, groupFields, valueFields, operation = 'sum') => {
@@ -316,7 +318,7 @@
   }
 
   root.viewDeclarative = {
-    protocol:'dataviz/runtime/v5',
+    protocol:'dataviz/runtime/v6',
     escape,
     numericAggregate,
     inputReferences,
@@ -330,7 +332,7 @@
   };
   root.descriptors = root.descriptors || new Map();
   root.descriptors.set('view.declarative', {
-    protocol:'dataviz/runtime/v5',
+    protocol:'dataviz/runtime/v6',
     owns:['descriptor-builders', 'renderer-lifecycle'],
   });
 })(window);

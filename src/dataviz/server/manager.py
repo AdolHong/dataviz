@@ -20,7 +20,7 @@ from dataviz.execution.events import ExecutionEvent
 from dataviz.errors import DatavizError, ExecutionFailure
 from dataviz.maintenance import cleanup_workspace_storage
 from dataviz.workspace.loader import LoadedWorkspace
-from dataviz.workspace.controls import resolve_compute_values, resolve_selection_states
+from dataviz.workspace.controls import resolve_control_states
 from dataviz.analysis.usage import dashboard_query_usage, record_usage_best_effort
 
 
@@ -30,6 +30,7 @@ class RunRecord:
     session_id: str
     dashboard_id: str
     requested_parameters: dict[str, Any] = field(default_factory=dict)
+    requested_parameter_intents: dict[str, str] = field(default_factory=dict)
     query_scope: str = "dashboard"
     query_targets: list[str] = field(default_factory=list)
     query_nodes: list[str] = field(default_factory=list)
@@ -55,8 +56,7 @@ class InteractionRecord:
     session_id: str
     dashboard_id: str
     target: str
-    compute_parameters: dict[str, Any] = field(default_factory=dict)
-    selection_state: dict[str, dict[str, Any]] = field(default_factory=dict)
+    control_state: dict[str, dict[str, Any]] = field(default_factory=dict)
     status: str = "queued"
     events: list[dict[str, Any]] = field(default_factory=list)
     event_offset: int = 0
@@ -250,6 +250,7 @@ class RunManager:
         session_id: str,
         refresh: bool = False,
         *,
+        query_parameter_intents: dict[str, str] | None = None,
         _workspace: LoadedWorkspace | None = None,
     ) -> RunRecord:
         self.cleanup()
@@ -265,6 +266,7 @@ class RunManager:
             session_id=session_id,
             dashboard_id=dashboard_id,
             requested_parameters=dict(query_parameters),
+            requested_parameter_intents=dict(query_parameter_intents or {}),
             query_scope="dashboard",
             query_targets=sorted(plan.targets),
             query_nodes=sorted(plan.nodes),
@@ -333,6 +335,7 @@ class RunManager:
                 result = executor.run(
                     dashboard_id,
                     query_parameters=query_parameters,
+                    query_parameter_intents=query_parameter_intents,
                     refresh=refresh,
                     observer=observer,
                     snapshot_observer=snapshot_observer,
@@ -449,6 +452,7 @@ class RunManager:
                 session_id=session_id,
                 dashboard_id=dashboard_id,
                 requested_parameters=dict(result.query_parameters),
+                requested_parameter_intents=dict(result.query_parameter_intents),
                 query_scope=result.query_scope,
                 query_targets=list(result.query_targets),
                 query_nodes=list(result.query_nodes),
@@ -472,8 +476,7 @@ class RunManager:
         session_id: str,
         target: str,
         generation: int,
-        compute_parameters: dict[str, Any],
-        selection_state: dict[str, dict[str, Any]],
+        control_state: dict[str, dict[str, Any]],
         refresh: bool = False,
         _workspace: LoadedWorkspace | None = None,
     ) -> InteractionRecord:
@@ -497,13 +500,9 @@ class RunManager:
         dashboard = executor.ensure_valid(query_run.dashboard)
         ensure_query_run_compatible(dashboard, query_run)
         compile_interactive_plan(dashboard, target_id)
-        resolved_compute = resolve_compute_values(
+        resolved_control_state = resolve_control_states(
             dashboard.definition,
-            compute_parameters,
-        )
-        resolved_selection_state = resolve_selection_states(
-            dashboard.definition,
-            selection_state,
+            control_state,
         )
         key = (session_id, run_record.dashboard_id, run_id, target_id)
         with self.lock:
@@ -532,8 +531,7 @@ class RunManager:
                 session_id=session_id,
                 dashboard_id=run_record.dashboard_id,
                 target=target_id,
-                compute_parameters=dict(resolved_compute),
-                selection_state=dict(resolved_selection_state),
+                control_state=dict(resolved_control_state),
             )
             self.interactions[interaction_id] = record
             self.latest_interactions[key] = interaction_id
@@ -581,8 +579,7 @@ class RunManager:
                 result = executor.execute(
                     query_run,
                     target_id,
-                    compute_parameters=resolved_compute,
-                    selection_state=resolved_selection_state,
+                    control_state=resolved_control_state,
                     generation=generation,
                     interaction_id=interaction_id,
                     refresh=refresh,

@@ -1,11 +1,10 @@
 // Owner: Interactive Transform scheduling, workers, cancellation, and status.
 Object.assign(datavizRuntime, {
-  interactiveWorkerUrl(runtime) {
+  interactiveWorkerUrl() {
+    const runtime = 'browser-js';
     if (this.workerUrls.has(runtime)) return this.workerUrls.get(runtime);
-    const source = runtime === 'browser-python'
-      ? window.datavizInteractivePythonWorkerSource
-      : window.datavizInteractiveJsWorkerSource;
-    if (!source) throw new Error(`${runtime} Worker source is missing`);
+    const source = window.datavizInteractiveJsWorkerSource;
+    if (!source) throw new Error('browser-js Worker source is missing');
     const url = URL.createObjectURL(new Blob([source], {type:'application/javascript'}));
     this.workerUrls.set(runtime, url);
     return url;
@@ -20,10 +19,7 @@ Object.assign(datavizRuntime, {
     this.activeTransforms.get(id)?.cancel('Superseded by a newer generation');
     const generation = (this.transformGenerations.get(id) || 0) + 1;
     this.transformGenerations.set(id, generation);
-    const worker = new Worker(
-      this.interactiveWorkerUrl(item.spec.runtime),
-      item.spec.runtime === 'browser-python' ? {type:'module'} : undefined,
-    );
+    const worker = new Worker(this.interactiveWorkerUrl());
     const cancelBuffer = typeof SharedArrayBuffer === 'function'
       ? new Uint8Array(new SharedArrayBuffer(1))
       : null;
@@ -44,7 +40,7 @@ Object.assign(datavizRuntime, {
         cancel: reason => {
           if (settled) return;
           this.metrics.interactiveTransforms.cancelled += 1;
-          if (cancelBuffer) Atomics.store(cancelBuffer, 0, item.spec.runtime === 'browser-python' ? 2 : 1);
+          if (cancelBuffer) Atomics.store(cancelBuffer, 0, 1);
           worker.postMessage({
             protocol:DATAVIZ_INTERACTIVE_WORKER_PROTOCOL,
             type:'cancel',
@@ -91,6 +87,7 @@ Object.assign(datavizRuntime, {
         worker:true,
       })));
       this.activeTransforms.set(id, controller);
+      const prepared = datavizPrepareControlInputs(this.transformControlInputs(id), inputValues);
       worker.postMessage({
         protocol:DATAVIZ_INTERACTIVE_WORKER_PROTOCOL,
         type:'execute',
@@ -100,20 +97,10 @@ Object.assign(datavizRuntime, {
         entrypoint:item.source.entrypoint,
         code_dependencies:item.source.dependencies || {},
         context:{
-          inputs:inputValues,
+          inputs:prepared.inputs,
           query_inputs:datavizProjectParameterInputs(this.transformParameterInputs(id)),
-          compute_params:Object.fromEntries(Object.entries(this.transformComputeInputs(id)).map(([alias, key]) => [alias, window.dataviz.compute_parameters?.[key]])),
-          selections:Object.fromEntries(Object.entries(this.transformSelectionInputs(id)).map(([alias, key]) => [alias, datavizSelectionValue(key)])),
+          control_inputs:prepared.controlInputs,
         },
-        python_dependencies:item.spec.python_dependencies || [],
-        // Module Workers created from a Blob cannot resolve root-relative or
-        // report-relative dynamic imports. Resolve against the Canvas document
-        // before crossing the Worker boundary so Server and exported reports
-        // follow the same URL contract.
-        index_url:new URL(
-          window.dataviz.runtime_versions?.pyodide_index_url,
-          window.location.href,
-        ).href,
         cancel_buffer:cancelBuffer,
       });
     });
@@ -151,8 +138,7 @@ Object.assign(datavizRuntime, {
           session_id:endpoint.session_id,
           transform_id:id,
           generation:options.generation,
-          compute_parameters:window.dataviz.compute_parameters || {},
-          selection_state:datavizSelectionStateSnapshot(),
+          control_state:datavizControlStateSnapshot(),
         }),
       });
       if (!started.ok) throw new Error(`Server Compute request failed (${started.status}): ${await started.text()}`);
@@ -225,8 +211,12 @@ Object.assign(datavizRuntime, {
         Object.entries(inputValues).map(([name, value]) => [name, datavizValueSignature(value)])
       ),
       query_inputs:datavizProjectParameterInputs(this.transformParameterInputs(id)),
-      compute_params:Object.fromEntries(Object.entries(this.transformComputeInputs(id)).map(([alias, key]) => [alias, window.dataviz.compute_parameters?.[key]])),
-      selections:Object.fromEntries(Object.entries(this.transformSelectionInputs(id)).map(([alias, key]) => [alias, datavizSelectionValue(key)])),
+      control_state:Object.fromEntries(
+        Object.values(this.transformControlInputs(id)).map(binding => [
+          binding.control,
+          datavizControlEntry(binding.control),
+        ])
+      ),
     });
   },
   async executeTransform(id, item, inputValues, generation) {
@@ -295,12 +285,9 @@ Object.assign(datavizRuntime, {
       } : null,
     });
   },
-  async runTransforms(changedSelectionKeys = [], seedChangedOutputs = [], options = {}) {
+  async runTransforms(changedControlKeys = [], seedChangedOutputs = [], options = {}) {
     const outputs = window.dataviz.portable?.outputs || {};
-    const changedSelections = changedSelectionKeys == null ? null : new Set(changedSelectionKeys);
-    const changedCompute = options.changedComputeKeys === null
-      ? null
-      : new Set(options.changedComputeKeys || []);
+    const changedControls = changedControlKeys == null ? null : new Set(changedControlKeys);
     const changedOutputs = new Set(seedChangedOutputs);
     const staleOutputs = new Set();
     const manualClosure = new Set(options.manualTargets || []);
@@ -327,7 +314,7 @@ Object.assign(datavizRuntime, {
       if (!references.size) return;
       const affectedViewIds = this.affectedViews([], references);
       if (affectedViewIds?.length) {
-        this.renderViews({initial:false, changedSelectionKeys:[], affectedViewIds});
+        this.renderViews({initial:false, changedControlKeys:[], affectedViewIds});
       }
     };
     for (const id of order) {
@@ -350,14 +337,12 @@ Object.assign(datavizRuntime, {
           .map(name => `interactive:${id}/${name}`);
         const upstreamChanged = Object.values(references).some(reference => changedOutputs.has(reference));
         const upstreamStale = Object.values(references).some(reference => staleOutputs.has(reference));
-        const selectionChanged = changedSelections == null
-          || Object.values(this.transformSelectionInputs(id)).some(key => changedSelections.has(key));
-        const computeChanged = changedCompute == null
-          || Object.values(this.transformComputeInputs(id)).some(key => changedCompute.has(key));
+        const controlChanged = changedControls == null
+          || Object.values(this.transformControlInputs(id)).some(binding => changedControls.has(binding.control));
         const missingOutput = requiredOutputReferences.some(reference =>
           !Object.prototype.hasOwnProperty.call(outputs, reference)
         );
-        const relevant = upstreamChanged || upstreamStale || selectionChanged || computeChanged
+        const relevant = upstreamChanged || upstreamStale || controlChanged
           || manualClosure.has(id);
         if (!relevant && !missingOutput) return;
         // Missing Derived Output starts a branch once. An unrelated Source may
@@ -394,7 +379,7 @@ Object.assign(datavizRuntime, {
         const shouldExecute = manualClosure.has(id)
           // A newly loaded Query Run has no Derived Output yet. That initial
           // absence is itself a reason to execute an auto branch, even when a
-          // parent-frame state sync carries an empty Selection/Compute delta.
+          // parent-frame state sync carries an empty Control delta.
           || (spec.trigger === 'auto' && (relevant || missingOutput))
           || (spec.trigger === 'apply' && (options.apply === true || missingOutput));
         if (upstreamStale || !shouldExecute) {
@@ -491,6 +476,13 @@ Object.assign(datavizRuntime, {
             }
           });
           this.transformErrors.delete(id);
+          window.dataviz.applied_revisions ||= {views:{}, transforms:{}};
+          window.dataviz.applied_revisions.transforms[id] = Object.fromEntries(
+            Object.values(this.transformControlInputs(id)).map(binding => [
+              binding.control,
+              Number(datavizControlEntry(binding.control)?.revision || 0),
+            ])
+          );
           if (localChanged.size) {
             renderOutputDelta(localChanged);
             this.publishTransformStatus(id, 'ready');

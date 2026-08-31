@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import hashlib
 import importlib.metadata
 import json
 from pathlib import Path
 import shutil
 
-import pytest
 from typer.testing import CliRunner
 import yaml
 
@@ -22,103 +20,6 @@ def _copy_workspace(tmp_path: Path) -> Path:
     destination = tmp_path / "workspace"
     shutil.copytree(MINIMAL_WORKSPACE, destination)
     return destination
-
-
-def _browser_python_workspace(
-    root: Path,
-    *,
-    dependency: str = "duckdb==1.5.1",
-    assets: str = "cdn",
-    bundle_path: str | None = None,
-) -> Path:
-    dashboard = root / "dashboards" / "browser-python"
-    (dashboard / "data").mkdir(parents=True)
-    (dashboard / "transforms").mkdir()
-    runtime = f"\n  pyodide_bundle_path: {bundle_path}" if bundle_path else ""
-    (root / "workspace.yaml").write_text(
-        f"""schema: dataviz/workspace/v1
-kind: workspace
-id: browser-python
-title: Browser Python
-runtime:{runtime or ' {}'}
-""",
-        encoding="utf-8",
-    )
-    (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v9
-kind: dashboard
-id: browser-python
-title: Browser Python
-sources:
-  - id: raw
-    type: file
-    path: data/rows.csv
-    format: csv
-    outputs: {main: {kind: table}}
-interactive_transforms: [transforms/calculate.yaml]
-views:
-  - {id: result, template: table, input: interactive:calculate/main}
-sections:
-  - {id: result, title: Result, views: [result]}
-""",
-        encoding="utf-8",
-    )
-    (dashboard / "data" / "rows.csv").write_text("value\n1\n", encoding="utf-8")
-    dependency_yaml = json.dumps(dependency)
-    (dashboard / "transforms" / "calculate.yaml").write_text(
-        f"""schema: dataviz/interactive-transform/v2
-kind: interactive_transform
-id: calculate
-runtime: browser-python
-code: calculate.py
-inputs: {{rows: source:raw/main}}
-export: {{mode: interactive, assets: {assets}}}
-outputs: {{main: {{kind: table}}}}
-python_dependencies: [{dependency_yaml}]
-""",
-        encoding="utf-8",
-    )
-    (dashboard / "transforms" / "calculate.py").write_text(
-        "def transform(context):\n    return {'main': context.inputs['rows']}\n",
-        encoding="utf-8",
-    )
-    return root
-
-
-def _write_pyodide_bundle(root: Path) -> None:
-    bundle = root / "pyodide"
-    bundle.mkdir(exist_ok=True)
-    for name in (
-        "pyodide.mjs",
-        "pyodide.asm.mjs",
-        "pyodide.asm.wasm",
-        "python_stdlib.zip",
-    ):
-        (bundle / name).write_bytes(f"fixture:{name}".encode())
-    (bundle / "package.json").write_text(
-        json.dumps({"name": "pyodide", "version": "314.0.4"}),
-        encoding="utf-8",
-    )
-    packages = {}
-    for name, version, dependencies in (
-        ("micropip", "0.11.1", []),
-        ("duckdb", "1.5.1", ["numpy"]),
-        ("numpy", "2.4.3", []),
-    ):
-        filename = f"{name}-{version}.whl"
-        content = f"fixture:{name}:{version}".encode()
-        (bundle / filename).write_bytes(content)
-        packages[name] = {
-            "name": name,
-            "version": version,
-            "depends": dependencies,
-            "file_name": filename,
-            "sha256": hashlib.sha256(content).hexdigest(),
-        }
-    (bundle / "pyodide-lock.json").write_text(
-        json.dumps({"info": {"python": "3.14.0"}, "packages": packages}),
-        encoding="utf-8",
-    )
 
 
 def test_validate_preflight_has_stable_ai_contract_and_dashboard_scope(tmp_path: Path):
@@ -186,7 +87,41 @@ def test_validate_rejects_query_input_part_for_non_date_range(tmp_path: Path):
     assert "not range_input/date" in diagnostic["message"]
 
 
-def test_validate_rejects_unknown_selection_option_domain(tmp_path: Path):
+def test_validate_rejects_intent_projection_for_non_multiple_select(tmp_path: Path):
+    workspace = _copy_workspace(tmp_path)
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    definition["sources"][0]["query_inputs"] = {
+        "min_query_revenue": "min_query_revenue",
+        "revenue_intent": {
+            "parameter": "min_query_revenue",
+            "projection": "intent",
+        },
+    }
+    source_sql = workspace / "dashboards" / "sales-overview" / "sources" / "sales.sql"
+    source_sql.write_text(
+        source_sql.read_text(encoding="utf-8") + "\n-- :revenue_intent\n",
+        encoding="utf-8",
+    )
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    report = validate_preflight(workspace, dashboard_id="sales-overview")
+    diagnostic = next(
+        item
+        for item in report["diagnostics"]
+        if item["code"] == "query_input_intent_cardinality_invalid"
+    )
+
+    assert report["status"] == "invalid"
+    assert diagnostic["field"].endswith(
+        "query_inputs.revenue_intent.projection"
+    )
+
+
+def test_validate_rejects_unknown_control_option_domain(tmp_path: Path):
     workspace = _copy_workspace(tmp_path)
     dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
     definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
@@ -204,7 +139,7 @@ def test_validate_rejects_unknown_selection_option_domain(tmp_path: Path):
     diagnostic = next(
         item
         for item in report["diagnostics"]
-        if item["code"] == "selection_option_domain_invalid"
+        if item["code"] == "control_option_domain_invalid"
     )
 
     assert report["status"] == "invalid"
@@ -220,7 +155,7 @@ def test_validate_reports_control_dependency_cycles_before_runtime(tmp_path: Pat
     definition["controls"].append(
         {
             "id": "day",
-            "kind": "selection",
+
             "field": "day",
             "type": "multiple_select", "value_type": "text",
             "depends_on": ["dashboard.region"],
@@ -248,7 +183,7 @@ def test_validate_reports_control_dependency_cycles_before_runtime(tmp_path: Pat
         "dashboard:sales-overview/region",
         "dashboard:sales-overview/day",
     ]
-    assert "direct Selection parents" in diagnostic["hint"]
+    assert "direct Control parents" in diagnostic["hint"]
 
 
 def test_validate_rejects_fields_outside_the_selected_source_variant(tmp_path: Path):
@@ -547,7 +482,7 @@ def test_validate_checks_configurable_local_browser_runtime_assets(tmp_path: Pat
     assert diagnostics["runtime_asset_missing"]["field"] == "runtime.arrow_js"
 
 
-def test_validate_selection_binding_against_declared_output_schema(tmp_path: Path):
+def test_validate_control_filter_against_declared_output_schema(tmp_path: Path):
     workspace = _copy_workspace(tmp_path)
     dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
     definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
@@ -565,7 +500,7 @@ def test_validate_selection_binding_against_declared_output_schema(tmp_path: Pat
     diagnostics = [
         item
         for item in report["diagnostics"]
-        if item["code"] == "selection_field_unknown"
+        if item["code"] == "control_filter_field_unknown"
     ]
 
     assert diagnostics
@@ -603,7 +538,7 @@ def test_validate_focus_excludes_another_broken_dashboard(tmp_path: Path):
     broken = workspace / "dashboards" / "broken"
     broken.mkdir()
     (broken / "dashboard.yaml").write_text(
-        "schema: dataviz/dashboard/v9\nkind: dashboard\nid: broken\nretired_field: true\n",
+        "schema: dataviz/dashboard/v11\nkind: dashboard\nid: broken\nretired_field: true\n",
         encoding="utf-8",
     )
 
@@ -669,162 +604,3 @@ def test_cli_docs_publish_the_validation_workflow():
     assert "--dashboard" in topic["recommended_command"]
     assert topic["json_contract"]["queries_executed"].startswith("固定为 0")
     assert "sql_parameter_undeclared" in topic["sql_parameter_example"]["errors"]
-
-
-def test_validate_uses_the_pinned_pyodide_package_catalog(tmp_path: Path):
-    supported = validate_preflight(
-        _browser_python_workspace(tmp_path / "supported")
-    )
-    assert not [
-        item
-        for item in supported["diagnostics"]
-        if item["code"].startswith("pyodide_dependency_")
-    ]
-
-    mismatched = validate_preflight(
-        _browser_python_workspace(
-            tmp_path / "mismatched", dependency="duckdb==1.4.0"
-        )
-    )
-    diagnostic = next(
-        item
-        for item in mismatched["diagnostics"]
-        if item["code"] == "pyodide_dependency_version_mismatch"
-    )
-    assert "duckdb==1.5.1" in diagnostic["message"]
-
-
-def test_validate_checks_export_only_pyodide_bundle_contents(tmp_path: Path):
-    root = _browser_python_workspace(
-        tmp_path / "bundle",
-        assets="bundle",
-        bundle_path="pyodide",
-    )
-    (root / "pyodide").mkdir()
-
-    report = validate_preflight(root)
-
-    diagnostic = next(
-        item
-        for item in report["diagnostics"]
-        if item["code"] == "pyodide_bundle_incomplete"
-    )
-    assert diagnostic["field"] == "runtime.pyodide_bundle_path"
-    assert diagnostic["category"] == "runtime-dependencies"
-    assert "complete official Pyodide distribution" in diagnostic["hint"]
-    assert diagnostic["details"]["missing"] == [
-        "pyodide.mjs",
-        "pyodide.asm.mjs",
-        "pyodide.asm.wasm",
-        "python_stdlib.zip",
-        "pyodide-lock.json",
-        "package.json",
-    ]
-
-
-def test_validate_checks_pyodide_bundle_dependency_closure_and_hashes(tmp_path: Path):
-    root = _browser_python_workspace(
-        tmp_path / "bundle",
-        assets="bundle",
-        bundle_path="pyodide",
-    )
-    _write_pyodide_bundle(root)
-
-    valid = validate_preflight(root)
-    assert not [
-        item
-        for item in valid["diagnostics"]
-        if item["code"].startswith("pyodide_bundle_")
-    ]
-
-    package_manifest = root / "pyodide" / "package.json"
-    package_manifest.write_text(
-        json.dumps({"name": "pyodide", "version": "0.29.4"}),
-        encoding="utf-8",
-    )
-    mismatched = validate_preflight(root)
-    diagnostic = next(
-        item
-        for item in mismatched["diagnostics"]
-        if item["code"] == "pyodide_bundle_version_mismatch"
-    )
-    assert diagnostic["details"] == {"expected": "314.0.4", "actual": "0.29.4"}
-    package_manifest.write_text(
-        json.dumps({"name": "pyodide", "version": "314.0.4"}),
-        encoding="utf-8",
-    )
-
-    (root / "pyodide" / "numpy-2.4.3.whl").unlink()
-    missing = validate_preflight(root)
-    diagnostic = next(
-        item
-        for item in missing["diagnostics"]
-        if item["code"] == "pyodide_bundle_wheels_missing"
-    )
-    assert diagnostic["details"]["missing"] == [
-        {"package": "numpy", "file": "numpy-2.4.3.whl"}
-    ]
-
-    (root / "pyodide" / "numpy-2.4.3.whl").write_bytes(b"corrupt")
-    corrupt = validate_preflight(root)
-    diagnostic = next(
-        item
-        for item in corrupt["diagnostics"]
-        if item["code"] == "pyodide_bundle_wheel_hash_mismatch"
-    )
-    assert diagnostic["details"]["corrupt"] == [
-        {"package": "numpy", "file": "numpy-2.4.3.whl"}
-    ]
-
-
-def test_validate_rejects_symlinks_in_portable_pyodide_bundle(tmp_path: Path):
-    root = _browser_python_workspace(
-        tmp_path / "symlink-bundle",
-        assets="bundle",
-        bundle_path="pyodide",
-    )
-    _write_pyodide_bundle(root)
-    outside = tmp_path / "outside-runtime.bin"
-    outside.write_bytes(b"outside")
-    link = root / "pyodide" / "linked-runtime.bin"
-    try:
-        link.symlink_to(outside)
-    except OSError as error:  # pragma: no cover - platform policy may forbid symlinks
-        pytest.skip(f"Symlinks are unavailable: {error}")
-
-    report = validate_preflight(root)
-    diagnostic = next(
-        item
-        for item in report["diagnostics"]
-        if item["code"] == "pyodide_bundle_symlink_unsupported"
-    )
-
-    assert report["status"] == "invalid"
-    assert diagnostic["details"]["symlinks"] == ["linked-runtime.bin"]
-
-
-def test_validate_pyodide_bundle_uses_browser_markers_and_requires_hashes(
-    tmp_path: Path,
-):
-    root = _browser_python_workspace(
-        tmp_path / "bundle-markers",
-        dependency='duckdb==1.5.1; sys_platform == "emscripten"',
-        assets="bundle",
-        bundle_path="pyodide",
-    )
-    _write_pyodide_bundle(root)
-    lock_path = root / "pyodide" / "pyodide-lock.json"
-    lock = json.loads(lock_path.read_text(encoding="utf-8"))
-    lock["packages"]["duckdb"].pop("sha256")
-    lock_path.write_text(json.dumps(lock), encoding="utf-8")
-
-    report = validate_preflight(root)
-
-    diagnostic = next(
-        item
-        for item in report["diagnostics"]
-        if item["code"] == "pyodide_bundle_wheel_hash_missing"
-    )
-    assert diagnostic["details"]["unhashed"] == [
-        {"package": "duckdb", "file": "duckdb-1.5.1.whl"}
-    ]

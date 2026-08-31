@@ -4,11 +4,9 @@ import asyncio
 import json
 import re
 import shutil
-import tempfile
 import threading
 import time
 import uuid
-import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -25,7 +23,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.gzip import GZipMiddleware
-from starlette.background import BackgroundTask
+from starlette.datastructures import MutableHeaders
 
 from dataviz.artifacts import ArtifactDescriptor, ArtifactStore
 from dataviz.analysis import (
@@ -43,6 +41,10 @@ from dataviz.execution.results import RunResult
 from dataviz.execution.interactive import InteractionExecutor
 from dataviz.execution.fingerprint import ensure_query_run_compatible
 from dataviz.execution.outputs import normalize_outputs
+from dataviz.execution.parameter_domains import (
+    ParameterDomainCache,
+    resolve_parameter_domains,
+)
 from dataviz.execution.parameters import resolve_parameter_default
 from dataviz.execution.references import parse_output_reference
 from dataviz.filesystem import atomic_copy_file, atomic_write_text
@@ -54,13 +56,13 @@ from dataviz.server.hot_reload import (
     WorkspaceSemanticSnapshot,
     classify_workspace_change,
 )
+from dataviz.state_snapshot import normalize_consumer_revisions
 from dataviz.server.manager import RunManager
 from dataviz.workspace import load_workspace, validate_workspace
-from dataviz.selection_state import initial_selection_state
+from dataviz.input_state import initial_input_state
 from dataviz.workspace.controls import (
     compile_control_contract,
-    resolve_compute_values,
-    resolve_selection_states,
+    resolve_control_states,
 )
 from dataviz.workspace.control_components import resolve_control_component
 from dataviz.workspace.navigation import NavigationEditor
@@ -74,6 +76,29 @@ from dataviz.workspace.parameter_editor import (
 PACKAGE_ROOT = Path(__file__).resolve().parent
 
 
+class RuntimeAssetNoStoreMiddleware:
+    """Set no-store without BaseHTTPMiddleware's disconnect failure mode."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        path = str(scope.get("path") or "")
+        no_store = scope.get("type") == "http" and (
+            path == "/"
+            or path.startswith("/dashboards/")
+            or path.startswith("/static/")
+            or path.endswith("/canvas")
+        )
+
+        async def send_with_cache_control(message):
+            if no_store and message.get("type") == "http.response.start":
+                MutableHeaders(scope=message)["Cache-Control"] = "no-store"
+            await send(message)
+
+        await self.app(scope, receive, send_with_cache_control)
+
+
 class ApiRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -81,6 +106,20 @@ class ApiRequest(BaseModel):
 class RunRequest(ApiRequest):
     session_id: str = Field(min_length=8, max_length=128)
     query_parameters: dict[str, Any] = Field(default_factory=dict)
+    query_parameter_intents: dict[str, Literal["explicit", "all_available"]] = Field(
+        default_factory=dict
+    )
+    refresh: bool = False
+
+
+class ParameterDomainResolveRequest(ApiRequest):
+    session_id: str = Field(min_length=8, max_length=128)
+    query_parameters: dict[str, Any] = Field(default_factory=dict)
+    initialized_parameters: list[str] = Field(default_factory=list)
+    intents: dict[str, Literal["explicit", "all_available"]] = Field(
+        default_factory=dict
+    )
+    reconciliation: Literal["draft", "committed_snapshot"] = "draft"
     refresh: bool = False
 
 
@@ -88,17 +127,18 @@ class InteractionRequest(ApiRequest):
     session_id: str = Field(min_length=8, max_length=128)
     transform_id: str
     generation: int = Field(ge=1)
-    compute_parameters: dict[str, Any] = Field(default_factory=dict)
-    selection_state: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    control_state: dict[str, dict[str, Any]] = Field(default_factory=dict)
     refresh: bool = False
 
 
 class ReportRequest(ApiRequest):
     session_id: str = Field(min_length=8, max_length=128)
     run_id: str
-    selection_state: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    compute_parameters: dict[str, Any] = Field(default_factory=dict)
+    control_state: dict[str, dict[str, Any]] = Field(default_factory=dict)
     snapshot_outputs: dict[str, Any] = Field(default_factory=dict)
+    applied_revisions: dict[str, dict[str, dict[str, int]]] = Field(
+        default_factory=dict
+    )
     destination: Literal["download", "share"] = "download"
 
 
@@ -149,8 +189,11 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
     parameter_editor = ParameterEditor()
     app = FastAPI(title=f"Dataviz · {workspace.definition.title}")
     app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
+    app.add_middleware(RuntimeAssetNoStoreMiddleware)
     app.state.workspace = workspace
     app.state.manager = manager
+    parameter_domain_caches: dict[tuple[str, str], ParameterDomainCache] = {}
+    parameter_domain_cache_lock = threading.Lock()
     workspace_refresh_lock = threading.RLock()
     change_journal = WorkspaceChangeJournal()
     reload_semantics = WorkspaceSemanticSnapshot.from_workspace(workspace)
@@ -160,19 +203,6 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         if item.level == "error"
     }
     app.mount("/static", StaticFiles(directory=PACKAGE_ROOT / "static"), name="static")
-
-    @app.middleware("http")
-    async def disable_runtime_asset_cache(request: Request, call_next):
-        response = await call_next(request)
-        if (
-            request.url.path == "/"
-            or request.url.path.startswith("/dashboards/")
-            or request.url.path.startswith("/static/")
-            or request.url.path.startswith("/runtime/pyodide/")
-            or request.url.path.endswith("/canvas")
-        ):
-            response.headers["Cache-Control"] = "no-store"
-        return response
 
     def current_workspace():
         """Return one complete Workspace snapshot, never a partially refreshed object."""
@@ -512,11 +542,9 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 dashboard,
                 result,
                 asset_mode="inline",
-                pyodide_index_url="/runtime/pyodide/",
                 interaction=interaction,
                 session_id=checked,
-                compute_parameters=manifest.get("compute_parameters") or {},
-                selection_state=manifest.get("selection_state") or {},
+                control_state=manifest.get("control_state") or {},
             )
         except DatavizError as error:
             raise HTTPException(409, error.as_dict()) from error
@@ -538,27 +566,6 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             get_plotlyjs(),
             media_type="application/javascript",
             headers={"X-Dataviz-Plotly-Version": PLOTLY_JS_VERSION},
-        )
-
-    @app.get("/runtime/pyodide/{asset_path:path}")
-    def pyodide_runtime_asset(asset_path: str):
-        snapshot = current_workspace()
-        configured = snapshot.definition.runtime.pyodide_bundle_path
-        if not configured:
-            raise HTTPException(404, "Workspace has no bundled Pyodide Runtime")
-        root = (workspace_root / configured).resolve()
-        if not root.is_relative_to(workspace_root):
-            raise HTTPException(404, "Pyodide bundle is outside the Workspace")
-        target = (root / asset_path).resolve()
-        try:
-            target.relative_to(root)
-        except ValueError as error:
-            raise HTTPException(404, "Pyodide asset is outside the configured bundle") from error
-        if not target.is_file():
-            raise HTTPException(404, "Pyodide asset not found")
-        return FileResponse(
-            target,
-            headers={"Cache-Control": "private, no-store"},
         )
 
     @app.get("/runtime/components.css")
@@ -669,7 +676,6 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                         {
                             "key": item.key,
                             "id": item.id,
-                            "kind": item.kind,
                             "origin": item.origin,
                             "owner_id": item.owner_id,
                             "owner_title": (
@@ -680,14 +686,10 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                                 else view_titles.get(item.owner_id, item.owner_id)
                             ),
                             "definition": item.definition.model_dump(mode="json"),
-                            "initial_state": (
-                                initial_selection_state(
-                                    item.definition,
-                                    allow_unresolved_inferred=True,
-                                ).as_dict()
-                                if item.kind == "selection"
-                                else None
-                            ),
+                            "initial_state": initial_input_state(
+                                item.definition,
+                                allow_unresolved_inferred=True,
+                            ).as_dict(),
                             "presentation": _control_component_presentation(
                                 dashboard, item.key, item.definition
                             ),
@@ -715,9 +717,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                     )
                     if dependency is None:
                         control["scope_views"].append(view_id)
-                        if item.kind == "selection":
-                            control["direct_views"].append(view_id)
-                            control["affected_views"].append(view_id)
+                        control["affected_views"].append(view_id)
             dashboards.append(
                 {
                     **base,
@@ -750,6 +750,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                         }
                         for item in dashboard.definition.query_parameters
                     ],
+                    "parameter_domain_contract": dashboard.parameter_domain_contract.as_dict(),
                     "controls": list(scoped_controls.values()),
                     "control_contract": {
                         view_id: [item.as_dict() for item in effective]
@@ -801,8 +802,14 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                                 )
                                 for alias, binding in transform.query_inputs.items()
                             },
-                            "compute_inputs": dict(transform.compute_inputs),
-                            "selection_inputs": dict(transform.selection_inputs),
+                            "control_inputs": {
+                                alias: (
+                                    {"mode": "value", "control": binding}
+                                    if isinstance(binding, str)
+                                    else binding.model_dump(mode="json")
+                                )
+                                for alias, binding in transform.control_inputs.items()
+                            },
                             "export": transform.export.model_dump(mode="json"),
                         }
                         for transform_id, (_, transform) in dashboard.interactive_transforms.items()
@@ -985,6 +992,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 dashboard_id,
                 request.query_parameters,
                 session_id=checked_session(request.session_id),
+                query_parameter_intents=request.query_parameter_intents,
                 refresh=request.refresh,
                 _workspace=snapshot,
             )
@@ -993,6 +1001,44 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         return {
             "run_id": record.run_id,
             "status": record.status,
+            "workspace_revision": change_journal.revision,
+        }
+
+    @app.post("/api/dashboards/{dashboard_id}/parameter-domains/resolve")
+    def resolve_parameter_domain_options(
+        dashboard_id: str, request: ParameterDomainResolveRequest
+    ):
+        """Resolve Query Parameter choices before the analytical Query DAG starts."""
+
+        if watch:
+            workspace_watcher.flush()
+        session_id = checked_session(request.session_id)
+        try:
+            snapshot, dashboard = dashboard_from_disk(dashboard_id)
+        except WorkspaceError as error:
+            raise HTTPException(409, error.message) from error
+        cache_key = (session_id, dashboard_id)
+        with parameter_domain_cache_lock:
+            domain_cache = parameter_domain_caches.setdefault(
+                cache_key, ParameterDomainCache()
+            )
+        try:
+            resolution = resolve_parameter_domains(
+                snapshot,
+                dashboard,
+                request.query_parameters,
+                timezone_name=snapshot.definition.context.timezone,
+                initialized_parameters=set(request.initialized_parameters),
+                intents=request.intents,
+                strict=False,
+                preserve_unavailable=request.reconciliation == "committed_snapshot",
+                cache=domain_cache,
+                refresh=request.refresh,
+            )
+        except DatavizError as error:
+            raise HTTPException(422, error.as_dict()) from error
+        return {
+            **resolution.as_dict(),
             "workspace_revision": change_journal.revision,
         }
 
@@ -1050,6 +1096,11 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                         if record.snapshot
                         else record.requested_parameters
                     ),
+                    "query_parameter_intents": (
+                        record.snapshot.query_parameter_intents
+                        if record.snapshot
+                        else record.requested_parameter_intents
+                    ),
                     "nodes": {
                         node_id: node.status
                         for node_id, node in (
@@ -1099,8 +1150,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 session_id=session_id,
                 target=request.transform_id,
                 generation=request.generation,
-                compute_parameters=request.compute_parameters,
-                selection_state=request.selection_state,
+                control_state=request.control_state,
                 refresh=request.refresh,
                 _workspace=snapshot,
             )
@@ -1524,12 +1574,14 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         except DatavizError as error:
             raise HTTPException(409, error.as_dict()) from error
         try:
-            resolved_selection_state = resolve_selection_states(
-                dashboard.definition, request.selection_state
-            )
-            resolved_compute = resolve_compute_values(
+            resolved_control_state = resolve_control_states(
                 dashboard.definition,
-                request.compute_parameters,
+                request.control_state,
+            )
+            consumer_revisions = normalize_consumer_revisions(
+                dashboard,
+                resolved_control_state,
+                request.applied_revisions,
             )
         except Exception as error:
             raise HTTPException(422, f"Invalid report state: {error}") from error
@@ -1579,8 +1631,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             interaction_result = interaction_executor.execute(
                 result,
                 transform_id,
-                compute_parameters=resolved_compute,
-                selection_state=resolved_selection_state,
+                control_state=resolved_control_state,
             )
             if interaction_result.status != "ready":
                 raise HTTPException(
@@ -1597,8 +1648,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         browser_snapshot_ids = {
             transform_id
             for transform_id in snapshot_interactions
-            if dashboard.interactive_transforms[transform_id][1].runtime
-            in {"browser-js", "browser-python"}
+            if dashboard.interactive_transforms[transform_id][1].runtime == "browser-js"
         }
         allowed_snapshot_references = {
             f"interactive:{transform_id}/{name}"
@@ -1753,8 +1803,8 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                     "created_at": datetime.now(timezone.utc).isoformat(),
                     "url": f"/shared/{share_id}",
                     "query_parameters": result.query_parameters,
-                    "compute_parameters": resolved_compute,
-                    "selection_state": resolved_selection_state,
+                    "control_state": resolved_control_state,
+                    "consumer_revisions": consumer_revisions,
                     "artifacts": copied_artifacts,
                 }
                 atomic_write_text(
@@ -1811,10 +1861,8 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                                 },
                             },
                             "query_parameters": result.query_parameters,
-                            "effective_controls": {
-                                "selection": resolved_selection_state,
-                                "compute": resolved_compute,
-                            },
+                            "effective_controls": resolved_control_state,
+                            "consumer_revisions": consumer_revisions,
                             "outputs": result_outputs,
                             "lineage": {"query_nodes": result.query_nodes},
                             "provenance": {
@@ -1849,41 +1897,12 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 "url": f"/shared/{share_id}",
                 "path": str(final_share.relative_to(workspace_root)),
             }
-        if renderer._browser_python_export_assets(dashboard) == "bundle":
-            temporary = Path(tempfile.mkdtemp(prefix="dataviz-report-"))
-            try:
-                report_name = f"{dashboard_id}-{result.run_id}.html"
-                renderer.write_report(
-                    dashboard,
-                    result,
-                    temporary / report_name,
-                    compute_parameters=resolved_compute,
-                    selection_state=resolved_selection_state,
-                    derived_outputs=derived_outputs,
-                    snapshot_interactions=snapshot_interactions,
-                )
-                archive = temporary / f"{dashboard_id}-{result.run_id}.zip"
-                with zipfile.ZipFile(
-                    archive, "w", compression=zipfile.ZIP_DEFLATED
-                ) as bundle:
-                    for path in sorted(temporary.rglob("*")):
-                        if path.is_file() and path != archive:
-                            bundle.write(path, path.relative_to(temporary))
-            except BaseException:
-                shutil.rmtree(temporary, ignore_errors=True)
-                raise
-            return FileResponse(
-                archive,
-                media_type="application/zip",
-                filename=archive.name,
-                background=BackgroundTask(shutil.rmtree, temporary, True),
-            )
         content = renderer.render(
             dashboard,
             result,
             asset_mode="inline",
-            compute_parameters=resolved_compute,
-            selection_state=resolved_selection_state,
+            control_state=resolved_control_state,
+            applied_revisions=request.applied_revisions,
             derived_outputs=derived_outputs,
             snapshot_interactions=snapshot_interactions,
         )

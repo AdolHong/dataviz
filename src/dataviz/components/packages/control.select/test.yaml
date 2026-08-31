@@ -11,4 +11,4 @@ tests:
   - id: control.select.dynamic-reconcile
     component: control.select
     kind: browser
-    assertions: [upstream changes remove unavailable rows, invalid selected values clear immediately]
+    assertions: [normal upstream changes reconcile invalid draft values, committed snapshot values missing from the latest domain remain visible and unavailable]

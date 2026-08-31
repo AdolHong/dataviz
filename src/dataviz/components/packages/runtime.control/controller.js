@@ -8,7 +8,9 @@
     .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
   const nativeOptions = input => Array.from(input?.options || []);
   const options = input => nativeOptions(input).filter(option => option.dataset.emptyOption !== 'true');
-  const selectedOptions = input => options(input).filter(option => option.selected && !option.disabled);
+  const selectedOptions = input => options(input).filter(
+    option => option.selected && (!option.disabled || option.dataset.preserveValue === 'true'),
+  );
   const availableOptions = input => options(input).filter(option => !option.disabled);
   const selectionIntentModes = new Set(['all_available', 'explicit']);
   const normalizeSelectionIntent = value => selectionIntentModes.has(value) ? value : null;
@@ -131,10 +133,9 @@
     if (!empty && !input.multiple) input.selectedIndex = -1;
   };
   const summary = (input, placeholder = 'Choose…') => {
-    const available = availableOptions(input);
     const selected = selectedOptions(input);
     if (!input.multiple) return selected[0]?.textContent || placeholder;
-    if (available.length && selected.length === available.length) return `All (${available.length})`;
+    if (inferSelectionIntent(input) === 'all_available') return '全选';
     return selected.length ? `${selected.length} selected` : placeholder;
   };
   const optionGroup = option => option.dataset.group || (
@@ -152,10 +153,10 @@
     if (!host) return;
     const available = availableOptions(input);
     const selected = selectedOptions(input);
-    const selectionKey = control.closest('[data-selection-key]')?.dataset.selectionKey;
-    const selectionIntent = selectionKey
-      ? global.dataviz?.selection?.state?.(selectionKey)?.intent
-      : null;
+    const selectionKey = control.closest('[data-control-key]')?.dataset.controlKey;
+    const selectionIntent = normalizeSelectionIntent(
+      selectionKey ? global.dataviz?.control?.state?.(selectionKey)?.intent : null,
+    ) || inferSelectionIntent(input);
     const maxVisible = Math.max(0, Number(control.dataset.maxTagCount || 2));
     host.replaceChildren();
     if (!input.multiple) {
@@ -165,7 +166,8 @@
     if (input.multiple && selectionIntent === 'all_available') {
       const label = document.createElement('span');
       label.className = 'dv-choice-summary__all';
-      label.textContent = available.length ? `${control.dataset.allLabel || 'All'} (${available.length})` : control.dataset.allLabel || 'All';
+      label.textContent = control.dataset.allLabel || '全选';
+      if (available.length) label.setAttribute('aria-label', `全选，共 ${available.length} 项`);
       host.append(label);
       return;
     }
@@ -298,6 +300,7 @@
     selectedOptions,
     availableOptions,
     normalizeSelectionIntent,
+    setSelectionIntent,
     consumeSelectionIntent,
     markSelectionIntent,
     inferSelectionIntent,

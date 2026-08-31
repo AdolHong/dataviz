@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v9
+schema: dataviz/dashboard/v11
 kind: dashboard
 id: chart-gallery
 title: 多图表陈列室
@@ -8,7 +8,6 @@ context:
 adapters: {warehouse: demo-duckdb}
 controls:
   - id: province
-    kind: selection
     field: province
     type: multiple_select
     value_type: text
@@ -22,7 +21,6 @@ controls:
         - {label: 福建, value: 福建}
         - {label: 浙江, value: 浙江}
   - id: radar_city_count
-    kind: compute
     type: single_input
     value_type: integer
     label: 雷达城市数
@@ -41,6 +39,13 @@ views:
     y: revenue
     series: province
     aggregate: sum
+    control_inputs: &province_filter
+      province:
+        mode: filter
+        control: dashboard.province
+        field: province
+        inputs: [main]
+        empty: match_none
 
   - id: ranking
     title: 城市收入排行
@@ -50,6 +55,7 @@ views:
     y: revenue
     aggregate: sum
     sort: revenue
+    control_inputs: *province_filter
 
   - id: composition
     title: 省份构成
@@ -58,6 +64,7 @@ views:
     label: province
     value: revenue
     aggregate: sum
+    control_inputs: *province_filter
 
   - id: scatter
     title: Plotly 区间探索
@@ -72,6 +79,7 @@ views:
     control_binding:
       control: dashboard.province
       field: province
+    control_inputs: *province_filter
 
   - id: radial
     title: 城市能力雷达
@@ -87,6 +95,7 @@ views:
     template: table
     columns: [province, city, quarter, revenue, orders, customers]
     limit: 40
+    control_inputs: *province_filter
     options:
       searchable: true
       page_size: 5

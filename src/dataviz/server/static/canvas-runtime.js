@@ -1,7 +1,7 @@
 // Owner: Runtime protocol, manifest normalization, and shared constants.
-const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v5';
+const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v6';
 const DATAVIZ_INTERACTIVE_WORKER_PROTOCOL = 'dataviz/interactive-worker/v1';
-const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v5';
+const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v7';
 if (window.dataviz.protocol?.schema !== DATAVIZ_RUNTIME_PROTOCOL) {
   throw new Error(`Unsupported Dataviz Runtime protocol: ${window.dataviz.protocol?.schema || 'missing'}`);
 }
@@ -76,10 +76,32 @@ const datavizInputContractSignature = inputs => JSON.stringify(
       .sort(([left], [right]) => left.localeCompare(right))
   )
 );
+const datavizCanonicalControlReference = reference => {
+  const raw = String(reference || '').trim();
+  if (raw.startsWith('dashboard.')) {
+    return `dashboard:${window.dataviz.dashboard_id}/${raw.slice('dashboard.'.length)}`;
+  }
+  return raw;
+};
 const datavizControlInputSignature = inputs => JSON.stringify(
   Object.fromEntries(
     Object.entries(inputs || {})
-      .map(([alias, key]) => [alias, String(key)])
+      .map(([alias, raw]) => {
+        const binding = typeof raw === 'string'
+          ? {mode:'value', control:datavizCanonicalControlReference(raw), projection:'value'}
+          : {
+              mode:String(raw?.mode || 'value'),
+              control:datavizCanonicalControlReference(raw?.control),
+              ...((raw?.mode || 'value') === 'value'
+                ? {projection:String(raw?.projection || 'value')}
+                : raw?.projection ? {projection:String(raw.projection)} : {}),
+              ...(raw?.field ? {field:raw.field} : {}),
+              ...(raw?.inputs ? {inputs:[...raw.inputs]} : {}),
+              ...(raw?.empty ? {empty:String(raw.empty)} : {}),
+              ...(raw?.operator ? {operator:String(raw.operator)} : {}),
+            };
+        return [alias, binding];
+      })
       .sort(([left], [right]) => left.localeCompare(right))
   )
 );
@@ -541,7 +563,7 @@ const validateInteractiveOutput = (transformId, name, value, definition = {}) =>
 };
 // Owner: shared Runtime host state and public registration surface.
 const datavizRuntime = window.datavizRuntime = {
-  protocol: 'dataviz/runtime/v5',
+  protocol: 'dataviz/runtime/v6',
   transforms: new Map(),
   views: new Map(),
   renderers: new Map(),
@@ -588,11 +610,8 @@ const datavizRuntime = window.datavizRuntime = {
       throw new Error(`Interactive Transform ${spec.id} inputs differ from the compiled dependency contract`);
     }
     const interactiveContract = window.dataviz.dependency_contract.interactive;
-    if (datavizControlInputSignature(spec.selection_inputs) !== datavizControlInputSignature(interactiveContract.selection_inputs?.[spec.id])) {
-      throw new Error(`Interactive Transform ${spec.id} Selection inputs differ from the compiled dependency contract`);
-    }
-    if (datavizControlInputSignature(spec.compute_inputs) !== datavizControlInputSignature(interactiveContract.compute_inputs?.[spec.id])) {
-      throw new Error(`Interactive Transform ${spec.id} Compute inputs differ from the compiled dependency contract`);
+    if (datavizControlInputSignature(spec.control_inputs) !== datavizControlInputSignature(interactiveContract.control_inputs?.[spec.id])) {
+      throw new Error(`Interactive Transform ${spec.id} Control inputs differ from the compiled dependency contract`);
     }
     if (datavizParameterInputSignature(spec.query_inputs) !== datavizParameterInputSignature(interactiveContract.parameter_inputs?.[spec.id])) {
       throw new Error(`Interactive Transform ${spec.id} Query Parameter inputs differ from the compiled dependency contract`);
@@ -624,22 +643,14 @@ const datavizRuntime = window.datavizRuntime = {
   },
   configureSnapshotControls() {
     const snapshotIds = new Set(window.dataviz.snapshot_interactions || []);
-    const selectionKeys = new Set();
-    const computeKeys = new Set();
+    const controlKeys = new Set();
     snapshotIds.forEach(id => {
-      Object.values(this.transformSelectionInputs(id)).forEach(key => selectionKeys.add(key));
-      Object.values(this.transformComputeInputs(id)).forEach(key => computeKeys.add(key));
+      Object.values(this.transformControlInputs(id)).forEach(binding => controlKeys.add(binding.control));
     });
-    selectionKeys.forEach(key => {
-      document.querySelectorAll(`[data-selection-key="${CSS.escape(key)}"]`).forEach(control => {
-        control.dataset.selectionFrozen = 'true';
+    controlKeys.forEach(key => {
+      document.querySelectorAll(`[data-control-key="${CSS.escape(key)}"]`).forEach(control => {
+        control.dataset.controlFrozen = 'true';
         control.setAttribute('aria-label', `${control.getAttribute('aria-label') || key} · fixed snapshot`);
-        control.querySelectorAll('input,select,button').forEach(input => { input.disabled = true; });
-      });
-    });
-    computeKeys.forEach(key => {
-      document.querySelectorAll(`[data-compute-key="${CSS.escape(key)}"]`).forEach(control => {
-        control.dataset.computeFrozen = 'true';
         control.querySelectorAll('input,select,button').forEach(input => { input.disabled = true; });
       });
     });
@@ -668,11 +679,8 @@ const datavizRuntime = window.datavizRuntime = {
     }
     return inputs;
   },
-  transformSelectionInputs(id) {
-    return window.dataviz.dependency_contract?.interactive?.selection_inputs?.[id] || {};
-  },
-  transformComputeInputs(id) {
-    return window.dataviz.dependency_contract?.interactive?.compute_inputs?.[id] || {};
+  transformControlInputs(id) {
+    return window.dataviz.dependency_contract?.interactive?.control_inputs?.[id] || {};
   },
   transformParameterInputs(id) {
     return window.dataviz.dependency_contract?.interactive?.parameter_inputs?.[id] || {};
@@ -690,12 +698,11 @@ const datavizRuntime = window.datavizRuntime = {
 };
 // Owner: Interactive Transform scheduling, workers, cancellation, and status.
 Object.assign(datavizRuntime, {
-  interactiveWorkerUrl(runtime) {
+  interactiveWorkerUrl() {
+    const runtime = 'browser-js';
     if (this.workerUrls.has(runtime)) return this.workerUrls.get(runtime);
-    const source = runtime === 'browser-python'
-      ? window.datavizInteractivePythonWorkerSource
-      : window.datavizInteractiveJsWorkerSource;
-    if (!source) throw new Error(`${runtime} Worker source is missing`);
+    const source = window.datavizInteractiveJsWorkerSource;
+    if (!source) throw new Error('browser-js Worker source is missing');
     const url = URL.createObjectURL(new Blob([source], {type:'application/javascript'}));
     this.workerUrls.set(runtime, url);
     return url;
@@ -710,10 +717,7 @@ Object.assign(datavizRuntime, {
     this.activeTransforms.get(id)?.cancel('Superseded by a newer generation');
     const generation = (this.transformGenerations.get(id) || 0) + 1;
     this.transformGenerations.set(id, generation);
-    const worker = new Worker(
-      this.interactiveWorkerUrl(item.spec.runtime),
-      item.spec.runtime === 'browser-python' ? {type:'module'} : undefined,
-    );
+    const worker = new Worker(this.interactiveWorkerUrl());
     const cancelBuffer = typeof SharedArrayBuffer === 'function'
       ? new Uint8Array(new SharedArrayBuffer(1))
       : null;
@@ -734,7 +738,7 @@ Object.assign(datavizRuntime, {
         cancel: reason => {
           if (settled) return;
           this.metrics.interactiveTransforms.cancelled += 1;
-          if (cancelBuffer) Atomics.store(cancelBuffer, 0, item.spec.runtime === 'browser-python' ? 2 : 1);
+          if (cancelBuffer) Atomics.store(cancelBuffer, 0, 1);
           worker.postMessage({
             protocol:DATAVIZ_INTERACTIVE_WORKER_PROTOCOL,
             type:'cancel',
@@ -781,6 +785,7 @@ Object.assign(datavizRuntime, {
         worker:true,
       })));
       this.activeTransforms.set(id, controller);
+      const prepared = datavizPrepareControlInputs(this.transformControlInputs(id), inputValues);
       worker.postMessage({
         protocol:DATAVIZ_INTERACTIVE_WORKER_PROTOCOL,
         type:'execute',
@@ -790,20 +795,10 @@ Object.assign(datavizRuntime, {
         entrypoint:item.source.entrypoint,
         code_dependencies:item.source.dependencies || {},
         context:{
-          inputs:inputValues,
+          inputs:prepared.inputs,
           query_inputs:datavizProjectParameterInputs(this.transformParameterInputs(id)),
-          compute_params:Object.fromEntries(Object.entries(this.transformComputeInputs(id)).map(([alias, key]) => [alias, window.dataviz.compute_parameters?.[key]])),
-          selections:Object.fromEntries(Object.entries(this.transformSelectionInputs(id)).map(([alias, key]) => [alias, datavizSelectionValue(key)])),
+          control_inputs:prepared.controlInputs,
         },
-        python_dependencies:item.spec.python_dependencies || [],
-        // Module Workers created from a Blob cannot resolve root-relative or
-        // report-relative dynamic imports. Resolve against the Canvas document
-        // before crossing the Worker boundary so Server and exported reports
-        // follow the same URL contract.
-        index_url:new URL(
-          window.dataviz.runtime_versions?.pyodide_index_url,
-          window.location.href,
-        ).href,
         cancel_buffer:cancelBuffer,
       });
     });
@@ -841,8 +836,7 @@ Object.assign(datavizRuntime, {
           session_id:endpoint.session_id,
           transform_id:id,
           generation:options.generation,
-          compute_parameters:window.dataviz.compute_parameters || {},
-          selection_state:datavizSelectionStateSnapshot(),
+          control_state:datavizControlStateSnapshot(),
         }),
       });
       if (!started.ok) throw new Error(`Server Compute request failed (${started.status}): ${await started.text()}`);
@@ -915,8 +909,12 @@ Object.assign(datavizRuntime, {
         Object.entries(inputValues).map(([name, value]) => [name, datavizValueSignature(value)])
       ),
       query_inputs:datavizProjectParameterInputs(this.transformParameterInputs(id)),
-      compute_params:Object.fromEntries(Object.entries(this.transformComputeInputs(id)).map(([alias, key]) => [alias, window.dataviz.compute_parameters?.[key]])),
-      selections:Object.fromEntries(Object.entries(this.transformSelectionInputs(id)).map(([alias, key]) => [alias, datavizSelectionValue(key)])),
+      control_state:Object.fromEntries(
+        Object.values(this.transformControlInputs(id)).map(binding => [
+          binding.control,
+          datavizControlEntry(binding.control),
+        ])
+      ),
     });
   },
   async executeTransform(id, item, inputValues, generation) {
@@ -985,12 +983,9 @@ Object.assign(datavizRuntime, {
       } : null,
     });
   },
-  async runTransforms(changedSelectionKeys = [], seedChangedOutputs = [], options = {}) {
+  async runTransforms(changedControlKeys = [], seedChangedOutputs = [], options = {}) {
     const outputs = window.dataviz.portable?.outputs || {};
-    const changedSelections = changedSelectionKeys == null ? null : new Set(changedSelectionKeys);
-    const changedCompute = options.changedComputeKeys === null
-      ? null
-      : new Set(options.changedComputeKeys || []);
+    const changedControls = changedControlKeys == null ? null : new Set(changedControlKeys);
     const changedOutputs = new Set(seedChangedOutputs);
     const staleOutputs = new Set();
     const manualClosure = new Set(options.manualTargets || []);
@@ -1017,7 +1012,7 @@ Object.assign(datavizRuntime, {
       if (!references.size) return;
       const affectedViewIds = this.affectedViews([], references);
       if (affectedViewIds?.length) {
-        this.renderViews({initial:false, changedSelectionKeys:[], affectedViewIds});
+        this.renderViews({initial:false, changedControlKeys:[], affectedViewIds});
       }
     };
     for (const id of order) {
@@ -1040,14 +1035,12 @@ Object.assign(datavizRuntime, {
           .map(name => `interactive:${id}/${name}`);
         const upstreamChanged = Object.values(references).some(reference => changedOutputs.has(reference));
         const upstreamStale = Object.values(references).some(reference => staleOutputs.has(reference));
-        const selectionChanged = changedSelections == null
-          || Object.values(this.transformSelectionInputs(id)).some(key => changedSelections.has(key));
-        const computeChanged = changedCompute == null
-          || Object.values(this.transformComputeInputs(id)).some(key => changedCompute.has(key));
+        const controlChanged = changedControls == null
+          || Object.values(this.transformControlInputs(id)).some(binding => changedControls.has(binding.control));
         const missingOutput = requiredOutputReferences.some(reference =>
           !Object.prototype.hasOwnProperty.call(outputs, reference)
         );
-        const relevant = upstreamChanged || upstreamStale || selectionChanged || computeChanged
+        const relevant = upstreamChanged || upstreamStale || controlChanged
           || manualClosure.has(id);
         if (!relevant && !missingOutput) return;
         // Missing Derived Output starts a branch once. An unrelated Source may
@@ -1084,7 +1077,7 @@ Object.assign(datavizRuntime, {
         const shouldExecute = manualClosure.has(id)
           // A newly loaded Query Run has no Derived Output yet. That initial
           // absence is itself a reason to execute an auto branch, even when a
-          // parent-frame state sync carries an empty Selection/Compute delta.
+          // parent-frame state sync carries an empty Control delta.
           || (spec.trigger === 'auto' && (relevant || missingOutput))
           || (spec.trigger === 'apply' && (options.apply === true || missingOutput));
         if (upstreamStale || !shouldExecute) {
@@ -1181,6 +1174,13 @@ Object.assign(datavizRuntime, {
             }
           });
           this.transformErrors.delete(id);
+          window.dataviz.applied_revisions ||= {views:{}, transforms:{}};
+          window.dataviz.applied_revisions.transforms[id] = Object.fromEntries(
+            Object.values(this.transformControlInputs(id)).map(binding => [
+              binding.control,
+              Number(datavizControlEntry(binding.control)?.revision || 0),
+            ])
+          );
           if (localChanged.size) {
             renderOutputDelta(localChanged);
             this.publishTransformStatus(id, 'ready');
@@ -1216,23 +1216,24 @@ Object.assign(datavizRuntime, {
 });
 // Owner: affected-view resolution and Renderer mount/update lifecycle.
 Object.assign(datavizRuntime, {
-  affectedViews(changedSelectionKeys, changedOutputs = new Set()) {
-    // A null Selection delta is the first render, not an empty update. Render
+  affectedViews(changedControlKeys, changedOutputs = new Set()) {
+    // A null Control delta is the first render, not an empty update. Render
     // every registered host so input-free Markdown/Image Views become ready and
     // data-backed Views can enter their branch-local waiting state.
-    if (changedSelectionKeys == null) return null;
-    const changedSelections = new Set(changedSelectionKeys || []);
+    if (changedControlKeys == null) return null;
+    const changedControls = new Set(changedControlKeys || []);
     const outputs = changedOutputs || new Set();
     const affected = new Set();
-    changedSelections.forEach(key => {
+    changedControls.forEach(key => {
       const dependency = window.dataviz.dependency_contract?.controls?.[key];
       (dependency?.direct_views || []).forEach(viewId => {
-        const item = datavizViewSelectionContract(viewId)
+        const item = datavizViewControlContract(viewId)
           .find(candidate => candidate.key === key);
-        if (item && datavizSelectionViewApplicability(viewId, item) !== 'not_applicable') {
+        if (item && datavizControlViewApplicability(viewId, item) !== 'not_applicable') {
           affected.add(viewId);
         }
       });
+      (dependency?.repeat_views || []).forEach(viewId => affected.add(viewId));
     });
     outputs.forEach(reference => this.outputViews(reference).forEach(viewId => affected.add(viewId)));
     return [...affected];
@@ -1285,6 +1286,14 @@ Object.assign(datavizRuntime, {
         return;
       }
       definition.render(window.dataviz, context);
+      window.dataviz.applied_revisions ||= {views:{}, transforms:{}};
+      const bindings = window.dataviz.dependency_contract?.views?.[id]?.control_inputs || {};
+      window.dataviz.applied_revisions.views[id] = Object.fromEntries(
+        Object.values(bindings).map(binding => [
+          binding.control,
+          Number(datavizControlEntry(binding.control)?.revision || 0),
+        ])
+      );
     });
   },
   async publishOutputs(bundle) {
@@ -1303,10 +1312,10 @@ Object.assign(datavizRuntime, {
     Object.assign(window.dataviz.portable.output_kinds, bundle.output_kinds || {});
     Object.assign(window.dataviz.portable.output_schemas, bundle.output_schemas || {});
     if (!changed.size || this.initializing) return changed;
-    refreshSelectionOptionDomains();
+    refreshControlOptionDomains();
     const affectedViewIds = this.affectedViews([], changed);
-    this.renderViews({initial:false, changedSelectionKeys:[], affectedViewIds});
-    const changedOutputs = await this.runTransforms([], changed, {changedComputeKeys: []});
+    this.renderViews({initial:false, changedControlKeys:[], affectedViewIds});
+    const changedOutputs = await this.runTransforms([], changed);
     window.dispatchEvent(new CustomEvent('dataviz:outputschange', {
       detail:{changed:[...changedOutputs], failed:[]},
     }));
@@ -1342,8 +1351,8 @@ Object.assign(datavizRuntime, {
     });
     if (this.initializing) return changed;
     const affectedViewIds = this.affectedViews([], changed);
-    this.renderViews({initial:false, changedSelectionKeys:[], affectedViewIds});
-    const changedOutputs = await this.runTransforms([], changed, {changedComputeKeys: []});
+    this.renderViews({initial:false, changedControlKeys:[], affectedViewIds});
+    const changedOutputs = await this.runTransforms([], changed);
     window.dispatchEvent(new CustomEvent('dataviz:outputschange', {
       detail:{changed:[...changedOutputs], failed:[...changed]},
     }));
@@ -1407,7 +1416,7 @@ Object.assign(datavizRuntime, {
     if (this.initializationPromise) return this.initializationPromise;
     this.initializationPromise = (async () => {
       // Establish the immutable Base Output snapshot before reconciling dynamic
-      // Selection domains. Hydration may publish Arrow tables, but no View or
+      // Control domains. Hydration may publish Arrow tables, but no View or
       // Interactive branch is allowed to observe a half-initialized Control state.
       this.initializing = true;
       try {
@@ -1415,13 +1424,13 @@ Object.assign(datavizRuntime, {
       } finally {
         this.initializing = false;
       }
-      await window.dataviz.applySelections();
+      await window.dataviz.applyControls();
       // Canvas ready is a lifecycle contract, not a script-load notification.
       // The parent may restore tab-local Controls only after Base Outputs,
-      // dynamic option domains and the first canonical Selection snapshot agree.
+      // dynamic option domains and the first canonical Control snapshot agree.
       datavizPostToParent({
         type:'dataviz:canvas-ready',
-        selection_state:datavizSelectionStateSnapshot(),
+        control_state:datavizControlStateSnapshot(),
       });
     })();
     return this.initializationPromise;
@@ -1459,7 +1468,7 @@ Object.assign(datavizRuntime, {
     Object.values(this.interactiveAdapters).forEach(adapter => adapter.dispose());
   },
 });
-// Owner: Selection binding, canonical commits, and parent-frame synchronization.
+// Owner: Control binding, canonical commits, and parent-frame synchronization.
 window.addEventListener('dataviz:interactionprogress', event => {
   const detail = event.detail || {};
   const percent = Number.isFinite(Number(detail.value))
@@ -1472,19 +1481,37 @@ window.addEventListener('dataviz:interactionprogress', event => {
 });
 
 const DATAVIZ_OWNER_PACKAGE_RUNTIME = true;
-const datavizSelectionFields = item => {
-  const pathFields = item.definition?.path_fields || [];
-  return pathFields.length ? pathFields : [item.binding?.field || item.id];
+const datavizControlFields = item => {
+  const field = item.consumer_binding?.field;
+  return Array.isArray(field) ? field : [field].filter(Boolean);
 };
-const datavizSelectionCanApply = (row, item) => (
+const datavizControlCanApply = (row, item) => (
   row != null
   && typeof row === 'object'
-  && datavizSelectionFields(item).every(field => Object.prototype.hasOwnProperty.call(row, field))
+  && datavizControlFields(item).every(field => Object.prototype.hasOwnProperty.call(row, field))
 );
-const datavizViewSelectionContract = viewId => (
-  window.dataviz.dependency_contract?.views?.[viewId]?.selection_contract || []
+const datavizViewControlContract = viewId => (
+  window.dataviz.dependency_contract?.views?.[viewId]?.filter_contract || []
 );
-const datavizSelectionDomainReferences = item => (
+const datavizControlContractItem = key => {
+  const dependency = window.dataviz.dependency_contract?.controls?.[key] || {};
+  const definition = dependency.definition || {};
+  return {
+    key,
+    id:definition.id || key?.split('/').at(-1),
+    origin:dependency.origin,
+    owner_id:dependency.owner_id,
+    definition,
+    consumer_binding:{
+      field:(definition.path_fields || []).length
+        ? definition.path_fields
+        : (definition.field || definition.id),
+      empty:'passthrough',
+      operator:'auto',
+    },
+  };
+};
+const datavizControlDomainReferences = item => (
   window.dataviz.dependency_contract?.controls?.[item?.key]?.option_domain_references || []
 ).map(canonicalOutputReference);
 const datavizOutputFieldNames = rawReference => {
@@ -1504,13 +1531,13 @@ const datavizOutputFieldNames = rawReference => {
   if (!rows.length) return null;
   return new Set(rows.flatMap(row => Object.keys(row || {})));
 };
-const datavizSelectionViewApplicability = (viewId, item) => {
+const datavizControlViewApplicability = (viewId, item) => {
   const dependency = window.dataviz.dependency_contract?.controls?.[item?.key];
   if (!dependency) return 'not_applicable';
   if ((dependency.declared_direct_views || []).includes(viewId)) return 'applies';
   const binding = dependency.direct_view_bindings?.[viewId];
   if (!binding || binding.applicability === 'not_applicable') return 'not_applicable';
-  const fields = binding.fields?.length ? binding.fields : datavizSelectionFields(item);
+  const fields = binding.fields?.length ? binding.fields : datavizControlFields(item);
   let pending = false;
   for (const reference of binding.input_references || []) {
     if (window.dataviz.portable?.output_kinds?.[canonicalOutputReference(reference)] !== 'table') {
@@ -1527,7 +1554,7 @@ const datavizSelectionViewApplicability = (viewId, item) => {
 };
 const datavizControlImpactSnapshot = () => Object.entries(
   window.dataviz.dependency_contract?.controls || {}
-).filter(([, dependency]) => dependency.kind === 'selection').map(([key, dependency]) => {
+).map(([key, dependency]) => {
   const affected = new Set([
     ...(dependency.declared_direct_views || []),
     ...(dependency.derived_views || []),
@@ -1536,9 +1563,9 @@ const datavizControlImpactSnapshot = () => Object.entries(
   if (dependency.writer_view) affected.add(dependency.writer_view);
   let pending = false;
   (dependency.runtime_checked_views || []).forEach(viewId => {
-    const item = datavizViewSelectionContract(viewId).find(candidate => candidate.key === key);
+    const item = datavizViewControlContract(viewId).find(candidate => candidate.key === key);
     if (!item) return;
-    const applicability = datavizSelectionViewApplicability(viewId, item);
+    const applicability = datavizControlViewApplicability(viewId, item);
     if (applicability === 'applies') affected.add(viewId);
     if (applicability === 'pending') pending = true;
   });
@@ -1554,111 +1581,128 @@ const datavizControlImpactLabel = impact => {
   const count = views.length;
   return `${impact.status === 'pending' ? 'Up to ' : ''}${count} view${count === 1 ? '' : 's'}`;
 };
-const datavizSelectionState = () => {
-  if (!window.dataviz.selection_state || typeof window.dataviz.selection_state !== 'object') {
-    window.dataviz.selection_state = {};
+const datavizControlState = () => {
+  if (!window.dataviz.control_state || typeof window.dataviz.control_state !== 'object') {
+    window.dataviz.control_state = {};
   }
-  return window.dataviz.selection_state;
+  return window.dataviz.control_state;
 };
-const datavizSelectionDefinition = key => (
+const datavizControlDefinition = key => (
   window.dataviz.dependency_contract?.controls?.[key]?.definition
   || Object.values(window.dataviz.dependency_contract?.views || {})
-    .flatMap(view => view.selection_contract || [])
+    .flatMap(view => view.filter_contract || [])
     .find(item => item.key === key)?.definition
   || {}
 );
-const datavizNormalizeSelectionState = (key, candidate = null) => {
-  const definition = datavizSelectionDefinition(key);
+const datavizNormalizeControlState = (key, candidate = null) => {
+  const definition = datavizControlDefinition(key);
   const initial = window.dataviz.dependency_contract?.controls?.[key]?.initial_state || {
-    intent:'explicit', values:[],
+    value:null, revision:0,
   };
   const source = candidate && typeof candidate === 'object' ? candidate : initial;
-  const intent = source.intent === 'all_available' && definition.type === 'multiple_select'
-    ? 'all_available'
-    : 'explicit';
-  const values = Array.isArray(source.values) ? structuredClone(source.values) : [];
-  if (!['multiple_input', 'multiple_select', 'range_input'].includes(definition.type) && values.length > 1) {
-    throw datavizContractError(
-      'selection_state_cardinality_invalid',
-      `Selection ${key} contains more than one value`,
-      {key},
-    );
-  }
-  if (definition.type === 'range_input' && values.length > 1) {
-    throw datavizContractError(
-      'selection_state_cardinality_invalid',
-      `Selection ${key} contains more than one date range`,
-      {key},
-    );
-  }
-  return {intent, values};
+  const value = datavizNormalizeControlValue(definition, source.value, {
+    namespace:'control_state', key,
+  });
+  const revision = Math.max(0, Number(source.revision || 0));
+  const intent = definition.type === 'multiple_select'
+    ? (source.intent === 'all_available' ? 'all_available' : 'explicit')
+    : null;
+  return {value:structuredClone(value), revision, ...(intent ? {intent} : {})};
 };
-const datavizSelectionEntry = key => {
-  const state = datavizSelectionState();
-  if (!state[key]) state[key] = datavizNormalizeSelectionState(key);
+const datavizControlEntry = key => {
+  const state = datavizControlState();
+  if (!state[key]) state[key] = datavizNormalizeControlState(key);
   return state[key];
 };
-const datavizSelectionValueFromState = (definition, entry) => {
-  const values = Array.isArray(entry?.values) ? entry.values : [];
-  if (['multiple_input', 'multiple_select'].includes(definition?.type)) return structuredClone(values);
-  if (definition?.type === 'range_input') return values.length ? structuredClone(values[0]) : [];
-  return values.length ? structuredClone(values[0]) : null;
-};
-const datavizSelectionValue = key => datavizSelectionValueFromState(
-  datavizSelectionDefinition(key),
-  datavizSelectionEntry(key),
+const datavizControlValueFromState = (_definition, entry) => structuredClone(entry?.value);
+const datavizControlValue = key => datavizControlValueFromState(
+  datavizControlDefinition(key),
+  datavizControlEntry(key),
 );
-const datavizSelectionLogicalValues = (definition, value) => {
-  if (datavizIsEmptyControlValue(value)) return [];
-  if (['multiple_input', 'multiple_select'].includes(definition?.type)) return structuredClone(value);
-  if (definition?.type === 'range_input') return [structuredClone(value)];
-  return [structuredClone(value)];
-};
-const datavizSetSelectionValue = (key, value, {intent = null} = {}) => {
-  const definition = datavizSelectionDefinition(key);
+const datavizSetControlValue = (key, value, {intent = null} = {}) => {
+  const definition = datavizControlDefinition(key);
   const normalized = datavizNormalizeControlValue(definition, value, {
-    namespace:'selection', key,
+    namespace:'control', key,
   });
-  const previous = datavizSelectionEntry(key);
-  datavizSelectionState()[key] = datavizNormalizeSelectionState(key, {
+  const previous = datavizControlEntry(key);
+  const candidate = datavizNormalizeControlState(key, {
     intent:intent || previous.intent || 'explicit',
-    values:datavizSelectionLogicalValues(definition, normalized),
+    value:normalized,
+    revision:Number(previous.revision || 0),
   });
-  return datavizSelectionState()[key];
+  if (
+    datavizValueSignature(previous.value) === datavizValueSignature(candidate.value)
+    && previous.intent === candidate.intent
+  ) return previous;
+  datavizControlState()[key] = {
+    ...candidate,
+    revision:Number(previous.revision || 0) + 1,
+  };
+  return datavizControlState()[key];
 };
-const datavizSelectionStateSnapshot = () => {
-  const validKeys = new Set(Object.entries(window.dataviz.dependency_contract?.controls || {})
-    .filter(([, item]) => item.kind === 'selection')
-    .map(([key]) => key));
+const datavizControlStateSnapshot = () => {
+  const validKeys = new Set(Object.keys(window.dataviz.dependency_contract?.controls || {}));
   return Object.fromEntries([...validKeys].map(key => [
     key,
-    structuredClone(datavizSelectionEntry(key)),
+    structuredClone(datavizControlEntry(key)),
   ]));
 };
-const datavizSelectionValueSnapshot = () => Object.fromEntries(
-  Object.keys(datavizSelectionStateSnapshot()).map(key => [key, datavizSelectionValue(key)]),
+const datavizControlValueSnapshot = () => Object.fromEntries(
+  Object.keys(datavizControlStateSnapshot()).map(key => [key, datavizControlValue(key)]),
 );
-const datavizSelectionMatches = (row, item, state) => {
-  // Dashboard and Section selections are inherited structurally. A View whose
+const datavizProjectControlBinding = binding => {
+  const entry = datavizControlEntry(binding.control);
+  if (binding.projection === 'present') return !datavizIsEmptyControlValue(entry.value);
+  if (binding.projection === 'intent') return entry.intent || 'explicit';
+  return structuredClone(entry.value);
+};
+const datavizPrepareControlInputs = (bindings, rawInputs) => {
+  const inputs = {...rawInputs};
+  Object.entries(bindings || {}).forEach(([alias, binding]) => {
+    if (binding.mode !== 'filter') return;
+    const item = {
+      key:binding.control,
+      id:binding.control.split('/').at(-1),
+      definition:datavizControlDefinition(binding.control),
+      consumer_binding:binding,
+    };
+    (binding.inputs || []).forEach(inputAlias => {
+      inputs[inputAlias] = datavizTableRows(inputs[inputAlias]).filter(row => (
+        datavizControlMatches(row, item, datavizControlEntry(binding.control))
+      ));
+    });
+  });
+  return {
+    inputs,
+    controlInputs:Object.fromEntries(
+      Object.entries(bindings || {}).map(([alias, binding]) => [
+        alias,
+        datavizProjectControlBinding(binding),
+      ])
+    ),
+  };
+};
+const datavizControlMatches = (row, item, state) => {
+  // Dashboard and Section controls are inherited structurally. A View whose
   // dataset does not expose the selected field is outside that data contract;
   // it must remain visible instead of being reduced to an accidental empty set.
-  if (!datavizSelectionCanApply(row, item)) return true;
-  const value = datavizSelectionValueFromState(item.definition || {}, state || {
-    intent:'explicit', values:[],
-  });
-  // Explicit empty is a real include-set with zero members. It is never All.
-  if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) return false;
-  const pathFields = item.definition?.path_fields || [];
-  if (pathFields.length) {
+  if (!datavizControlCanApply(row, item)) return true;
+  const binding = item.consumer_binding || {};
+  const value = datavizControlValueFromState(item.definition || {}, state || {value:null});
+  if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) {
+    return binding.empty === 'passthrough';
+  }
+  const pathFields = datavizControlFields(item);
+  if (pathFields.length > 1) {
     const paths = Array.isArray(value?.[0]) ? value : [value];
     const matched = paths.some(path => pathFields.every((field, index) => String(row[field] ?? '') === String(path[index] ?? '')));
     return matched;
   }
-  const field = item.binding?.field || item.id;
+  const field = pathFields[0];
   const actual = row[field];
-  const operator = item.binding?.operator === 'auto'
+  const operator = binding.operator === 'auto'
     ? (['multiple_input', 'multiple_select'].includes(item.definition?.type) ? 'in' : item.definition?.type === 'range_input' ? 'between' : 'equals')
-    : item.binding?.operator;
+    : binding.operator;
   let matched;
   if (operator === 'in') matched = (Array.isArray(value) ? value : [value]).map(String).includes(String(actual));
   else if (operator === 'between') {
@@ -1676,18 +1720,18 @@ const datavizSelectionMatches = (row, item, state) => {
   else matched = String(actual ?? '') === String(value ?? '');
   return matched;
 };
-const datavizSelectionIntentKey = input => (
-  input?.closest('[data-selection-key]')?.dataset.selectionKey || null
+const datavizControlIntentKey = input => (
+  input?.closest('[data-control-key]')?.dataset.controlKey || null
 );
-const datavizCaptureSelectionIntent = input => {
-  const key = datavizSelectionIntentKey(input);
+const datavizCaptureControlIntent = input => {
+  const key = datavizControlIntentKey(input);
   const consume = window.datavizComponents?.controls?.consumeSelectionIntent;
   if (!key || !consume) return null;
   const intent = consume(input);
-  if (intent) datavizSelectionEntry(key).intent = intent;
+  if (intent) datavizControlEntry(key).intent = intent;
   return intent;
 };
-const datavizReconcileSelectionOptionDomain = (
+const datavizReconcileControlOptionDomain = (
   input,
   nextOptions,
   {selectedValues = [], required = input?.required === true} = {},
@@ -1697,9 +1741,9 @@ const datavizReconcileSelectionOptionDomain = (
     input.replaceChildren(...Array.from(nextOptions || []));
     return {intent:null, selectedValues:[]};
   }
-  const key = datavizSelectionIntentKey(input);
-  const state = key ? datavizSelectionEntry(key) : {intent:'explicit', values:[]};
-  const definition = key ? datavizSelectionDefinition(key) : {};
+  const key = datavizControlIntentKey(input);
+  const state = key ? datavizControlEntry(key) : {intent:'explicit', value:[], revision:0};
+  const definition = key ? datavizControlDefinition(key) : {};
   const policy = definition.initial || {
     mode:definition.type === 'multiple_select' ? 'all' : 'first',
   };
@@ -1709,7 +1753,7 @@ const datavizReconcileSelectionOptionDomain = (
       ? [policy.value]
       : [];
   const initialValues = rawInitialValues.map(value => datavizEncodeControlValue(input, value, {
-    path:input.closest('[data-selection-key]')?.dataset.selectionPath === 'true',
+    path:input.closest('[data-control-key]')?.dataset.controlPath === 'true',
   }));
   const result = reconcile(input, nextOptions, {
     selectedValues,
@@ -1720,16 +1764,16 @@ const datavizReconcileSelectionOptionDomain = (
   if (key && result.intent) state.intent = result.intent;
   return result;
 };
-window.dataviz.selection = {
-  fields: datavizSelectionFields,
-  canApply: datavizSelectionCanApply,
-  matches: datavizSelectionMatches,
-  captureIntent: datavizCaptureSelectionIntent,
-  reconcileOptionDomain: datavizReconcileSelectionOptionDomain,
-  state: datavizSelectionEntry,
-  value: datavizSelectionValue,
-  set: datavizSetSelectionValue,
-  stateSnapshot: datavizSelectionStateSnapshot,
+window.dataviz.control = {
+  fields: datavizControlFields,
+  canApply: datavizControlCanApply,
+  matches: datavizControlMatches,
+  captureIntent: datavizCaptureControlIntent,
+  reconcileOptionDomain: datavizReconcileControlOptionDomain,
+  state: datavizControlEntry,
+  value: datavizControlValue,
+  set: datavizSetControlValue,
+  stateSnapshot: datavizControlStateSnapshot,
 };
 let datavizControlActionRevision = 0;
 let datavizControlActionQueue = Promise.resolve();
@@ -1771,12 +1815,12 @@ const datavizDispatchControlAction = event => {
     )) {
       return {status:'discarded', reason:'stale_view_generation'};
     }
-    const definition = datavizSelectionDefinition(binding.control);
-    const current = datavizSelectionEntry(binding.control);
+    const definition = datavizControlDefinition(binding.control);
+    const current = datavizControlEntry(binding.control);
     let next;
     let value;
     if (event.action === 'reset') {
-      next = datavizNormalizeSelectionState(binding.control);
+      next = datavizNormalizeControlState(binding.control);
     } else if (event.action === 'clear') value = definition.type === 'range_input' ? [] : (
       ['multiple_input', 'multiple_select'].includes(definition.type) ? [] : null
     );
@@ -1791,22 +1835,21 @@ const datavizDispatchControlAction = event => {
         `Unknown Control action: ${event.action}`,
       );
     }
-    if (!next) next = datavizNormalizeSelectionState(binding.control, {
+    if (!next) next = datavizNormalizeControlState(binding.control, {
       intent:'explicit',
-      values:datavizSelectionLogicalValues(
-        definition,
-        datavizNormalizeControlValue(definition, value, {
-          namespace:'selection', key:binding.control,
-        }),
-      ),
+      value:datavizNormalizeControlValue(definition, value, {
+        namespace:'control', key:binding.control,
+      }),
+      revision:Number(current.revision || 0),
     });
     if (JSON.stringify(current) === JSON.stringify(next)) {
       return {status:'noop', revision:datavizControlActionRevision};
     }
+    next = {...next, revision:Number(current.revision || 0) + 1};
     const revision = ++datavizControlActionRevision;
-    datavizSelectionState()[binding.control] = next;
-    setSelectionInputs({[binding.control]:next});
-    await window.dataviz.applySelections();
+    datavizControlState()[binding.control] = next;
+    setControlInputs({[binding.control]:next});
+    await window.dataviz.applyControls({keys:[binding.control]});
     return {status:'committed', revision};
   });
   return datavizControlActionQueue;
@@ -1820,25 +1863,28 @@ window.dataviz.controlActions = {
 if (window.datavizComponents?.controls) {
   window.datavizComponents.controlPathOptions = ({control, input, levels}) => {
     const viewId = control.dataset.cascaderView;
-    const selectionKey = control.closest('[data-selection-key]')?.dataset.selectionKey;
+    const controlKey = control.closest('[data-control-key]')?.dataset.controlKey;
     if (!viewId || !levels?.length) {
       return Array.from(input.options).map(option => {
         try { return JSON.parse(option.value); } catch (_error) { return [option.value]; }
       });
     }
-    const contract = datavizViewSelectionContract(viewId);
-    const item = contract.find(candidate => candidate.key === selectionKey);
+    const contract = datavizViewControlContract(viewId);
+    const item = contract.find(candidate => candidate.key === controlKey)
+      || datavizControlContractItem(controlKey);
     const dependencyKeys = new Set(
-      window.dataviz.dependency_contract?.controls?.[selectionKey]?.dependency_ancestors || []
+      window.dataviz.dependency_contract?.controls?.[controlKey]?.dependency_ancestors || []
     );
-    const upstreamSelections = contract.filter(candidate => dependencyKeys.has(candidate.key));
-    const rows = datavizSelectionDomainReferences(item).flatMap(reference =>
+    const upstreamControls = [...dependencyKeys].map(key => (
+      contract.find(candidate => candidate.key === key) || datavizControlContractItem(key)
+    ));
+    const rows = datavizControlDomainReferences(item).flatMap(reference =>
       datavizTableRows(window.dataviz.portable?.outputs?.[canonicalOutputReference(reference)])
     ).filter(row => (
-      upstreamSelections.length === dependencyKeys.size
-      && upstreamSelections.every(item => (
-        datavizSelectionCanApply(row, item)
-        && datavizSelectionMatches(row, item, datavizSelectionEntry(item.key))
+      upstreamControls.length === dependencyKeys.size
+      && upstreamControls.every(item => (
+        datavizControlCanApply(row, item)
+        && datavizControlMatches(row, item, datavizControlEntry(item.key))
       ))
     ));
     const unique = new Map();
@@ -1850,18 +1896,32 @@ if (window.datavizComponents?.controls) {
     return [...unique.values()];
   };
 }
-const datavizSelectionOccurrences = () => {
+const datavizControlOccurrences = () => {
   const occurrences = new Map();
-  Object.entries(window.dataviz.dependency_contract?.views || {}).forEach(([viewId, dependency]) => {
-    const contract = dependency.selection_contract || [];
-    contract.forEach(item => {
-      if (!occurrences.has(item.key)) occurrences.set(item.key, []);
-      occurrences.get(item.key).push({viewId, item});
+  Object.entries(window.dataviz.dependency_contract?.controls || {}).forEach(([key, dependency]) => {
+    const definition = dependency.definition || {};
+    (dependency.scope_views || []).forEach(viewId => {
+      const filter = datavizViewControlContract(viewId).find(item => item.key === key);
+      const item = filter || {
+        key,
+        id:definition.id || key.split('/').at(-1),
+        origin:dependency.origin,
+        definition,
+        consumer_binding:{
+          field:definition.path_fields?.length
+            ? definition.path_fields
+            : (definition.field || definition.id),
+          empty:'passthrough',
+          operator:'auto',
+        },
+      };
+      if (!occurrences.has(key)) occurrences.set(key, []);
+      occurrences.get(key).push({viewId, item});
     });
   });
   return occurrences;
 };
-const datavizAvailableSelectionOptions = targets => {
+const datavizAvailableControlOptions = targets => {
   const item = targets[0]?.item;
   const definition = item?.definition || {};
   const dependency = window.dataviz.dependency_contract?.controls?.[item?.key] || {};
@@ -1870,35 +1930,35 @@ const datavizAvailableSelectionOptions = targets => {
   let observedSource = false;
   let observedDependencyRelation = !hasDependencies;
   targets.forEach(({viewId, item: target}) => {
-    const outputRefs = datavizSelectionDomainReferences(target);
+    const outputRefs = datavizControlDomainReferences(target);
     const upstreamKeys = new Set(
       window.dataviz.dependency_contract?.controls?.[target.key]?.dependency_ancestors || []
     );
-    const upstream = datavizViewSelectionContract(viewId)
+    const upstream = datavizViewControlContract(viewId)
       .filter(candidate => upstreamKeys.has(candidate.key));
     outputRefs.forEach(reference => {
       const canonical = canonicalOutputReference(reference);
       const rows = datavizTableRows(window.dataviz.portable?.outputs?.[canonical]);
       // Progressive query branches may publish in any order. An unrelated
-      // table being present does not mean it can define this Selection's
+      // table being present does not mean it can define this Control's
       // option domain; otherwise a fast sibling branch can clear valid choices
       // before the actual field-bearing branch arrives.
-      if (rows.some(row => datavizSelectionCanApply(row, target))) {
+      if (rows.some(row => datavizControlCanApply(row, target))) {
         observedSource = true;
       }
       rows.forEach(row => {
         const relationAvailable = (
           upstream.length === upstreamKeys.size
-          && upstream.every(candidate => datavizSelectionCanApply(row, candidate))
+          && upstream.every(candidate => datavizControlCanApply(row, candidate))
         );
         if (hasDependencies && !relationAvailable) return;
         if (relationAvailable) observedDependencyRelation = true;
         if (!upstream.every(candidate =>
-          datavizSelectionMatches(row, candidate, datavizSelectionEntry(candidate.key))
+          datavizControlMatches(row, candidate, datavizControlEntry(candidate.key))
         )) return;
         const value = (definition.path_fields || []).length
           ? definition.path_fields.map(field => row[field])
-          : row[target.binding?.field || target.id];
+          : row[definition.field || target.id];
         if (value == null || (Array.isArray(value) && value.some(part => part == null))) return;
         values.set(datavizValueSignature(value), value);
       });
@@ -1927,23 +1987,23 @@ const datavizAvailableSelectionOptions = targets => {
     options,
   };
 };
-const publishDashboardSelectionOptions = occurrences => {
+const publishDashboardControlOptions = occurrences => {
   if (window.parent === window) return;
   const controls = [];
   occurrences.forEach((targets, key) => {
     if (targets[0]?.item?.origin !== 'dashboard') return;
-    controls.push({key, ...datavizAvailableSelectionOptions(targets)});
+    controls.push({key, ...datavizAvailableControlOptions(targets)});
   });
-  datavizPostToParent({type:'dataviz:selection-options-changed', controls});
+  datavizPostToParent({type:'dataviz:control-options-changed', controls});
 };
-const refreshSelectionOptionDomains = () => {
-  const occurrences = datavizSelectionOccurrences();
-  const controls = Array.from(document.querySelectorAll('[data-selection-key]'));
+const refreshControlOptionDomains = () => {
+  const occurrences = datavizControlOccurrences();
+  const controls = Array.from(document.querySelectorAll('[data-control-key]'));
   const order = window.dataviz.dependency_contract?.control_order || [];
   order.forEach(key => {
     const targets = occurrences.get(key) || [];
-    if (!targets.length || targets[0]?.item?.kind !== 'selection') return;
-    controls.filter(control => control.dataset.selectionKey === key).forEach(control => {
+    if (!targets.length) return;
+    controls.filter(control => control.dataset.controlKey === key).forEach(control => {
       const input = control.querySelector('select');
       if (!input) return;
       const definition = targets[0]?.item?.definition || {};
@@ -1953,7 +2013,7 @@ const refreshSelectionOptionDomains = () => {
         syncPortableChoices(control);
         return;
       }
-      const availability = datavizAvailableSelectionOptions(targets);
+      const availability = datavizAvailableControlOptions(targets);
       if (availability.observed && !availability.dependencyRelationReady) {
         const message = 'Option-domain rows do not expose every declared dependency field.';
         control.dataset.optionDomainState = 'error';
@@ -1984,14 +2044,14 @@ const refreshSelectionOptionDomains = () => {
       control.dataset.optionDomainState = 'ready';
       const typed = availability.options.some(option => typeof option.value !== 'string');
       input.dataset.valueEncoding = typed ? 'json' : 'string';
-      const currentValue = datavizSelectionValue(control.dataset.selectionKey);
+      const currentValue = datavizControlValue(control.dataset.controlKey);
       const currentValues = input.multiple
         ? (Array.isArray(currentValue) ? currentValue : [])
         : [currentValue];
       const selectedValues = currentValues
         .filter(value => !datavizIsEmptyControlValue(value))
         .map(value => datavizEncodeControlValue(input, value, {
-          path:control.dataset.selectionPath === 'true',
+          path:control.dataset.controlPath === 'true',
         }));
       const options = [];
       if (!input.multiple && !definition.required) {
@@ -2004,7 +2064,7 @@ const refreshSelectionOptionDomains = () => {
       availability.options.forEach(item => {
         const option = document.createElement('option');
         option.value = datavizEncodeControlValue(input, item.value, {
-          path:control.dataset.selectionPath === 'true',
+          path:control.dataset.controlPath === 'true',
         });
         option.textContent = item.label ?? String(item.value);
         option.disabled = item.available === false;
@@ -2013,7 +2073,7 @@ const refreshSelectionOptionDomains = () => {
         if (item.keywords?.length) option.dataset.keywords = item.keywords.join(' ');
         options.push(option);
       });
-      datavizReconcileSelectionOptionDomain(input, options, {
+      datavizReconcileControlOptionDomain(input, options, {
         selectedValues,
         required:Boolean(definition.required),
       });
@@ -2024,24 +2084,24 @@ const refreshSelectionOptionDomains = () => {
     });
     // Commit each compiled Control before deriving its declared dependents.
     // The browser does not rebuild Control dependency edges from DOM order.
-    readSelectionInputs({keys:new Set([key])});
+    readControlInputs({keys:new Set([key])});
   });
-  publishDashboardSelectionOptions(occurrences);
+  publishDashboardControlOptions(occurrences);
 };
-const readSelectionInputs = ({keys = null} = {}) => {
-  document.querySelectorAll('[data-selection-key]').forEach(control => {
-    const key = control.dataset.selectionKey;
+const readControlInputs = ({keys = null} = {}) => {
+  document.querySelectorAll('[data-control-key]').forEach(control => {
+    const key = control.dataset.controlKey;
     if (keys && !keys.has(key)) return;
-    const input = control.querySelector('[data-selection-input]');
+    const input = control.querySelector('[data-control-state-input]');
     if (!input) return;
-    const definition = datavizSelectionDefinition(key);
+    const definition = datavizControlDefinition(key);
     if (
       input.tagName === 'SELECT'
       && control.dataset.optionDomainState === 'pending'
-      && Object.prototype.hasOwnProperty.call(datavizSelectionState(), key)
+      && Object.prototype.hasOwnProperty.call(datavizControlState(), key)
     ) return;
     const decode = raw => datavizDecodeControlValue(input, raw, {
-      path:control.dataset.selectionPath === 'true',
+      path:control.dataset.controlPath === 'true',
     });
     const type = definition.type;
     const valueType = definition.value_type;
@@ -2050,7 +2110,7 @@ const readSelectionInputs = ({keys = null} = {}) => {
     else if (valueType === 'boolean') value = input.checked;
     else if (type === 'multiple_select') value = input.options.length
       ? Array.from(input.selectedOptions).map(option => decode(option.value))
-      : (datavizSelectionValue(key) || []);
+      : (datavizControlValue(key) || []);
     else if (type === 'multiple_input') {
       try { value = input.value ? JSON.parse(input.value) : []; }
       catch (_error) { value = input.value.split(',').map(item => item.trim()).filter(Boolean); }
@@ -2065,7 +2125,7 @@ const readSelectionInputs = ({keys = null} = {}) => {
       const intent = input.multiple
         ? (window.datavizComponents?.controls?.inferSelectionIntent(input) || 'explicit')
         : 'explicit';
-      datavizSetSelectionValue(key, value, {intent});
+      datavizSetControlValue(key, value, {intent});
       input.setCustomValidity?.('');
       const output = control.querySelector('[data-control-error]');
       if (output) {
@@ -2083,14 +2143,14 @@ const readSelectionInputs = ({keys = null} = {}) => {
     }
   });
 };
-const datavizSelectionSignature = value => JSON.stringify(
+const datavizControlSignature = value => JSON.stringify(
   Array.isArray(value) ? [...value].map(datavizValueSignature).sort() : value
 );
-const datavizChangedSelectionKeys = (previous, current) => {
+const datavizChangedControlKeys = (previous, current) => {
   if (previous == null) return null;
   const keys = new Set([...Object.keys(previous), ...Object.keys(current)]);
   return [...keys].filter(key =>
-    datavizSelectionSignature(previous[key]) !== datavizSelectionSignature(current[key])
+    datavizControlSignature(previous[key]) !== datavizControlSignature(current[key])
   );
 };
 const datavizContentBindings = window.dataviz.content_bindings || {};
@@ -2100,14 +2160,14 @@ const datavizContentAllLabel = () => (
     : 'All'
 );
 const datavizContentControl = key => Array.from(
-  document.querySelectorAll('[data-selection-key]')
-).find(control => control.dataset.selectionKey === key) || null;
+  document.querySelectorAll('[data-control-key]')
+).find(control => control.dataset.controlKey === key) || null;
 const datavizContentChoiceLabel = (reference, value, control = null) => {
-  const input = control?.querySelector('[data-selection-input], [data-compute-input]');
+  const input = control?.querySelector('[data-control-state-input]');
   const option = Array.from(input?.options || []).find(candidate => (
     candidate.dataset.emptyOption !== 'true'
     && datavizValueSignature(datavizDecodeControlValue(input, candidate.value, {
-      path:control?.dataset?.selectionPath === 'true',
+      path:control?.dataset?.controlPath === 'true',
     })) === datavizValueSignature(value)
   ));
   if (option) return option.textContent?.trim() || String(value);
@@ -2127,15 +2187,10 @@ const datavizContentPathValue = value => {
 };
 const datavizFormatContentReference = reference => {
   const definition = reference.definition || {};
-  const isCompute = reference.kind === 'compute';
-  const control = isCompute
-    ? document.querySelector(`[data-compute-key="${CSS.escape(reference.key)}"]`)
-    : datavizContentControl(reference.key);
-  const value = isCompute
-    ? (window.dataviz.compute_parameters?.[reference.key] ?? definition.default)
-    : (datavizSelectionValue(reference.key) ?? definition.default);
+  const control = datavizContentControl(reference.key);
+  const value = datavizControlValue(reference.key) ?? definition.default;
   if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) {
-    return isCompute ? '' : datavizContentAllLabel();
+    return '';
   }
   if (definition.type === 'range_input') {
     const range = Array.isArray(value) ? value : String(value).split(',', 2);
@@ -2152,12 +2207,12 @@ const datavizFormatContentReference = reference => {
   }
   const values = Array.isArray(value) ? value : [value];
   if (Array.isArray(value)) {
-    const input = control?.querySelector('[data-selection-input], [data-compute-input]');
+    const input = control?.querySelector('[data-control-state-input]');
     const availableOptions = Array.from(input?.options || []).filter(option => (
       option.dataset.emptyOption !== 'true' && !option.disabled
     ));
     const available = availableOptions.map(option => datavizDecodeControlValue(input, option.value, {
-      path:control?.dataset?.selectionPath === 'true',
+      path:control?.dataset?.controlPath === 'true',
     }));
     const choices = datavizStaticChoices(reference.definition);
     const universe = available.length
@@ -2184,8 +2239,8 @@ const datavizRenderContentBinding = binding => {
   });
   return value;
 };
-const syncDatavizContentBindings = changedSelectionKeys => {
-  const changed = changedSelectionKeys == null ? null : new Set(changedSelectionKeys);
+const syncDatavizContentBindings = changedControlKeys => {
+  const changed = changedControlKeys == null ? null : new Set(changedControlKeys);
   const affectedViews = new Set();
   Object.entries(datavizContentBindings).forEach(([field, binding]) => {
     if (changed && !(binding.references || []).some(reference => changed.has(reference.key))) return;
@@ -2218,28 +2273,64 @@ const datavizStateItemConfig = item => (
   || datavizStateSummaryConfig.items?.[item.id]
   || {}
 );
+const datavizConsumerRevisionEvidence = () => {
+  const contract = window.dataviz.dependency_contract || {};
+  const applied = window.dataviz.applied_revisions || {};
+  const project = (consumerType, consumerId, bindings, trigger) => {
+    const keys = [...new Set(
+      Object.values(bindings || {}).map(binding => binding.control).filter(Boolean)
+    )].sort();
+    if (!keys.length) return null;
+    const controls = Object.fromEntries(keys.map(key => {
+      const effectiveRevision = Number(datavizControlEntry(key)?.revision || 0);
+      const rawApplied = applied?.[consumerType]?.[consumerId]?.[key];
+      const appliedRevision = Number.isInteger(rawApplied) && rawApplied >= 0
+        ? rawApplied
+        : null;
+      return [key, {
+        effective_revision:effectiveRevision,
+        applied_revision:appliedRevision,
+        stale:appliedRevision !== effectiveRevision,
+      }];
+    }));
+    return {
+      trigger,
+      stale:Object.values(controls).some(item => item.stale),
+      controls,
+    };
+  };
+  const views = {};
+  Object.entries(contract.views || {}).forEach(([id, definition]) => {
+    const evidence = project('views', id, definition.control_inputs, 'auto');
+    if (evidence) views[id] = evidence;
+  });
+  const transforms = {};
+  Object.entries(contract.interactive?.control_inputs || {}).forEach(([id, bindings]) => {
+    const trigger = datavizRuntime.transforms.get(id)?.spec?.trigger || 'auto';
+    const evidence = project('transforms', id, bindings, trigger);
+    if (evidence) transforms[id] = evidence;
+  });
+  return {views, transforms};
+};
 const datavizBuildStateSnapshot = () => {
   const initial = window.dataviz.state_snapshot || {items:[]};
   const queryStale = Boolean(
     window.dataviz.query_stale ?? initial.query_stale
   );
   const items = (initial.items || []).map(item => {
-    if (item.kind === 'selection') {
-      const committed = structuredClone(datavizSelectionEntry(item.key));
-      return {...item, committed, draft:structuredClone(committed), stale:false};
-    }
-    if (item.kind === 'compute') {
+    if (item.entry_type === 'control') {
+      const current = structuredClone(datavizControlEntry(item.key));
       const committed = structuredClone(
-        window.dataviz.compute_parameters?.[item.key] ?? item.definition?.default
+        window.dataviz.applied_control_state?.[item.key] ?? current
       );
       const draft = structuredClone(
-        window.dataviz.draft_compute_parameters?.[item.key] ?? committed
+        window.dataviz.draft_control_state?.[item.key] ?? current
       );
       return {
         ...item,
         committed,
         draft,
-        stale:datavizValueSignature(committed) !== datavizValueSignature(draft),
+        stale:datavizControlSignature(committed) !== datavizControlSignature(draft),
       };
     }
     const committed = structuredClone(
@@ -2257,17 +2348,21 @@ const datavizBuildStateSnapshot = () => {
     };
   });
   const snapshot = {
-    schema:'dataviz/state-snapshot/v1',
+    schema:'dataviz/state-snapshot/v2',
     dashboard:window.dataviz.dashboard_id,
     query_stale:queryStale,
     items,
+    applied_revisions:structuredClone(
+      window.dataviz.applied_revisions || initial.applied_revisions || {}
+    ),
+    consumer_revisions:datavizConsumerRevisionEvidence(),
   };
   window.dataviz.state_snapshot = snapshot;
   return snapshot;
 };
 const datavizStateLogicalValue = item => {
-  if (item.kind !== 'selection') return item.committed;
-  return datavizSelectionValueFromState(item.definition || {}, item.committed);
+  if (item.entry_type !== 'control') return item.committed;
+  return datavizControlValueFromState(item.definition || {}, item.committed);
 };
 const datavizStateChoiceLabel = (definition, value) => {
   const match = datavizStaticChoices(definition || {}).find(
@@ -2276,7 +2371,7 @@ const datavizStateChoiceLabel = (definition, value) => {
   return match?.label || (Array.isArray(value) ? value.join(' / ') : String(value ?? ''));
 };
 const datavizStateValueParts = (item, rawValue, formatter = 'auto') => {
-  if (item.kind === 'selection' && item.committed?.intent === 'all_available') {
+  if (item.entry_type === 'control' && item.committed?.intent === 'all_available') {
     const values = Array.isArray(rawValue) ? rawValue : [];
     return [values.length ? `全部（${values.length}）` : '全部'];
   }
@@ -2294,7 +2389,7 @@ const datavizStateValueParts = (item, rawValue, formatter = 'auto') => {
   return values.map(value => datavizStateChoiceLabel(item.definition, value));
 };
 const datavizStateItemVisibleIn = (item, scope, ownerId) => {
-  if (scope === 'dashboard') return item.kind === 'query' || item.origin === 'dashboard';
+  if (scope === 'dashboard') return item.entry_type === 'query_parameter' || item.origin === 'dashboard';
   return item.origin === scope && item.owner_id === ownerId;
 };
 const datavizStateSummaryItem = item => {
@@ -2306,7 +2401,7 @@ const datavizStateSummaryItem = item => {
   const root = document.createElement(parts.length > max ? 'details' : 'span');
   root.className = 'dv-state-chip';
   root.dataset.stateKey = item.key;
-  root.dataset.stateKind = item.kind;
+  root.dataset.stateKind = item.entry_type;
   if (item.stale) root.dataset.stateStale = 'true';
   const visible = parts.slice(0, max).join('、');
   const suffix = parts.length > max ? ` +${parts.length - max}` : '';
@@ -2355,206 +2450,88 @@ const renderDatavizStateSummaries = () => {
 };
 window.dataviz.stateSnapshot = datavizBuildStateSnapshot;
 window.dataviz.renderStateSummaries = renderDatavizStateSummaries;
-const readComputeInputs = () => {
-  const values = {...(window.dataviz.draft_compute_parameters || {})};
-  document.querySelectorAll('[data-compute-key]').forEach(control => {
-    const key = control.dataset.computeKey;
-    const input = control.querySelector('[data-compute-input]');
-    if (!input || input.disabled || control.dataset.computeFrozen === 'true') return;
-    const definition = window.dataviz.compute_definitions?.[key] || {
-      type:input.dataset.computeType,
-      value_type:input.dataset.valueType || 'text',
-    };
-    const type = definition.type;
-    const valueType = definition.value_type;
-    const decode = raw => datavizDecodeControlValue(input, raw);
-    if (type === 'range_input') {
-      const range = input.value
-        ? input.value.split(',', 2).map(item => item.trim())
-        : [];
-      values[key] = range.some(Boolean) ? range : [];
-    } else if (valueType === 'boolean') values[key] = Boolean(input.checked);
-    else if (type === 'multiple_select') values[key] = Array.from(input.selectedOptions).map(option => decode(option.value));
-    else if (type === 'multiple_input') {
-      try { values[key] = input.value ? JSON.parse(input.value) : []; }
-      catch (_error) { values[key] = input.value.split(',').map(item => item.trim()).filter(Boolean); }
-    }
-    else if (input.tagName === 'SELECT') values[key] = input.value === '' ? null : decode(input.value);
-    else if (valueType === 'number' || valueType === 'integer') values[key] = input.value === '' ? null : Number(input.value);
-    else values[key] = input.value;
-    try {
-      values[key] = datavizNormalizeControlValue(
-        definition,
-        values[key],
-        {namespace:'compute_parameter', key},
-      );
-      input.setCustomValidity?.('');
-      const output = control.querySelector('[data-control-error]');
-      if (output) {
-        output.textContent = '';
-        output.hidden = true;
-      }
-    } catch (error) {
-      input.setCustomValidity?.(error.message);
-      const output = control.querySelector('[data-control-error]');
-      if (output) {
-        output.textContent = error.message;
-        output.hidden = false;
-      }
-      throw error;
-    }
-  });
-  window.dataviz.draft_compute_parameters = values;
-  return values;
-};
-const datavizChangedComputeKeys = (previous, current) => {
-  const keys = new Set([...Object.keys(previous || {}), ...Object.keys(current || {})]);
-  return [...keys].filter(key => datavizValueSignature(previous?.[key]) !== datavizValueSignature(current?.[key]));
-};
-const syncComputeDirtyState = () => {
-  const changed = datavizChangedComputeKeys(
-    window.dataviz.compute_parameters || {},
-    window.dataviz.draft_compute_parameters || {},
-  );
-  document.querySelectorAll('[data-compute-dirty-label]').forEach(node => {
-    const button = node.parentElement?.querySelector('[data-compute-apply]');
+const syncControlDirtyState = () => {
+  const changed = datavizChangedControlKeys(
+    window.dataviz.applied_control_state || null,
+    datavizControlStateSnapshot(),
+  ) || [];
+  document.querySelectorAll('[data-control-dirty-label]').forEach(node => {
+    const button = node.parentElement?.querySelector('[data-control-apply]');
     const scopeKeys = new Set(JSON.parse(button?.dataset.controlKeys || '[]'));
-    const localChanged = scopeKeys.size
-      ? changed.filter(key => scopeKeys.has(key))
-      : changed;
+    const localChanged = scopeKeys.size ? changed.filter(key => scopeKeys.has(key)) : changed;
     node.textContent = localChanged.length
       ? `${localChanged.length} draft change${localChanged.length === 1 ? '' : 's'}`
       : 'Results are current';
   });
-  document.querySelectorAll('[data-compute-apply]').forEach(button => {
+  document.querySelectorAll('[data-control-apply]').forEach(button => {
     const scopeKeys = new Set(JSON.parse(button.dataset.controlKeys || '[]'));
-    const localChanged = scopeKeys.size
-      ? changed.filter(key => scopeKeys.has(key))
-      : changed;
+    const localChanged = scopeKeys.size ? changed.filter(key => scopeKeys.has(key)) : changed;
     button.disabled = localChanged.length === 0 && button.dataset.analysisAlways !== 'true';
   });
   renderDatavizStateSummaries();
   return changed;
 };
-const renderComputeResult = async (changedKeys, options = {}) => {
-  const contentAffected = syncDatavizContentBindings(changedKeys);
-  if (contentAffected.size) {
-    datavizRuntime.renderViews({
-      initial:false,
-      changedSelectionKeys:[],
-      changedComputeKeys:changedKeys,
-      affectedViewIds:[...contentAffected],
-    });
-  }
-  const changedOutputs = await datavizRuntime.runTransforms([], [], {
-    changedComputeKeys:changedKeys,
-    apply:options.apply === true,
-    manualTargets:options.manualTargets || [],
-  });
-  window.dispatchEvent(new CustomEvent('dataviz:computechange', {
-    detail:{
-      compute_parameters:window.dataviz.compute_parameters,
-      changed:changedKeys,
-      outputs:[...changedOutputs],
-    },
-  }));
-  if (window.parent !== window) {
-    datavizPostToParent({
-      type:'dataviz:compute-changed',
-      compute_parameters:window.dataviz.compute_parameters,
-      draft_compute_parameters:window.dataviz.draft_compute_parameters,
-    });
-  }
-};
-window.dataviz.applyCompute = async (options = {}) => {
-  const draft = readComputeInputs();
-  const requested = options.keys || datavizChangedComputeKeys(window.dataviz.compute_parameters || {}, draft);
-  const changed = requested.filter(key => datavizValueSignature(window.dataviz.compute_parameters?.[key]) !== datavizValueSignature(draft[key]));
-  const committed = {...(window.dataviz.compute_parameters || {})};
-  changed.forEach(key => { committed[key] = structuredClone(draft[key]); });
-  window.dataviz.compute_parameters = committed;
-  syncComputeDirtyState();
-  await renderComputeResult(changed, options);
-};
 window.dataviz.applyControls = async (options = {}) => {
-  const requestedKeys = options.keys || [];
-  const draft = readComputeInputs();
-  const computeKeys = requestedKeys.filter(key => Object.prototype.hasOwnProperty.call(draft, key));
-  const selectionKeys = requestedKeys.filter(key => Object.prototype.hasOwnProperty.call(datavizSelectionState(), key));
-  const changedComputeKeys = computeKeys.filter(key => (
-    datavizValueSignature(window.dataviz.compute_parameters?.[key])
-    !== datavizValueSignature(draft[key])
-  ));
-  const committed = {...(window.dataviz.compute_parameters || {})};
-  changedComputeKeys.forEach(key => { committed[key] = structuredClone(draft[key]); });
-  window.dataviz.compute_parameters = committed;
-  syncComputeDirtyState();
-  const contentAffected = syncDatavizContentBindings(changedComputeKeys);
-  if (contentAffected.size) {
-    datavizRuntime.renderViews({
-      initial:false,
-      changedSelectionKeys:[],
-      changedComputeKeys,
-      affectedViewIds:[...contentAffected],
+  const previous = window.dataviz.current_control_state || null;
+  // Dynamic selects are empty until their immutable option domain is hydrated;
+  // preserve the compiled initial state during the first pass.
+  if (previous != null) readControlInputs({keys:options.keys ? new Set(options.keys) : null});
+  refreshControlOptionDomains();
+  readControlInputs({keys:options.keys ? new Set(options.keys) : null});
+  const current = datavizControlStateSnapshot();
+  const changed = datavizChangedControlKeys(previous, current);
+  window.dataviz.current_control_state = structuredClone(current);
+  let affectedViewIds = datavizRuntime.affectedViews(changed, new Set());
+  const contentAffected = syncDatavizContentBindings(changed);
+  if (affectedViewIds != null) affectedViewIds = [...new Set([...affectedViewIds, ...contentAffected])];
+  if (previous == null) {
+    window.dataviz.applied_control_state = structuredClone(current);
+  } else if (options.apply === true) {
+    const keys = options.keys?.length ? options.keys : Object.keys(current);
+    window.dataviz.applied_control_state ||= {};
+    keys.forEach(key => {
+      if (current[key]) {
+        window.dataviz.applied_control_state[key] = structuredClone(current[key]);
+      }
+    });
+  } else {
+    // Controls consumed only by immediate Views/auto Transforms have no pending
+    // Apply lifecycle. Advance their evidence snapshot without committing keys
+    // that still feed an apply/manual consumer.
+    window.dataviz.applied_control_state ||= {};
+    Object.keys(current).forEach(key => {
+      const deferred = [...datavizRuntime.transforms].some(([id, item]) => (
+        item.spec.trigger !== 'auto'
+        && Object.values(datavizRuntime.transformControlInputs(id))
+          .some(binding => binding.control === key)
+      ));
+      if (!deferred) {
+        window.dataviz.applied_control_state[key] = structuredClone(current[key]);
+      }
     });
   }
-  const changedOutputs = await datavizRuntime.runTransforms(selectionKeys, [], {
-    changedComputeKeys,
-    apply:true,
-    manualTargets:options.manualTargets || [],
-  });
-  window.dispatchEvent(new CustomEvent('dataviz:computechange', {
-    detail:{
-      compute_parameters:window.dataviz.compute_parameters,
-      changed:changedComputeKeys,
-      outputs:[...changedOutputs],
-    },
-  }));
-  if (window.parent !== window) {
-    datavizPostToParent({
-      type:'dataviz:compute-changed',
-      compute_parameters:window.dataviz.compute_parameters,
-      draft_compute_parameters:window.dataviz.draft_compute_parameters,
-    });
-  }
-};
-window.dataviz.applySelections = async () => {
-  const previous = window.dataviz.appliedSelectionState || null;
-  // On first paint the canonical values come from the validated Query/report
-  // snapshot. Dynamic <select> elements are intentionally empty until their
-  // immutable option domains are available, so reading the DOM first would erase
-  // a valid required default and abort every unrelated View.
-  if (previous != null) readSelectionInputs();
-  refreshSelectionOptionDomains();
-  readSelectionInputs();
-  const current = datavizSelectionStateSnapshot();
-  const changedSelectionKeys = datavizChangedSelectionKeys(previous, current);
-  let affectedViewIds = datavizRuntime.affectedViews(changedSelectionKeys, new Set());
-  const contentAffectedViewIds = syncDatavizContentBindings(changedSelectionKeys);
-  if (affectedViewIds != null) {
-    affectedViewIds = [...new Set([...affectedViewIds, ...contentAffectedViewIds])];
-  }
-  window.dataviz.appliedSelectionState = structuredClone(current);
-  renderDatavizStateSummaries();
+  window.dataviz.draft_control_state = structuredClone(current);
   window.dataviz.renderContext = {
-    initial: changedSelectionKeys == null,
-    changedSelectionKeys: changedSelectionKeys || Object.keys(current),
+    initial:changed == null,
+    changedControlKeys:changed || Object.keys(current),
     affectedViewIds,
   };
-  if (changedSelectionKeys == null || changedSelectionKeys.length) {
-    datavizRuntime.renderViews(window.dataviz.renderContext);
-  }
-  window.dispatchEvent(new CustomEvent('dataviz:selectionchange', {detail: structuredClone(current)}));
+  syncControlDirtyState();
+  if (changed == null || changed.length) datavizRuntime.renderViews(window.dataviz.renderContext);
+  const changedOutputs = await datavizRuntime.runTransforms(changed, [], {
+    apply:options.apply === true,
+    manualTargets:options.manualTargets || [],
+    targets:options.targets,
+  });
+  window.dispatchEvent(new CustomEvent('dataviz:controlchange', {
+    detail:{control_state:structuredClone(current), changed:changed || Object.keys(current), outputs:[...changedOutputs]},
+  }));
   if (window.parent !== window) {
     datavizPostToParent({
-      type:'dataviz:selections-changed',
-      selection_state:structuredClone(current),
-      selection_epoch:Number(window.dataviz.selection_epoch || 0),
+      type:'dataviz:controls-changed',
+      control_state:structuredClone(current),
     });
   }
-  await datavizRuntime.runTransforms(changedSelectionKeys, [], {
-    changedComputeKeys: previous == null ? null : [],
-  });
   datavizRuntime.publishControlImpacts();
 };
 window.dataviz.connectLive = () => {
@@ -2649,75 +2626,36 @@ window.dataviz.connectLive = () => {
   source.addEventListener('stream_end', () => source.close());
   window.dataviz.liveSource = source;
 };
-const setSelectionInputs = states => {
-  // The parent owns Dashboard Controls, which deliberately have no duplicate
-  // input inside the Canvas. Commit every canonical state first; DOM syncing is
-  // only a projection for Controls that are actually rendered in this frame.
-  const known = window.dataviz.dependency_contract?.controls || {};
+const setControlInputs = states => {
   Object.entries(states || {}).forEach(([key, state]) => {
-    if (known[key]?.kind !== 'selection') return;
-    datavizSelectionState()[key] = datavizNormalizeSelectionState(key, state);
+    if (!window.dataviz.dependency_contract?.controls?.[key]) return;
+    datavizControlState()[key] = datavizNormalizeControlState(key, state);
   });
-  document.querySelectorAll('[data-selection-key]').forEach(control => {
-    const key = control.dataset.selectionKey;
-    if (!(key in states)) return;
-    const input = control.querySelector('[data-selection-input]');
-    if (!input) return;
-    const value = datavizSelectionValue(key);
+  window.dataviz.draft_control_state = structuredClone(datavizControlStateSnapshot());
+  document.querySelectorAll('[data-control-key]').forEach(control => {
+    const key = control.dataset.controlKey;
+    if (!(key in (states || {}))) return;
+    const input = control.querySelector('[data-control-state-input]');
+    if (!input || input.disabled) return;
+    const definition = datavizControlDefinition(key);
+    const value = datavizControlValue(key);
     const encode = item => datavizEncodeControlValue(input, item, {
-      path:control.dataset.selectionPath === 'true',
+      path:control.dataset.controlPath === 'true',
     });
-    const definition = datavizSelectionDefinition(key);
-    if (definition.value_type === 'boolean' && input.tagName === 'SELECT') {
-      input.value = value == null ? '' : encode(value);
-    }
+    if (definition.value_type === 'boolean' && input.tagName === 'SELECT') input.value = value == null ? '' : encode(value);
     else if (definition.value_type === 'boolean') input.checked = Boolean(value);
     else if (input.multiple) {
       const selected = new Set((value || []).map(encode));
-      Array.from(input.options).forEach(option => {
-        option.selected = selected.has(option.value);
-      });
+      Array.from(input.options).forEach(option => { option.selected = selected.has(option.value); });
       syncPortableChoices(control);
-    }
-    else if (definition.type === 'range_input' && Array.isArray(value)) {
-      input.value = value.length ? value.join(',') : '';
-    }
+    } else if (definition.type === 'range_input' && Array.isArray(value)) input.value = value.length ? value.join(',') : '';
     else if (input.tagName === 'SELECT') input.value = value == null ? '' : encode(value);
     else if (definition.type === 'multiple_input' && Array.isArray(value)) input.value = JSON.stringify(value);
     else if (Array.isArray(value)) input.value = value.join(',');
     else input.value = value ?? '';
     input._syncChoiceControl?.();
   });
-};
-const setComputeInputs = values => {
-  window.dataviz.draft_compute_parameters = {
-    ...(window.dataviz.draft_compute_parameters || {}),
-    ...(values || {}),
-  };
-  document.querySelectorAll('[data-compute-key]').forEach(control => {
-    const key = control.dataset.computeKey;
-    if (!(key in (values || {}))) return;
-    const input = control.querySelector('[data-compute-input]');
-    if (!input || input.disabled) return;
-    const value = values[key];
-    const definition = window.dataviz.compute_definitions?.[key] || {
-      type:input.dataset.computeType,
-      value_type:input.dataset.valueType || 'text',
-    };
-    const type = definition.type;
-    if (type === 'range_input') {
-      const range = Array.isArray(value) ? value : String(value || '').split(',', 2);
-      input.value = range.some(Boolean) ? `${range[0] || ''},${range[1] || ''}` : '';
-    } else if (definition.value_type === 'boolean') input.checked = Boolean(value);
-    else if (input.multiple) {
-      const selected = new Set((value || []).map(item => datavizEncodeControlValue(input, item)));
-      Array.from(input.options).forEach(option => { option.selected = selected.has(option.value); });
-    } else if (input.tagName === 'SELECT') {
-      input.value = value == null ? '' : datavizEncodeControlValue(input, value);
-    } else if (type === 'multiple_input') input.value = JSON.stringify(value || []);
-    else input.value = value ?? '';
-  });
-  syncComputeDirtyState();
+  syncControlDirtyState();
 };
 window.addEventListener('message', event => {
   if (
@@ -2726,11 +2664,16 @@ window.addEventListener('message', event => {
     || event.source !== window.parent
     || !datavizSameFrameIdentity(event.data)
   ) return;
-  if (event.data?.type === 'dataviz:set-selections') {
-    const values = event.data.selection_state || {};
-    window.dataviz.selection_epoch = Number(event.data.selection_epoch || 0);
-    setSelectionInputs(values);
-    window.dataviz.applySelections().catch(error => console.error('[dataviz:selections]', error));
+  if (event.data?.type === 'dataviz:set-controls') {
+    const states = event.data.control_state || {};
+    setControlInputs(states);
+    if (event.data.commit !== false) {
+      window.dataviz.applyControls({
+        keys:event.data.control_keys || Object.keys(states),
+        apply:event.data.apply !== false,
+        manualTargets:event.data.manual_targets || [],
+      }).catch(error => console.error('[dataviz:controls]', error));
+    }
   }
   if (event.data?.type === 'dataviz:set-query-draft') {
     window.dataviz.draft_query_parameters = structuredClone(
@@ -2756,24 +2699,8 @@ window.addEventListener('message', event => {
       const targets = [...datavizRuntime.transforms.entries()]
         .filter(([, item]) => item.spec.runtime === 'server-python')
         .map(([id]) => id);
-      datavizRuntime.runTransforms([], [], {
-        changedComputeKeys: [],
-        targets,
-      }).catch(error => console.error('[dataviz:interaction]', error));
-    }
-  }
-  if (event.data?.type === 'dataviz:set-compute') {
-    const values = event.data.compute_parameters || {};
-    setComputeInputs(values);
-    if (event.data.commit) {
-      const apply = event.data.control_keys == null
-        ? window.dataviz.applyCompute
-        : window.dataviz.applyControls;
-      apply({
-        keys:event.data.control_keys || Object.keys(values),
-        apply:event.data.apply !== false,
-        manualTargets:event.data.manual_targets || [],
-      }).catch(error => console.error('[dataviz:compute]', error));
+      datavizRuntime.runTransforms([], [], {targets})
+        .catch(error => console.error('[dataviz:interaction]', error));
     }
   }
   if (event.data?.type === 'dataviz:collect-snapshot') {
@@ -2785,8 +2712,8 @@ window.addEventListener('message', event => {
         request_id:requestId,
         ...datavizFrameIdentity(),
         ...snapshot,
-        selection_state:datavizSelectionStateSnapshot(),
-        compute_parameters:structuredClone(window.dataviz.compute_parameters || {}),
+        control_state:datavizControlStateSnapshot(),
+        state_snapshot:datavizBuildStateSnapshot(),
       }, event.origin);
     } catch (error) {
       event.source?.postMessage({
@@ -2799,33 +2726,33 @@ window.addEventListener('message', event => {
   }
 });
 // Owner: DOM/bootstrap event wiring after every Runtime owner is registered.
-let datavizSelectionScheduled = false;
-let datavizSelectionQueue = Promise.resolve();
-const scheduleDatavizSelection = event => {
+let datavizControlScheduled = false;
+let datavizControlQueue = Promise.resolve();
+const scheduleDatavizControl = event => {
   // Capture the user's native control value before asynchronous initialization
   // or option-domain reconciliation can rebuild the underlying <select>.
   try {
-    datavizCaptureSelectionIntent(event?.currentTarget || event?.target);
-    readSelectionInputs();
+    datavizCaptureControlIntent(event?.currentTarget || event?.target);
+    readControlInputs();
   } catch (error) {
-    console.error('[dataviz:selections]', error);
+    console.error('[dataviz:controls]', error);
     return;
   }
-  if (datavizSelectionScheduled) return;
-  datavizSelectionScheduled = true;
+  if (datavizControlScheduled) return;
+  datavizControlScheduled = true;
   queueMicrotask(() => {
-    datavizSelectionScheduled = false;
+    datavizControlScheduled = false;
     // A native select emits both input and change for one user action. Coalesce
     // that event pair in the current task, then serialize any later actions
-    // behind the in-flight Interactive branch. Selection is an immediate data
+    // behind the in-flight Interactive branch. Control state is an immediate data
     // contract; it must not depend on a browser timer being scheduled promptly.
     const initialization = datavizRuntime.initializationPromise || Promise.resolve();
-    datavizSelectionQueue = Promise.all([
-      datavizSelectionQueue.catch(() => undefined),
+    datavizControlQueue = Promise.all([
+      datavizControlQueue.catch(() => undefined),
       initialization.catch(() => undefined),
     ])
-      .then(() => window.dataviz.applySelections())
-      .catch(error => console.error('[dataviz:selections]', error));
+      .then(() => window.dataviz.applyControls())
+      .catch(error => console.error('[dataviz:controls]', error));
   });
 };
 const datavizEscape = value => String(value ?? '')
@@ -2950,42 +2877,20 @@ document.addEventListener('keydown', event => {
   }
 });
 window.datavizComponents?.hydrate(document);
-document.querySelectorAll('[data-selection-input]').forEach(input => {
-  input.addEventListener('input', scheduleDatavizSelection);
-  input.addEventListener('change', scheduleDatavizSelection);
+document.querySelectorAll('[data-control-state-input]').forEach(input => {
+  input.addEventListener('input', scheduleDatavizControl);
+  input.addEventListener('change', scheduleDatavizControl);
 });
-let datavizComputeTimer;
-document.querySelectorAll('[data-compute-input]').forEach(input => {
-  const onDraft = () => {
-    readComputeInputs();
-    const changed = syncComputeDirtyState();
-    const key = input.closest('[data-compute-key]')?.dataset.computeKey || input.dataset.computeInput;
-    const trigger = input.dataset.computeTrigger || input.closest('[data-compute-trigger]')?.dataset.computeTrigger;
-    if (trigger !== 'auto' || !key || !changed.includes(key)) return;
-    clearTimeout(datavizComputeTimer);
-    const consumers = (
-      window.dataviz.dependency_contract?.controls?.[key]?.transform_consumers || []
-    ).map(id => datavizRuntime.transforms.get(id)).filter(
-      item => item?.spec.trigger === 'auto'
-    );
-    const delay = Math.max(0, ...consumers.map(item => Number(item.spec.debounce_ms || 0)));
-    datavizComputeTimer = setTimeout(() => window.dataviz.applyCompute({keys:[key]}).catch(error => {
-      console.error('[dataviz:compute:auto]', error);
-    }), delay);
-  };
-  input.addEventListener('input', onDraft);
-  input.addEventListener('change', onDraft);
-});
-document.querySelectorAll('[data-compute-apply]').forEach(button => {
+document.querySelectorAll('[data-control-apply]').forEach(button => {
   button.addEventListener('click', () => window.dataviz.applyControls({
     apply:true,
     keys:JSON.parse(button.dataset.controlKeys || '[]'),
     manualTargets:JSON.parse(button.dataset.manualTargets || '[]'),
   }).catch(error => {
-    console.error('[dataviz:compute:apply]', error);
+    console.error('[dataviz:control:apply]', error);
   }));
 });
-syncComputeDirtyState();
+syncControlDirtyState();
 if (window.dataviz.asset_mode === 'server') {
   document.querySelectorAll('.dv-context-controls[data-editor-owner] > summary').forEach(trigger => {
     trigger.addEventListener('contextmenu', event => {
@@ -3030,10 +2935,10 @@ Object.entries(window.dataviz.portable?.output_errors || {}).forEach(([reference
     datavizRuntimeError(failure),
   );
 });
-window.dataviz.getViewSelections = viewId => {
-  const contract = datavizViewSelectionContract(viewId);
+window.dataviz.getViewControls = viewId => {
+  const contract = datavizViewControlContract(viewId);
   return Object.fromEntries(
-    contract.map(item => [item.id, datavizSelectionValue(item.key)])
+    contract.map(item => [item.id, datavizControlValue(item.key)])
   );
 };
 window.datavizRuntimeServices = Object.freeze({
@@ -3041,8 +2946,8 @@ window.datavizRuntimeServices = Object.freeze({
   tableRows:datavizTableRows,
   numericAggregate:datavizNumericAggregate,
   workerValue:datavizWorkerValue,
-  selectionCanApply:datavizSelectionCanApply,
-  selectionMatches:datavizSelectionMatches,
+  controlCanApply:datavizControlCanApply,
+  controlMatches:datavizControlMatches,
   runtimeError:datavizRuntimeError,
   escape:datavizEscape,
   decodeSpec:node => JSON.parse(new TextDecoder().decode(Uint8Array.from(

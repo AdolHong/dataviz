@@ -27,12 +27,9 @@ def _text_series(series: pd.Series) -> pd.Series:
 
 
 def _fields(item: dict[str, Any]) -> list[str]:
-    definition = item.get("definition") or {}
-    path_fields = definition.get("path_fields") or []
-    if path_fields:
-        return [str(field) for field in path_fields]
-    binding = item.get("binding") or {}
-    return [str(binding.get("field") or definition.get("field") or item.get("id"))]
+    binding = item.get("consumer_binding") or item
+    raw = binding.get("field") or []
+    return [str(field) for field in (raw if isinstance(raw, list) else [raw])]
 
 
 def _can_apply(frame: pd.DataFrame, item: dict[str, Any]) -> bool:
@@ -46,17 +43,19 @@ def _mask(
 ) -> pd.Series:
     if not _can_apply(frame, item):
         return pd.Series(True, index=frame.index, dtype=bool)
-    # Canonical Selection semantics: explicit empty means no samples.  The
-    # all_available intent carries the currently resolved domain in ``values``
-    # and therefore follows the same include filter.
+    binding = item.get("consumer_binding") or item
     if value is None or value == "" or (
         isinstance(value, (list, tuple)) and len(value) == 0
     ):
-        return pd.Series(False, index=frame.index, dtype=bool)
+        return pd.Series(
+            binding.get("empty", "passthrough") == "passthrough",
+            index=frame.index,
+            dtype=bool,
+        )
 
     definition = item.get("definition") or {}
-    binding = item.get("binding") or {}
-    path_fields = definition.get("path_fields") or []
+    fields = _fields(item)
+    path_fields = fields if len(fields) > 1 else []
     if path_fields:
         paths = value if isinstance(value, list) and value and isinstance(value[0], list) else [value]
         matched = pd.Series(False, index=frame.index, dtype=bool)
@@ -69,7 +68,7 @@ def _mask(
             matched |= candidate
         return matched
 
-    field = str(binding.get("field") or definition.get("field") or item.get("id"))
+    field = fields[0]
     operator = binding.get("operator") or "auto"
     if operator == "auto":
         if definition.get("type") in {"multiple_input", "multiple_select"}:
@@ -114,16 +113,11 @@ def _mask(
     return _text_series(actual) == _text(value)
 
 
-def apply_selection_filters(
+def apply_control_filters(
     frame: pd.DataFrame,
     filters: Iterable[dict[str, Any]],
 ) -> pd.DataFrame:
-    """Apply include-only Selection Controls before Interactive computation.
-
-    A Selection only constrains a table that exposes its complete field contract.
-    This mirrors the browser/View rule: unrelated table inputs pass through rather
-    than becoming accidentally empty.
-    """
+    """Apply explicit consumer-side Control filters to one table input."""
 
     selected = frame
     for item in filters:

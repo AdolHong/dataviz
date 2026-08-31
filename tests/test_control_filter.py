@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from dataviz.execution.selection_filter import apply_selection_filters
+from dataviz.execution.control_filter import apply_control_filters
 
 
 def _filter(
@@ -18,17 +18,21 @@ def _filter(
         "id": control_id,
         "definition": {
             "id": control_id,
-            "kind": "selection",
+
             "type": control_type,
             "field": field,
             "path_fields": path_fields or [],
         },
-        "binding": {"field": field or control_id, "operator": operator},
+        "consumer_binding": {
+            "field": field or control_id,
+            "operator": operator,
+            "empty": "match_none",
+        },
         "value": value,
     }
 
 
-def test_selection_filters_are_include_only_and_ignore_unrelated_tables():
+def test_control_filters_are_include_only_and_ignore_unrelated_tables():
     frame = pd.DataFrame(
         [
             {"province": "广东", "city": "深圳", "value": 10},
@@ -37,7 +41,7 @@ def test_selection_filters_are_include_only_and_ignore_unrelated_tables():
         ]
     )
 
-    selected = apply_selection_filters(
+    selected = apply_control_filters(
         frame,
         [_filter(control_id="province", value=["广东"], field="province")],
     )
@@ -47,13 +51,13 @@ def test_selection_filters_are_include_only_and_ignore_unrelated_tables():
     ]
 
     unrelated = frame[["value"]]
-    assert apply_selection_filters(
+    assert apply_control_filters(
         unrelated,
         [_filter(control_id="province", value=["广东"], field="province")],
     ).equals(unrelated)
 
 
-def test_explicit_empty_selection_means_zero_rows_not_all_rows():
+def test_match_none_empty_filter_means_zero_rows_not_all_rows():
     frame = pd.DataFrame(
         [
             {"region": "north", "value": 1},
@@ -61,7 +65,7 @@ def test_explicit_empty_selection_means_zero_rows_not_all_rows():
         ]
     )
 
-    selected = apply_selection_filters(
+    selected = apply_control_filters(
         frame,
         [_filter(control_id="region", value=[], field="region")],
     )
@@ -70,7 +74,7 @@ def test_explicit_empty_selection_means_zero_rows_not_all_rows():
     assert list(selected.columns) == ["region", "value"]
 
 
-def test_selection_filters_support_path_date_and_numeric_contracts():
+def test_control_filters_support_path_date_and_numeric_contracts():
     frame = pd.DataFrame(
         [
             {"province": "广东", "city": "深圳", "day": "2026-08-20", "value": 10},
@@ -99,6 +103,6 @@ def test_selection_filters_support_path_date_and_numeric_contracts():
         ),
     ]
 
-    assert apply_selection_filters(frame, filters).to_dict(orient="records") == [
+    assert apply_control_filters(frame, filters).to_dict(orient="records") == [
         {"province": "福建", "city": "厦门", "day": "2026-08-23", "value": 30}
     ]

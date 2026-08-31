@@ -105,6 +105,9 @@ def create_analysis_evidence(
         target=validated.get("target") or {},
         outputs=output_evidence,
         lineage=validated.get("lineage", {}),
+        consumer_revisions=validated.get(
+            "consumer_revisions", {"views": {}, "transforms": {}}
+        ),
         snapshot=snapshots,
     )
     destination = root / ".dataviz" / "analysis-evidence" / f"{evidence_id}.json"

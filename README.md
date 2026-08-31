@@ -114,8 +114,10 @@ dataviz run myworkspace 'sales::source:orders/main' \
 dataviz result show myworkspace result_... --offset 0 --limit 100
 dataviz result inspect myworkspace result_...
 dataviz result export myworkspace result_... \
-  'sales::source:orders/main' --to result.parquet
+  'sales::source:orders/main' --to ./exported-output
 ```
+
+`result export` 复制 Result 中的原生 Artifact，不重新执行查询，也不转换文件格式。
 
 典型 AI 工作流是：
 

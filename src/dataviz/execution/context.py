@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 from dataviz.artifacts import ArtifactDescriptor, ArtifactStore
 from dataviz.errors import ExecutionFailure
-from dataviz.execution.selection_filter import apply_selection_filters
+from dataviz.execution.control_filter import apply_control_filters
 
 
 @dataclass(slots=True)
@@ -17,12 +17,11 @@ class ExecutionContext:
     dashboard_root: Path
     run_id: str
     query_inputs: dict[str, Any]
-    compute_params: dict[str, Any]
-    selections: dict[str, Any]
-    selection_state: dict[str, dict[str, Any]]
+    control_inputs: dict[str, Any]
+    control_state: dict[str, dict[str, Any]]
     inputs: dict[str, ArtifactDescriptor]
     store: ArtifactStore
-    selection_filters: tuple[dict[str, Any], ...] = ()
+    control_filters: tuple[dict[str, Any], ...] = ()
     adapter: dict[str, Any] | None = None
     _progress_callback: Callable[[float | None, str], None] | None = None
     _log_callback: Callable[[dict[str, Any]], None] | None = None
@@ -31,9 +30,14 @@ class ExecutionContext:
         descriptor = self.inputs[name]
         if descriptor.kind != "table":
             raise ExecutionFailure(f"Input {name} is {descriptor.kind}, not table")
-        return apply_selection_filters(
+        applicable = tuple(
+            item
+            for item in self.control_filters
+            if name in (item.get("consumer_binding") or {}).get("inputs", ())
+        )
+        return apply_control_filters(
             self.store.read_table(descriptor),
-            self.selection_filters,
+            applicable,
         )
 
     def input(self, name: str) -> Any:

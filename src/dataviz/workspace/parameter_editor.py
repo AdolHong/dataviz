@@ -49,7 +49,7 @@ def _minimal_choice(value: dict[str, Any]) -> dict[str, Any]:
 
 def _control_payload(control) -> dict[str, Any]:
     static = isinstance(control.options, StaticOptionDomainDefinition)
-    inferred = getattr(control.options, "mode", None) == "infer"
+    option_mode = getattr(control.options, "mode", None)
     select = control.type in {"single_select", "multiple_select"}
     return {
         "id": control.id,
@@ -71,7 +71,7 @@ def _control_payload(control) -> dict[str, Any]:
         "default_editable": not select,
         "initial": select_initial_contract(control) if select else None,
         "initial_editable": select,
-        "option_source": "static" if static else "infer" if inferred else None,
+        "option_source": option_mode,
         "choices_editable": static,
         "choices": [_choice_payload(choice) for choice in control.options.choices]
         if static

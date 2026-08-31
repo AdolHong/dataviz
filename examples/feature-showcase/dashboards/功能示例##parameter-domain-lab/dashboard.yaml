@@ -1,0 +1,55 @@
+schema: dataviz/dashboard/v11
+kind: dashboard
+id: parameter-domain-lab
+title: 动态参数域
+description: 一个 SQL 同时提供省份与城市候选，并在正式查询前完成本地级联。
+context:
+  grain: 每行代表一个城市的经营指标
+adapters: {warehouse: demo-duckdb}
+parameter_domains: [parameter_domains/locations.yaml]
+query_parameters:
+  - id: provinces
+    type: multiple_select
+    value_type: text
+    label: 省份
+    required: true
+    initial: {mode: values, values: [GD]}
+    options:
+      mode: domain
+      source: locations
+      value_field: province_code
+      label_field: province_name
+      sort_field: province_order
+  - id: cities
+    type: multiple_select
+    value_type: text
+    label: 城市
+    required: false
+    initial: {mode: all}
+    options:
+      mode: domain
+      source: locations
+      value_field: city_code
+      label_field: city_name
+      sort_field: city_order
+      depends_on:
+        provinces: {field: province_code}
+sources: [sources/metrics.yaml]
+views:
+  - id: city-ranking
+    title: 当前参数对应的城市收入
+    template: bar
+    input: source:metrics/main
+    x: city_name
+    y: revenue
+    aggregate: none
+  - id: city-table
+    title: 查询结果
+    template: table
+    input: source:metrics/main
+    columns: [province_name, city_name, revenue, orders]
+sections:
+  - {id: results, title: 动态候选与查询结果, views: [city-ranking, city-table]}
+canvas:
+  use_default_style: true
+  client_libraries: [plotly]

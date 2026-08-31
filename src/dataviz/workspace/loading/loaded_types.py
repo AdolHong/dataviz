@@ -13,6 +13,10 @@ from dataviz.execution.dependencies import (
     DashboardDependencyContract,
     compile_dashboard_dependencies,
 )
+from dataviz.execution.parameter_domains import (
+    ParameterDomainContract,
+    compile_parameter_domain_contract,
+)
 from dataviz.layout import DashboardLayoutContract, compile_layout_contract
 from dataviz.workspace.models import (
     DashboardDefinition,
@@ -20,6 +24,7 @@ from dataviz.workspace.models import (
     DeclarativeViewDefinition,
     InteractiveTransformDefinition,
     NavigationItem,
+    ParameterDomainDefinition,
     PresentationDefinition,
     SourceDefinition,
     TrashItemDefinition,
@@ -37,6 +42,7 @@ class LoadedDashboard:
     definition: DashboardDefinition
     logic_definition: DashboardDefinition
     sources: dict[str, tuple[Path, SourceDefinition]]
+    parameter_domains: dict[str, tuple[Path, ParameterDomainDefinition]]
     dataset_transforms: dict[str, tuple[Path, DatasetTransformDefinition]]
     interactive_transforms: dict[str, tuple[Path, InteractiveTransformDefinition]]
     views: dict[str, DeclarativeViewDefinition]
@@ -67,6 +73,16 @@ class LoadedDashboard:
         init=False,
         repr=False,
     )
+    _parameter_domain_contract: ParameterDomainContract | None = dataclass_field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+    _parameter_domain_contract_lock: Lock = dataclass_field(
+        default_factory=Lock,
+        init=False,
+        repr=False,
+    )
 
     @property
     def dependency_contract(self) -> DashboardDependencyContract:
@@ -93,6 +109,14 @@ class LoadedDashboard:
                 if self._layout_contract is None:
                     self._layout_contract = compile_layout_contract(self)
         return self._layout_contract
+
+    @property
+    def parameter_domain_contract(self) -> ParameterDomainContract:
+        if self._parameter_domain_contract is None:
+            with self._parameter_domain_contract_lock:
+                if self._parameter_domain_contract is None:
+                    self._parameter_domain_contract = compile_parameter_domain_contract(self)
+        return self._parameter_domain_contract
 
     @property
     def canvas_name(self) -> str:

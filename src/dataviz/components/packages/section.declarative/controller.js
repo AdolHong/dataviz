@@ -14,18 +14,26 @@
     if (!view) return [];
     const viewController = root.viewDeclarative;
     const repeatedView = spec.input ? {...view, input:spec.input, inputs:{}} : view;
-    const contract = state.dependency_contract?.views?.[view.id]?.selection_contract || [];
+    let selectedGroups = null;
     if (spec.template === 'selection-gallery') {
-      const selection = contract.find(item => (
-        item.origin === 'section'
-        && item.owner_id === spec.section
-        && (!spec.selection || item.id === spec.selection)
-      ));
-      const entry = selection ? state.selection.state(selection.key) : null;
-      const values = Array.isArray(entry?.values) ? entry.values : [];
+      const controlKey = spec.control ? `section:${spec.section}/${spec.control}` : null;
+      const entry = controlKey ? state.control.state(controlKey) : null;
+      const values = Array.isArray(entry?.value) ? entry.value : [];
       if (!values.length) {
         return [];
       }
+      const definition = state.dependency_contract?.controls?.[controlKey]?.definition || {};
+      const fields = definition.path_fields?.length
+        ? definition.path_fields
+        : [definition.field || definition.id].filter(Boolean);
+      const indexes = spec.by.map(field => fields.indexOf(field));
+      selectedGroups = new Set(values.map(value => {
+        const path = Array.isArray(value) ? value : [value];
+        const projected = indexes.every(index => index >= 0)
+          ? indexes.map(index => path[index])
+          : path.slice(-spec.by.length);
+        return JSON.stringify(projected.length === 1 ? projected[0] : projected);
+      }));
     }
     const grouped = new Map();
     viewController.selectRows(repeatedView, state).forEach(row => {
@@ -35,6 +43,11 @@
       grouped.get(key).rows.push(row);
     });
     let groups = [...grouped.values()];
+    if (selectedGroups) {
+      groups = groups.filter(group => selectedGroups.has(JSON.stringify(
+        group.values.length === 1 ? group.values[0] : group.values
+      )));
+    }
     const direction = spec.order === 'desc' ? -1 : 1;
     groups.sort((left, right) => {
       if (spec.order_by) {
@@ -89,7 +102,7 @@
   };
 
   root.sectionDeclarative = {
-    protocol:'dataviz/runtime/v5',
+    protocol:'dataviz/runtime/v6',
     flow:'document',
     coordinates:false,
     repeatTitle,

@@ -1,7 +1,2 @@
 schema: dataviz/component-story/v1
-stories:
-  - id: compute.control.states
-    component: compute.control
-    title: Compute state matrix
-    summary: Ready, Loading, Stale, Empty, Error, Cancelled and Unavailable controls share one semantic contract.
-    gallery: {dashboard: component-gallery, target: "#story-compute-state-matrix", anchor: compute-state-matrix}
+stories: []

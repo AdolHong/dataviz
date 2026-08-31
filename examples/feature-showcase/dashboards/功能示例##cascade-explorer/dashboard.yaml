@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v9
+schema: dataviz/dashboard/v11
 kind: dashboard
 id: cascade-explorer
 title: 级联选择器
@@ -10,7 +10,6 @@ adapters:
   uploads: shared-files
 controls:
   - id: province
-    kind: selection
     field: province
     type: multiple_select
     value_type: text
@@ -34,6 +33,9 @@ views:
     y: val
     series: city
     aggregate: sum
+    control_inputs:
+      province: {mode: filter, control: dashboard.province, field: province, inputs: [main], empty: match_none}
+      city: {mode: filter, control: section.city, field: city, inputs: [main], empty: match_none}
 
   - id: city-detail
     title: 级联后的城市明细
@@ -43,22 +45,23 @@ views:
     limit: 40
     controls:
       - id: min_value
-        kind: selection
         field: val
         type: single_input
         value_type: number
         label: 最低值
         default: 0
       - id: district
-        kind: selection
         type: multiple_select
         value_type: text
         label: 区县
         path_fields: [province, city, district]
         depends_on: [section.city]
         options: {mode: infer}
-    selection_bindings:
-      min_value: {field: val, operator: gte}
+    control_inputs:
+      province: {mode: filter, control: dashboard.province, field: province, inputs: [main], empty: match_none}
+      city: {mode: filter, control: section.city, field: city, inputs: [main], empty: match_none}
+      district: {mode: filter, control: view.district, field: [province, city, district], inputs: [main], empty: match_none}
+      min_value: {mode: filter, control: view.min_value, field: val, inputs: [main], empty: passthrough, operator: gte}
 
   - id: uploaded-file
     title: Workspace Adapter 文件
@@ -80,7 +83,6 @@ sections:
     title: 地理级联
     controls:
       - id: city
-        kind: selection
         field: city
         type: multiple_select
         value_type: text

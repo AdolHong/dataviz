@@ -4,8 +4,7 @@ const state = {
   sessionId: null,
   dashboardStates: new Map(),
   preferredDashboardId: null,
-  selectionTimer: null,
-  computeTimer: null,
+  controlTimer: null,
   draggedNavigation: null,
   sidebarWidth: 250,
   sidebarWidthCustomized: false,
@@ -22,14 +21,11 @@ function runtimeFor(dashboardId) {
     state.dashboardStates.set(dashboardId, {
       runId: null,
       pendingRunId: null,
-      committedQueryParameters: null,
+      committedQuerySnapshot: null,
       queryParameterValues: null,
       queryParametersOpen: null,
-      committedComputeParameters: null,
-      draftComputeParameters: null,
-      selectionState: {},
+      controlState: {},
       controlImpacts: {},
-      selectionEpoch: 0,
       eventSource: null,
       nodeErrors: {},
       nodeStatuses: {},
@@ -43,6 +39,13 @@ function runtimeFor(dashboardId) {
       pendingRunOutdated: false,
       queryRequestInFlight: false,
       pendingQueryChangeRevision: 0,
+      queryDomainReady: true,
+      queryDomainPending: false,
+      queryDomainGeneration: null,
+      queryDomainRequestGeneration: 0,
+      queryDomainController: null,
+      queryDomainInitialized: [],
+      queryParameterIntents: {},
     });
   }
   return state.dashboardStates.get(dashboardId);
@@ -52,15 +55,25 @@ function activeRuntime() {
   return state.dashboard ? runtimeFor(state.dashboard.id) : null;
 }
 
+function sealCommittedQuerySnapshot(runtime, values, intents) {
+  runtime.committedQuerySnapshot = {
+    values:structuredClone(values || {}),
+    intents:structuredClone(intents || {}),
+  };
+  return runtime.committedQuerySnapshot;
+}
+
+function committedQueryValues(runtime = activeRuntime()) {
+  return runtime?.committedQuerySnapshot?.values || null;
+}
+
 for (const property of [
   'runId',
   'pendingRunId',
-  'committedQueryParameters',
-  'committedComputeParameters',
-  'draftComputeParameters',
+  'committedQuerySnapshot',
   'eventSource',
   'nodeErrors',
-  'selectionState',
+  'controlState',
 ]) {
   Object.defineProperty(state, property, {
     get() { return activeRuntime()?.[property] ?? (property.endsWith('Errors') || property.endsWith('State') ? {} : null); },
@@ -263,10 +276,12 @@ function saveTabUiState() {
   for (const [dashboardId, runtime] of state.dashboardStates) {
     dashboards[dashboardId] = {
       queryParameterValues: runtime.queryParameterValues,
+      committedQuerySnapshot: runtime.committedQuerySnapshot,
       queryParametersOpen: runtime.queryParametersOpen,
-      committedComputeParameters: runtime.committedComputeParameters,
-      draftComputeParameters: runtime.draftComputeParameters,
-      selectionState: runtime.selectionState,
+      controlState: runtime.controlState,
+      queryDomainGeneration: runtime.queryDomainGeneration,
+      queryDomainInitialized: runtime.queryDomainInitialized,
+      queryParameterIntents: runtime.queryParameterIntents,
     };
   }
   sessionStorage.setItem(
@@ -1160,8 +1175,8 @@ function collectCanvasSnapshot(expectedIdentity) {
       else if (event.data.missing?.length) reject(new Error(`Run Query before export: ${event.data.missing.join(', ')}`));
       else resolve({
         outputs:event.data.outputs || {},
-        selectionState:event.data.selection_state || {},
-        computeParameters:event.data.compute_parameters || {},
+        controlState:event.data.control_state || {},
+        stateSnapshot:event.data.state_snapshot || {},
       });
     };
     window.addEventListener('message', receive);
@@ -1192,9 +1207,9 @@ async function reportRequestContext() {
       // Canvas owns the canonical Section/View Controls and returns them in
       // the same atomic snapshot as Derived Outputs. Reading the parent's
       // asynchronous shadow before this handshake races on Firefox.
-      selection_state:snapshot.selectionState,
-      compute_parameters:snapshot.computeParameters,
+      control_state:snapshot.controlState,
       snapshot_outputs:snapshot.outputs,
+      applied_revisions:snapshot.stateSnapshot.applied_revisions || {},
     },
   };
 }
@@ -1429,8 +1444,10 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
   input.dataset.type = parameter.type;
   input.dataset.valueType = parameter.value_type;
   input.dataset.controlInput = '';
-  if (behavior.selection === true) input.dataset.selectionInput = name;
-  if (behavior.compute === true) input.dataset.computeInput = name;
+  if (behavior.query && parameter.options?.mode === 'domain') {
+    input.dataset.parameterDomain = parameter.options.source;
+  }
+  if (behavior.control === true) input.dataset.controlStateInput = name;
   wrapper.append(label);
   wrapper.classList.add('field--control');
   wrapper.dataset.controlSpan = String(presentation.span || 1);
@@ -1507,15 +1524,15 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
   return wrapper;
 }
 
-function selectionField(control) {
+function controlField(control) {
   const wrapper = document.createElement('div');
-  wrapper.className = 'selection-scope';
+  wrapper.className = 'control-scope';
   wrapper.dataset.origin = control.origin;
   wrapper.dataset.controlKey = control.key;
   wrapper.dataset.controlSpan = String(control.presentation?.span || 1);
   const impact = activeRuntime()?.controlImpacts?.[control.key];
   wrapper.innerHTML = `<span hidden data-control-impact-count>${escapeHtml(controlImpactLabel(control, impact))}</span>`;
-  wrapper.append(field(control.definition, control.key, control.presentation || {}, {selection: true}));
+  wrapper.append(field(control.definition, control.key, control.presentation || {}, {control: true}));
   return wrapper;
 }
 
@@ -1533,33 +1550,20 @@ function syncDashboardControlImpacts(impacts = []) {
   const runtime = activeRuntime();
   if (!runtime) return;
   for (const impact of impacts) {
-    const control = selectionControl(impact?.key);
+    const control = dashboardControl(impact?.key);
     if (!control || control.origin !== 'dashboard') continue;
     runtime.controlImpacts[impact.key] = impact;
-    const wrapper = [...document.querySelectorAll('#dashboard-selection-form .selection-scope')]
+    const wrapper = [...document.querySelectorAll('#dashboard-control-form .control-scope')]
       .find(candidate => candidate.dataset.controlKey === impact.key);
     const label = wrapper?.querySelector('[data-control-impact-count]');
     if (label) label.textContent = controlImpactLabel(control, impact);
   }
 }
 
-function dashboardControls(kind = null) {
+function dashboardControls() {
   return (state.dashboard?.controls || []).filter(
-    control => control.origin === 'dashboard' && (kind == null || control.kind === kind),
+    control => control.origin === 'dashboard',
   );
-}
-
-function computeField(control) {
-  const wrapper = field(
-    control.definition,
-    control.key,
-    control.presentation || {},
-    {compute: true},
-  );
-  wrapper.dataset.computeParameter = control.key;
-  wrapper.dataset.computeTrigger = control.trigger || 'apply';
-  wrapper.dataset.controlKind = 'compute';
-  return wrapper;
 }
 
 function applyDashboardControlPresentation(dashboard) {
@@ -1604,41 +1608,33 @@ function toggleQueryParameters() {
   setQueryParametersOpen(!expanded, {persist: true});
 }
 
-function selectionControl(key) {
+function dashboardControl(key) {
   return (state.dashboard?.controls || []).find(
-    control => control.kind === 'selection' && control.key === key,
+    control => control.key === key,
   ) || null;
 }
 
-function selectionValueFromState(definition, entry) {
-  const values = Array.isArray(entry?.values) ? entry.values : [];
-  if (['multiple_input', 'multiple_select'].includes(definition?.type)) return structuredClone(values);
-  if (definition?.type === 'range_input') return values.length ? structuredClone(values[0]) : [];
-  return values.length ? structuredClone(values[0]) : null;
+function controlValueFromState(_definition, entry) {
+  return structuredClone(entry?.value ?? null);
 }
 
-function selectionStateFromValue(definition, value, intent = 'explicit') {
-  const empty = value == null || value === '' || (Array.isArray(value) && value.length === 0);
-  let values;
-  if (empty) values = [];
-  else if (['multiple_input', 'multiple_select'].includes(definition?.type)) values = structuredClone(value);
-  else if (definition?.type === 'range_input') values = [structuredClone(value)];
-  else values = [structuredClone(value)];
+function controlStateFromValue(definition, value, intent = 'explicit') {
   return {
+    value:structuredClone(value),
+    revision:0,
     intent: intent === 'all_available' && definition?.type === 'multiple_select'
       ? 'all_available'
       : 'explicit',
-    values,
   };
 }
 
-function dashboardSelectionState() {
-  const form = $('#dashboard-selection-form');
+function dashboardControlState() {
+  const form = $('#dashboard-control-form');
   const values = formValues(form);
   const runtime = activeRuntime();
-  const remembered = runtime?.selectionState || {};
+  const remembered = runtime?.controlState || {};
   for (const input of form.elements) {
-    const control = selectionControl(input.name);
+    const control = dashboardControl(input.name);
     if (!control) continue;
     if (
       input instanceof HTMLSelectElement
@@ -1648,28 +1644,44 @@ function dashboardSelectionState() {
     const intent = input instanceof HTMLSelectElement && input.multiple
       ? (window.datavizComponents?.controls?.inferSelectionIntent?.(input) || 'explicit')
       : 'explicit';
-    remembered[input.name] = selectionStateFromValue(control.definition, values[input.name], intent);
+    const previous = remembered[input.name];
+    const candidate = {
+      ...controlStateFromValue(control.definition, values[input.name], intent),
+      revision:Number(previous?.revision || 0),
+    };
+    if (
+      JSON.stringify(previous?.value) === JSON.stringify(candidate.value)
+      && previous?.intent === candidate.intent
+    ) continue;
+    remembered[input.name] = {
+      ...candidate,
+      revision:Number(previous?.revision || 0) + 1,
+    };
   }
   return remembered;
 }
 
-function captureDashboardSelectionIntent(event) {
+function captureDashboardControlIntent(event) {
   const input = event?.target;
   if (!(input instanceof HTMLSelectElement) || !input.multiple || !input.name) return;
   const intent = window.datavizComponents?.controls?.consumeSelectionIntent?.(input);
   const runtime = activeRuntime();
-  const control = selectionControl(input.name);
+  const control = dashboardControl(input.name);
   if (intent && runtime && control) {
-    runtime.selectionState[input.name] = selectionStateFromValue(
+    const previous = runtime.controlState[input.name];
+    runtime.controlState[input.name] = {
+      ...controlStateFromValue(
       control.definition,
-      formValues($('#dashboard-selection-form'))[input.name],
+      formValues($('#dashboard-control-form'))[input.name],
       intent,
-    );
+      ),
+      revision:Number(previous?.revision || 0) + 1,
+    };
   }
 }
 
-function syncDashboardSelectionOptions(controls = []) {
-  const form = $('#dashboard-selection-form');
+function syncDashboardControlOptions(controls = []) {
+  const form = $('#dashboard-control-form');
   let changed = false;
   let synchronized = false;
   for (const control of controls) {
@@ -1677,16 +1689,16 @@ function syncDashboardSelectionOptions(controls = []) {
     const input = form.elements.namedItem(control.key);
     if (!(input instanceof HTMLSelectElement)) continue;
     const definition = state.dashboard?.controls.find(
-      item => item.kind === 'selection' && item.key === control.key,
+      item => item.key === control.key,
     )?.definition;
     const options = control.options || [];
     const signature = JSON.stringify(options);
     if (input.dataset.runtimeOptionsSignature === signature) continue;
     const runtime = activeRuntime();
-    const previousState = runtime?.selectionState?.[control.key] || control.initial_state || {
-      intent:'explicit', values:[],
+    const previousState = runtime?.controlState?.[control.key] || control.initial_state || {
+      intent:'explicit', value:null, revision:0,
     };
-    const previous = selectionValueFromState(definition, previousState);
+    const previous = controlValueFromState(definition, previousState);
     const previousValues = input.multiple && Array.isArray(previous) ? previous : [previous];
     const typed = options.some(option => typeof option.value !== 'string');
     input.dataset.valueEncoding = typed ? 'json' : 'string';
@@ -1741,10 +1753,10 @@ function syncDashboardSelectionOptions(controls = []) {
   }
   if (!synchronized) return;
   const runtime = activeRuntime();
-  if (runtime) dashboardSelectionState();
+  if (runtime) dashboardControlState();
   updateDashboardControlSummary();
   saveTabUiState();
-  if (changed) scheduleViewSelections();
+  if (changed) scheduleCanvasControls();
 }
 
 function nodeRow(node) {
@@ -1777,9 +1789,12 @@ function setNodeStatus(node, status) {
 function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {}) {
   if (state.dashboard) {
     const previous = activeRuntime();
-    previous.queryParameterValues = queryParameters();
-    previous.draftComputeParameters = computeParameters();
-    dashboardSelectionState();
+    previous.queryDomainController?.abort();
+    previous.queryDomainController = null;
+    previous.queryDomainPending = false;
+    previous.queryDomainRequestGeneration += 1;
+    try { previous.queryParameterValues = queryParameters(); } catch (_) {}
+    try { dashboardControlState(); } catch (_) {}
     try { previous.canvasScrollY = $('#canvas-frame').contentWindow.scrollY || 0; } catch (_) { previous.canvasScrollY = 0; }
     saveTabUiState();
   }
@@ -1787,23 +1802,29 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
   state.dashboard = state.payload.dashboards.find((item) => item.id === id);
   state.preferredDashboardId = id;
   const runtime = activeRuntime();
+  for (const parameter of state.dashboard.query_parameters || []) {
+    if (Object.prototype.hasOwnProperty.call(runtime.queryParameterIntents, parameter.id)) continue;
+    runtime.queryParameterIntents[parameter.id] = (
+      parameter.type === 'multiple_select' && parameter.initial?.mode === 'all'
+    ) ? 'all_available' : 'explicit';
+  }
+  const restoredQueryParameterValues = structuredClone(
+    runtime.queryParameterValues || committedQueryValues(runtime) || {},
+  );
   document.querySelectorAll('.nav-button').forEach((node) => node.classList.toggle('active', node.dataset.id === id));
   const runnable = Boolean(state.dashboard.runnable);
   $('#parameter-form').replaceChildren(...state.dashboard.query_parameters.map(
     item => field(item, item.id, item.presentation || {}, {query: true}),
   ));
-  const dataControls = dashboardControls('selection');
-  const logicControls = dashboardControls('compute');
-  $('#compute-parameter-form').replaceChildren(...logicControls.map(computeField));
+  const controls = dashboardControls();
   const hasAnalysisActions = (state.dashboard.nodes || []).some(
     (node) => node.type === 'interactive_transform' && node.trigger !== 'auto',
   );
   $('#dashboard-controls-control').dataset.empty = String(
-    dataControls.length === 0 && logicControls.length === 0 && !hasAnalysisActions,
+    controls.length === 0 && !hasAnalysisActions,
   );
-  $('#dashboard-selection-group').hidden = dataControls.length === 0;
-  $('#dashboard-compute-group').hidden = logicControls.length === 0;
-  $('#dashboard-selection-form').replaceChildren(...dataControls.map(selectionField));
+  $('#dashboard-control-group').hidden = controls.length === 0;
+  $('#dashboard-control-form').replaceChildren(...controls.map(controlField));
   applyDashboardControlPresentation(state.dashboard);
   const queryParameterCount = state.dashboard.query_parameters.length;
   const hasQueryParameters = queryParameterCount > 0;
@@ -1813,39 +1834,59 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
     runtime.queryParametersOpen = true;
   }
   setQueryParametersOpen(runtime.queryParametersOpen);
-  for (const control of dataControls) {
-    if (!Object.prototype.hasOwnProperty.call(runtime.selectionState, control.key)) {
-      runtime.selectionState[control.key] = structuredClone(
-        control.initial_state || {intent:'explicit', values:[]},
+  for (const control of controls) {
+    if (!Object.prototype.hasOwnProperty.call(runtime.controlState, control.key)) {
+      runtime.controlState[control.key] = structuredClone(
+        control.initial_state || {intent:'explicit', value:null, revision:0},
       );
     }
   }
   window.datavizComponents?.hydrate(document);
+  syncQueryParameterSelectionIntents();
+  let locationValues = {};
   if (locationSearch != null) {
+    locationValues = queryParameterValuesFromLocation(state.dashboard, locationSearch);
     runtime.queryParameterValues = {
-      ...queryParameters(),
-      ...queryParameterValuesFromLocation(state.dashboard, locationSearch),
+      ...Object.fromEntries(state.dashboard.query_parameters.map(parameter => [
+        parameter.id,
+        structuredClone(parameter.resolved_default ?? parameter.default ?? null),
+      ])),
+      ...restoredQueryParameterValues,
+      ...locationValues,
     };
+    for (const parameterId of Object.keys(locationValues)) {
+      runtime.queryParameterIntents[parameterId] = 'explicit';
+    }
   }
+  runtime.queryDomainInitialized = [...new Set([
+    ...(runtime.queryDomainInitialized || []),
+    ...dynamicQueryParameters()
+      .map(parameter => parameter.id)
+      .filter(parameterId => (
+        Object.prototype.hasOwnProperty.call(restoredQueryParameterValues, parameterId)
+        || Object.prototype.hasOwnProperty.call(locationValues, parameterId)
+      )),
+  ])];
   setFormValues(
     $('#parameter-form'),
-    runtime.queryParameterValues || runtime.committedQueryParameters || {},
+    runtime.queryParameterValues || committedQueryValues(runtime) || {},
   );
   // Freeze resolved relative defaults as concrete tab-local values on first
   // hydration. A full page reload in the same tab must restore these values
   // instead of silently re-evaluating `today` from a newer Workspace payload.
   if (runtime.queryParameterValues == null) {
-    runtime.queryParameterValues = queryParameters();
+    runtime.queryParameterValues = Object.fromEntries(
+      state.dashboard.query_parameters.map(parameter => [
+        parameter.id,
+        structuredClone(parameter.resolved_default ?? parameter.default ?? null),
+      ]),
+    );
   }
   setFormValues(
-    $('#compute-parameter-form'),
-    runtime.draftComputeParameters || runtime.committedComputeParameters || {},
-  );
-  setFormValues(
-    $('#dashboard-selection-form'),
-    Object.fromEntries(dataControls.map(control => [
+    $('#dashboard-control-form'),
+    Object.fromEntries(controls.map(control => [
       control.key,
-      selectionValueFromState(control.definition, runtime.selectionState[control.key]),
+      controlValueFromState(control.definition, runtime.controlState[control.key]),
     ])),
   );
   updateDashboardControlSummary();
@@ -1860,7 +1901,7 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
   $('#query-diagnostics-label').textContent = runnable ? runtime.queryLabel : state.dashboard.status;
   $('#run-message').textContent = runnable ? runtime.message : (state.dashboard.message || 'Dashboard unavailable.');
   setQueryState();
-  setSelectionsEnabled(Boolean(runtime.runId));
+  setControlsEnabled(Boolean(runtime.runId));
   setComputeState();
   loadCanvasFrame(id, runtime.pendingRunId || runtime.runId);
   $('#run-button').disabled = !runnable;
@@ -1868,10 +1909,18 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
   setRunButtonLabel(runtime.pendingRunId ? '取消' : '查询');
   setShareEnabled(Boolean(runtime.runId));
   saveTabUiState();
-  syncDashboardLocation(historyMode);
+  if (dynamicQueryParameters().length) {
+    runtime.queryDomainReady = false;
+    updateParameterDomainUi();
+    void resolveQueryParameterDomains();
+  } else {
+    runtime.queryDomainReady = true;
+    updateParameterDomainUi();
+    syncDashboardLocation(historyMode);
+  }
 }
 
-function setFormValues(form, values) {
+function setFormValues(form, values, {sync = true} = {}) {
   for (const input of form.elements) {
     if (!input.name || !(input.name in values)) continue;
     const value = values[input.name];
@@ -1883,7 +1932,7 @@ function setFormValues(form, values) {
     } else if (input.dataset.type === 'multiple_input' && Array.isArray(value)) input.value = JSON.stringify(value);
     else if (Array.isArray(value)) input.value = value.join(',');
     else input.value = value ?? '';
-    input._syncChoiceControl?.();
+    if (sync) input._syncChoiceControl?.();
   }
 }
 
@@ -1891,8 +1940,207 @@ function queryParameters() {
   return formValues($('#parameter-form'));
 }
 
-function computeParameters() {
-  return formValues($('#compute-parameter-form'));
+function dynamicQueryParameters() {
+  return (state.dashboard?.query_parameters || []).filter(
+    parameter => parameter.options?.mode === 'domain',
+  );
+}
+
+function syncQueryParameterSelectionIntents({sync = true} = {}) {
+  const runtime = activeRuntime();
+  const controls = window.datavizComponents?.controls;
+  if (!runtime || !controls?.setSelectionIntent) return;
+  for (const parameter of state.dashboard?.query_parameters || []) {
+    if (parameter.type !== 'multiple_select') continue;
+    const input = $('#parameter-form').elements.namedItem(parameter.id);
+    if (!(input instanceof HTMLSelectElement)) continue;
+    controls.setSelectionIntent(
+      input,
+      runtime.queryParameterIntents[parameter.id] || 'explicit',
+    );
+    if (sync) input._syncChoiceControl?.();
+  }
+}
+
+function updateParameterDomainUi() {
+  const runtime = activeRuntime();
+  const dynamic = dynamicQueryParameters();
+  const reload = $('#query-parameter-options-reload');
+  const revert = $('#query-parameters-revert');
+  reload.hidden = dynamic.length === 0;
+  reload.disabled = Boolean(runtime?.queryDomainPending);
+  reload.classList.toggle('is-loading', Boolean(runtime?.queryDomainPending));
+  revert.hidden = !runtime?.committedQuerySnapshot || pendingParametersMatchDataset();
+  revert.disabled = Boolean(runtime?.queryDomainPending);
+  for (const parameter of dynamic) {
+    const input = $('#parameter-form').elements.namedItem(parameter.id);
+    if (input) {
+      input.disabled = Boolean(runtime?.queryDomainPending);
+      input._syncChoiceControl?.();
+    }
+  }
+  if (runtime && dynamic.length) {
+    $('#run-button').disabled = runtime.pendingRunId
+      ? false
+      : !state.dashboard?.runnable || runtime.queryDomainPending || !runtime.queryDomainReady;
+  }
+}
+
+function replaceParameterDomainOptions(parameter, choices, {sync = true} = {}) {
+  const input = $('#parameter-form').elements.namedItem(parameter.id);
+  if (!(input instanceof HTMLSelectElement)) return;
+  const typed = choices.some(choice => typeof choice.value !== 'string');
+  input.dataset.valueEncoding = typed ? 'json' : 'string';
+  const nodes = [];
+  if (!input.multiple) {
+    const empty = document.createElement('option');
+    empty.value = '';
+    empty.hidden = true;
+    empty.dataset.emptyOption = 'true';
+    nodes.push(empty);
+  }
+  for (const choice of choices) {
+    const option = document.createElement('option');
+    option.value = typed ? JSON.stringify(choice.value) : String(choice.value);
+    option.textContent = choice.label ?? String(choice.value);
+    option.disabled = Boolean(choice.disabled);
+    if (choice.unavailable) {
+      option.dataset.unavailable = 'true';
+      option.dataset.preserveValue = 'true';
+    }
+    if (choice.group) option.dataset.group = choice.group;
+    if (choice.description) option.dataset.description = choice.description;
+    if (choice.keywords?.length) option.dataset.keywords = choice.keywords.join(' ');
+    nodes.push(option);
+  }
+  input.replaceChildren(...nodes);
+  input.dataset.runtimeOptionsSignature = JSON.stringify(choices);
+  if (sync) input._syncChoiceControl?.();
+}
+
+async function resolveQueryParameterDomains({
+  refresh = false,
+  announce = false,
+  targetSnapshot = null,
+} = {}) {
+  const dashboard = state.dashboard;
+  const runtime = activeRuntime();
+  const dynamic = dynamicQueryParameters();
+  if (!dashboard || !runtime || dynamic.length === 0) {
+    updateParameterDomainUi();
+    return;
+  }
+  runtime.queryDomainController?.abort();
+  const controller = new AbortController();
+  const requestGeneration = runtime.queryDomainRequestGeneration + 1;
+  runtime.queryDomainController = controller;
+  runtime.queryDomainRequestGeneration = requestGeneration;
+  let values;
+  if (targetSnapshot) values = structuredClone(targetSnapshot.values || {});
+  else {
+    try { values = queryParameters(); }
+    catch (_error) { values = runtime.queryParameterValues || {}; }
+  }
+  const requestedIntents = targetSnapshot
+    ? structuredClone(targetSnapshot.intents || {})
+    : runtime.queryParameterIntents;
+  runtime.queryDomainPending = true;
+  if (!runtime.queryDomainGeneration) runtime.queryDomainReady = false;
+  updateParameterDomainUi();
+  try {
+    const response = await request(
+      `/api/dashboards/${encodeURIComponent(dashboard.id)}/parameter-domains/resolve`,
+      {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        signal:controller.signal,
+        body:JSON.stringify({
+          session_id:state.sessionId,
+          query_parameters:values,
+          initialized_parameters:targetSnapshot
+            ? dynamic.map(parameter => parameter.id)
+            : runtime.queryDomainInitialized,
+          intents:requestedIntents,
+          reconciliation:targetSnapshot ? 'committed_snapshot' : 'draft',
+          refresh,
+        }),
+      },
+    );
+    if (
+      state.dashboard?.id !== dashboard.id
+      || runtime.queryDomainRequestGeneration !== requestGeneration
+    ) return;
+    runtime.queryParameterIntents = targetSnapshot
+      ? {...(response.intents || {})}
+      : {...runtime.queryParameterIntents, ...(response.intents || {})};
+    for (const parameter of dynamic) {
+      replaceParameterDomainOptions(
+        parameter,
+        response.choices?.[parameter.id] || [],
+        {sync:false},
+      );
+    }
+    syncQueryParameterSelectionIntents({sync:false});
+    setFormValues($('#parameter-form'), response.query_parameters || {}, {sync:false});
+    window.datavizComponents?.controls?.sync($('#parameter-form'));
+    runtime.queryParameterValues = queryParameters();
+    runtime.queryDomainInitialized = dynamic.map(parameter => parameter.id);
+    runtime.queryDomainGeneration = response.generation;
+    runtime.queryDomainReady = true;
+    state.workspaceRevision = Math.max(
+      state.workspaceRevision,
+      Number(response.workspace_revision || 0),
+    );
+    saveTabUiState();
+    syncDashboardLocation('replace');
+    setQueryState();
+    syncCanvasQueryDraft();
+    if (announce) showShortcutToast(
+      targetSnapshot ? '已恢复已应用参数' : refresh ? '参数选项已更新' : '参数选项已加载',
+    );
+    return true;
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    runtime.queryDomainReady = false;
+    runtime.message = `参数选项加载失败：${error.message}`;
+    setQueryState(runtime.message);
+    showShortcutToast(runtime.message);
+    return false;
+  } finally {
+    if (runtime.queryDomainRequestGeneration === requestGeneration) {
+      runtime.queryDomainPending = false;
+      runtime.queryDomainController = null;
+      updateParameterDomainUi();
+    }
+  }
+}
+
+function scheduleParameterDomainResolution() {
+  window.clearTimeout(state.parameterDomainTimer);
+  state.parameterDomainTimer = window.setTimeout(
+    () => resolveQueryParameterDomains(),
+    120,
+  );
+}
+
+async function revertQueryParameters() {
+  const runtime = activeRuntime();
+  const snapshot = runtime?.committedQuerySnapshot;
+  if (!runtime || !snapshot || runtime.queryDomainPending) return;
+  if (dynamicQueryParameters().length) {
+    await resolveQueryParameterDomains({targetSnapshot:snapshot, announce:true});
+    return;
+  }
+  runtime.queryParameterIntents = structuredClone(snapshot.intents || {});
+  runtime.queryParameterValues = structuredClone(snapshot.values || {});
+  syncQueryParameterSelectionIntents({sync:false});
+  setFormValues($('#parameter-form'), runtime.queryParameterValues, {sync:false});
+  window.datavizComponents?.controls?.sync($('#parameter-form'));
+  saveTabUiState();
+  syncDashboardLocation('replace');
+  setQueryState();
+  syncCanvasQueryDraft();
+  showShortcutToast('已恢复已应用参数');
 }
 
 function formInputDefinition(input) {
@@ -1991,12 +2239,11 @@ function normalizeFormInput(input) {
   return normalizeFormScalar(definition, input.value);
 }
 
-function selectionState() {
-  dashboardSelectionState();
-  const values = activeRuntime()?.selectionState || {};
+function controlState() {
+  dashboardControlState();
+  const values = activeRuntime()?.controlState || {};
   const validKeys = new Set(
     (state.dashboard?.controls || [])
-      .filter(control => control.kind === 'selection')
       .map(control => control.key),
   );
   return Object.fromEntries(Object.entries(values).filter(([key]) => validKeys.has(key)));
@@ -2041,6 +2288,11 @@ async function runDashboard() {
     }
     return;
   }
+  if (dynamicQueryParameters().length && !runtime.queryDomainReady) {
+    setQueryParametersOpen(true, {persist:true});
+    showShortcutToast(runtime.queryDomainPending ? '正在加载参数选项' : '请先刷新参数选项');
+    return;
+  }
   if (!$('#parameter-form').checkValidity()) {
     setQueryParametersOpen(true, {persist: true});
     window.requestAnimationFrame(() => $('#parameter-form').reportValidity());
@@ -2073,6 +2325,7 @@ async function runDashboard() {
       method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({
         session_id: state.sessionId,
         query_parameters: runtime.queryParameterValues,
+        query_parameter_intents: runtime.queryParameterIntents,
       })
     });
     const runWorkspaceRevision = Number(
@@ -2168,7 +2421,11 @@ async function finishRun(runId, dashboardId) {
   const committed = record.result && ['ready', 'partial'].includes(status) && !outdated;
   if (committed) {
     runtime.runId = runId;
-    runtime.committedQueryParameters = record.result.query_parameters;
+    sealCommittedQuerySnapshot(
+      runtime,
+      record.result.query_parameters,
+      record.result.query_parameter_intents,
+    );
     runtime.queryStatus = ['ready', 'partial'].includes(status) ? status : 'error';
     runtime.queryLabel = status === 'ready' ? 'Ready' : status === 'partial' ? 'Partial' : 'Failed';
     runtime.queryDefinitionStale = false;
@@ -2194,7 +2451,7 @@ async function finishRun(runId, dashboardId) {
     setShareEnabled(Boolean(runtime.runId));
     $('#query-diagnostics').dataset.status = runtime.queryStatus;
     $('#query-diagnostics-label').textContent = runtime.queryLabel;
-    setSelectionsEnabled(Boolean(runtime.runId));
+    setControlsEnabled(Boolean(runtime.runId));
     setComputeState();
     setQueryState(committed ? null : runtime.message);
     if (committed && $('#workspace-update').dataset.impact === 'query') {
@@ -2215,64 +2472,37 @@ async function finishRun(runId, dashboardId) {
   }
 }
 
-function setSelectionsEnabled(enabled) {
-  for (const input of $('#dashboard-selection-form').elements) {
+function setControlsEnabled(enabled) {
+  for (const input of $('#dashboard-control-form').elements) {
     input.disabled = !enabled;
     input._syncChoiceControl?.();
   }
-}
-
-function setComputeEnabled(enabled) {
-  for (const input of $('#compute-parameter-form').elements) {
-    input.disabled = !enabled;
-    input._syncChoiceControl?.();
-  }
-}
-
-function changedComputeParameters() {
-  const runtime = activeRuntime();
-  if (!runtime) return [];
-  const committed = runtime.committedComputeParameters || Object.fromEntries(
-    dashboardControls('compute').map(
-      control => [control.key, structuredClone(control.definition.default)],
-    ),
-  );
-  const draft = computeParameters();
-  const keys = new Set([...Object.keys(committed), ...Object.keys(draft)]);
-  return [...keys].filter(
-    (key) => JSON.stringify(normalized(committed[key])) !== JSON.stringify(normalized(draft[key])),
-  );
 }
 
 function setComputeState() {
-  const definitions = dashboardControls('compute');
   const runtime = activeRuntime();
-  const changed = changedComputeParameters();
   const actionable = (state.dashboard?.nodes || []).some(
     (node) => node.type === 'interactive_transform' && node.trigger !== 'auto',
   );
-  const enabled = Boolean(runtime?.runId) && (definitions.length > 0 || actionable);
-  setComputeEnabled(Boolean(runtime?.runId) && definitions.length > 0);
-  $('#dashboard-compute-actions').hidden = definitions.length === 0 && !actionable;
-  const status = $('#compute-state');
-  status.dataset.stale = String(changed.length > 0);
+  const enabled = Boolean(runtime?.runId) && actionable;
+  $('#dashboard-control-actions').hidden = !actionable;
+  const status = $('#control-state');
+  status.dataset.stale = 'false';
   status.textContent = !runtime?.runId
     ? 'Run query before analysis.'
-    : changed.length
-    ? `${changed.length} value${changed.length === 1 ? '' : 's'} not applied.`
     : actionable ? 'Ready to run on demand.' : 'Results are current.';
-  $('#compute-apply').disabled = !enabled;
+  $('#control-apply').disabled = !enabled;
   updateDashboardControlSummary();
 }
 
-function sendCompute(
-  values,
+function sendControls(
+  states,
   {commit = false, apply = false, manualTargets = [], controlKeys = null} = {},
 ) {
   if (!state.runId && !state.pendingRunId) return;
   postCanvasMessage({
-    type: 'dataviz:set-compute',
-    compute_parameters: values,
+    type: 'dataviz:set-controls',
+    control_state: states,
     commit,
     apply,
     manual_targets: manualTargets,
@@ -2283,13 +2513,12 @@ function sendCompute(
 function applyDashboardControls() {
   const runtime = activeRuntime();
   if (!runtime?.runId) return;
-  runtime.draftComputeParameters = computeParameters();
   const controlKeys = dashboardControls().map(control => control.key);
   const manualTargets = (state.dashboard?.nodes || [])
     .filter((node) => node.type === 'interactive_transform' && node.trigger === 'manual')
     .map((node) => node.local_id);
-  applyViewSelections();
-  sendCompute(runtime.draftComputeParameters, {
+  dashboardControlState();
+  sendControls(runtime.controlState, {
     commit: true,
     apply: true,
     manualTargets,
@@ -2304,12 +2533,24 @@ function normalized(value) {
 }
 
 function pendingParametersMatchDataset() {
-  if (!state.committedQueryParameters) return false;
+  const snapshot = state.committedQuerySnapshot;
+  if (!snapshot) return false;
   let pending;
   try { pending = queryParameters(); }
   catch (_error) { return false; }
-  const keys = new Set([...Object.keys(pending), ...Object.keys(state.committedQueryParameters)]);
-  return [...keys].every((key) => JSON.stringify(normalized(pending[key])) === JSON.stringify(normalized(state.committedQueryParameters[key])));
+  const valueKeys = new Set([...Object.keys(pending), ...Object.keys(snapshot.values || {})]);
+  const valuesMatch = [...valueKeys].every(
+    key => JSON.stringify(normalized(pending[key])) === JSON.stringify(normalized(snapshot.values?.[key])),
+  );
+  if (!valuesMatch) return false;
+  const intentKeys = new Set(Object.keys(snapshot.intents || {}));
+  for (const parameter of state.dashboard?.query_parameters || []) {
+    if (parameter.type === 'multiple_select') intentKeys.add(parameter.id);
+  }
+  return [...intentKeys].every(
+    key => (activeRuntime()?.queryParameterIntents?.[key] || 'explicit')
+      === (snapshot.intents?.[key] || 'explicit'),
+  );
 }
 
 function setQueryState(message = null) {
@@ -2347,46 +2588,40 @@ function setQueryState(message = null) {
   owner.dataset.stale = String(stale);
   owner.title = detail;
   $('#query-control-meta').textContent = label;
+  updateParameterDomainUi();
 }
 
 function updateDashboardControlSummary() {
-  const dataCount = dashboardControls('selection').length;
-  const logicCount = dashboardControls('compute').length;
-  const changed = changedComputeParameters().length;
-  const summary = [];
-  if (dataCount) summary.push(`${dataCount} data`);
-  if (logicCount) summary.push(changed ? `${changed} logic changed` : `${logicCount} logic`);
-  $('#dashboard-control-meta').textContent = summary.join(' · ') || 'None';
+  const count = dashboardControls().length;
+  $('#dashboard-control-meta').textContent = count ? `${count} controls` : 'None';
 }
 
 function closeHeaderPopovers(except = null) {
   window.datavizComponents?.overlay.closeAll({except, group: 'popover'});
 }
 
-function applyViewSelections({full = false} = {}) {
+function applyCanvasControls() {
   if (!state.runId && !state.pendingRunId) return;
-  dashboardSelectionState();
+  dashboardControlState();
   const runtime = activeRuntime();
-  const dashboardKeys = new Set(
-    dashboardControls('selection').map(control => control.key),
-  );
-  const selectionPatch = Object.fromEntries(
-    Object.entries(runtime?.selectionState || {}).filter(([key]) => dashboardKeys.has(key)),
+  const dashboardKeys = new Set(dashboardControls().map(control => control.key));
+  const controlPatch = Object.fromEntries(
+    Object.entries(runtime?.controlState || {}).filter(([key]) => dashboardKeys.has(key)),
   );
   postCanvasMessage({
-    type:'dataviz:set-selections',
+    type:'dataviz:set-controls',
     // After bootstrap the Header owns Dashboard Controls only. Sending its
     // asynchronous full shadow would overwrite newer Section/View writes made
     // inside the Canvas. The Canvas merges this owner-scoped patch, reconciles
     // downstream domains, then returns one complete canonical snapshot.
-    selection_state:full ? selectionState() : selectionPatch,
-    selection_epoch:runtime?.selectionEpoch || 0,
+    control_state:controlPatch,
+    commit:true,
   });
 }
 
-function scheduleViewSelections() {
-  window.clearTimeout(state.selectionTimer);
-  state.selectionTimer = window.setTimeout(applyViewSelections, 80);
+function scheduleCanvasControls() {
+  window.clearTimeout(state.controlTimer);
+  state.controlTimer = window.setTimeout(applyCanvasControls, 80);
 }
 
 function inspectorElement(tag, className = '', text = '') {
@@ -3195,8 +3430,18 @@ async function boot() {
   const remembered = await request(`/api/session/runs?${sessionQuery()}`);
   for (const record of remembered.runs || []) {
     const runtime = runtimeFor(record.dashboard_id);
-    runtime.committedQueryParameters = record.query_parameters;
+    if (record.ready && ['ready', 'partial'].includes(record.status)) {
+      sealCommittedQuerySnapshot(
+        runtime,
+        record.query_parameters,
+        record.query_parameter_intents,
+      );
+    }
     if (!runtime.queryParameterValues) runtime.queryParameterValues = record.query_parameters;
+    runtime.queryParameterIntents = {
+      ...runtime.queryParameterIntents,
+      ...(record.query_parameter_intents || {}),
+    };
     runtime.nodeStatuses = record.nodes || {};
     runtime.queryDefinitionStale = Boolean(record.query_outdated);
     if (record.ready) {
@@ -3238,6 +3483,12 @@ async function boot() {
 
 $('#run-button').addEventListener('click', runDashboard);
 $('#query-parameters-toggle').addEventListener('click', toggleQueryParameters);
+$('#query-parameter-options-reload').addEventListener('click', () => {
+  void resolveQueryParameterDomains({refresh:true, announce:true});
+});
+$('#query-parameters-revert').addEventListener('click', () => {
+  void revertQueryParameters();
+});
 $('#download-button').addEventListener('click', downloadReport);
 $('#copy-share-link').addEventListener('click', createSharedLink);
 $('#dashboard-reload').addEventListener('click', reloadDashboardFromDisk);
@@ -3254,53 +3505,46 @@ const onQueryDraft = event => {
     setQueryState();
     return;
   }
-  if (activeRuntime()) activeRuntime().queryParameterValues = values;
+  const runtime = activeRuntime();
+  if (runtime) runtime.queryParameterValues = values;
+  const input = event.target;
+  if (runtime && input?.name) {
+    if (input instanceof HTMLSelectElement && input.multiple) {
+      runtime.queryParameterIntents[input.name] =
+        window.datavizComponents?.controls?.consumeSelectionIntent?.(input) || 'explicit';
+    } else {
+      runtime.queryParameterIntents[input.name] = 'explicit';
+    }
+  }
+  if (runtime && input?.dataset?.parameterDomain && input.name) {
+    runtime.queryDomainInitialized = [...new Set([
+      ...(runtime.queryDomainInitialized || []), input.name,
+    ])];
+  }
   saveTabUiState();
   syncDashboardLocation('replace');
   setQueryState();
   syncCanvasQueryDraft();
+  const dependencies = state.dashboard?.parameter_domain_contract?.dependencies || {};
+  if (input?.name && Object.values(dependencies).some(items => items.includes(input.name))) {
+    if (runtime) runtime.queryDomainReady = false;
+    updateParameterDomainUi();
+    scheduleParameterDomainResolution();
+  }
 };
 $('#parameter-form').addEventListener('input', onQueryDraft);
 $('#parameter-form').addEventListener('change', onQueryDraft);
-const onDashboardSelectionDraft = event => {
-  if (activeRuntime()) activeRuntime().selectionEpoch += 1;
-  captureDashboardSelectionIntent(event);
-  try { dashboardSelectionState(); }
+const onDashboardControlDraft = event => {
+  captureDashboardControlIntent(event);
+  try { dashboardControlState(); }
   catch (_error) { return; }
   saveTabUiState();
   updateDashboardControlSummary();
-  scheduleViewSelections();
+  scheduleCanvasControls();
 };
-$('#dashboard-selection-form').addEventListener('input', onDashboardSelectionDraft);
-const onComputeDraft = (event) => {
-  const runtime = activeRuntime();
-  if (!runtime) return;
-  try { runtime.draftComputeParameters = computeParameters(); }
-  catch (_error) { return; }
-  saveTabUiState();
-  setComputeState();
-  sendCompute(runtime.draftComputeParameters);
-  const control = event.target.closest('[data-compute-parameter]');
-  if (control?.dataset.computeTrigger !== 'auto') return;
-  window.clearTimeout(state.computeTimer);
-  const definition = dashboardControls('compute').find(
-    item => item.key === control.dataset.computeParameter,
-  );
-  const consumers = (state.dashboard.nodes || []).filter(
-    (node) => node.type === 'interactive_transform'
-      && (definition?.consumers || []).includes(node.local_id),
-  );
-  const delay = Math.max(0, ...consumers.map((node) => Number(node.debounce_ms || 300)));
-  state.computeTimer = window.setTimeout(() => {
-    sendCompute({[control.dataset.computeParameter]: runtime.draftComputeParameters[control.dataset.computeParameter]}, {
-      commit: true,
-    });
-  }, delay);
-};
-$('#compute-parameter-form').addEventListener('input', onComputeDraft);
-$('#compute-parameter-form').addEventListener('change', onComputeDraft);
-$('#compute-apply').addEventListener('click', applyDashboardControls);
-$('#dashboard-selection-form').addEventListener('change', onDashboardSelectionDraft);
+$('#dashboard-control-form').addEventListener('input', onDashboardControlDraft);
+$('#control-apply').addEventListener('click', applyDashboardControls);
+$('#dashboard-control-form').addEventListener('change', onDashboardControlDraft);
 document.addEventListener('click', (event) => {
   if (!event.target.closest('#nav-context-menu')) hideNavMenu();
 });
@@ -3312,17 +3556,13 @@ window.addEventListener('message', (event) => {
     if (!runtime) return;
     // Fresh Canvas defaults seed missing keys; remembered tab-local canonical
     // state wins on reload. Invalid/removed keys are filtered before sending.
-    runtime.selectionState = {
-      ...(event.data.selection_state || {}),
-      ...(runtime.selectionState || {}),
+    runtime.controlState = {
+      ...(event.data.control_state || {}),
+      ...(runtime.controlState || {}),
     };
     frame.dataset.runtimeReady = 'true';
     saveTabUiState();
-    applyViewSelections({full:true});
-    const values = runtime.committedComputeParameters
-      || runtime.draftComputeParameters
-      || computeParameters();
-    sendCompute(values, {commit:true});
+    applyCanvasControls();
     syncCanvasInteraction();
     syncCanvasQueryDraft();
     return;
@@ -3365,47 +3605,39 @@ window.addEventListener('message', (event) => {
     }
     return;
   }
-  if (event.data?.type === 'dataviz:compute-changed') {
-    const runtime = activeRuntime();
-    if (!runtime) return;
-    runtime.committedComputeParameters = {...(event.data.compute_parameters || {})};
-    runtime.draftComputeParameters = {...(event.data.draft_compute_parameters || {})};
-    setFormValues($('#compute-parameter-form'), runtime.draftComputeParameters);
-    setComputeState();
-    saveTabUiState();
-    return;
-  }
-  if (event.data?.type === 'dataviz:selection-options-changed') {
-    syncDashboardSelectionOptions(event.data.controls || []);
+  if (event.data?.type === 'dataviz:control-options-changed') {
+    syncDashboardControlOptions(event.data.controls || []);
     return;
   }
   if (event.data?.type === 'dataviz:control-impact-changed') {
     syncDashboardControlImpacts(event.data.controls || []);
     return;
   }
-  if (event.data?.type === 'dataviz:selections-changed') {
+  if (event.data?.type === 'dataviz:controls-changed') {
     const runtime = activeRuntime();
-    // A Canvas event created before a newer parent-owned Dashboard Control
-    // change must not restore the old full snapshot when its postMessage task
-    // arrives late. The parent epoch advances only for parent-origin writes;
-    // child View/Control actions remain serial within the current epoch.
-    if (
-      !runtime
-      || Number(event.data.selection_epoch || 0) !== Number(runtime.selectionEpoch || 0)
-    ) return;
+    if (!runtime) return;
     // Canvas messages contain the complete canonical state. Replacing it also
-    // removes keys restored from sessionStorage after a Selection is renamed.
-    state.selectionState = {...(event.data.selection_state || {})};
-    runtime.selectionState = state.selectionState;
-    const controls = dashboardControls('selection');
+    // removes keys restored from sessionStorage after a Control is renamed.
+    const incoming = {...(event.data.control_state || {})};
+    const local = runtime.controlState || {};
+    const dashboardKeys = new Set(dashboardControls().map(control => control.key));
+    dashboardKeys.forEach(key => {
+      if (
+        local[key]
+        && Number(local[key].revision || 0) > Number(incoming[key]?.revision || 0)
+      ) incoming[key] = local[key];
+    });
+    state.controlState = incoming;
+    runtime.controlState = state.controlState;
+    const controls = dashboardControls();
     setFormValues(
-      $('#dashboard-selection-form'),
+      $('#dashboard-control-form'),
       Object.fromEntries(controls.map(control => [
         control.key,
-        selectionValueFromState(control.definition, state.selectionState[control.key]),
+        controlValueFromState(control.definition, state.controlState[control.key]),
       ])),
     );
-    for (const input of $('#dashboard-selection-form').elements) {
+    for (const input of $('#dashboard-control-form').elements) {
       input._syncChoiceControl?.();
     }
     updateDashboardControlSummary();

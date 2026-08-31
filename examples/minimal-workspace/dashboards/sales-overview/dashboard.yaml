@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v9
+schema: dataviz/dashboard/v11
 kind: dashboard
 id: sales-overview
 title: 销售概览
@@ -39,7 +39,6 @@ sources:
 
 controls:
   - id: region
-    kind: selection
     field: region
     type: multiple_select
     value_type: text
@@ -61,6 +60,8 @@ views:
     label: 当前选择范围
     aggregate: sum
     span: 6
+    control_inputs:
+      region: {mode: filter, control: dashboard.region, field: region, inputs: [main], empty: match_none}
 
   - id: total-orders
     title: 总订单
@@ -70,6 +71,8 @@ views:
     label: 当前选择范围
     aggregate: sum
     span: 6
+    control_inputs:
+      region: {mode: filter, control: dashboard.region, field: region, inputs: [main], empty: match_none}
 
   - id: revenue-trend
     title: 收入趋势
@@ -80,6 +83,8 @@ views:
     series: region
     aggregate: sum
     span: 8
+    control_inputs:
+      region: {mode: filter, control: dashboard.region, field: region, inputs: [main], empty: match_none}
 
   - id: region-comparison
     title: 区域收入
@@ -89,6 +94,8 @@ views:
     y: revenue
     aggregate: sum
     span: 4
+    control_inputs:
+      region: {mode: filter, control: dashboard.region, field: region, inputs: [main], empty: match_none}
 
   - id: sales-detail
     title: 展示型销售明细
@@ -97,6 +104,8 @@ views:
     columns: [day, region, revenue, orders]
     limit: 50
     span: 6
+    control_inputs:
+      region: {mode: filter, control: dashboard.region, field: region, inputs: [main], empty: match_none}
     options:
       labels: {day: 日期, region: 区域, revenue: 收入, orders: 订单}
       formats: {revenue: currency, orders: number}
@@ -110,6 +119,8 @@ views:
     template: perspective
     columns: [day, region, revenue, orders]
     span: 6
+    control_inputs:
+      region: {mode: filter, control: dashboard.region, field: region, inputs: [main], empty: match_none}
     config:
       plugin: Datagrid
       columns: [revenue, orders]

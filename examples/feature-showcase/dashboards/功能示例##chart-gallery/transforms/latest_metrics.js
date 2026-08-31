@@ -1,6 +1,6 @@
 function transform(context) {
   const rows = context.inputs.metrics || [];
-  const cityCount = Math.max(1, Number(context.compute_params.city_count || 5));
+  const cityCount = Math.max(1, Number(context.control_inputs.city_count || 5));
   const latestQuarter = rows.reduce(
     (latest, row) => String(row.quarter) > latest ? String(row.quarter) : latest,
     "",

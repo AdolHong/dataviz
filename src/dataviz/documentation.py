@@ -36,10 +36,10 @@ AUTHORING_DOCUMENTS: dict[str, dict[str, Any]] = {
             "adapter", "source", "view", "layout", "named-output",
             "control", "interactive-transform", "dependency-closure",
         ],
-        "purpose": "Add selection or compute state and recompute only affected outputs.",
+        "purpose": "Add typed post-query Control state with explicit filter or value consumers.",
         "path": "Base Named Output + Control → Interactive Transform → Derived Named Output → View",
         "steps": [
-            "Choose selection for data filtering or compute for calculation settings.",
+            "Declare each consumer as mode: filter or mode: value; do not infer behavior from the Control component.",
             "Declare only the inputs consumed by the Interactive Transform.",
             "Inspect the compiled dependency closure before debugging Runtime behavior.",
             "Run validate, report, then visual-check.",
@@ -61,8 +61,8 @@ AUTHORING_DOCUMENTS: dict[str, dict[str, Any]] = {
     },
     "cascading-selection": {
         "requires": ["view", "control", "option-domain", "dependency-closure"],
-        "purpose": "Filter a child Selection's candidates from one or more direct parent Selections.",
-        "path": "Base option domain → parent Selection → child depends_on → affected Views",
+        "purpose": "Filter a child choice Control's candidates from one or more direct parent Controls.",
+        "path": "Base option domain → parent Control → child depends_on → explicit consumers",
         "steps": [
             "Put every candidate and parent field in one immutable Base table output.",
             "Declare only the child's direct parent in depends_on.",
@@ -71,7 +71,6 @@ AUTHORING_DOCUMENTS: dict[str, dict[str, Any]] = {
         ],
         "minimal_example": """controls:
   - id: province
-    kind: selection
     field: province
     type: multiple_select
     value_type: text
@@ -82,7 +81,6 @@ sections:
     title: Geography
     controls:
       - id: city
-        kind: selection
         field: city
         type: multiple_select
         value_type: text
@@ -91,8 +89,8 @@ sections:
         options: {mode: infer, source: source:stores/main}
     views: [stores]""",
         "allowed_fields": {
-            "selection": [
-                "id", "kind", "field", "path_fields", "type", "value_type",
+            "control": [
+                "id", "field", "path_fields", "type", "value_type",
                 "label", "initial", "required", "clearable", "depends_on", "options",
             ],
             "options": ["mode", "source"],
@@ -112,11 +110,11 @@ sections:
     },
     "view-filter": {
         "requires": ["view", "control", "option-domain"],
-        "purpose": "Filter one View directly with a View-scoped Selection and no Interactive Transform.",
-        "path": "Base Named Output → View Selection → filtered View",
+        "purpose": "Filter one View directly with a View-scoped Control and no Interactive Transform.",
+        "path": "Base Named Output + Control filter binding → filtered View",
         "steps": [
-            "Place the Selection under the target View's controls list.",
-            "Bind field to a column in that View's table input.",
+            "Place the Control under the target View's controls list.",
+            "Declare an explicit control_inputs filter binding for that View input.",
             "Use a static closed enum or infer candidates from the immutable Base output.",
             "Keep the View input unchanged; the Runtime applies the include filter.",
         ],
@@ -127,15 +125,16 @@ sections:
     input: source:orders/main
     controls:
       - id: region
-        kind: selection
         field: region
         type: multiple_select
         value_type: text
         initial: {mode: all}
-        options: {mode: infer, source: source:orders/main}""",
+        options: {mode: infer, source: source:orders/main}
+    control_inputs:
+      region: {mode: filter, control: view.region, field: region, inputs: [main], empty: match_none}""",
         "allowed_fields": {
-            "selection": [
-                "id", "kind", "field", "path_fields", "type", "value_type",
+            "control": [
+                "id", "field", "path_fields", "type", "value_type",
                 "label", "initial", "required", "clearable", "options",
             ],
             "binding_operators": ["auto", "equals", "in", "between", "contains", "gte", "lte", "gt", "lt"],
@@ -144,7 +143,7 @@ sections:
             "Adding an Interactive Transform for a direct include filter.",
             "Filtering on a field absent from the View's table input.",
             "Using default on a Select instead of initial.",
-            "Treating explicit empty as All; an explicit empty Selection produces zero rows.",
+            "Omitting empty policy; passthrough and match_none are intentionally different.",
         ],
         "validation_commands": [
             "dataviz validate <workspace> --dashboard <dashboard> --strict",
@@ -156,18 +155,17 @@ sections:
         "requires": [
             "view", "control", "named-output", "interactive-transform", "dependency-closure",
         ],
-        "purpose": "Recompute a Derived Named Output in a browser Worker after a Compute Control changes.",
-        "path": "Base Named Output + Compute Control → browser-js Transform → Derived Named Output → View",
+        "purpose": "Recompute a Derived Named Output in a browser Worker after a value-bound Control changes.",
+        "path": "Base Named Output + Control value binding → browser-js Transform → Derived Named Output → View",
         "steps": [
             "Use browser-js unless the calculation genuinely requires Python.",
-            "Declare data_inputs and compute_inputs with node-local aliases.",
+            "Declare inputs and control_inputs with node-local aliases.",
             "Return the exact Named Output declared by outputs.",
             "Point the View at interactive:<transform>/<output>.",
         ],
         "minimal_example": """# dashboard.yaml
 controls:
   - id: factor
-    kind: compute
     type: single_input
     value_type: number
     default: 2
@@ -177,27 +175,28 @@ views:
   - {id: scaled, title: Scaled values, template: table, input: interactive:scale/main}
 
 # transforms/scale.yaml
-schema: dataviz/interactive-transform/v2
+schema: dataviz/interactive-transform/v3
 id: scale
 runtime: browser-js
 code: scale.js
-data_inputs: {rows: source:data/main}
-compute_inputs: {factor: "dashboard:example/factor"}
+inputs: {rows: source:data/main}
+control_inputs:
+  factor: {mode: value, control: dashboard.factor}
 outputs:
   main: {kind: table}
 export: {mode: interactive}""",
         "allowed_fields": {
-            "compute_control": [
-                "id", "kind", "type", "value_type", "label", "default",
+            "control": [
+                "id", "type", "value_type", "label", "default",
                 "required", "min", "max", "step",
             ],
             "interactive_transform": [
-                "schema", "id", "runtime", "code", "data_inputs", "query_inputs",
-                "selection_inputs", "compute_inputs", "outputs", "trigger", "timeout_seconds", "export",
+                "schema", "id", "runtime", "code", "inputs", "query_inputs",
+                "control_inputs", "outputs", "trigger", "timeout_seconds", "export",
             ],
         },
         "common_errors": [
-            "Reading a global Control id directly instead of declaring a compute_inputs alias.",
+            "Reading global state directly instead of declaring a control_inputs alias.",
             "Pointing a View at the Transform id without an output name.",
             "Returning a shape that disagrees with the declared output kind.",
             "Choosing server-python for code that must remain interactive in portable HTML.",
@@ -234,7 +233,7 @@ AUTHORING_ROUTES: dict[str, dict[str, Any]] = {
         "documents": ["interactive-dashboard"],
         "scaffolds": [
             "interactive", "interactive-transform.browser-js",
-            "interactive-transform.browser-python", "interactive-transform.server-python",
+            "interactive-transform.server-python",
         ],
         "commands": [
             "dataviz scaffold interactive --id <dashboard> --output <workspace>",
@@ -255,7 +254,7 @@ AUTHORING_ROUTES: dict[str, dict[str, Any]] = {
         "excludes": ["control", "interactive-transform"],
     },
     "cascading-selection": {
-        "summary": "Build a parent-child Selection candidate cascade.",
+        "summary": "Build a parent-child choice-Control candidate cascade.",
         "inherits": ["minimal"],
         "documents": ["cascading-selection"],
         "scaffolds": ["control.select", "control.cascader", "control.tree-select"],
@@ -265,7 +264,7 @@ AUTHORING_ROUTES: dict[str, dict[str, Any]] = {
         "excludes": ["interactive-transform", "renderer-contract"],
     },
     "view-filter": {
-        "summary": "Apply a direct include-only Selection to one View.",
+        "summary": "Apply one Control to an explicit View input through mode: filter.",
         "inherits": ["minimal"],
         "documents": ["view-filter"],
         "scaffolds": ["control.select", "control.checkbox-group"],
@@ -326,7 +325,7 @@ def resolve_authoring_route(
             route = "custom-renderer"
         elif (
             selected_component.startswith(("control.", "interactive-transform."))
-            or selected_component in {"compute.control", "runtime.control"}
+            or selected_component == "runtime.control"
         ):
             route = "interactive"
         else:
@@ -490,7 +489,6 @@ DOC_TOPIC_REDIRECTS = {
     "export": "html-export",
     "html": "html-export",
     "offline": "html-export",
-    "pyodide": "html-export",
     "schema": "strict-schema",
     "schemas": "schema-reference",
     "validate": "validation",
@@ -548,9 +546,9 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
     "quickstart": {
         "summary": "从空环境到可验证 Dashboard、不可变 Result 和 HTML 报告的最短当前路径。",
         "workspace_start": {
-            "empty_workspace": "dataviz init <workspace>",
-            "runnable_example": "dataviz scaffold minimal --id <dashboard-id> --output <workspace>",
-            "rule": "二选一：init 创建空的最小 Workspace；scaffold minimal 直接生成可运行示例。",
+            "starter_workspace": "dataviz init <workspace>",
+            "focused_scaffold": "dataviz scaffold minimal --id <dashboard-id> --output <workspace>",
+            "rule": "init 直接生成可运行的 hello Dashboard；需要特定结构或能力时，再选择对应 Scaffold recipe。",
         },
         "commands": [
             "dataviz version",
@@ -592,7 +590,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "dataviz run <workspace> '<dashboard-id>::source:<source-id>/<output>' --query-param key=value",
             "dataviz result inspect <workspace> <result-id>",
             "dataviz result show <workspace> <result-id> '<dashboard-id>::source:<source-id>/<output>' --offset 0 --limit 100",
-            "dataviz result export <workspace> <result-id> '<dashboard-id>::source:<source-id>/<output>' --to output.arrow",
+            "dataviz result export <workspace> <result-id> '<dashboard-id>::source:<source-id>/<output>' --to <destination>",
         ],
         "workflow": [
             "不知道物理引用时先 catalog search；需要全局概览时使用 catalog list。",
@@ -658,7 +656,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "dataviz result list <workspace> --status ready",
             "dataviz result inspect <workspace> <result-id> --detail full",
             "dataviz result show <workspace> <result-id> '<output-reference>' --offset 0 --limit 100",
-            "dataviz result export <workspace> <result-id> '<output-reference>' --to output.arrow",
+            "dataviz result export <workspace> <result-id> '<output-reference>' --to <destination>",
             "dataviz report <workspace> <result-id> --output report.html",
         ],
         "terminal_statuses": {
@@ -738,18 +736,18 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
         ],
         "state_contract": {
             "query_parameters": "提交后创建新 Query Run，只进入声明依赖它们的 Source/Dataset Transform。",
-            "controls": "Dashboard、Section、View 共用的交互入口；每项显式声明 kind。",
-            "selection_delta": "kind: selection；include-only，先选择数据，也可驱动 Interactive Transform。",
-            "compute_delta": "kind: compute；在已选数据上改变计算逻辑，不重新查询。",
+            "controls": "Dashboard、Section、View 范围内的统一 typed state owner；Control 本身不声明消费语义。",
+            "consumer_binding": "View/Interactive Transform 用 mode: filter 或 mode: value 显式解释同一 Control state。",
+            "writer": "Control Component 与可选的 View selection gesture 只负责写 canonical state；影响范围由编译后的 binding graph 决定。",
         },
         "execution": {
             "compiled_contract": (
-                "每个 Dashboard load snapshot 以并发安全方式只编译并缓存一份 dataviz/dependency-contract/v5；"
+                "每个 Dashboard load snapshot 以并发安全方式只编译并缓存一份 dataviz/dependency-contract/v7；"
                 "Query planner、Interactive executor、Canvas、Server API 与浏览器 Runtime 都消费同一个对象。"
             ),
             "query_dag": "Source 与 Dataset Transform；完成的独立分支立即发布 Base Output。",
-            "interactive_dag": "三种 Runtime 共用 Named Output、依赖、状态、缓存和局部失效协议。",
-            "view_isolation": "View 只因自己的 Selection、内容绑定或输入 Output 变化而更新。",
+            "interactive_dag": "两种 Runtime 共用 Named Output、依赖、状态、缓存和局部失效协议。",
+            "view_isolation": "View 只因自己的 Control binding、内容绑定或输入 Output 变化而更新。",
             "diagnostic_projection": (
                 "Header 只显示 Query DAG 的 Source/Dataset 节点；每个 View 使用编译后的 pipeline_nodes "
                 "在类型标签左侧显示自己的上游与 Renderer。View 灯只在活动、过期或失败时出现，Ready/Not run 隐藏；"
@@ -757,7 +755,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             ),
             "identity": "Interaction 以 tab、Dashboard、Query Run、Transform、generation 隔离。",
             "server_interactive_cache": (
-                "Query 计划显式标记 server_interactive_inputs；Server Compute 只读取该 tab Query Run 的 Artifact，"
+                "Query 计划显式标记 server_interactive_inputs；Server Interactive Transform 只读取该 tab Query Run 的 Artifact，"
                 "不会重新执行 Source。运行数据位于 Workspace/.dataviz，不进入 Dashboard。"
             ),
         },
@@ -769,40 +767,40 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "dataviz inspect dependencies <workspace> <dashboard-id>",
             "dataviz inspect dependencies <workspace> <dashboard-id> --format json",
         ],
-        "schema": "dataviz/dependency-contract/v5",
+        "schema": "dataviz/dependency-contract/v7",
         "graphs": {
             "query": (
                 "Query Parameter → Source/Dataset Transform → immutable Base Named Output；"
                 "同时列出最终失效的 Query/Interactive/option Control/View 闭包。"
             ),
             "control": (
-                "Control 分开报告 scope_views、depends_on、传递祖先/后代、option domains、Selection direct_view_bindings、"
+                "Control 分开报告 scope_views、depends_on、传递祖先/后代、option domains、direct_view_bindings、"
                 "runtime field checks、Transform aliases/consumers、derived_views、content_fields 与最终 affected_views。"
             ),
             "interactive": (
-                "Base/Derived inputs → browser-js、browser-python 或 server-python → Derived Named Output。"
+                "Base/Derived inputs → browser-js 或 server-python → Derived Named Output。"
             ),
             "render": "Named Output → direct View consumers；上游 Transform 另有完整 downstream Views。",
         },
         "initialization": [
             "Hydrate immutable Base Outputs。",
-            "从 Base Outputs 推导 Selection option domains。",
+            "从 Base Outputs 推导候选型 Control 的 option domains。",
             "按编译后的 Control DAG 拓扑顺序协调候选域并提交 canonical Controls。",
             "先渲染 Base Views，再按编译顺序执行 Interactive DAG。",
         ],
         "rules": [
-            "Selection 直接筛选其作用域内、且实际拥有绑定字段的 View 数据。",
-            "Selection 只用 depends_on 声明直接父节点；Compiler 生成 control_order 和 dependency_ancestors。",
+            "Control 不因自身类型自动筛选 View；View 或 Transform 必须用 mode: filter 显式声明输入、字段和空值策略。",
+            "候选型 Control 只用 depends_on 声明直接父节点；Compiler 生成 control_order 和 dependency_ancestors。",
             "dashboard.<id>、section.<id>、view.<id> 相对当前 owner 解析，不能跨兄弟 Section/View。",
             "Browser 使用编译后的 Control DAG，不按 DOM 层级重建依赖。",
             "Browser 注册 payload 只检查契约漂移；Transform 调度、View waiting 和 Renderer 输入仍读取编译契约。",
-            "Compute 不直接筛选任何 View，只触发显式消费它的 Interactive Transform。",
+            "mode: value 只向显式 consumer alias 投影 value、present 或 intent，不隐式筛选任何 View。",
             "Control 经 Transform 影响的 View 由 Derived Output 依赖反向索引决定。",
             "Query Parameter 变更创建新 Query Run；Control 变更不得触发 Source Query。",
             "Query/Interactive 节点只能读取自己显式声明的参数 alias。",
             "契约编译直接拒绝环、未知 Output、browser → server-python 非法边和越界 Control consumer。",
             "Loader recovery diagnostics 只服务无效配置定位，不构成第二张运行时 DAG。",
-            "动态 Selection 在 canvas-hydration 阶段允许暂未解析，进入执行边界前必须成为合法值。",
+            "动态候选型 Control 在 canvas-hydration 阶段允许暂未解析，进入执行边界前必须成为合法值。",
         ],
         "related": ["pipeline", "controls", "interactive-transforms", "validation"],
     },
@@ -844,9 +842,9 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "navigation": "Dashboard 目录新增、移除、改名；只更新导航。",
             "canvas": "内容、View、Presentation、CSS/JS；重载 Canvas 并保留 Run/Controls/滚动。",
             "analysis": "Interactive Transform 或 Control Contract；复用 Base Output 重算。",
-            "query": "Query Parameter、Adapter、Source、数据文件或 Dataset Transform；标记 Outdated，等待 Run query。",
+            "query": "Query Parameter、Adapter、Source、数据文件或 Dataset Transform；标记 Outdated，等待用户执行 RUN。",
             "server": "Workspace Runtime/进程级设置；明确提示重启 Server。",
-            "invalid": "候选快照无效；保留上一份完整 Canvas 并显示诊断。",
+            "invalid": "新的 Workspace load snapshot 无效；保留上一份完整 Canvas 并显示诊断。",
         },
         "rules": [
             "活动 Query 使用启动时的不可变 Workspace 快照。",
@@ -859,10 +857,10 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
     },
     "dashboard": {
         "summary": "dashboard.yaml 是分析逻辑；presentation.yaml 是可删除的视觉覆盖。",
-        "schema": "dataviz/dashboard/v9",
+        "schema": "dataviz/dashboard/v11",
         "state_summary": {
-            "schema": "dataviz/state-snapshot/v1",
-            "behavior": "Runtime 始终维护已提交 Query、applied Selection、committed/draft Compute；默认不把它们机械复述到画布。",
+            "schema": "dataviz/state-snapshot/v2",
+            "behavior": "Runtime 始终维护已提交 Query、Control current/applied state 与各 consumer 的 applied revision；State Snapshot 按编译契约规范化 effective/applied/stale，Result 与 Evidence 继承该审计证据，但默认不把它机械复述到画布。",
             "presentation": "仅在确有分析价值时设置 presentation.state_summary.enabled: true；items 可按 canonical Control key 调整 label/order/hidden/formatter，且不允许改写状态值。",
         },
         "identity": {
@@ -870,7 +868,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "id": "CLI、DAG、API 与 Presentation 使用的稳定程序身份。",
             "title": "页面内容，可与文件夹名不同；为空时回退到文件夹末级名称。",
         },
-        "minimal_example": """schema: dataviz/dashboard/v9
+        "minimal_example": """schema: dataviz/dashboard/v11
 kind: dashboard
 id: sales-overview
 title: 销售概览
@@ -901,9 +899,8 @@ sections:
                 "view title/description/markdown text",
             ],
             "lifecycle": {
-                "query_parameter": "展示最近一次 Run query 已提交的值；草稿值不会伪装成当前结果。",
-                "compute_control": "展示产生当前 Derived Output 的已提交值。",
-                "selection_control": "Selection Control 变化后即时更新可见文案与受影响 View。",
+                "query_parameter": "展示最近一次 RUN 已提交的值；草稿值不会伪装成当前结果。",
+                "control": "展示 canonical Control state；value/filter consumer 根据 trigger 决定即时更新或提交后重算。",
             },
         },
         "related": ["layout-contract", "presentation", "controls", "interactive-transforms"],
@@ -932,7 +929,46 @@ sections:
         "related": ["dashboard", "presentation", "validation"],
     },
     "query-parameters": {
-        "summary": "Query Parameter 创建不可变 Query Run；节点通过 query_inputs 使用本地别名和显式投影。",
+        "summary": "Query Parameter 创建不可变 Query Run；multiple_select 同时固化 values 与 all_available/explicit 意图，动态候选由 Query 前置 Parameter Domain SQL 提供。",
+        "dynamic_domains": {
+            "purpose": "一个轻量 SQL 返回一张候选表，多个 Query Parameter 从不同字段投影，并可按直接父参数做省→市等本地级联。",
+            "example": """parameter_domains: [parameter_domains/locations.yaml]
+query_parameters:
+  - id: province
+    type: multiple_select
+    value_type: text
+    initial: {mode: values, values: [GD]}
+    options: {mode: domain, source: locations, value_field: province_code, label_field: province_name}
+  - id: city
+    type: multiple_select
+    value_type: text
+    initial: {mode: all}
+    options:
+      mode: domain
+      source: locations
+      value_field: city_code
+      label_field: city_name
+      depends_on: {province: {field: province_code}}
+""",
+            "rules": [
+                "Parameter Domain 只在正式 Query 前解析候选，不产生 Named Output、Result 或 Catalog 条目。",
+                "Server 执行 Domain SQL；外层 Query Panel Shell 只填充候选、级联和协调草稿，不进入 Canvas/browser-js Interactive Runtime。",
+                "AI 可按需运行 dataviz parameters options，把原始多列 Domain 表封存为 options_id；终端默认预览 10 行、显式上限 100 行，后续 parameters filter 从快照筛选、选列和分页，不重跑 SQL。",
+                "dataviz run 不执行 Domain，也不把候选表当作成员白名单；options_id 不是 Result。",
+                "父参数可以是 static 单选或多选；同一有界 Domain 表可投影 province、city 等多个候选池，每个 value_field 都按 canonical value 自动去重；不需要级联的投影不要声明 depends_on。",
+                "Parameter Domain 的候选池必须有界并适合一次完整加载；候选值过多说明参数抽象不合适，应缩小业务层级，或让已知 ID 使用 multiple_input，而不是继续扩张候选组件。",
+                "父参数为空时子候选为空，不把未选择偷偷解释成全部；允许这种空状态时，依赖子参数通常也应 required: false。",
+                "候选变化优先保留有效交集；原非空选择完全失效才恢复 initial；可选参数的主动空集保持为空。",
+                "Query Card 的 reload 只刷新候选，不执行正式 Query，也不清空仍有效的选择。",
+                "每次成功 Query 都封存 committed {values, intents}；Revert 把这份完整目标一次性交给 Resolver，按依赖拓扑事务式恢复全部级联字段，不执行 Query，也不回退 initial。",
+                "Revert 遇到最新 Domain 已缺失的 committed value 时保留该值并显示为 unavailable；候选是编辑建议，不是 Source 参数白名单。",
+                "Domain 失败只禁用当前 Dashboard 的查询；切换 Dashboard 会取消旧请求，损坏的草稿不能锁住 Shell 导航。",
+                "portable HTML 与分享链接只携带已提交 Query Parameter values/intents，不嵌入或执行 Parameter Domain。",
+            ],
+            "inspect": "dataviz schemas parameter-domain --full --format json",
+            "optional_cli": "dataviz parameters options <workspace> <dashboard> --query-param province=GD",
+            "filter_snapshot": "dataviz parameters filter <workspace> <options_id> --where province_code=GD --column city_code --column city_name",
+        },
         "date_range": {
             "definition": """- id: job_date_range
   type: range_input
@@ -955,10 +991,16 @@ sections:
         ],
         "query_inputs": [
             "key 是节点本地别名，也是 SQL named placeholder 或 context.query_inputs 的 key。",
-            "字符串值是 {parameter: <id>} 的简写。",
+            "字符串值是 {parameter: <id>, projection: value} 的简写。",
             "part=start/end 仅允许投影 range_input/date；validate 在查询前拒绝错误类型。",
+            "projection=intent 仅允许投影 multiple_select，返回 all_available 或 explicit，不能与 part 同时使用。",
+            "explicit + [] 是明确空集；Clear/Reset/loading/error 不增加新的业务意图，当前不支持 exclude。",
         ],
-        "related": ["sources", "dataset-transforms", "interactive-transforms"],
+        "intent_binding": """query_inputs:
+  city_values: cities
+  city_intent: {parameter: cities, projection: intent}
+""",
+        "related": ["sources", "dataset-transforms", "interactive-transforms", "data-entry-components"],
     },
     "adapters": {
         "summary": "连接配置属于 Workspace；可分享的 Dashboard 只引用逻辑 Adapter 名。",
@@ -967,18 +1009,18 @@ sections:
             "非敏感定义放在 auth/adapters.yaml；密码使用环境变量字段或未提交的 auth/adapters.local.yaml。",
             "更换团队环境只修改 Dashboard adapter 别名映射。",
             "内置类型只接受 file、duckdb、mysql、starrocks、sqlalchemy，不保留旧类型别名。",
-            "validate 会检查被 Source 引用的 Adapter、文件路径和必需环境变量。",
+            "validate 会检查被 Source 或 Parameter Domain 引用的 Adapter、文件路径和必需环境变量。",
             "Interactive Transform 永远没有 Adapter，不能借交互状态重新查数。",
             "Dataviz 会脱敏错误和日志；可信 Python Source 仍不得主动把 Adapter 凭据作为 Output 返回。",
         ],
     },
     "sources": {
-        "summary": "Source 是唯一外部取数入口，类型为 file、sql 或 python。",
+        "summary": "Source 是唯一进入分析 DAG 的外部取数入口，类型为 file、sql 或 python；Parameter Domain 只能查询网页候选元数据，不产生分析 Output。",
         "required": ["schema", "kind", "id", "type", "outputs"],
         "examples": {
-            "file": "{schema: dataviz/source/v2, kind: source, id: sales, type: file, path: data/sales.csv, outputs: {main: {kind: table}}}",
-            "sql": "{schema: dataviz/source/v2, kind: source, id: sales, type: sql, adapter: warehouse, code: sales.sql, query_inputs: {start_date: start_date}, outputs: {main: {kind: table}}}",
-            "python": "{schema: dataviz/source/v2, kind: source, id: api, type: python, code: api.py, outputs: {main: {kind: table}}}",
+            "file": "{schema: dataviz/source/v3, kind: source, id: sales, type: file, path: data/sales.csv, outputs: {main: {kind: table}}}",
+            "sql": "{schema: dataviz/source/v3, kind: source, id: sales, type: sql, adapter: warehouse, code: sales.sql, query_inputs: {start_date: start_date}, outputs: {main: {kind: table}}}",
+            "python": "{schema: dataviz/source/v3, kind: source, id: api, type: python, code: api.py, outputs: {main: {kind: table}}}",
         },
         "timeouts": "SQL/Python 默认 120 秒；SQL timeout_retries 默认 1，超时后立即使用新连接重试。",
         "debug": "Server 的 Sources 面板公开参数化 SQL、解析后 SQL、绑定参数、Adapter 类型、超时和重试证据。",
@@ -999,9 +1041,9 @@ sections:
     },
     "dataset-transforms": {
         "summary": "Dataset Transform 在 Query DAG 中加工取数结果，并固化为 Base Output。",
-        "schema": "dataviz/dataset-transform/v2",
+        "schema": "dataviz/dataset-transform/v3",
         "runtime": "server-python",
-        "example": """schema: dataviz/dataset-transform/v2
+        "example": """schema: dataviz/dataset-transform/v3
 kind: dataset_transform
 id: features
 runtime: server-python
@@ -1016,7 +1058,6 @@ timeout_seconds: 120
         "context": [
             "context.inputs / context.input(name) / context.table(name)",
             "context.query_inputs",
-            "context.compute_params={} / context.selections={}",
             "context.adapter=None",
             "context.progress(value, message)",
             "context.log(message, level='info', **fields)",
@@ -1028,32 +1069,30 @@ timeout_seconds: 120
         ],
     },
     "interactive-transforms": {
-        "summary": "Interactive Transform 在不可变 Query Run 上按 selection/compute Control delta 重算 Derived Output。",
-        "schema": "dataviz/interactive-transform/v2",
-        "common_fields": ["runtime", "inputs", "query_inputs", "compute_inputs", "selection_inputs", "trigger", "export", "outputs"],
+        "summary": "Interactive Transform 在不可变 Query Run 上按编译后的 Control consumer bindings 重算 Derived Output。",
+        "schema": "dataviz/interactive-transform/v3",
+        "common_fields": ["runtime", "inputs", "query_inputs", "control_inputs", "trigger", "export", "outputs"],
         "runtimes": {
             "browser-js": "JavaScript Web Worker；Server 与 HTML 共用；支持 Promise、progress、timeout、cancel。",
-            "browser-python": "Pyodide module Worker；支持纯 Python/Pyodide wheel；图表仍由 JS Renderer 绘制。",
             "server-python": "独立服务端进程；可用任意已安装 Python 依赖；不能访问 Adapter；HTML 只允许 snapshot/unavailable。",
         },
         "runtime_choice": {
-            "default_order": ["browser-js", "browser-python", "server-python"],
+            "default_order": ["browser-js", "server-python"],
             "rule": (
-                "当三者都能清楚、可靠地表达同一逻辑且数据规模适合浏览器时，"
-                "优先 browser-js，其次 browser-python，最后 server-python。"
+                "浏览器内 snapshot 数据加工和便携交互使用 browser-js；"
+                "完整 Python 生态、复杂模型或重型计算使用 server-python。"
             ),
             "reason": (
-                "这个顺序优化启动开销、分发体积和 HTML 可移植性，不表示 JavaScript "
-                "在所有算法上都比原生 Python 更快。原生依赖、大模型、运筹求解或大数据量仍应选择 server-python。"
+                "浏览器 Runtime 受浏览器内存、CPU 和资产边界约束；作者语言偏好不构成新增 Runtime 的理由。"
             ),
         },
         "triggers": {
-            "auto": "browser-js/browser-python 默认；输入变化后 debounce，并取消同一 Transform 的旧 generation。",
+            "auto": "browser-js 默认；输入变化后 debounce，并取消同一 Transform 的旧 generation。",
             "apply": "server-python 默认；用户提交相关草稿后执行。",
             "manual": "仅明确指定 Transform 时执行，同时补齐其依赖闭包。",
         },
         "export_modes": {
-            "interactive": "HTML 中继续计算；仅 browser-js/browser-python。",
+            "interactive": "HTML 中继续计算；仅 browser-js。",
             "snapshot": "导出时固化 Derived Output 及产生它的状态，相关控件只读。",
             "unavailable": "HTML 明确显示缺失能力与原因。",
         },
@@ -1071,38 +1110,10 @@ timeout_seconds: 120
             "HTML 从已封存 Result 的数据与 Presentation 快照生成；只有 Browser Runtime 能在脱离 Dataviz Server 后继续计算。"
         ),
         "runtime_matrix": {
-            "browser-js": "interactive/snapshot/unavailable；interactive 不需要 Python 或 Pyodide。",
-            "browser-python": "interactive/snapshot/unavailable；interactive 需要 Pyodide CDN 或 bundle。",
+            "browser-js": "interactive/snapshot/unavailable；interactive 在 JavaScript Worker 中执行。",
             "server-python": (
                 "只能 snapshot 或 unavailable。导出页没有 Python Server，不能继续执行模型、"
                 "运筹或其他 server-python 逻辑。"
-            ),
-        },
-        "pyodide_assets": {
-            "cdn": (
-                "下载较小的 HTML，打开时从 runtime.pyodide_index_url 加载 Pyodide；"
-                "公司内网或离线环境可能失败。"
-            ),
-            "bundle": (
-                "从 runtime.pyodide_bundle_path 复制已校验的本地 Pyodide 分发。CLI 输出 HTML + "
-                "<name>.assets/pyodide + manifest；Server 下载 ZIP。它是自包含文件包，不是单一 HTML。"
-            ),
-            "bundle_contract": (
-                "目录根部必须包含 pyodide.mjs、pyodide.asm.mjs、pyodide.asm.wasm、"
-                "python_stdlib.zip、package.json 和 pyodide-lock.json。validate 会检查固定版本，"
-                "按 Emscripten marker 继续检查 micropip、声明依赖的传递 wheel 闭包与必需 SHA-256。"
-            ),
-            "serve": (
-                "bundle 报告应解压后通过 HTTP 静态服务打开；module Worker/WASM 不保证在 file:// 下工作。"
-            ),
-            "conditional": (
-                "没有可执行 browser-python 分支时，报告不嵌入 Python Worker、不写 Pyodide URL，"
-                "也不复制 Pyodide 资产。snapshot/unavailable 分支同样不携带无用 Runtime。"
-            ),
-            "other_assets": (
-                "Pyodide bundle 不等于整页离线：Plotly.js 与 TanStack Table Core Runtime 随 Dataviz 提供；"
-                "Arrow 只有配置本地文件时离线；Perspective 当前仍依赖 CDN。"
-                "manifest 只判断声明的 Runtime/View 资产，不分析自定义脚本请求。"
             ),
         },
         "commands": [
@@ -1113,46 +1124,49 @@ timeout_seconds: 120
         "related": ["interactive-transforms", "pipeline", "troubleshooting"],
     },
     "controls": {
-        "summary": "Control 是 Query 后唯一交互入口；kind: selection 选择数据，kind: compute 改变随后计算。",
+        "summary": "Control 是 Query 后统一的 typed state owner；筛选或计算含义由 consumer binding 显式声明。",
         "scopes": {
             "dashboard": "在 dashboard.controls 声明，影响全部可见 View。",
             "section": "在 section.controls 声明，影响该 Section 的 View。",
             "view": "在 view.controls 声明，只影响单个 View。",
         },
-        "kinds": {
-            "selection": "include-only；先从 Base/Derived Output 中选择样本，再渲染或进入计算。",
-            "compute": "在当前选择上改变模型、阈值、随机种子等逻辑；有 draft/committed 状态。",
+        "consumer_modes": {
+            "filter": "对指定 View/Transform 输入应用字段筛选；empty 必须选择 passthrough 或 match_none。",
+            "value": "把 Control 值、present 状态或 intent 投影为 Interactive Transform 的局部 alias。",
         },
         "dashboard_example": """controls:
   - id: region
-    kind: selection
     type: multiple_select
     value_type: text
     field: region
+    initial: {mode: all}
     options:
       mode: static
       choices:
         - {label: 华东, value: east}
         - {label: 华南, value: south}
   - id: simulations
-    kind: compute
     type: single_input
     value_type: integer
     default: 100000
     min: 1000
     max: 1000000
 """,
-        "interactive_input_example": """compute_inputs:
-  simulations: dashboard:sales/simulations
-selection_inputs:
-  region: dashboard:sales/region
+        "interactive_input_example": """control_inputs:
+  simulations: {mode: value, control: dashboard.simulations}
+  region:
+    mode: filter
+    control: dashboard.region
+    field: region
+    inputs: [rows]
+    empty: match_none
 """,
         "component_choice": {
             "auto": "按 value type、choices 数量、suggestions 和 path_fields 确定 Data Entry component。",
             "input": "自由文本；multiline 只改变展示，不改变 string value。",
             "input-number": "有界 number/integer；min/max/step 属于逻辑契约。",
             "auto-complete": "自由文本 + suggestions；建议不是封闭枚举。",
-            "checkbox": "随所在 Query/Compute 工作流提交的 boolean。",
+            "checkbox": "随所在 Query/Control 工作流提交的 boolean。",
             "switch": "立即发出 input/change 的 boolean；执行策略仍由外层工作流决定。",
             "radio-group": "少量可见单选；不合成 All/Clear。",
             "select": "平面单选或多选；search/virtual 支持 auto/always/never。单选不提供批量操作。",
@@ -1170,23 +1184,23 @@ selection_inputs:
         ],
         "behavior": [
             "Single Select 不出现 All、Select all 或 Invert；optional + clearable 的单选允许 Clear，required single 始终恰好一个值且拒绝 clearable。",
-            "Selection 的 canonical state 始终是 {intent, values}：all_available 跟随当前完整候选域；explicit 是显式子集；explicit + [] 是不选择任何样本。",
+            "Control canonical state 是 {value, revision, intent?}；候选型多选可带 all_available/explicit intent，自由集合只保存 list value。",
             "Multi Select 和 Date Range 用 required 控制是否允许空值；clearable 可显式关闭清空操作，required: true 与 clearable: true 会被 validate 拒绝。",
-            "候选依赖用 depends_on 声明直接 Selection 父节点；Compiler 计算传递闭包和拓扑顺序。",
+            "候选依赖用 depends_on 声明直接 Control 父节点；Compiler 计算传递闭包和拓扑顺序。",
             "Dashboard Control 只可依赖 dashboard.*；Section 可再依赖本 section.*；View 可再依赖自身 view.*。",
             "上游域改变时，下游 all_available 跟随全部新候选；explicit 优先保留有效交集，原非空选择完全失效才恢复 initial，用户主动空集保留。",
             "Select 必须显式声明 options.mode；static 表示封闭业务枚举，infer 表示从数据推导候选域。",
             "options.mode=static 的 choices 是权威白名单；Source 中未声明的成员会被有意排除。",
-            "Query/Selection/Compute Select 统一使用 initial：多选为 all/empty/values，单选为 first/empty/value；非 Select 使用 default。",
-            "infer 未写 source 时，Runtime 从消费 View 背后的 Base Output 建立选项域；不会从依赖该 Selection 的 Derived Output 反推。",
+            "Query Parameter 与 Control Select 统一使用 initial：多选为 all/empty/values，单选为 first/empty/value；非 Select 使用 default。",
+            "infer 未写 source 时，Runtime 从消费 View 背后的 Base Output 建立选项域；不会从依赖该 Control 的 Derived Output 反推。",
             "多输入或需要明确数据域时使用 options.source: source:<id>/<name> 或 dataset:<id>/<name>；Interactive Output 会被 validate 拒绝。",
             "View Control 不重绘无关 View。",
-            "导出 HTML 保留完整 Dataset；Selection Control 是初始状态，不是导出裁剪。",
-            "Interactive Transform 用 selection_inputs / compute_inputs 把本地 alias 映射到 canonical Control key。",
-            "Runtime 先将 selection_inputs 应用于具有对应字段的表输入，再执行 Compute 逻辑；Transform 不应重复手写同一筛选。",
+            "导出 HTML 保留完整 Dataset；Control state 是导出时锁定的交互快照，不是 Query 裁剪。",
+            "View 与 Interactive Transform 都用 control_inputs 声明局部 alias 和 mode，不从 Control type 猜测行为。",
+            "Runtime 在 Transform 代码执行前应用 mode: filter，并把 mode: value 投影到 context.control_inputs。",
         ],
         "view_control_binding": {
-            "summary": "一个 Selection Control 最多有一个可读写 Bound View；Control Component 和 View event 写同一 canonical state。",
+            "summary": "一个 Control 最多有一个可读写 Bound View；Control Component 和 View selection gesture 写同一 canonical state。",
             "example": """views:
   - id: store-map
     input: source:stores/main
@@ -1207,31 +1221,31 @@ selection_inputs:
         },
         "dynamic_option_example": """controls:
   - id: dow
-    kind: selection
     type: single_select
     value_type: text
     field: dow
+    initial: {mode: first}
     options:
       mode: infer
       source: source:forecast-series/main
   - id: job_date
-    kind: selection
     type: multiple_select
     value_type: text
     field: job_date
+    initial: {mode: all}
     depends_on: [view.dow]
     options:
       mode: infer
       source: source:forecast-series/main
 """,
-        "compute_cli": "dataviz run <workspace> '<dashboard>::interactive:<transform-id>/<output>' --control dashboard:<dashboard>/<id>=42",
+        "interactive_cli": "dataviz run <workspace> '<dashboard>::interactive:<transform-id>/<output>' --control dashboard:<dashboard>/<id>=42",
         "related": ["data-entry-components", "interactive-transforms", "presentation"],
     },
     "data-entry-components": {
-        "summary": "Query Parameter、Selection 和 Compute 共用同一套独立 Data Entry Component；值语义、作用域和 UI 组件是三个正交维度。",
+        "summary": "Query Parameter 与 Control 共用同一套独立 Data Entry Component；生命周期、consumer binding 和 UI 组件是三个正交维度。",
         "architecture": {
             "value": "dashboard.yaml 定义 type、default、required、options/suggestions、min/max/step、path_fields 等可验证逻辑。",
-            "scope": "Query，或 dashboard/section/view 范围内的 Selection/Compute。",
+            "scope": "Query，或 dashboard/section/view 范围内的 Control。",
             "component": "presentation.yaml 的 control_components.<canonical-key>.component 只选择交互表现；span: 1|2 是独立的排版选择。",
             "runtime": "runtime.control 管理 canonical native value、事件、键盘与浮层生命周期；每个 control.* 包只实现一个组件。",
         },
@@ -1254,7 +1268,7 @@ selection_inputs:
                 "control.slider": "Ant Slider；单值或双端 numeric range、marks、tooltip 和可选同步输入框。",
             },
             "composition": {
-                "Form": "不是 value component；由 control_panels 和 Query/Selection/Compute 工作流组合 label、description、validation、layout 与 submit/apply。",
+                "Form": "不是 value component；由 control_panels 和 Query/Control 生命周期组合 label、description、validation、layout 与 submit/apply。",
             },
             "deferred": {
                 "TimePicker": "当前 DSL 没有 time/time_range value type；先不制造 string 伪语义。",
@@ -1281,11 +1295,11 @@ selection_inputs:
             "options.mode=static 的 choices 是权威白名单，只用于真正封闭或需要主动限制的候选集合。",
             "数据成员来自 Source 且可能变化时使用 options.mode=infer，由 options.source 或消费 View 的 Base Output 推导完整选项域。",
             "多选未声明 initial 时默认 all_available，需要空集或指定值时分别使用 initial.mode=empty/values。",
+            "单选未声明 initial 时默认 first；可选单选需要空值时使用 initial.mode=empty。候选域更新时优先保留仍有效的当前值，完全失效后才恢复 initial。",
         ],
         "example": """# dashboard.yaml: value and behavior contract
 controls:
   - id: model
-    kind: compute
     type: single_select
     value_type: text
     required: true
@@ -1356,6 +1370,12 @@ control_components:
             "interaction": "图例、点击、框选、套索与缩放使用 Plotly 事件和 config；页面滚动仍由 Dashboard 优先处理。",
             "offline": "Plotly.js 4.0.0 作为固定浏览器资产随 Dataviz 提供；Server 与 portable HTML 使用同一份 JS，不依赖 Python plotly 包。",
         },
+        "ownership": {
+            "data": "Server/Transform 生成 canonical Named Output；Browser Adapter 只把已计算字段投影为 Plotly traces，不重新解释业务口径。",
+            "layout": "Dashboard options.layout 保存稳定作者意图；Browser Runtime 再合并 Theme、容器尺寸和响应式边距。",
+            "config": "Browser Runtime 提供 page-first 滚轮、Modebar、框选交互、Resize 与离线安全默认，并关闭 Plotly 云端分享入口；View config 只覆盖明确的局部需求。",
+            "render": "浏览器直接调用内置 Plotly.js 4.0.0 的 newPlot/react/resize/purge，不经过 Python Figure。",
+        },
         "official_gallery": "https://plotly.com/javascript/",
         "official_source": "https://github.com/plotly/plotly.js/",
         "gallery_guidance": "先确定需要回答的分析问题，再从 Plotly 官方示例选择 trace 类型，并接入 Named Output、Controls 与 Renderer 生命周期。",
@@ -1363,7 +1383,7 @@ control_components:
         "recipe_policy": "Dataviz Recipe 只提供少量经过验证的起点，不复制官方示例库、不形成能力白名单，也不替代 Plotly 文档。",
         "service_example": "const state = await context.charts.plotly.mount(node, {data, layout, config});",
         "wheel_and_zoom": {
-            "plotly_default": "内置 Plotly 模板关闭 scrollZoom。未绑定 Selection 的图不显示工具栏；绑定 Selection 的图只显示矩形选择、套索选择和恢复默认选择。下载图片不默认出现。",
+            "plotly_default": "内置 Plotly 模板关闭 scrollZoom。没有可写 Control binding 的图不显示工具栏；绑定后只显示矩形选择、套索选择和恢复默认值。下载图片不默认出现。",
             "explicit_zoom": "缩放、平移和坐标轴恢复不进入默认工具栏；有明确分析需求时通过 config 覆盖，但不得默认截获 Dashboard 的连续滚动。",
             "custom_renderer": "Custom Renderer 使用 context.charts.plotly；只有明确需求时才启用 scrollZoom。",
         },
@@ -1393,7 +1413,7 @@ control_components:
         "scroll": "表格和 Perspective 仅在内部仍可滚动时消费滚轮；边界把滚轮交还页面。",
     },
     "repeated-views": {
-        "summary": "一个 View 蓝图可按实体平铺或由 Selection 选择后重复。",
+        "summary": "一个 View 蓝图可按实体平铺，或按一个候选型 Control 的值重复。",
         "templates": {
             "small-multiples": "按 repeat.by 生成所有实体，支持分页、懒挂载与离屏回收。",
             "selection-gallery": "先搜索/级联选择实体，再只创建选中的 View 实例。",
@@ -1429,7 +1449,7 @@ control_components:
             "boundary": "Dashboard Theme 只拥有 Canvas、Section、View 与 Renderer；Dashboard CSS 不应重写 Shell token。",
         },
         "control_panels": {
-            "default": "Query Parameters 是正常文档流中的 Query Card；Header 最右侧的 Run query split control 负责执行与开合，Card 内不重复运行按钮。Dashboard/Section/View Controls 使用临时托盘，默认只展示业务字段与组件，Selection/Compute 分组及影响范围保留在 Runtime 契约中。",
+            "default": "Query Parameters 是正常文档流中的 Query Card；Header 最右侧的 RUN split control 负责执行与开合，Card 内不重复运行按钮。Dashboard/Section/View Controls 使用临时托盘，默认只展示业务字段与组件；consumer mode 与影响范围保留在 Runtime 契约中。",
             "path": "control_panels.<query|dashboard>；Section/View 可在各自 presentation 条目中设置 controls",
             "options": {
                 "template": ["auto", "stack", "grid"],
@@ -1473,7 +1493,7 @@ control_components:
             "Insight first：首屏先说明当前分析对象、关键结果和可采取的下一步。",
             "One section, one question：一个 Section 回答一个问题；View title 描述内容，description 说明读法。",
             "Semantic before decorative：颜色、容器和层级表达语义，不用装饰制造虚假重点。",
-            "Progressive disclosure：Query Parameters 首次默认展开并参与页面文档流；Controls 位于最右侧 Run split control 左侧并按需展开；Pipeline 以品牌旁逐节点状态灯呈现，悬停看任务名、点击看证据。",
+            "Progressive disclosure：Query Parameters 首次默认展开并参与页面文档流；Controls 位于最右侧 RUN split control 左侧并按需展开；Pipeline 以品牌旁逐节点状态灯呈现，悬停看任务名、点击看证据。",
             "Stable interaction：自定义 CSS 不改变 Control 级联、焦点、弹层几何、滚动或 Renderer 生命周期。",
             "Two bounded token layers：稳定 Shell token 管理导航和操作；Dashboard Theme token 管理 Canvas 与 Renderer。",
         ],
@@ -1509,7 +1529,7 @@ control_components:
             "semantic": {
                 "--dv-accent": "主要操作、活动状态和第一图表序列",
                 "--dv-accent-strong": "高层标题和强强调",
-                "--dv-green": "Ready、Selection 与正向语义",
+                "--dv-green": "Ready、成功与正向业务语义",
                 "--dv-amber": "Stale、Warning 与 Cancelled",
                 "--dv-red": "Error 与破坏性操作",
                 "--dv-blue": "信息状态",
@@ -1537,7 +1557,7 @@ control_components:
                 "避免 3D、厚重阴影、彩虹 palette 和同时竞争注意力的多种图表风格。",
             ],
             "tables": [
-                "普通 Table 用于可定制阅读；Perspective 用于排序、筛选和透视探索。",
+                "普通 TanStack Table 负责明细阅读、排序、搜索、分页、列显示和行选择；Perspective 只用于终端用户需要临时重组、聚合或透视数据的场景。",
                 "表头、斑马纹与 hover 保持低对比；数字右对齐，文本左对齐，关键列可用局部 class 强调。",
                 "Perspective 拥有自己的交互 UI；只调整外层容器和语义 Token，不覆盖其内部结构。",
             ],
@@ -1667,6 +1687,7 @@ assets:
         "commands": [
             "dataviz schemas --format json",
             "dataviz schemas dashboard --full --format json",
+            "dataviz schemas parameter-domain --full --format json",
             "dataviz schemas interactive-transform --full --format json",
             "dataviz schemas target-reference --full --format json",
             "dataviz schemas analysis-result --full --format json",
@@ -1679,9 +1700,10 @@ assets:
         "coverage": [
             "schema、未知字段、重复 ID 和本地路径边界",
             "显式 Output 引用、缺失 Output、两个 DAG 的环和跨 Runtime 非法依赖",
-            "Query/Control namespace、Control kind、作用域可见性与 trigger 冲突",
-            "Interactive export.mode、Pyodide 依赖和 bundle 资产",
+            "Query/Control namespace、Control type、consumer binding、作用域可见性与 trigger 冲突",
+            "Interactive export.mode 与浏览器 Runtime 资产",
             "SQL named parameter、Python 依赖和输入/输出 Schema",
+            "Parameter Domain Adapter、SQL named parameter、字段投影、父参数依赖与环",
             "View/Section/Presentation/Data Entry Control 引用",
             "最终 Layout/Dependency/Renderer 配置中的确定性冲突、no-op 与无 consumer Control",
         ],
@@ -1702,16 +1724,23 @@ assets:
     "strict-schema": {
         "summary": "只接受当前 DSL；不提供 deprecated 层、字段别名、自动迁移或双协议 Runtime。",
         "current": {
-            "dashboard": "dataviz/dashboard/v9",
+            "dashboard": "dataviz/dashboard/v11",
+            "parameter_domain": "dataviz/parameter-domain/v1",
             "presentation": "dataviz/presentation/v2",
-            "source": "dataviz/source/v2",
-            "runtime": "dataviz/runtime/v5",
-            "dependency_contract": "dataviz/dependency-contract/v5",
-            "dataset_transform": "dataviz/dataset-transform/v2",
-            "interactive_transform": "dataviz/interactive-transform/v2",
+            "source": "dataviz/source/v3",
+            "runtime": "dataviz/runtime/v6",
+            "dependency_contract": "dataviz/dependency-contract/v7",
+            "dataset_transform": "dataviz/dataset-transform/v3",
+            "interactive_transform": "dataviz/interactive-transform/v3",
             "target_reference": "dataviz/target-reference/v1",
             "analysis_result": "dataviz/analysis-result/v1",
             "analysis_evidence": "dataviz/analysis-evidence/v1",
+            "layout_contract": "dataviz/layout-contract/v1",
+            "state_snapshot": "dataviz/state-snapshot/v2",
+        },
+        "browser_assets": {
+            "plotly_js": "4.0.0（直接内置，不安装 Python plotly）",
+            "tanstack_table_core": "9.2.4（直接内置）",
         },
         "rules": [
             "未知字段 extra=forbid。",
@@ -1720,20 +1749,21 @@ assets:
         ],
     },
     "frontend-adapters": {
-        "summary": "前端实现只消费 dataviz/runtime/v5 Manifest/Event/Output，不读取 Python 内部对象。",
+        "summary": "前端实现只消费 dataviz/runtime/v6 Manifest/Event/Output，不读取 Python 内部对象。",
         "commands": [
             "dataviz frontend-adapters --format json",
             "dataviz frontend-adapters web-component --output runtime-adapter.js",
         ],
-        "public": ["canonical Named Output", "Control selection/compute deltas", "node lifecycle", "Renderer lifecycle"],
+        "public": ["canonical Named Output", "Control state revisions and bindings", "node lifecycle", "Renderer lifecycle"],
     },
     "versioning-release": {
         "summary": "版本发布验证当前契约，不把旧 DSL 重新带回发行包。",
         "commands": ["dataviz version", "uv build", "python scripts/build_release_zip.py"],
         "release_contract": [
             "Python 3.11–3.14 运行 unit/contract tests。",
-            "Chromium/Firefox/WebKit 运行真实 Runtime tests。",
+            "快速迭代默认运行完整 Chromium Runtime tests；稳定发布、跨浏览器敏感修改或明确要求时再重复 Firefox/WebKit。",
             "wheel、sdist、pip ZIP 在干净 venv 中运行 version/schemas/components check/init/validate/report smoke。",
+            "干净环境确认 Python plotly 未安装，并核对 version 与报告中的 Plotly.js 固定版本。",
             "发行包排除 .venv、build、缓存和运行 Artifact。",
         ],
     },
@@ -1742,13 +1772,13 @@ assets:
         "implemented": [
             "SQL/Python Source 与 Dataset Transform 独立进程；SQL 默认 120 秒并立即重试一次。",
             "server-python Interactive Transform 使用独立进程和 generation 取消。",
-            "browser-js/browser-python 使用 Web Worker、timeout、supersede cancellation 和结构化错误。",
+            "browser-js 使用 Web Worker、timeout、supersede cancellation 和结构化错误。",
             "大 Table 自动使用 Arrow IPC；浏览器按需物化行。",
             "内置数值聚合使用线性 reducer，避免大数组展开触发 JavaScript 参数上限。",
             "节点独立发布，失败分支不阻塞无关分支。",
             "runtime.max_concurrent_runs 与 max_concurrent_interactions 分别限制单机并发 Query/Server 交互任务。",
-            "Execution Artifact、NodeCache 与不可变 Result 只写入 Workspace/.dataviz；默认缓存由 tab session 隔离，Server Interactive 复用同一 Query Run。",
-            "Run、cache、Worker、PyProxy、Renderer 与订阅均有 dispose/淘汰路径。",
+            "Execution Artifact、NodeCache、AI options_id 候选快照与不可变 Result 只写入 Workspace/.dataviz；默认缓存由 tab session 隔离，Server Interactive 复用同一 Query Run。",
+            "Run、cache、Worker、Renderer 与订阅均有 dispose/淘汰路径。",
         ],
         "current_limits": [
             "可信本地 Python/JavaScript 不是不可信代码沙箱。",
@@ -1775,11 +1805,11 @@ assets:
         },
         "memory_scope": "进程树 RSS 包含 Playwright driver、browser、workers、native Arrow 与 GPU helper；JS heap 不包含 Worker/native 内存。Firefox/WebKit 不公开 performance.memory 时返回 null，不伪造估值。",
         "fixed_fixture": "benchmarks/scale-workspace 的 row_count=10000/100000/1000000；结果与方法见 docs/runtime-performance.md。",
-        "decision": "1M 聚合链路可完成后仍不自动推出通用分页；原始明细 View、Selection 和高基数组合需各自基准触发。",
+        "decision": "1M 聚合链路可完成后仍不自动推出通用分页；原始明细 View、候选型 Control 和高基数组合需各自基准触发。",
         "boundary": "Runtime 性能基准只衡量页面运行规模与资源生命周期。",
     },
     "maintenance": {
-        "summary": "安全预览并清理 Workspace 的不可变 Result、Execution Artifact 和持久缓存。",
+        "summary": "安全预览并清理 Workspace 的不可变 Result、Execution Artifact、AI options_id 候选快照和持久缓存。",
         "commands": [
             "dataviz prune <workspace>",
             "dataviz prune <workspace> --keep-runs 20 --run-max-age-hours 48",
@@ -1788,7 +1818,7 @@ assets:
         ],
         "rules": [
             "默认 dry-run；必须显式 --apply 才删除。",
-            "只允许删除 Workspace/.dataviz/results、runs 与 cache 中被策略选中的目标。",
+            "只允许删除 Workspace/.dataviz/results、runs、cache 与 parameter-options 中被策略选中的目标；options_id 使用同一 cache 数量/时效策略。",
             "活动 Query、读取租约，以及仍被活动 Interaction 消费的 Query Run 和缓存始终受保护。",
             "复制到 Workspace 外的 export 和原始 File Source 永不由 prune 删除。",
         ],
@@ -1801,11 +1831,11 @@ assets:
             {"symptom": "Target Reference 无法解析", "action": "复制 catalog 返回的 canonical reference，并对照 docs target-references；不要传 Result ID 或模糊对象名。"},
             {"symptom": "Source 失败", "action": "用规范 Source Target 单独 run；再通过 result inspect 查看解析 SQL、Adapter、参数、timeout 和 traceback。"},
             {"symptom": "Dataset Transform 失败", "action": "run 对应 Output Target；检查 result inspect 中的 input schema、node.error.traceback 和 node.log。"},
-            {"symptom": "Interactive Transform 失败", "action": "检查 Runtime、trigger、canonical state、generation 与 export.mode；browser-python/js Derived Output 使用 --runtime browser。"},
+            {"symptom": "Interactive Transform 失败", "action": "检查 Runtime、trigger、canonical state、generation 与 export.mode；browser-js Derived Output 使用 --runtime browser。"},
             {"symptom": "需要查看更多结果", "action": "不要重新 run；使用 result show 的 --offset/--limit 分页，或 result export 原样复制一个 Artifact。"},
             {"symptom": "Result 引用的 File Source 已变化", "action": "Result 保留实际读取的 path/hash 收据；重新执行产生新 Result，不修改旧 manifest。"},
-            {"symptom": "查询成功但 View 为空", "action": "检查 Named Output 字段、类型、Selection 后行数和 View input。"},
-            {"symptom": "Server 正常但 HTML 失败", "action": "检查 export.mode；server-python 不能离线重算。browser-python 再检查 CDN/bundle、manifest，并通过 HTTP 打开。"},
+            {"symptom": "查询成功但 View 为空", "action": "检查 Named Output 字段、类型、显式 Control filter 后行数和 View input。"},
+            {"symptom": "Server 正常但 HTML 失败", "action": "检查 export.mode；server-python 不能离线重算，browser-js 的代码和依赖必须随报告嵌入。"},
             {"symptom": "源码环境 ModuleNotFoundError", "action": "在 dataviz-tool 下运行 uv sync --python 3.12 --extra dev --no-editable --reinstall-package ai-dataviz；后续 CLI 使用 uv run --no-editable dataviz。"},
         ],
         "evidence": [

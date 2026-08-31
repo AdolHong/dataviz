@@ -1,6 +1,55 @@
 # Changelog
 
-## Unreleased
+## 0.15.0 — 2026-08-31
+
+- 删除受限且职责重叠的浏览器 Python Runtime；Interactive Transform 只保留用于便携端侧数据加工的 `browser-js` 与用于完整 Python 生态和复杂计算的 `server-python`，同时移除相关 Worker、依赖校验、资产分发、导出分支、脚手架和测试夹具。
+- Dashboard v11、Dependency Contract v7、State Snapshot v2 与 Browser Runtime v6 统一 Input State / Consumer Binding：Control 不再用 `selection/compute` 类型猜测行为，View 与 Interactive Transform 通过 `control_inputs.mode: filter | value` 显式消费同一 canonical `{value, revision, intent?}` 状态。
+- Plotly、Table、Custom Renderer 与 Control Component 统一为类型化 writer action；Compiler 明确校验单 writer、consumer 输入、字段、空值策略与影响闭包，Runtime 只重绘真实受影响 View，并拒绝旧 generation 和注册契约漂移。
+- State Snapshot 将 Runtime 原始 `applied_revisions` 按当前 Dependency Contract 规范化为 per-consumer `effective_revision / applied_revision / stale` 证据；Browser/Server 执行、HTML/Share、不可变 Result、`result inspect` 与 Evidence 贯通同一结构，未知或超前 revision 不会进入封存事实。
+- Query Parameter Revert 现在以最后一次成功 Query 的 committed `{values, intents}` 为唯一目标，通过 Parameter Domain 拓扑一次性恢复级联候选和值，不执行正式 Query，也不回退声明 `initial`。
+- 最新 Domain 缺少已提交值时，Resolver 保留该值并投影为只读 unavailable choice；Query Card 只有在 draft 真正偏离 committed values 或 intents 时才显示克制的恢复动作，完成后回到 Applied。
+- `dataviz init` 与 Feature Showcase 全部改为显式 View `control_inputs.mode: filter`，新建 Workspace 可直接通过 `validate --strict`，不再依赖已删除的继承 Control 隐式筛选。
+- 修复级联/树形 Control 初始化、Section/Repeat 路径投影、Header/Canvas revision 竞争、Progressive SSE 初始化、Server/Browser Interactive 注册与显式 View filter 等真实浏览器边界；429 项非浏览器测试、52 项 Chromium E2E，以及可切换引擎的 43 项 Firefox/WebKit Runtime E2E 均完整通过。
+- `dataviz docs` 与 `dataviz-skill.md` 清除旧 Selection/Compute/PyProxy 叙述，统一说明 Control 只持有状态、consumer binding 决定 filter/value 语义。
+- 四个示例 Workspace 通过 strict validate，21 个 Component Package（63 个组件、38 个 Story、75 个测试声明）通过检查；wheel、sdist、ZIP 分别在全新 Python 3.12 环境完成安装、Schema/Component 检查、`init → strict validate → report` 与无 Python `plotly` 依赖验证。
+
+## 0.14.1 — 2026-08-30
+
+- 统一 Parameter Domain 的作者边界：一张低/中基数有界关系表可投影多个候选池，每个 `value_field` 按 canonical value 自动去重；独立候选不声明 `depends_on`。
+- focused docs、DESIGN、实现索引与 AI skill 不再使用高基数 `item_nbr` 候选池演示选择意图；Parameter Domain 必须适合完整加载，候选过多时重构业务参数或让已知 ID 使用 `multiple_input`。
+- AI skill 的 Workspace Quickstart 对齐真实 CLI：`dataviz init` 直接生成可运行的 `hello` Dashboard；Scaffold 用于指定 Dashboard ID 或选择渐进式 recipe。
+- README 明确 `result export` 只复制不可变 Result 中的原生 Artifact，不重新执行查询，也不转换格式。
+- 生成资产、JavaScript 语法、四个示例 Workspace strict validate 与 Component Package 检查通过；Ruff、435 项非浏览器测试和 43 项 Chromium E2E 全部通过。
+- wheel、sdist、pip ZIP 通过内容审计，并分别在独立 Python 3.12 环境完成 `install → version → schemas → components → init → validate → report`；三个环境均未安装 Python `plotly`。
+
+## 0.14.0 — 2026-08-30
+
+- Query Parameter `multiple_select` 的 committed state 现在同时封存 canonical values 与 `all_available | explicit` 意图；`explicit + []` 是唯一明确空集，不增加 `none`、`exclude`、loading 或 reset 等伪业务状态。
+- Source、Dataset Transform 与 Interactive Transform 的结构化 `query_inputs` 新增 `{parameter: <id>, projection: intent}`，让 SQL/Python 能区分“当前范围全部成员”和“显式有限子集”；默认值投影继续保持原有短格式，Intent 只允许用于 `multiple_select` 且不能与日期 `part` 混用。
+- Server、CLI Analysis Result、Interaction Result、持久化分享结果与 portable HTML 元数据共同保留 Query Parameter intents；Parameter Domain 仍只负责 Query 前候选发现，不进入 Result、Canvas Interactive DAG 或候选成员校验。
+- 修复 Parameter Domain 422 后旧 Dashboard 表单校验阻断全局导航的问题：切换看板先取消旧请求，并以 best-effort 保存旧草稿；刷新仍可重试当前看板，但损坏 Domain 不再锁住整个 tab。
+- 运行时静态资产禁缓存改为纯 ASGI Middleware，消除浏览器取消请求时 Starlette `EndOfStream → No response returned` 的错误链。
+- DESIGN、产品架构、focused CLI docs 与分析 skill 明确两态 Intent、固定字段 Domain 投影、同表多候选自动去重和有界完整候选池原则。
+- Ruff、434 项非浏览器测试与 54 项 Chromium E2E 通过；新增真实浏览器回归覆盖 Domain 失败、刷新后跨 Dashboard 导航，以及 `all_available/explicit` 从 Query Panel 到封存 Run 的传递。
+- wheel、sdist、pip ZIP 完成内容审计，并分别在独立 Python 3.12 环境通过安装全流程；三个环境均未安装 Python `plotly`。
+
+## 0.13.0 — 2026-08-30
+
+- Dashboard Contract 升级为 v10，新增严格 `dataviz/parameter-domain/v1`：一个 Query 前置 SQL Domain Table 可为多个 Query Parameter 投影类型化候选，并通过直接父参数映射完成共享省市等层级级联。
+- Server Parameter Resolver 提供行数上限、类型化 Choice、session/TTL cache key 和稳定诊断；AI 可按需使用 `dataviz parameters options` 将原始多列候选表封存为 `options_id`，终端默认只预览 10 行，再由 `parameters filter` 基于快照筛选、选列和分页而不重跑 SQL。`dataviz run` 不隐式执行 Domain、不做候选成员校验，只校验参数值契约。Dependency Contract 升级为 v6，只在 Query 区域公开独立 Parameter Domain Contract，不把它写入 Canvas Runtime Manifest。
+- Query Panel Shell 支持请求 generation、tab 草稿恢复、有效交集/initial/主动空集协调、级联 loading 与 RUN 门禁；动态参数看板在“查询参数”右侧显示克制的 reload，强制刷新候选但不执行 Query、不清空有效选择。
+- 动态候选加载结束会同步恢复自定义 Select 的交互状态；浏览器回归直接点击可见的省份、城市候选，避免隐藏原生 `<select>` 的强制操作掩盖“候选可见但无法点击”。
+- portable HTML 与分享链接继续只消费封存 Result 中的 committed Query Parameter；不嵌入 Domain SQL、候选表、Adapter、cache receipt 或刷新 endpoint，也不把 Parameter Domain 接入 browser-js Interactive Runtime。
+- Feature Showcase 新增共享省市参数域看板；机器 Schema、focused docs、分析 skill、产品架构与参数编辑器同步当前边界。
+- 432 项非浏览器测试与 53 项 Chromium E2E 通过；四个示例 Workspace strict validate、21 个 Component Package（65 个组件、39 个 Story、77 个测试声明）和真实 `run → Result → report` 冒烟通过。
+- wheel、sdist、pip ZIP 通过内容审计，并分别在独立 Python 3.12 环境完成安装全流程；归档包含 Parameter Domain/Options 实现与浏览器交互修复，不包含 Workspace 缓存、凭据、维护者评测工具或 Python `plotly`。
+
+## 0.12.3 — 2026-08-30
+
+- 重新审计并收敛机器可读 `dataviz docs`：Quickstart 对齐 `init` 生成可运行 `hello` Dashboard 的真实行为，Shell 文案统一为 `RUN` split control，Table/Perspective 职责、Selection 初始化与动态候选恢复策略同步当前实现。
+- 图表文档明确 Server/Transform、Browser Adapter 与 Plotly.js 的所有权边界；strict-schema 和 release topic 补齐 Layout Contract、State Snapshot、Plotly.js 4.0.0、TanStack Table Core 9.2.4 及快速迭代浏览器门禁。
+- 新增文档残余回归，拒绝 ECharts/Vega、旧 CLI、旧 Schema/Runtime、旧 Query 按钮文案和过期组件职责重新进入正式 docs。
+- Ruff、423 项非浏览器测试与 52 项 Chromium E2E 通过；四个示例 Workspace strict validate、21 个 Component Package（65 个组件、39 个 Story、77 个测试声明）和实际 `run`/`report` 冒烟通过。wheel、sdist、pip ZIP 完成内容审计，并分别在独立 Python 3.12 环境通过安装全流程；三个环境均未安装 Python `plotly`。
 
 ## 0.12.2 — 2026-08-30
 
@@ -48,14 +97,14 @@
 
 ## 0.10.0 — 2026-08-29
 
-- 新增 AI Analysis Plane：`dataviz analyze all/search/describe/run` 可通过稳定裸别名搜索、批量描述并执行 Source、Base Output、Derived Output 与 View 输入；Base/server-python/browser-js/browser-python 共用现有 Runtime 和机器可读 provenance。
+- 新增 AI Analysis Plane：`dataviz analyze all/search/describe/run` 可通过稳定裸别名搜索、批量描述并执行 Source、Base Output、Derived Output 与 View 输入；各类 Output 共用现有 Runtime 和机器可读 provenance。
 - P1 Analysis Plane A–E 完成：新增 Output `semantics`/`assurance`、版本化机器 JSON Schema、public/internal 与可信发现边界、稳定 Analysis 错误 envelope、Evidence 和 Promote dry-run。
 - Workspace Catalog 补齐并发 refresh 去重、构建失败回退旧 generation、Server watcher 异步刷新和 stale diagnostics。
 - 新增 `.dataviz/usage.sqlite` 成功行为统计；Server Query 与 AI `analyze run` 使用 WAL、原子 UPSERT、首次初始化的有界锁重试和 best-effort 故障隔离，统计文件不影响 fingerprint、Hot Reload 或成功结果。
 - `analyze all/search` 对实现资产、Runtime、Adapter 引用、Query bindings 与 Output Contract 完全一致的口径做精确折叠，支持 occurrence 展开、关闭折叠和折叠后的 Top N；不推断 SQL 语义等价。
 - public 或 reviewed/certified SQL Output 的 `SELECT *`/`table.*` 产生稳定 warning，`count(*)` 不误报；Scaffold 与示例改用显式字段投影。
 - `analyze run` 使用原生 Parquet/Arrow Artifact、输入 Artifact provenance、summary/debug/full 分层、View presentation mapping，以及 `--also` 单浏览器会话批量 Derived 提取；格式转换不再暴露为 run 职责。
-- Browser Analysis 默认使用隔离 Context 并阻止非本地网络，按需加载 Pyodide，记录 launch/page-ready/runtime-ready/transform/extraction 分段耗时；可复用 Arrow Output 优先通过 Arrow IPC 提取。
+- Browser Analysis 默认使用隔离 Context 并阻止非本地网络，记录 launch/page-ready/runtime-ready/transform/extraction 分段耗时；可复用 Arrow Output 优先通过 Arrow IPC 提取。
 - 新增 `dataviz/analysis-overlay/v1`：`analyze run --overlay FILE|-` 可一次性替换 SQL、File Source、Python/JS Transform 及 code dependencies；`--dry-run` 先检查影响范围，正式执行不写回 Dashboard/Catalog，并使用独立缓存 salt 与 Analysis Run manifest。
 - `analyze describe --detail full --include-code` 可批量查看目标闭包的定义、路径、hash 与已脱敏的小型代码资产；大型数据文件不内联，也不会执行 Source。
 - Dashboard Contract 升级为 v9：Query Parameter、Selection 与 Compute 的所有 Select 统一使用 `initial`。多选支持 `all | empty | values`，单选支持 `first | empty | value`；非 Select 输入继续使用 `default`。
@@ -167,7 +216,7 @@ Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本
 
 ### Runtime, CLI and browser verification
 
-- browser-js/browser-python 未显式声明时默认 `trigger: auto`，server-python 默认 `apply`；Scaffold 与文档使用同一规则。
+- browser-js 未显式声明时默认 `trigger: auto`，server-python 默认 `apply`；Scaffold 与文档使用同一规则。
 - `query`、`output`、`compute` 默认输出紧凑 `dataviz/cli-result/v1`，`--detail debug|full` 才展开执行证据。
 - Component Registry 升级为 4.1.0；Custom Renderer 可通过 `context.charts.plotly` 复用平台 Theme、滚轮、Resize、Update 与 Dispose。
 - 新增 `visual-check`，真实加载 Server/Report 并输出 `dataviz/visual-check/v1`、截图和稳定几何/Loading/Console 诊断；不判断主观美感。
@@ -399,7 +448,7 @@ Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本
 ### Runtime
 
 - `selection_inputs` 成为三种 Interactive Runtime 共享的数据边界：Runtime 先对具有对应字段契约的表输入应用 include Selection，再执行 Compute 逻辑。
-- Server Python 的 `context.table()` / `context.input()` 与 browser-js/browser-python 的 `context.inputs` 看到相同的已选样本；`context.selections` 仍可用于日志、标签和确定性分支。
+- Server Python 的 `context.table()` / `context.input()` 与 browser-js 的 `context.inputs` 看到相同的已选样本；`context.selections` 仍可用于日志、标签和确定性分支。
 - `data.pipeline` 拥有 Browser Selection-before-Compute 边界，Server 使用同契约的 `ExecutionContext` 筛选；无关表输入保持不变。
 
 ### Verification
@@ -412,14 +461,14 @@ Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本
 ### Breaking architecture
 
 - Dashboard 与 Browser Runtime 升级为严格的 `dataviz/dashboard/v2`、`dataviz/runtime/v2`；查询阶段使用 Dataset Transform，取数后计算使用 Interactive Transform。
-- 新增独立 Compute Parameter，以及 `server-python`、`browser-python`、`browser-js` 三种 Interactive Runtime；三者统一产出 Named Output。
+- 新增独立 Compute Parameter，以及服务端 Python 与浏览器 JavaScript Interactive Runtime；两者统一产出 Named Output。
 - Query DAG 与 Interactive DAG 分离；Query Run 固化 Base Output，交互结果按 tab、Dashboard、Run、Transform 和 generation 隔离。
 - HTML Export 强制声明 `interactive`、`snapshot` 或 `unavailable`，不再把 Server Python 伪装成离线交互。
 - 删除旧实验性 Transform 字段、自动迁移命令和 Runtime 兼容分支；仓库示例与测试直接使用当前严格契约。
 
 ### Added
 
-- 新增 `dataviz compute`、Compute Control、Interactive Compute API、Pyodide module Worker 和 browser-js Worker。
+- 新增 `dataviz compute`、Compute Control、Interactive Compute API 和 browser-js Worker。
 - Query 与 Interactive Python 节点支持 cancel、progress、`context.log(...)`、结构化执行日志 Artifact 和完整 traceback；日志可通过 session 隔离的 Artifact API 获取，Query 节点可直接在 Sources 证据面板检查。
 - 页面导出采集 canonical Canvas snapshot，并清除旧 tab 状态中已经不属于当前 Dashboard 的 Selection key。
 - 新增五类固定 AI authoring 对照任务、带任务/prompt/输入哈希的 `authoring prepare`、`authoring verify/assess`、`authoring-event/v3` trial identity 与逐项验收证据，以及 `authoring tasks/protocol/compare` 成对评测；只有身份一致、prompt/输入完整且两边全部验收通过的 pair 进入效率聚合。
@@ -447,7 +496,6 @@ Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本
 - server-python Interactive 依赖链可复用相同 Query Run 与状态下已经完成的上游 generation；Interaction/event/cache 内存保留量有界。
 - Run/Interaction 事件截断使用单调 offset，长时间轮询不会因保留窗口移动而漏掉后续事件。
 - snapshot 的可选 Output 不再被误判为缺失并触发重算。
-- Pyodide package catalog 对齐固定 Runtime；bundle 核对 `package.json` 版本，并按 Emscripten marker 校验核心文件、lockfile、`micropip`、传递 wheel 闭包与必需 SHA-256 后随 ZIP 分发。没有活动 browser-python 的报告不再携带 Python Worker、Pyodide URL 或 bundle 资产。
 - 源码 CLI 文档固定使用 non-editable `uv sync --reinstall-package ai-dataviz`，规避部分 macOS/Python 组合忽略 hidden editable `.pth` 导致的 `ModuleNotFoundError`；发布 smoke 仍使用独立干净环境。
 - 声明式 View、browser-js Worker 与 Custom Canvas 的数值聚合改为线性 reducer，大表 min/max 不再因展开数组超过 JavaScript 参数上限而崩溃。
 - Arrow Table 作为 Metric 输入时不再被误判成 scalar 并显示 `[object Object]`；没有 descriptor 的 View 进入明确的 `empty` 终态。
@@ -459,7 +507,7 @@ Dataviz 的 package、DSL、Component Registry 与浏览器 Runtime 分别版本
 
 - 仓库首页改为面向首次访问者的简明 README；稳定产品设计收敛到 `DESIGN.md`，未完成工作收敛到 `plan.md`，三者都会进入后续源码 ZIP 与 sdist。
 - 删除设计文档中的安装手册、旧版本测试快照和已完成里程碑；明确当前未完成边界、放弃的旧方向与按真实需求触发的候选能力。
-- 明确 Runtime 默认选择 `browser-js → browser-python → server-python` 的适用条件、server-python 无法在独立 HTML 重算，以及 Pyodide CDN/bundle 的内网与离线边界。
+- 明确浏览器与服务端 Runtime 的适用条件，以及 server-python 无法在独立 HTML 重算的边界。
 
 ## 0.1.4 — 2026-08-23
 

@@ -54,7 +54,7 @@ Object.assign(datavizRuntime, {
     if (this.initializationPromise) return this.initializationPromise;
     this.initializationPromise = (async () => {
       // Establish the immutable Base Output snapshot before reconciling dynamic
-      // Selection domains. Hydration may publish Arrow tables, but no View or
+      // Control domains. Hydration may publish Arrow tables, but no View or
       // Interactive branch is allowed to observe a half-initialized Control state.
       this.initializing = true;
       try {
@@ -62,13 +62,13 @@ Object.assign(datavizRuntime, {
       } finally {
         this.initializing = false;
       }
-      await window.dataviz.applySelections();
+      await window.dataviz.applyControls();
       // Canvas ready is a lifecycle contract, not a script-load notification.
       // The parent may restore tab-local Controls only after Base Outputs,
-      // dynamic option domains and the first canonical Selection snapshot agree.
+      // dynamic option domains and the first canonical Control snapshot agree.
       datavizPostToParent({
         type:'dataviz:canvas-ready',
-        selection_state:datavizSelectionStateSnapshot(),
+        control_state:datavizControlStateSnapshot(),
       });
     })();
     return this.initializationPromise;

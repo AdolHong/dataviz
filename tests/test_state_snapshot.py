@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from dataviz.errors import ValidationFailure
 from dataviz.execution import Executor
 from dataviz.rendering import CanvasRenderer
-from dataviz.state_snapshot import build_state_snapshot
+from dataviz.state_snapshot import build_state_snapshot, normalize_consumer_revisions
 from dataviz.workspace import load_workspace
 
 
@@ -19,23 +22,28 @@ def test_state_snapshot_separates_committed_and_draft_values():
     snapshot = build_state_snapshot(
         dashboard,
         query_parameters={"min_query_revenue": 100},
-        selection_state={
+        control_state={
             "dashboard:sales-overview/region": {
                 "intent": "explicit",
-                "values": ["华东", "华南"],
+                "value": ["华东", "华南"],
+                "revision": 3,
             }
         },
-        compute_parameters={},
     )
 
-    assert snapshot["schema"] == "dataviz/state-snapshot/v1"
-    parameter = next(item for item in snapshot["items"] if item["kind"] == "query")
-    selection = next(item for item in snapshot["items"] if item["kind"] == "selection")
+    assert snapshot["schema"] == "dataviz/state-snapshot/v2"
+    parameter = next(
+        item for item in snapshot["items"] if item["entry_type"] == "query_parameter"
+    )
+    control = next(
+        item for item in snapshot["items"] if item["entry_type"] == "control"
+    )
     assert parameter["committed"] == 100
     assert parameter["stale"] is False
-    assert selection["committed"] == {
+    assert control["committed"] == {
         "intent": "explicit",
-        "values": ["华东", "华南"],
+        "value": ["华东", "华南"],
+        "revision": 3,
     }
 
 
@@ -48,8 +56,76 @@ def test_default_canvas_embeds_snapshot_and_summary_hosts():
 
     assert dashboard.presentation is not None
     assert dashboard.presentation.state_summary.enabled is False
-    assert '"schema": "dataviz/state-snapshot/v1"' in rendered
+    assert '"schema": "dataviz/state-snapshot/v2"' in rendered
     assert 'data-state-summary-scope="dashboard"' in rendered
     assert 'data-state-summary-scope="section"' in rendered
     assert 'data-state-summary-scope="view"' in rendered
     assert "renderDatavizStateSummaries" in rendered
+
+
+def test_consumer_revisions_distinguish_effective_and_applied_state():
+    dashboard = load_workspace(MINIMAL).dashboard("sales-overview")
+    control_state = {
+        "dashboard:sales-overview/region": {
+            "intent": "explicit",
+            "value": ["华东"],
+            "revision": 3,
+        }
+    }
+
+    evidence = normalize_consumer_revisions(
+        dashboard,
+        control_state,
+        {
+            "views": {
+                "revenue-trend": {
+                    "dashboard:sales-overview/region": 2,
+                },
+                "unknown-view": {"unknown-control": 999},
+            },
+            "transforms": {},
+        },
+    )
+
+    trend = evidence["views"]["revenue-trend"]
+    assert trend == {
+        "trigger": "auto",
+        "stale": True,
+        "controls": {
+            "dashboard:sales-overview/region": {
+                "effective_revision": 3,
+                "applied_revision": 2,
+                "stale": True,
+            }
+        },
+    }
+    assert "unknown-view" not in evidence["views"]
+    assert evidence["views"]["total-revenue"]["controls"][
+        "dashboard:sales-overview/region"
+    ]["applied_revision"] is None
+
+
+def test_consumer_revision_cannot_be_ahead_of_effective_state():
+    dashboard = load_workspace(MINIMAL).dashboard("sales-overview")
+
+    with pytest.raises(ValidationFailure) as raised:
+        normalize_consumer_revisions(
+            dashboard,
+            {
+                "dashboard:sales-overview/region": {
+                    "intent": "explicit",
+                    "value": ["华东"],
+                    "revision": 3,
+                }
+            },
+            {
+                "views": {
+                    "revenue-trend": {
+                        "dashboard:sales-overview/region": 4,
+                    }
+                },
+                "transforms": {},
+            },
+        )
+
+    assert raised.value.details["code"] == "consumer_applied_revision_ahead"

@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v9
+schema: dataviz/dashboard/v11
 kind: dashboard
 id: sales
 title: 销售脉搏
@@ -18,7 +18,6 @@ query_parameters:
     default: 1.0
 controls:
   - id: region
-    kind: selection
     field: region
     type: multiple_select
     value_type: text
@@ -45,8 +44,9 @@ views:
     x: date
     y: [revenue, forecast_revenue]
     aggregate: sum
-    selection_bindings:
-      min_revenue: {field: revenue, operator: gte}
+    control_inputs:
+      region: {mode: filter, control: dashboard.region, field: region, inputs: [main], empty: match_none}
+      min_revenue: {mode: filter, control: section.min_revenue, field: revenue, inputs: [main], empty: passthrough, operator: gte}
 
   - id: target
     title: 区域目标完成度
@@ -56,8 +56,9 @@ views:
     x: region
     y: completion_pct
     aggregate: none
-    selection_bindings:
-      min_revenue: {field: revenue, operator: gte}
+    control_inputs:
+      region: {mode: filter, control: dashboard.region, field: region, inputs: [main], empty: match_none}
+      min_revenue: {mode: filter, control: section.min_revenue, field: revenue, inputs: [main], empty: passthrough, operator: gte}
 
   - id: distribution
     title: 订单分布
@@ -67,8 +68,9 @@ views:
     x: region
     y: orders
     aggregate: sum
-    selection_bindings:
-      min_revenue: {field: revenue, operator: gte}
+    control_inputs:
+      region: {mode: filter, control: dashboard.region, field: region, inputs: [main], empty: match_none}
+      min_revenue: {mode: filter, control: section.min_revenue, field: revenue, inputs: [main], empty: passthrough, operator: gte}
 
   - id: detail
     title: 明细检查
@@ -79,21 +81,20 @@ views:
     limit: 100
     controls:
       - id: min_orders
-        kind: selection
         field: orders
         type: single_input
         value_type: number
         label: 最低订单数
         default: 0
-    selection_bindings:
-      min_orders: {field: orders, operator: gte}
+    control_inputs:
+      region: {mode: filter, control: dashboard.region, field: region, inputs: [main], empty: match_none}
+      min_orders: {mode: filter, control: view.min_orders, field: orders, inputs: [main], empty: passthrough, operator: gte}
 
 sections:
   - id: pulse
     title: 经营脉搏
     controls:
       - id: min_revenue
-        kind: selection
         field: revenue
         type: single_input
         value_type: number

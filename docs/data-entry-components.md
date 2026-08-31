@@ -2,7 +2,7 @@
 
 Dataviz 把三个问题彻底分开：
 
-1. `dashboard.yaml` 定义值是什么，以及它如何影响数据：Query Parameter、Selection 或 Compute。
+1. `dashboard.yaml` 定义值是什么；Query Parameter 创建 Query Run，scoped Control 持有查询后的交互状态。
 2. Control 所在位置定义作用域：Dashboard、Section 或 View。
 3. `presentation.yaml` 只选择如何编辑这个值：`control.input`、`control.select`、`control.cascader` 等。
 
@@ -67,7 +67,7 @@ default:
 
 Server 默认值编辑器也按 Atom 呈现。单日期只有“类型 + 值”两个控件；日期范围分别为开始、结束各提供一组“类型 + 值”，共四个控件。选择“固定日期”时复用运行界面的可编辑 ISO DatePicker（包括八位数字自动分段、统一图标、浮层和校验），选择“相对今天”时值控件是整数 offset。编辑器不会同时显示两种输入，也不接受旧的 `start_offset/end_offset` 范围对象。
 
-相对表达式只允许用于 Query Parameter；在 Run 创建前解析成具体 `YYYY-MM-DD`，随后 SQL 绑定、缓存和导出 HTML 都使用该不可变日期。Selection/Compute 的交互状态必须保存具体日期，不能随浏览日期漂移。
+相对表达式只允许用于 Query Parameter；在 Run 创建前解析成具体 `YYYY-MM-DD`，随后 SQL 绑定、缓存和导出 HTML 都使用该不可变日期。Control 的交互状态必须保存具体日期，不能随浏览日期漂移。
 
 运行界面的 DatePicker 与 RangePicker 始终展示 `YYYY-MM-DD`，不采用浏览器原生 `date` 控件的本地化格式。键入或粘贴连续八位数字会自动跨过年/月/日分隔符：`20260809` → `2026-08-09`。这只是输入辅助，不放宽日期契约；`20260231` 仍会被真实日期校验拒绝。Range 的两个端点可以分别文本编辑，也可以在同一双月弹层中依次选择；两个端点共用一个外框，不各自绘制输入边框。单日期、Range 和默认值编辑器的日历都可直接下拉选择年与月；没有声明 preset 时不渲染空工具条，没有 Clear/Apply 时不再用 footer 重复已选日期范围。
 
@@ -83,7 +83,7 @@ Server 默认值编辑器也按 Atom 呈现。单日期只有“类型 + 值”�
 Select 必须明确候选域由谁拥有：
 
 - `options.mode: static`：Dashboard 维护封闭 `choices`；Source 中未列出的值不会进入控件。
-- `options.mode: infer`：Runtime 从 `options.source` 或消费该 Selection 的 Base Output 推导完整选项域。
+- `options.mode: infer`：Runtime 从 `options.source` 或消费该 Control 的 Base Output 推导完整选项域。
 
 Select 不使用 `default`，而是统一使用 `initial`。多选支持 `all/empty/values`，单选支持 `first/empty/value`；未声明时分别默认 `all` 和 `first`。`all` 编译为 `all_available` 意图，因此 Source 从 4 个城市增加到 10 个时无需修改 Dashboard。
 
@@ -99,24 +99,24 @@ Select 不使用 `default`，而是统一使用 `initial`。多选支持 `all/em
 
 `Slider`、`InputNumber`、`DatePicker`、`Checkbox` 等只是上述逻辑类型的展示组件，不另造初始化语义。`min` 不是默认值，`false` 和“今天”也不会被 Runtime 擅自推断；如果必填输入未声明 `default`，它会保持空值并在提交时提示补充。这样修改候选域只协调 Select，修改展示组件或约束不会悄悄重置用户已经输入的业务值。
 
-候选项依赖属于值/数据契约，不属于 Component。下游 Selection 只用 `depends_on` 声明直接父节点：
+候选项依赖属于值/数据契约，不属于 Component。下游 Control 只用 `depends_on` 声明直接父节点：
 
 ```yaml
 controls:
   - id: dow
-    kind: selection
     field: dow
     type: single_select
     options: {mode: infer, source: source:hourly/main}
   - id: dates
-    kind: selection
     field: job_date
     type: multiple_select
     depends_on: [view.dow]
     options: {mode: infer, source: source:hourly/main}
 ```
 
-`dashboard.<id>` 指当前 Dashboard，`section.<id>` 指当前所在 Section，`view.<id>` 指当前 View；不能跨兄弟 Section/View。链式关系只写直接边，例如 A 依赖 B、B 依赖 C，不在 A 重复列 C。`dataviz validate` 负责作用域、未知父节点、Selection 类型、候选关系字段和环；Select、Checkbox Group、Cascader 或 Tree Select 只呈现同一份 canonical 状态。
+`dashboard.<id>` 指当前 Dashboard，`section.<id>` 指当前所在 Section，`view.<id>` 指当前 View；不能跨兄弟 Section/View。链式关系只写直接边，例如 A 依赖 B、B 依赖 C，不在 A 重复列 C。`dataviz validate` 负责作用域、未知父节点、Select 类型、候选关系字段和环；Select、Checkbox Group、Cascader 或 Tree Select 只呈现同一份 canonical 状态。
+
+Control 本身不声明“筛选”或“计算”类别。效果由每个消费者的 `control_inputs` 决定：`mode: filter` 对指定表和字段筛选，`mode: value` 把值、是否存在或候选意图传给 View/Interactive Transform。同一个 Control 可以被不同消费者以不同方式读取。
 
 ## 自动选择规则
 
@@ -147,7 +147,6 @@ Checkbox Group 的意义是“所有少量选项都值得直接看到”。可�
 ```yaml
 controls:
   - id: model
-    kind: compute
     type: single_select
     value_type: text
     label: 模型
@@ -160,7 +159,6 @@ controls:
         - {label: 候选, value: candidate}
 
   - id: location
-    kind: selection
     type: multiple_select
     value_type: text
     label: 地区
@@ -168,6 +166,17 @@ controls:
     path_fields: [province, city, district]
     options:
       mode: infer
+
+interactive_transforms:
+  - id: forecast
+    control_inputs:
+      model: {mode: value, control: dashboard.model}
+
+views:
+  - id: district-detail
+    input: source:districts/main
+    control_inputs:
+      location: {mode: filter, control: dashboard.location, field: district, inputs: [main], empty: passthrough}
 ```
 
 Presentation 只选 Component 和视觉选项：
@@ -220,7 +229,7 @@ Query Parameters 的 `columns` 表示最大列数（默认 6），`column_width`
 - `Transfer`：适合数百项的候选/已选双栏，但需要先验证真实分析场景、搜索和窄屏体验。
 - `ColorPicker`：更适合 Theme/Presentation 编辑器，不是默认分析参数。
 - `Mentions`、`Rate`：目前没有稳定、通用的数据分析参数语义。
-- `Upload`：属于 Source/Adapter 的数据接入、安全和文件生命周期，不放进浏览器 Selection/Compute。
+- `Upload`：属于 Source/Adapter 的数据接入、安全和文件生命周期，不放进浏览器 Control。
 
 ## AI 开发入口
 

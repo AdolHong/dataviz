@@ -53,7 +53,7 @@ title: Fold tests
 """,
         encoding="utf-8",
     )
-    source = """schema: dataviz/source/v2
+    source = """schema: dataviz/source/v3
 kind: source
 id: rows
 name: 收入
@@ -76,7 +76,7 @@ outputs:
         dashboard = root / "dashboards" / dashboard_id
         (dashboard / "sources").mkdir(parents=True)
         (dashboard / "dashboard.yaml").write_text(
-            f"""schema: dataviz/dashboard/v9
+            f"""schema: dataviz/dashboard/v11
 kind: dashboard
 id: {dashboard_id}
 title: {dashboard_id}

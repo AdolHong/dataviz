@@ -47,7 +47,7 @@ from dataviz.templates import (
 from dataviz.workspace import load_workspace, validate_workspace
 from dataviz.workspace.models import (
     DashboardDefinition,
-    ComputeControlDefinition,
+    ControlDefinition,
     DatasetTransformDefinition,
     DeclarativeViewDefinition,
     InteractiveTransformDefinition,
@@ -55,7 +55,6 @@ from dataviz.workspace.models import (
     PresentationDefinition,
     PresentationControlComponentDefinition,
     SectionDefinition,
-    SelectionControlDefinition,
     SOURCE_DEFINITION_ADAPTER,
     ThemeDefinition,
 )
@@ -149,10 +148,10 @@ def test_machine_readable_component_examples_use_canonical_output_references():
 
 def test_machine_readable_documentation_examples_match_current_schemas():
     providers = {
-        "dataviz/dashboard/v9": DashboardDefinition,
-        "dataviz/source/v2": SOURCE_DEFINITION_ADAPTER,
-        "dataviz/dataset-transform/v2": DatasetTransformDefinition,
-        "dataviz/interactive-transform/v2": InteractiveTransformDefinition,
+        "dataviz/dashboard/v11": DashboardDefinition,
+        "dataviz/source/v3": SOURCE_DEFINITION_ADAPTER,
+        "dataviz/dataset-transform/v3": DatasetTransformDefinition,
+        "dataviz/interactive-transform/v3": InteractiveTransformDefinition,
         "dataviz/presentation/v2": PresentationDefinition,
     }
     examples: list[tuple[str, dict[str, object]]] = []
@@ -304,6 +303,68 @@ def test_docs_catalog_exposes_both_progressive_product_paths():
         "troubleshooting",
     ]
 
+    quickstart = DOC_TOPICS["quickstart"]
+    assert quickstart["workspace_start"]["starter_workspace"] == (
+        "dataviz init <workspace>"
+    )
+    assert "hello Dashboard" in quickstart["workspace_start"]["rule"]
+
+
+def test_docs_do_not_restore_removed_chart_cli_or_shell_contracts():
+    corpus = json.dumps(DOC_TOPICS, ensure_ascii=False)
+
+    for stale in (
+        "ECharts",
+        "Vega",
+        "Plotly 6",
+        "init 创建空的最小 Workspace",
+        "Run query split control",
+        "Perspective 用于排序、筛选和透视探索",
+    ):
+        assert stale not in corpus
+
+
+def test_query_parameter_docs_keep_domain_cardinality_and_init_contracts_explicit():
+    query_docs = DOC_TOPICS["query-parameters"]
+    rules = "\n".join(query_docs["dynamic_domains"]["rules"])
+    skill = (ROOT / "dataviz-skill.md").read_text(encoding="utf-8")
+    design = (ROOT / "DESIGN.md").read_text(encoding="utf-8")
+
+    assert "canonical value 自动去重" in rules
+    assert "multiple_input" in rules
+    assert "必须有界并适合一次完整加载" in rules
+    assert "远程搜索" not in rules
+    assert "分页候选" not in rules
+    assert "item_values: item_nbrs" not in query_docs["intent_binding"]
+    assert "dataviz init <workspace>" in skill
+    assert "intentionally empty Workspace" not in skill
+    assert "one complete candidate pool" in skill
+    assert "remote search" not in skill
+    assert "paged candidates" not in skill
+    assert "候选池必须有界并适合一次完整加载" in design
+
+    public_docs = "\n".join(
+        [
+            json.dumps(DOC_TOPICS, ensure_ascii=False),
+            skill,
+            design,
+            (ROOT / "README.md").read_text(encoding="utf-8"),
+            (ROOT / "plan.md").read_text(encoding="utf-8"),
+            (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"),
+            *[
+                path.read_text(encoding="utf-8")
+                for path in sorted((ROOT / "docs").glob("*.md"))
+            ],
+        ]
+    )
+    for rejected_direction in (
+        "远程搜索",
+        "分页候选",
+        "remote search",
+        "paged candidates",
+    ):
+        assert rejected_direction not in public_docs
+
 
 @pytest.mark.parametrize(
     ("alias", "topic"),
@@ -336,6 +397,9 @@ def test_chart_docs_expose_plotly_as_the_only_author_path():
     assert charts["official_source"] == "https://github.com/plotly/plotly.js/"
     assert charts["plotly_runtime"]["version"] == "4.0.0"
     assert "不依赖 Python plotly" in charts["plotly_runtime"]["offline"]
+    assert "canonical Named Output" in charts["ownership"]["data"]
+    assert "Browser Runtime" in charts["ownership"]["layout"]
+    assert "newPlot/react/resize/purge" in charts["ownership"]["render"]
     assert "Named Output" in charts["source_adaptation"]
     assert "不复制官方示例库" in charts["recipe_policy"]
     assert "完整 Plotly.js" in service["native_api"]
@@ -363,13 +427,32 @@ def test_table_docs_expose_tanstack_defaults_and_the_full_escape_hatch():
     assert "context.tables.tanstack.core" in tables["custom_service"]["raw"]
     assert "完整 TanStack Table Core" in service["api"]
     assert "Perspective" in tables["decision_rule"]
+    table_rules = DOC_TOPICS["design-language"]["component_rules"]["tables"]
+    assert "TanStack Table" in table_rules[0]
+    assert "临时重组、聚合或透视" in table_rules[0]
+
+
+def test_version_docs_match_the_current_runtime_and_release_gate():
+    strict = DOC_TOPICS["strict-schema"]
+    release = DOC_TOPICS["versioning-release"]
+
+    assert strict["current"]["layout_contract"] == "dataviz/layout-contract/v1"
+    assert strict["current"]["state_snapshot"] == "dataviz/state-snapshot/v2"
+    assert strict["browser_assets"] == {
+        "plotly_js": "4.0.0（直接内置，不安装 Python plotly）",
+        "tanstack_table_core": "9.2.4（直接内置）",
+    }
+    contract = "\n".join(release["release_contract"])
+    assert "快速迭代默认运行完整 Chromium" in contract
+    assert "稳定发布" in contract and "Firefox/WebKit" in contract
+    assert "Python plotly 未安装" in contract
 
 
 def test_component_registry_reports_package_owned_implementations():
     catalog = component_catalog()
     report = validate_component_packages(catalog)
 
-    assert COMPONENT_REGISTRY_VERSION == "5.5.0"
+    assert COMPONENT_REGISTRY_VERSION == "5.6.0"
     assert set(component_packages()) == {
         "control.auto-complete",
         "control.cascader",
@@ -418,9 +501,9 @@ def test_component_registry_reports_package_owned_implementations():
         "packages": 21,
         "package_implemented": 21,
         "bridge_implemented": 0,
-        "components": 65,
-        "stories": 39,
-        "test_declarations": 77,
+        "components": 63,
+        "stories": 38,
+        "test_declarations": 75,
         "errors": [],
     }
     assert set(component_index()) == set(catalog)
@@ -511,9 +594,10 @@ def test_component_package_cli_check_and_data_entry_scaffolds():
     }
     assert "auto/always/never" in docs_payload["component_choice"]["select"]
     documented_controls = yaml.safe_load(docs_payload["dashboard_example"])["controls"]
-    assert [item["kind"] for item in documented_controls] == ["selection", "compute"]
+    assert all("kind" not in item for item in documented_controls)
+    assert [item["id"] for item in documented_controls] == ["region", "simulations"]
     documented_inputs = yaml.safe_load(docs_payload["interactive_input_example"])
-    assert set(documented_inputs) == {"selection_inputs", "compute_inputs"}
+    assert set(documented_inputs) == {"control_inputs"}
     assert json.loads(component.stdout)["id"] == "control.select"
 
 
@@ -551,10 +635,8 @@ def test_every_scaffold_recipe_matches_the_current_strict_models():
             )
         elif recipe.startswith("control."):
             control = yaml.safe_load(files["dashboard.control.snippet.yaml"])[0]
-            if control["kind"] == "selection":
-                SelectionControlDefinition.model_validate(control)
-            else:
-                ComputeControlDefinition.model_validate(control)
+            assert "kind" not in control
+            ControlDefinition.model_validate(control)
             presentation = next(
                 iter(
                     yaml.safe_load(files["presentation.control-component.snippet.yaml"])[
@@ -574,7 +656,7 @@ def test_every_scaffold_recipe_matches_the_current_strict_models():
         ]
     )[0]
     assert selection_gallery["controls"][0]["id"] == "groups"
-    assert selection_gallery["repeat"]["selection"] == "groups"
+    assert selection_gallery["repeat"]["control"] == "groups"
 
 
 def test_selection_gallery_scaffold_composes_into_a_valid_dashboard(tmp_path: Path):
@@ -907,7 +989,7 @@ def test_coordinate_layout_fields_are_strictly_rejected(layout):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v9",
+                "schema": "dataviz/dashboard/v11",
                 "kind": "dashboard",
                 "id": "strict",
                 "layout": layout,
@@ -1026,7 +1108,7 @@ def test_initial_runtime_render_includes_input_free_content_views():
 
     # The first render is a full render. Otherwise Markdown/Image Views without
     # an input stay in a permanent waiting state because no Output can wake them.
-    assert "if (changedSelectionKeys == null) return null" in runtime
+    assert "if (changedControlKeys == null) return null" in runtime
     assert declarative.index("view.template === 'markdown'") < declarative.index(
         "let rows = preparedRows"
     )

@@ -162,7 +162,6 @@ def _control_contracts(
         item: dict[str, Any] = {
             "key": effective.key,
             "id": effective.id,
-            "kind": effective.kind,
             "type": definition.type,
             "value_type": definition.value_type,
             "required": definition.required,
@@ -227,8 +226,10 @@ def _interactive_context(dashboard: LoadedDashboard, transform_id: str) -> dict[
         query_parameters.update(
             _parameter_names(contract.interactive_parameter_inputs.get(identifier, {}))
         )
-        controls.update(contract.interactive_selection_inputs.get(identifier, {}).values())
-        controls.update(contract.interactive_compute_inputs.get(identifier, {}).values())
+        controls.update(
+            binding["control"]
+            for binding in contract.interactive_control_inputs.get(identifier, {}).values()
+        )
         for reference in contract.interactive_inputs.get(identifier, {}).values():
             upstream_outputs.add(reference)
             node_id = reference.split("/", 1)[0]

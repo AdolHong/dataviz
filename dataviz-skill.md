@@ -54,7 +54,7 @@ dataviz docs --task view-filter --format json
 dataviz docs --task browser-compute --format json
 ```
 
-- Use `interactive` only for post-query selection, compute state, or Derived Output.
+- Use `interactive` only when a post-query Control must filter inputs, provide a calculation value, or produce a Derived Output.
 - Use `custom-renderer` only when built-in Views plus Plotly trace/layout/config overrides cannot express the required behavior.
 - When a component is already known, route directly with `dataviz docs --component <component-id> --format json`.
 
@@ -69,20 +69,20 @@ dataviz inspect dependencies <workspace> <dashboard> --format json
 dataviz inspect layout <workspace> <dashboard> --format json
 ```
 
-Use `dataviz schemas <schema> --full --format json` only when exact fields are needed. Use `dataviz components show <component-id> --format json` for a component contract. Use `dataviz scaffold <recipe> --format json` for a small current-schema example instead of copying an old Dashboard.
+Use `dataviz schemas <schema> --full --format json` only when exact fields are needed. Use `dataviz components list` to discover components, `dataviz components show <component-id> --format json` for one contract, and `dataviz components check --format json` to validate installed packages. Use `dataviz scaffold <recipe> --format json` for a small current-schema example instead of copying an old Dashboard.
 
 Use `dataviz docs --search '<term>'` or `dataviz docs troubleshooting` when a diagnostic or Runtime boundary is unclear. Read architecture documents only when changing the Runtime itself.
 
 ## Quick start: build a Dashboard
 
-For a new runnable Workspace:
+For a new runnable Workspace with a built-in `hello` Dashboard:
 
 ```bash
-dataviz scaffold minimal --id <dashboard-id> --output <workspace>
+dataviz init <workspace>
 dataviz tree <workspace>
 ```
 
-For an intentionally empty Workspace, use `dataviz init <workspace>` instead.
+When the task already has a chosen Dashboard ID or needs a focused recipe, use `dataviz scaffold minimal|interactive|custom-renderer` instead.
 
 Build in this order:
 
@@ -166,7 +166,7 @@ Use pie/donut only for a small, stable set of categories where rough part-to-who
 After the analytical choice:
 
 1. Start with a built-in declarative Plotly View when it represents the question.
-2. Use native Plotly `option` for richer encodings and interactions.
+2. Use declarative Plotly `options.trace`, `options.layout`, and View `config` for richer encodings and interactions.
 3. Use `context.charts.plotly` in a Custom Renderer only for functions, imperative events, or lifecycle behavior that cannot remain declarative.
 4. Use the official Plotly Gallery and source examples as implementation references, not as the ontology for choosing a chart.
 
@@ -240,7 +240,7 @@ dataviz report <workspace> <result-id> --output report.html
 ```
 
 - `result show` paginates without executing the Dashboard again.
-- `result inspect` exposes lineage, parameters, Controls, hashes, timings, storage, and provenance progressively.
+- `result inspect` exposes lineage, parameters, Controls, per-consumer effective/applied revisions, hashes, timings, storage, and provenance progressively. A stale manual/apply consumer means the sealed Output used an older Control revision; do not describe it as if it consumed the latest value.
 - `result export` copies one selected native Artifact; it does not convert formats or mutate the Result.
 - A directly read File Source may be represented by an immutable path/hash receipt instead of a redundant copy.
 
@@ -254,11 +254,18 @@ Use an Analysis Overlay only for an explicitly temporary experiment that substit
 - Keep rate denominators, currency/unit, aggregation, timezone/calendar, exclusions, and caveats explicit.
 - Project public SQL fields explicitly; avoid `SELECT *` so upstream schema drift cannot silently change the contract.
 - Deprecate a semantic contract with a reason and replacement instead of silently changing its meaning.
-- Record reviewed conclusions as Evidence; use `evidence promote --dry-run` to generate a reviewable patch rather than mutating production definitions implicitly.
+- Record reviewed conclusions as Evidence; Evidence preserves the Result's consumer revision audit. Use `evidence promote --dry-run` to generate a reviewable patch rather than mutating production definitions implicitly.
 
 ### Preserve architectural boundaries
 
-- Query Parameters change query identity; Controls change post-query selection or computation. Do not substitute one for the other merely for UI convenience.
+- Query Parameters change query identity; Controls own post-query typed state. Each View or Interactive Transform declares whether it consumes that state as a filter or a value. Do not substitute one lifecycle for the other merely for UI convenience.
+- When a Query Parameter needs live SQL-backed choices or cascading candidates, use one pre-query Parameter Domain table and project multiple fields from it. Do not use a normal Source or Interactive Transform to populate Query Parameter options.
+- A static single/multiple parent may drive several child parameters from that one Domain table. Treat an empty parent as no child candidates, not as All; make dependent children optional when that empty state is valid.
+- Candidate discovery is optional for AI: call `dataviz parameters options` only when candidates help exploration. It returns an immutable `options_id` and defaults to 10 preview rows (hard limit 100); use `dataviz parameters filter` to query columns/rows from that snapshot without rerunning SQL. If the value is already known, pass it directly to `dataviz run`; run never executes or enforces the UI Domain.
+- For a `multiple_select`, use `{parameter: <id>, projection: intent}` only when a Source must distinguish all currently available members from an explicit subset. The only intents are `all_available` and `explicit`; `explicit + []` is the clear state. Do not invent `ALL` members, infer intent from an empty list, or add complement/exclude semantics.
+- Treat the last successful Query's `{values, intents}` as one committed snapshot. Query Panel Revert restores that snapshot through the current Domain topology without running Query; a committed value missing from the latest candidates remains visible as unavailable because a Domain is not a Source whitelist.
+- Prefer one normalized, bounded Domain relation with fixed `value_field` projections over a conditional field selector. A low/medium-cardinality relation may project several independent candidate lists and deduplicates each canonical value automatically; omit `depends_on` when those lists should not cascade.
+- Every Parameter Domain must be bounded and reasonable to load as one complete candidate pool. If an entity list is too large, redesign the business parameter at a coarser level or use `multiple_input` when users already know IDs such as `item_nbr`; do not enlarge the candidate component to hide a poor parameter boundary.
 - Sources are the only external data entry. Server Dataset Transforms create Base Outputs; Interactive Transforms create Derived Outputs.
 - Renderers consume Named Outputs and View descriptors. Do not put SQL, model inference, or reusable business calculations in Presentation JavaScript.
 - Use Plotly as the author chart interface and the default TanStack-based Table for tabular presentation. Do not introduce another chart/table stack casually.
@@ -292,7 +299,7 @@ Check populated, empty, loading, error, stale, cancelled, and unavailable states
 
 ### Control stored artifacts
 
-Result, Execution Artifact, and cache cleanup is explicit and preview-first:
+Result, Execution Artifact, `options_id` candidate snapshot, and cache cleanup is explicit and preview-first:
 
 ```bash
 dataviz prune <workspace>

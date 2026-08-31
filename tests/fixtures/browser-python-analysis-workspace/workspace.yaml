@@ -1,8 +1,0 @@
-schema: dataviz/workspace/v1
-kind: workspace
-id: browser-python-analysis
-title: Browser Python Analysis
-runtime:
-  pyodide_asset_policy: bundle
-  pyodide_bundle_path: pyodide
-  browser_table_transport: json

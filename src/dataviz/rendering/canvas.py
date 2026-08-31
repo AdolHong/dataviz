@@ -5,9 +5,6 @@ import gzip
 import html
 import json
 import mimetypes
-import os
-import shutil
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,14 +29,12 @@ from dataviz.execution.results import RunResult
 from dataviz.execution.fingerprint import ensure_query_run_compatible
 from dataviz.filesystem import atomic_write_bytes, atomic_write_text
 from dataviz.plotly_runtime import PLOTLY_JS_VERSION, get_plotlyjs
-from dataviz.state_snapshot import build_state_snapshot
+from dataviz.state_snapshot import build_state_snapshot, normalize_consumer_revisions
 from dataviz.templates import COMPONENT_REGISTRY_VERSION, RUNTIME_PROTOCOL_SCHEMA
 from dataviz.value_contract import initial_control_value, static_control_choices
 from dataviz.workspace.models import DashboardDefinition, DeclarativeViewDefinition
 from dataviz.workspace.controls import (
-    project_selection_values,
-    resolve_compute_values,
-    resolve_selection_states,
+    resolve_control_states,
     scoped_control_registry,
 )
 from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace
@@ -116,40 +111,6 @@ def _portable_run_result(result: RunResult, workspace_root: Path) -> dict[str, A
     return _scrub_portable_paths(payload, workspace_root)
 
 
-def _replace_directory(staging: Path, target: Path) -> Path | None:
-    """Stage a directory replacement and retain the previous value for rollback."""
-    backup = target.parent / f".{target.name}.{uuid.uuid4().hex}.backup"
-    had_target = target.exists()
-    if had_target:
-        os.replace(target, backup)
-    try:
-        os.replace(staging, target)
-    except BaseException:
-        if had_target and backup.exists():
-            os.replace(backup, target)
-        raise
-    return backup if had_target else None
-
-
-def _rollback_directory(target: Path, backup: Path | None) -> None:
-    if target.exists():
-        if target.is_dir():
-            shutil.rmtree(target)
-        else:
-            target.unlink()
-    if backup is not None and backup.exists():
-        os.replace(backup, target)
-
-
-def _discard_backup(backup: Path | None) -> None:
-    if backup is None or not backup.exists():
-        return
-    if backup.is_dir():
-        shutil.rmtree(backup)
-    else:
-        backup.unlink()
-
-
 class CanvasRenderer:
     def __init__(self, workspace: LoadedWorkspace):
         self.workspace = workspace
@@ -196,7 +157,6 @@ class CanvasRenderer:
         live: dict[str, str] | None,
         asset_mode: str,
         snapshot_interactions: set[str],
-        pyodide_index_url: str | None = None,
     ) -> dict[str, Any]:
         """Resolve the exact built-in browser assets needed by one report."""
         declarative_views = dashboard.definition.views
@@ -253,12 +213,6 @@ class CanvasRenderer:
             asset_mode=asset_mode,
             snapshot_interactions=snapshot_interactions,
         )
-        needs_pyodide = any(
-            dashboard.interactive_transforms[identifier][1].runtime
-            == "browser-python"
-            for identifier in active_browser_interactions
-        )
-
         network_dependencies: list[dict[str, str]] = []
 
         def add_remote(library: str, source: str) -> None:
@@ -272,16 +226,6 @@ class CanvasRenderer:
                 "perspective",
                 "https://cdn.jsdelivr.net/npm/@perspective-dev/",
             )
-        if needs_pyodide:
-            add_remote(
-                "pyodide",
-                pyodide_index_url
-                or self._pyodide_index_url(
-                    dashboard,
-                    asset_mode,
-                    dependency_contract=dependency_contract,
-                ),
-            )
         for view in declarative_views:
             if view.template == "image" and view.url:
                 add_remote(f"view-image:{view.id}", view.url)
@@ -289,7 +233,6 @@ class CanvasRenderer:
             "plotly": needs_plotly,
             "arrow": needs_arrow,
             "perspective": needs_perspective,
-            "pyodide": needs_pyodide,
             "active_browser_interactions": active_browser_interactions,
             "network_dependencies": network_dependencies,
         }
@@ -304,11 +247,10 @@ class CanvasRenderer:
         live: dict[str, str] | None = None,
         interaction: dict[str, Any] | None = None,
         session_id: str | None = None,
-        compute_parameters: dict[str, Any] | None = None,
-        selection_state: dict[str, dict[str, Any]] | None = None,
+        control_state: dict[str, dict[str, Any]] | None = None,
+        applied_revisions: dict[str, dict[str, dict[str, int]]] | None = None,
         derived_outputs: dict[str, Any] | None = None,
         snapshot_interactions: set[str] | None = None,
-        pyodide_index_url: str | None = None,
         frame_id: str | None = None,
         dependency_contract: DashboardDependencyContract | None = None,
     ) -> str:
@@ -329,26 +271,17 @@ class CanvasRenderer:
                     "transforms": server_interactions,
                 },
             )
-        compute_values = resolve_compute_values(
+        resolved_control_state = resolve_control_states(
             dashboard.definition,
-            compute_parameters,
-        )
-        resolved_selection_state = resolve_selection_states(
-            dashboard.definition,
-            selection_state,
+            control_state,
             phase="canvas-hydration",
-        )
-        selection_values = project_selection_values(
-            dashboard.definition,
-            resolved_selection_state,
         )
         merged_outputs = {**result.outputs, **(derived_outputs or {})}
         render_state = SimpleNamespace(
             run_id=result.run_id,
             status=result.status,
             query_parameters=result.query_parameters,
-            compute_parameters=compute_values,
-            selections=selection_values,
+            control_state=resolved_control_state,
             outputs=merged_outputs,
             nodes=result.nodes,
             snapshot_interactions=set(snapshot_interactions or set()),
@@ -361,8 +294,7 @@ class CanvasRenderer:
             content_definition = interpolate_dashboard_content(
                 dashboard.definition,
                 result.query_parameters,
-                compute_values,
-                selection_values,
+                resolved_control_state,
                 fallback_title=dashboard.canvas_name,
             )
         except ValueError as error:
@@ -415,8 +347,10 @@ class CanvasRenderer:
                 workspace=self.workspace.definition,
                 dashboard=content_definition,
                 parameters=result.query_parameters,
-                compute=compute_values,
-                selections=selection_values,
+                controls={
+                    key: entry.get("value")
+                    for key, entry in resolved_control_state.items()
+                },
                 run=result,
                 view=lambda value: Markup(view(value)),
                 section_controls=lambda value: Markup(
@@ -431,7 +365,7 @@ class CanvasRenderer:
                 content_definition,
                 view_html,
                 result.query_parameters,
-                selection_values,
+                resolved_control_state,
                 binding_fields,
             )
 
@@ -465,7 +399,6 @@ class CanvasRenderer:
             live=live,
             asset_mode=asset_mode,
             snapshot_interactions=snapshot_interactions or set(),
-            pyodide_index_url=pyodide_index_url,
         )
         needs_plotly = asset_usage["plotly"]
         needs_arrow = asset_usage["arrow"]
@@ -534,9 +467,9 @@ class CanvasRenderer:
         state_snapshot = build_state_snapshot(
             dashboard,
             query_parameters=result.query_parameters,
-            selection_state=resolved_selection_state,
-            compute_parameters=compute_values,
-            draft_compute_parameters=compute_values,
+            control_state=resolved_control_state,
+            draft_control_state=resolved_control_state,
+            applied_revisions=applied_revisions,
         )
         meta = {
             "protocol": {
@@ -549,16 +482,15 @@ class CanvasRenderer:
             "status": result.status,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "query_parameters": result.query_parameters,
-            "compute_parameters": compute_values,
-            "compute_definitions": {
+            "query_parameter_intents": result.query_parameter_intents,
+            "control_state": resolved_control_state,
+            "applied_control_state": dict(resolved_control_state),
+            "control_definitions": {
                 item.key: item.definition.model_dump(mode="json")
-                for item in scoped_control_registry(
-                    dashboard.definition,
-                    kind="compute",
-                ).values()
+                for item in scoped_control_registry(dashboard.definition).values()
             },
-            "draft_compute_parameters": dict(compute_values),
-            "selection_state": resolved_selection_state,
+            "draft_control_state": dict(resolved_control_state),
+            "applied_revisions": {"views": {}, "transforms": {}},
             "state_snapshot": state_snapshot,
             "state_summary": state_summary,
             "dependency_contract": dependency_contract.runtime_manifest(),
@@ -577,23 +509,6 @@ class CanvasRenderer:
                 **(
                     {"perspective": self.workspace.definition.runtime.perspective_version}
                     if needs_perspective
-                    else {}
-                ),
-                **(
-                    {
-                        "pyodide": self.workspace.definition.runtime.pyodide_version,
-                        "pyodide_index_url": pyodide_index_url
-                        or self._pyodide_index_url(
-                            dashboard,
-                            asset_mode,
-                            dependency_contract=dependency_contract,
-                        ),
-                    }
-                    if any(
-                        dashboard.interactive_transforms[identifier][1].runtime
-                        == "browser-python"
-                        for identifier in active_browser_interactions
-                    )
                     else {}
                 ),
             },
@@ -623,7 +538,7 @@ class CanvasRenderer:
   <script>{runtime}</script>
   <script>{interactive_transform_script}</script>
   <script>{custom_script}</script>
-  <script>if (window.dataviz.portable) {{ window.datavizRuntime.initializePortable().then(() => window.dataviz.live && window.dataviz.connectLive?.()).catch(error => console.error('[dataviz:init]', error)); }} else if (window.dataviz.live) window.dataviz.connectLive?.();</script>
+  <script>if (window.dataviz.live) window.dataviz.connectLive?.(); if (window.dataviz.portable) {{ window.datavizRuntime.initializePortable().catch(error => console.error('[dataviz:init]', error)); }}</script>
 </body>
 </html>"""
 
@@ -788,8 +703,7 @@ class CanvasRenderer:
             if section and section.views:
                 control_view_id = section.views[0]
         consumers_by_control = self._control_consumers(dashboard)
-        selection_fields = []
-        compute_fields = []
+        control_fields = []
         manual_targets: set[str] = set()
         actionable = False
         for key, item in controls.items():
@@ -804,48 +718,30 @@ class CanvasRenderer:
                 for item in consumers
                 if item.definition.trigger == "manual"
             )
-            if item.kind == "selection":
-                value = result.selections.get(key, initial_control_value(definition))
-                presentation = self._control_component_presentation(
-                    dashboard, key, definition
-                )
-                selection_fields.append(
-                    f'<label class="dv-context-selection" data-selection-key="{html.escape(key)}" '
-                    f'data-selection-type="{html.escape(definition.type)}" '
-                    f'data-selection-path="{str(bool(definition.path_fields)).lower()}" '
-                    f'data-control-span="{int(presentation.get("span", 1))}">'
-                    f'<span>{html.escape(definition.label or definition.id)}</span>'
-                    f'{self._portable_field(key, definition, value, presentation, control_view_id, kind="selection")}</label>'
-                )
-                continue
             triggers = {consumer.definition.trigger for consumer in consumers}
             trigger = next(iter(triggers), "manual")
             frozen = any(
                 consumer.id in set(getattr(result, "snapshot_interactions", set()))
                 for consumer in consumers
             )
-            compute_fields.append(
-                self._compute_control_html(
+            control_fields.append(
+                self._control_html(
                     dashboard,
                     key,
                     definition,
-                    result.compute_parameters.get(key, initial_control_value(definition)),
+                    result.control_state.get(key, {}).get(
+                        "value", initial_control_value(definition)
+                    ),
+                    view_id=control_view_id,
                     trigger=trigger,
                     frozen=frozen,
                 )
             )
         scope = "Section" if origin == "section" else "View"
-        groups = []
-        if selection_fields:
-            groups.append(
-                '<section class="dv-context-controls__group" data-control-kind="selection">'
-                f'<div>{"".join(selection_fields)}</div></section>'
-            )
-        if compute_fields:
-            groups.append(
-                '<section class="dv-context-controls__group" data-control-kind="compute">'
-                f'<div>{"".join(compute_fields)}</div></section>'
-            )
+        groups = [
+            '<section class="dv-context-controls__group">'
+            f'<div>{"".join(control_fields)}</div></section>'
+        ] if control_fields else []
         footer = ""
         if actionable:
             targets = html.escape(
@@ -858,8 +754,8 @@ class CanvasRenderer:
             )
             footer = (
                 '<footer class="dv-context-controls__footer">'
-                '<span data-compute-dirty-label>Results are current</span>'
-                f'<button type="button" data-compute-apply data-control-keys="{control_keys}" '
+                '<span data-control-dirty-label>Results are current</span>'
+                f'<button type="button" data-control-apply data-control-keys="{control_keys}" '
                 f'data-analysis-always="true" data-manual-targets="{targets}">RUN</button>'
                 '</footer>'
             )
@@ -949,8 +845,7 @@ class CanvasRenderer:
         return {
             identifier
             for identifier in dependency_contract.reachable_interactive_order
-            if dashboard.interactive_transforms[identifier][1].runtime
-            in {"browser-js", "browser-python"}
+            if dashboard.interactive_transforms[identifier][1].runtime == "browser-js"
             and not (
                 asset_mode == "inline"
                 and (
@@ -1032,68 +927,11 @@ class CanvasRenderer:
     ) -> str:
         if not active_ids:
             return ""
-        runtimes = {
-            dashboard.interactive_transforms[identifier][1].runtime
-            for identifier in active_ids
-        }
-        scripts: list[str] = []
-        if "browser-js" in runtimes:
-            source = (
-                PACKAGE_ROOT / "server" / "static" / "interactive-js-worker.js"
-            ).read_text(encoding="utf-8")
-            encoded = json.dumps(source, ensure_ascii=False).replace("</", "<\\/")
-            scripts.append(
-                f"window.datavizInteractiveJsWorkerSource={encoded};"
-            )
-        if "browser-python" in runtimes:
-            source = (
-                PACKAGE_ROOT / "server" / "static" / "interactive-python-worker.mjs"
-            ).read_text(encoding="utf-8")
-            encoded = json.dumps(source, ensure_ascii=False).replace("</", "<\\/")
-            scripts.append(
-                f"window.datavizInteractivePythonWorkerSource={encoded};"
-            )
-        return f"<script>{''.join(scripts)}</script>"
-
-    def _browser_python_export_assets(
-        self,
-        dashboard: LoadedDashboard,
-        *,
-        dependency_contract: DashboardDependencyContract | None = None,
-    ) -> str | None:
-        dependency_contract = dependency_contract or dashboard.dependency_contract
-        policies = {
-            dashboard.interactive_transforms[identifier][1].export.assets
-            for identifier in dependency_contract.reachable_interactive_order
-            if dashboard.interactive_transforms[identifier][1].runtime == "browser-python"
-            and dashboard.interactive_transforms[identifier][1].export.mode == "interactive"
-        }
-        policies.discard(None)
-        if len(policies) > 1:
-            raise ExecutionFailure(
-                "Reachable browser-python transforms use conflicting export.assets policies"
-            )
-        return next(iter(policies), None)
-
-    def _pyodide_index_url(
-        self,
-        dashboard: LoadedDashboard,
-        asset_mode: str,
-        *,
-        dependency_contract: DashboardDependencyContract | None = None,
-    ) -> str:
-        runtime = self.workspace.definition.runtime
-        if asset_mode == "inline":
-            export_assets = self._browser_python_export_assets(
-                dashboard,
-                dependency_contract=dependency_contract,
-            )
-            if export_assets == "bundle":
-                return "./pyodide/"
-            return runtime.pyodide_index_url.rstrip("/") + "/"
-        if runtime.pyodide_asset_policy == "cdn":
-            return runtime.pyodide_index_url.rstrip("/") + "/"
-        return "/runtime/pyodide/"
+        source = (
+            PACKAGE_ROOT / "server" / "static" / "interactive-js-worker.js"
+        ).read_text(encoding="utf-8")
+        encoded = json.dumps(source, ensure_ascii=False).replace("</", "<\\/")
+        return f"<script>window.datavizInteractiveJsWorkerSource={encoded};</script>"
 
     def _portable_bundle(
         self,
@@ -1312,8 +1150,7 @@ class CanvasRenderer:
             dashboard,
             dependency_contract=dependency_contract,
         )
-        selection_items: list[str] = []
-        compute_items: list[str] = []
+        control_items: list[str] = []
         dashboard_control_keys: list[str] = []
         for key, control in controls.items():
             item = control["control"]
@@ -1321,38 +1158,6 @@ class CanvasRenderer:
                 continue
             dashboard_control_keys.append(key)
             definition = item.definition
-            if item.kind == "selection":
-                value = result.selections.get(key, initial_control_value(definition))
-                dependency = dependency_contract.controls.get(key)
-                affected_count = len(dependency.affected_views) if dependency else 0
-                affected_noun = "view" if affected_count == 1 else "views"
-                affected_prefix = (
-                    "Up to "
-                    if dependency and dependency.runtime_checked_views
-                    else ""
-                )
-                affected_label = (
-                    f"{affected_prefix}{affected_count} {affected_noun}"
-                )
-                presentation = self._control_component_presentation(
-                    dashboard, key, definition
-                )
-                field = self._portable_field(
-                    key,
-                    definition,
-                    value,
-                    presentation,
-                    kind="selection",
-                )
-                selection_items.append(
-                    f'<div class="dv-report-selection" data-selection-key="{html.escape(key)}" '
-                    f'data-selection-type="{html.escape(definition.type)}" '
-                    f'data-control-span="{int(presentation.get("span", 1))}">'
-                    f'<small data-control-impact-key="{html.escape(key, quote=True)}" '
-                    f'data-control-impact-count hidden>{html.escape(affected_label)}</small>'
-                    f'<strong>{html.escape(definition.label or definition.id)}</strong>{field}</div>'
-                )
-                continue
             consumers = consumers_by_control.get(key, [])
             triggers = {consumer.definition.trigger for consumer in consumers}
             trigger = next(iter(triggers), "manual")
@@ -1360,12 +1165,15 @@ class CanvasRenderer:
                 consumer.id in snapshot_interactions
                 for consumer in consumers
             )
-            compute_items.append(
-                self._compute_control_html(
+            control_items.append(
+                self._control_html(
                     dashboard,
                     key,
                     definition,
-                    result.compute_parameters.get(key, initial_control_value(definition)),
+                    result.control_state.get(key, {}).get(
+                        "value", initial_control_value(definition)
+                    ),
+                    view_id=(control["views"][0] if control["views"] else None),
                     trigger=trigger,
                     frozen=frozen,
                 )
@@ -1392,17 +1200,14 @@ class CanvasRenderer:
             if transform.trigger in {"apply", "manual"}
             and transform_id not in snapshot_interactions
             and (
-                not dependency_contract.interactive_selection_inputs[transform_id]
-                and not dependency_contract.interactive_compute_inputs[transform_id]
+                not dependency_contract.interactive_control_inputs[transform_id]
                 or any(
                     key in dashboard_control_keys
                     for key in {
-                        *dependency_contract.interactive_selection_inputs[
+                        binding["control"]
+                        for binding in dependency_contract.interactive_control_inputs[
                             transform_id
-                        ].values(),
-                        *dependency_contract.interactive_compute_inputs[
-                            transform_id
-                        ].values(),
+                        ].values()
                     }
                 )
             )
@@ -1420,16 +1225,10 @@ class CanvasRenderer:
             "dashboard",
             len(dashboard_control_keys),
         )
-        selection_group = (
-            '<section class="dv-runtime-control-group" data-control-kind="selection">'
-            f'<div class="dv-report-selection-group__fields">{"".join(selection_items)}</div></section>'
-            if selection_items
-            else ""
-        )
-        compute_group = (
-            '<section class="dv-runtime-control-group" data-control-kind="compute">'
-            f'<div class="dv-compute-fields">{"".join(compute_items)}</div></section>'
-            if compute_items
+        control_group = (
+            '<section class="dv-runtime-control-group">'
+            f'<div class="dv-control-fields">{"".join(control_items)}</div></section>'
+            if control_items
             else ""
         )
         control_block = ""
@@ -1443,11 +1242,11 @@ class CanvasRenderer:
                 quote=True,
             )
             footer = (
-                '<footer><span data-compute-dirty-label>Results are current</span>'
-                f'<button type="button" data-compute-apply data-control-keys="{encoded_keys}" '
+                '<footer><span data-control-dirty-label>Results are current</span>'
+                f'<button type="button" data-control-apply data-control-keys="{encoded_keys}" '
                 f'data-analysis-always="{str(bool(actionable)).lower()}" '
                 f'data-manual-targets="{encoded_targets}">RUN</button></footer>'
-                if compute_items or actionable
+                if control_items or actionable
                 else ""
             )
             control_block = (
@@ -1459,7 +1258,7 @@ class CanvasRenderer:
                 '<span class="dv-control-chevron" aria-hidden="true"><svg viewBox="0 0 16 16">'
                 '<path d="m4 6 4 4 4-4"/></svg></span></summary>'
                 '<div class="dv-runtime-popover dv-runtime-popover--controls">'
-                f'<div class="dv-runtime-control-groups">{selection_group}{compute_group}</div>{footer}'
+                f'<div class="dv-runtime-control-groups">{control_group}</div>{footer}'
                 '</div></details>'
             )
         card_is_present = bool(dashboard.definition.query_parameters)
@@ -1506,13 +1305,14 @@ class CanvasRenderer:
             '</dl><footer><button type="submit">关闭</button></footer></form></dialog>'
         )
 
-    def _compute_control_html(
+    def _control_html(
         self,
         dashboard: LoadedDashboard,
         key: str,
         definition,
         value: Any,
         *,
+        view_id: str | None = None,
         trigger: str,
         frozen: bool,
     ) -> str:
@@ -1524,13 +1324,21 @@ class CanvasRenderer:
             definition,
             value,
             presentation,
-            kind="compute",
+            view_id=(
+                view_id
+                or (
+                    key.split(":", 1)[1].split("/", 1)[0]
+                    if key.startswith("view:")
+                    else None
+                )
+            ),
             trigger=trigger,
             disabled=frozen,
         )
         return (
-            f'<label class="dv-compute-control" data-compute-key="{html.escape(key)}" '
-            f'data-compute-trigger="{html.escape(trigger)}" data-compute-frozen="{str(frozen).lower()}" '
+            f'<label class="dv-control-field" data-control-key="{html.escape(key)}" '
+            f'data-control-update-trigger="{html.escape(trigger)}" data-control-frozen="{str(frozen).lower()}" '
+            f'data-control-path="{str(bool(definition.path_fields)).lower()}" '
             f'data-control-span="{int(presentation.get("span", 1))}">'
             f'<span>{html.escape(definition.label or definition.id)}</span>{field}'
             f'{"<small>Fixed snapshot</small>" if frozen else ""}</label>'
@@ -1557,7 +1365,6 @@ class CanvasRenderer:
         presentation: dict[str, Any] | None = None,
         view_id: str | None = None,
         *,
-        kind: str = "selection",
         trigger: str = "auto",
         disabled: bool = False,
     ) -> str:
@@ -1569,13 +1376,8 @@ class CanvasRenderer:
         label = html.escape(definition.label or definition.id, quote=True)
         path_fields = list(getattr(definition, "path_fields", []) or [])
         role_attributes = (
-            f'data-selection-input="{escaped_key}"'
-            if kind == "selection"
-            else (
-                f'data-compute-input="{escaped_key}" '
-                f'data-compute-type="{html.escape(definition.type, quote=True)}" '
-                f'data-compute-trigger="{html.escape(trigger, quote=True)}"'
-            )
+            f'data-control-state-input="{escaped_key}" '
+            f'data-control-update-trigger="{html.escape(trigger, quote=True)}"'
         )
         common_native = (
             f'aria-label="{label}" data-control-input '
@@ -1803,67 +1605,19 @@ class CanvasRenderer:
         result: RunResult,
         output: Path,
         *,
-        compute_parameters: dict[str, Any] | None = None,
-        selection_state: dict[str, dict[str, Any]] | None = None,
+        control_state: dict[str, dict[str, Any]] | None = None,
+        applied_revisions: dict[str, dict[str, dict[str, int]]] | None = None,
         derived_outputs: dict[str, Any] | None = None,
         snapshot_interactions: set[str] | None = None,
     ) -> Path:
         output.parent.mkdir(parents=True, exist_ok=True)
         dependency_contract = dashboard.dependency_contract
-        pyodide_index_url = None
-        asset_manifest: dict[str, Any] = {}
-        staged_asset_root: Path | None = None
-        asset_root: Path | None = None
-        asset_backup: Path | None = None
-        assets_published = False
         manifest = output.with_suffix(output.suffix + ".manifest.json")
         previous_manifest = manifest.read_bytes() if manifest.is_file() else None
         manifest_published = False
-        if self._browser_python_export_assets(
-            dashboard,
-            dependency_contract=dependency_contract,
-        ) == "bundle":
-            configured = self.workspace.definition.runtime.pyodide_bundle_path
-            if not configured:
-                raise ExecutionFailure(
-                    "browser-python bundle export requires runtime.pyodide_bundle_path"
-                )
-            source = self._workspace_runtime_asset(
-                configured,
-                field="runtime.pyodide_bundle_path",
-                directory=True,
-            )
-            symlinks = sorted(
-                path.relative_to(source).as_posix()
-                for path in source.rglob("*")
-                if path.is_symlink()
-            )
-            if symlinks:
-                raise ExecutionFailure(
-                    "Pyodide bundle cannot contain symbolic links",
-                    details={
-                        "code": "pyodide_bundle_symlink_unsupported",
-                        "field": "runtime.pyodide_bundle_path",
-                        "symlinks": symlinks,
-                    },
-                )
-            asset_root = output.parent / f"{output.stem}.assets"
-            staged_asset_root = output.parent / (
-                f".{asset_root.name}.{uuid.uuid4().hex}.tmp"
-            )
-            target = staged_asset_root / "pyodide"
-            shutil.copytree(source, target)
-            pyodide_index_url = f"./{quote(asset_root.name)}/pyodide/"
-            asset_manifest = {
-                "pyodide": {
-                    "policy": "bundle",
-                    "path": f"{asset_root.name}/pyodide",
-                    "version": self.workspace.definition.runtime.pyodide_version,
-                }
-            }
-        resolved_selection_state = resolve_selection_states(
+        resolved_control_state = resolve_control_states(
             dashboard.definition,
-            selection_state,
+            control_state,
             phase="canvas-hydration",
         )
         runtime_assets = self._runtime_asset_usage(
@@ -1873,18 +1627,16 @@ class CanvasRenderer:
             live=None,
             asset_mode="inline",
             snapshot_interactions=snapshot_interactions or set(),
-            pyodide_index_url=pyodide_index_url,
         )
         try:
             rendered = self.render(
                 dashboard,
                 result,
                 asset_mode="inline",
-                compute_parameters=compute_parameters,
-                selection_state=resolved_selection_state,
+                control_state=resolved_control_state,
+                applied_revisions=applied_revisions,
                 derived_outputs=derived_outputs,
                 snapshot_interactions=snapshot_interactions,
-                pyodide_index_url=pyodide_index_url,
                 dependency_contract=dependency_contract,
             )
             manifest_content = json.dumps(
@@ -1897,15 +1649,19 @@ class CanvasRenderer:
                     "query_run": _portable_run_result(result, self.workspace.root),
                     "state": {
                         "query_parameters": result.query_parameters,
-                        "compute_parameters": compute_parameters or {},
-                        "selection_state": resolved_selection_state,
+                        "control_state": resolved_control_state,
+                        "consumer_revisions": normalize_consumer_revisions(
+                            dashboard,
+                            resolved_control_state,
+                            applied_revisions,
+                        ),
                     },
                     "derived_outputs": {
                         reference: descriptor.model_dump(mode="json", by_alias=True)
                         for reference, descriptor in (derived_outputs or {}).items()
                     },
                     "snapshot_interactions": sorted(snapshot_interactions or set()),
-                    "assets": asset_manifest,
+                    "assets": {},
                     "network_dependencies": runtime_assets["network_dependencies"],
                     "portable_without_network": not runtime_assets[
                         "network_dependencies"
@@ -1918,10 +1674,6 @@ class CanvasRenderer:
                 indent=2,
                 default=str,
             )
-            if staged_asset_root is not None and asset_root is not None:
-                asset_backup = _replace_directory(staged_asset_root, asset_root)
-                staged_asset_root = None
-                assets_published = True
             atomic_write_text(manifest, manifest_content)
             manifest_published = True
             # Publish HTML last: once it is visible, its manifest and bundled
@@ -1933,14 +1685,7 @@ class CanvasRenderer:
                     manifest.unlink(missing_ok=True)
                 else:
                     atomic_write_bytes(manifest, previous_manifest)
-            if assets_published and asset_root is not None:
-                _rollback_directory(asset_root, asset_backup)
-                asset_backup = None
             raise
-        finally:
-            if staged_asset_root is not None and staged_asset_root.exists():
-                shutil.rmtree(staged_asset_root)
-            _discard_backup(asset_backup)
         return output
 
     def _default_body(
@@ -1949,7 +1694,7 @@ class CanvasRenderer:
         definition: DashboardDefinition,
         views: dict[str, str],
         parameters: dict[str, Any],
-        selections: dict[str, Any],
+        control_state: dict[str, dict[str, Any]],
         binding_fields: set[str],
     ) -> str:
         assumptions = "".join(
@@ -1965,7 +1710,7 @@ class CanvasRenderer:
         }
         all_view_ids = list(dashboard.views)
         declarative_views = {item.id: item for item in definition.views}
-        run_state = SimpleNamespace(selections=selections)
+        run_state = SimpleNamespace(control_state=control_state)
 
         def view_item(view_id: str, section_id: str) -> str:
             visual = presentation_views.get(view_id)

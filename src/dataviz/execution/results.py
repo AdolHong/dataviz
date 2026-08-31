@@ -52,6 +52,9 @@ class RunResult(BaseModel):
     started_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     finished_at: str | None = None
     query_parameters: dict[str, Any] = Field(default_factory=dict)
+    query_parameter_intents: dict[str, Literal["all_available", "explicit"]] = Field(
+        default_factory=dict
+    )
     nodes: dict[str, NodeResult] = Field(default_factory=dict)
     outputs: dict[str, ArtifactDescriptor] = Field(default_factory=dict)
     warnings: list[dict[str, Any]] = Field(default_factory=list)
@@ -62,8 +65,8 @@ class InteractionResult(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_: Literal["dataviz/interaction-result/v1"] = Field(
-        "dataviz/interaction-result/v1", alias="schema"
+    schema_: Literal["dataviz/interaction-result/v2"] = Field(
+        "dataviz/interaction-result/v2", alias="schema"
     )
     interaction_id: StableId
     generation: int = Field(ge=1)
@@ -75,8 +78,10 @@ class InteractionResult(BaseModel):
     started_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     finished_at: str | None = None
     query_parameters: dict[str, Any] = Field(default_factory=dict)
-    compute_parameters: dict[str, Any] = Field(default_factory=dict)
-    selection_state: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    query_parameter_intents: dict[str, Literal["all_available", "explicit"]] = Field(
+        default_factory=dict
+    )
+    control_state: dict[str, dict[str, Any]] = Field(default_factory=dict)
     nodes: dict[str, NodeResult] = Field(default_factory=dict)
     outputs: dict[str, ArtifactDescriptor] = Field(default_factory=dict)
     warnings: list[dict[str, Any]] = Field(default_factory=list)

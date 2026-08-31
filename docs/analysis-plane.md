@@ -1,6 +1,6 @@
 # AI Analysis Plane
 
-Analysis Plane 让 AI 搜索、理解并执行 Dashboard 已有的数据契约。它不引入第二套查询引擎：Base Output 仍走 Query Executor，server-python 仍走 Interaction Executor，browser-js/browser-python 仍走同一 Browser Runtime。
+Analysis Plane 让 AI 搜索、理解并执行 Dashboard 已有的数据契约。它不引入第二套查询引擎：Base Output 仍走 Query Executor，server-python 仍走 Interaction Executor，browser-js 仍走同一 Browser Runtime。
 
 ## 最短工作流
 
@@ -82,7 +82,7 @@ dataviz run WORKSPACE 'sales::interactive:forecast/main' \
 
 Source/Base 只执行目标的最小 Query DAG。Derived Output 根据声明自动选择 server-python 或无头浏览器；浏览器默认阻止额外 HTTP(S) 请求，确实依赖 CDN 时显式使用 `--allow-network`。Playwright 未安装时按 CLI 给出的命令安装 `ai-dataviz[visual-check]` 和 Chromium。
 
-`run` 始终完整执行并封存不可变 Result，默认 stdout 只显示 Result ID/路径、紧凑 DAG、每个表格 Output 的前 10 行和下一步命令；`--preview-rows` 只改变终端预览，不裁剪实际结果。显式 `--format json` 使用 `dataviz/analysis-result/v1`，包含最终 Query Parameter、有效 Controls、输入 Artifact/hash、Schema、行数、Output hash、分段耗时、lineage 和 Result 句柄。机器契约可直接导出 JSON Schema：
+`run` 始终完整执行并封存不可变 Result，默认 stdout 只显示 Result ID/路径、紧凑 DAG、每个表格 Output 的前 10 行和下一步命令；`--preview-rows` 只改变终端预览，不裁剪实际结果。显式 `--format json` 使用 `dataviz/analysis-result/v1`，包含最终 Query Parameter、有效 Controls、每个 consumer 的 effective/applied revision、输入 Artifact/hash、Schema、行数、Output hash、分段耗时、lineage 和 Result 句柄。机器契约可直接导出 JSON Schema：
 
 ```bash
 dataviz schemas analysis-entry --format json --full
@@ -108,7 +108,7 @@ dataviz result export WORKSPACE result_... \
 
 ## Evidence 与 Promote
 
-一次 Result 可以沉淀为紧凑 Evidence；大型数据不默认复制，只记录 Result hash、Output hash、lineage、结论/断言和可选的最多 100 行 snapshot：
+一次 Result 可以沉淀为紧凑 Evidence；大型数据不默认复制，只记录 Result hash、Output hash、lineage、consumer revision 审计、结论/断言和可选的最多 100 行 snapshot：
 
 ```bash
 dataviz run WORKSPACE 'sales::source:orders/main'

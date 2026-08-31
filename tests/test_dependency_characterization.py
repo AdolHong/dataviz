@@ -101,7 +101,11 @@ def test_inspect_dependencies_is_the_exact_contract_projection():
 def test_catalog_projection_is_unchanged_by_dependency_modularization(tmp_path: Path):
     expected = CHARACTERIZATION["cases"]["chart-gallery"]
     workspace_path = tmp_path / "workspace"
-    shutil.copytree(ROOT / expected["workspace"], workspace_path)
+    shutil.copytree(
+        ROOT / expected["workspace"],
+        workspace_path,
+        ignore=shutil.ignore_patterns(".dataviz", "__pycache__", "*.pyc"),
+    )
     catalog = ensure_analysis_catalog(workspace_path)
     entries = [
         entry

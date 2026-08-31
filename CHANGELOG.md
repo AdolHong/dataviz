@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.16.0 — 2026-08-31
+
+- 0.16.0 发布门禁完整执行 594 项 Chromium-inclusive pytest，并由 Firefox、WebKit 各重复 53 项 Runtime E2E；三引擎共同覆盖 Host/Canvas 协议、Control writer/consumer、portable HTML、Renderer 生命周期及 Plotly 柱形/散点真实鼠标手势。Catalog characterization 现在排除本地 `.dataviz` 使用状态，async-host 边界测试也不再受先前 Playwright 主线程生命周期污染。
 - 保留 Plotly 原生快速双击恢复 zoom scale，但 `plotly_doubleclick` 不再被 Dataviz 解释为 Control `reset`；Control 恢复只由工具栏中明确的 “Restore default selection” action 触发。Bound writer 在数据、layout 与 config 未变而仅 `selectedpoints` 改变时改用 `Plotly.restyle()`，不再以完整 `Plotly.react()` 重建 marker 命中层，避免散点重绘窗口吞掉下一次正常慢速点击。
 - 修复 `chart-gallery` 连续点击省份收入柱形或订单/收入散点时偶发无响应：View writer action 的 render generation 现在只在同步入队时做准入校验，已经合法入队的 action 不再被前一个 action 引起的同 writer 自重绘误判为 `stale_view_generation`；writer DOM 实例真正被替换/移除和初始即过期的 action 仍会拒绝。真实 Chromium 覆盖重叠 Plotly action、柱形/散点连续鼠标切换与既有 portable provenance。
 - TanStack Table 搜索框现在在 Renderer state 生命周期内保持唯一稳定 `id`，避免 `records` View 每次重绘时 Chrome 重复报告 “A form field element should have an id or name attribute”；该浏览器告警与 Control action 竞态本来没有执行因果关系。

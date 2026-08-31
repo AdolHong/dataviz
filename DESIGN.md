@@ -697,6 +697,237 @@ Parameter Domain 也不进入任何 Result consumer。portable HTML 和分享链
 
 Parameter Domain DAG 与 Interactive DAG 没有执行边：前者只在 Query 前为 Query Parameter draft 提供建议候选并协调网页选择状态，后者只在 Query 后消费 Base Named Output 和已提交 Controls 做计算或渲染。Domain 不定义 Query Parameter 的合法成员集合，不进入 Canvas Runtime Manifest，不触发 Interactive Scheduler，也不能被 `browser-js` 或 View Renderer 读取。
 
+#### Query Parameter vNext：统一物化候选与紧凑集合表达式
+
+> **设计状态：待实现。** 这一节是下一次 Query Parameter 断代的目标设计，不描述当前 v13/v1 Runtime。当前 `all_available | explicit`、完整 client relation 和 `query_inputs` Domain query edge 在迁移完成前仍是现行行为；实施必须一次完成 Schema、Runtime、Result、CLI 文档和迁移样例，不能让同一个声明在旧/新语义之间自动回退。
+
+新设计不再按候选基数建立两套作者模型。Query Parameter 只有两种候选来源：
+
+| 候选来源 | 作者语义 | Runtime 行为 |
+| --- | --- | --- |
+| `static` | Dashboard 内声明的封闭小枚举 | 随 Dashboard 定义到达浏览器，不执行 SQL |
+| SQL Parameter Domain | 可跨 Dashboard 复用的候选关系 | 一律先在 Server 物化为 Workspace 共享 immutable generation；Browser 只读取去重后的搜索/分页投影 |
+
+SQL Domain 不再拥有“完整关系下发 Browser”与“Server Lookup”两个 access mode。行数少时第一页可能已经包含全部候选，行数多时继续分页；这只是同一 Lookup 的物理结果，不形成新的 DSL 分支、容量回退或作者决策。现有 50,000 relation records / 8 MiB 限制只约束 v1 将完整关系发送到 Browser 的路径，不适用于服务器物化存储。vNext Browser 永远不持有 SQL Domain 原始关系，因此该限制随旧 client-relation 路径一起退出，而 Server 物化使用作者声明的 row/byte guard、Workspace 磁盘配额和可观测构建结果。
+
+##### 统一的 Query Parameter 状态
+
+Query Parameter 的 canonical owner 仍是 Shell 的 draft/committed reducer，但不再维护平行的 `query_parameters` 与 `query_parameter_intents` 字典。每个参数只保存一个 typed state：
+
+```text
+scalar / range / free multiple input:
+  {value}
+
+candidate-backed multiple_select:
+  {selection: all | include | exclude | none, value: [finite operands]}
+```
+
+四种集合表达式是业务语义，不是 Select 的显示技巧：
+
+| `selection` | `value` 的含义 | 对 Source 字段的约束 |
+| --- | --- | --- |
+| `all` | 必须为空 | 不限制该字段；新出现的候选自然被包含 |
+| `include` | 明确包含的有限成员 | `field IN value` |
+| `exclude` | 明确排除的有限成员 | `field NOT IN value` |
+| `none` | 必须为空 | 明确空集，Query 返回无匹配记录 |
+
+`all` 不表示“把当前 generation 的全部候选复制进 value”，也不依赖物化 generation 才能解释；它表示在其他 Query 条件给出的范围内不增加该字段过滤。`exclude` 同样只保存例外，因此“10 万个 Item 中取消 1 个”封存为 `{selection: exclude, value: [item]}`，不会产生 99,999 个值。候选 Domain 是给人的发现和标签服务，不是 Source 的成员白名单；Result 可以记录本次编辑所见的 candidate generation 作为审计信息，但 Query 语义不能依赖该 generation 仍然存在。
+
+Reducer 根据 typed 用户动作维护紧凑表达式：
+
+```text
+default all + deselect(X)  → exclude [X]
+exclude [X] + select(X)    → all
+default none + select(X)   → include [X]
+include [X] + deselect(X)  → none
+Select all                 → all
+Clear                      → none
+Reset                      → 声明的 default
+Revert                     → 最后成功 Query 的 committed state
+```
+
+小候选的 Runtime 可以在已知全集时把同一集合规范化为更短的 include/exclude operands；高基数候选不枚举补集，只沿用户动作维护当前表达式。该差异不得改变最终集合语义。搜索页上的“全选”不能表示“当前页全选”或“搜索结果全选”：全局 Select all 永远产生 `all`；首版不提供容易产生歧义的 page/search-result bulk selection。
+
+`include/exclude` 的 operands 必须去重、保持 canonical 类型并受统一 `max_explicit_values` 限制。默认上限应足以覆盖人工选择，但不能允许数万 ID 进入 URL、Run request、Result 或 HTML；超过上限应建议上传名单/集合资产或改写分析口径，不能悄悄展开另一侧补集。`required` 禁止 `none`，但不禁止 `all`；`clearable: false` 只禁止用户产生 `none`，不改变其他三种表达式。
+
+##### 默认状态只保留一套声明
+
+vNext 删除候选输入同时存在 `default` 与 `initial` 的双入口，统一使用 `default`：
+
+```yaml
+# single_select
+default: {mode: first}                 # 或 value / none
+
+# multiple_select
+default: {selection: all}              # 或 include / exclude / none
+default: {selection: include, values: [A, B]}
+
+# single_input / multiple_input / range_input
+default: ...                            # 直接使用对应 value contract
+```
+
+`first` 只适用于 single select，并在当前物化 generation 的稳定排序中取第一项；`value`/`include` 中未出现在最新候选页的声明值仍是可提交值，但 UI 必须以 unavailable 标签解释，不能静默改成第一项。刷新候选不执行 Reset；普通页面恢复优先级继续是 URL 显式状态 → tab draft → committed Result → declared default。Revert 恢复完整 committed state，不恢复 default，也不需要保存旧候选表。
+
+##### Source、Transform 与代码模板只消费规范投影
+
+候选页、搜索词、cursor、物化路径和刷新状态都不是业务参数，不能进入 Source/Transform。消费者只从 canonical Query Parameter state 读取以下投影：
+
+| projection | 结果 | 允许的 consumer |
+| --- | --- | --- |
+| `value` | scalar/range/free input 的值；candidate multiple 的有限 include/exclude operands | SQL / Python / Domain-independent Transform |
+| `selection` | `all | include | exclude | none`；只适用于 candidate multiple | SQL / Python |
+| `active` | 参数是否施加约束；candidate multiple 仅 `all` 为 false | SQL / Python |
+| `state` | 完整 typed state | Python 与内部 Runtime；不能作为普通 SQL bind value |
+| `start/end` | range 的对应端点 | SQL / Python |
+
+原短写绑定继续等价于 `projection: value`，但 candidate multiple 若进入 SQL，Compiler 必须要求同一参数同时被消费为 `selection`，避免代码把 exclude operands 错当 include values。高级 SQL 可以显式绑定两项：
+
+```yaml
+query_inputs:
+  item_selection: {parameter: item_nbrs, projection: selection}
+  item_values: {parameter: item_nbrs, projection: value}
+```
+
+```sql
+-- 具体列表语法由 Adapter dialect 决定；四个分支必须全部可解释。
+where :item_selection = 'all'
+   or (:item_selection = 'none' and false)
+   or (:item_selection = 'include' and item_nbr in (... :item_values ...))
+   or (:item_selection = 'exclude' and item_nbr not in (... :item_values ...))
+```
+
+为避免每个作者重复处理空 `IN ()`、列表展开和四态分支，vNext 同时提供一个受限的 SQL filter token，而不是引入通用 Jinja：
+
+```yaml
+query_filters:
+  item_scope:
+    parameter: item_nbrs
+    expression: item_nbr
+```
+
+```sql
+select *
+from fact_sales
+where {{ dataviz_filter:item_scope }}
+```
+
+Compiler 只允许已声明的精确 token，并按 Adapter dialect 生成参数化 `TRUE / FALSE / IN / NOT IN` predicate；用户值永远不能进入 SQL 文本，`include []` canonicalize 为 `none`，`exclude []` canonicalize 为 `all`，因此执行层永不生成 `IN ()`。需要复杂业务条件时，作者继续使用显式 `selection + value` 投影或 Python Source；标准 filter token 不演变成通用 SQL 模板语言。
+
+Python `context.query_inputs` 可以直接接收 `projection: state`，但不得把候选物化对象、DataFrame 或 Lookup client 暴露给 Query/Interactive Transform。`dataviz run` 只消费调用方给出的 state 或无需 Domain 即可解析的 default；已知 Item 的 AI 可以直接运行，绝不为了验证候选或补标签而隐式构建物化。
+
+##### Workspace 共享物化
+
+可复用 SQL Domain 是显式 Workspace 资产，而不是“两个 Dashboard 的 SQL 文本碰巧相同就自动合并”。建议目录和引用形态如下：
+
+```text
+workspace/
+  parameter_domains/
+    item-catalog/
+      domain.yaml
+      items.sql
+  dashboards/
+    .../dashboard.yaml
+```
+
+```yaml
+# dashboard.yaml
+parameter_domains:
+  - workspace:/parameter_domains/item-catalog/domain.yaml
+
+query_parameters:
+  - id: item_nbrs
+    type: multiple_select
+    value_type: text
+    required: false
+    default: {selection: all}
+    options:
+      mode: domain
+      source: item-catalog
+      value_field: item_nbr
+      label_field: item_name
+      keywords_field: item_keywords
+      sort_field: item_nbr
+      depends_on:
+        division: {field: division}
+        category: {field: category_nbr}
+        subcategory: {field: subcategory_nbr}
+```
+
+```yaml
+# parameter_domains/item-catalog/domain.yaml
+schema: dataviz/parameter-domain/vNext
+kind: parameter_domain
+id: item-catalog
+type: sql
+adapter: warehouse
+code: items.sql
+max_rows: 500000
+materialization:
+  refresh_after_seconds: 43200       # 12h 后变 stale，仍可读并后台更新
+  expire_after_seconds: 604800       # 7d 后硬过期，不再作为候选服务
+```
+
+Dashboard 的 `adapters` binding 继续把 Domain 中的逻辑 Adapter 映射到 Workspace `auth/adapters*.yaml` 中的实际 Adapter。多个 Dashboard 只有显式引用同一 Workspace Domain、解析到相同 definition/code hash、实际 Adapter identity 和数据可见范围时才共用 generation；不同定义或权限范围绝不因 SQL hash 相同自动复用。第一版共享物化禁止读取 Dashboard Query Parameter `query_inputs`，因为这会把一个目录重新碎片化为每个 draft 的远端 SQL 查询；Division/Category/Subcategory 等父条件都在已经物化的关系上本地过滤。若一个候选 SQL 无法在作者声明的 Server guard 内形成完整目录，应重新定义候选资产，而不是运行时退回远程逐字搜索。
+
+物化文件不进入 `dashboards/`：
+
+```text
+.dataviz/parameter-materializations/
+  index.sqlite
+  objects/<materialization-key>/<generation>/
+    manifest.json
+    data.parquet
+```
+
+`materialization-key` 至少包含 Workspace、Domain definition/code hash、实际 Adapter identity 和非敏感 visibility scope；不得把明文凭据写进 key/manifest。Workspace 级共享要求 Adapter 提供稳定的非敏感数据可见范围标识；相同身份可跨用户/tab/Dashboard 共享，行级权限不同的 principal 必须生成不同 key。当前没有账号体系的单租户 Server 只能在同一 Adapter visibility 下共享，不能把这一点宣传成任意多租户隔离。
+
+每个 generation immutable。构建完成后先校验 Schema、row guard、字段与 metadata conflict，写入临时目录，再原子切换 current pointer；读请求在生命周期内 pin 一个 generation，不会看到半份新数据。SQLite transaction + 有时限 refresh lease 保证同一个 key 同时只有一个 builder；其他 tab/用户继续读当前 generation。Server 重启后从 manifest/index 恢复，过期 lease 可被安全接管。旧 generation 在没有 reader 且超过 grace period 后由 `dataviz prune` preview-first 清理；不承诺多个独立 Server 进程或网络文件系统共同写一个 Workspace。
+
+##### 更新时间、过期时间与 Reload
+
+Materialization 的状态机固定为：
+
+```text
+missing → building → fresh → stale → expired
+                    ↘ refresh_failed（仍持有未硬过期的旧 generation）
+```
+
+- `fresh`：当前时间早于 `refresh_due_at`，直接服务。
+- `stale`：达到 `refresh_after_seconds`；第一位访问者取得 refresh lease，所有访问者立即继续读取旧 generation（stale-while-revalidate）。
+- `refresh_failed`：记录脱敏错误和退避时间；只要未到 `expires_at`，旧 generation 继续可读。
+- `expired`：超过 `expire_after_seconds`，旧数据不能再作为候选；当前 Dashboard 的相关 Picker 显示不可用/构建中，但全局导航、其他 Dashboard 和自由输入参数不受阻断。
+- `missing`：首次没有可用 generation 时启动一次构建。长 SQL 不阻塞 Server 启动；生产使用可以通过 CLI prewarm 或外部计划任务提前构建。
+
+Query Card 的 Reload 对 SQL Domain 表示“请求刷新共享候选目录”，不清空选择、不恢复 default、不执行正式 Query。若已有 generation，刷新期间继续使用旧候选并显示克制的更新状态；重复点击和其他 tab 的请求被同一 lease 合并。新 generation 原子发布后，只刷新候选标签/计数/当前页；draft state 按 canonical selection 保持，`all/exclude` 不展开，明确 include/exclude operands 缺失时显示 unavailable 而不静默删除。正式 Query 仍需用户点击 Header 查询。
+
+##### 搜索、级联与分页
+
+所有 SQL Domain Picker 都通过同一 Server-local Lookup 读取 current generation。请求只包含：Domain/consumer identity、当前父参数的 canonical selection state、普通搜索文本、page limit、opaque cursor，以及需要补标签的有限已选 operands；绝不携带 SQL、Adapter 或原始物化路径。
+
+父级 `depends_on` 不重新执行 SQL。Lookup 把父参数的 `all/include/exclude/none` 直接编译为物化关系上的本地 predicate，再对当前 parameter 的 value/label/metadata 做 distinct projection。一次 item-catalog 可以同时为 Division、Category、Subcategory 和 Item 提供候选；每个字段按自己的投影去重，相同 canonical value 出现冲突 label/metadata 时 generation 构建或查询稳定失败，不能随机取一行。
+
+搜索规则保持克制且可预测：Unicode NFKC + casefold、空白 token AND；排序优先 exact value、exact label、prefix、keywords、substring，再使用声明的稳定 `sort_field + canonical value`。Runtime 不自动猜拼音；需要 `shenzhen → 深圳` 时由 SQL 在 `keywords_field` 提供拼音/别名。第一版不开放 regex、任意 SQL 搜索表达式或模糊模型检索。
+
+分页使用 generation-bound opaque cursor，不使用容易在 generation 更新后漂移的页码 offset。默认 `limit=50`、机器上限 `100`；响应包含 `generation / items / selected_items / total / next_cursor / freshness`。同一请求的 `total` 和 items 必须来自同一 pinned generation；generation 已切换的旧 cursor 返回稳定 `parameter_lookup_cursor_stale`，Browser 自动从第一页重试。搜索文本或父级 state 改变会取消旧请求、清空临时页和 cursor，但不会把当前页误当完整候选集合，也不会据此展开/压缩 committed selection。
+
+已选标签与当前搜索页分离：`selected_items` 只补全有限 include/exclude operands 的 label/availability；翻页、关闭下拉框和修改搜索词都不能丢失选择。父级变化后 Server 只在当前 materialization 上验证这些有限 operands；普通 draft 使用统一 reducer 协调，Revert 则原样恢复 committed operands 并把当前范围外成员标成 unavailable。所有请求带 Dashboard/request generation，迟到页不得覆盖较新的搜索或父级状态。
+
+Lookup 可以有短期 process-local page cache，但它不是第二个事实源，也不改变 materialization freshness。验收基准至少覆盖 10K、100K、250K rows 的首次本地查询、连续搜索、三级父过滤、并发 tab 和 generation 切换；性能优化可以采用 DuckDB/Parquet 扫描、内部索引或预计算 normalized search column，但不得泄露成多套作者 DSL。
+
+##### AI、HTML、分享与可搬运性
+
+AI 候选探索复用同一物化与 Lookup，不再执行并复制一份独立的大 `options_id` 原始表。CLI 默认只展示 10 行高密度预览，并通过 cursor 继续搜索/分页；`dataviz run` 与候选探索仍完全独立。Catalog/describe 应展示参数 default、selection contract、候选 Domain、父依赖和 Source 所需 projection，让 AI 在 Run 前一次知道如何传 `all/include/exclude/none`。
+
+Result、Evidence、URL/tab checkpoint、分享链接和 portable HTML 只封存 canonical Query Parameter state。`all/none` 不带 values，`include/exclude` 只带受限 operands；它们不嵌入 Domain SQL、物化 Parquet、候选页、搜索词、cursor 或 10 万项全集。HTML/分享页面继续锁定 Query Parameter，显示“全部”“仅 3 项”“全部但排除 1 项”或“无”，不能刷新候选或再次 RUN。
+
+`workspace:/...` 使 Dashboard 在同一 Workspace 内移动时仍能引用共享 Domain。跨 Workspace 单独搬运 Dashboard 必须使用 portable bundle 命令计算依赖闭包并复制 Domain definition/SQL、必要的非敏感 Adapter binding 声明和 manifest；默认不复制 `.dataviz` 物化数据或凭据。导入时同 id + 同 content hash 可复用，同 id + 不同 hash 必须冲突失败。若将来允许显式携带预热物化，必须作为独立安全选项并重新校验 visibility scope、过期时间和数据敏感性，不能成为默认行为。
+
+##### 版本与完成门禁
+
+这是可观察语义断代，不得以内部缓存优化名义落地。实施前通过 P0.0 最小 inventory 决定并一次迁移：Dashboard default/Query state、Parameter Domain definition/Contract/Lookup wire、Source SQL filter token、Runtime Query transaction，以及 Result/Evidence persisted shape。目标至少需要一个版本化物化 manifest；private Browser Lookup wire 是否单独编号由 producer/consumer/persistence 判断，不为每个分页 envelope机械造协议。
+
+完成必须证明：static 与 SQL-materialized 两种候选来源无第三条回退路径；任何 SQL Domain 只构建一次共享 generation，父级/搜索/分页都不重跑远端 SQL；`all/include/exclude/none` 在 Browser、Python、SQL filter token、CLI、Result 与 HTML 解释一致；空列表永不产生非法 SQL；12h stale refresh、hard expiry、失败回退、并发 lease、Server restart、权限 scope、cursor generation 与 prune 都有确定结果；现有 v1 文档中“高基数改 query_inputs/multiple_input”和“完整 relation 下发”只有在实现迁移完成后才能统一删除。
+
 相对日期不是自由格式字符串。当前严格语法只接受 `anchor: today` 与整数日偏移 `offset: ±Nd/0d`。日期范围是两个独立 Date Atom 的有序对，每个端点可以是固定 ISO 日期，也可以是相对表达式，因此可以表达“固定开始日 + 相对结束日”。默认值编辑器也直接编辑这两个 Atom：每个端点只有“固定日期/相对今天”模式和一个随模式切换的值控件，不同时维护隐藏的 fixed/offset 副本，不使用 `start_offset/end_offset` 范围对象；固定模式复用运行界面的 ISO DatePicker 输入、日历与校验，相对模式使用整数 offset。`today` 按 `workspace.context.timezone` 求值，并在 tab 首次构建参数表单或 CLI Run 开始时解析为具体 ISO 日期。Query Run、缓存指纹、SQL 绑定和 HTML Export 保存的都是这个具体值；导出页不会在第二天重新解释“today”。Server 启动时不预计算，避免跨午夜后继续使用旧日期。
 
 ### Control、候选意图与 consumer binding

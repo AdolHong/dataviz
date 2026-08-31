@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
 import shutil
@@ -92,8 +93,6 @@ def test_browser_analysis_sync_boundary_isolated_from_caller_event_loop(
 ):
     from dataviz.analysis import browser as browser_analysis
 
-    caller_thread = threading.get_ident()
-
     def observe_thread(*args, **kwargs):
         return {"thread": threading.get_ident()}
 
@@ -103,19 +102,28 @@ def test_browser_analysis_sync_boundary_isolated_from_caller_event_loop(
         observe_thread,
     )
 
-    async def invoke():
-        return browser_analysis.run_browser_outputs(
-            None,  # type: ignore[arg-type]
-            None,  # type: ignore[arg-type]
-            None,
-            targets=[("scaled", "main")],
-            control_state={},
-            refresh=False,
-            allow_network=False,
-            timeout_seconds=1,
-        )
+    def invoke_from_async_host():
+        async def invoke():
+            caller_thread = threading.get_ident()
+            observed = browser_analysis.run_browser_outputs(
+                None,  # type: ignore[arg-type]
+                None,  # type: ignore[arg-type]
+                None,
+                targets=[("scaled", "main")],
+                control_state={},
+                refresh=False,
+                allow_network=False,
+                timeout_seconds=1,
+            )
+            return caller_thread, observed
 
-    observed = asyncio.run(invoke())
+        return asyncio.run(invoke())
+
+    # A fresh thread makes the async-host precondition deterministic even after
+    # a session-scoped synchronous Playwright lifecycle has used pytest's main
+    # thread. The product call must still cross into its own worker thread.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        caller_thread, observed = executor.submit(invoke_from_async_host).result()
 
     assert observed["thread"] != caller_thread
 

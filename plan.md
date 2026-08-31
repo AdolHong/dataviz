@@ -17,10 +17,11 @@
 | AI 开发效率评测 | 工具完成，真实试验暂缓 | 维护者评测工具已与正式产品隔离；没有真实成对试验前不发布 Token 或效率结论。 |
 | 规模与浏览器可靠性 | 当前范围已完成 | 固定 10K/100K/1M 基准和三浏览器契约矩阵已有可复现证据；快速迭代发布默认执行 Chromium 全套，稳定发布、跨浏览器敏感变更或明确要求时再执行 Firefox/WebKit。 |
 | Query Parameter 与 Domain | P1-E 已完成 | Query 前置 Domain 以 Contract/Resolution v2 明确分开 `options.depends_on` projection edge 与 Domain `query_inputs` query edge；同 snapshot 级联在浏览器本地事务式完成，query edge 才获取新 snapshot，叶子和独立 `multiple_input` 不触发 Domain 工作。完整 relation projection 受 50,000 rows / 8 MiB 双预算约束，超限稳定失败且不截断、不回退。 |
+| Query Parameter vNext | P3 已完成设计、尚未实现 | 目标统一为 `static` 或 Server 共享物化 SQL Domain；Browser 只走 Lookup 搜索/分页。候选多选使用紧凑 `all/include/exclude/none`，Source 消费规范 state/projection 或受限 SQL filter token，Result/HTML 不携带候选全集。 |
 | Compiler 与应用边界 | P1-B/P1-C 已完成 | `LoadedDashboard` 继续分别持有和缓存三份 canonical lazy Contract；Contract 间已有 derivation dependency 保持显式、单向。`dependencies.py` 已按语义提取私有 derivation 函数，没有增加 owner/wrapper/phase class；`RunRequest → run_analysis() → canonical AnalysisResult` 复用现有 Catalog resolver 与 `AnalysisResultStore`，没有增加 Runner class。 |
-| 当前发行基线 | 0.15.0 之后的 P0、P1 与当前 P2 范围实现完成 | Input State / Consumer Binding 断代、browser-python 删除、Domain locality、显式 Target 应用函数、单一 Control authority、多 View linked-brushing、Compiler 内部模块化、当前协议版本门禁与严格 Analysis producer 已落地。 |
+| 当前发行基线 | 0.16.0 已封版 | Input State / Consumer Binding 断代、browser-python 删除、Domain locality、显式 Target 应用函数、单一 Control authority、多 View linked-brushing、Compiler 内部模块化、当前协议版本门禁与严格 Analysis producer 已落地。 |
 
-当前开发基线：Package `0.15.0` 之后的工作树、Python 3.11–3.14、`dataviz/dashboard/v13`、`dataviz/parameter-domain/v1`、`dataviz/parameter-domain-contract/v2`、`dataviz/parameter-domain-resolution/v2`、`dataviz/presentation/v2`、`dataviz/source/v3`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v10`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v4`、`dataviz/runtime/v9`、`dataviz/analysis-result/v3`、`dataviz/analysis-evidence/v3`、Component Registry `5.6.0`。当前 0.x Runtime 是 exact-current、同 package lockstep，没有 capability negotiation。P1-D 已按 P0.0 决策一次迁移 authoring、private wire 与 persisted evidence；以后缩小合法 Output 声明、改变持久化 shape 或 public wire 仍必须分别判断版本，不能被“bugfix 不升版”笼统覆盖。
+当前开发基线：Package `0.16.0`、Python 3.11–3.14、`dataviz/dashboard/v13`、`dataviz/parameter-domain/v1`、`dataviz/parameter-domain-contract/v2`、`dataviz/parameter-domain-resolution/v2`、`dataviz/presentation/v2`、`dataviz/source/v3`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v10`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v4`、`dataviz/runtime/v9`、`dataviz/analysis-result/v3`、`dataviz/analysis-evidence/v3`、Component Registry `5.6.0`。当前 0.x Runtime 是 exact-current、同 package lockstep，没有 capability negotiation。P1-D 已按 P0.0 决策一次迁移 authoring、private wire 与 persisted evidence；以后缩小合法 Output 声明、改变持久化 shape 或 public wire 仍必须分别判断版本，不能被“bugfix 不升版”笼统覆盖。
 
 ## 当前优先级
 
@@ -194,6 +195,56 @@ P1 在 P0 与 typed comparison 决策之后调整内部边界，目标是让强�
 - [x] 回归测试校验机器接口和 `docs/product-architecture.md` 的当前版本表；版本升级若只修改某一处会直接失败。
 - [x] Analysis 持久化 reader 保留 tolerant-read 行为；Dataviz 内部 Entry/Catalog/Describe/Result/Evidence/Promotion producer 在每个 typed model 边界递归拒绝未知字段，核心字段拼错返回稳定 `analysis_producer_unknown_field`。
 - [x] 当前不建设完整 Registry 平台，不统一升级无关协议，也不增加迁移层或双协议 Runtime。`DatavizRuntimeV3Client` 作为既有公开 symbol 保持不变；未来若确需重命名，再作为独立兼容变更处理。
+
+### P3：Query Parameter 紧凑集合与共享物化候选
+
+目标：删除 SQL 候选的“小 Domain 完整下发 / 大 Domain 远程查询”作者分叉。所有 SQL Parameter Domain 都先形成 Server 端 Workspace 共享 immutable materialization，Browser 只通过同一 Lookup 做 distinct、父级过滤、搜索和 cursor 分页；static choices 保持内联。Query Parameter 多选改为紧凑集合表达式，10 万候选的全选、排除一项、Result 与 HTML 都不得展开全集。
+
+#### P3.0 冻结状态语义与版本边界
+
+- [ ] Characterization 当前 `default + initial`、`all_available | explicit`、parallel values/intents、Domain projection/query edge、Source projection、URL/tab/Revert、Result/HTML 与 `parameters options` 行为；所有迁移差异必须有旧/新 expected。
+- [ ] 定稿 canonical Query Parameter state：普通输入 `{value}`；候选多选 `{selection: all|include|exclude|none, value: finite operands}`。`all/none` 强制空 operands，include/exclude 去重且受 `max_explicit_values` 限制。
+- [ ] 统一默认声明为 `default`：single select 只允许 first/value/none，candidate multiple 只允许 all/include/exclude/none，自由输入继续使用自身 typed value；Reset/Revert/refresh 的边界分别冻结。
+- [ ] 执行 P0.0 inventory 和一次迁移决策，覆盖 Dashboard、Parameter Domain definition/Contract/Resolution or Lookup、Source SQL filter token、Runtime Query transaction、State/Result/Evidence 和 CLI invocation；不保留同一 Dashboard 的双 state 解释器。
+
+#### P3.1 Workspace Domain 资产与物化 Store
+
+- [ ] 支持显式 `workspace:/parameter_domains/...` 依赖；同 Workspace 移动 Dashboard 不破坏引用，不按相同 SQL 文本自动合并两个资产。Dashboard-local Domain 若继续允许，也必须走同一物化 Store。
+- [ ] SQL Domain 一律禁止以 Dashboard draft `query_inputs` 碎片化物化；父级关系只进入物化后的本地 Lookup predicate。删除运行时按基数选择 client projection/query edge 的回退可能。
+- [ ] 实现 `.dataviz/parameter-materializations/` registry、immutable generation、Parquet/manifest、atomic publish、reader pin、refresh lease、Server restart recovery 和 preview-first prune；物化不写入 `dashboards/`。
+- [ ] Materialization key 覆盖 definition/code hash、实际 Adapter identity 和非敏感 visibility scope；凭据不落盘。相同可见范围可跨用户/tab/Dashboard 共享，RLS/principal 不同必须隔离。
+- [ ] 明确 Server row/byte/disk guard 与错误证据；现有 50,000 rows / 8 MiB 只属于旧 Browser full-relation path，不得错误复用为 Server 物化上限。
+
+#### P3.2 Freshness、并发与运维
+
+- [ ] 实现 `refresh_after_seconds` 与 `expire_after_seconds`：fresh 直接读，stale 立即读旧 generation 并由单一 lease 后台刷新，refresh failure 在 hard expiry 前继续读旧值，expired/missing 只禁用相关 Picker。
+- [ ] Query Card Reload 触发共享 refresh、合并重复请求并保留旧 generation/draft；不 Reset、不 Query。新 generation 原子发布后只更新标签、计数与页，不展开 all/exclude。
+- [ ] 提供可脚本化的 prewarm/status/refresh CLI，使耗时两分钟的首次构建可以在用户打开 Dashboard 前完成；CLI 输出 generation、rows、freshness、last error 与 next refresh，不打印候选全集。
+- [ ] 覆盖并发 tab/用户、Server 中断、过期 lease、构建失败、Adapter visibility 变化、旧 generation reader 与 prune 竞争；当前仍不承诺多个独立 Server 或网络文件系统共同写一个 Workspace。
+
+#### P3.3 Lookup、搜索、分页与级联
+
+- [ ] 所有 SQL Domain consumer 使用同一 Server-local Lookup；小候选只是第一页自然返回全部，不增加 eager/remote/access 等作者 mode。
+- [ ] 请求只含 Domain/consumer、父 canonical states、search、limit、opaque cursor 和有限 selected operands；response 在一个 pinned generation 中返回 items、selected_items、exact total、next_cursor 与 freshness。
+- [ ] 父 `depends_on` 将 all/include/exclude/none 编译为本地物化 predicate，再做 consumer value/label/metadata distinct；父编辑、搜索和翻页都不得执行远端 Domain SQL。
+- [ ] 搜索固定 NFKC/casefold、空白 token AND 与 exact/prefix/keywords/substring 排序；拼音和别名只来自 `keywords_field`，不提供 regex、任意 SQL 或模型搜索。
+- [ ] cursor 绑定 generation 和稳定 sort tuple；generation/search/parent 改变会取消旧请求并从第一页开始，迟到页不得覆盖新状态。默认 50、上限 100，不提供含糊的“当前页全选”。
+- [ ] 已选 operands 与当前页分离；补标签和 unavailable 只处理有限 operands。普通 draft、URL 恢复、Revert、父级变化和 materialization refresh 共用一个 reducer，不因页中不可见而丢失选择。
+
+#### P3.4 Source binding、Result 与可搬运性
+
+- [ ] 将 Query consumer projection 收敛为 `value / selection / active / state / start / end`；candidate multiple 的 SQL value consumer 必须同时消费 selection，Python 可直接消费完整 state。候选页、cursor 和物化 metadata 不进入业务代码。
+- [ ] 提供受限 `{{ dataviz_filter:name }}` SQL token 与 `query_filters` 声明，只生成参数化 TRUE/FALSE/IN/NOT IN 并安全扩展列表；不是通用 Jinja。高级作者仍可显式消费 selection/value。
+- [ ] `dataviz run` 支持直接传 canonical state 且不隐式物化候选；Catalog/describe 一次展示 default、selection contract、Domain、父依赖和所需 Source projection。
+- [ ] Result/Evidence/URL/checkpoint/分享/HTML 只保存 compact state；all/none 无 operands，include/exclude 只保存有限 operands。分享/HTML 继续锁定参数，不嵌入 SQL、Parquet、候选页、搜索词或 cursor。
+- [ ] 提供 portable Dashboard bundle 的依赖闭包：复制共享 Domain definition/SQL 与非敏感 binding manifest，默认不复制 `.dataviz` materialization 或凭据；同 id/hash 复用、同 id/不同 hash 失败。
+
+#### P3.5 验收与文档迁移
+
+- [ ] 共享 conformance corpus 覆盖 Browser/Python/SQL filter/CLI 的 all/include/exclude/none、默认、typed values、空列表、operand limit、parent predicate、unavailable 与 canonical signature。
+- [ ] 真实浏览器覆盖首次 missing、预热 fresh、12h stale refresh、hard expiry、搜索、cursor、三级级联、Reload/Revert、两个 Dashboard/多个 tab 共用 generation，以及 Domain 失败不锁死导航。
+- [ ] 固定 10K/100K/250K materialization/Lookup benchmark；任何内部索引或 DuckDB 优化不产生第二套 DSL。证明页面始终只持有当前页和有限 operands。
+- [ ] 实现完成后统一更新 `documentation.py`、`dataviz-skill.md`、product architecture、Scaffold、schemas、examples 和错误建议，删除“高基数必须 query_inputs/multiple_input”“完整 relation 下发”“options_id 再复制大表”等旧设计；完成前正式 docs 仍描述现行 v1，不能提前承诺未发布行为。
 
 默认价值顺序如下；顺序不等于人为串联的技术依赖：
 

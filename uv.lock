@@ -15,7 +15,7 @@ resolution-markers = [
 
 [[package]]
 name = "ai-dataviz"
-version = "0.15.0"
+version = "0.16.0"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },

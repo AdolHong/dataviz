@@ -200,14 +200,14 @@
   }
 
   root.dataPipeline = {
-    protocol:'dataviz/runtime/v9',
+    protocol:'dataviz/runtime/v10',
     createInteractiveAdapters,
     createDataApi,
     selectedWorkerInputs,
   };
   root.descriptors = root.descriptors || new Map();
   root.descriptors.set('data.pipeline', {
-    protocol:'dataviz/runtime/v9',
+    protocol:'dataviz/runtime/v10',
     owns:['interactive-adapters', 'data-frame'],
   });
 })(window);

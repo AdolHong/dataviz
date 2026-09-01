@@ -204,10 +204,7 @@ class AnalysisResult(AnalysisContract):
     status: Literal["ready", "partial", "failed", "cancelled"]
     generation: str | None = None
     target: AnalysisEntry | dict[str, Any] | None = None
-    query_parameters: dict[str, Any] = Field(default_factory=dict)
-    query_parameter_intents: dict[str, Literal["all_available", "explicit"]] = Field(
-        default_factory=dict
-    )
+    query_parameter_state: dict[str, dict[str, Any]] = Field(default_factory=dict)
     effective_controls: dict[str, Any] = Field(default_factory=dict)
     consumer_revisions: AnalysisConsumerRevisions = Field(
         default_factory=AnalysisConsumerRevisions

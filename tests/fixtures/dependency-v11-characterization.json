@@ -4,8 +4,8 @@
     "chart-gallery": {
       "workspace": "examples/feature-showcase",
       "dashboard": "chart-gallery",
-      "contract_sha256": "add155dc94cbed32d66aad91a19d85855a8a280518bd36405bf8a07c059884a2",
-      "runtime_manifest_sha256": "cce4c8bd5a9d1d265751f53eca7f0296e324066347a602717322524245776f64",
+      "contract_sha256": "ac11fcc7af1640fe141753567efc3b9300e0dc87a38f56342f3f25c7ebedf270",
+      "runtime_manifest_sha256": "93b266e5b506da77349dc38119334d2a4822f03dbadad0e92dc1d7cb7f522751",
       "layout_sha256": "c8433e5bbfcecdd0d6e5c8f3481a7ac7db31dea86d510afd9096c76d92a1de3d",
       "query_plan": {
         "targets": ["source:metrics"],
@@ -44,13 +44,13 @@
         ]
       },
       "catalog_entry_count": 9,
-      "catalog_entries_sha256": "6eac27f6e3c6d90bc34790259f4a54f1ae2fd51ff6965d2f79b4c7e7868d889d"
+      "catalog_entries_sha256": "47ecb723a0e82d221e5e7f93f29d89c2f5b07146d1ebeadb536657e1537c913c"
     },
     "cascade-explorer": {
       "workspace": "examples/feature-showcase",
       "dashboard": "cascade-explorer",
-      "contract_sha256": "cf6ba79fd5ad2a279ce49da695b047db91c3ed49501d602201394da273f83ed1",
-      "runtime_manifest_sha256": "5bfd2ca92664405d8ab59f9aaf4c3b1d5072077ede66d894b45f8e824132e14e",
+      "contract_sha256": "ff2df20ce536f3adc6cb537e486623e808f877ac5c8f0ca8920c436e12e6960e",
+      "runtime_manifest_sha256": "ca91bbc4eeec5abd06e166420171c476566d4260ab0548118cf41096afb653ed",
       "layout_sha256": "550392e9d89938206e21e37f56558499fe1c63553b66e3039179ee78469805ca",
       "query_plan": {
         "targets": ["source:bundled-file", "source:cities", "source:uploaded-file"],
@@ -65,8 +65,8 @@
     "progressive": {
       "workspace": "tests/fixtures/progressive-workspace",
       "dashboard": "progressive",
-      "contract_sha256": "4aea1499ea31770861d90bed16dd6544bdec0f09046a931666dc372a41a6416c",
-      "runtime_manifest_sha256": "bcd70939c3d5c3ae6c4160e7eb807a86f8502b08c823587e84fe7a1616fd7610",
+      "contract_sha256": "46a4db8d991db2ef8fa5d4e5e94b79c13e1fe7636f5659f9a1b6c0b3aa33ceea",
+      "runtime_manifest_sha256": "fe8bbcecf9fa42f5ca1e4fe410b49c4d2e9da4acbf5caa74248fd8eccbf0f7bf",
       "layout_sha256": "c7355951d7c97a4b7f91bc8396310bbcde785245edab1cf5a83aa836bf12118b",
       "query_plan": {
         "targets": ["source:fast", "source:slow"],
@@ -80,8 +80,8 @@
     "worker-runtime": {
       "workspace": "tests/fixtures/browser-worker-workspace",
       "dashboard": "worker-runtime",
-      "contract_sha256": "075de250d7b6b4d7cb0357ec0ba7f7715b08eba3dd63f893becdf290a5247496",
-      "runtime_manifest_sha256": "30efa1c509343ce11bdb4d1271fefd8670f19a0c650c22763b9cbd98b38efcf4",
+      "contract_sha256": "ec9379575a144e5d540212dbe114aeb87930aeed4b25610b010f32509b1e7960",
+      "runtime_manifest_sha256": "01b626f7ee11d50005ae522f332ecccd840a0be6de3e22e07007ddb8d8638e39",
       "layout_sha256": "a618bc2ded27a298072e5c0760581e8547b1068eea657b5c0bfd4d5563689ea4",
       "query_plan": {
         "targets": ["source:raw"],

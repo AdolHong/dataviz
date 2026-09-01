@@ -117,7 +117,6 @@ def cleanup_workspace_storage(
     runs_root = state_root / "runs"
     cache_root = state_root / "cache"
     results_root = state_root / "results"
-    parameter_options_root = state_root / "parameter-options"
     current = time.time() if now is None else now
 
     run_entries = (
@@ -136,22 +135,6 @@ def cleanup_workspace_storage(
     cache = _candidate_rows(
         _cache_entry_directories(cache_root) if include_cache else [],
         root=cache_root,
-        keep=max_cache_entries,
-        max_age_seconds=cache_max_age_seconds,
-        now=current,
-    )
-    parameter_options_entries = (
-        [
-            path
-            for path in parameter_options_root.glob("options_*")
-            if path.is_dir()
-        ]
-        if include_cache and parameter_options_root.exists()
-        else []
-    )
-    parameter_options = _candidate_rows(
-        parameter_options_entries,
-        root=parameter_options_root,
         keep=max_cache_entries,
         max_age_seconds=cache_max_age_seconds,
         now=current,
@@ -179,14 +162,12 @@ def cleanup_workspace_storage(
     errors: list[dict[str, str]] = []
     deleted: list[str] = []
     if apply:
-        for item in [*runs, *cache, *parameter_options, *results]:
+        for item in [*runs, *cache, *results]:
             path = Path(item["path"])
             if path.parent == runs_root:
                 parent = runs_root
             elif path.parent == results_root:
                 parent = results_root
-            elif path.parent == parameter_options_root:
-                parent = parameter_options_root
             else:
                 parent = cache_root
             if not _safe_child(path, parent):
@@ -200,13 +181,12 @@ def cleanup_workspace_storage(
             except OSError as exc:
                 errors.append({"path": str(path), "message": str(exc)})
 
-    candidates = [*runs, *cache, *parameter_options, *results]
+    candidates = [*runs, *cache, *results]
     return {
         "mode": "apply" if apply else "dry-run",
         "workspace": str(workspace_root),
         "runs": runs,
         "cache": cache,
-        "parameter_options": parameter_options,
         "results": results,
         "candidate_count": len(candidates),
         "candidate_bytes": sum(item["bytes"] for item in candidates),

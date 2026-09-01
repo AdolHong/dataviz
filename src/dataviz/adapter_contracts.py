@@ -42,6 +42,7 @@ ADAPTER_CONTRACTS: dict[str, dict[str, Any]] = {
 ADAPTER_COMMON_FIELDS = {
     "type",
     "description",
+    "visibility_scope",
     "options",
     "config",
     "secrets",

@@ -880,7 +880,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "id": "CLI、DAG、API 与 Presentation 使用的稳定程序身份。",
             "title": "页面内容，可与文件夹名不同；为空时回退到文件夹末级名称。",
         },
-        "minimal_example": """schema: dataviz/dashboard/v13
+        "minimal_example": """schema: dataviz/dashboard/v14
 kind: dashboard
 id: sales-overview
 title: 销售概览
@@ -941,20 +941,20 @@ sections:
         "related": ["dashboard", "presentation", "validation"],
     },
     "query-parameters": {
-        "summary": "Query Parameter 创建不可变 Query Run；multiple_select 同时固化 values 与 all_available/explicit 意图，动态候选由 Query 前置 Parameter Domain SQL 提供。",
+        "summary": "Query Parameter 创建不可变 Query Run；每个参数只保存一份 canonical state，SQL 候选统一由 Server 共享物化并通过 Lookup 搜索或分页。",
         "dynamic_domains": {
-            "purpose": "一个轻量 SQL 返回一张候选表，多个 Query Parameter 从不同字段投影，并可按直接父参数做省→市等本地级联。",
-            "example": """parameter_domains: [parameter_domains/locations.yaml]
+            "purpose": "一个 SQL Domain 物化一张完整候选关系；多个 Query Parameter 可从不同字段去重投影，父级变化只在该 generation 上过滤，不重跑 SQL。",
+            "example": """parameter_domains: [workspace:/parameter_domains/locations/domain.yaml]
 query_parameters:
   - id: province
     type: multiple_select
     value_type: text
-    initial: {mode: values, values: [GD]}
+    default: {mode: include, values: [GD]}
     options: {mode: domain, source: locations, value_field: province_code, label_field: province_name}
   - id: city
     type: multiple_select
     value_type: text
-    initial: {mode: all}
+    default: {mode: all}
     options:
       mode: domain
       source: locations
@@ -963,23 +963,26 @@ query_parameters:
       depends_on: {province: {field: province_code}}
 """,
             "rules": [
-                "Parameter Domain 只在正式 Query 前解析候选，不产生 Named Output、Result 或 Catalog 条目。",
-                "Server 执行 Domain SQL 并返回有界 snapshot；外层 Query Panel Shell 对 options.depends_on 只做同 snapshot 本地投影，只有 Domain query_inputs 的有效值变化才请求新 snapshot，不进入 Canvas/browser-js Interactive Runtime。",
-                "AI 可按需运行 dataviz parameters options，把原始多列 Domain 表封存为 options_id；终端默认预览 10 行、显式上限 100 行，后续 parameters filter 从快照筛选、选列和分页，不重跑 SQL。",
-                "dataviz run 不执行 Domain，也不把候选表当作成员白名单；options_id 不是 Result。",
-                "父参数可以是 static 单选或多选；同一有界 Domain 表可投影 province、city 等多个候选池，每个 value_field 都按 canonical value 自动去重；不需要级联的投影不要声明 depends_on。",
-                "Parameter Domain 的候选池必须有界并适合一次完整加载；client relation projection 必须在 50000 records / 8 MiB 内完整下发，超限不截断、不回退到逐次 Resolver，应改用 query_inputs 缩小 snapshot、拆分 Domain，或让已知 ID 使用 multiple_input。",
-                "父参数为空时子候选为空，不把未选择偷偷解释成全部；允许这种空状态时，依赖子参数通常也应 required: false。",
-                "候选变化优先保留有效交集；原非空选择完全失效才恢复 initial；可选参数的主动空集保持为空。",
-                "Query Card 的 reload 只刷新候选，不执行正式 Query，也不清空仍有效的选择。",
-                "每次成功 Query 都封存 committed {values, intents}；Revert 在相同 Domain input signature 下本地事务式恢复，signature 不同时才明确请求 committed snapshot；两者都不执行正式 Query，也不把候选表写进 committed state。",
-                "Revert 遇到最新 Domain 已缺失的 committed value 时保留该值并显示为 unavailable；候选是编辑建议，不是 Source 参数白名单。",
+                "Parameter Domain 只提供候选发现与标签，不产生 Named Output、Result 或 Catalog 条目，也不是 Source 参数白名单。",
+                "所有 SQL Domain 都先形成 Workspace 共享 immutable generation；Browser 永远不接收原始关系、SQL、Adapter、物化路径或候选全集。",
+                "同一个 Workspace Domain、定义/代码 hash、Adapter identity 与 visibility scope 可以跨 Dashboard、tab 和用户复用；权限范围不同不得共用。",
+                "options.depends_on 只对当前 generation 做本地 predicate；搜索、级联和 cursor 分页都不重新执行远端 SQL。",
+                "multiple_select 使用 all/include/exclude/none 紧凑集合；all/none 不带 operands，include/exclude 只保存有限例外，绝不展开 10 万候选。",
+                "Query Card 的 reload 请求刷新共享物化；已有 generation 时继续读旧数据，不清空选择、不恢复 default、不执行正式 Query。",
+                "每次成功 Query 都封存完整 committed canonical state；Revert 按依赖拓扑恢复该 state，不恢复 default，也不执行正式 Query。",
+                "最新 generation 中缺失的 committed operand 仍显示为 unavailable，不会静默删除。",
                 "Domain 失败只禁用当前 Dashboard 的查询；切换 Dashboard 会取消旧请求，损坏的草稿不能锁住 Shell 导航。",
-                "portable HTML 与分享链接只携带已提交 Query Parameter values/intents，不嵌入或执行 Parameter Domain。",
+                "dataviz run 不隐式物化或查询候选；已知参数值的 AI 可直接提交 canonical state。",
+                "portable HTML 与分享链接只携带已提交 canonical state，不嵌入 Parameter Domain、候选页、cursor 或物化数据。",
             ],
             "inspect": "dataviz schemas parameter-domain --full --format json",
-            "optional_cli": "dataviz parameters options <workspace> <dashboard> --query-param province=GD",
-            "filter_snapshot": "dataviz parameters filter <workspace> <options_id> --where province_code=GD --column city_code --column city_name",
+            "operations": [
+                "dataviz parameters prewarm <workspace> <dashboard>",
+                "dataviz parameters status <workspace> [dashboard]",
+                "dataviz parameters lookup <workspace> <dashboard> <parameter> --search <text> --limit 10",
+                "dataviz parameters refresh <workspace> <dashboard>",
+                "dataviz bundle <workspace> <dashboard> <destination>",
+            ],
         },
         "date_range": {
             "definition": """- id: job_date_range
@@ -1005,12 +1008,13 @@ query_parameters:
             "key 是节点本地别名，也是 SQL named placeholder 或 context.query_inputs 的 key。",
             "字符串值是 {parameter: <id>, projection: value} 的简写。",
             "part=start/end 仅允许投影 range_input/date；validate 在查询前拒绝错误类型。",
-            "projection=intent 仅允许投影 multiple_select，返回 all_available 或 explicit，不能与 part 同时使用。",
-            "explicit + [] 是明确空集；Clear/Reset/loading/error 不增加新的业务意图，当前不支持 exclude。",
+            "candidate multiple 可投影 selection=all/include/exclude/none、有限 value operands、active 约束状态，或把完整 state 交给 Python。",
+            "SQL 优先使用 Source query_filters 与 {{ dataviz_filter:<name> }}，由 Adapter 参数化生成 TRUE/FALSE/IN/NOT IN，永不产生 IN ()。",
+            "直接消费 candidate multiple 的 value 时必须同时消费 selection，避免把 exclude operands 错当成 include。",
         ],
-        "intent_binding": """query_inputs:
+        "selection_binding": """query_inputs:
   city_values: cities
-  city_intent: {parameter: cities, projection: intent}
+  city_selection: {parameter: cities, projection: selection}
 """,
         "related": ["sources", "dataset-transforms", "interactive-transforms", "data-entry-components"],
     },
@@ -1030,9 +1034,9 @@ query_parameters:
         "summary": "Source 是唯一进入分析 DAG 的外部取数入口，类型为 file、sql 或 python；Parameter Domain 只能查询网页候选元数据，不产生分析 Output。",
         "required": ["schema", "kind", "id", "type", "outputs"],
         "examples": {
-            "file": "{schema: dataviz/source/v3, kind: source, id: sales, type: file, path: data/sales.csv, outputs: {main: {kind: table}}}",
-            "sql": "{schema: dataviz/source/v3, kind: source, id: sales, type: sql, adapter: warehouse, code: sales.sql, query_inputs: {start_date: start_date}, outputs: {main: {kind: table}}}",
-            "python": "{schema: dataviz/source/v3, kind: source, id: api, type: python, code: api.py, outputs: {main: {kind: table}}}",
+            "file": "{schema: dataviz/source/v4, kind: source, id: sales, type: file, path: data/sales.csv, outputs: {main: {kind: table}}}",
+            "sql": "{schema: dataviz/source/v4, kind: source, id: sales, type: sql, adapter: warehouse, code: sales.sql, query_inputs: {start_date: start_date}, outputs: {main: {kind: table}}}",
+            "python": "{schema: dataviz/source/v4, kind: source, id: api, type: python, code: api.py, outputs: {main: {kind: table}}}",
         },
         "timeouts": "SQL/Python 默认 120 秒；SQL timeout_retries 默认 1，超时后立即使用新连接重试。",
         "debug": "Server 的 Sources 面板公开参数化 SQL、解析后 SQL、绑定参数、Adapter 类型、超时和重试证据。",
@@ -1215,7 +1219,7 @@ timeout_seconds: 120
             "上游域改变时，下游 all_available 跟随全部新候选；explicit 优先保留有效交集，原非空选择完全失效才恢复 initial，用户主动空集保留。",
             "Select 必须显式声明 options.mode；static 表示封闭业务枚举，infer 表示从数据推导候选域。",
             "options.mode=static 的 choices 是权威白名单；Source 中未声明的成员会被有意排除。",
-            "Query Parameter 与 Control Select 统一使用 initial：多选为 all/empty/values，单选为 first/empty/value；非 Select 使用 default。",
+            "Control Select 使用 initial：多选为 all/empty/values，单选为 first/empty/value；Query Parameter 统一使用 default，候选多选声明 all/include/exclude/none。",
             "infer 未写 source 时，Runtime 从消费 View 背后的 Base Output 建立选项域；不会从依赖该 Control 的 Derived Output 反推。",
             "多输入或需要明确数据域时使用 options.source: source:<id>/<name> 或 dataset:<id>/<name>；Interactive Output 会被 validate 拒绝。",
             "View Control 不重绘无关 View。",
@@ -1224,7 +1228,7 @@ timeout_seconds: 120
             "Runtime 在 Transform 代码执行前应用 mode: filter，并把 mode: value 投影到 context.control_inputs。",
         ],
         "view_control_binding": {
-            "summary": "一个 Control 最多有一个可读写 Bound View；Control Component 和 View selection gesture 写同一 canonical state。",
+            "summary": "一个 Control 可由多个经过 Compiler 校验的 Bound View 写入；Control Component 与所有合法 View selection gesture 都只向同一 ControlRuntime 发送 typed action。",
             "example": """views:
   - id: store-map
     input: source:stores/main
@@ -1391,7 +1395,7 @@ control_components:
             "version": "4.0.0",
             "grammar": "内置 line/bar/stacked-bar/pie/scatter/heatmap/radar 都生成 Plotly traces 与 layout。",
             "native": "复杂视觉由 Custom Renderer 复用 context.charts.plotly，或直接调用完整 Plotly.js API。",
-            "interaction": "图例、点击、框选、套索与缩放使用 Plotly 事件和 config；页面滚动仍由 Dashboard 优先处理。",
+            "interaction": "图例、点击、框选、套索与缩放使用 Plotly 事件和 config；再次点击当前激活的矩形/套索工具会退出选择模式并保留已有选区；页面滚动仍由 Dashboard 优先处理。",
             "offline": "Plotly.js 4.0.0 作为固定浏览器资产随 Dataviz 提供；Server 与 portable HTML 使用同一份 JS，不依赖 Python plotly 包。",
         },
         "ownership": {
@@ -1407,7 +1411,7 @@ control_components:
         "recipe_policy": "Dataviz Recipe 只提供少量经过验证的起点，不复制官方示例库、不形成能力白名单，也不替代 Plotly 文档。",
         "service_example": "const state = await context.charts.plotly.mount(node, {data, layout, config});",
         "wheel_and_zoom": {
-            "plotly_default": "内置 Plotly 模板关闭 scrollZoom。没有可写 Control binding 的图不显示工具栏；绑定后只显示矩形选择、套索选择和恢复默认值。下载图片不默认出现。",
+            "plotly_default": "内置 Plotly 模板关闭 scrollZoom。没有可写 Control binding 的图不显示工具栏；绑定后只显示矩形选择、套索选择和恢复默认值。再次点击激活的选择工具退出到普通查看模式，不清空选区；下载图片不默认出现。",
             "explicit_zoom": "缩放、平移和坐标轴恢复不进入默认工具栏；有明确分析需求时通过 config 覆盖，但不得默认截获 Dashboard 的连续滚动。",
             "custom_renderer": "Custom Renderer 使用 context.charts.plotly；只有明确需求时才启用 scrollZoom。",
         },
@@ -1804,7 +1808,7 @@ assets:
             "内置数值聚合使用线性 reducer，避免大数组展开触发 JavaScript 参数上限。",
             "节点独立发布，失败分支不阻塞无关分支。",
             "runtime.max_concurrent_runs 与 max_concurrent_interactions 分别限制单机并发 Query/Server 交互任务。",
-            "Execution Artifact、NodeCache、AI options_id 候选快照与不可变 Result 只写入 Workspace/.dataviz；默认缓存由 tab session 隔离，Server Interactive 复用同一 Query Run。",
+            "Execution Artifact、NodeCache、共享 Parameter Materialization 与不可变 Result 只写入 Workspace/.dataviz；默认缓存由 tab session 隔离，Server Interactive 复用同一 Query Run。",
             "Run、cache、Worker、Renderer 与订阅均有 dispose/淘汰路径。",
         ],
         "current_limits": [
@@ -1836,7 +1840,7 @@ assets:
         "boundary": "Runtime 性能基准只衡量页面运行规模与资源生命周期。",
     },
     "maintenance": {
-        "summary": "安全预览并清理 Workspace 的不可变 Result、Execution Artifact、AI options_id 候选快照和持久缓存。",
+        "summary": "安全预览并清理 Workspace 的不可变 Result、Execution Artifact、共享候选物化旧 generation 和持久缓存。",
         "commands": [
             "dataviz prune <workspace>",
             "dataviz prune <workspace> --keep-runs 20 --run-max-age-hours 48",
@@ -1845,7 +1849,7 @@ assets:
         ],
         "rules": [
             "默认 dry-run；必须显式 --apply 才删除。",
-            "只允许删除 Workspace/.dataviz/results、runs、cache 与 parameter-options 中被策略选中的目标；options_id 使用同一 cache 数量/时效策略。",
+            "只允许删除 Workspace/.dataviz/results、runs、cache 与 parameter-materializations 中被策略选中的目标；当前、活动读取或仍被租约保护的 generation 不会删除。",
             "活动 Query、读取租约，以及仍被活动 Interaction 消费的 Query Run 和缓存始终受保护。",
             "复制到 Workspace 外的 export 和原始 File Source 永不由 prune 删除。",
         ],

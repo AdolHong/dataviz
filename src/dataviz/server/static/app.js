@@ -1,12 +1,3 @@
-import {
-  isEmptyParameterDomainValue,
-  parameterDomainFailure,
-  parameterDomainSignature,
-  projectParameterDomainRelation,
-  resolveLocalParameterDomainValue,
-  withUnavailableParameterDomainChoices,
-} from './parameter-domain-projection.js';
-
 const state = {
   payload: null,
   dashboard: null,
@@ -32,7 +23,7 @@ function runtimeFor(dashboardId) {
       runId: null,
       pendingRunId: null,
       committedQuerySnapshot: null,
-      queryParameterValues: null,
+      queryParameterState: null,
       queryParametersOpen: null,
       controlCheckpoint: null,
       controlVersion: null,
@@ -61,11 +52,7 @@ function runtimeFor(dashboardId) {
       queryDomainGeneration: null,
       queryDomainRequestGeneration: 0,
       queryDomainController: null,
-      queryDomainInitialized: [],
-      queryDomainProjection: null,
-      queryDomainInputSignatures: null,
-      queryDomainRootChoices: {},
-      queryParameterIntents: {},
+      queryLookup: {},
     });
   }
   return state.dashboardStates.get(dashboardId);
@@ -75,16 +62,13 @@ function activeRuntime() {
   return state.dashboard ? runtimeFor(state.dashboard.id) : null;
 }
 
-function sealCommittedQuerySnapshot(runtime, values, intents) {
-  runtime.committedQuerySnapshot = {
-    values:structuredClone(values || {}),
-    intents:structuredClone(intents || {}),
-  };
+function sealCommittedQuerySnapshot(runtime, queryState) {
+  runtime.committedQuerySnapshot = structuredClone(queryState || {});
   return runtime.committedQuerySnapshot;
 }
 
-function committedQueryValues(runtime = activeRuntime()) {
-  return runtime?.committedQuerySnapshot?.values || null;
+function committedQueryState(runtime = activeRuntime()) {
+  return runtime?.committedQuerySnapshot || null;
 }
 
 for (const property of [
@@ -156,31 +140,43 @@ function queryParameterScalar(parameter, raw) {
   return choice ? structuredClone(choice.value) : raw;
 }
 
-function queryParameterValuesFromLocation(dashboard, search = window.location.search) {
+function queryParameterStateFromLocation(dashboard, search = window.location.search) {
   const params = new URLSearchParams(search);
-  const values = {};
+  const states = {};
   for (const parameter of dashboard.query_parameters || []) {
-    if (!params.has(parameter.id)) continue;
+    const selectionKey = `${parameter.id}.selection`;
+    if (!params.has(parameter.id) && !params.has(selectionKey)) continue;
     const raw = params.getAll(parameter.id);
+    if (parameter.type === 'multiple_select') {
+      states[parameter.id] = {
+        selection:params.get(selectionKey) || 'include',
+        value:raw.map(item => queryParameterScalar(parameter, item)),
+      };
+      continue;
+    }
     if (
       parameter.type === 'multiple_input'
       || parameter.type === 'multiple_select'
       || parameter.type === 'range_input'
       || (parameter.path_fields || []).length > 0
     ) {
-      values[parameter.id] = raw.map(item => queryParameterScalar(parameter, item));
+      states[parameter.id] = {value:raw.map(item => queryParameterScalar(parameter, item))};
     } else {
-      values[parameter.id] = queryParameterScalar(parameter, raw.at(-1));
+      states[parameter.id] = {value:queryParameterScalar(parameter, raw.at(-1))};
     }
   }
-  return values;
+  return states;
 }
 
-function dashboardLocation(dashboardId, parameters = {}) {
+function dashboardLocation(dashboardId, parameterState = {}) {
   const dashboard = state.payload?.dashboards?.find(item => item.id === dashboardId);
   const search = new URLSearchParams();
   for (const definition of dashboard?.query_parameters || []) {
-    const value = parameters[definition.id];
+    const entry = parameterState[definition.id] || {};
+    const value = entry.value;
+    if (definition.type === 'multiple_select') {
+      search.set(`${definition.id}.selection`, entry.selection || 'all');
+    }
     if (value == null || value === '') continue;
     const items = Array.isArray(value) ? value : [value];
     for (const item of items) {
@@ -194,7 +190,7 @@ function dashboardLocation(dashboardId, parameters = {}) {
 
 function syncDashboardLocation(mode = 'replace') {
   if (!state.dashboard || mode === 'none') return;
-  const url = dashboardLocation(state.dashboard.id, queryParameters());
+  const url = dashboardLocation(state.dashboard.id, queryParameterStates());
   const activeLink = document.querySelector(
     `.nav-button[data-id="${CSS.escape(state.dashboard.id)}"]`,
   );
@@ -275,7 +271,7 @@ function syncCanvasQueryDraft() {
   const valuesMatch = hasCommittedDataset && pendingParametersMatchDataset();
   return postCanvasMessage({
     type: 'dataviz:set-query-draft',
-    query_parameters: structuredClone(runtime.queryParameterValues || queryParameters()),
+    query_parameter_state: structuredClone(runtime.queryParameterState || queryParameterStates()),
     query_stale: Boolean(
       runtime.queryDefinitionStale || (hasCommittedDataset && !valuesMatch)
     ),
@@ -297,13 +293,11 @@ function saveTabUiState() {
   const dashboards = {};
   for (const [dashboardId, runtime] of state.dashboardStates) {
     dashboards[dashboardId] = {
-      queryParameterValues: runtime.queryParameterValues,
+      queryParameterState: runtime.queryParameterState,
       committedQuerySnapshot: runtime.committedQuerySnapshot,
       queryParametersOpen: runtime.queryParametersOpen,
       controlCheckpoint: runtime.controlCheckpoint,
       queryDomainGeneration: runtime.queryDomainGeneration,
-      queryDomainInitialized: runtime.queryDomainInitialized,
-      queryParameterIntents: runtime.queryParameterIntents,
     };
   }
   sessionStorage.setItem(
@@ -474,11 +468,16 @@ async function request(url, options = {}) {
   const response = await fetch(url, options);
   if (!response.ok) {
     let message = response.statusText;
+    let details = null;
     try {
       const payload = await response.json();
-      message = typeof payload.detail === 'string' ? payload.detail : payload.detail?.message || JSON.stringify(payload.detail || payload);
+      details = payload.detail || payload;
+      message = typeof details === 'string' ? details : details?.message || JSON.stringify(details);
     } catch (_) {}
-    throw new Error(message);
+    const error = new Error(message);
+    error.code = details?.details?.code || details?.code || null;
+    error.details = details;
+    throw error;
   }
   return response.json();
 }
@@ -1379,7 +1378,10 @@ function controlComponent(parameter, presentation = {}) {
   const count = parameter.options?.mode === 'static'
     ? (parameter.options.choices || []).length
     : 0;
-  if (parameter.type === 'multiple_select') return count > 0 && count <= 8 ? 'checkbox-group' : 'select';
+  if (parameter.type === 'multiple_select') {
+    if (Object.prototype.hasOwnProperty.call(parameter, 'resolved_default_state')) return 'select';
+    return count > 0 && count <= 8 ? 'checkbox-group' : 'select';
+  }
   if (parameter.type === 'single_select') {
     return !parameter.clearable && count > 0 && count <= 4 ? 'radio-group' : 'select';
   }
@@ -1387,9 +1389,8 @@ function controlComponent(parameter, presentation = {}) {
 }
 
 function field(parameter, name = parameter.id, presentation = {}, behavior = {}) {
-  const defaultValue = Object.prototype.hasOwnProperty.call(parameter, 'resolved_default')
-    ? parameter.resolved_default
-    : parameter.default;
+  const defaultState = parameter.resolved_default_state || {value:parameter.default};
+  const defaultValue = defaultState.value;
   const wrapper = document.createElement('div');
   wrapper.className = 'field';
   const label = document.createElement('label');
@@ -1457,7 +1458,16 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
     else if (Array.isArray(defaultValue)) input.value = defaultValue.join(',');
     else input.value = defaultValue ?? '';
   }
-  input.required = Boolean(parameter.required && parameter.value_type !== 'boolean');
+  // A candidate-backed Query multiple is constrained by its compact
+  // all/include/exclude/none state, not by the selected <option> operands.
+  // Native required validation cannot represent `all` (valid with zero
+  // operands) and would incorrectly block Query before canonical validation.
+  const compactQueryMultiple = Boolean(
+    behavior.query && parameter.type === 'multiple_select'
+  );
+  input.required = Boolean(
+    parameter.required && parameter.value_type !== 'boolean' && !compactQueryMultiple
+  );
   if (parameter.placeholder) input.placeholder = parameter.placeholder;
   if (parameter.min != null) input.min = parameter.min;
   if (parameter.max != null) input.max = parameter.max;
@@ -1471,6 +1481,10 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
   input.dataset.type = parameter.type;
   input.dataset.valueType = parameter.value_type;
   input.dataset.controlInput = '';
+  input.dataset.queryParameter = String(Boolean(behavior.query));
+  if (behavior.query && parameter.type === 'multiple_select') {
+    input.dataset.querySelection = defaultState.selection || 'all';
+  }
   if (behavior.query && parameter.options?.mode === 'domain') {
     input.dataset.parameterDomain = parameter.options.source;
   }
@@ -1496,6 +1510,10 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
   control.dataset.maxItems = String(parameter.max_items || '');
   control.dataset.controlType = parameter.type;
   control.dataset.valueType = parameter.value_type;
+  control.dataset.queryParameter = String(Boolean(behavior.query));
+  control.dataset.remoteOptions = String(Boolean(
+    behavior.query && parameter.options?.mode === 'domain'
+  ));
   control.dataset.hideSelected = String(Boolean(presentation.hide_selected));
   control.dataset.searchPlaceholder = presentation.search_placeholder || 'Search options…';
   control.dataset.emptyText = presentation.empty_text || 'No matching options';
@@ -1802,7 +1820,11 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
     previous.queryDomainController = null;
     previous.queryDomainPending = false;
     previous.queryDomainRequestGeneration += 1;
-    try { previous.queryParameterValues = queryParameters(); } catch (_) {}
+    Object.values(previous.queryLookup || {}).forEach(entry => {
+      entry.controller?.abort?.();
+      window.clearTimeout(entry.retryTimer);
+    });
+    try { previous.queryParameterState = queryParameterStates(); } catch (_) {}
     try { previous.canvasScrollY = $('#canvas-frame').contentWindow.scrollY || 0; } catch (_) { previous.canvasScrollY = 0; }
     saveTabUiState();
   }
@@ -1810,17 +1832,9 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
   state.dashboard = state.payload.dashboards.find((item) => item.id === id);
   state.preferredDashboardId = id;
   const runtime = activeRuntime();
-  runtime.queryDomainProjection = null;
-  runtime.queryDomainInputSignatures = null;
-  runtime.queryDomainRootChoices = {};
-  for (const parameter of state.dashboard.query_parameters || []) {
-    if (Object.prototype.hasOwnProperty.call(runtime.queryParameterIntents, parameter.id)) continue;
-    runtime.queryParameterIntents[parameter.id] = (
-      parameter.type === 'multiple_select' && parameter.initial?.mode === 'all'
-    ) ? 'all_available' : 'explicit';
-  }
-  const restoredQueryParameterValues = structuredClone(
-    runtime.queryParameterValues || committedQueryValues(runtime) || {},
+  runtime.queryLookup = {};
+  const restoredQueryParameterState = structuredClone(
+    runtime.queryParameterState || committedQueryState(runtime) || {},
   );
   document.querySelectorAll('.nav-button').forEach((node) => node.classList.toggle('active', node.dataset.id === id));
   const runnable = Boolean(state.dashboard.runnable);
@@ -1846,45 +1860,30 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
   }
   setQueryParametersOpen(runtime.queryParametersOpen);
   window.datavizComponents?.hydrate(document);
-  syncQueryParameterSelectionIntents();
-  let locationValues = {};
+  let locationState = {};
   if (locationSearch != null) {
-    locationValues = queryParameterValuesFromLocation(state.dashboard, locationSearch);
-    runtime.queryParameterValues = {
+    locationState = queryParameterStateFromLocation(state.dashboard, locationSearch);
+    runtime.queryParameterState = {
       ...Object.fromEntries(state.dashboard.query_parameters.map(parameter => [
         parameter.id,
-        structuredClone(parameter.resolved_default ?? parameter.default ?? null),
+        structuredClone(parameter.resolved_default_state || {value:parameter.resolved_default ?? parameter.default ?? null}),
       ])),
-      ...restoredQueryParameterValues,
-      ...locationValues,
+      ...restoredQueryParameterState,
+      ...locationState,
     };
-    for (const parameterId of Object.keys(locationValues)) {
-      runtime.queryParameterIntents[parameterId] = 'explicit';
-    }
   }
-  runtime.queryDomainInitialized = [...new Set([
-    ...(runtime.queryDomainInitialized || []),
-    ...dynamicQueryParameters()
-      .map(parameter => parameter.id)
-      .filter(parameterId => (
-        Object.prototype.hasOwnProperty.call(restoredQueryParameterValues, parameterId)
-        || Object.prototype.hasOwnProperty.call(locationValues, parameterId)
-      )),
-  ])];
-  setFormValues(
-    $('#parameter-form'),
-    runtime.queryParameterValues || committedQueryValues(runtime) || {},
-  );
+  setQueryParameterStates(runtime.queryParameterState || committedQueryState(runtime) || {});
   // Freeze resolved relative defaults as concrete tab-local values on first
   // hydration. A full page reload in the same tab must restore these values
   // instead of silently re-evaluating `today` from a newer Workspace payload.
-  if (runtime.queryParameterValues == null) {
-    runtime.queryParameterValues = Object.fromEntries(
+  if (runtime.queryParameterState == null) {
+    runtime.queryParameterState = Object.fromEntries(
       state.dashboard.query_parameters.map(parameter => [
         parameter.id,
-        structuredClone(parameter.resolved_default ?? parameter.default ?? null),
+        structuredClone(parameter.resolved_default_state || {value:parameter.resolved_default ?? parameter.default ?? null}),
       ]),
     );
+    setQueryParameterStates(runtime.queryParameterState);
   }
   setFormValues(
     $('#dashboard-control-form'),
@@ -1917,7 +1916,7 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
   setShareEnabled(Boolean(runtime.runId) && runtime.controlConnected);
   saveTabUiState();
   if (dynamicQueryParameters().length) {
-    runtime.queryDomainReady = false;
+    runtime.queryDomainReady = true;
     updateParameterDomainUi();
     void resolveQueryParameterDomains();
   } else {
@@ -1943,8 +1942,42 @@ function setFormValues(form, values, {sync = true} = {}) {
   }
 }
 
-function queryParameters() {
-  return formValues($('#parameter-form'));
+function queryParameterStates() {
+  const values = formValues($('#parameter-form'));
+  const states = {};
+  for (const parameter of state.dashboard?.query_parameters || []) {
+    const input = $('#parameter-form').elements.namedItem(parameter.id);
+    if (parameter.type === 'multiple_select') {
+      states[parameter.id] = {
+        selection:input?.dataset.querySelection || 'all',
+        value:Array.isArray(values[parameter.id]) ? values[parameter.id] : [],
+      };
+    } else states[parameter.id] = {value:values[parameter.id]};
+  }
+  return states;
+}
+
+function queryParameterValues(queryState = queryParameterStates()) {
+  return Object.fromEntries(Object.entries(queryState).map(([key, entry]) => [
+    key, structuredClone(entry?.value),
+  ]));
+}
+
+function setQueryParameterStates(queryState, {sync = true} = {}) {
+  const values = queryParameterValues(queryState);
+  setFormValues($('#parameter-form'), values, {sync:false});
+  for (const parameter of state.dashboard?.query_parameters || []) {
+    if (parameter.type !== 'multiple_select') continue;
+    const input = $('#parameter-form').elements.namedItem(parameter.id);
+    if (!(input instanceof HTMLSelectElement)) continue;
+    const entry = queryState?.[parameter.id] || {selection:'all', value:[]};
+    input.dataset.querySelection = entry.selection || 'all';
+    const operands = new Set((entry.value || []).map(value => (
+      input.dataset.valueEncoding === 'json' ? JSON.stringify(value) : String(value)
+    )));
+    for (const option of input.options) option.selected = operands.has(option.value);
+    if (sync) input._syncChoiceControl?.();
+  }
 }
 
 function dynamicQueryParameters() {
@@ -1953,227 +1986,47 @@ function dynamicQueryParameters() {
   );
 }
 
-function parameterDomainProjectedInput(binding, values, intents) {
-  const parameterId = binding?.parameter;
-  const value = values?.[parameterId];
-  if (binding?.projection === 'intent') return intents?.[parameterId] || 'explicit';
-  if (binding?.projection === 'present') return !isEmptyParameterDomainValue(value);
-  if (binding?.part != null) {
-    if (!Array.isArray(value) || value.length !== 2) {
-      throw parameterDomainFailure(
-        'query_input_projection_failed',
-        `Parameter Domain input cannot read ${binding.part} from ${parameterId}`,
-      );
-    }
-    return value[binding.part === 'start' ? 0 : 1];
-  }
-  return value;
-}
-
-function parameterDomainInputSignatures(values, intents) {
-  const bindingsByDomain = state.dashboard?.parameter_domain_contract?.domain_input_bindings || {};
-  return Object.fromEntries(Object.entries(bindingsByDomain).map(([domainId, bindings]) => [
-    domainId,
-    parameterDomainSignature(Object.fromEntries(
-      Object.keys(bindings || {}).sort().map(alias => [
-        alias,
-        parameterDomainProjectedInput(bindings[alias], values, intents),
-      ]),
-    )),
-  ]));
-}
-
-function parameterDomainSnapshotMatches(values, intents) {
-  const runtime = activeRuntime();
-  if (!runtime?.queryDomainInputSignatures) return false;
-  const desired = parameterDomainInputSignatures(values, intents);
-  return Object.keys(desired).every(
-    domainId => desired[domainId] === runtime.queryDomainInputSignatures[domainId],
-  ) && Object.keys(runtime.queryDomainInputSignatures).every(
-    domainId => desired[domainId] === runtime.queryDomainInputSignatures[domainId],
-  );
-}
-
-function validateParameterDomainClientProjection(projection, contract) {
-  if (!projection || typeof projection !== 'object') {
-    throw parameterDomainFailure(
-      'parameter_domain_client_projection_missing',
-      'Parameter Domain response omitted its complete client projection',
-    );
-  }
-  if (contract?.schema !== 'dataviz/parameter-domain-contract/v2') {
-    throw parameterDomainFailure(
-      'parameter_domain_contract_unsupported',
-      `Unsupported Parameter Domain Contract: ${contract?.schema || 'missing'}`,
-    );
-  }
-  if (
-    projection.contract_schema !== contract.schema
-    || !contract.contract_hash
-    || projection.contract_hash !== contract.contract_hash
-  ) {
-    throw parameterDomainFailure(
-      'parameter_domain_contract_drift',
-      'Parameter Domain projection does not match the active Contract',
-    );
-  }
-  const parameters = projection.parameters;
-  const capacity = projection.capacity;
-  if (!parameters || typeof parameters !== 'object' || !capacity) {
-    throw parameterDomainFailure(
-      'parameter_domain_client_projection_invalid',
-      'Parameter Domain client projection is incomplete',
-    );
-  }
-  for (const [parameterId, parents] of Object.entries(contract.projection_dependencies || {})) {
-    if ((parents || []).length && !parameters[parameterId]) {
-      throw parameterDomainFailure(
-        'parameter_domain_client_projection_missing',
-        `Parameter Domain projection is missing consumer ${parameterId}`,
-      );
-    }
-  }
-  const rows = Object.values(parameters).reduce(
-    (total, entry) => total + (Array.isArray(entry?.rows) ? entry.rows.length : 0),
-    0,
-  );
-  const serializedBytes = new TextEncoder().encode(parameterDomainSignature({
-    contract_schema:projection.contract_schema,
-    contract_hash:projection.contract_hash,
-    parameters,
-  })).byteLength;
-  if (
-    rows !== capacity.rows
-    || serializedBytes !== capacity.serialized_bytes
-    || rows > capacity.max_rows
-    || serializedBytes > capacity.max_serialized_bytes
-  ) {
-    throw parameterDomainFailure(
-      'parameter_domain_client_projection_capacity_invalid',
-      'Parameter Domain projection capacity metadata is inconsistent',
-    );
-  }
-  return projection;
-}
-
-function projectParameterDomainChoices(parameter, values, projection = null) {
-  const snapshot = projection || activeRuntime()?.queryDomainProjection;
-  const contract = state.dashboard?.parameter_domain_contract || {};
-  const entry = snapshot?.parameters?.[parameter.id];
-  const expectedParents = contract.projection_dependencies?.[parameter.id] || [];
-  if (!entry || entry.domain !== parameter.options?.source) {
-    throw parameterDomainFailure(
-      'parameter_domain_client_projection_missing',
-      `Parameter Domain projection is missing consumer ${parameter.id}`,
-    );
-  }
-  return projectParameterDomainRelation({
-    entry,
-    expectedParents,
-    values,
-    parameterId:parameter.id,
-  });
-}
-
-function calculateLocalParameterDomainTransaction(
-  values,
-  intents,
-  parameterIds,
-  {preserveUnavailable = false} = {},
-) {
-  const contract = state.dashboard?.parameter_domain_contract || {};
-  const definitions = new Map(
-    (state.dashboard?.query_parameters || []).map(parameter => [parameter.id, parameter]),
-  );
-  const affected = new Set(parameterIds || []);
-  const nextValues = structuredClone(values || {});
-  const nextIntents = structuredClone(intents || {});
-  const choices = {};
-  for (const parameterId of contract.order || []) {
-    if (!affected.has(parameterId)) continue;
-    const parameter = definitions.get(parameterId);
-    if (!parameter || parameter.options?.mode !== 'domain') continue;
-    let parameterChoices = projectParameterDomainChoices(parameter, nextValues);
-    const resolved = resolveLocalParameterDomainValue(
-      parameter,
-      parameterChoices,
-      nextValues[parameterId],
-      nextIntents[parameterId],
-      {preserveUnavailable},
-    );
-    if (preserveUnavailable) {
-      parameterChoices = withUnavailableParameterDomainChoices(
-        parameter, parameterChoices, resolved.value,
-      );
-    }
-    choices[parameterId] = parameterChoices;
-    nextValues[parameterId] = resolved.value;
-    nextIntents[parameterId] = resolved.intent;
-  }
-  return {values:nextValues, intents:nextIntents, choices};
-}
-
-function applyParameterDomainTransaction(transaction) {
-  const runtime = activeRuntime();
-  if (!runtime) return;
-  runtime.queryParameterIntents = structuredClone(transaction.intents || {});
-  for (const parameter of dynamicQueryParameters()) {
-    if (!Object.prototype.hasOwnProperty.call(transaction.choices || {}, parameter.id)) continue;
-    replaceParameterDomainOptions(parameter, transaction.choices[parameter.id], {sync:false});
-  }
-  syncQueryParameterSelectionIntents({sync:false});
-  setFormValues($('#parameter-form'), transaction.values || {}, {sync:false});
-  window.datavizComponents?.controls?.sync($('#parameter-form'));
-  runtime.queryParameterValues = structuredClone(transaction.values || {});
-  runtime.queryDomainInitialized = [...new Set([
-    ...(runtime.queryDomainInitialized || []),
-    ...Object.keys(transaction.choices || {}),
-  ])];
-}
-
-function syncQueryParameterSelectionIntents({sync = true} = {}) {
-  const runtime = activeRuntime();
-  const controls = window.datavizComponents?.controls;
-  if (!runtime || !controls?.setSelectionIntent) return;
-  for (const parameter of state.dashboard?.query_parameters || []) {
-    if (parameter.type !== 'multiple_select') continue;
-    const input = $('#parameter-form').elements.namedItem(parameter.id);
-    if (!(input instanceof HTMLSelectElement)) continue;
-    controls.setSelectionIntent(
-      input,
-      runtime.queryParameterIntents[parameter.id] || 'explicit',
-    );
-    if (sync) input._syncChoiceControl?.();
-  }
-}
-
 function updateParameterDomainUi() {
   const runtime = activeRuntime();
   const dynamic = dynamicQueryParameters();
   const reload = $('#query-parameter-options-reload');
   const revert = $('#query-parameters-revert');
   reload.hidden = dynamic.length === 0;
-  reload.disabled = Boolean(runtime?.queryDomainPending);
+  reload.disabled = false;
   reload.classList.toggle('is-loading', Boolean(runtime?.queryDomainPending));
   revert.hidden = !runtime?.committedQuerySnapshot || pendingParametersMatchDataset();
-  revert.disabled = Boolean(runtime?.queryDomainPending);
-  for (const parameter of dynamic) {
-    const input = $('#parameter-form').elements.namedItem(parameter.id);
-    if (input) {
-      input.disabled = Boolean(runtime?.queryDomainPending);
-      input._syncChoiceControl?.();
-    }
-  }
+  revert.disabled = false;
   if (runtime && dynamic.length) {
     $('#run-button').disabled = runtime.pendingRunId
       ? false
-      : !state.dashboard?.runnable || runtime.queryDomainPending || !runtime.queryDomainReady;
+      : !state.dashboard?.runnable || !runtime.queryDomainReady;
   }
 }
 
-function replaceParameterDomainOptions(parameter, choices, {sync = true} = {}) {
+function replaceParameterDomainOptions(parameter, choices, {
+  sync = true,
+  append = false,
+  selectedItems = [],
+} = {}) {
   const input = $('#parameter-form').elements.namedItem(parameter.id);
   if (!(input instanceof HTMLSelectElement)) return;
+  const currentState = activeRuntime()?.queryParameterState?.[parameter.id]
+    || {selection:parameter.type === 'multiple_select' ? 'all' : undefined, value:[]};
+  const existing = append
+    ? [...input.options].filter(option => option.dataset.emptyOption !== 'true').map(option => ({
+        value:input.dataset.valueEncoding === 'json' ? JSON.parse(option.value) : option.value,
+        label:option.textContent,
+        description:option.dataset.description || '',
+        group:option.dataset.group || '',
+        keywords:(option.dataset.keywords || '').split(' ').filter(Boolean),
+        unavailable:option.dataset.unavailable === 'true',
+      }))
+    : [];
+  const byValue = new Map();
+  for (const choice of [...selectedItems, ...existing, ...choices]) {
+    byValue.set(JSON.stringify(choice.value), choice);
+  }
+  choices = [...byValue.values()];
   const typed = choices.some(choice => typeof choice.value !== 'string');
   input.dataset.valueEncoding = typed ? 'json' : 'string';
   const nodes = [];
@@ -2199,64 +2052,170 @@ function replaceParameterDomainOptions(parameter, choices, {sync = true} = {}) {
     nodes.push(option);
   }
   input.replaceChildren(...nodes);
+  input.dataset.querySelection = currentState.selection || input.dataset.querySelection || 'all';
+  const operands = new Set((currentState.value || []).map(value => (
+    typed ? JSON.stringify(value) : String(value)
+  )));
+  for (const option of input.options) option.selected = operands.has(option.value);
   input.dataset.runtimeOptionsSignature = JSON.stringify(choices);
   if (sync) input._syncChoiceControl?.();
 }
 
-function parameterDomainResponseTransaction(response) {
-  const contract = state.dashboard?.parameter_domain_contract;
-  if (response?.schema !== 'dataviz/parameter-domain-resolution/v2') {
-    throw parameterDomainFailure(
-      'parameter_domain_resolution_unsupported',
-      `Unsupported Parameter Domain Resolution: ${response?.schema || 'missing'}`,
-    );
+
+function reconcileLookupState(parameter, response, {preserve = false} = {}) {
+  const runtime = activeRuntime();
+  if (!runtime || parameter.type !== 'multiple_select' || preserve) return;
+  const current = runtime.queryParameterState?.[parameter.id];
+  if (!current || !['include', 'exclude'].includes(current.selection)) return;
+  const available = (response.selected_items || [])
+    .filter(item => item.available)
+    .map(item => structuredClone(item.value));
+  let next = current;
+  if (current.selection === 'include') {
+    next = available.length
+      ? {selection:'include', value:available}
+      : structuredClone(parameter.resolved_default_state || {selection:'all', value:[]});
+  } else {
+    next = available.length
+      ? {selection:'exclude', value:available}
+      : {selection:'all', value:[]};
   }
-  if (
-    !contract?.contract_hash
-    || response.contract?.contract_hash !== contract.contract_hash
-    || response.contract?.schema !== contract.schema
-  ) {
-    throw parameterDomainFailure(
-      'parameter_domain_contract_drift',
-      'Parameter Domain response does not match the active Dashboard Contract',
-    );
-  }
-  const projection = validateParameterDomainClientProjection(
-    response.client_projection,
-    contract,
-  );
-  const values = structuredClone(response.query_parameters || {});
-  const intents = structuredClone(response.intents || {});
-  const choices = {};
-  const rootChoices = {};
-  for (const parameter of dynamicQueryParameters()) {
-    const parents = contract.projection_dependencies?.[parameter.id] || [];
-    const serverChoices = structuredClone(response.choices?.[parameter.id] || []);
-    if (!parents.length) {
-      choices[parameter.id] = serverChoices;
-      rootChoices[parameter.id] = serverChoices.filter(choice => !choice.unavailable);
-      continue;
-    }
-    let projectedChoices = projectParameterDomainChoices(parameter, values, projection);
-    if (serverChoices.some(choice => choice.unavailable)) {
-      projectedChoices = withUnavailableParameterDomainChoices(
-        parameter, projectedChoices, values[parameter.id],
-      );
-    }
-    if (parameterDomainSignature(projectedChoices) !== parameterDomainSignature(serverChoices)) {
-      throw parameterDomainFailure(
-        'parameter_domain_projection_drift',
-        `Server and browser projections disagree for ${parameter.id}`,
-      );
-    }
-    choices[parameter.id] = projectedChoices;
-  }
-  return {
-    transaction:{values, intents, choices},
-    projection,
-    rootChoices,
-    inputSignatures:parameterDomainInputSignatures(values, intents),
+  runtime.queryParameterState[parameter.id] = next;
+}
+
+async function lookupQueryParameter(parameter, {
+  search = '', append = false, refresh = false, preserve = false,
+} = {}) {
+  const dashboard = state.dashboard;
+  const runtime = activeRuntime();
+  if (!dashboard || !runtime || parameter.options?.mode !== 'domain') return null;
+  const previous = runtime.queryLookup[parameter.id] || {};
+  const cursor = append && previous.search === search ? previous.nextCursor : null;
+  if (append && !cursor) return previous;
+  const requestGeneration = Number(previous.requestGeneration || 0) + 1;
+  previous.controller?.abort();
+  window.clearTimeout(previous.retryTimer);
+  const controller = new AbortController();
+  runtime.queryLookup[parameter.id] = {
+    ...previous, search, controller, requestGeneration, status:'loading',
   };
+  runtime.queryDomainPending = true;
+  updateParameterDomainUi();
+  const stateEntry = runtime.queryParameterState?.[parameter.id] || {value:[]};
+  const parentStates = Object.fromEntries(
+    Object.keys(parameter.options.depends_on || {}).map(parent => [
+      parent,
+      structuredClone(runtime.queryParameterState?.[parent] || {selection:'all', value:[]}),
+    ]),
+  );
+  try {
+    const response = await request(
+      `/api/dashboards/${encodeURIComponent(dashboard.id)}/parameter-domains/lookup`,
+      {
+        method:'POST', headers:{'Content-Type':'application/json'}, signal:controller.signal,
+        body:JSON.stringify({
+          session_id:state.sessionId,
+          parameter:parameter.id,
+          parent_states:parentStates,
+          search,
+          limit:50,
+          cursor,
+          selected:Array.isArray(stateEntry.value) ? stateEntry.value : [],
+          refresh,
+        }),
+      },
+    );
+    if (
+      state.dashboard?.id !== dashboard.id
+      || runtime.queryLookup[parameter.id]?.requestGeneration !== requestGeneration
+    ) return null;
+    const items = append
+      ? [...(previous.items || []), ...(response.items || [])]
+      : (response.items || []);
+    runtime.queryLookup[parameter.id] = {
+      items,
+      selectedItems:response.selected_items || [],
+      total:Number(response.total || 0),
+      nextCursor:response.next_cursor || null,
+      generation:response.generation || null,
+      freshness:response.freshness || 'missing',
+      status:response.status || 'unavailable',
+      search,
+      requestGeneration,
+      controller:null,
+    };
+    if (response.status !== 'ready') {
+      const input = $('#parameter-form').elements.namedItem(parameter.id);
+      replaceParameterDomainOptions(parameter, [], {
+        append:false,
+        selectedItems:response.selected_items || [],
+        sync:false,
+      });
+      if (input) {
+        input.dataset.queryTotal = '0';
+        input.dataset.queryFreshness = response.freshness || 'missing';
+        input.disabled = true;
+        input._syncChoiceControl?.();
+      }
+      const needsFirst = parameter.default?.mode === 'first'
+        && runtime.queryParameterState?.[parameter.id]?.value == null;
+      if (needsFirst) runtime.queryDomainReady = false;
+      const retryTimer = window.setTimeout(() => {
+        if (state.dashboard?.id === dashboard.id) void lookupQueryParameter(parameter, {search});
+      }, 1000);
+      runtime.queryLookup[parameter.id].retryTimer = retryTimer;
+      return runtime.queryLookup[parameter.id];
+    }
+    reconcileLookupState(parameter, response, {preserve});
+    if (
+      parameter.type === 'single_select'
+      && (runtime.queryParameterState?.[parameter.id]?.value == null)
+      && parameter.default?.mode === 'first'
+      && response.items?.length
+    ) {
+      runtime.queryParameterState[parameter.id] = {
+        value:structuredClone(response.items[0].value),
+      };
+    }
+    replaceParameterDomainOptions(parameter, response.items || [], {
+      append,
+      selectedItems:response.selected_items || [],
+      sync:false,
+    });
+    const input = $('#parameter-form').elements.namedItem(parameter.id);
+    if (input) {
+      input.disabled = false;
+      input.dataset.queryTotal = String(response.total || 0);
+      // `total` is the number of matches for this request. Keep the latest
+      // unfiltered total separately so an auto-search control does not hide
+      // itself after a narrow query returns fewer than the UI threshold.
+      if (!search) input.dataset.queryUniverseTotal = String(response.total || 0);
+      input.dataset.queryFreshness = response.freshness || 'missing';
+      input._syncChoiceControl?.();
+    }
+    setQueryParameterStates(runtime.queryParameterState, {sync:false});
+    window.datavizComponents?.controls?.sync($('#parameter-form'));
+    runtime.queryDomainGeneration = response.generation || runtime.queryDomainGeneration;
+    state.workspaceRevision = Math.max(state.workspaceRevision, Number(response.workspace_revision || 0));
+    return runtime.queryLookup[parameter.id];
+  } catch (error) {
+    if (error.name === 'AbortError') return null;
+    if (append && error.code === 'parameter_lookup_cursor_stale') {
+      return lookupQueryParameter(parameter, {search, refresh, preserve});
+    }
+    runtime.queryLookup[parameter.id] = {
+      ...previous, status:'error', error:error.message, controller:null, requestGeneration,
+    };
+    const needsFirst = parameter.default?.mode === 'first'
+      && runtime.queryParameterState?.[parameter.id]?.value == null;
+    if (needsFirst) runtime.queryDomainReady = false;
+    return null;
+  } finally {
+    runtime.queryDomainPending = dynamicQueryParameters().some(item => (
+      runtime.queryLookup[item.id]?.status === 'loading'
+    ));
+    updateParameterDomainUi();
+  }
 }
 
 async function resolveQueryParameterDomains({
@@ -2264,184 +2223,46 @@ async function resolveQueryParameterDomains({
   announce = false,
   targetSnapshot = null,
 } = {}) {
-  const dashboard = state.dashboard;
   const runtime = activeRuntime();
-  const dynamic = dynamicQueryParameters();
-  if (!dashboard || !runtime || dynamic.length === 0) {
-    updateParameterDomainUi();
-    return;
+  if (!runtime) return false;
+  if (targetSnapshot) {
+    runtime.queryParameterState = structuredClone(targetSnapshot);
+    setQueryParameterStates(runtime.queryParameterState, {sync:false});
   }
-  window.clearTimeout(state.parameterDomainTimer);
-  state.parameterDomainTimer = null;
-  runtime.queryDomainController?.abort();
-  const controller = new AbortController();
-  const requestGeneration = runtime.queryDomainRequestGeneration + 1;
-  runtime.queryDomainController = controller;
-  runtime.queryDomainRequestGeneration = requestGeneration;
-  let values;
-  if (targetSnapshot) values = structuredClone(targetSnapshot.values || {});
-  else {
-    try { values = queryParameters(); }
-    catch (_error) { values = runtime.queryParameterValues || {}; }
-  }
-  const requestedIntents = targetSnapshot
-    ? structuredClone(targetSnapshot.intents || {})
-    : runtime.queryParameterIntents;
-  runtime.queryDomainPending = true;
-  if (!runtime.queryDomainGeneration) runtime.queryDomainReady = false;
-  updateParameterDomainUi();
-  try {
-    const response = await request(
-      `/api/dashboards/${encodeURIComponent(dashboard.id)}/parameter-domains/resolve`,
-      {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        signal:controller.signal,
-        body:JSON.stringify({
-          session_id:state.sessionId,
-          query_parameters:values,
-          initialized_parameters:targetSnapshot
-            ? dynamic.map(parameter => parameter.id)
-            : runtime.queryDomainInitialized,
-          intents:requestedIntents,
-          reconciliation:targetSnapshot ? 'committed_snapshot' : 'draft',
-          refresh,
-        }),
-      },
-    );
-    if (
-      state.dashboard?.id !== dashboard.id
-      || runtime.queryDomainRequestGeneration !== requestGeneration
-    ) return;
-    const resolved = parameterDomainResponseTransaction(response);
-    runtime.queryDomainProjection = resolved.projection;
-    runtime.queryDomainRootChoices = resolved.rootChoices;
-    runtime.queryDomainInputSignatures = resolved.inputSignatures;
-    applyParameterDomainTransaction(resolved.transaction);
-    runtime.queryDomainInitialized = dynamic.map(parameter => parameter.id);
-    runtime.queryDomainGeneration = response.generation;
-    runtime.queryDomainReady = true;
-    state.workspaceRevision = Math.max(
-      state.workspaceRevision,
-      Number(response.workspace_revision || 0),
-    );
-    saveTabUiState();
-    syncDashboardLocation('replace');
-    setQueryState();
-    syncCanvasQueryDraft();
-    if (announce) showShortcutToast(
-      targetSnapshot ? '已恢复已应用参数' : refresh ? '参数选项已更新' : '参数选项已加载',
-    );
-    return true;
-  } catch (error) {
-    if (error.name === 'AbortError') return;
-    runtime.queryDomainReady = false;
-    runtime.message = `参数选项加载失败：${error.message}`;
-    setQueryState(runtime.message);
-    showShortcutToast(runtime.message);
-    return false;
-  } finally {
-    if (runtime.queryDomainRequestGeneration === requestGeneration) {
-      runtime.queryDomainPending = false;
-      runtime.queryDomainController = null;
-      updateParameterDomainUi();
-    }
-  }
-}
-
-function scheduleParameterDomainResolution() {
-  window.clearTimeout(state.parameterDomainTimer);
-  state.parameterDomainTimer = window.setTimeout(
-    () => {
-      state.parameterDomainTimer = null;
-      void resolveQueryParameterDomains();
-    },
-    120,
+  runtime.queryDomainReady = true;
+  const definitions = new Map(
+    dynamicQueryParameters().map(parameter => [parameter.id, parameter]),
   );
+  const order = state.dashboard?.parameter_domain_contract?.order || [...definitions.keys()];
+  for (const parameterId of order) {
+    const parameter = definitions.get(parameterId);
+    if (!parameter) continue;
+    const input = $('#parameter-form').elements.namedItem(parameter.id);
+    if (input) input._remoteLookup = options => lookupQueryParameter(parameter, options);
+    await lookupQueryParameter(parameter, {refresh, preserve:Boolean(targetSnapshot)});
+  }
+  runtime.queryParameterState = queryParameterStates();
+  saveTabUiState();
+  syncDashboardLocation('replace');
+  setQueryState();
+  syncCanvasQueryDraft();
+  if (announce) showShortcutToast(targetSnapshot ? '已恢复已应用参数' : refresh ? '参数选项已更新' : '参数选项已加载');
+  return true;
 }
 
-function reconcileParameterDomainSnapshotDemand(values, intents) {
-  const runtime = activeRuntime();
-  if (!runtime) return;
-  if (parameterDomainSnapshotMatches(values, intents)) {
-    window.clearTimeout(state.parameterDomainTimer);
-    state.parameterDomainTimer = null;
-    runtime.queryDomainReady = true;
-  } else {
-    runtime.queryDomainReady = false;
-    scheduleParameterDomainResolution();
-  }
-  updateParameterDomainUi();
-}
-
-function localCommittedParameterDomainTransaction(snapshot) {
-  const runtime = activeRuntime();
-  if (!runtime?.queryDomainProjection) {
-    throw parameterDomainFailure(
-      'parameter_domain_client_projection_missing',
-      'Cannot restore Query Parameters without the current complete Domain projection',
-    );
-  }
-  const contract = state.dashboard?.parameter_domain_contract || {};
-  const projectionConsumers = Object.entries(contract.projection_dependencies || {})
-    .filter(([_parameterId, parents]) => (parents || []).length)
-    .map(([parameterId]) => parameterId);
-  const transaction = calculateLocalParameterDomainTransaction(
-    structuredClone(snapshot.values || {}),
-    structuredClone(snapshot.intents || {}),
-    projectionConsumers,
-    {preserveUnavailable:true},
-  );
-  for (const parameter of dynamicQueryParameters()) {
-    if ((contract.projection_dependencies?.[parameter.id] || []).length) continue;
-    const choices = runtime.queryDomainRootChoices?.[parameter.id];
-    if (!Array.isArray(choices)) {
-      throw parameterDomainFailure(
-        'parameter_domain_client_projection_missing',
-        `Current Domain snapshot is missing root choices for ${parameter.id}`,
-      );
-    }
-    transaction.choices[parameter.id] = withUnavailableParameterDomainChoices(
-      parameter, choices, transaction.values[parameter.id],
-    );
-  }
-  return transaction;
-}
 
 async function revertQueryParameters() {
   const runtime = activeRuntime();
   const snapshot = runtime?.committedQuerySnapshot;
-  if (!runtime || !snapshot || runtime.queryDomainPending) return;
-  if (dynamicQueryParameters().length) {
-    if (!parameterDomainSnapshotMatches(snapshot.values || {}, snapshot.intents || {})) {
-      await resolveQueryParameterDomains({targetSnapshot:snapshot, announce:true});
-      return;
-    }
-    try {
-      applyParameterDomainTransaction(localCommittedParameterDomainTransaction(snapshot));
-      runtime.queryDomainReady = true;
-    } catch (error) {
-      runtime.queryDomainReady = false;
-      runtime.message = `参数选项本地投影失败：${error.message}`;
-      setQueryState(runtime.message);
-      showShortcutToast(runtime.message);
-      updateParameterDomainUi();
-      return;
-    }
-    window.clearTimeout(state.parameterDomainTimer);
-    state.parameterDomainTimer = null;
-    saveTabUiState();
-    syncDashboardLocation('replace');
-    setQueryState();
-    syncCanvasQueryDraft();
-    showShortcutToast('已恢复已应用参数');
-    return;
-  }
-  runtime.queryParameterIntents = structuredClone(snapshot.intents || {});
-  runtime.queryParameterValues = structuredClone(snapshot.values || {});
-  syncQueryParameterSelectionIntents({sync:false});
-  setFormValues($('#parameter-form'), runtime.queryParameterValues, {sync:false});
+  if (!runtime || !snapshot) return;
+  window.clearTimeout(state.parameterDomainTimer);
+  state.parameterDomainTimer = null;
+  runtime.queryParameterState = structuredClone(snapshot);
+  setQueryParameterStates(runtime.queryParameterState, {sync:false});
   window.datavizComponents?.controls?.sync($('#parameter-form'));
+  if (dynamicQueryParameters().length) {
+    await resolveQueryParameterDomains({targetSnapshot:snapshot});
+  }
   saveTabUiState();
   syncDashboardLocation('replace');
   setQueryState();
@@ -2594,8 +2415,8 @@ async function runDashboard() {
     window.requestAnimationFrame(() => $('#parameter-form').reportValidity());
     return;
   }
-  let requestedParameters;
-  try { requestedParameters = queryParameters(); }
+  let requestedParameterState;
+  try { requestedParameterState = queryParameterStates(); }
   catch (_error) {
     setQueryParametersOpen(true, {persist:true});
     window.requestAnimationFrame(() => $('#parameter-form').reportValidity());
@@ -2616,12 +2437,11 @@ async function runDashboard() {
   $('#run-message').textContent = 'Querying a new dataset…';
   document.querySelectorAll('.node').forEach((node) => node.dataset.status = 'not_run');
   try {
-    runtime.queryParameterValues = requestedParameters;
+    runtime.queryParameterState = structuredClone(requestedParameterState);
     const response = await request(`/api/dashboards/${encodeURIComponent(dashboardId)}/runs`, {
       method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({
         session_id: state.sessionId,
-        query_parameters: runtime.queryParameterValues,
-        query_parameter_intents: runtime.queryParameterIntents,
+        query_parameter_state: runtime.queryParameterState,
       })
     });
     const runWorkspaceRevision = Number(
@@ -2717,11 +2537,8 @@ async function finishRun(runId, dashboardId) {
   const committed = record.result && ['ready', 'partial'].includes(status) && !outdated;
   if (committed) {
     runtime.runId = runId;
-    sealCommittedQuerySnapshot(
-      runtime,
-      record.result.query_parameters,
-      record.result.query_parameter_intents,
-    );
+    sealCommittedQuerySnapshot(runtime, record.result.query_parameter_state);
+    runtime.queryParameterState = structuredClone(record.result.query_parameter_state || {});
     runtime.queryStatus = ['ready', 'partial'].includes(status) ? status : 'error';
     runtime.queryLabel = status === 'ready' ? 'Ready' : status === 'partial' ? 'Partial' : 'Failed';
     runtime.queryDefinitionStale = false;
@@ -2917,29 +2734,20 @@ async function applyDashboardControls() {
 
 function normalized(value) {
   if (Array.isArray(value)) return value.map(normalized);
+  if (value && typeof value === 'object') return Object.fromEntries(
+    Object.keys(value).sort().map(key => [key, normalized(value[key])]),
+  );
   if (value === null || value === undefined) return '';
   return String(value);
 }
 
 function pendingParametersMatchDataset() {
-  const snapshot = state.committedQuerySnapshot;
+  const snapshot = committedQueryState();
   if (!snapshot) return false;
   let pending;
-  try { pending = queryParameters(); }
+  try { pending = queryParameterStates(); }
   catch (_error) { return false; }
-  const valueKeys = new Set([...Object.keys(pending), ...Object.keys(snapshot.values || {})]);
-  const valuesMatch = [...valueKeys].every(
-    key => JSON.stringify(normalized(pending[key])) === JSON.stringify(normalized(snapshot.values?.[key])),
-  );
-  if (!valuesMatch) return false;
-  const intentKeys = new Set(Object.keys(snapshot.intents || {}));
-  for (const parameter of state.dashboard?.query_parameters || []) {
-    if (parameter.type === 'multiple_select') intentKeys.add(parameter.id);
-  }
-  return [...intentKeys].every(
-    key => (activeRuntime()?.queryParameterIntents?.[key] || 'explicit')
-      === (snapshot.intents?.[key] || 'explicit'),
-  );
+  return JSON.stringify(normalized(pending)) === JSON.stringify(normalized(snapshot));
 }
 
 function setQueryState(message = null) {
@@ -3240,7 +3048,7 @@ function bindOverflowTitle(owner, label, fullName) {
 function dashboardButton(dashboard) {
     const button = document.createElement('a');
     button.className = 'nav-button';
-    button.href = dashboardLocation(dashboard.id, runtimeFor(dashboard.id).queryParameterValues || {});
+    button.href = dashboardLocation(dashboard.id, runtimeFor(dashboard.id).queryParameterState || {});
     button.dataset.id = dashboard.id;
     button.dataset.navType = 'dashboard';
     button.dataset.status = dashboard.status;
@@ -3805,17 +3613,11 @@ async function boot() {
   for (const record of remembered.runs || []) {
     const runtime = runtimeFor(record.dashboard_id);
     if (record.ready && ['ready', 'partial'].includes(record.status)) {
-      sealCommittedQuerySnapshot(
-        runtime,
-        record.query_parameters,
-        record.query_parameter_intents,
-      );
+      sealCommittedQuerySnapshot(runtime, record.query_parameter_state);
     }
-    if (!runtime.queryParameterValues) runtime.queryParameterValues = record.query_parameters;
-    runtime.queryParameterIntents = {
-      ...runtime.queryParameterIntents,
-      ...(record.query_parameter_intents || {}),
-    };
+    if (!runtime.queryParameterState) {
+      runtime.queryParameterState = structuredClone(record.query_parameter_state || {});
+    }
     runtime.nodeStatuses = record.nodes || {};
     runtime.queryDefinitionStale = Boolean(record.query_outdated);
     if (record.ready) {
@@ -3873,59 +3675,41 @@ $('#workspace-update-action').addEventListener('click', () => {
 });
 const onQueryDraft = event => {
   event.target?.setCustomValidity?.('');
-  let domainProjectionError = null;
-  let values;
-  try { values = queryParameters(); }
+  let parameterState;
+  try { parameterState = queryParameterStates(); }
   catch (_error) {
     setQueryState();
     return;
   }
   const runtime = activeRuntime();
   const input = event.target;
-  if (runtime && input?.name) {
-    if (input instanceof HTMLSelectElement && input.multiple) {
-      runtime.queryParameterIntents[input.name] =
-        window.datavizComponents?.controls?.consumeSelectionIntent?.(input) || 'explicit';
-    } else {
-      runtime.queryParameterIntents[input.name] = 'explicit';
-    }
-  }
-  if (runtime && input?.dataset?.parameterDomain && input.name) {
-    runtime.queryDomainInitialized = [...new Set([
-      ...(runtime.queryDomainInitialized || []), input.name,
-    ])];
-  }
   if (runtime) {
-    const descendants = input?.name
-      ? state.dashboard?.parameter_domain_contract?.projection_descendants?.[input.name] || []
-      : [];
-    try {
-      if (descendants.length) {
-        const transaction = calculateLocalParameterDomainTransaction(
-          values,
-          runtime.queryParameterIntents,
-          descendants,
-        );
-        applyParameterDomainTransaction(transaction);
-        values = transaction.values;
-      } else {
-        runtime.queryParameterValues = structuredClone(values);
-      }
-      if (dynamicQueryParameters().length) {
-        reconcileParameterDomainSnapshotDemand(values, runtime.queryParameterIntents);
-      }
-    } catch (error) {
-      runtime.queryParameterValues = structuredClone(values);
-      runtime.queryDomainReady = false;
-      runtime.message = `参数选项本地投影失败：${error.message}`;
-      domainProjectionError = runtime.message;
-      showShortcutToast(runtime.message);
-      updateParameterDomainUi();
+    runtime.queryParameterState = structuredClone(parameterState);
+    const descendants = new Set(
+      input?.name
+        ? state.dashboard?.parameter_domain_contract?.descendants?.[input.name] || []
+        : [],
+    );
+    if (descendants.size) {
+      const definitions = new Map(dynamicQueryParameters().map(item => [item.id, item]));
+      const order = state.dashboard?.parameter_domain_contract?.order || [...definitions.keys()];
+      void (async () => {
+        for (const parameterId of order) {
+          if (!descendants.has(parameterId)) continue;
+          const parameter = definitions.get(parameterId);
+          if (parameter) await lookupQueryParameter(parameter);
+        }
+        runtime.queryParameterState = queryParameterStates();
+        saveTabUiState();
+        syncDashboardLocation('replace');
+        setQueryState();
+        syncCanvasQueryDraft();
+      })();
     }
   }
   saveTabUiState();
   syncDashboardLocation('replace');
-  setQueryState(domainProjectionError);
+  setQueryState();
   syncCanvasQueryDraft();
 };
 $('#parameter-form').addEventListener('input', onQueryDraft);

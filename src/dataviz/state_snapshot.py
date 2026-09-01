@@ -471,7 +471,7 @@ def normalize_consumer_revisions(
 def build_state_snapshot(
     dashboard: "LoadedDashboard",
     *,
-    query_parameters: dict[str, Any],
+    query_parameter_state: dict[str, dict[str, Any]],
     control_state: dict[str, dict[str, Any]],
     draft_control_state: dict[str, dict[str, Any]] | None = None,
     applied_revisions: dict[str, dict[str, dict[str, int]]] | None = None,
@@ -488,7 +488,7 @@ def build_state_snapshot(
 
     items: list[dict[str, Any]] = []
     for definition in dashboard.definition.query_parameters:
-        value = deepcopy(query_parameters.get(definition.id))
+        state = deepcopy(query_parameter_state.get(definition.id, {"value": None}))
         items.append(
             {
                 "key": f"parameter:{definition.id}",
@@ -498,8 +498,8 @@ def build_state_snapshot(
                 "owner_id": dashboard.definition.id,
                 "label": definition.label or definition.id,
                 "type": definition.type,
-                "committed": value,
-                "draft": deepcopy(value),
+                "committed": state,
+                "draft": deepcopy(state),
                 "stale": query_stale,
                 "definition": definition.model_dump(mode="json"),
             }

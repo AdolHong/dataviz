@@ -20,8 +20,7 @@ from dataviz.execution.node_support import hash_path, output_status, package_fin
 from dataviz.execution.outputs import normalize_outputs, validate_table_schema
 from dataviz.execution.parameters import (
     project_query_inputs,
-    resolve_query_parameter_intents,
-    resolve_query_parameter_values,
+    resolve_query_parameter_states,
 )
 from dataviz.execution.plan import PlanNode, compile_plan
 from dataviz.execution.python_process import execute_python_node
@@ -74,16 +73,16 @@ def _write_python_log(
     )
 
 
-def resolve_query_parameters(
+def resolve_dashboard_query_parameter_state(
     dashboard: LoadedDashboard,
-    values: dict[str, Any] | None,
+    states: dict[str, Any] | None,
     *,
     timezone_name: str,
     current_time: datetime | None = None,
-) -> dict[str, Any]:
-    return resolve_query_parameter_values(
+) -> dict[str, dict[str, Any]]:
+    return resolve_query_parameter_states(
         dashboard.definition.query_parameters,
-        values,
+        states,
         timezone_name=timezone_name,
         current_time=current_time,
     )
@@ -129,8 +128,7 @@ class Executor:
         self,
         dashboard_id: str,
         *,
-        query_parameters: dict[str, Any] | None = None,
-        query_parameter_intents: dict[str, str] | None = None,
+        query_parameter_state: dict[str, Any] | None = None,
         targets: list[str] | None = None,
         refresh: bool = False,
         observer: EventObserver | None = None,
@@ -143,15 +141,10 @@ class Executor:
         if dashboard.definition.id != dashboard_id:
             raise ValueError("Prevalidated Dashboard does not match the requested id")
         workspace_definition = self.workspace.definition.model_copy(deep=True)
-        parameters = resolve_query_parameters(
+        parameters = resolve_dashboard_query_parameter_state(
             dashboard,
-            query_parameters,
+            query_parameter_state,
             timezone_name=workspace_definition.context.timezone,
-        )
-        parameter_intents = resolve_query_parameter_intents(
-            dashboard.definition.query_parameters,
-            query_parameters,
-            query_parameter_intents,
         )
         # Adapter files are an editable Workspace boundary. Resolve one immutable
         # snapshot per Run instead of retaining the first values seen by a tab.
@@ -170,8 +163,7 @@ class Executor:
             query_targets=sorted(plan.targets),
             query_nodes=sorted(plan.nodes),
             query_contract_hash=query_contract_fingerprint(dashboard, plan.nodes),
-            query_parameters=parameters,
-            query_parameter_intents=parameter_intents,
+            query_parameter_state=parameters,
             nodes={
                 node_id: NodeResult(node_id=node_id, node_type=node.kind, status="not_run")
                 for node_id, node in plan.nodes.items()
@@ -210,7 +202,7 @@ class Executor:
         publish_snapshot()
         emit(
             "run_started",
-            data={"targets": sorted(plan.targets), "query_parameters": parameters},
+            data={"targets": sorted(plan.targets), "query_parameter_state": parameters},
         )
         pending = set(plan.nodes)
         running: dict[Future, str] = {}
@@ -727,11 +719,8 @@ class Executor:
             workspace_root=self.workspace.root,
             dashboard_root=dashboard.root,
             run_id=run_result.run_id,
-            query_inputs=project_query_inputs(
-                node.parameter_inputs,
-                parameters,
-                run_result.query_parameter_intents,
-            ),
+            query_parameter_state=parameters,
+            query_inputs=project_query_inputs(node.parameter_inputs, parameters),
             control_inputs={},
             control_state={},
             inputs=inputs,
@@ -795,11 +784,11 @@ class Executor:
             "dashboard": dashboard.definition.id,
             "node": node.id,
             "definition": definition.model_dump(mode="json", by_alias=True),
-            "query_inputs": project_query_inputs(
-                node.parameter_inputs,
-                parameters,
-                result.query_parameter_intents,
-            ),
+            "query_inputs": project_query_inputs(node.parameter_inputs, parameters),
+            "query_filter_state": {
+                name: parameters.get(query_filter.parameter)
+                for name, query_filter in getattr(definition, "query_filters", {}).items()
+            },
             "files": files,
             "upstream": upstream,
             "adapter": (

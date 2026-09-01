@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any
 from urllib.parse import urlparse
 
@@ -162,16 +163,44 @@ def _validate_query_inputs(
             )
         if (
             not isinstance(binding, str)
-            and binding.projection == "intent"
+            and binding.projection == "selection"
             and parameter_definitions[parameter].type != "multiple_select"
         ):
             diagnostics.append(
                 Diagnostic(
                     "error",
-                    f"Query input {alias} projects intent, but {parameter} is not multiple_select",
+                    f"Query input {alias} projects selection, but {parameter} is not multiple_select",
                     str(definition_path),
                     f"query_inputs.{alias}.projection",
-                    "query_input_intent_cardinality_invalid",
+                    "query_input_selection_cardinality_invalid",
+                )
+            )
+    projected = {
+        parameter: {
+            (
+                binding.projection
+                if not isinstance(binding, str)
+                else "value"
+            )
+            for binding in bindings.values()
+            if query_input_parameter(binding) == parameter
+        }
+        for parameter in parameter_definitions
+    }
+    for parameter, projections in projected.items():
+        definition = parameter_definitions[parameter]
+        if (
+            definition.type == "multiple_select"
+            and "value" in projections
+            and "selection" not in projections
+        ):
+            diagnostics.append(
+                Diagnostic(
+                    "error",
+                    f"Query Parameter {parameter} value consumer must also consume selection",
+                    str(definition_path),
+                    "query_inputs",
+                    "query_input_selection_required",
                 )
             )
 
@@ -558,14 +587,14 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                 )
 
         for domain_id, (domain_path, domain) in dashboard.parameter_domains.items():
-            if not _is_within(domain_path, dashboard.root):
+            if not _is_within(domain_path, workspace.root):
                 diagnostics.append(
                     Diagnostic(
                         "error",
-                        "Parameter Domain definition must stay inside its Dashboard folder",
+                        "Parameter Domain definition must stay inside its Workspace",
                         str(domain_path),
                         "parameter_domains",
-                        "parameter_domain_definition_outside_dashboard",
+                        "parameter_domain_definition_outside_workspace",
                     )
                 )
             if adapter_resolver:
@@ -583,21 +612,15 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             "adapter_not_configured",
                         )
                     )
-            _validate_query_inputs(
-                domain.query_inputs,
-                parameter_definitions=parameter_definitions,
-                definition_path=domain_path,
-                diagnostics=diagnostics,
-            )
             code_path = _code_path(domain_path, domain.code)
-            if not _is_within(code_path, dashboard.root):
+            if not _is_within(code_path, workspace.root):
                 diagnostics.append(
                     Diagnostic(
                         "error",
-                        "Parameter Domain SQL must stay inside its Dashboard folder",
+                        "Parameter Domain SQL must stay inside its Workspace",
                         str(code_path),
                         "code",
-                        "parameter_domain_sql_outside_dashboard",
+                        "parameter_domain_sql_outside_workspace",
                     )
                 )
             elif not code_path.is_file():
@@ -624,32 +647,17 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         )
                     )
                 else:
-                    declared = set(domain.query_inputs)
                     referenced = sql_parameter_names(sql)
-                    undeclared = sorted(referenced - declared)
-                    unused = sorted(declared - referenced)
-                    if undeclared:
+                    if referenced:
                         diagnostics.append(
                             Diagnostic(
                                 "error",
-                                "SQL uses named parameters not declared in Parameter Domain query_inputs: "
-                                + ", ".join(undeclared),
+                                "Materialized Parameter Domain SQL cannot use Query Parameters: "
+                                + ", ".join(sorted(referenced)),
                                 str(domain_path),
-                                "query_inputs",
-                                "parameter_domain_sql_parameter_undeclared",
-                                {"domain": domain_id, "parameters": undeclared},
-                            )
-                        )
-                    if unused:
-                        diagnostics.append(
-                            Diagnostic(
-                                "warning",
-                                "Parameter Domain query_inputs are not referenced by SQL: "
-                                + ", ".join(unused),
-                                str(domain_path),
-                                "query_inputs",
-                                "parameter_domain_sql_parameter_unused",
-                                {"domain": domain_id, "parameters": unused},
+                                "code",
+                                "parameter_domain_sql_parameter_forbidden",
+                                {"domain": domain_id, "parameters": sorted(referenced)},
                             )
                         )
             if (
@@ -840,8 +848,63 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             )
                         )
                     else:
+                        filter_tokens = set(
+                            re.findall(
+                                r"\{\{\s*dataviz_filter:([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}",
+                                sql,
+                            )
+                        )
+                        declared_filters = set(source.query_filters)
+                        unknown_filters = sorted(filter_tokens - declared_filters)
+                        unused_filters = sorted(declared_filters - filter_tokens)
+                        for name, query_filter in source.query_filters.items():
+                            if query_filter.parameter not in parameter_definitions:
+                                diagnostics.append(
+                                    Diagnostic(
+                                        "error",
+                                        f"Query filter {name} references unknown Query Parameter: {query_filter.parameter}",
+                                        str(source_path),
+                                        f"query_filters.{name}.parameter",
+                                        "query_filter_parameter_unknown",
+                                    )
+                                )
+                            elif parameter_definitions[query_filter.parameter].type != "multiple_select":
+                                diagnostics.append(
+                                    Diagnostic(
+                                        "error",
+                                        f"Query filter {name} requires multiple_select",
+                                        str(source_path),
+                                        f"query_filters.{name}.parameter",
+                                        "query_filter_parameter_type_invalid",
+                                    )
+                                )
+                        if unknown_filters:
+                            diagnostics.append(
+                                Diagnostic(
+                                    "error",
+                                    "SQL uses undeclared Dataviz query filters: " + ", ".join(unknown_filters),
+                                    str(source_path),
+                                    "query_filters",
+                                    "query_filter_undeclared",
+                                )
+                            )
+                        if unused_filters:
+                            diagnostics.append(
+                                Diagnostic(
+                                    "warning",
+                                    "Source query_filters are not referenced by SQL: " + ", ".join(unused_filters),
+                                    str(source_path),
+                                    "query_filters",
+                                    "query_filter_unused",
+                                )
+                            )
                         declared = set(source.query_inputs)
-                        referenced = sql_parameter_names(sql)
+                        sql_without_filters = re.sub(
+                            r"\{\{\s*dataviz_filter:[A-Za-z_][A-Za-z0-9_-]*\s*\}\}",
+                            "TRUE",
+                            sql,
+                        )
+                        referenced = sql_parameter_names(sql_without_filters)
                         undeclared = sorted(referenced - declared)
                         unused = sorted(declared - referenced)
                         if undeclared:

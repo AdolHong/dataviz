@@ -27,7 +27,7 @@ WORKER = ROOT / "tests" / "fixtures" / "browser-worker-workspace"
 PROGRESSIVE = ROOT / "tests" / "fixtures" / "progressive-workspace"
 MINIMAL = ROOT / "examples" / "minimal-workspace"
 FROZEN_DIAGNOSTICS = json.loads(
-    (ROOT / "tests" / "fixtures" / "dependency-v10-characterization.json").read_text(
+    (ROOT / "tests" / "fixtures" / "dependency-v11-characterization.json").read_text(
         encoding="utf-8"
     )
 )["diagnostics"]
@@ -567,7 +567,7 @@ def test_dependency_contract_is_directly_inspectable_by_ai_and_humans():
 
     assert machine.exit_code == 0, machine.stdout
     assert machine.stdout.lstrip().startswith("{")
-    assert '"schema": "dataviz/dependency-contract/v10"' in machine.stdout
+    assert '"schema": "dataviz/dependency-contract/v11"' in machine.stdout
     assert human.exit_code == 0, human.stdout
     assert "Query DAG" in human.stdout
     assert "Query Parameters" in human.stdout

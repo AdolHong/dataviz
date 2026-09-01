@@ -1,0 +1,53 @@
+{
+  "family": "query-parameter-state",
+  "cases": [
+    {
+      "id": "all-is-compact",
+      "definition": {"id": "items", "type": "multiple_select", "value_type": "text", "default": {"mode": "all"}, "options": {"mode": "static", "choices": [{"label": "A", "value": "A"}]}},
+      "state": {"selection": "all", "value": []},
+      "expected": {"selection": "all", "value": []}
+    },
+    {
+      "id": "include-is-finite-and-deduplicated",
+      "definition": {"id": "items", "type": "multiple_select", "value_type": "text", "default": {"mode": "all"}, "options": {"mode": "static", "choices": [{"label": "A", "value": "A"}, {"label": "B", "value": "B"}]}},
+      "state": {"selection": "include", "value": ["A", "A", "B"]},
+      "expected": {"selection": "include", "value": ["A", "B"]}
+    },
+    {
+      "id": "exclude-is-finite",
+      "definition": {"id": "items", "type": "multiple_select", "value_type": "text", "default": {"mode": "all"}, "options": {"mode": "static", "choices": [{"label": "A", "value": "A"}]}},
+      "state": {"selection": "exclude", "value": ["A"]},
+      "expected": {"selection": "exclude", "value": ["A"]}
+    },
+    {
+      "id": "none-is-compact",
+      "definition": {"id": "items", "type": "multiple_select", "value_type": "text", "default": {"mode": "none"}, "options": {"mode": "static", "choices": [{"label": "A", "value": "A"}]}},
+      "state": {"selection": "none", "value": []},
+      "expected": {"selection": "none", "value": []}
+    },
+    {
+      "id": "typed-scalar",
+      "definition": {"id": "amount", "type": "single_input", "value_type": "integer", "default": 0},
+      "state": {"value": "2"},
+      "expected": {"value": 2}
+    },
+    {
+      "id": "all-rejects-operands",
+      "definition": {"id": "items", "type": "multiple_select", "value_type": "text", "default": {"mode": "all"}, "options": {"mode": "static", "choices": [{"label": "A", "value": "A"}]}},
+      "state": {"selection": "all", "value": ["A"]},
+      "expected_error_code": "invalid_selection_operands"
+    },
+    {
+      "id": "finite-selection-requires-operands",
+      "definition": {"id": "items", "type": "multiple_select", "value_type": "text", "default": {"mode": "all"}, "options": {"mode": "static", "choices": [{"label": "A", "value": "A"}]}},
+      "state": {"selection": "include", "value": []},
+      "expected_error_code": "invalid_selection_operands"
+    },
+    {
+      "id": "operand-limit",
+      "definition": {"id": "items", "type": "multiple_select", "value_type": "text", "default": {"mode": "all"}, "max_explicit_values": 1, "options": {"mode": "static", "choices": [{"label": "A", "value": "A"}, {"label": "B", "value": "B"}]}},
+      "state": {"selection": "exclude", "value": ["A", "B"]},
+      "expected_error_code": "too_many_explicit_values"
+    }
+  ]
+}

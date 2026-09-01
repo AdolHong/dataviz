@@ -2,11 +2,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import {
-  projectParameterDomainRelation,
-  resolveLocalParameterDomainValue,
-} from '../../src/dataviz/server/static/parameter-domain-projection.js';
-
 const root = process.cwd();
 const fixture = name => JSON.parse(
   fs.readFileSync(path.join(root, 'tests', 'conformance', `${name}.json`), 'utf8'),
@@ -14,10 +9,9 @@ const fixture = name => JSON.parse(
 
 const runtimeWindow = {
   dataviz:{
-    protocol:{schema:'dataviz/runtime/v9'},
-    dependency_contract:{schema:'dataviz/dependency-contract/v10'},
-    query_parameters:{},
-    query_parameter_intents:{},
+    protocol:{schema:'dataviz/runtime/v10'},
+    dependency_contract:{schema:'dataviz/dependency-contract/v11'},
+    query_parameter_state:{},
   },
   location:{origin:'http://localhost'},
 };
@@ -65,8 +59,7 @@ for (const item of fixture('input-binding')) {
     const payload = item.input;
     if (item.operation === 'canonicalize') return runtime.parameterBinding(payload.binding);
     if (item.operation === 'signature') return runtime.parameterSignature(payload.inputs);
-    runtimeWindow.dataviz.query_parameters = {[payload.binding.parameter]:payload.value};
-    runtimeWindow.dataviz.query_parameter_intents = {[payload.binding.parameter]:payload.intent};
+    runtimeWindow.dataviz.query_parameter_state = {[payload.binding.parameter]:payload.state};
     return runtime.project({result:payload.binding}).result;
   });
 }
@@ -90,32 +83,8 @@ for (const item of fixture('output-capability')) {
   }));
 }
 
-for (const item of fixture('parameter-domain-projection')) {
-  verify({
-    ...item,
-    expected:'expected_error_code' in item ? undefined : {
-      choices:item.expected_choices,
-      ...item.expected,
-    },
-  }, () => {
-    const choices = projectParameterDomainRelation({
-      entry:item.relation,
-      expectedParents:item.relation.parents,
-      values:item.values,
-      parameterId:item.parameter.id,
-    });
-    const resolved = resolveLocalParameterDomainValue(
-      item.parameter,
-      choices,
-      item.raw_value,
-      item.intent,
-    );
-    return {choices, ...resolved};
-  });
-}
-
 const adapterWindow = {
-  dataviz:{protocol:{schema:'dataviz/runtime/v9'}},
+  dataviz:{protocol:{schema:'dataviz/runtime/v10'}},
   customElements:{get:() => null, define:() => {}},
   addEventListener:() => {},
 };
@@ -147,7 +116,7 @@ const runWebFilter = item => {
     operator:isPath ? 'auto' : payload.operator,
   };
   const manifest = {
-    protocol:{schema:'dataviz/runtime/v9'},
+    protocol:{schema:'dataviz/runtime/v10'},
     portable:{outputs:{'source:rows/main':rows}},
     dependency_contract:{
       views:{sample:{

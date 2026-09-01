@@ -2,57 +2,69 @@
   "family": "input-binding",
   "cases": [
     {
-      "id": "canonical-binding-keeps-projection",
+      "id": "canonical-binding-keeps-selection-projection",
       "operation": "canonicalize",
-      "input": {"binding": {"parameter": "items", "projection": "intent"}},
-      "expected": {"parameter": "items", "projection": "intent"}
+      "input": {"binding": {"parameter": "items", "projection": "selection"}},
+      "expected": {"parameter": "items", "projection": "selection"}
     },
     {
-      "id": "signature-keeps-projection",
+      "id": "signature-keeps-active-projection",
       "operation": "signature",
-      "input": {"inputs": {"present": {"parameter": "items", "projection": "present"}, "value": "items"}},
-      "expected": "{\"present\":{\"parameter\":\"items\",\"projection\":\"present\"},\"value\":{\"parameter\":\"items\"}}"
+      "input": {"inputs": {"active": {"parameter": "items", "projection": "active"}, "value": "items"}},
+      "expected": "{\"active\":{\"parameter\":\"items\",\"projection\":\"active\"},\"value\":{\"parameter\":\"items\"}}"
     },
     {
-      "id": "value",
+      "id": "value-zero",
       "operation": "project",
-      "input": {"binding": {"parameter": "amount"}, "value": 0, "intent": "explicit"},
+      "input": {"binding": {"parameter": "amount"}, "state": {"value": 0}},
       "expected": 0
     },
     {
-      "id": "present-zero",
+      "id": "active-zero",
       "operation": "project",
-      "input": {"binding": {"parameter": "amount", "projection": "present"}, "value": 0, "intent": "explicit"},
+      "input": {"binding": {"parameter": "amount", "projection": "active"}, "state": {"value": 0}},
       "expected": true
     },
     {
-      "id": "present-false",
+      "id": "active-false",
       "operation": "project",
-      "input": {"binding": {"parameter": "enabled", "projection": "present"}, "value": false, "intent": "explicit"},
+      "input": {"binding": {"parameter": "enabled", "projection": "active"}, "state": {"value": false}},
       "expected": true
     },
     {
-      "id": "present-empty-list",
+      "id": "active-all",
       "operation": "project",
-      "input": {"binding": {"parameter": "items", "projection": "present"}, "value": [], "intent": "explicit"},
+      "input": {"binding": {"parameter": "items", "projection": "active"}, "state": {"selection": "all", "value": []}},
       "expected": false
     },
     {
-      "id": "intent-all",
+      "id": "active-none",
       "operation": "project",
-      "input": {"binding": {"parameter": "items", "projection": "intent"}, "value": ["a", "b"], "intent": "all_available"},
-      "expected": "all_available"
+      "input": {"binding": {"parameter": "items", "projection": "active"}, "state": {"selection": "none", "value": []}},
+      "expected": true
+    },
+    {
+      "id": "selection-exclude",
+      "operation": "project",
+      "input": {"binding": {"parameter": "items", "projection": "selection"}, "state": {"selection": "exclude", "value": ["B"]}},
+      "expected": "exclude"
+    },
+    {
+      "id": "complete-state",
+      "operation": "project",
+      "input": {"binding": {"parameter": "items", "projection": "state"}, "state": {"selection": "include", "value": ["A"]}},
+      "expected": {"selection": "include", "value": ["A"]}
     },
     {
       "id": "range-start",
       "operation": "project",
-      "input": {"binding": {"parameter": "window", "part": "start"}, "value": ["2026-01-01", "2026-01-31"], "intent": "explicit"},
+      "input": {"binding": {"parameter": "window", "part": "start"}, "state": {"value": ["2026-01-01", "2026-01-31"]}},
       "expected": "2026-01-01"
     },
     {
       "id": "range-part-invalid",
       "operation": "project",
-      "input": {"binding": {"parameter": "window", "part": "end"}, "value": "2026-01-01", "intent": "explicit"},
+      "input": {"binding": {"parameter": "window", "part": "end"}, "state": {"value": "2026-01-01"}},
       "expected_error_code": "query_input_projection_failed"
     }
   ]

@@ -734,7 +734,7 @@ def _profile_files(profile: str, item_id: str) -> dict[str, str]:
         "runtime": {"browser_table_transport": "json"},
     }
     dashboard: dict[str, Any] = {
-        "schema": "dataviz/dashboard/v13",
+        "schema": "dataviz/dashboard/v14",
         "kind": "dashboard",
         "id": item_id,
         "title": item_id.replace("-", " ").title(),
@@ -899,7 +899,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         files = {
             "dashboard.yaml": _yaml(
                 {
-                    "schema": "dataviz/dashboard/v13",
+                    "schema": "dataviz/dashboard/v14",
                     "kind": "dashboard",
                     "id": item_id,
                     "title": item_id.replace("-", " ").title(),
@@ -938,7 +938,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
     elif recipe in {"source.file", "source.sql", "source.python"}:
         source_type = recipe.split(".", 1)[1]
         definition: dict[str, Any] = {
-            "schema": "dataviz/source/v3",
+            "schema": "dataviz/source/v4",
             "kind": "source",
             "id": item_id,
             "type": source_type,

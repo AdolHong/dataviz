@@ -257,8 +257,9 @@ class InteractionExecutor:
             dashboard=run.dashboard,
             target=target_id,
             status="loading",
-            query_parameters=dict(run.query_parameters),
-            query_parameter_intents=dict(run.query_parameter_intents),
+            query_parameter_state={
+                key: dict(value) for key, value in run.query_parameter_state.items()
+            },
             control_state=resolved_control_state,
             nodes={
                 node.id: NodeResult(
@@ -481,10 +482,9 @@ class InteractionExecutor:
                 workspace_root=self.workspace.root,
                 dashboard_root=dashboard.root,
                 run_id=run.run_id,
+                query_parameter_state=run.query_parameter_state,
                 query_inputs=project_query_inputs(
-                    node.query_inputs,
-                    run.query_parameters,
-                    run.query_parameter_intents,
+                    node.query_inputs, run.query_parameter_state
                 ),
                 control_inputs=control_values,
                 control_state={

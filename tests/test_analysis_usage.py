@@ -53,7 +53,7 @@ title: Fold tests
 """,
         encoding="utf-8",
     )
-    source = """schema: dataviz/source/v3
+    source = """schema: dataviz/source/v4
 kind: source
 id: rows
 name: 收入
@@ -76,7 +76,7 @@ outputs:
         dashboard = root / "dashboards" / dashboard_id
         (dashboard / "sources").mkdir(parents=True)
         (dashboard / "dashboard.yaml").write_text(
-            f"""schema: dataviz/dashboard/v13
+            f"""schema: dataviz/dashboard/v14
 kind: dashboard
 id: {dashboard_id}
 title: {dashboard_id}
@@ -181,7 +181,7 @@ def test_server_success_records_human_dashboard_query(isolated_workspace):
             "/api/dashboards/sales-overview/runs",
             json={
                 "session_id": "usage-test-session",
-                "query_parameters": {"min_query_revenue": 0},
+                "query_parameter_state": {"min_query_revenue": {"value": 0}},
                 "refresh": True,
             },
         ).json()

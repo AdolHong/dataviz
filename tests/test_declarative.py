@@ -258,7 +258,7 @@ def test_run_cli_reads_an_explicit_named_source_output():
     assert result.exit_code == 0, result.stdout
     payload = json.loads(result.stdout)
     assert payload["target"]["reference"] == "sales-overview::source:sales/main"
-    assert payload["schema"] == "dataviz/analysis-result/v3"
+    assert payload["schema"] == "dataviz/analysis-result/v4"
     assert len(payload["outputs"][0]["preview"]) == 1
     assert payload["outputs"][0]["truncated"] is True
     assert payload["result_id"].startswith("result_")
@@ -272,7 +272,7 @@ def test_run_cli_reads_an_explicit_named_source_output():
     )
     assert debug.exit_code == 0, debug.stdout
     debug_payload = json.loads(debug.stdout)
-    assert debug_payload["schema"] == "dataviz/analysis-result/v3"
+    assert debug_payload["schema"] == "dataviz/analysis-result/v4"
     assert debug_payload["outputs"][0]["kind"] == "table"
     assert debug_payload["nodes"]["source:sales"]["diagnostics"]
 
@@ -814,7 +814,7 @@ def test_dashboard_definition_assets_cannot_escape_dashboard_folder(tmp_path: Pa
     dashboard_root = root / "dashboards" / "sales-overview"
     outside = root / "outside-source.yaml"
     outside.write_text(
-        """schema: dataviz/source/v3
+        """schema: dataviz/source/v4
 kind: source
 id: outside
 type: file
@@ -916,7 +916,7 @@ def test_removed_schema_fields_are_rejected(removed_fragment):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v13",
+                "schema": "dataviz/dashboard/v14",
                 "kind": "dashboard",
                 "id": "strict",
                 **removed_fragment,
@@ -977,7 +977,7 @@ def test_layout_and_view_bounds_are_enforced(fragment, location):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v13",
+                "schema": "dataviz/dashboard/v14",
                 "kind": "dashboard",
                 "id": "strict",
                 **fragment,
@@ -996,7 +996,9 @@ def test_selection_contract_is_include_only():
 def test_query_parameter_changes_inline_sql_dataset():
     workspace = load_workspace(WORKSPACE)
     result = Executor(workspace).run(
-        "sales-overview", query_parameters={"min_query_revenue": 150000}, refresh=True
+        "sales-overview",
+        query_parameter_state={"min_query_revenue": {"value": 150000}},
+        refresh=True,
     )
     artifact = result.nodes["source:sales"].outputs["main"]
     frame = ArtifactStore(workspace.root, result.run_id).read_table(artifact)
@@ -1021,8 +1023,8 @@ def test_default_renderer_builds_templates_and_portable_report(tmp_path: Path):
     assert "Optional presentation-only polish" in report
     assert "min-height:420px" in report
     assert "global.dataviz?.view_specs" in report
-    assert '"schema": "dataviz/runtime/v9"' in report
-    assert '"schema": "dataviz/dependency-contract/v10"' in report
+    assert '"schema": "dataviz/runtime/v10"' in report
+    assert '"schema": "dataviz/dependency-contract/v11"' in report
     assert 'data-view-pipeline-node="source:sales"' in report
     assert 'data-view-renderer-signal data-status="not_run" hidden' in report
     assert 'class="dv-view-type-label">plotly</small>' in report

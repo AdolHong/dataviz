@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import socket
+import sqlite3
 import threading
 import time
 from contextlib import contextmanager
@@ -27,6 +28,10 @@ from playwright.sync_api import (
 
 from dataviz.server import create_app
 from dataviz.cli import _copy_gallery_workspace
+from dataviz.execution.parameter_materializations import ParameterMaterializationStore
+import dataviz.execution.parameter_materializations as parameter_materializations
+from dataviz.errors import ExecutionFailure
+from dataviz.workspace import load_workspace
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -215,7 +220,7 @@ folders: []
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v13
+        """schema: dataviz/dashboard/v14
 kind: dashboard
 id: same-view-controls
 title: Same View Controls
@@ -251,7 +256,7 @@ sections:
         encoding="utf-8",
     )
     (sources / "daily.yaml").write_text(
-        """schema: dataviz/source/v3
+        """schema: dataviz/source/v4
 kind: source
 id: daily
 type: sql
@@ -310,7 +315,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v13
+        """schema: dataviz/dashboard/v14
 kind: dashboard
 id: scale
 title: Scale Runtime
@@ -410,7 +415,7 @@ title: Interactive Runtime E2E
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v13
+        """schema: dataviz/dashboard/v14
 kind: dashboard
 id: runtime-matrix
 title: Interactive Runtime Matrix
@@ -612,7 +617,7 @@ def test_parameter_domain_cascade_reload_and_tab_restore(page: Page, tmp_path: P
             "request",
             lambda request: (
                 domain_requests.append(request.url)
-                if "/parameter-domains/resolve" in request.url
+                if "/parameter-domains/lookup" in request.url
                 else None
             ),
         )
@@ -623,8 +628,9 @@ def test_parameter_domain_cascade_reload_and_tab_restore(page: Page, tmp_path: P
 
         expect(reload_options).to_be_visible()
         expect(province).to_have_values(["GD"])
-        expect(city).to_have_values(["SZ", "GZ"])
-        assert len(domain_requests) == 1
+        expect(city.locator("option")).to_have_count(2, timeout=20_000)
+        expect(city).to_have_values([])
+        assert len(domain_requests) >= 2
         city_control = page.locator("#parameter-form .dv-control").filter(has=city)
         expect(city_control.locator("[data-control-summary]")).to_have_text("全选")
 
@@ -639,16 +645,19 @@ def test_parameter_domain_cascade_reload_and_tab_restore(page: Page, tmp_path: P
         initial_run = next(
             item for item in remembered["runs"] if item["dashboard_id"] == "parameter-domain-lab"
         )
-        assert initial_run["query_parameter_intents"] == {
-            "provinces": "explicit",
-            "cities": "all_available",
+        assert initial_run["query_parameter_state"] == {
+            "provinces": {"selection": "include", "value": ["GD"]},
+            "cities": {"selection": "all", "value": []},
         }
         committed_run_id = page.locator("#canvas-frame").get_attribute("data-run-id")
 
-        # Intent is part of the committed snapshot. Selecting the same concrete
-        # values explicitly is still a draft change and Revert restores the
-        # all-available intent without running the analytical Query again.
-        city.select_option(["SZ", "GZ"], force=True)
+        # Compact all/exclude state is part of the committed snapshot. Deselecting
+        # one visible member stores only that exception; Revert restores all
+        # without enumerating the candidate generation or rerunning Query.
+        city_trigger = city_control.locator("[data-control-trigger]")
+        city_trigger.click()
+        city_control.locator(".dv-choice-option", has_text="广州").click()
+        expect(city_control.locator("[data-control-summary]")).to_contain_text("排除 1 项")
         revert = page.locator("#query-parameters-revert")
         expect(page.locator("#query-control-meta")).to_have_text("Changed")
         expect(revert).to_be_visible()
@@ -657,11 +666,9 @@ def test_parameter_domain_cascade_reload_and_tab_restore(page: Page, tmp_path: P
         expect(revert).to_be_hidden()
         expect(city_control.locator("[data-control-summary]")).to_have_text("全选")
         assert page.locator("#canvas-frame").get_attribute("data-run-id") == committed_run_id
-        assert len(domain_requests) == 1
 
-        # Exercise the visible controls instead of bypassing them through the
-        # hidden native selects. Domain hydration temporarily disables inputs;
-        # the custom controls must become interactive again when it settles.
+        # Parent changes issue local Lookup predicates against the same immutable
+        # materialization generation. The visible custom controls remain usable.
         province_control = page.locator("#parameter-form .dv-control").filter(has=province)
         province_trigger = province_control.locator("[data-control-trigger]")
         expect(province_trigger).to_be_enabled()
@@ -669,196 +676,109 @@ def test_parameter_domain_cascade_reload_and_tab_restore(page: Page, tmp_path: P
         province_control.locator(".dv-choice-option", has_text="湖南").click()
         expect(province).to_have_values(["GD", "HN"])
 
-        province.select_option(["GD"], force=True)
-        expect(city).to_have_values(["SZ", "GZ"], timeout=10_000)
-        city_trigger = city_control.locator("[data-control-trigger]")
-        expect(city_trigger).to_be_enabled()
-        city_trigger.click()
-        city_control.locator(".dv-choice-option", has_text="广州").click()
-        expect(city).to_have_values(["SZ"])
-
         province.select_option(["HN"], force=True)
-        expect(city).to_have_values(["CS"], timeout=10_000)
+        expect(city.locator("option")).to_have_count(1, timeout=10_000)
+        expect(city.locator("option")).to_have_text(["长沙"])
+        expect(city).to_have_values([])
         expect(page.locator("#run-button")).to_be_enabled()
-        assert len(domain_requests) == 1
 
-        # Revert stays inside the same complete relation snapshot. Parent and
-        # child settle atomically in dependency order without a Resolver call.
+        # Revert restores the parent then rehydrates the child atomically from
+        # the current generation; it does not execute the analytical Query.
         expect(revert).to_be_visible()
         revert.click()
         expect(province).to_have_values(["GD"], timeout=10_000)
-        expect(city).to_have_values(["SZ", "GZ"])
+        expect(city.locator("option")).to_have_count(2, timeout=10_000)
+        expect(city).to_have_values([])
         expect(page.locator("#query-control-meta")).to_have_text("Applied")
         assert page.locator("#canvas-frame").get_attribute("data-run-id") == committed_run_id
-        assert len(domain_requests) == 1
 
-        province.select_option(["GD"], force=True)
-        expect(city).to_have_values(["SZ", "GZ"], timeout=10_000)
-        city.select_option(["SZ"], force=True)
+        requests_before_reload = len(domain_requests)
         reload_options.click()
         expect(reload_options).to_be_enabled(timeout=10_000)
-        expect(city).to_have_values(["SZ"])
-        assert len(domain_requests) == 2
+        expect(city).to_have_values([])
+        assert len(domain_requests) > requests_before_reload
 
         page.reload(wait_until="domcontentloaded")
         expect(page.locator("#run-button")).to_be_enabled(timeout=10_000)
         expect(province).to_have_values(["GD"])
-        expect(city).to_have_values(["SZ"])
-        assert len(domain_requests) == 3
+        expect(city.locator("option")).to_have_count(2, timeout=20_000)
+        expect(city).to_have_values([])
 
         _run_and_wait(page)
-        assert len(domain_requests) == 3
         with page.expect_download(timeout=20_000) as download_info:
             _export_html(page)
         report = Path(download_info.value.path()).read_text(encoding="utf-8")
-        assert "parameter-domains/resolve" not in report
+        assert "parameter-domains/lookup" not in report
         assert "locations.sql" not in report
-        assert '"provinces": ["GD"]' in report
-        assert '"cities": ["SZ"]' in report
+        assert '"provinces": {"selection": "include", "value": ["GD"]}' in report
+        assert '"cities": {"selection": "all", "value": []}' in report
 
 
 @pytest.mark.e2e
-def test_parameter_domain_query_edges_request_new_snapshot_only_when_needed(
-    page: Page,
-    tmp_path: Path,
-):
-    workspace = _copy_workspace(SHOWCASE, tmp_path / "parameter-domain-query-edge")
+def test_parameter_domain_lookup_search_and_cursor_pagination(page: Page, tmp_path: Path):
+    workspace = _copy_workspace(SHOWCASE, tmp_path / "parameter-domain-pagination")
     dashboard_root = workspace / "dashboards" / "功能示例##parameter-domain-lab"
-    dashboard_path = dashboard_root / "dashboard.yaml"
-    dashboard_yaml = dashboard_path.read_text(encoding="utf-8")
-    dashboard_path.write_text(
-        dashboard_yaml.replace(
-            "query_parameters:\n",
-            "query_parameters:\n"
-            "  - id: candidate_scope\n"
-            "    type: single_select\n"
-            "    value_type: text\n"
-            "    label: 候选范围\n"
-            "    required: true\n"
-            "    initial: {mode: value, value: core}\n"
-            "    options:\n"
-            "      mode: static\n"
-            "      choices:\n"
-            "        - {value: core, label: 常用候选}\n"
-            "        - {value: all, label: 全部候选}\n"
-            "  - id: item_nbrs\n"
-            "    type: multiple_input\n"
-            "    value_type: text\n"
-            "    label: 独立商品编号\n"
-            "    default: []\n",
-            1,
-        ),
-        encoding="utf-8",
-    )
     domain_path = dashboard_root / "parameter_domains" / "locations.yaml"
-    domain_yaml = domain_path.read_text(encoding="utf-8")
     domain_path.write_text(
-        domain_yaml.replace(
-            "code: locations.sql\n",
-            "code: locations.sql\nquery_inputs:\n  scope: candidate_scope\n",
-            1,
-        ),
+        domain_path.read_text(encoding="utf-8").replace("max_rows: 100", "max_rows: 200"),
         encoding="utf-8",
     )
-    sql_path = dashboard_root / "parameter_domains" / "locations.sql"
-    sql_path.write_text(
+    rows = ",\n".join(
+        f"  ('GD', '广东', 1, 'C{index:03d}', '城市 {index:03d}', {index})"
+        for index in range(1, 121)
+    )
+    (dashboard_root / "parameter_domains" / "locations.sql").write_text(
         "select * from (values\n"
-        "  ('GD', '广东', 1, 'SZ', '深圳', 1),\n"
-        "  ('GD', '广东', 1, 'GZ', '广州', 2),\n"
-        "  ('HN', '湖南', 2, 'CS', '长沙', 1)\n"
-        ") as locations(\n"
-        "  province_code, province_name, province_order,\n"
-        "  city_code, city_name, city_order\n"
-        ")\n"
-        "where :scope = 'all' or province_code <> 'HN'\n",
+        + rows
+        + "\n) as locations("
+        "province_code, province_name, province_order, city_code, city_name, city_order)\n",
         encoding="utf-8",
     )
 
     with _running_server(workspace) as base_url:
-        domain_requests: list[str] = []
-        domain_responses = []
-        page.on(
-            "request",
-            lambda request: (
-                domain_requests.append(request.url)
-                if "/parameter-domains/resolve" in request.url
-                else None
-            ),
-        )
-        page.on(
-            "response",
-            lambda response: (
-                domain_responses.append(response)
-                if "/parameter-domains/resolve" in response.url
-                else None
-            ),
-        )
+        requests = []
+        ready_responses: list[dict] = []
+
+        def record_request(request):
+            if "/parameter-domains/lookup" in request.url:
+                requests.append(request)
+
+        def record_response(response):
+            if "/parameter-domains/lookup" not in response.url or response.status != 200:
+                return
+            payload = response.json()
+            if payload.get("status") == "ready":
+                ready_responses.append(payload)
+
+        page.on("request", record_request)
+        page.on("response", record_response)
         _open_dashboard(page, base_url, "parameter-domain-lab")
-        scope = page.locator('select[name="candidate_scope"]')
-        item_nbrs = page.locator('input[name="item_nbrs"]')
-        province = page.locator('select[name="provinces"]')
         city = page.locator('select[name="cities"]')
+        expect(city.locator("option")).to_have_count(50, timeout=20_000)
+        city_control = page.locator("#parameter-form .dv-control").filter(has=city)
+        city_control.locator("[data-control-trigger]").click()
+        search = city_control.locator(".dv-choice-search")
 
-        expect(scope).to_have_value("core")
-        expect(province).to_have_values(["GD"])
-        expect(city).to_have_values(["SZ", "GZ"])
-        assert len(domain_requests) == 1
-        initial_resolution = domain_responses[0].json()
-        assert initial_resolution["domains"]["locations"]["cached"] is False
-        _run_and_wait(page)
-        assert len(domain_requests) == 1
+        # This member is outside the first page, so finding it proves that the
+        # Picker used remote Lookup search rather than filtering only loaded DOM.
+        search.fill("城市 119")
+        expect(city_control.locator(".dv-choice-option")).to_have_count(1, timeout=10_000)
+        expect(city_control.locator(".dv-choice-option")).to_contain_text("城市 119")
 
-        # A leaf candidate and an independent multiple_input update draft only.
-        city.select_option(["SZ"], force=True)
-        item_nbrs.fill('["100", "200"]', force=True)
-        page.wait_for_timeout(300)
-        assert len(domain_requests) == 1
-
-        # A projection parent reuses the current relation snapshot locally.
-        province.select_option(["GD"], force=True)
-        expect(city).to_have_values(["SZ"], timeout=10_000)
-        page.wait_for_timeout(300)
-        assert len(domain_requests) == 1
-
-        # A declared Domain query_input obtains one new input-specific snapshot.
-        with page.expect_response(
-            lambda response: "/parameter-domains/resolve" in response.url
-        ) as query_edge_response:
-            scope.select_option("all")
-        expect(scope).to_have_value("all")
-        assert len(domain_requests) == 2
-        query_edge_resolution = query_edge_response.value.json()
-        assert query_edge_resolution["domains"]["locations"]["cached"] is False
-        assert query_edge_resolution["generation"] != initial_resolution["generation"]
-
-        # The committed query-input value belongs to another snapshot, so Revert
-        # explicitly requests it; this is a query edge, never a local fallback.
-        revert = page.locator("#query-parameters-revert")
-        expect(revert).to_be_visible()
-        with page.expect_response(
-            lambda response: "/parameter-domains/resolve" in response.url
-        ) as revert_response:
-            revert.click()
-        expect(scope).to_have_value("core")
-        expect(city).to_have_values(["SZ", "GZ"])
-        assert len(domain_requests) == 3
-        reverted_resolution = revert_response.value.json()
-        assert reverted_resolution["domains"]["locations"]["cached"] is True
-        assert reverted_resolution["generation"] == initial_resolution["generation"]
-
-        # Rapid edits that settle back on the active input signature cancel the
-        # debounce entirely; no intermediate snapshot or choices are published.
-        scope.evaluate(
-            """node => {
-              node.value = 'all';
-              node.dispatchEvent(new Event('change', {bubbles:true}));
-              node.value = 'core';
-              node.dispatchEvent(new Event('change', {bubbles:true}));
-            }"""
+        search.fill("")
+        expect(city.locator("option")).to_have_count(50, timeout=10_000)
+        viewport = city_control.locator(".dv-select-options")
+        viewport.evaluate(
+            "node => { node.scrollTop = node.scrollHeight; node.dispatchEvent(new Event('scroll')); }"
         )
-        page.wait_for_timeout(300)
-        expect(scope).to_have_value("core")
-        assert len(domain_requests) == 3
+        expect(city.locator("option")).to_have_count(100, timeout=10_000)
+
+        payloads = [request.post_data_json for request in requests if request.post_data]
+        assert any(payload.get("search") == "城市 119" for payload in payloads)
+        assert any(payload.get("cursor") for payload in payloads)
+        assert all("sql" not in payload and "adapter" not in payload for payload in payloads)
+        generations = {payload["generation"] for payload in ready_responses}
+        assert len(generations) == 1
 
 
 @pytest.mark.e2e
@@ -878,7 +798,9 @@ def test_parameter_domain_failure_does_not_trap_dashboard_navigation(page: Page,
             f"{base_url}/dashboards/parameter-domain-lab",
             wait_until="domcontentloaded",
         )
-        expect(page.locator("#run-button")).to_be_disabled(timeout=10_000)
+        # Candidate failure does not invalidate a canonical all/include state;
+        # users who already know the value may still run the analytical Query.
+        expect(page.locator("#run-button")).to_be_enabled(timeout=10_000)
 
         # A reload may retry the broken Domain, but it must not make the Shell
         # or another Dashboard unreachable.
@@ -889,6 +811,91 @@ def test_parameter_domain_failure_does_not_trap_dashboard_navigation(page: Page,
         expect(target).to_have_class(re.compile(r"\bactive\b"))
         expect(page.locator("#run-button")).to_be_enabled(timeout=10_000)
         expect(page).to_have_url(re.compile(r"/dashboards/chart-gallery"))
+
+
+@pytest.mark.e2e
+def test_parameter_domain_generation_is_shared_across_dashboards_and_browser_contexts(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(SHOWCASE, tmp_path / "parameter-domain-shared")
+    original = workspace / "dashboards" / "功能示例##parameter-domain-lab"
+    shared = workspace / "parameter_domains"
+    shared.mkdir()
+    shutil.copy2(original / "parameter_domains" / "locations.yaml", shared / "locations.yaml")
+    shutil.copy2(original / "parameter_domains" / "locations.sql", shared / "locations.sql")
+    dashboard_path = original / "dashboard.yaml"
+    dashboard_path.write_text(
+        dashboard_path.read_text(encoding="utf-8").replace(
+            "parameter_domains: [parameter_domains/locations.yaml]",
+            "parameter_domains: [workspace:/parameter_domains/locations.yaml]",
+        ),
+        encoding="utf-8",
+    )
+    copied = workspace / "dashboards" / "功能示例##parameter-domain-lab-copy"
+    shutil.copytree(original, copied)
+    copied_dashboard = copied / "dashboard.yaml"
+    copied_dashboard.write_text(
+        copied_dashboard.read_text(encoding="utf-8").replace(
+            "id: parameter-domain-lab", "id: parameter-domain-lab-copy", 1
+        ),
+        encoding="utf-8",
+    )
+
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "parameter-domain-lab")
+        expect(page.locator('select[name="cities"] option')).to_have_count(2, timeout=20_000)
+        second_context = page.context.browser.new_context(viewport={"width": 1440, "height": 900})
+        second_page = second_context.new_page()
+        try:
+            _open_dashboard(second_page, base_url, "parameter-domain-lab-copy")
+            expect(second_page.locator('select[name="cities"] option')).to_have_count(
+                2, timeout=20_000
+            )
+            index = workspace / ".dataviz" / "parameter-materializations" / "index.sqlite"
+            with sqlite3.connect(index) as connection:
+                rows = connection.execute(
+                    "SELECT generation, status FROM materializations"
+                ).fetchall()
+            assert len(rows) == 1
+            assert rows[0][0] and rows[0][1] == "ready"
+        finally:
+            second_context.close()
+
+
+@pytest.mark.e2e
+def test_hard_expired_parameter_domain_disables_only_its_pickers(
+    page: Page, tmp_path: Path, monkeypatch
+):
+    workspace = _copy_workspace(SHOWCASE, tmp_path / "parameter-domain-expired")
+    loaded = load_workspace(workspace)
+    dashboard = loaded.dashboard("parameter-domain-lab")
+    store = ParameterMaterializationStore(loaded)
+    record = store.build(dashboard, "locations")
+    with sqlite3.connect(store.index_path) as connection:
+        connection.execute(
+            "UPDATE materializations SET refresh_due_at=?, expires_at=? "
+            "WHERE materialization_key=?",
+            (time.time() - 2, time.time() - 1, record.key),
+        )
+
+    def fail_rebuild(**_kwargs):
+        raise ExecutionFailure(
+            "benchmark warehouse unavailable",
+            details={"code": "parameter_materialization_test_failure"},
+        )
+
+    monkeypatch.setattr(parameter_materializations, "execute_sql_query", fail_rebuild)
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "parameter-domain-lab")
+        province = page.locator('select[name="provinces"]')
+        city = page.locator('select[name="cities"]')
+        expect(province).to_be_disabled(timeout=20_000)
+        expect(city).to_be_disabled(timeout=20_000)
+        expect(city.locator("option")).to_have_count(0)
+        expect(page.locator("#run-button")).to_be_enabled()
+        expect(
+            page.locator('[data-nav-type="dashboard"][data-id="chart-gallery"]')
+        ).to_be_visible()
 
 
 @pytest.mark.e2e
@@ -1691,7 +1698,7 @@ def test_web_component_reference_adapter_consumes_runtime_v2_without_canvas_runt
     page: Page,
 ):
     manifest = {
-        "protocol": {"schema": "dataviz/runtime/v9", "component_registry_version": "3.0.0"},
+        "protocol": {"schema": "dataviz/runtime/v10", "component_registry_version": "3.0.0"},
         "control_state": {
             "dashboard:probe/region": {
                 "intent": "explicit",
@@ -1701,7 +1708,7 @@ def test_web_component_reference_adapter_consumes_runtime_v2_without_canvas_runt
         },
         "view_specs": [{"id": "detail", "inputs": {"main": "source:data/main"}}],
         "dependency_contract": {
-            "schema": "dataviz/dependency-contract/v10",
+            "schema": "dataviz/dependency-contract/v11",
             "views": {
                 "detail": {
                     "inputs": {"main": "source:data/main"},
@@ -1784,7 +1791,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
         )
         assert {
             owner_contract[key] for key in ("runtime", "data", "view", "section", "presentation")
-        } == {"dataviz/runtime/v9"}
+        } == {"dataviz/runtime/v10"}
         assert {
             "data.pipeline",
             "view.declarative",
@@ -2230,7 +2237,7 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(page: Page, 
             "type": "multiple_select",
             "value_type": "text",
             "label": "Model list",
-            "initial": {"mode": "values", "values": ["model-01"]},
+            "default": {"mode": "include", "values": ["model-01"]},
             "options": {
                 "mode": "static",
                 "choices": [
@@ -2429,7 +2436,7 @@ def test_cross_browser_narrow_control_overlay_keyboard_scroll_and_aria(page: Pag
             "type": "multiple_select",
             "value_type": "text",
             "label": "Model list",
-            "initial": {"mode": "values", "values": ["model-01"]},
+            "default": {"mode": "include", "values": ["model-01"]},
             "options": {
                 "mode": "static",
                 "choices": [
@@ -3664,10 +3671,10 @@ def test_browser_query_inputs_project_date_range_parts(page: Page, tmp_path: Pat
         stored = page.evaluate(
             """() => {
               const key = Object.keys(sessionStorage).find(value => value.startsWith('dataviz.tab-ui.v4.'));
-              return JSON.parse(sessionStorage.getItem(key)).dashboards['worker-runtime'].queryParameterValues;
+              return JSON.parse(sessionStorage.getItem(key)).dashboards['worker-runtime'].queryParameterState;
             }"""
         )
-        assert tuple(stored["job_date_range"]) in expected_ranges
+        assert tuple(stored["job_date_range"]["value"]) in expected_ranges
         _run_and_wait(page)
         frame = page.frame_locator("#canvas-frame")
         table = frame.locator('[data-view-id="scaled-table"]')
@@ -4950,7 +4957,7 @@ def test_multi_view_linked_brushing_preserves_writer_provenance_across_runtime(
             )
         )
         result = manifest["result"]
-        assert result["schema"] == "dataviz/analysis-result/v3"
+        assert result["schema"] == "dataviz/analysis-result/v4"
         records_evidence = result["consumer_revisions"]["views"]["records"]
         assert records_evidence["applied_writer_provenance"][control_key] == {
             "revision": 4,
@@ -4985,7 +4992,7 @@ def test_multi_view_linked_brushing_preserves_writer_provenance_across_runtime(
             })""",
             control_key,
         )
-        assert snapshot["schema"] == "dataviz/state-snapshot/v4"
+        assert snapshot["schema"] == "dataviz/state-snapshot/v5"
         assert snapshot["state"]["value"] == ["广东"]
         assert (
             snapshot["provenance"]
@@ -5005,6 +5012,7 @@ def test_plotly_area_selection_gesture_commits_the_bound_control(
     page: Page, tmp_path: Path, dragmode: str
 ):
     workspace = _copy_workspace(SHOWCASE, tmp_path / f"plotly-{dragmode}")
+    report_path = tmp_path / f"plotly-{dragmode}-toggle.html"
     dashboard_path = workspace / "dashboards" / "功能示例##chart-gallery" / "dashboard.yaml"
     definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
     definition["controls"][0]["initial"] = {"mode": "empty"}
@@ -5065,6 +5073,27 @@ def test_plotly_area_selection_gesture_commits_the_bound_control(
         assert selection["intent"] == "explicit"
         assert 0 < len(selection["value"]) < 4
 
+        mode_title = "Box Select" if dragmode == "select" else "Lasso Select"
+        active_tool = chart.locator(f'.modebar-btn[data-title="{mode_title}"]')
+        expect(active_tool).to_have_class(re.compile(r"\bactive\b"))
+        active_tool.click()
+        page.wait_for_function(
+            """() => document.querySelector('#canvas-frame').contentWindow
+              .document.querySelector('[data-view-id="scatter"] .dv-plotly')
+              ._fullLayout.dragmode === 'zoom'""",
+            timeout=10_000,
+        )
+        expect(active_tool).not_to_have_class(re.compile(r"\bactive\b"))
+        assert frame.locator("body").evaluate(
+            "() => window.dataviz.control.state('dashboard:chart-gallery/province')"
+        ) == selection
+
+        # Seal the selected state before Reset so portable HTML proves the same
+        # click-active-tool-again behavior with no Server callback.
+        with page.expect_download(timeout=20_000) as download_info:
+            _export_html(page)
+        download_info.value.save_as(report_path)
+
         chart.locator('.modebar-btn[data-title="Restore default selection"]').click()
         page.wait_for_function(
             """() => document.querySelector('#canvas-frame').contentWindow
@@ -5072,6 +5101,31 @@ def test_plotly_area_selection_gesture_commits_the_bound_control(
               .value.length === 0""",
             timeout=10_000,
         )
+
+    with _running_static_server(report_path.parent) as report_url:
+        page.goto(f"{report_url}/{report_path.name}", wait_until="domcontentloaded")
+        view = page.locator('[data-view-id="scatter"]')
+        expect(view).to_have_attribute("data-view-status", "ready", timeout=20_000)
+        chart = view.locator(".dv-plotly")
+        active_tool = chart.locator(
+            f'.modebar-btn[data-title="{"Box Select" if dragmode == "select" else "Lasso Select"}"]'
+        )
+        portable_selection = page.locator("body").evaluate(
+            "() => window.dataviz.control.state('dashboard:chart-gallery/province')"
+        )
+        assert portable_selection == selection
+        active_tool.click()
+        expect(active_tool).to_have_class(re.compile(r"\bactive\b"))
+        active_tool.click()
+        page.wait_for_function(
+            """() => document.querySelector('[data-view-id="scatter"] .dv-plotly')
+              ._fullLayout.dragmode === 'zoom'""",
+            timeout=10_000,
+        )
+        expect(active_tool).not_to_have_class(re.compile(r"\bactive\b"))
+        assert page.locator("body").evaluate(
+            "() => window.dataviz.control.state('dashboard:chart-gallery/province')"
+        ) == portable_selection
 
 
 @pytest.mark.e2e

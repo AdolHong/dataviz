@@ -35,7 +35,7 @@ def _sql_workspace(
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v13
+        """schema: dataviz/dashboard/v14
 kind: dashboard
 id: sql-test
 title: SQL test
@@ -54,7 +54,7 @@ sections:
         f"timeout_retries: {timeout_retries}\n" if timeout_retries is not None else ""
     )
     (sources / "query.yaml").write_text(
-        f"""schema: dataviz/source/v3
+        f"""schema: dataviz/source/v4
 kind: source
 id: query
 type: sql
@@ -129,7 +129,9 @@ query_inputs:
 
     result = Executor(workspace).run(
         "sql-test",
-        query_parameters={"job_date_range": ["2026-08-17", "2026-08-23"]},
+        query_parameter_state={
+            "job_date_range": {"value": ["2026-08-17", "2026-08-23"]}
+        },
         refresh=True,
     )
     artifact = result.nodes["source:query"].outputs["main"]
@@ -139,8 +141,8 @@ query_inputs:
     assert frame.to_dict(orient="records") == [
         {"start_date": "2026-08-17", "end_date": "2026-08-23"}
     ]
-    assert result.query_parameters == {
-        "job_date_range": ["2026-08-17", "2026-08-23"]
+    assert result.query_parameter_state == {
+        "job_date_range": {"value": ["2026-08-17", "2026-08-23"]}
     }
     assert evidence["parameters"] == {
         "start_date": "2026-08-17",
@@ -209,7 +211,7 @@ def test_sql_timeout_does_not_block_an_independent_fast_branch(tmp_path: Path):
     sources = dashboard / "sources"
     (sources / "fast.csv").write_text("label,value\nready,7\n", encoding="utf-8")
     (sources / "fast.yaml").write_text(
-        """schema: dataviz/source/v3
+        """schema: dataviz/source/v4
 kind: source
 id: fast
 type: file
@@ -221,7 +223,7 @@ cache: {mode: none}
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v13
+        """schema: dataviz/dashboard/v14
 kind: dashboard
 id: sql-test
 title: SQL test
@@ -350,7 +352,7 @@ def test_timeout_retries_is_rejected_by_the_file_source_schema(tmp_path: Path):
     sources = root / "dashboards" / "sql-test" / "sources"
     (sources / "query.csv").write_text("value\n1\n", encoding="utf-8")
     (sources / "query.yaml").write_text(
-        """schema: dataviz/source/v3
+        """schema: dataviz/source/v4
 kind: source
 id: query
 type: file

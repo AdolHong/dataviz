@@ -29,8 +29,7 @@ class RunRecord:
     run_id: str
     session_id: str
     dashboard_id: str
-    requested_parameters: dict[str, Any] = field(default_factory=dict)
-    requested_parameter_intents: dict[str, str] = field(default_factory=dict)
+    requested_parameter_state: dict[str, dict[str, Any]] = field(default_factory=dict)
     query_scope: str = "dashboard"
     query_targets: list[str] = field(default_factory=list)
     query_nodes: list[str] = field(default_factory=list)
@@ -246,11 +245,10 @@ class RunManager:
     def start(
         self,
         dashboard_id: str,
-        query_parameters: dict[str, Any],
+        query_parameter_state: dict[str, Any],
         session_id: str,
         refresh: bool = False,
         *,
-        query_parameter_intents: dict[str, str] | None = None,
         _workspace: LoadedWorkspace | None = None,
     ) -> RunRecord:
         self.cleanup()
@@ -265,8 +263,9 @@ class RunManager:
             run_id=run_id,
             session_id=session_id,
             dashboard_id=dashboard_id,
-            requested_parameters=dict(query_parameters),
-            requested_parameter_intents=dict(query_parameter_intents or {}),
+            requested_parameter_state={
+                key: dict(value) for key, value in query_parameter_state.items()
+            },
             query_scope="dashboard",
             query_targets=sorted(plan.targets),
             query_nodes=sorted(plan.nodes),
@@ -334,8 +333,7 @@ class RunManager:
                     record.condition.notify_all()
                 result = executor.run(
                     dashboard_id,
-                    query_parameters=query_parameters,
-                    query_parameter_intents=query_parameter_intents,
+                    query_parameter_state=query_parameter_state,
                     refresh=refresh,
                     observer=observer,
                     snapshot_observer=snapshot_observer,
@@ -451,8 +449,9 @@ class RunManager:
                 run_id=result.run_id,
                 session_id=session_id,
                 dashboard_id=dashboard_id,
-                requested_parameters=dict(result.query_parameters),
-                requested_parameter_intents=dict(result.query_parameter_intents),
+                requested_parameter_state={
+                    key: dict(value) for key, value in result.query_parameter_state.items()
+                },
                 query_scope=result.query_scope,
                 query_targets=list(result.query_targets),
                 query_nodes=list(result.query_nodes),

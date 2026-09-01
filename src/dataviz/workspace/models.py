@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, ClassVar, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
@@ -52,7 +52,7 @@ class QueryInputProjectionDefinition(Model):
     """Bind one node-local input name to a canonical Query Parameter value."""
 
     parameter: StableId
-    projection: Literal["value", "present", "intent"] = "value"
+    projection: Literal["value", "selection", "active", "state"] = "value"
     part: Literal["start", "end"] | None = None
 
     @model_validator(mode="after")
@@ -182,7 +182,7 @@ OptionDomainDefinition = Annotated[
 
 
 class SelectInitialDefinition(Model):
-    """Initial value policy shared by Query, Selection and Compute selects."""
+    """Initial value policy for post-query Control selects."""
 
     mode: Literal["all", "empty", "values", "first", "value"]
     values: list[Any] | None = None
@@ -205,6 +205,30 @@ class SelectInitialDefinition(Model):
         return self
 
 
+class QuerySelectDefaultDefinition(Model):
+    """Compact default policy for one Query Parameter select."""
+
+    mode: Literal["first", "value", "none", "all", "include", "exclude"]
+    value: Any = None
+    values: list[Any] | None = None
+
+    @model_validator(mode="after")
+    def validate_shape(self):
+        if self.mode == "value":
+            if "value" not in self.model_fields_set or self.value is None:
+                raise ValueError("default mode=value requires value")
+            if self.values is not None:
+                raise ValueError("default mode=value does not accept values")
+        elif self.mode in {"include", "exclude"}:
+            if not self.values:
+                raise ValueError(f"default mode={self.mode} requires non-empty values")
+            if "value" in self.model_fields_set:
+                raise ValueError(f"default mode={self.mode} does not accept value")
+        elif self.values is not None or "value" in self.model_fields_set:
+            raise ValueError(f"default mode={self.mode} does not accept value or values")
+        return self
+
+
 ControlDependencyReference = Annotated[
     str,
     StringConstraints(
@@ -221,6 +245,7 @@ class ViewControlBindingDefinition(Model):
 
 
 class _ValueControlDefinition(Model):
+    _is_query_parameter: ClassVar[bool] = False
     id: StableId
     type: Literal[
         "single_input",
@@ -257,6 +282,11 @@ class _ValueControlDefinition(Model):
 class QueryParameterDefinition(_ValueControlDefinition):
     """State that creates a new immutable Query Run when committed."""
 
+    _is_query_parameter: ClassVar[bool] = True
+    initial: None = Field(default=None, exclude=True)
+    default: QuerySelectDefaultDefinition | Any = None
+    max_explicit_values: int = Field(500, ge=1, le=10_000)
+
     @model_validator(mode="after")
     def validate_option_domain(self):
         if self.type in {"single_select", "multiple_select"} and not isinstance(
@@ -266,6 +296,12 @@ class QueryParameterDefinition(_ValueControlDefinition):
             raise ValueError(
                 "Query Parameter select controls require options.mode=static or options.mode=domain"
             )
+        if self.initial is not None:
+            raise ValueError("Query Parameters use default; initial is not supported")
+        if self.type not in {"single_select", "multiple_select"} and isinstance(
+            self.default, QuerySelectDefaultDefinition
+        ):
+            raise ValueError("structured default policies are only valid for select Query Parameters")
         return self
 
 
@@ -880,7 +916,7 @@ class CacheDefinition(Model):
 
 
 class ParameterDomainDefinition(Model):
-    """A bounded SQL table used only to resolve Query Parameter domains."""
+    """A shared materialized SQL catalog used only for Query Parameter choices."""
 
     schema_: Literal[PARAMETER_DOMAIN_SCHEMA] = Field(alias="schema")
     kind: Literal["parameter_domain"] = "parameter_domain"
@@ -890,22 +926,26 @@ class ParameterDomainDefinition(Model):
     type: Literal["sql"] = "sql"
     adapter: StableId
     code: str
-    query_inputs: dict[StableId, QueryInputBindingDefinition] = Field(
-        default_factory=dict
-    )
     timeout_seconds: float = Field(30.0, gt=0)
     timeout_retries: int = Field(0, ge=0, le=5)
-    max_rows: int = Field(10_000, ge=1, le=100_000)
-    cache: CacheDefinition = Field(default_factory=CacheDefinition)
+    max_rows: int = Field(500_000, ge=1, le=10_000_000)
+    max_bytes: int = Field(536_870_912, ge=1)
+    materialization: "ParameterDomainMaterializationDefinition" = Field(
+        default_factory=lambda: ParameterDomainMaterializationDefinition()
+    )
 
     @model_validator(mode="after")
-    def require_session_bounded_cache(self):
-        if self.cache.mode == "persistent" or self.cache.scope == "workspace":
+    def validate_materialization_guard(self):
+        if self.materialization.expire_after_seconds <= self.materialization.refresh_after_seconds:
             raise ValueError(
-                "Parameter Domain cache must be tab/session bounded; "
-                "persistent and workspace scope are not supported"
+                "materialization.expire_after_seconds must be greater than refresh_after_seconds"
             )
         return self
+
+
+class ParameterDomainMaterializationDefinition(Model):
+    refresh_after_seconds: int = Field(43_200, ge=1)
+    expire_after_seconds: int = Field(604_800, ge=2)
 
 
 class _SourceDefinition(Model):
@@ -953,6 +993,7 @@ class SqlSourceDefinition(_SourceDefinition):
     code: str
     adapter: StableId
     query_inputs: dict[StableId, QueryInputBindingDefinition] = Field(default_factory=dict)
+    query_filters: dict[StableId, "SqlQueryFilterDefinition"] = Field(default_factory=dict)
     timeout_seconds: float = Field(120.0, gt=0)
     timeout_retries: int = Field(1, ge=0, le=5)
 
@@ -960,6 +1001,19 @@ class SqlSourceDefinition(_SourceDefinition):
     def require_single_table_output(self):
         if set(self.outputs) != {"main"} or self.outputs["main"].kind != "table":
             raise ValueError("SQL Source outputs must be exactly main: {kind: table}")
+        return self
+
+
+class SqlQueryFilterDefinition(Model):
+    parameter: StableId
+    field: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_field(self):
+        import re
+
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", self.field):
+            raise ValueError("query filter field must be a dot-qualified SQL identifier")
         return self
 
 
@@ -1084,6 +1138,7 @@ def _require_unique_input_schema_columns(
 class AdapterDefinition(Model):
     type: str = "sqlalchemy"
     description: str = ""
+    visibility_scope: str = "default"
     url: str | None = None
     env: str | None = None
     database: str | None = None

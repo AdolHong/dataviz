@@ -76,8 +76,7 @@ def _stable_result_projection(payload: dict) -> dict:
         "schema": payload["schema"],
         "status": payload["status"],
         "target": payload["target"],
-        "query_parameters": payload["query_parameters"],
-        "query_parameter_intents": payload.get("query_parameter_intents", {}),
+        "query_parameter_state": payload["query_parameter_state"],
         "effective_controls": payload["effective_controls"],
         "consumer_revisions": payload.get(
             "consumer_revisions", {"views": {}, "transforms": {}}
@@ -201,15 +200,14 @@ def test_run_analysis_seals_failure_after_execution_starts(
         RunRequest(
             workspace=workspace,
             target=target,
-            query_parameters={"min_query_revenue": 100},
+            query_parameter_state={"min_query_revenue": {"value": 100}},
         )
     )
 
     assert result["schema"] == ANALYSIS_RESULT_SCHEMA
     assert result["status"] == "failed"
     assert result["error"]["code"] == "synthetic_execution_failure"
-    assert result["query_parameters"] == {"min_query_revenue": 100}
-    assert result["query_parameter_intents"] == {"min_query_revenue": "explicit"}
+    assert result["query_parameter_state"] == {"min_query_revenue": {"value": 100}}
     assert result["result_id"].startswith("result_")
 
 

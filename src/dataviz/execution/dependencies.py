@@ -1841,6 +1841,10 @@ def _compile_query_parameter_impacts(
         for binding in getattr(definition, "query_inputs", {}).values():
             key = query_input_parameter(binding)
             query_parameter_consumers.setdefault(key, set()).add(f"source:{identifier}")
+        for query_filter in getattr(definition, "query_filters", {}).values():
+            query_parameter_consumers.setdefault(
+                query_filter.parameter, set()
+            ).add(f"source:{identifier}")
     for identifier, (_, definition) in dashboard.dataset_transforms.items():
         for binding in definition.query_inputs.values():
             key = query_input_parameter(binding)

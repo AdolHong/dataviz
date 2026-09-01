@@ -171,7 +171,9 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
                 )
             )
         try:
-            loaded_by_path[dashboard_path] = load_dashboard(dashboard_path)
+            loaded_by_path[dashboard_path] = load_dashboard(
+                dashboard_path, workspace_root=root
+            )
         except WorkspaceError as error:
             errors_by_path[dashboard_path] = error
 

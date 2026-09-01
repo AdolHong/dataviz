@@ -14,9 +14,27 @@
     const overscan = Math.max(2, Number(control.dataset.overscan || 5));
     const maxSelected = Number(control.dataset.maxSelected || 0);
     const allowEmpty = control.dataset.clearable === 'true';
+    const queryParameter = control.dataset.queryParameter === 'true';
+    const remoteOptions = control.dataset.remoteOptions === 'true';
     let filtered = [];
     let active = 0;
     let virtual = false;
+    let searchTimer = null;
+
+    const querySelection = () => input.dataset.querySelection || 'all';
+    const querySelected = option => {
+      if (!queryParameter || !input.multiple) return option.selected;
+      const operand = option.selected;
+      if (querySelection() === 'all') return true;
+      if (querySelection() === 'none') return false;
+      return querySelection() === 'exclude' ? !operand : operand;
+    };
+    const setQuerySelection = selection => {
+      input.dataset.querySelection = selection;
+      if (selection === 'all' || selection === 'none') {
+        api.options(input).forEach(option => { option.selected = false; });
+      }
+    };
 
     const picker = document.createElement('div');
     picker.className = 'dv-select';
@@ -80,6 +98,25 @@
     const choose = index => {
       const option = filtered[index];
       if (!option || option.disabled || input.disabled) return;
+      if (queryParameter && input.multiple) {
+        const wasSelected = querySelected(option);
+        const mode = querySelection();
+        if (mode === 'all') {
+          setQuerySelection('exclude');
+          option.selected = true;
+        } else if (mode === 'none') {
+          setQuerySelection('include');
+          option.selected = true;
+        } else {
+          option.selected = mode === 'include' ? !wasSelected : wasSelected;
+          if (!api.selectedOptions(input).length) {
+            setQuerySelection(mode === 'include' ? 'none' : 'all');
+          }
+        }
+        sync();
+        api.emitChange(input);
+        return;
+      }
       const selectedCount = api.selectedOptions(input).length;
       if (input.multiple && !option.selected && maxSelected && selectedCount >= maxSelected) return;
       if (input.multiple && option.selected && selectedCount === 1 && !allowEmpty) return;
@@ -92,13 +129,14 @@
 
     const rowFor = (option, index) => {
       const selectedCount = api.selectedOptions(input).length;
+      const selected = querySelected(option);
       const capped = Boolean(input.multiple && maxSelected && selectedCount >= maxSelected && !option.selected);
       const button = document.createElement('button');
       button.type = 'button';
       button.id = `${input.id || 'dv-select'}-option-${index}`;
-      button.className = `dv-choice-option${option.selected ? ' is-selected' : ''}${option.dataset.unavailable === 'true' ? ' is-unavailable' : ''}${index === active ? ' is-active' : ''}`;
+      button.className = `dv-choice-option${selected ? ' is-selected' : ''}${option.dataset.unavailable === 'true' ? ' is-unavailable' : ''}${index === active ? ' is-active' : ''}`;
       button.setAttribute('role', 'option');
-      button.setAttribute('aria-selected', String(option.selected));
+      button.setAttribute('aria-selected', String(selected));
       button.disabled = input.disabled || option.disabled || capped;
       const copy = document.createElement('span');
       copy.className = 'dv-select-option__copy';
@@ -114,7 +152,7 @@
       }
       const mark = document.createElement('i');
       mark.setAttribute('aria-hidden', 'true');
-      mark.textContent = option.selected ? '✓' : '';
+      mark.textContent = selected ? '✓' : '';
       button.append(copy, mark);
       button.addEventListener('click', () => choose(index));
       return button;
@@ -159,14 +197,28 @@
       viewport.setAttribute('aria-activedescendant', renderedOptions[active] ? `${input.id || 'dv-select'}-option-${active}` : '');
       empty.hidden = renderedOptions.length > 0;
       viewport.hidden = renderedOptions.length === 0;
-      const selectedCount = api.selectedOptions(input).length;
-      const availableCount = api.availableOptions(input).length;
+      const operandCount = api.selectedOptions(input).length;
+      const availableCount = Number(input.dataset.queryTotal || api.availableOptions(input).length);
+      const selectedCount = queryParameter && input.multiple
+        ? querySelection() === 'all' ? availableCount
+        : querySelection() === 'none' ? 0
+        : querySelection() === 'exclude' ? Math.max(0, availableCount - operandCount)
+        : operandCount
+        : operandCount;
       const limit = maxSelected ? ` · max ${maxSelected}` : '';
       const matching = filtered.length === availableCount ? '' : `${filtered.length} matching · `;
       count.textContent = `${matching}${selectedCount} selected · ${availableCount} available${limit}`;
       clear.hidden = !allowEmpty;
       clear.disabled = input.disabled || selectedCount === 0;
       all.hidden = !input.multiple;
+      if (queryParameter && input.multiple) {
+        all.textContent = control.dataset.selectAllLabel || 'Select all';
+        all.dataset.action = 'select-all';
+        all.disabled = input.disabled || querySelection() === 'all';
+        api.renderSummary(trigger, input, control, control.dataset.placeholder || 'Choose…');
+        trigger.disabled = input.disabled;
+        return;
+      }
       const candidates = filtered.filter(option => !option.disabled);
       const allCandidatesSelected = candidates.length > 0 && candidates.every(option => option.selected);
       const required = candidates.filter(option => !option.selected).length;
@@ -191,9 +243,12 @@
 
     function sync() {
       const allOptions = api.options(input);
+      const searchableCount = remoteOptions
+        ? Number(input.dataset.queryUniverseTotal || input.dataset.queryTotal || allOptions.length)
+        : allOptions.length;
       const searchEnabled = enabledByMode(
         control.dataset.searchMode || 'auto',
-        allOptions.length,
+        searchableCount,
         Math.max(0, Number(control.dataset.searchThreshold || 9)),
       );
       virtual = enabledByMode(
@@ -211,7 +266,7 @@
           && control.dataset.showUnavailable !== 'true'
         ) return false;
         if (control.dataset.hideSelected === 'true' && option.selected) return false;
-        return !query || api.optionSearchText(option).includes(query);
+        return remoteOptions || !query || api.optionSearchText(option).includes(query);
       });
       active = Math.min(active, Math.max(0, filtered.length - 1));
       render();
@@ -221,14 +276,27 @@
     search.addEventListener('input', () => {
       viewport.scrollTop = 0;
       active = 0;
-      sync();
+      if (!remoteOptions) {
+        sync();
+        return;
+      }
+      window.clearTimeout(searchTimer);
+      searchTimer = window.setTimeout(() => {
+        void input._remoteLookup?.({search:search.value.trim()});
+      }, 180);
     });
     search.addEventListener('keydown', event => {
       if (event.key !== 'ArrowDown' || !filtered.length) return;
       event.preventDefault();
       viewport.focus();
     });
-    viewport.addEventListener('scroll', () => { if (virtual) render(); }, {passive: true});
+    viewport.addEventListener('scroll', () => {
+      if (virtual) render();
+      if (
+        remoteOptions
+        && viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - rowHeight * 2
+      ) void input._remoteLookup?.({search:search.value.trim(), append:true});
+    }, {passive: true});
     viewport.addEventListener('keydown', event => {
       if (!filtered.length) return;
       if (event.key === 'ArrowDown') active = Math.min(filtered.length - 1, active + 1);
@@ -245,6 +313,12 @@
     });
     all.addEventListener('click', () => {
       if (!input.multiple || input.disabled) return;
+      if (queryParameter) {
+        setQuerySelection('all');
+        sync();
+        api.emitChange(input);
+        return;
+      }
       const candidates = filtered.filter(option => !option.disabled);
       const allCandidatesSelected = candidates.length > 0 && candidates.every(option => option.selected);
       const selectedOutsideCandidates = api.selectedOptions(input).filter(
@@ -258,7 +332,8 @@
     });
     clear.addEventListener('click', () => {
       if (input.disabled || !allowEmpty) return;
-      api.clearOptions(input);
+      if (queryParameter && input.multiple) setQuerySelection('none');
+      else api.clearOptions(input);
       api.markSelectionIntent(input, 'explicit');
       sync();
       api.emitChange(input);

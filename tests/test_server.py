@@ -35,6 +35,10 @@ SESSION_A = "tab_session_a123"
 SESSION_B = "tab_session_b456"
 
 
+def _query_state(**values):
+    return {name: {"value": value} for name, value in values.items()}
+
+
 @pytest.fixture(scope="module", autouse=True)
 def _isolate_repository_workspaces(isolated_workspace):
     global WORKSPACE, MINIMAL_WORKSPACE, REPEAT_WORKSPACE
@@ -419,7 +423,7 @@ def test_workspace_api_resolves_relative_query_defaults_to_concrete_tab_values(
         for anchor in {before, after}
     }
 
-    assert tuple(parameter["resolved_default"]) in expected
+    assert tuple(parameter["resolved_default_state"]["value"]) in expected
     assert parameter["default"] == [
         {"mode": "relative", "anchor": "today", "offset": "-3d"},
         {"mode": "relative", "anchor": "today", "offset": "-1d"},
@@ -427,7 +431,7 @@ def test_workspace_api_resolves_relative_query_defaults_to_concrete_tab_values(
 
     started = client.post(
         "/api/dashboards/sales-overview/runs",
-        json={"session_id": SESSION_A, "query_parameters": {"min_query_revenue": 0}},
+        json={"session_id": SESSION_A, "query_parameter_state": _query_state(min_query_revenue=0)},
     ).json()
     record = None
     for _ in range(100):
@@ -438,7 +442,7 @@ def test_workspace_api_resolves_relative_query_defaults_to_concrete_tab_values(
             break
         time.sleep(0.05)
     assert record and record["status"] == "ready", record
-    assert tuple(record["result"]["query_parameters"]["job_date_range"]) in expected
+    assert tuple(record["result"]["query_parameter_state"]["job_date_range"]["value"]) in expected
 
 
 def test_queued_query_can_be_cancelled_before_a_global_slot_is_available(
@@ -458,7 +462,7 @@ def test_queued_query_can_be_cancelled_before_a_global_slot_is_available(
     try:
         record = manager.start(
             "sales-overview",
-            {"min_query_revenue": 0},
+            _query_state(min_query_revenue=0),
             SESSION_A,
         )
         wait_for(lambda: any(event.event == "run_queued" for event in record.events))
@@ -489,7 +493,7 @@ def test_server_rejects_query_when_static_preflight_has_errors(tmp_path: Path):
 
     response = client.post(
         "/api/dashboards/sales-overview/runs",
-        json={"session_id": SESSION_A, "query_parameters": {}},
+        json={"session_id": SESSION_A, "query_parameter_state": {}},
     )
 
     assert response.status_code == 422
@@ -516,7 +520,7 @@ def test_run_preflight_reloads_dashboard_files_changed_after_server_start(
         "/api/dashboards/sales-overview/runs",
         json={
             "session_id": SESSION_A,
-            "query_parameters": {"min_query_revenue": 0},
+            "query_parameter_state": _query_state(min_query_revenue=0),
         },
     )
 
@@ -584,7 +588,7 @@ def test_existing_run_allows_presentation_edits_but_rejects_query_logic_drift(
         "/api/dashboards/sales-overview/runs",
         json={
             "session_id": SESSION_A,
-            "query_parameters": {"min_query_revenue": 0},
+            "query_parameter_state": _query_state(min_query_revenue=0),
         },
     ).json()
     run_id = started["run_id"]
@@ -666,7 +670,7 @@ def test_server_run_and_canvas():
         "/api/dashboards/sales/runs",
         json={
             "session_id": SESSION_A,
-            "query_parameters": {"target_factor": 1.0},
+            "query_parameter_state": _query_state(target_factor=1.0),
             "refresh": True,
         },
     ).json()
@@ -779,7 +783,7 @@ def test_shared_result_is_persisted_outside_dashboards_and_survives_restart(
             "/api/dashboards/worker-runtime/runs",
             json={
                 "session_id": session_id,
-                "query_parameters": {},
+                "query_parameter_state": {},
                 "refresh": True,
             },
         )
@@ -937,7 +941,7 @@ def test_shared_result_adds_server_python_interaction_but_html_export_rejects_it
             "/api/dashboards/worker-runtime/runs",
             json={
                 "session_id": session_id,
-                "query_parameters": {"batch": 3},
+                "query_parameter_state": _query_state(batch=3),
                 "refresh": True,
             },
         )
@@ -1055,7 +1059,7 @@ def test_server_shell_owns_dashboard_and_query_parameter_url_state():
     script = (ROOT / "src" / "dataviz" / "server" / "static" / "app.js").read_text()
 
     assert "function dashboardIdFromLocation" in script
-    assert "function queryParameterValuesFromLocation" in script
+    assert "function queryParameterStateFromLocation" in script
     assert "function dashboardLocation" in script
     assert "window.history[method]" in script
     assert "window.addEventListener('popstate'" in script
@@ -1083,7 +1087,7 @@ def test_server_streams_large_tables_as_gzipped_arrow_without_json_materializati
     client = TestClient(create_app(REPEAT_WORKSPACE))
     started = client.post(
         "/api/dashboards/store-performance/runs",
-        json={"session_id": SESSION_A, "query_parameters": {}, "refresh": True},
+        json={"session_id": SESSION_A, "query_parameter_state": {}, "refresh": True},
     ).json()
     run_id = started["run_id"]
     for _ in range(120):
@@ -1171,7 +1175,7 @@ def test_server_app_controls_are_browser_only():
     assert "Number(local[key].revision || 0)" not in script
     assert "state.canvasSelections" not in script
     assert "/static/app.js?v=" in template
-    select_block = script[script.index("function selectDashboard"):script.index("function queryParameters")]
+    select_block = script[script.index("function selectDashboard"):script.index("function queryParameterStates")]
     assert "eventSource.close()" not in select_block
 
 
@@ -1621,7 +1625,7 @@ def test_run_ready_is_emitted_after_result_is_available():
     manager = RunManager(load_workspace(WORKSPACE))
     record = manager.start(
         "sales",
-        {"target_factor": 1.0},
+        _query_state(target_factor=1.0),
         session_id=SESSION_A,
     )
     for _ in range(100):
@@ -1646,7 +1650,7 @@ def test_fast_dag_branch_publishes_output_before_slow_branch_finishes(
         encoding="utf-8",
     )
     (dashboard_root / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v13
+        """schema: dataviz/dashboard/v14
 kind: dashboard
 id: progressive
 title: Progressive branches
@@ -1729,7 +1733,7 @@ cache: {mode: none}
     client = TestClient(create_app(root))
     started = client.post(
         "/api/dashboards/progressive/runs",
-        json={"session_id": SESSION_A, "query_parameters": {}},
+        json={"session_id": SESSION_A, "query_parameter_state": {}},
     )
     assert started.status_code == 200
     run_id = started.json()["run_id"]
@@ -1829,10 +1833,10 @@ cache: {mode: none}
 def test_runs_and_session_cache_are_isolated_per_browser_tab():
     manager = RunManager(load_workspace(WORKSPACE))
     first = manager.start(
-        "sales", {"target_factor": 1.0}, session_id=SESSION_A
+        "sales", _query_state(target_factor=1.0), session_id=SESSION_A
     )
     second = manager.start(
-        "sales", {"target_factor": 1.25}, session_id=SESSION_B
+        "sales", _query_state(target_factor=1.25), session_id=SESSION_B
     )
     for _ in range(100):
         if first.result and second.result:
@@ -1840,8 +1844,8 @@ def test_runs_and_session_cache_are_isolated_per_browser_tab():
         time.sleep(0.05)
 
     assert first.result and second.result
-    assert first.result.query_parameters["target_factor"] == 1.0
-    assert second.result.query_parameters["target_factor"] == 1.25
+    assert first.result.query_parameter_state["target_factor"] == {"value": 1.0}
+    assert second.result.query_parameter_state["target_factor"] == {"value": 1.25}
     assert manager.latest_for(SESSION_A, "sales") is first
     assert manager.latest_for(SESSION_B, "sales") is second
     assert manager.get(first.run_id, SESSION_B) is None
@@ -1860,7 +1864,7 @@ def test_run_api_rejects_cross_tab_and_cross_dashboard_access():
     client = TestClient(create_app(WORKSPACE))
     started = client.post(
         "/api/dashboards/sales/runs",
-        json={"session_id": SESSION_A, "query_parameters": {"target_factor": 1.0}},
+        json={"session_id": SESSION_A, "query_parameter_state": _query_state(target_factor=1.0)},
     )
     assert started.status_code == 200
     run_id = started.json()["run_id"]
@@ -2053,7 +2057,7 @@ def test_query_cancel_is_tab_scoped_and_same_dashboard_run_supersedes(tmp_path: 
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v13
+        """schema: dataviz/dashboard/v14
 kind: dashboard
 id: slow
 title: Slow
@@ -2068,7 +2072,7 @@ sections:
         encoding="utf-8",
     )
     (dashboard / "sources" / "slow.yaml").write_text(
-        """schema: dataviz/source/v3
+        """schema: dataviz/source/v4
 kind: source
 id: slow
 type: python
@@ -2093,11 +2097,11 @@ def load(context):
     client = TestClient(create_app(root))
     first_a = client.post(
         "/api/dashboards/slow/runs",
-        json={"session_id": SESSION_A, "query_parameters": {"delay": 5}},
+        json={"session_id": SESSION_A, "query_parameter_state": _query_state(delay=5)},
     ).json()["run_id"]
     first_b = client.post(
         "/api/dashboards/slow/runs",
-        json={"session_id": SESSION_B, "query_parameters": {"delay": 0.2}},
+        json={"session_id": SESSION_B, "query_parameter_state": _query_state(delay=0.2)},
     ).json()["run_id"]
 
     assert client.delete(
@@ -2106,7 +2110,7 @@ def load(context):
 
     second_a = client.post(
         "/api/dashboards/slow/runs",
-        json={"session_id": SESSION_A, "query_parameters": {"delay": 0}},
+        json={"session_id": SESSION_A, "query_parameter_state": _query_state(delay=0)},
     ).json()["run_id"]
 
     records = {}
@@ -2132,4 +2136,4 @@ def load(context):
     assert records["first_a"]["status"] == "cancelled"
     assert records["second_a"]["result"]["status"] == "ready"
     assert records["first_b"]["result"]["status"] == "ready"
-    assert records["first_b"]["result"]["query_parameters"]["delay"] == 0.2
+    assert records["first_b"]["result"]["query_parameter_state"]["delay"] == {"value": 0.2}

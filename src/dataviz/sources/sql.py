@@ -42,6 +42,73 @@ _QUERY_TIMEOUT_MARKERS = (
     "cancelled due to timeout",
     "canceled due to timeout",
 )
+_QUERY_FILTER_TOKEN = re.compile(
+    r"\{\{\s*dataviz_filter:([A-Za-z_][A-Za-z0-9_-]*)\s*\}\}"
+)
+
+
+def resolve_query_filter_tokens(
+    query: str,
+    declarations: dict[str, Any],
+    states: dict[str, dict[str, Any]],
+    *,
+    adapter_type: str,
+) -> tuple[str, dict[str, Any]]:
+    """Resolve the only supported SQL template token into parameterized predicates."""
+
+    tokens = _QUERY_FILTER_TOKEN.findall(query)
+    unknown = sorted(set(tokens) - set(declarations))
+    if unknown:
+        raise ExecutionFailure(
+            "SQL uses undeclared Dataviz query filters: " + ", ".join(unknown),
+            details={"code": "query_filter_undeclared", "filters": unknown},
+        )
+    unused = sorted(set(declarations) - set(tokens))
+    if unused:
+        raise ExecutionFailure(
+            "SQL declares unused Dataviz query filters: " + ", ".join(unused),
+            details={"code": "query_filter_unused", "filters": unused},
+        )
+    parameters: dict[str, Any] = {}
+
+    def replacement(match: re.Match[str]) -> str:
+        name = match.group(1)
+        declaration = declarations[name]
+        state = states.get(declaration.parameter)
+        if state is None or state.get("selection") not in {
+            "all",
+            "include",
+            "exclude",
+            "none",
+        }:
+            raise ExecutionFailure(
+                f"Query filter {name} requires a candidate multiple Query Parameter state",
+                details={
+                    "code": "query_filter_state_invalid",
+                    "filter": name,
+                    "parameter": declaration.parameter,
+                },
+            )
+        selection = state["selection"]
+        if selection == "all":
+            return "TRUE"
+        if selection == "none":
+            return "FALSE"
+        values = list(state.get("value") or ())
+        if not values:
+            raise ExecutionFailure(
+                f"Query filter {name} has no explicit operands",
+                details={"code": "query_filter_operands_missing", "filter": name},
+            )
+        parameter = f"__dv_filter_{name}"
+        parameters[parameter] = values
+        if adapter_type == "duckdb":
+            predicate = f"{declaration.field} = ANY(:{parameter})"
+        else:
+            predicate = f"{declaration.field} IN :{parameter}"
+        return f"NOT ({predicate})" if selection == "exclude" else predicate
+
+    return _QUERY_FILTER_TOKEN.sub(replacement, query), parameters
 
 
 def _relative_debug_path(path: Path, workspace_root: Path) -> str:
@@ -112,6 +179,7 @@ def _run_sql_query(
     adapter: dict[str, Any],
     query: str,
     parameters: dict[str, Any],
+    expanding_parameters: list[str],
     timeout_seconds: float | None,
     result_path: str,
 ) -> None:
@@ -134,7 +202,7 @@ def _run_sql_query(
             duck_query = re.sub(r":([A-Za-z_]\w*)", r"$\1", query)
             frame = database_connection.execute(duck_query, parameters).fetchdf()
         else:
-            from sqlalchemy import create_engine, text
+            from sqlalchemy import bindparam, create_engine, text
 
             url = adapter.get("url")
             if not url:
@@ -146,7 +214,12 @@ def _run_sql_query(
             database_connection = engine.connect()
             _configure_statement_timeout(database_connection, adapter_type, timeout_seconds)
             phase = "query"
-            frame = pd.read_sql_query(text(query), database_connection, params=parameters)
+            statement = text(query)
+            if expanding_parameters:
+                statement = statement.bindparams(
+                    *(bindparam(name, expanding=True) for name in expanding_parameters)
+                )
+            frame = pd.read_sql_query(statement, database_connection, params=parameters)
 
         Path(result_path).parent.mkdir(parents=True, exist_ok=True)
         frame.to_parquet(result_path, index=False)
@@ -189,6 +262,7 @@ def execute_sql_query(
     adapter: dict[str, Any],
     query: str,
     parameters: dict[str, Any],
+    expanding_parameters: list[str] | None = None,
     timeout_seconds: float | None,
     workspace_root: Path,
     run_id: str,
@@ -218,6 +292,7 @@ def execute_sql_query(
             "adapter": adapter,
             "query": query,
             "parameters": parameters,
+            "expanding_parameters": list(expanding_parameters or ()),
             "timeout_seconds": timeout_seconds,
             "result_path": str(result_path),
         },
@@ -349,6 +424,13 @@ class SqlSourceRunner:
                 request.adapter_bindings,
             )
             adapter_type = str(adapter.get("type") or "unknown")
+            query, filter_parameters = resolve_query_filter_tokens(
+                query,
+                definition.query_filters,
+                request.context.query_parameter_state,
+                adapter_type=adapter_type,
+            )
+            parameters.update(filter_parameters)
         except Exception as error:
             inspection_warning = redact_text(error, secrets)
         statement = (
@@ -375,6 +457,10 @@ class SqlSourceRunner:
                     alias: query_input_contract(binding)
                     for alias, binding in definition.query_inputs.items()
                 },
+                "query_filters": {
+                    key: value.model_dump(mode="json")
+                    for key, value in definition.query_filters.items()
+                },
                 "timeout_seconds": timeout_seconds,
                 "timeout_retries": timeout_retries,
                 "query_hash": hashlib.sha256(
@@ -393,6 +479,13 @@ class SqlSourceRunner:
         query = code_path.read_text(encoding="utf-8")
         parameters = dict(request.context.query_inputs)
         adapter = request.adapters.runtime_config(adapter_name, request.adapter_bindings)
+        query, filter_parameters = resolve_query_filter_tokens(
+            query,
+            definition.query_filters,
+            request.context.query_parameter_state,
+            adapter_type=str(adapter.get("type") or "sqlalchemy"),
+        )
+        parameters.update(filter_parameters)
         timeout_seconds = definition.timeout_seconds
         timeout_retries = definition.timeout_retries
         max_attempts = timeout_retries + 1
@@ -402,6 +495,7 @@ class SqlSourceRunner:
                     adapter=adapter,
                     query=query,
                     parameters=parameters,
+                    expanding_parameters=list(filter_parameters),
                     timeout_seconds=timeout_seconds,
                     workspace_root=request.context.workspace_root,
                     run_id=request.context.run_id,

@@ -128,11 +128,16 @@ def _parameter_contracts(
             "required": definition.required,
         }
         if "default" in definition.model_fields_set:
-            item["default"] = definition.default
-        if definition.initial is not None:
-            item["initial"] = definition.initial.model_dump(
-                mode="json", exclude_none=True
+            item["default"] = (
+                definition.default.model_dump(mode="json", exclude_none=True)
+                if hasattr(definition.default, "model_dump")
+                else definition.default
             )
+        if definition.type == "multiple_select":
+            item["selection"] = {
+                "modes": ["all", "include", "exclude", "none"],
+                "max_explicit_values": definition.max_explicit_values,
+            }
         if definition.options is not None:
             options = definition.options.model_dump(mode="json", exclude_none=True)
             summary: dict[str, Any] = {"mode": options["mode"]}
@@ -140,6 +145,7 @@ def _parameter_contracts(
                 summary["count"] = len(options.get("choices", []))
             elif options.get("source"):
                 summary["source"] = options["source"]
+                summary["depends_on"] = options.get("depends_on", {})
             item["options"] = summary
         for field in ("min", "max", "step", "min_date", "max_date", "max_length"):
             value = getattr(definition, field, None)

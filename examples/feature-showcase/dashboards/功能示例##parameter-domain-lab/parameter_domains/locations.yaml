@@ -1,4 +1,4 @@
-schema: dataviz/parameter-domain/v1
+schema: dataviz/parameter-domain/v2
 kind: parameter_domain
 id: locations
 name: 省市参数候选
@@ -7,4 +7,3 @@ type: sql
 adapter: warehouse
 code: locations.sql
 max_rows: 100
-cache: {mode: session}

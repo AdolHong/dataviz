@@ -1,0 +1,62 @@
+{
+  "schema": "dataviz/parameter-domain-benchmark/v1",
+  "date": "2026-09-01",
+  "dataviz_version": "0.17.0",
+  "python": "3.12.8",
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "row_counts": [
+    10000,
+    100000,
+    250000
+  ],
+  "cases": [
+    {
+      "rows": 10000,
+      "generation": "pm_1788216630344565000_55d9408c31e9",
+      "parquet_bytes": 214064,
+      "build_ms": 412.528,
+      "first_lookup_ms": 15.291,
+      "exact_search_ms": 32.185,
+      "parent_filter_ms": 10.255,
+      "second_page_ms": 13.665,
+      "first_page_items": 50,
+      "second_page_items": 50,
+      "exact_search_total": 1,
+      "parent_filter_total": 1000,
+      "response_bytes": 3754,
+      "bounded": true
+    },
+    {
+      "rows": 100000,
+      "generation": "pm_1788216630921068000_0c11cbbacd79",
+      "parquet_bytes": 1935475,
+      "build_ms": 512.421,
+      "first_lookup_ms": 68.088,
+      "exact_search_ms": 264.743,
+      "parent_filter_ms": 25.574,
+      "second_page_ms": 68.578,
+      "first_page_items": 50,
+      "second_page_items": 50,
+      "exact_search_total": 1,
+      "parent_filter_total": 10000,
+      "response_bytes": 3755,
+      "bounded": true
+    },
+    {
+      "rows": 250000,
+      "generation": "pm_1788216632046613000_ae05e5af9dae",
+      "parquet_bytes": 4191401,
+      "build_ms": 714.187,
+      "first_lookup_ms": 176.991,
+      "exact_search_ms": 899.55,
+      "parent_filter_ms": 68.231,
+      "second_page_ms": 254.646,
+      "first_page_items": 50,
+      "second_page_items": 50,
+      "exact_search_total": 1,
+      "parent_filter_total": 25000,
+      "response_bytes": 3755,
+      "bounded": true
+    }
+  ]
+}

@@ -41,11 +41,8 @@ from dataviz.execution.results import RunResult
 from dataviz.execution.interactive import InteractionExecutor
 from dataviz.execution.fingerprint import ensure_query_run_compatible
 from dataviz.execution.outputs import normalize_outputs, validate_output_destination
-from dataviz.execution.parameter_domains import (
-    ParameterDomainCache,
-    resolve_parameter_domains,
-)
-from dataviz.execution.parameters import resolve_parameter_default
+from dataviz.execution.parameter_materializations import ParameterMaterializationStore
+from dataviz.execution.parameters import resolve_query_parameter_states
 from dataviz.execution.references import parse_output_reference
 from dataviz.filesystem import atomic_copy_file, atomic_write_text
 from dataviz.plotly_runtime import PLOTLY_JS_VERSION, get_plotlyjs
@@ -106,22 +103,34 @@ class ApiRequest(BaseModel):
 
 class RunRequest(ApiRequest):
     session_id: str = Field(min_length=8, max_length=128)
-    query_parameters: dict[str, Any] = Field(default_factory=dict)
-    query_parameter_intents: dict[str, Literal["explicit", "all_available"]] = Field(
-        default_factory=dict
-    )
+    query_parameter_state: dict[str, dict[str, Any]] = Field(default_factory=dict)
     refresh: bool = False
 
 
-class ParameterDomainResolveRequest(ApiRequest):
+class ParameterLookupRequest(ApiRequest):
     session_id: str = Field(min_length=8, max_length=128)
-    query_parameters: dict[str, Any] = Field(default_factory=dict)
-    initialized_parameters: list[str] = Field(default_factory=list)
-    intents: dict[str, Literal["explicit", "all_available"]] = Field(
-        default_factory=dict
-    )
-    reconciliation: Literal["draft", "committed_snapshot"] = "draft"
+    parameter: str = Field(min_length=1)
+    parent_states: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    search: str = ""
+    limit: int = Field(50, ge=1, le=100)
+    cursor: str | None = None
+    selected: list[Any] = Field(default_factory=list)
     refresh: bool = False
+
+
+def _resolved_query_parameter_state(definition: Any, *, timezone_name: str) -> dict[str, Any]:
+    try:
+        return resolve_query_parameter_states(
+            [definition], {}, timezone_name=timezone_name
+        )[definition.id]
+    except ExecutionFailure as error:
+        if error.details.get("code") == "query_parameter_default_requires_lookup":
+            return {"value": None}
+        raise
+
+
+def _query_parameter_values(states: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    return {name: state.get("value") for name, state in states.items()}
 
 
 class InteractionRequest(ApiRequest):
@@ -202,8 +211,6 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
     app.add_middleware(RuntimeAssetNoStoreMiddleware)
     app.state.workspace = workspace
     app.state.manager = manager
-    parameter_domain_caches: dict[tuple[str, str], ParameterDomainCache] = {}
-    parameter_domain_cache_lock = threading.Lock()
     workspace_refresh_lock = threading.RLock()
     change_journal = WorkspaceChangeJournal()
     reload_semantics = WorkspaceSemanticSnapshot.from_workspace(workspace)
@@ -772,7 +779,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                     "query_parameters": [
                         {
                             **item.model_dump(mode="json"),
-                            "resolved_default": resolve_parameter_default(
+                            "resolved_default_state": _resolved_query_parameter_state(
                                 item,
                                 timezone_name=snapshot.definition.context.timezone,
                             ),
@@ -1023,9 +1030,8 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         try:
             record = manager.start(
                 dashboard_id,
-                request.query_parameters,
+                request.query_parameter_state,
                 session_id=checked_session(request.session_id),
-                query_parameter_intents=request.query_parameter_intents,
                 refresh=request.refresh,
                 _workspace=snapshot,
             )
@@ -1037,41 +1043,45 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             "workspace_revision": change_journal.revision,
         }
 
-    @app.post("/api/dashboards/{dashboard_id}/parameter-domains/resolve")
-    def resolve_parameter_domain_options(
-        dashboard_id: str, request: ParameterDomainResolveRequest
+    @app.post("/api/dashboards/{dashboard_id}/parameter-domains/lookup")
+    def lookup_parameter_domain_options(
+        dashboard_id: str, request: ParameterLookupRequest
     ):
-        """Resolve Query Parameter choices before the analytical Query DAG starts."""
+        """Read one page from a shared immutable Parameter Domain generation."""
 
         if watch:
             workspace_watcher.flush()
-        session_id = checked_session(request.session_id)
+        checked_session(request.session_id)
         try:
             snapshot, dashboard = dashboard_from_disk(dashboard_id)
         except WorkspaceError as error:
             raise HTTPException(409, error.message) from error
-        cache_key = (session_id, dashboard_id)
-        with parameter_domain_cache_lock:
-            domain_cache = parameter_domain_caches.setdefault(
-                cache_key, ParameterDomainCache()
-            )
         try:
-            resolution = resolve_parameter_domains(
-                snapshot,
+            store = ParameterMaterializationStore(snapshot)
+            if request.refresh:
+                definition = next(
+                    item for item in dashboard.definition.query_parameters
+                    if item.id == request.parameter
+                )
+                store.ensure(
+                    dashboard,
+                    definition.options.source,
+                    refresh=True,
+                    background=True,
+                )
+            resolution = store.lookup(
                 dashboard,
-                request.query_parameters,
-                timezone_name=snapshot.definition.context.timezone,
-                initialized_parameters=set(request.initialized_parameters),
-                intents=request.intents,
-                strict=False,
-                preserve_unavailable=request.reconciliation == "committed_snapshot",
-                cache=domain_cache,
-                refresh=request.refresh,
+                request.parameter,
+                parent_states=request.parent_states,
+                search=request.search,
+                limit=request.limit,
+                cursor=request.cursor,
+                selected=request.selected,
             )
         except DatavizError as error:
             raise HTTPException(422, error.as_dict()) from error
         return {
-            **resolution.as_dict(),
+            **resolution,
             "workspace_revision": change_journal.revision,
         }
 
@@ -1124,15 +1134,10 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                     "dashboard_id": record.dashboard_id,
                     "status": record.status,
                     "server_interactive_inputs": record.server_interactive_inputs,
-                    "query_parameters": (
-                        record.snapshot.query_parameters
+                    "query_parameter_state": (
+                        record.snapshot.query_parameter_state
                         if record.snapshot
-                        else record.requested_parameters
-                    ),
-                    "query_parameter_intents": (
-                        record.snapshot.query_parameter_intents
-                        if record.snapshot
-                        else record.requested_parameter_intents
+                        else record.requested_parameter_state
                     ),
                     "nodes": {
                         node_id: node.status
@@ -1518,15 +1523,15 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             query_complete = False
         if not result and not record:
             try:
+                default_query_state = {
+                    item.id: _resolved_query_parameter_state(
+                        item, timezone_name=snapshot.definition.context.timezone
+                    )
+                    for item in dashboard.definition.query_parameters
+                }
                 waiting_content = interpolate_dashboard_content(
                     dashboard.definition,
-                    {
-                        item.id: resolve_parameter_default(
-                            item,
-                            timezone_name=snapshot.definition.context.timezone,
-                        )
-                        for item in dashboard.definition.query_parameters
-                    },
+                    _query_parameter_values(default_query_state),
                     fallback_title=dashboard.canvas_name,
                 )
                 waiting_title = waiting_content.title
@@ -1551,7 +1556,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 query_targets=list(record.query_targets),
                 query_nodes=list(record.query_nodes),
                 query_contract_hash=record.query_contract_hash,
-                query_parameters=record.requested_parameters,
+                query_parameter_state=record.requested_parameter_state,
             )
         live = None
         if record and not query_complete:
@@ -1862,7 +1867,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                     "run_id": result.run_id,
                     "created_at": datetime.now(timezone.utc).isoformat(),
                     "url": f"/shared/{share_id}",
-                    "query_parameters": result.query_parameters,
+                    "query_parameter_state": result.query_parameter_state,
                     "control_state": resolved_control_state,
                     "consumer_revisions": consumer_revisions,
                     "artifacts": copied_artifacts,
@@ -1920,7 +1925,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                                     "path": dashboard.root.relative_to(workspace_root).as_posix(),
                                 },
                             },
-                            "query_parameters": result.query_parameters,
+                            "query_parameter_state": result.query_parameter_state,
                             "effective_controls": resolved_control_state,
                             "consumer_revisions": consumer_revisions,
                             "outputs": result_outputs,

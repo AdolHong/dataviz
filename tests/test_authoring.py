@@ -148,8 +148,8 @@ def test_machine_readable_component_examples_use_canonical_output_references():
 
 def test_machine_readable_documentation_examples_match_current_schemas():
     providers = {
-        "dataviz/dashboard/v13": DashboardDefinition,
-        "dataviz/source/v3": SOURCE_DEFINITION_ADAPTER,
+        "dataviz/dashboard/v14": DashboardDefinition,
+        "dataviz/source/v4": SOURCE_DEFINITION_ADAPTER,
         "dataviz/dataset-transform/v3": DatasetTransformDefinition,
         "dataviz/interactive-transform/v4": InteractiveTransformDefinition,
         "dataviz/presentation/v2": PresentationDefinition,
@@ -324,24 +324,23 @@ def test_docs_do_not_restore_removed_chart_cli_or_shell_contracts():
         assert stale not in corpus
 
 
-def test_query_parameter_docs_keep_domain_cardinality_and_init_contracts_explicit():
+def test_query_parameter_docs_keep_materialization_and_compact_state_explicit():
     query_docs = DOC_TOPICS["query-parameters"]
     rules = "\n".join(query_docs["dynamic_domains"]["rules"])
     skill = (ROOT / "dataviz-skill.md").read_text(encoding="utf-8")
     design = (ROOT / "DESIGN.md").read_text(encoding="utf-8")
 
-    assert "canonical value 自动去重" in rules
-    assert "multiple_input" in rules
-    assert "必须有界并适合一次完整加载" in rules
-    assert "远程搜索" not in rules
-    assert "分页候选" not in rules
-    assert "item_values: item_nbrs" not in query_docs["intent_binding"]
+    assert "共享 immutable generation" in rules
+    assert "all/include/exclude/none" in rules
+    assert "搜索、级联和 cursor 分页" in rules
+    assert "不重新执行远端 SQL" in rules
+    assert "city_selection" in query_docs["selection_binding"]
     assert "dataviz init <workspace>" in skill
     assert "intentionally empty Workspace" not in skill
-    assert "one complete candidate pool" in skill
-    assert "remote search" not in skill
-    assert "paged candidates" not in skill
-    assert "候选池必须有界并适合一次完整加载" in design
+    assert "canonical Query Parameter state" in skill
+    assert "all/include/exclude/none" in skill
+    assert "Workspace 共享物化" in design
+    assert "generation-bound opaque cursor" in design
 
     public_docs = "\n".join(
         [
@@ -437,7 +436,7 @@ def test_version_docs_match_the_current_runtime_and_release_gate():
     release = DOC_TOPICS["versioning-release"]
 
     assert strict["current"]["layout_contract"] == "dataviz/layout-contract/v1"
-    assert strict["current"]["state_snapshot"] == "dataviz/state-snapshot/v4"
+    assert strict["current"]["state_snapshot"] == "dataviz/state-snapshot/v5"
     assert strict["browser_assets"] == {
         "plotly_js": "4.0.0（直接内置，不安装 Python plotly）",
         "tanstack_table_core": "9.2.4（直接内置）",
@@ -989,7 +988,7 @@ def test_coordinate_layout_fields_are_strictly_rejected(layout):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v13",
+                "schema": "dataviz/dashboard/v14",
                 "kind": "dashboard",
                 "id": "strict",
                 "layout": layout,

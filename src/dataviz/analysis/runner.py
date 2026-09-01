@@ -19,8 +19,11 @@ from dataviz.analysis.usage import (
 from dataviz.artifacts import ArtifactStore
 from dataviz.auth import AdapterResolver
 from dataviz.errors import DatavizError, ValidationFailure
-from dataviz.execution import Executor, InteractionExecutor, resolve_query_parameters
-from dataviz.execution.parameters import resolve_query_parameter_intents
+from dataviz.execution import (
+    Executor,
+    InteractionExecutor,
+    resolve_dashboard_query_parameter_state,
+)
 from dataviz.execution.plan import compile_plan
 from dataviz.execution.outputs import validate_output_destination
 from dataviz.filesystem import sha256_file
@@ -53,7 +56,7 @@ class RunRequest:
     workspace: Path
     target: str
     also: tuple[str, ...] = ()
-    query_parameters: dict[str, Any] = field(default_factory=dict)
+    query_parameter_state: dict[str, Any] = field(default_factory=dict)
     controls: dict[str, Any] = field(default_factory=dict)
     output_name: str | None = None
     runtime: RunRuntime = "auto"
@@ -252,8 +255,7 @@ def _seal_failure(
     *,
     target: dict[str, Any],
     generation: str | None,
-    query_parameters: dict[str, Any],
-    query_parameter_intents: dict[str, Any] | None = None,
+    query_parameter_state: dict[str, Any],
     effective_controls: dict[str, Any] | None = None,
     error: dict[str, Any],
     status: Literal["failed", "cancelled"] = "failed",
@@ -267,8 +269,7 @@ def _seal_failure(
             "status": status,
             "generation": generation,
             "target": analysis_entry_summary(target),
-            "query_parameters": query_parameters,
-            "query_parameter_intents": query_parameter_intents or {},
+            "query_parameter_state": query_parameter_state,
             "effective_controls": effective_controls or {},
             "outputs": [],
             "lineage": lineage or {},
@@ -293,19 +294,14 @@ def _preflight_request(request: RunRequest) -> None:
         _invalid("--dry-run requires --overlay")
 
 
-def _resolve_parameters(loaded, dashboard, values: dict[str, Any]):
+def _resolve_parameters(loaded, dashboard, states: dict[str, Any]):
     timezone_name = loaded.definition.context.timezone
-    resolved = resolve_query_parameters(
+    resolved = resolve_dashboard_query_parameter_state(
         dashboard,
-        values,
+        states,
         timezone_name=timezone_name,
     )
-    intents = resolve_query_parameter_intents(
-        dashboard.definition.query_parameters,
-        values,
-        None,
-    )
-    return resolved, intents
+    return resolved
 
 
 def _run_dashboard(
@@ -320,9 +316,7 @@ def _run_dashboard(
         )
     executor = Executor(loaded)
     dashboard = executor.ensure_valid(dashboard_id)
-    query_parameters, query_intents = _resolve_parameters(
-        loaded, dashboard, request.query_parameters
-    )
+    query_state = _resolve_parameters(loaded, dashboard, request.query_parameter_state)
     compile_plan(dashboard, targets=None)
     target = {
         "reference": dashboard_id,
@@ -339,8 +333,7 @@ def _run_dashboard(
     try:
         execution = executor.run(
             dashboard_id,
-            query_parameters=query_parameters,
-            query_parameter_intents=query_intents,
+            query_parameter_state=query_state,
             refresh=request.refresh,
             _dashboard=dashboard,
         )
@@ -358,8 +351,7 @@ def _run_dashboard(
                 request,
                 target=target,
                 generation=catalog.generation,
-                query_parameters=query_parameters,
-                query_parameter_intents=query_intents,
+                query_parameter_state=query_state,
                 error=error,
                 status="cancelled" if cancelled else "failed",
             )
@@ -403,8 +395,7 @@ def _run_dashboard(
         "status": execution.status,
         "generation": catalog.generation,
         "target": target,
-        "query_parameters": execution.query_parameters,
-        "query_parameter_intents": execution.query_parameter_intents,
+        "query_parameter_state": execution.query_parameter_state,
         "effective_controls": {},
         "outputs": outputs,
         "lineage": {
@@ -524,9 +515,7 @@ def _run_data_target(
                 "overlay": _overlay_payload(variant),
             }
 
-    query_parameters, query_intents = _resolve_parameters(
-        loaded, dashboard, request.query_parameters
-    )
+    query_state = _resolve_parameters(loaded, dashboard, request.query_parameter_state)
     output_name = None if requested_entry.get("kind") == "view" else request.output_name
     executor_options = (
         {
@@ -621,8 +610,7 @@ def _run_data_target(
         result_started = True
         query_result = Executor(loaded, **executor_options).run(
             dashboard_id,
-            query_parameters=query_parameters,
-            query_parameter_intents=query_intents,
+            query_parameter_state=query_state,
             targets=target_references,
             refresh=request.refresh,
             run_id=variant.analysis_run_id if variant is not None else None,
@@ -681,8 +669,7 @@ def _run_data_target(
                 request,
                 target=requested_entry,
                 generation=catalog.generation,
-                query_parameters=query_parameters,
-                query_parameter_intents=query_intents,
+                query_parameter_state=query_state,
                 effective_controls=control_state or {},
                 error=error,
                 status="cancelled" if cancelled else "failed",
@@ -717,8 +704,7 @@ def _finish_base(
             request,
             target=requested_entry,
             generation=catalog.generation,
-            query_parameters=result.query_parameters,
-            query_parameter_intents=result.query_parameter_intents,
+            query_parameter_state=result.query_parameter_state,
             error=node.error if node else {
                 "code": "analysis_output_unavailable",
                 "message": "Named Output was not produced",
@@ -754,8 +740,7 @@ def _finish_base(
         "status": result.status,
         "generation": catalog.generation,
         **_target_payload(requested_entry, entry),
-        "query_parameters": result.query_parameters,
-        "query_parameter_intents": result.query_parameter_intents,
+        "query_parameter_state": result.query_parameter_state,
         "effective_controls": {},
         "outputs": outputs,
         "lineage": {
@@ -853,8 +838,7 @@ def _finish_derived(
             "status": "ready",
             "generation": catalog.generation,
             **_target_payload(requested_entry, entry),
-            "query_parameters": run_result.query_parameters,
-            "query_parameter_intents": run_result.query_parameter_intents,
+            "query_parameter_state": run_result.query_parameter_state,
             "effective_controls": control_state,
             "consumer_revisions": browser_batch["consumer_revisions"],
             "outputs": outputs,
@@ -924,8 +908,7 @@ def _finish_derived(
                 request,
                 target=requested_entry,
                 generation=catalog.generation,
-                query_parameters=run_result.query_parameters,
-                query_parameter_intents=run_result.query_parameter_intents,
+                query_parameter_state=run_result.query_parameter_state,
                 effective_controls=control_state,
                 error=node.error if node else {
                     "code": "analysis_output_unavailable",
@@ -989,8 +972,7 @@ def _finish_derived(
         "status": "ready",
         "generation": catalog.generation,
         **_target_payload(requested_entry, entry),
-        "query_parameters": run_result.query_parameters,
-        "query_parameter_intents": run_result.query_parameter_intents,
+        "query_parameter_state": run_result.query_parameter_state,
         "effective_controls": last_interaction.control_state,
         "consumer_revisions": normalize_consumer_revisions(
             dashboard,

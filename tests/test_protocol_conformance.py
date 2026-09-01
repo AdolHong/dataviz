@@ -15,11 +15,11 @@ from dataviz.errors import DatavizError
 from dataviz.documentation import docs_catalog
 from dataviz.execution.control_filter import apply_control_filters
 from dataviz.execution.outputs import validate_output_destination
-from dataviz.execution.parameter_domains import (
-    _project_choices,
-    _resolve_dynamic_value,
+from dataviz.execution.parameters import (
+    normalize_query_parameter_state,
+    project_query_inputs,
+    query_input_contract,
 )
-from dataviz.execution.parameters import project_query_inputs, query_input_contract
 from dataviz.protocols import CURRENT_PROTOCOL_SCHEMAS, protocol_registry
 from dataviz.schema_docs import schema_catalog
 from dataviz.state_snapshot import normalize_consumer_revision
@@ -77,8 +77,7 @@ def test_python_input_binding_conformance(case: dict[str, Any]):
         else:
             actual = project_query_inputs(
                 {"result": payload["binding"]},
-                {payload["binding"]["parameter"]: payload["value"]},
-                {payload["binding"]["parameter"]: payload["intent"]},
+                {payload["binding"]["parameter"]: payload["state"]},
             )["result"]
     except Exception as error:
         assert _error_code(error) == case.get("expected_error_code")
@@ -174,35 +173,16 @@ def test_python_output_capability_conformance(case: dict[str, Any]):
         assert "expected_error_code" not in case
 
 
-@pytest.mark.parametrize(
-    "case",
-    _cases("parameter-domain-projection"),
-    ids=lambda item: item["id"],
-)
-def test_python_parameter_domain_projection_conformance(case: dict[str, Any]):
-    parameter = QueryParameterDefinition.model_validate(case["parameter"])
+@pytest.mark.parametrize("case", _cases("query-parameter-state"), ids=lambda item: item["id"])
+def test_python_query_parameter_state_conformance(case: dict[str, Any]):
+    parameter = QueryParameterDefinition.model_validate(case["definition"])
     try:
-        choices = _project_choices(
-            parameter,
-            pd.DataFrame(case["rows"]),
-            case["values"],
-        )
-        value, intent = _resolve_dynamic_value(
-            parameter,
-            choices,
-            supplied=True,
-            raw_value=case["raw_value"],
-            initialized=True,
-            intent=case["intent"],
-            strict=False,
-            preserve_unavailable=False,
-        )
+        actual = normalize_query_parameter_state(parameter, case["state"])
     except Exception as error:
         assert _error_code(error) == case.get("expected_error_code")
     else:
         assert "expected_error_code" not in case
-        assert choices == case["expected_choices"]
-        assert {"value": value, "intent": intent} == case["expected"]
+        assert actual == case["expected"]
 
 
 def test_javascript_runtime_and_web_component_share_conformance_corpus():
@@ -256,6 +236,10 @@ def test_product_architecture_current_version_table_matches_protocols():
     labels = {
         "Workspace": "workspace",
         "Dashboard": "dashboard",
+        "Parameter Domain": "parameter_domain",
+        "Parameter Domain Contract": "parameter_domain_contract",
+        "Parameter Lookup": "parameter_lookup",
+        "Parameter Materialization": "parameter_materialization",
         "Presentation": "presentation",
         "Source": "source",
         "Dataset Transform": "dataset_transform",
@@ -267,6 +251,7 @@ def test_product_architecture_current_version_table_matches_protocols():
         "Analysis Evidence": "analysis_evidence",
         "Layout Contract": "layout_contract",
         "Workspace Change": "workspace_change",
+        "Dashboard Bundle": "dashboard_bundle",
     }
     for label, key in labels.items():
         match = re.search(
@@ -283,7 +268,8 @@ def test_design_and_plan_baselines_match_current_protocols():
         "dashboard",
         "parameter_domain",
         "parameter_domain_contract",
-        "parameter_domain_resolution",
+        "parameter_lookup",
+        "parameter_materialization",
         "presentation",
         "source",
         "dataset_transform",
@@ -294,6 +280,7 @@ def test_design_and_plan_baselines_match_current_protocols():
         "runtime",
         "analysis_result",
         "analysis_evidence",
+        "dashboard_bundle",
     )
     for document in ("DESIGN.md", "plan.md"):
         baseline = "\n".join(

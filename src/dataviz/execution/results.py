@@ -51,10 +51,7 @@ class RunResult(BaseModel):
     query_contract_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     started_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     finished_at: str | None = None
-    query_parameters: dict[str, Any] = Field(default_factory=dict)
-    query_parameter_intents: dict[str, Literal["all_available", "explicit"]] = Field(
-        default_factory=dict
-    )
+    query_parameter_state: dict[str, dict[str, Any]] = Field(default_factory=dict)
     nodes: dict[str, NodeResult] = Field(default_factory=dict)
     outputs: dict[str, ArtifactDescriptor] = Field(default_factory=dict)
     warnings: list[dict[str, Any]] = Field(default_factory=list)
@@ -77,10 +74,7 @@ class InteractionResult(BaseModel):
     status: Literal["loading", "ready", "partial", "error", "cancelled", "unavailable"]
     started_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     finished_at: str | None = None
-    query_parameters: dict[str, Any] = Field(default_factory=dict)
-    query_parameter_intents: dict[str, Literal["all_available", "explicit"]] = Field(
-        default_factory=dict
-    )
+    query_parameter_state: dict[str, dict[str, Any]] = Field(default_factory=dict)
     control_state: dict[str, dict[str, Any]] = Field(default_factory=dict)
     nodes: dict[str, NodeResult] = Field(default_factory=dict)
     outputs: dict[str, ArtifactDescriptor] = Field(default_factory=dict)

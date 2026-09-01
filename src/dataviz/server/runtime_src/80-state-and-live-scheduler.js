@@ -83,10 +83,10 @@ const datavizBuildStateSnapshot = () => {
       };
     }
     const committed = structuredClone(
-      window.dataviz.query_parameters?.[item.id] ?? item.committed
+      window.dataviz.query_parameter_state?.[item.id] ?? item.committed
     );
     const draft = structuredClone(
-      window.dataviz.draft_query_parameters?.[item.id] ?? item.draft ?? committed
+      window.dataviz.draft_query_parameter_state?.[item.id] ?? item.draft ?? committed
     );
     return {
       ...item,
@@ -97,7 +97,7 @@ const datavizBuildStateSnapshot = () => {
     };
   });
   const snapshot = {
-    schema:'dataviz/state-snapshot/v4',
+    schema:'dataviz/state-snapshot/v5',
     dashboard:window.dataviz.dashboard_id,
     query_stale:queryStale,
     items,
@@ -124,9 +124,14 @@ const datavizBuildStateSnapshot = () => {
   window.dataviz.state_snapshot = snapshot;
   return snapshot;
 };
-const datavizStateLogicalValue = item => {
-  if (item.entry_type !== 'control') return item.committed;
-  return datavizControlValueFromState(item.definition || {}, item.committed);
+const datavizStateLogicalValue = (item, state = item.committed) => {
+  if (item.entry_type === 'control') {
+    return datavizControlValueFromState(item.definition || {}, state);
+  }
+  if (state && typeof state === 'object' && !Array.isArray(state) && 'value' in state) {
+    return state.value;
+  }
+  return state;
 };
 const datavizStateChoiceLabel = (definition, value) => {
   const match = datavizStaticChoices(definition || {}).find(
@@ -134,10 +139,24 @@ const datavizStateChoiceLabel = (definition, value) => {
   );
   return match?.label || (Array.isArray(value) ? value.join(' / ') : String(value ?? ''));
 };
-const datavizStateValueParts = (item, rawValue, formatter = 'auto') => {
+const datavizStateValueParts = (
+  item,
+  rawValue,
+  formatter = 'auto',
+  state = item.committed,
+) => {
   if (item.entry_type === 'control' && item.committed?.intent === 'all_available') {
     const values = Array.isArray(rawValue) ? rawValue : [];
     return [values.length ? `全部（${values.length}）` : '全部'];
+  }
+  if (item.entry_type === 'query_parameter' && item.type === 'multiple_select') {
+    const selection = state?.selection || 'include';
+    const values = Array.isArray(rawValue) ? rawValue : [];
+    if (selection === 'all') return ['全部'];
+    if (selection === 'none') return ['未选择'];
+    if (selection === 'exclude') {
+      return [values.length ? `全部（排除 ${values.length} 项）` : '全部'];
+    }
   }
   if (rawValue == null || rawValue === '' || (Array.isArray(rawValue) && rawValue.length === 0)) {
     return ['未选择'];
@@ -184,7 +203,12 @@ const datavizStateSummaryItem = item => {
     root.append(expanded);
   }
   if (item.stale) {
-    const draftParts = datavizStateValueParts(item, item.draft, formatter);
+    const draftParts = datavizStateValueParts(
+      item,
+      datavizStateLogicalValue(item, item.draft),
+      formatter,
+      item.draft,
+    );
     const pending = document.createElement('em');
     pending.className = 'dv-state-chip__pending';
     pending.textContent = `待应用：${draftParts.join('、')}`;
@@ -726,8 +750,8 @@ window.addEventListener('message', event => {
     return;
   }
   if (event.data?.type === 'dataviz:set-query-draft') {
-    window.dataviz.draft_query_parameters = structuredClone(
-      event.data.query_parameters || {}
+    window.dataviz.draft_query_parameter_state = structuredClone(
+      event.data.query_parameter_state || {}
     );
     window.dataviz.query_stale = Boolean(event.data.query_stale);
     window.dataviz.query_definition_stale = Boolean(

@@ -22,7 +22,7 @@ def test_state_snapshot_separates_committed_and_draft_values():
 
     snapshot = build_state_snapshot(
         dashboard,
-        query_parameters={"min_query_revenue": 100},
+        query_parameter_state={"min_query_revenue": {"value": 100}},
         control_state={
             "dashboard:sales-overview/region": {
                 "intent": "explicit",
@@ -32,14 +32,14 @@ def test_state_snapshot_separates_committed_and_draft_values():
         },
     )
 
-    assert snapshot["schema"] == "dataviz/state-snapshot/v4"
+    assert snapshot["schema"] == "dataviz/state-snapshot/v5"
     parameter = next(
         item for item in snapshot["items"] if item["entry_type"] == "query_parameter"
     )
     control = next(
         item for item in snapshot["items"] if item["entry_type"] == "control"
     )
-    assert parameter["committed"] == 100
+    assert parameter["committed"] == {"value": 100}
     assert parameter["stale"] is False
     assert control["committed"] == {
         "intent": "explicit",
@@ -57,7 +57,7 @@ def test_default_canvas_embeds_snapshot_and_summary_hosts():
 
     assert dashboard.presentation is not None
     assert dashboard.presentation.state_summary.enabled is False
-    assert '"schema": "dataviz/state-snapshot/v4"' in rendered
+    assert '"schema": "dataviz/state-snapshot/v5"' in rendered
     assert 'data-state-summary-scope="dashboard"' in rendered
     assert 'data-state-summary-scope="section"' in rendered
     assert 'data-state-summary-scope="view"' in rendered

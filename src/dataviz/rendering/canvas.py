@@ -283,11 +283,16 @@ class CanvasRenderer:
             control_state,
             phase="canvas-hydration",
         )
+        query_values = {
+            key: state.get("value")
+            for key, state in result.query_parameter_state.items()
+        }
         merged_outputs = {**result.outputs, **(derived_outputs or {})}
         render_state = SimpleNamespace(
             run_id=result.run_id,
             status=result.status,
-            query_parameters=result.query_parameters,
+            query_parameter_state=result.query_parameter_state,
+            query_parameters=query_values,
             control_state=resolved_control_state,
             outputs=merged_outputs,
             nodes=result.nodes,
@@ -296,11 +301,11 @@ class CanvasRenderer:
         try:
             content_bindings = build_content_bindings(
                 dashboard.definition,
-                result.query_parameters,
+                query_values,
             )
             content_definition = interpolate_dashboard_content(
                 dashboard.definition,
-                result.query_parameters,
+                query_values,
                 resolved_control_state,
                 fallback_title=dashboard.canvas_name,
             )
@@ -353,7 +358,7 @@ class CanvasRenderer:
             body = template.render(
                 workspace=self.workspace.definition,
                 dashboard=content_definition,
-                parameters=result.query_parameters,
+                parameters=query_values,
                 controls={
                     key: entry.get("value")
                     for key, entry in resolved_control_state.items()
@@ -371,7 +376,7 @@ class CanvasRenderer:
                 dashboard,
                 content_definition,
                 view_html,
-                result.query_parameters,
+                query_values,
                 resolved_control_state,
                 binding_fields,
             )
@@ -473,7 +478,7 @@ class CanvasRenderer:
         )
         state_snapshot = build_state_snapshot(
             dashboard,
-            query_parameters=result.query_parameters,
+            query_parameter_state=result.query_parameter_state,
             control_state=resolved_control_state,
             draft_control_state=resolved_control_state,
             applied_revisions=applied_revisions,
@@ -491,8 +496,7 @@ class CanvasRenderer:
             "frame_id": frame_id,
             "status": result.status,
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "query_parameters": result.query_parameters,
-            "query_parameter_intents": result.query_parameter_intents,
+            "query_parameter_state": result.query_parameter_state,
             "control_state": resolved_control_state,
             "control_definitions": {
                 item.key: item.definition.model_dump(mode="json")
@@ -1193,7 +1197,15 @@ class CanvasRenderer:
                     frozen=frozen,
                 )
             )
-        def query_value_text(value: Any) -> str:
+        def query_value_text(state: dict[str, Any]) -> str:
+            selection = state.get("selection")
+            value = state.get("value")
+            if selection == "all":
+                return "全部"
+            if selection == "none":
+                return "无"
+            if selection == "exclude":
+                return f"全部，排除 {len(value or [])} 项"
             if isinstance(value, list):
                 separator = " → " if len(value) == 2 else "、"
                 return separator.join(str(item) for item in value)
@@ -1204,7 +1216,7 @@ class CanvasRenderer:
         query_items = "".join(
             '<div class="dv-query-value field">'
             f'<label>{html.escape(item.label or item.id)}</label>'
-            f'<output>{html.escape(query_value_text(result.query_parameters.get(item.id)))}</output>'
+            f'<output>{html.escape(query_value_text(result.query_parameter_state.get(item.id, {})))}</output>'
             '</div>'
             for item in dashboard.definition.query_parameters
         )
@@ -1673,7 +1685,7 @@ class CanvasRenderer:
                     "layout_contract": dashboard.layout_contract.as_dict(),
                     "query_run": _portable_run_result(result, self.workspace.root),
                     "state": {
-                        "query_parameters": result.query_parameters,
+                        "query_parameter_state": result.query_parameter_state,
                         "control_state": resolved_control_state,
                         "consumer_revisions": normalize_consumer_revisions(
                             dashboard,

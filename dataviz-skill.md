@@ -259,13 +259,15 @@ Use an Analysis Overlay only for an explicitly temporary experiment that substit
 ### Preserve architectural boundaries
 
 - Query Parameters change query identity; Controls own post-query typed state. Each View or Interactive Transform declares whether it consumes that state as a filter or a value. Do not substitute one lifecycle for the other merely for UI convenience.
-- When a Query Parameter needs live SQL-backed choices or cascading candidates, use one pre-query Parameter Domain table and project multiple fields from it. Do not use a normal Source or Interactive Transform to populate Query Parameter options.
-- A static single/multiple parent may drive several child parameters from that one Domain table. Treat an empty parent as no child candidates, not as All; make dependent children optional when that empty state is valid.
-- Candidate discovery is optional for AI: call `dataviz parameters options` only when candidates help exploration. It returns an immutable `options_id` and defaults to 10 preview rows (hard limit 100); use `dataviz parameters filter` to query columns/rows from that snapshot without rerunning SQL. If the value is already known, pass it directly to `dataviz run`; run never executes or enforces the UI Domain.
-- For a `multiple_select`, use `{parameter: <id>, projection: intent}` only when a Source must distinguish all currently available members from an explicit subset. The only intents are `all_available` and `explicit`; `explicit + []` is the clear state. Do not invent `ALL` members, infer intent from an empty list, or add complement/exclude semantics.
-- Treat the last successful Query's `{values, intents}` as one committed snapshot. Query Panel Revert restores that snapshot through the current Domain topology without running Query; a committed value missing from the latest candidates remains visible as unavailable because a Domain is not a Source whitelist.
-- Prefer one normalized, bounded Domain relation with fixed `value_field` projections over a conditional field selector. A low/medium-cardinality relation may project several independent candidate lists and deduplicates each canonical value automatically; omit `depends_on` when those lists should not cascade.
-- Every Parameter Domain must be bounded and reasonable to load as one complete candidate pool. If an entity list is too large, redesign the business parameter at a coarser level or use `multiple_input` when users already know IDs such as `item_nbr`; do not enlarge the candidate component to hide a poor parameter boundary.
+- When a Query Parameter needs SQL-backed choices, define one Parameter Domain relation and project stable `value_field` / `label_field` pairs from it. Do not use a normal Source or Interactive Transform to populate Query Parameter options.
+- SQL Domains are always Server-side Workspace shared materializations. Browser Pickers use Lookup search, generation-bound cursor pagination, and local predicates over one immutable generation; they never receive the raw relation or rerun SQL for each parent edit.
+- Reuse an explicit `workspace:/parameter_domains/...` asset when several Dashboards share one catalog. Sharing requires the same definition/code hash, Adapter identity, and visibility scope; never merge unrelated Domains merely because SQL text happens to match.
+- Candidate discovery is optional for AI. Use `dataviz parameters prewarm`, `status`, `lookup`, or `refresh` only when candidate exploration is useful. If the value is known, pass canonical Query Parameter state directly to `dataviz run`; Run neither builds nor validates against the UI candidate catalog.
+- Candidate-backed `multiple_select` uses `all/include/exclude/none`. `all` and `none` carry no operands; `include` and `exclude` carry only finite operands. Never expand All into every candidate, invent an `ALL` member, or serialize 99,999 included values after excluding one item.
+- A Source may consume `selection`, finite `value` operands, `active`, or complete `state`. Prefer `query_filters` plus `{{ dataviz_filter:<name> }}` for ordinary SQL predicates so all four states remain parameterized and an empty list never produces `IN ()`.
+- Treat the last successful Query's canonical Query Parameter state as one committed snapshot. Query Panel Revert restores it through the dependency topology without running Query; a committed operand missing from the latest generation remains visible as unavailable because a Domain is not a Source whitelist.
+- One materialized relation may project Division, Category, Subcategory, Item, or several independent lists. `depends_on` filters the materialized relation and never triggers a remote SQL query; omit it when lists should not cascade.
+- Use `dataviz bundle <workspace> <dashboard> <destination>` when moving one Dashboard across Workspaces. It copies the shared Domain definition/SQL closure and a non-sensitive binding manifest, but never `.dataviz` materializations or credentials.
 - Sources are the only external data entry. Server Dataset Transforms create Base Outputs; Interactive Transforms create Derived Outputs.
 - Renderers consume Named Outputs and View descriptors. Do not put SQL, model inference, or reusable business calculations in Presentation JavaScript.
 - Use Plotly as the author chart interface and the default TanStack-based Table for tabular presentation. Do not introduce another chart/table stack casually.
@@ -299,7 +301,7 @@ Check populated, empty, loading, error, stale, cancelled, and unavailable states
 
 ### Control stored artifacts
 
-Result, Execution Artifact, `options_id` candidate snapshot, and cache cleanup is explicit and preview-first:
+Result, Execution Artifact, shared Parameter Materialization, and cache cleanup is explicit and preview-first:
 
 ```bash
 dataviz prune <workspace>

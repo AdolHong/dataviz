@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.17.0 — 2026-09-01
+
+- P3 将 Query Parameter 候选多选一次迁移为紧凑 `all/include/exclude/none` state；`all/none` 不展开全集，`include/exclude` 只保存有限 operands。Dashboard v14 统一使用 `default`，URL、Tab、Revert、Run、Result/Evidence、分享与 HTML 均封存同一 canonical state，候选全集不会进入结果资产。
+- SQL Parameter Domain v2 一律先形成 Workspace 共享 immutable materialization；Parquet generation、SQLite registry、原子发布、reader pin、refresh lease、Server restart recovery、stale-while-revalidate、hard expiry、visibility scope 隔离与 preview-first prune 共同支持跨用户、Tab 和 Dashboard 复用，物化数据不污染 `dashboards/`。
+- Parameter Lookup v1 只向 Browser 返回有界页面，支持规范化搜索、稳定排序、opaque cursor、exact total、有限已选项补标签和父级 `all/include/exclude/none` 本地谓词；级联、搜索与翻页不重新执行远端 Domain SQL，也不把完整关系下发浏览器。
+- Source v4 提供规范 `value/selection/active/state/start/end` projection 与受限 `{{ dataviz_filter:name }}` 参数化 SQL predicate；`dataviz run` 可直接消费已知 canonical state，不隐式构建候选物化。Dashboard Bundle v1 复制共享 Domain 定义和 SQL，不复制凭据或 `.dataviz` 缓存。
+- Query Panel Reload 只刷新共享候选 generation，不 Reset、不执行业务 Query；失败或 hard-expired Domain 只禁用相关 Picker，不再锁死全局导航。候选摘要按紧凑 state 显示“全部”或有限排除数，不再渲染数千个 Tag。
+- Plotly Box Select 与 Lasso Select 可通过再次点击当前激活工具退出到普通查看模式；退出保留已有选区，不触发 clear/reset，Server 与 portable HTML 共享同一行为。State Summary 同步适配 Query Parameter v14，避免把 `{value, selection}` 显示成 `[object Object]`。
+- 固定 10K/100K/250K Parameter Materialization/Lookup benchmark、604 项 Chromium-inclusive pytest、Runtime 生成资产一致性、Ruff、wheel/sdist/pip ZIP 内容与独立安装冒烟共同作为 0.17.0 发布门禁。
+
 ## 0.16.0 — 2026-08-31
 
 - 0.16.0 发布门禁完整执行 594 项 Chromium-inclusive pytest，并由 Firefox、WebKit 各重复 53 项 Runtime E2E；三引擎共同覆盖 Host/Canvas 协议、Control writer/consumer、portable HTML、Renderer 生命周期及 Plotly 柱形/散点真实鼠标手势。Catalog characterization 现在排除本地 `.dataviz` 使用状态，async-host 边界测试也不再受先前 Playwright 主线程生命周期污染。

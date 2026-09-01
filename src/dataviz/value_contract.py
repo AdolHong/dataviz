@@ -107,6 +107,21 @@ def select_initial_contract(definition: Any) -> dict[str, Any]:
     return initial.model_dump(mode="json", exclude_none=True)
 
 
+def query_select_default_contract(definition: Any) -> dict[str, Any]:
+    """Return the single public default policy for a Query select."""
+
+    if definition.type not in {"single_select", "multiple_select"}:
+        raise ValueError("select default policies are only valid for select Query Parameters")
+    default = getattr(definition, "default", None)
+    if default is None:
+        return {"mode": "all" if definition.type == "multiple_select" else "first"}
+    if hasattr(default, "model_dump"):
+        return default.model_dump(mode="json", exclude_none=True)
+    if isinstance(default, dict):
+        return dict(default)
+    raise ValueError("select Query Parameter default must be a structured policy")
+
+
 def select_initial_value(
     definition: Any,
     available_values: list[Any] | None = None,
@@ -303,6 +318,7 @@ def normalize_control_value(
     value: Any,
     *,
     enforce_required: bool = True,
+    deduplicate: bool = False,
 ) -> Any:
     """Normalize one Query/Compute/Selection value using the shared DSL contract."""
 
@@ -412,7 +428,16 @@ def normalize_control_value(
             normalized = [_typed_choice_value(definition, item) for item in value]
         signatures = [json_value_signature(item) for item in normalized]
         if len(signatures) != len(set(signatures)):
-            raise ValueContractViolation("duplicate_value", "multiple_select values must be unique")
+            if not deduplicate:
+                raise ValueContractViolation(
+                    "duplicate_value", "multiple_select values must be unique"
+                )
+            seen: set[str] = set()
+            normalized = [
+                item
+                for item, signature in zip(normalized, signatures, strict=True)
+                if not (signature in seen or seen.add(signature))
+            ]
         if enforce_required and getattr(definition, "required", False) and not normalized:
             raise ValueContractViolation("required", "at least one value is required")
         maximum = getattr(definition, "max_selected", None)
@@ -464,10 +489,13 @@ def validate_control_definition(definition: Any) -> Any:
     if definition.type in {"single_select", "multiple_select"} and definition.options is None:
         raise ValueError("select controls require options.mode=static or options.mode=infer")
     is_select = definition.type in {"single_select", "multiple_select"}
+    is_query_parameter = bool(getattr(definition, "_is_query_parameter", False))
     if not is_select and definition.initial is not None:
         raise ValueError("initial is only valid for single_select or multiple_select")
-    if is_select and "default" in definition.model_fields_set:
+    if is_select and not is_query_parameter and "default" in definition.model_fields_set:
         raise ValueError("select controls use initial instead of default")
+    if is_query_parameter and definition.initial is not None:
+        raise ValueError("Query Parameters use default instead of initial")
     if definition.suggestions and not (
         definition.type == "single_input" and definition.value_type == "text"
     ):
@@ -495,34 +523,56 @@ def validate_control_definition(definition: Any) -> Any:
     if len(signatures) != len(set(signatures)):
         raise ValueError("choice values must be unique")
     if is_select:
-        policy = select_initial_contract(definition)
-        mode = policy["mode"]
-        allowed = (
-            {"all", "empty", "values"}
-            if definition.type == "multiple_select"
-            else {"first", "empty", "value"}
+        policy = (
+            query_select_default_contract(definition)
+            if is_query_parameter
+            else select_initial_contract(definition)
         )
+        mode = policy["mode"]
+        if is_query_parameter:
+            allowed = (
+                {"all", "include", "exclude", "none"}
+                if definition.type == "multiple_select"
+                else {"first", "value", "none"}
+            )
+        else:
+            allowed = (
+                {"all", "empty", "values"}
+                if definition.type == "multiple_select"
+                else {"first", "empty", "value"}
+            )
         if mode not in allowed:
             choices_label = ", ".join(sorted(allowed))
             raise ValueError(
-                f"{definition.type} initial mode must be one of: {choices_label}"
+                f"{definition.type} {'default' if is_query_parameter else 'initial'} mode "
+                f"must be one of: {choices_label}"
             )
-        if definition.required and mode == "empty":
-            raise ValueError("required select controls cannot use initial mode=empty")
+        if definition.required and mode in {"empty", "none"}:
+            raise ValueError("required select controls cannot use an empty default")
         try:
-            if mode == "values":
-                definition.initial.values = normalize_control_value(
+            if mode in {"values", "include", "exclude"}:
+                normalized_values = normalize_control_value(
                     definition,
                     policy["values"],
                     enforce_required=True,
                 )
+                if len(normalized_values) > getattr(definition, "max_explicit_values", 10_000):
+                    raise ValueError("default operands exceed max_explicit_values")
+                if is_query_parameter:
+                    definition.default.values = normalized_values
+                else:
+                    definition.initial.values = normalized_values
             elif mode == "value":
-                definition.initial.value = normalize_control_value(
+                normalized_value = normalize_control_value(
                     definition,
                     policy["value"],
                     enforce_required=True,
                 )
-            elif mode == "all" and definition.max_selected is not None:
+                if is_query_parameter:
+                    definition.default.value = normalized_value
+                else:
+                    definition.initial.value = normalized_value
+            elif mode == "all" and not is_query_parameter and definition.max_selected is not None:
                 if not choices or len(choices) > definition.max_selected:
                     raise ValueError(
                         "initial mode=all is incompatible with max_selected when the "
@@ -540,8 +590,10 @@ def validate_control_definition(definition: Any) -> Any:
     ]
     if len(suggestion_signatures) != len(set(suggestion_signatures)):
         raise ValueError("suggestion values must be unique")
-    if is_select:
+    if is_select and not is_query_parameter:
         definition.default = None
+    elif is_select and is_query_parameter:
+        pass
     elif is_relative_date_default(definition.default):
         if not (
             definition.value_type == "date"

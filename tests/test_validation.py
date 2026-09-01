@@ -87,20 +87,20 @@ def test_validate_rejects_query_input_part_for_non_date_range(tmp_path: Path):
     assert "not range_input/date" in diagnostic["message"]
 
 
-def test_validate_rejects_intent_projection_for_non_multiple_select(tmp_path: Path):
+def test_validate_rejects_selection_projection_for_non_multiple_select(tmp_path: Path):
     workspace = _copy_workspace(tmp_path)
     dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
     definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
     definition["sources"][0]["query_inputs"] = {
         "min_query_revenue": "min_query_revenue",
-        "revenue_intent": {
+        "revenue_selection": {
             "parameter": "min_query_revenue",
-            "projection": "intent",
+            "projection": "selection",
         },
     }
     source_sql = workspace / "dashboards" / "sales-overview" / "sources" / "sales.sql"
     source_sql.write_text(
-        source_sql.read_text(encoding="utf-8") + "\n-- :revenue_intent\n",
+        source_sql.read_text(encoding="utf-8") + "\n-- :revenue_selection\n",
         encoding="utf-8",
     )
     dashboard_path.write_text(
@@ -112,12 +112,12 @@ def test_validate_rejects_intent_projection_for_non_multiple_select(tmp_path: Pa
     diagnostic = next(
         item
         for item in report["diagnostics"]
-        if item["code"] == "query_input_intent_cardinality_invalid"
+        if item["code"] == "query_input_selection_cardinality_invalid"
     )
 
     assert report["status"] == "invalid"
     assert diagnostic["field"].endswith(
-        "query_inputs.revenue_intent.projection"
+        "query_inputs.revenue_selection.projection"
     )
 
 
@@ -538,7 +538,7 @@ def test_validate_focus_excludes_another_broken_dashboard(tmp_path: Path):
     broken = workspace / "dashboards" / "broken"
     broken.mkdir()
     (broken / "dashboard.yaml").write_text(
-        "schema: dataviz/dashboard/v13\nkind: dashboard\nid: broken\nretired_field: true\n",
+        "schema: dataviz/dashboard/v14\nkind: dashboard\nid: broken\nretired_field: true\n",
         encoding="utf-8",
     )
 

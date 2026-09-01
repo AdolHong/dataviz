@@ -25,6 +25,7 @@ _EXPORTS = {
     ),
     "load_workspace": ("dataviz.workspace.loader", "load_workspace"),
     "validate_workspace": ("dataviz.workspace.loader", "validate_workspace"),
+    "bundle_dashboard": ("dataviz.workspace.bundle", "bundle_dashboard"),
 }
 
 __all__ = sorted(_EXPORTS)

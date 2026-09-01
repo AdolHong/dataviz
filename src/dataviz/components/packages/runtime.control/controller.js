@@ -135,6 +135,12 @@
   const summary = (input, placeholder = 'Choose…') => {
     const selected = selectedOptions(input);
     if (!input.multiple) return selected[0]?.textContent || placeholder;
+    if (input.dataset.queryParameter === 'true') {
+      const mode = input.dataset.querySelection || 'all';
+      if (mode === 'all') return '全选';
+      if (mode === 'none') return '无';
+      if (mode === 'exclude') return `全部，排除 ${selected.length} 项`;
+    }
     if (inferSelectionIntent(input) === 'all_available') return '全选';
     return selected.length ? `${selected.length} selected` : placeholder;
   };
@@ -162,6 +168,20 @@
     if (!input.multiple) {
       host.textContent = selected[0]?.textContent || placeholder;
       return;
+    }
+    if (input.dataset.queryParameter === 'true') {
+      const mode = input.dataset.querySelection || 'all';
+      if (mode === 'all' || mode === 'none' || mode === 'exclude') {
+        const label = document.createElement('span');
+        label.className = 'dv-choice-summary__all';
+        label.textContent = mode === 'all'
+          ? control.dataset.allLabel || '全选'
+          : mode === 'none'
+          ? control.dataset.noneLabel || '无'
+          : `全部，排除 ${selected.length} 项`;
+        host.append(label);
+        return;
+      }
     }
     if (input.multiple && selectionIntent === 'all_available') {
       const label = document.createElement('span');

@@ -4,25 +4,27 @@ from typing import Any
 
 
 WORKSPACE_SCHEMA = "dataviz/workspace/v1"
-DASHBOARD_SCHEMA = "dataviz/dashboard/v13"
-PARAMETER_DOMAIN_SCHEMA = "dataviz/parameter-domain/v1"
-PARAMETER_DOMAIN_CONTRACT_SCHEMA = "dataviz/parameter-domain-contract/v2"
-PARAMETER_DOMAIN_RESOLUTION_SCHEMA = "dataviz/parameter-domain-resolution/v2"
+DASHBOARD_SCHEMA = "dataviz/dashboard/v14"
+PARAMETER_DOMAIN_SCHEMA = "dataviz/parameter-domain/v2"
+PARAMETER_DOMAIN_CONTRACT_SCHEMA = "dataviz/parameter-domain-contract/v3"
+PARAMETER_LOOKUP_SCHEMA = "dataviz/parameter-lookup/v1"
+PARAMETER_MATERIALIZATION_SCHEMA = "dataviz/parameter-materialization/v1"
 PRESENTATION_SCHEMA = "dataviz/presentation/v2"
-SOURCE_SCHEMA = "dataviz/source/v3"
+SOURCE_SCHEMA = "dataviz/source/v4"
 DATASET_TRANSFORM_SCHEMA = "dataviz/dataset-transform/v3"
 INTERACTIVE_TRANSFORM_SCHEMA = "dataviz/interactive-transform/v4"
-DEPENDENCY_CONTRACT_SCHEMA = "dataviz/dependency-contract/v10"
+DEPENDENCY_CONTRACT_SCHEMA = "dataviz/dependency-contract/v11"
 LAYOUT_CONTRACT_SCHEMA = "dataviz/layout-contract/v1"
-STATE_SNAPSHOT_SCHEMA = "dataviz/state-snapshot/v4"
-RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v9"
+STATE_SNAPSHOT_SCHEMA = "dataviz/state-snapshot/v5"
+RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v10"
 TARGET_REFERENCE_SCHEMA = "dataviz/target-reference/v1"
 ANALYSIS_ENTRY_SCHEMA = "dataviz/analysis-entry/v1"
 ANALYSIS_CATALOG_SCHEMA = "dataviz/analysis-catalog/v1"
 ANALYSIS_DESCRIBE_SCHEMA = "dataviz/analysis-describe/v1"
-ANALYSIS_RESULT_SCHEMA = "dataviz/analysis-result/v3"
-ANALYSIS_EVIDENCE_SCHEMA = "dataviz/analysis-evidence/v3"
+ANALYSIS_RESULT_SCHEMA = "dataviz/analysis-result/v4"
+ANALYSIS_EVIDENCE_SCHEMA = "dataviz/analysis-evidence/v4"
 WORKSPACE_CHANGE_SCHEMA = "dataviz/workspace-change/v1"
+DASHBOARD_BUNDLE_SCHEMA = "dataviz/dashboard-bundle/v1"
 
 
 CURRENT_PROTOCOL_SCHEMAS: dict[str, str] = {
@@ -30,7 +32,8 @@ CURRENT_PROTOCOL_SCHEMAS: dict[str, str] = {
     "dashboard": DASHBOARD_SCHEMA,
     "parameter_domain": PARAMETER_DOMAIN_SCHEMA,
     "parameter_domain_contract": PARAMETER_DOMAIN_CONTRACT_SCHEMA,
-    "parameter_domain_resolution": PARAMETER_DOMAIN_RESOLUTION_SCHEMA,
+    "parameter_lookup": PARAMETER_LOOKUP_SCHEMA,
+    "parameter_materialization": PARAMETER_MATERIALIZATION_SCHEMA,
     "presentation": PRESENTATION_SCHEMA,
     "source": SOURCE_SCHEMA,
     "dataset_transform": DATASET_TRANSFORM_SCHEMA,
@@ -46,10 +49,22 @@ CURRENT_PROTOCOL_SCHEMAS: dict[str, str] = {
     "analysis_result": ANALYSIS_RESULT_SCHEMA,
     "analysis_evidence": ANALYSIS_EVIDENCE_SCHEMA,
     "workspace_change": WORKSPACE_CHANGE_SCHEMA,
+    "dashboard_bundle": DASHBOARD_BUNDLE_SCHEMA,
 }
 
 
 PROTOCOL_BOUNDARIES: tuple[dict[str, Any], ...] = (
+    {
+        "boundary": "portable-dashboard-bundle",
+        "schema": DASHBOARD_BUNDLE_SCHEMA,
+        "owner": "workspace.bundle",
+        "producer": "dataviz bundle",
+        "consumer": "Workspace loader and bundle merge",
+        "persisted": True,
+        "strictness": "exact-current",
+        "compatibility": "major-revision",
+        "conformance_suite": "dashboard-bundle",
+    },
     {
         "boundary": "authoring-dashboard",
         "schema": DASHBOARD_SCHEMA,
@@ -77,22 +92,33 @@ PROTOCOL_BOUNDARIES: tuple[dict[str, Any], ...] = (
         "schema": PARAMETER_DOMAIN_CONTRACT_SCHEMA,
         "owner": "execution.parameter_domains",
         "producer": "Parameter Domain compiler",
-        "consumer": "Dashboard Shell, resolver and inspect",
+        "consumer": "Dashboard Shell, Lookup and inspect",
         "persisted": False,
         "strictness": "exact-current",
         "compatibility": "package-lockstep",
-        "conformance_suite": "parameter-domain-projection,input-binding",
+        "conformance_suite": "query-parameter-state,input-binding",
     },
     {
-        "boundary": "parameter-domain-resolution",
-        "schema": PARAMETER_DOMAIN_RESOLUTION_SCHEMA,
-        "owner": "execution.parameter_domains",
-        "producer": "Parameter Domain compiler and resolver",
-        "consumer": "Dashboard Shell and parameters options CLI",
+        "boundary": "parameter-domain-lookup",
+        "schema": PARAMETER_LOOKUP_SCHEMA,
+        "owner": "execution.parameter_materializations",
+        "producer": "Workspace materialization store",
+        "consumer": "Dashboard Shell and parameters lookup CLI",
         "persisted": False,
         "strictness": "exact-current",
         "compatibility": "package-lockstep",
-        "conformance_suite": "parameter-domain-projection,value-signature,input-binding",
+        "conformance_suite": "query-parameter-state,value-signature,input-binding",
+    },
+    {
+        "boundary": "parameter-domain-materialization",
+        "schema": PARAMETER_MATERIALIZATION_SCHEMA,
+        "owner": "execution.parameter_materializations",
+        "producer": "Workspace materialization builder",
+        "consumer": "Parameter Lookup, refresh/status CLI and prune",
+        "persisted": True,
+        "strictness": "exact-current",
+        "compatibility": "major-revision",
+        "conformance_suite": "parameter-materialization-lifecycle",
     },
     {
         "boundary": "dependency-projection",
@@ -172,6 +198,21 @@ PROTOCOL_BOUNDARIES: tuple[dict[str, Any], ...] = (
 
 PROTOCOL_CHANGE_RECORDS: tuple[dict[str, str], ...] = (
     {
+        "change": "shared-parameter-materialization-and-compact-query-state",
+        "classification": "authoring, private lockstep and persisted semantic breaking",
+        "decision": (
+            "dashboard v14, parameter domain v2, parameter domain contract v3, "
+            "parameter lookup v1, parameter materialization v1, source v4, "
+            "dependency contract v11, runtime v10, state snapshot v5, "
+            "analysis result v4 and analysis evidence v4"
+        ),
+        "reason": (
+            "SQL candidate relations are shared immutable Server materializations; "
+            "Lookup owns search, parent predicates and cursor pages; candidate-backed "
+            "multiple select persists all/include/exclude/none without expanding the universe"
+        ),
+    },
+    {
         "change": "multi-view-control-writer-provenance",
         "classification": "authoring, private lockstep and persisted semantic breaking",
         "decision": (
@@ -198,9 +239,15 @@ PROTOCOL_CHANGE_RECORDS: tuple[dict[str, str], ...] = (
     },
     {
         "change": "parameter-domain-local-projection",
-        "classification": "private lockstep semantic breaking",
-        "decision": "parameter-domain contract v2 and resolution v2; author schema unchanged",
-        "reason": "projection edges now execute locally while query_inputs alone request a new snapshot",
+        "classification": "superseded historical private lockstep change",
+        "decision": (
+            "parameter-domain contract v2 and resolution v2; superseded by "
+            "shared-parameter-materialization-and-compact-query-state"
+        ),
+        "reason": (
+            "records the former client-relation generation only; current Runtime no "
+            "longer ships complete relations or supports Domain query_inputs"
+        ),
     },
     {
         "change": "query-input-projection-parity",

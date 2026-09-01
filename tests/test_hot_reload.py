@@ -189,7 +189,7 @@ def test_run_flushes_saved_query_definition_before_capturing_revision(tmp_path: 
             "/api/dashboards/sales-overview/runs",
             json={
                 "session_id": "tab_hot_reload",
-                "query_parameters": {"min_query_revenue": 0},
+                "query_parameter_state": {"min_query_revenue": {"value": 0}},
             },
         )
 

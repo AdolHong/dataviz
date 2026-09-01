@@ -5,17 +5,20 @@ __all__ = [
     "NodeResult",
     "RunResult",
     "resolve_control_states",
-    "resolve_query_parameters",
+    "resolve_dashboard_query_parameter_state",
 ]
 
 
 def __getattr__(name: str):
-    if name in {"Executor", "resolve_query_parameters"}:
-        from dataviz.execution.executor import Executor, resolve_query_parameters
+    if name in {"Executor", "resolve_dashboard_query_parameter_state"}:
+        from dataviz.execution.executor import (
+            Executor,
+            resolve_dashboard_query_parameter_state,
+        )
 
         return {
             "Executor": Executor,
-            "resolve_query_parameters": resolve_query_parameters,
+            "resolve_dashboard_query_parameter_state": resolve_dashboard_query_parameter_state,
         }[name]
     if name in {"InteractionResult", "NodeResult", "RunResult"}:
         from dataviz.execution.results import InteractionResult, NodeResult, RunResult

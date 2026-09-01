@@ -16,6 +16,7 @@ class ExecutionContext:
     workspace_root: Path
     dashboard_root: Path
     run_id: str
+    query_parameter_state: dict[str, dict[str, Any]]
     query_inputs: dict[str, Any]
     control_inputs: dict[str, Any]
     control_state: dict[str, dict[str, Any]]

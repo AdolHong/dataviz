@@ -82,7 +82,7 @@ dataviz run WORKSPACE 'sales::interactive:forecast/main' \
 
 Source/Base 只执行目标的最小 Query DAG。Derived Output 根据声明自动选择 server-python 或无头浏览器；浏览器默认阻止额外 HTTP(S) 请求，确实依赖 CDN 时显式使用 `--allow-network`。Playwright 未安装时按 CLI 给出的命令安装 `ai-dataviz[visual-check]` 和 Chromium。
 
-`run` 始终完整执行并封存不可变 Result，默认 stdout 只显示 Result ID/路径、紧凑 DAG、每个表格 Output 的前 10 行和下一步命令；`--preview-rows` 只改变终端预览，不裁剪实际结果。显式 `--format json` 使用 `dataviz/analysis-result/v3`，包含最终 Query Parameter、有效 Controls、每个 consumer 的 effective/applied revision、对应 `applied_control_state` 与实际 View writer 的 `applied_writer_provenance`，以及输入 Artifact/hash、Schema、行数、Output hash、分段耗时、lineage 和 Result 句柄。机器契约可直接导出 JSON Schema：
+`run` 始终完整执行并封存不可变 Result，默认 stdout 只显示 Result ID/路径、紧凑 DAG、每个表格 Output 的前 10 行和下一步命令；`--preview-rows` 只改变终端预览，不裁剪实际结果。显式 `--format json` 使用 `dataviz/analysis-result/v4`，包含最终 compact Query Parameter state、有效 Controls、每个 consumer 的 effective/applied revision、对应 `applied_control_state` 与实际 View writer 的 `applied_writer_provenance`，以及输入 Artifact/hash、Schema、行数、Output hash、分段耗时、lineage 和 Result 句柄。机器契约可直接导出 JSON Schema：
 
 ```bash
 dataviz schemas analysis-entry --format json --full

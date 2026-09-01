@@ -233,6 +233,20 @@
         },
       };
     };
+    const installPlotlyDragModeToggle = host => {
+      const onClick = event => {
+        const button = event.target?.closest?.('.modebar-btn[data-attr="dragmode"]');
+        if (!button || !host.contains(button)) return;
+        const mode = button.dataset.val;
+        if (!['select', 'lasso'].includes(mode) || !button.classList.contains('active')) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        runtime.metrics.renderers.interactions += 1;
+        void global.Plotly.relayout(host, {dragmode:'zoom'});
+      };
+      host.addEventListener('click', onClick, true);
+      return () => host.removeEventListener('click', onClick, true);
+    };
     const chartService = Object.freeze({
       plotly:Object.freeze({
         async mount(host, specification = {}, root = host?.closest?.('.dv-view')) {
@@ -249,7 +263,12 @@
             plotlyTheme(root, specification.layout || {}),
             config,
           );
-          const state = {node:host, specification, observer:null};
+          const state = {
+            node:host,
+            specification,
+            observer:null,
+            releaseDragModeToggle:installPlotlyDragModeToggle(host),
+          };
           state.observer = new ResizeObserver(() => {
             runtime.metrics.renderers.resizes += 1;
             global.Plotly?.Plots?.resize?.(host);
@@ -294,6 +313,7 @@
         },
         dispose(state) {
           state?.observer?.disconnect?.();
+          state?.releaseDragModeToggle?.();
           if (state?.node) global.Plotly?.purge?.(state.node);
         },
       }),
@@ -1536,7 +1556,7 @@
     });
 
     const adapter = {
-      protocol:'dataviz/runtime/v9',
+      protocol:'dataviz/runtime/v10',
       lifecycle:Object.freeze({
         hooks:Object.freeze(['validate', 'mount', 'update', 'dispose']),
         phases:Object.freeze([

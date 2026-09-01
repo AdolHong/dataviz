@@ -37,7 +37,7 @@ def test_analysis_result_stores_text_and_html_as_native_bytes(
     value = "<strong>hello</strong>" if kind == "html" else "hello"
     published = store.publish(
         {
-            "schema": "dataviz/analysis-result/v3",
+            "schema": "dataviz/analysis-result/v4",
             "status": "ready",
             "outputs": [
                 {
@@ -99,7 +99,7 @@ title: Analysis tests
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v13
+        """schema: dataviz/dashboard/v14
 kind: dashboard
 id: analysis
 title: Analysis
@@ -207,7 +207,7 @@ def test_analysis_contracts_publish_machine_json_schemas():
         "dataviz/analysis-describe/v1"
     )
     assert AnalysisResult.model_json_schema()["properties"]["schema"]["const"] == (
-        "dataviz/analysis-result/v3"
+        "dataviz/analysis-result/v4"
     )
 
 
@@ -396,7 +396,7 @@ def test_analysis_cli_all_show_and_run_base_output(isolated_workspace):
     )
     assert executed.exit_code == 0, executed.output
     result = json.loads(executed.output)
-    assert result["schema"] == "dataviz/analysis-result/v3"
+    assert result["schema"] == "dataviz/analysis-result/v4"
     assert result["status"] == "ready"
     assert result["outputs"][0]["rows"] == 1
     assert result["lineage"]["query_nodes"] == ["source:date-window"]
@@ -453,14 +453,14 @@ def test_analysis_cli_executes_file_sql_and_dataset_transform(tmp_path: Path):
             "--output",
             "main",
             "--query-param",
-            "target_factor=2",
+            'target_factor={"value":2}',
             "--format",
             "json",
         ],
     )
     assert sql_source.exit_code == 0, sql_source.output
     sql_payload = json.loads(sql_source.output)
-    assert sql_payload["query_parameters"]["target_factor"] == 2
+    assert sql_payload["query_parameter_state"]["target_factor"] == {"value": 2}
     assert sql_payload["outputs"][0]["preview"][0]["target"] == 136000
 
     dataset_output = runner.invoke(
@@ -470,7 +470,7 @@ def test_analysis_cli_executes_file_sql_and_dataset_transform(tmp_path: Path):
             str(workspace),
             entries["sales::dataset:sales-metrics/trend"]["reference"],
             "--query-param",
-            "target_factor=2",
+            'target_factor={"value":2}',
             "--preview-rows",
             "1",
             "--detail",
@@ -682,7 +682,7 @@ def test_analysis_evidence_preserves_consumer_revision_audit(tmp_path: Path):
     evidence, destination = create_analysis_evidence(
         workspace,
         {
-            "schema": "dataviz/analysis-result/v3",
+            "schema": "dataviz/analysis-result/v4",
             "status": "ready",
             "target": {"reference": "sales::interactive:forecast/main"},
             "consumer_revisions": consumer_revisions,
@@ -705,7 +705,7 @@ def test_analysis_result_rejects_inconsistent_consumer_revision_audit():
     with pytest.raises(ValueError, match="stale flag"):
         AnalysisResult.model_validate(
             {
-                "schema": "dataviz/analysis-result/v3",
+                "schema": "dataviz/analysis-result/v4",
                 "status": "ready",
                 "consumer_revisions": {
                     "views": {
@@ -864,7 +864,7 @@ include_snapshot: true
                 "files": {
                     "dashboards/analysis/dashboard.yaml": promoted_dashboard,
                     "dashboards/analysis/sources/rows-copy.yaml": (
-                        "schema: dataviz/source/v3\n"
+                        "schema: dataviz/source/v4\n"
                         "kind: source\n"
                         "id: rows-copy\n"
                         "name: 收入副本\n"

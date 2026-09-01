@@ -24,6 +24,13 @@ SESSION_A = "interactive-tab-a"
 SESSION_B = "interactive-tab-b"
 
 
+def query_state(*, batch: int = 7) -> dict[str, dict[str, object]]:
+    return {
+        "batch": {"value": batch},
+        "items": {"selection": "all", "value": []},
+    }
+
+
 def test_interactive_trigger_defaults_follow_runtime():
     base = {
         "schema": "dataviz/interactive-transform/v4",
@@ -90,7 +97,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v13
+        """schema: dataviz/dashboard/v14
 kind: dashboard
 id: interactive
 title: Interactive contract
@@ -143,8 +150,8 @@ inputs:
   rows: source:raw/main
 query_inputs:
   batch: batch
-  items_present: {{parameter: items, projection: present}}
-  items_intent: {{parameter: items, projection: intent}}
+  items_active: {{parameter: items, projection: active}}
+  items_selection: {{parameter: items, projection: selection}}
 control_inputs:
   factor: {{mode: value, control: dashboard.factor}}
   delay: {{mode: value, control: dashboard.delay}}
@@ -172,8 +179,8 @@ def transform(context):
     context.progress(0.1, "started")
     time.sleep(float(context.control_inputs["delay"]))
     frame = context.table("rows").copy()
-    assert context.query_inputs["items_present"] is True
-    assert context.query_inputs["items_intent"] == "all_available"
+    assert context.query_inputs["items_active"] is False
+    assert context.query_inputs["items_selection"] == "all"
     selected = context.control_inputs["region"]
     context.log("applying region selection", selected=selected)
     if selected:
@@ -244,7 +251,7 @@ def test_server_interactive_transform_has_isolated_context_named_outputs_and_cac
     workspace = load_workspace(build_interactive_workspace(tmp_path / "workspace"))
     assert validate_workspace(workspace) == []
     query_executor = Executor(workspace, cache_namespace=SESSION_A)
-    run = query_executor.run("interactive", query_parameters={"batch": 11})
+    run = query_executor.run("interactive", query_parameter_state=query_state(batch=11))
     events = []
     executor = InteractionExecutor(workspace, cache=query_executor.cache)
 
@@ -263,7 +270,7 @@ def test_server_interactive_transform_has_isolated_context_named_outputs_and_cac
     store = ArtifactStore(workspace.root, run.run_id)
     frame = store.read_table(first.outputs["interactive:summary/main"])
     assert first.status == "ready"
-    assert first.query_parameters == {"batch": 11, "items": ["a", "b"]}
+    assert first.query_parameter_state == query_state(batch=11)
     assert first.control_state == interaction_state(factor=3, delay=0, region="north")
     assert frame.to_dict(orient="records") == [
         {"region": "north", "value": 6, "batch": 11}
@@ -297,7 +304,7 @@ def test_server_interactive_inputs_are_classified_and_reuse_the_tab_run_snapshot
     }
 
     manager = RunManager(workspace)
-    run = manager.start("interactive", {"batch": 11}, SESSION_A)
+    run = manager.start("interactive", query_state(batch=11), SESSION_A)
     wait_for(lambda: run.result is not None)
 
     assert run.status == "ready"
@@ -485,8 +492,8 @@ def test_interaction_generations_are_isolated_by_tab_dashboard_and_query_run(
 ):
     workspace = load_workspace(build_interactive_workspace(tmp_path / "workspace"))
     manager = RunManager(workspace)
-    run_a = manager.start("interactive", {"batch": 1}, SESSION_A)
-    run_b = manager.start("interactive", {"batch": 2}, SESSION_B)
+    run_a = manager.start("interactive", query_state(batch=1), SESSION_A)
+    run_b = manager.start("interactive", query_state(batch=2), SESSION_B)
     wait_for(lambda: run_a.result is not None and run_b.result is not None)
 
     first_a = manager.start_interaction(
@@ -539,8 +546,8 @@ def test_server_interactions_are_globally_bounded_on_one_machine(tmp_path: Path)
         )
     )
     manager = RunManager(workspace)
-    run_a = manager.start("interactive", {"batch": 1}, SESSION_A)
-    run_b = manager.start("interactive", {"batch": 2}, SESSION_B)
+    run_a = manager.start("interactive", query_state(batch=1), SESSION_A)
+    run_b = manager.start("interactive", query_state(batch=2), SESSION_B)
     wait_for(lambda: run_a.result is not None and run_b.result is not None)
 
     first = manager.start_interaction(
@@ -574,7 +581,7 @@ def test_queued_server_interaction_can_be_cancelled_before_slot_is_available(
         )
     )
     manager = RunManager(workspace)
-    run = manager.start("interactive", {"batch": 1}, SESSION_A)
+    run = manager.start("interactive", query_state(batch=1), SESSION_A)
     wait_for(lambda: run.result is not None)
     assert manager.interaction_slots.acquire(timeout=0.1)
     try:
@@ -603,7 +610,7 @@ def test_server_rejects_interaction_when_query_contract_changed(
     client = TestClient(create_app(root))
     started = client.post(
         "/api/dashboards/interactive/runs",
-        json={"session_id": SESSION_A, "query_parameters": {"batch": 7}},
+        json={"session_id": SESSION_A, "query_parameter_state": query_state()},
     ).json()
     run_id = started["run_id"]
 
@@ -692,7 +699,7 @@ cache: {mode: none}
     workspace = load_workspace(root)
     assert validate_workspace(workspace) == []
     manager = RunManager(workspace)
-    run = manager.start("interactive", {"batch": 7}, SESSION_A)
+    run = manager.start("interactive", query_state(), SESSION_A)
     wait_for(lambda: run.result is not None)
 
     upstream = manager.start_interaction(
@@ -739,7 +746,7 @@ cache: {mode: none}
 def _start_query(client: TestClient, *, session_id: str = SESSION_A) -> str:
     run_id = client.post(
         "/api/dashboards/interactive/runs",
-        json={"session_id": session_id, "query_parameters": {"batch": 7}},
+        json={"session_id": session_id, "query_parameter_state": query_state()},
     ).json()["run_id"]
     record = {}
     for _ in range(200):

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+import threading
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -9,397 +12,48 @@ from typer.testing import CliRunner
 
 from dataviz.artifacts import ArtifactStore
 from dataviz.cli import app
-from dataviz.errors import ExecutionFailure, ValidationFailure
+from dataviz.errors import ExecutionFailure
 from dataviz.execution import Executor
-import dataviz.execution.parameter_domains as parameter_domains
-from dataviz.execution.parameter_domains import (
-    ParameterDomainCache,
-    resolve_parameter_domains,
-)
+from dataviz.execution.parameter_materializations import ParameterMaterializationStore
+import dataviz.execution.parameter_materializations as parameter_materializations
 from dataviz.server import create_app
 from dataviz.workspace import load_workspace, validate_workspace
 
 
-def _workspace(root: Path) -> Path:
-    dashboard = root / "dashboards" / "domain-lab"
-    domains = dashboard / "parameter_domains"
+def _dashboard(root: Path, dashboard_id: str) -> None:
+    dashboard = root / "dashboards" / dashboard_id
     sources = dashboard / "sources"
-    domains.mkdir(parents=True)
-    sources.mkdir()
-    (root / "auth").mkdir()
-    (root / "workspace.yaml").write_text(
-        "schema: dataviz/workspace/v1\nkind: workspace\nid: domain-tests\ntitle: Domain tests\n",
-        encoding="utf-8",
-    )
-    (root / "auth" / "adapters.yaml").write_text(
-        "adapters:\n  demo:\n    type: duckdb\n    database: ':memory:'\n",
-        encoding="utf-8",
-    )
+    sources.mkdir(parents=True)
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v13
+        f"""schema: dataviz/dashboard/v14
 kind: dashboard
-id: domain-lab
+id: {dashboard_id}
 title: Domain lab
-adapters: {warehouse: demo}
-parameter_domains: [parameter_domains/locations.yaml]
+adapters: {{warehouse: demo}}
+parameter_domains: [workspace:/parameter_domains/locations.yaml]
 query_parameters:
   - id: province
     type: multiple_select
     value_type: text
     required: true
-    initial: {mode: values, values: [GD]}
-    options: {mode: domain, source: locations, value_field: province_code, label_field: province_name}
+    default: {{mode: include, values: [GD]}}
+    options:
+      mode: domain
+      source: locations
+      value_field: province_code
+      label_field: province_name
+      keywords_field: province_keywords
   - id: city
     type: multiple_select
     value_type: text
-    initial: {mode: all}
+    default: {{mode: all}}
     options:
       mode: domain
       source: locations
       value_field: city_code
       label_field: city_name
-      depends_on: {province: {field: province_code}}
-sources: [sources/metrics.yaml]
-views:
-  - {id: rows, title: Rows, template: table, input: source:metrics/main}
-sections:
-  - {id: main, title: Main, views: [rows]}
-""",
-        encoding="utf-8",
-    )
-    (domains / "locations.yaml").write_text(
-        """schema: dataviz/parameter-domain/v1
-kind: parameter_domain
-id: locations
-type: sql
-adapter: warehouse
-code: locations.sql
-cache: {mode: session}
-""",
-        encoding="utf-8",
-    )
-    (domains / "locations.sql").write_text(
-        """select * from (values
-('GD', '广东', 'SZ', '深圳'),
-('GD', '广东', 'GZ', '广州'),
-('HN', '湖南', 'CS', '长沙')
-) as locations(province_code, province_name, city_code, city_name)
-""",
-        encoding="utf-8",
-    )
-    (sources / "metrics.yaml").write_text(
-        """schema: dataviz/source/v3
-kind: source
-id: metrics
-type: sql
-adapter: warehouse
-code: metrics.sql
-query_inputs:
-  province: province
-  city: city
-  province_intent: {parameter: province, projection: intent}
-  city_intent: {parameter: city, projection: intent}
-outputs: {main: {kind: table}}
-cache: {mode: none}
-""",
-        encoding="utf-8",
-    )
-    (sources / "metrics.sql").write_text(
-        """select province_code, city_code, value,
-  :province_intent as province_intent,
-  :city_intent as city_intent
-from (values
-('GD', 'SZ', 10), ('GD', 'GZ', 8), ('HN', 'CS', 7)
-) as metrics(province_code, city_code, value)
-where list_contains(:province, province_code) and list_contains(:city, city_code)
-""",
-        encoding="utf-8",
-    )
-    return root
-
-
-def test_shared_domain_projects_cascading_choices_and_reconciles_values(tmp_path: Path):
-    root = _workspace(tmp_path / "workspace")
-    workspace = load_workspace(root)
-    dashboard = workspace.dashboard("domain-lab")
-    assert validate_workspace(workspace) == []
-    contract = dashboard.parameter_domain_contract.as_dict()
-    assert contract["schema"] == "dataviz/parameter-domain-contract/v2"
-    assert contract["order"] == ["province", "city"]
-    assert contract["projection_dependencies"] == {
-        "province": [],
-        "city": ["province"],
-    }
-    assert contract["projection_descendants"] == {
-        "province": ["city"],
-        "city": [],
-    }
-    assert contract["query_domains"] == {"province": [], "city": []}
-
-    initial = resolve_parameter_domains(
-        workspace,
-        dashboard,
-        {},
-        timezone_name="UTC",
-        initialized_parameters=set(),
-        strict=False,
-        cache=ParameterDomainCache(),
-    )
-    assert initial.values == {"province": ["GD"], "city": ["SZ", "GZ"]}
-    assert [item["label"] for item in initial.choices["province"]] == ["广东", "湖南"]
-    assert [item["value"] for item in initial.choices["city"]] == ["SZ", "GZ"]
-    assert list(initial.domains) == ["locations"]
-    payload = initial.as_dict()
-    assert payload["schema"] == "dataviz/parameter-domain-resolution/v2"
-    client_projection = payload["client_projection"]
-    assert client_projection["contract_hash"] == contract["contract_hash"]
-    assert list(client_projection["parameters"]) == ["city"]
-    assert client_projection["capacity"]["rows"] == 3
-    assert client_projection["capacity"]["max_rows"] == 50_000
-    assert client_projection["capacity"]["max_serialized_bytes"] == 8 * 1024 * 1024
-    assert client_projection["parameters"]["city"]["rows"][0] == {
-        "signature": '"SZ"',
-        "choice": {"value": "SZ", "label": "深圳"},
-        "parents": {"province": '"GD"'},
-    }
-    serialized_projection = json.dumps(client_projection, ensure_ascii=False)
-    assert "province_name" not in serialized_projection
-    assert "locations.sql" not in serialized_projection
-
-    cascaded = resolve_parameter_domains(
-        workspace,
-        dashboard,
-        {"province": ["HN"], "city": ["SZ"]},
-        timezone_name="UTC",
-        initialized_parameters={"province", "city"},
-        intents={"province": "explicit", "city": "explicit"},
-        strict=False,
-        cache=ParameterDomainCache(),
-    )
-    assert cascaded.values == {"province": ["HN"], "city": ["CS"]}
-    assert [item["value"] for item in cascaded.choices["city"]] == ["CS"]
-
-
-def test_contract_separates_query_edges_from_local_projection_edges(tmp_path: Path):
-    root = _workspace(tmp_path / "workspace")
-    dashboard_path = root / "dashboards/domain-lab/dashboard.yaml"
-    dashboard_yaml = dashboard_path.read_text(encoding="utf-8")
-    dashboard_path.write_text(
-        dashboard_yaml.replace(
-            "query_parameters:\n",
-            "query_parameters:\n"
-            "  - id: search\n"
-            "    type: single_input\n"
-            "    value_type: text\n"
-            "    default: ''\n",
-            1,
-        ),
-        encoding="utf-8",
-    )
-    domain_path = root / "dashboards/domain-lab/parameter_domains/locations.yaml"
-    domain_yaml = domain_path.read_text(encoding="utf-8")
-    domain_path.write_text(
-        domain_yaml.replace(
-            "code: locations.sql\n",
-            "code: locations.sql\nquery_inputs:\n  search_term: search\n",
-            1,
-        ),
-        encoding="utf-8",
-    )
-
-    dashboard = load_workspace(root).dashboard("domain-lab")
-    contract = dashboard.parameter_domain_contract.as_dict()
-
-    assert contract["projection_descendants"]["province"] == ["city"]
-    assert contract["query_domains"]["search"] == ["locations"]
-    assert contract["domain_input_bindings"] == {
-        "locations": {"search_term": {"parameter": "search"}}
-    }
-    assert contract["dependencies"]["city"] == ["province", "search"]
-
-
-def test_contract_rejects_same_parent_domain_projection_and_query_edge(tmp_path: Path):
-    root = _workspace(tmp_path / "workspace")
-    domain_path = root / "dashboards/domain-lab/parameter_domains/locations.yaml"
-    domain_yaml = domain_path.read_text(encoding="utf-8")
-    domain_path.write_text(
-        domain_yaml.replace(
-            "code: locations.sql\n",
-            "code: locations.sql\nquery_inputs:\n  province_filter: province\n",
-            1,
-        ),
-        encoding="utf-8",
-    )
-
-    dashboard = load_workspace(root).dashboard("domain-lab")
-    with pytest.raises(ValidationFailure) as raised:
-        _ = dashboard.parameter_domain_contract
-
-    assert raised.value.details == {
-        "code": "parameter_domain_dependency_mode_conflict",
-        "domain": "locations",
-        "parameter": "city",
-        "parents": ["province"],
-    }
-
-
-@pytest.mark.parametrize(
-    "limit_name",
-    [
-        "PARAMETER_DOMAIN_CLIENT_PROJECTION_MAX_ROWS",
-        "PARAMETER_DOMAIN_CLIENT_PROJECTION_MAX_BYTES",
-    ],
-)
-def test_client_projection_capacity_fails_without_truncation_or_fallback(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    limit_name: str,
-):
-    root = _workspace(tmp_path / "workspace")
-    workspace = load_workspace(root)
-    monkeypatch.setattr(parameter_domains, limit_name, 1)
-
-    with pytest.raises(ExecutionFailure) as raised:
-        resolve_parameter_domains(
-            workspace,
-            workspace.dashboard("domain-lab"),
-            {},
-            timezone_name="UTC",
-            initialized_parameters=set(),
-            strict=False,
-        )
-
-    details = raised.value.details
-    assert details["code"] == "parameter_domain_client_projection_limit"
-    assert details["rows"] == 3
-    assert details["serialized_bytes"] > 1
-    assert details["domains"] == ["locations"]
-    assert details["consumers"] == ["city"]
-    assert "query_inputs" in details["suggestions"][0]
-
-
-def test_explicit_empty_selection_survives_domain_refresh(tmp_path: Path):
-    root = _workspace(tmp_path / "workspace")
-    workspace = load_workspace(root)
-    dashboard = workspace.dashboard("domain-lab")
-
-    resolution = resolve_parameter_domains(
-        workspace,
-        dashboard,
-        {"province": ["GD"], "city": []},
-        timezone_name="UTC",
-        initialized_parameters={"province", "city"},
-        intents={"province": "explicit", "city": "explicit"},
-        strict=False,
-    )
-
-    assert resolution.values["city"] == []
-    assert resolution.intents["city"] == "explicit"
-
-
-def test_committed_snapshot_rehydration_preserves_unavailable_cascade_values(
-    tmp_path: Path,
-):
-    root = _workspace(tmp_path / "workspace")
-    workspace = load_workspace(root)
-    dashboard = workspace.dashboard("domain-lab")
-    domain_sql = root / "dashboards/domain-lab/parameter_domains/locations.sql"
-    domain_sql.write_text(
-        """select * from (values
-('HN', '湖南', 'CS', '长沙')
-) as locations(province_code, province_name, city_code, city_name)
-""",
-        encoding="utf-8",
-    )
-
-    restored = resolve_parameter_domains(
-        workspace,
-        dashboard,
-        {"province": ["GD"], "city": ["SZ"]},
-        timezone_name="UTC",
-        initialized_parameters={"province", "city"},
-        intents={"province": "explicit", "city": "all_available"},
-        strict=False,
-        preserve_unavailable=True,
-    )
-
-    assert restored.values == {"province": ["GD"], "city": ["SZ"]}
-    assert restored.intents == {
-        "province": "explicit",
-        "city": "all_available",
-    }
-    assert restored.choices["province"][-1] == {
-        "value": "GD",
-        "label": "GD",
-        "description": "Unavailable in the current Parameter Domain",
-        "disabled": True,
-        "unavailable": True,
-    }
-    assert restored.choices["city"] == [
-        {
-            "value": "SZ",
-            "label": "SZ",
-            "description": "Unavailable in the current Parameter Domain",
-            "disabled": True,
-            "unavailable": True,
-        }
-    ]
-
-
-@pytest.mark.parametrize(
-    ("category_type", "selected", "empty"),
-    [
-        ("single_select", "food", None),
-        ("multiple_select", ["food"], []),
-    ],
-)
-def test_static_single_or_multiple_parent_filters_two_fields_from_one_domain(
-    tmp_path: Path,
-    category_type: str,
-    selected: object,
-    empty: object,
-):
-    root = _workspace(tmp_path / "workspace")
-    dashboard_path = root / "dashboards/domain-lab/dashboard.yaml"
-    dashboard_path.write_text(
-        f"""schema: dataviz/dashboard/v13
-kind: dashboard
-id: domain-lab
-title: Shared item candidates
-adapters: {{warehouse: demo}}
-parameter_domains: [parameter_domains/locations.yaml]
-query_parameters:
-  - id: category
-    type: {category_type}
-    value_type: text
-    required: false
-    initial: {{mode: empty}}
-    options:
-      mode: static
-      choices:
-        - {{value: food, label: 食品}}
-        - {{value: beauty, label: 美妆}}
-  - id: subcategory
-    type: multiple_select
-    value_type: text
-    required: false
-    initial: {{mode: all}}
-    options:
-      mode: domain
-      source: locations
-      value_field: subcategory
-      depends_on: {{category: {{field: category}}}}
-  - id: item_nbr
-    type: multiple_select
-    value_type: text
-    required: false
-    initial: {{mode: all}}
-    options:
-      mode: domain
-      source: locations
-      value_field: item_nbr
-      label_field: item_name
-      depends_on: {{category: {{field: category}}}}
+      keywords_field: city_keywords
+      depends_on: {{province: {{field: province_code}}}}
 sources: [sources/metrics.yaml]
 views:
   - {{id: rows, title: Rows, template: table, input: source:metrics/main}}
@@ -408,200 +62,479 @@ sections:
 """,
         encoding="utf-8",
     )
-    domain_sql = root / "dashboards/domain-lab/parameter_domains/locations.sql"
-    domain_sql.write_text(
-        """select * from (values
-('food', 'snack', 'F1', '饼干'),
-('food', 'candy', 'F2', '糖果'),
-('beauty', 'skin', 'B1', '面霜')
-) as items(category, subcategory, item_nbr, item_name)
+    (sources / "metrics.yaml").write_text(
+        """schema: dataviz/source/v4
+kind: source
+id: metrics
+type: sql
+adapter: warehouse
+code: metrics.sql
+query_filters:
+  province: {parameter: province, field: province_code}
+  city: {parameter: city, field: city_code}
+outputs: {main: {kind: table}}
+cache: {mode: none}
 """,
         encoding="utf-8",
     )
+    (sources / "metrics.sql").write_text(
+        """select province_code, city_code, value
+from (values ('GD', 'SZ', 10), ('GD', 'GZ', 8), ('HN', 'CS', 7))
+  as metrics(province_code, city_code, value)
+where {{ dataviz_filter:province }} and {{ dataviz_filter:city }}
+order by province_code, city_code
+""",
+        encoding="utf-8",
+    )
+
+
+def _workspace(root: Path, *, second_dashboard: bool = False) -> Path:
+    (root / "auth").mkdir(parents=True)
+    (root / "parameter_domains").mkdir()
+    (root / "workspace.yaml").write_text(
+        "schema: dataviz/workspace/v1\nkind: workspace\nid: domain-tests\ntitle: Domain tests\n",
+        encoding="utf-8",
+    )
+    (root / "auth" / "adapters.yaml").write_text(
+        "adapters:\n  demo:\n    type: duckdb\n    database: ':memory:'\n",
+        encoding="utf-8",
+    )
+    (root / "parameter_domains" / "locations.yaml").write_text(
+        """schema: dataviz/parameter-domain/v2
+kind: parameter_domain
+id: locations
+type: sql
+adapter: warehouse
+code: locations.sql
+materialization: {refresh_after_seconds: 43200, expire_after_seconds: 604800}
+""",
+        encoding="utf-8",
+    )
+    (root / "parameter_domains" / "locations.sql").write_text(
+        """select * from (values
+('GD', '广东', 'guang dong', 'SZ', '深圳', 'shen zhen'),
+('GD', '广东', 'guang dong', 'GZ', '广州', 'guang zhou'),
+('HN', '湖南', 'hu nan', 'CS', '长沙', 'chang sha')
+) as locations(province_code, province_name, province_keywords, city_code, city_name, city_keywords)
+""",
+        encoding="utf-8",
+    )
+    _dashboard(root, "domain-lab")
+    if second_dashboard:
+        _dashboard(root, "domain-lab-copy")
+    return root
+
+
+def _store(root: Path):
+    workspace = load_workspace(root)
+    return workspace, workspace.dashboard("domain-lab"), ParameterMaterializationStore(workspace)
+
+
+def test_shared_domain_contract_contains_only_topology(tmp_path: Path):
+    root = _workspace(tmp_path / "workspace")
     workspace = load_workspace(root)
     dashboard = workspace.dashboard("domain-lab")
 
-    populated = resolve_parameter_domains(
-        workspace,
-        dashboard,
-        {"category": selected},
-        timezone_name="UTC",
-        initialized_parameters={"category"},
-        intents={"category": "explicit"},
-        strict=False,
+    assert validate_workspace(workspace) == []
+    assert dashboard.parameter_domain_contract.as_dict() == {
+        "schema": "dataviz/parameter-domain-contract/v3",
+        "contract_hash": dashboard.parameter_domain_contract.contract_hash,
+        "dependencies": {"province": [], "city": ["province"]},
+        "descendants": {"province": ["city"], "city": []},
+        "order": ["province", "city"],
+        "domain_consumers": {"locations": ["city", "province"]},
+    }
+    assert "深圳" not in json.dumps(
+        dashboard.parameter_domain_contract.as_dict(), ensure_ascii=False
     )
-    assert [choice["value"] for choice in populated.choices["subcategory"]] == [
-        "snack",
-        "candy",
-    ]
-    assert [choice["value"] for choice in populated.choices["item_nbr"]] == [
-        "F1",
-        "F2",
-    ]
-    assert list(populated.frames) == ["locations"]
-    assert len(populated.frames["locations"]) == 3
 
-    cleared = resolve_parameter_domains(
-        workspace,
+
+def test_materialization_is_shared_and_lookup_filters_searches_and_pages(tmp_path: Path):
+    root = _workspace(tmp_path / "workspace", second_dashboard=True)
+    workspace, dashboard, store = _store(root)
+    record = store.build(dashboard, "locations")
+
+    copied = workspace.dashboard("domain-lab-copy")
+    assert store.identity(dashboard, "locations")[0] == store.identity(copied, "locations")[0]
+    assert store.status(copied, "locations").generation == record.generation
+
+    first = store.lookup(dashboard, "province", limit=1)
+    assert first["status"] == "ready"
+    assert first["total"] == 2
+    assert len(first["items"]) == 1
+    second = store.lookup(dashboard, "province", limit=1, cursor=first["next_cursor"])
+    assert len(second["items"]) == 1
+    assert second["next_cursor"] is None
+
+    cities = store.lookup(
         dashboard,
-        {"category": empty},
-        timezone_name="UTC",
-        initialized_parameters={"category"},
-        intents={"category": "explicit"},
-        strict=False,
+        "city",
+        parent_states={"province": {"selection": "include", "value": ["GD"]}},
     )
-    assert cleared.choices["subcategory"] == []
-    assert cleared.choices["item_nbr"] == []
-    assert cleared.values["subcategory"] == []
-    assert cleared.values["item_nbr"] == []
+    assert [item["value"] for item in cities["items"]] == ["GZ", "SZ"]
+    excluded = store.lookup(
+        dashboard,
+        "city",
+        parent_states={"province": {"selection": "exclude", "value": ["GD"]}},
+    )
+    assert [item["value"] for item in excluded["items"]] == ["CS"]
+    none = store.lookup(
+        dashboard,
+        "city",
+        parent_states={"province": {"selection": "none", "value": []}},
+    )
+    assert none["items"] == []
+    searched = store.lookup(dashboard, "city", search="shen zhen")
+    assert [item["value"] for item in searched["items"]] == ["SZ"]
 
 
-def test_executor_accepts_typed_values_without_executing_the_ui_domain(tmp_path: Path):
+def test_lookup_preserves_finite_selected_operands_and_marks_unavailable(tmp_path: Path):
+    root = _workspace(tmp_path / "workspace")
+    _workspace_loaded, dashboard, store = _store(root)
+    store.build(dashboard, "locations")
+
+    payload = store.lookup(dashboard, "city", selected=["SZ", "LEGACY"])
+
+    assert payload["selected_items"][0] == {
+        "value": "SZ",
+        "label": "深圳",
+        "keywords": ["shen zhen"],
+        "available": True,
+    }
+    assert payload["selected_items"][1] == {
+        "value": "LEGACY",
+        "label": "LEGACY",
+        "available": False,
+    }
+
+
+def test_cursor_is_generation_bound(tmp_path: Path):
+    root = _workspace(tmp_path / "workspace")
+    _workspace_loaded, dashboard, store = _store(root)
+    store.build(dashboard, "locations")
+    cursor = store.lookup(dashboard, "city", limit=1)["next_cursor"]
+    domain_sql = root / "parameter_domains" / "locations.sql"
+    domain_sql.write_text(domain_sql.read_text(encoding="utf-8").replace("长沙", "长沙市"), encoding="utf-8")
+    workspace, dashboard, store = _store(root)
+    store.build(dashboard, "locations", force=True)
+
+    with pytest.raises(ExecutionFailure) as failure:
+        store.lookup(dashboard, "city", limit=1, cursor=cursor)
+    assert failure.value.details["code"] == "parameter_lookup_cursor_stale"
+
+
+def test_stale_generation_remains_readable_while_refresh_starts(tmp_path: Path):
+    root = _workspace(tmp_path / "workspace")
+    _workspace_loaded, dashboard, store = _store(root)
+    initial = store.build(dashboard, "locations")
+    with sqlite3.connect(store.index_path) as connection:
+        connection.execute(
+            "UPDATE materializations SET refresh_due_at=? WHERE materialization_key=?",
+            (time.time() - 1, initial.key),
+        )
+    stale = store.ensure(dashboard, "locations", background=True)
+    assert stale.generation == initial.generation
+    assert stale.freshness() == "stale"
+
+
+def test_prune_never_removes_current_generation(tmp_path: Path):
+    root = _workspace(tmp_path / "workspace")
+    _workspace_loaded, dashboard, store = _store(root)
+    first = store.build(dashboard, "locations")
+    second = store.build(dashboard, "locations", force=True)
+    assert first.generation != second.generation
+
+    preview = store.prune_generations()
+    assert [item["generation"] for item in preview["generations"]] == [first.generation]
+    applied = store.prune_generations(apply=True)
+    assert applied["deleted_count"] == 1
+    assert second.data_path.is_file()
+
+
+def test_executor_uses_canonical_state_without_materializing_candidates(tmp_path: Path):
     root = _workspace(tmp_path / "workspace")
     workspace = load_workspace(root)
-    domain_sql = root / "dashboards" / "domain-lab" / "parameter_domains" / "locations.sql"
-    domain_sql.write_text("this is deliberately not executable SQL", encoding="utf-8")
+    (root / "parameter_domains" / "locations.sql").write_text(
+        "this SQL must not run during Dashboard execution", encoding="utf-8"
+    )
 
     result = Executor(workspace).run(
         "domain-lab",
-        query_parameters={"province": ["GD"], "city": ["OUTSIDE_UI_DOMAIN"]},
-        query_parameter_intents={
-            "province": "all_available",
-            "city": "explicit",
+        query_parameter_state={
+            "province": {"selection": "include", "value": ["GD"]},
+            "city": {"selection": "exclude", "value": ["GZ"]},
         },
     )
 
     assert result.status == "ready"
-    assert result.query_parameters == {
-        "province": ["GD"],
-        "city": ["OUTSIDE_UI_DOMAIN"],
-    }
-    assert result.query_parameter_intents == {
-        "province": "all_available",
-        "city": "explicit",
+    assert result.query_parameter_state == {
+        "province": {"selection": "include", "value": ["GD"]},
+        "city": {"selection": "exclude", "value": ["GZ"]},
     }
     frame = ArtifactStore(root, result.run_id).read_table(result.outputs["source:metrics/main"])
-    assert list(frame.columns[-2:]) == ["province_intent", "city_intent"]
-    assert result.nodes["source:metrics"].status == "empty"
+    assert frame[["province_code", "city_code"]].to_dict("records") == [
+        {"province_code": "GD", "city_code": "SZ"}
+    ]
 
 
-def test_parameters_options_is_explicit_optional_candidate_discovery(tmp_path: Path):
+def test_cli_prewarm_status_and_lookup_are_bounded(tmp_path: Path):
     root = _workspace(tmp_path / "workspace")
+    runner = CliRunner()
+    prewarm = runner.invoke(app, ["parameters", "prewarm", str(root), "domain-lab"])
+    assert prewarm.exit_code == 0, prewarm.output
+    assert json.loads(prewarm.output)["materializations"][0]["rows"] == 3
 
-    result = CliRunner().invoke(
+    status = runner.invoke(app, ["parameters", "status", str(root), "domain-lab"])
+    assert status.exit_code == 0, status.output
+    assert json.loads(status.output)["materializations"][0]["freshness"] == "fresh"
+
+    lookup = runner.invoke(
         app,
         [
-            "parameters",
-            "options",
-            str(root),
-            "domain-lab",
-            "--query-param",
-            'province=["HN"]',
-            "--parameter",
-            "city",
-            "--format",
-            "json",
+            "parameters", "lookup", str(root), "domain-lab", "city",
+            "--parent-state", 'province={"selection":"include","value":["GD"]}',
+            "--search", "深", "--limit", "1",
         ],
     )
-
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
-    assert payload["schema"] == "dataviz/parameter-options/v1"
-    assert payload["tables"][0]["domain"] == "locations"
-    assert payload["tables"][0]["rows"] == 3
-    assert len(payload["tables"][0]["preview"]) == 3
-    options_id = payload["options_id"]
-    assert "optional" in payload["note"].lower()
-    assert "does not execute or enforce" in payload["note"]
-
-    domain_sql = root / "dashboards/domain-lab/parameter_domains/locations.sql"
-    domain_sql.write_text("this SQL must not be executed again", encoding="utf-8")
-    filtered = CliRunner().invoke(
-        app,
-        [
-            "parameters",
-            "filter",
-            str(root),
-            options_id,
-            "--domain",
-            "locations",
-            "--where",
-            'province_code="HN"',
-            "--column",
-            "city_code",
-            "--column",
-            "city_name",
-            "--format",
-            "json",
-        ],
-    )
-
-    assert filtered.exit_code == 0, filtered.output
-    page = json.loads(filtered.output)
-    assert page["rows"] == [{"city_code": "CS", "city_name": "长沙"}]
+    assert lookup.exit_code == 0, lookup.output
+    payload = json.loads(lookup.output)
+    assert payload["items"] == [
+        {"value": "SZ", "label": "深圳", "keywords": ["shen zhen"]}
+    ]
 
 
-def test_server_resolver_uses_tab_cache_and_reload_bypasses_it(tmp_path: Path):
+def test_server_lookup_does_not_embed_rows_or_lock_workspace_navigation(tmp_path: Path):
     root = _workspace(tmp_path / "workspace")
     client = TestClient(create_app(root, watch=False))
-    endpoint = "/api/dashboards/domain-lab/parameter-domains/resolve"
-    request = {
-        "session_id": "domain_test_session",
-        "query_parameters": {},
-        "initialized_parameters": [],
-        "intents": {},
-    }
-
-    first = client.post(endpoint, json=request)
-    second = client.post(endpoint, json=request)
-    refreshed = client.post(endpoint, json={**request, "refresh": True})
-
-    assert first.status_code == second.status_code == refreshed.status_code == 200
-    assert first.json()["domains"]["locations"]["cached"] is False
-    assert second.json()["domains"]["locations"]["cached"] is True
-    assert refreshed.json()["domains"]["locations"]["cached"] is False
-    assert first.json()["query_parameters"] == {
-        "province": ["GD"],
-        "city": ["SZ", "GZ"],
-    }
-    assert first.json()["contract"]["dependencies"] == {
-        "province": [],
-        "city": ["province"],
-    }
-
-
-def test_server_resolver_accepts_committed_snapshot_reconciliation(tmp_path: Path):
-    root = _workspace(tmp_path / "workspace")
-    client = TestClient(create_app(root, watch=False))
-    response = client.post(
-        "/api/dashboards/domain-lab/parameter-domains/resolve",
-        json={
-            "session_id": "committed_domain_session",
-            "query_parameters": {"province": ["outside"], "city": ["legacy"]},
-            "initialized_parameters": ["province", "city"],
-            "intents": {"province": "explicit", "city": "explicit"},
-            "reconciliation": "committed_snapshot",
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["query_parameters"] == {
-        "province": ["outside"],
-        "city": ["legacy"],
-    }
-    assert payload["choices"]["province"][-1]["unavailable"] is True
-    assert payload["choices"]["city"][-1]["unavailable"] is True
-
-
-def test_dashboard_shell_exposes_contract_but_not_domain_rows_or_sql(tmp_path: Path):
-    root = _workspace(tmp_path / "workspace")
-    client = TestClient(create_app(root, watch=False))
-
-    payload = client.get("/api/workspace").json()
-    dashboard = next(item for item in payload["dashboards"] if item["id"] == "domain-lab")
-    serialized = str(dashboard)
-
-    assert dashboard["parameter_domain_contract"]["dependencies"]["city"] == ["province"]
+    workspace_payload = client.get("/api/workspace")
+    assert workspace_payload.status_code == 200
+    serialized = workspace_payload.text
     assert "locations.sql" not in serialized
     assert "深圳" not in serialized
+
+    lookup = client.post(
+        "/api/dashboards/domain-lab/parameter-domains/lookup",
+        json={"session_id": "domain_session", "parameter": "city"},
+    )
+    assert lookup.status_code == 200
+    assert lookup.json()["status"] in {"building", "ready"}
+    assert client.get("/").status_code == 200
+
+
+def test_materialization_guards_are_server_side(tmp_path: Path):
+    root = _workspace(tmp_path / "workspace")
+    definition = root / "parameter_domains" / "locations.yaml"
+    definition.write_text(
+        definition.read_text(encoding="utf-8").replace(
+            "materialization:", "max_rows: 2\nmaterialization:"
+        ),
+        encoding="utf-8",
+    )
+    _workspace_loaded, dashboard, store = _store(root)
+    with pytest.raises(ExecutionFailure) as failure:
+        store.build(dashboard, "locations")
+    assert failure.value.details["code"] == "parameter_materialization_row_limit"
+
+
+def test_portable_bundle_copies_shared_domain_closure_without_runtime_state_or_secrets(
+    tmp_path: Path,
+):
+    root = _workspace(tmp_path / "workspace")
+    workspace, dashboard, store = _store(root)
+    store.build(dashboard, "locations")
+    destination = tmp_path / "portable"
+
+    runner = CliRunner()
+    first = runner.invoke(app, ["bundle", str(root), "domain-lab", str(destination)])
+    assert first.exit_code == 0, first.output
+    payload = json.loads(first.output)
+    assert payload["schema"] == "dataviz/dashboard-bundle/v1"
+    assert payload["materializations_copied"] is False
+    assert payload["credentials_copied"] is False
+
+    assert (destination / "dashboards" / "domain-lab" / "dashboard.yaml").is_file()
+    assert (destination / "parameter_domains" / "locations.yaml").is_file()
+    assert (destination / "parameter_domains" / "locations.sql").is_file()
+    assert not (destination / ".dataviz").exists()
+    assert not (destination / "auth").exists()
+    bundled = load_workspace(destination).dashboard("domain-lab")
+    assert bundled.parameter_domains["locations"][0] == (
+        destination / "parameter_domains" / "locations.yaml"
+    )
+    manifest = json.loads((destination / "dataviz-bundle.json").read_text(encoding="utf-8"))
+    assert manifest["dashboards"][0]["adapter_bindings"] == [
+        {
+            "actual": "demo",
+            "configured": False,
+            "description": "",
+            "logical": "warehouse",
+            "type": "duckdb",
+            "visibility_scope": "default",
+        }
+    ]
+    assert "password" not in json.dumps(manifest).casefold()
+
+    repeated = runner.invoke(app, ["bundle", str(root), "domain-lab", str(destination)])
+    assert repeated.exit_code == 0, repeated.output
+    assert "parameter_domains/locations.sql" in json.loads(repeated.output)["reused"]
+
+    (destination / "parameter_domains" / "locations.sql").write_text(
+        "select 'conflict'", encoding="utf-8"
+    )
+    conflict = runner.invoke(app, ["bundle", str(root), "domain-lab", str(destination)])
+    assert conflict.exit_code == 1
+    assert "dashboard_bundle_content_conflict" in conflict.output
+
+
+def test_expired_generation_is_not_served_and_restarts_as_building(tmp_path: Path):
+    root = _workspace(tmp_path / "workspace")
+    _workspace_loaded, dashboard, store = _store(root)
+    record = store.build(dashboard, "locations")
+    with sqlite3.connect(store.index_path) as connection:
+        connection.execute(
+            "UPDATE materializations SET refresh_due_at=?, expires_at=? "
+            "WHERE materialization_key=?",
+            (time.time() - 2, time.time() - 1, record.key),
+        )
+
+    response = store.lookup(dashboard, "city", selected=["LEGACY"])
+
+    assert response["status"] in {"building", "unavailable"}
+    assert response["generation"] is None
+    assert response["items"] == []
+    assert response["selected_items"] == [
+        {"value": "LEGACY", "label": "LEGACY", "available": False}
+    ]
+
+
+def test_failed_refresh_preserves_readable_stale_generation(tmp_path: Path, monkeypatch):
+    root = _workspace(tmp_path / "workspace")
+    _workspace_loaded, dashboard, store = _store(root)
+    initial = store.build(dashboard, "locations")
+    with sqlite3.connect(store.index_path) as connection:
+        connection.execute(
+            "UPDATE materializations SET refresh_due_at=? WHERE materialization_key=?",
+            (time.time() - 1, initial.key),
+        )
+
+    def fail_refresh(**_kwargs):
+        raise ExecutionFailure(
+            "warehouse unavailable",
+            details={"code": "parameter_materialization_test_failure"},
+        )
+
+    monkeypatch.setattr(parameter_materializations, "execute_sql_query", fail_refresh)
+    with pytest.raises(ExecutionFailure):
+        store.build(dashboard, "locations", force=True)
+
+    failed = store.status(dashboard, "locations")
+    assert failed.generation == initial.generation
+    assert failed.status == "refresh_failed"
+    assert failed.freshness() == "stale"
+    response = store.lookup(dashboard, "city")
+    assert response["status"] == "ready"
+    assert response["generation"] == initial.generation
+    assert response["last_error"]["code"] == "parameter_materialization_test_failure"
+
+
+def test_cross_store_refresh_lease_and_restart_recovery_share_one_generation(
+    tmp_path: Path, monkeypatch
+):
+    root = _workspace(tmp_path / "workspace")
+    workspace = load_workspace(root)
+    dashboard = workspace.dashboard("domain-lab")
+    first_store = ParameterMaterializationStore(workspace)
+    second_store = ParameterMaterializationStore(workspace)
+    original = parameter_materializations.execute_sql_query
+    calls = 0
+    entered = threading.Event()
+    release = threading.Event()
+
+    def delayed_query(**kwargs):
+        nonlocal calls
+        calls += 1
+        entered.set()
+        release.wait(timeout=5)
+        return original(**kwargs)
+
+    monkeypatch.setattr(parameter_materializations, "execute_sql_query", delayed_query)
+    result: list = []
+    thread = threading.Thread(
+        target=lambda: result.append(first_store.build(dashboard, "locations", force=True))
+    )
+    thread.start()
+    assert entered.wait(timeout=5)
+    competing = second_store.build(dashboard, "locations", force=True)
+    release.set()
+    thread.join(timeout=5)
+
+    assert calls == 1
+    assert competing.status == "building"
+    assert result[0].generation
+    restarted = ParameterMaterializationStore(load_workspace(root))
+    recovered_dashboard = restarted.workspace.dashboard("domain-lab")
+    assert restarted.status(recovered_dashboard, "locations").generation == result[0].generation
+
+
+def test_expired_refresh_lease_is_reclaimed_after_interrupted_builder(tmp_path: Path):
+    root = _workspace(tmp_path / "workspace")
+    _workspace_loaded, dashboard, store = _store(root)
+    key, definition_hash, _code_path, _adapter = store.identity(dashboard, "locations")
+    with sqlite3.connect(store.index_path) as connection:
+        connection.execute(
+            "INSERT INTO materializations "
+            "(materialization_key, domain_id, definition_hash, status, rows, lease_until, updated_at) "
+            "VALUES (?, ?, ?, 'building', 0, ?, 'interrupted')",
+            (key, "locations", definition_hash, time.time() - 1),
+        )
+
+    recovered = ParameterMaterializationStore(load_workspace(root))
+    record = recovered.build(recovered.workspace.dashboard("domain-lab"), "locations")
+
+    assert record.status == "ready"
+    assert record.generation
+
+
+def test_visibility_scope_changes_materialization_identity(tmp_path: Path):
+    root = _workspace(tmp_path / "workspace")
+    _workspace_loaded, dashboard, store = _store(root)
+    first_key = store.identity(dashboard, "locations")[0]
+    adapter_path = root / "auth" / "adapters.yaml"
+    adapter_path.write_text(
+        adapter_path.read_text(encoding="utf-8").replace(
+            "type: duckdb", "type: duckdb\n    visibility_scope: restricted"
+        ),
+        encoding="utf-8",
+    )
+    workspace = load_workspace(root)
+    changed = ParameterMaterializationStore(workspace)
+    second_key = changed.identity(workspace.dashboard("domain-lab"), "locations")[0]
+    assert first_key != second_key
+
+
+def test_reader_pin_blocks_prune_until_lookup_generation_is_released(tmp_path: Path):
+    root = _workspace(tmp_path / "workspace")
+    _workspace_loaded, dashboard, store = _store(root)
+    first = store.build(dashboard, "locations")
+    with store._reader_pin(first):
+        second = store.build(dashboard, "locations", force=True)
+        assert store.prune_generations()["generations"] == []
+    candidates = store.prune_generations()["generations"]
+    assert [item["generation"] for item in candidates] == [first.generation]
+    assert second.data_path.is_file()
+
+
+def test_fixed_parameter_domain_benchmark_is_bounded():
+    payload = json.loads(
+        (
+            Path(__file__).parents[1]
+            / "benchmarks"
+            / "results"
+            / "parameter-domain-lookup-2026-09-01.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert payload["row_counts"] == [10_000, 100_000, 250_000]
+    assert [case["rows"] for case in payload["cases"]] == payload["row_counts"]
+    assert all(case["bounded"] for case in payload["cases"])
+    assert all(case["first_page_items"] == 50 for case in payload["cases"])
+    assert all(case["response_bytes"] < 16_384 for case in payload["cases"])

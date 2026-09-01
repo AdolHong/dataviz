@@ -10,8 +10,9 @@ from dataviz.value_contract import (
     ValueContractViolation,
     initial_control_value,
     is_empty_control_value,
+    json_value_signature,
     normalize_control_value,
-    select_initial_contract,
+    query_select_default_contract,
 )
 
 
@@ -69,55 +70,174 @@ def control_input_contract(binding: Any) -> dict[str, Any]:
     return payload
 
 
-QueryParameterIntent = Literal["all_available", "explicit"]
+QueryParameterSelection = Literal["all", "include", "exclude", "none"]
 
 
-def resolve_query_parameter_intents(
+def _selection_operands(definition: Any, value: Any) -> list[Any]:
+    normalized = normalize_control_value(
+        definition,
+        value,
+        enforce_required=False,
+        deduplicate=True,
+    )
+    signatures: set[str] = set()
+    result: list[Any] = []
+    for item in normalized:
+        signature = json_value_signature(item)
+        if signature in signatures:
+            continue
+        signatures.add(signature)
+        result.append(item)
+    if len(result) > definition.max_explicit_values:
+        raise ValueContractViolation(
+            "too_many_explicit_values",
+            f"at most {definition.max_explicit_values} explicit values are allowed",
+        )
+    return result
+
+
+def _query_parameter_default_state(
+    definition: Any,
+    *,
+    timezone_name: str,
+    current_time: datetime | None,
+) -> dict[str, Any]:
+    if definition.type == "multiple_select":
+        policy = query_select_default_contract(definition)
+        mode = str(policy["mode"])
+        if mode in {"all", "none"}:
+            return {"selection": mode, "value": []}
+        return {
+            "selection": mode,
+            "value": _selection_operands(definition, policy.get("values") or []),
+        }
+    if definition.type == "single_select":
+        policy = query_select_default_contract(definition)
+        mode = str(policy["mode"])
+        if mode == "none":
+            value = None
+        elif mode == "value":
+            value = normalize_control_value(definition, policy.get("value"))
+        else:
+            options = getattr(definition, "options", None)
+            choices = list(getattr(options, "choices", ()) or ())
+            if getattr(options, "mode", None) != "static":
+                raise ExecutionFailure(
+                    f"Query Parameter {definition.id} default=first requires Parameter Lookup",
+                    details={
+                        "code": "query_parameter_default_requires_lookup",
+                        "id": definition.id,
+                    },
+                )
+            value = choices[0].value if choices else None
+        return {"value": normalize_control_value(definition, value, enforce_required=True)}
+    return {
+        "value": resolve_parameter_default(
+            definition,
+            timezone_name=timezone_name,
+            current_time=current_time,
+            enforce_required=True,
+        )
+    }
+
+
+def normalize_query_parameter_state(
+    definition: Any,
+    raw_state: Any,
+    *,
+    enforce_required: bool = True,
+) -> dict[str, Any]:
+    """Normalize one public Query Parameter state without consulting candidates."""
+
+    if not isinstance(raw_state, Mapping):
+        raise ValueContractViolation(
+            "invalid_state", "Query Parameter state must be an object containing value"
+        )
+    unknown = sorted(set(raw_state) - {"value", "selection"})
+    if unknown:
+        raise ValueContractViolation(
+            "invalid_state", "unknown Query Parameter state fields: " + ", ".join(unknown)
+        )
+    if definition.type != "multiple_select":
+        if "selection" in raw_state:
+            raise ValueContractViolation(
+                "invalid_selection", "selection is only valid for multiple_select"
+            )
+        if "value" not in raw_state:
+            raise ValueContractViolation("invalid_state", "Query Parameter state requires value")
+        return {
+            "value": normalize_control_value(
+                definition,
+                raw_state.get("value"),
+                enforce_required=enforce_required,
+            )
+        }
+    selection = raw_state.get("selection")
+    if selection not in {"all", "include", "exclude", "none"}:
+        raise ValueContractViolation(
+            "invalid_selection",
+            "multiple_select selection must be all, include, exclude, or none",
+        )
+    raw_value = raw_state.get("value", [])
+    if selection in {"all", "none"}:
+        if raw_value not in (None, [], ()):
+            raise ValueContractViolation(
+                "invalid_selection_operands", f"selection={selection} requires empty value"
+            )
+        if selection == "none" and enforce_required and definition.required:
+            raise ValueContractViolation("required", "a non-empty selection is required")
+        return {"selection": selection, "value": []}
+    operands = _selection_operands(definition, raw_value)
+    if not operands:
+        raise ValueContractViolation(
+            "invalid_selection_operands", f"selection={selection} requires finite operands"
+        )
+    return {"selection": selection, "value": operands}
+
+
+def resolve_query_parameter_states(
     definitions: list[Any],
-    values: Mapping[str, Any] | None,
-    intents: Mapping[str, str] | None,
-) -> dict[str, QueryParameterIntent]:
-    """Resolve the minimal Query selection intent independently from values."""
+    states: Mapping[str, Any] | None,
+    *,
+    timezone_name: str,
+    current_time: datetime | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Resolve the only canonical Query Parameter snapshot used by a Run."""
 
-    provided_values = dict(values or {})
-    provided_intents = dict(intents or {})
+    provided = dict(states or {})
     registry = {item.id: item for item in definitions}
-    unknown = sorted(set(provided_intents) - set(registry))
+    unknown = sorted(set(provided) - set(registry))
     if unknown:
         raise ExecutionFailure(
-            "Unknown Query Parameter intents",
-            details={"code": "query_parameter_intent_unknown", "ids": unknown},
+            "Unknown Query Parameters",
+            details={"code": "query_parameter_unknown", "ids": unknown},
         )
-    resolved: dict[str, QueryParameterIntent] = {}
-    for parameter_id, definition in registry.items():
-        intent = provided_intents.get(parameter_id)
-        if intent is None:
-            intent = (
-                "all_available"
-                if parameter_id not in provided_values
-                and definition.type == "multiple_select"
-                and select_initial_contract(definition)["mode"] == "all"
-                else "explicit"
+    result: dict[str, dict[str, Any]] = {}
+    for definition in definitions:
+        try:
+            result[definition.id] = (
+                normalize_query_parameter_state(definition, provided[definition.id])
+                if definition.id in provided
+                else _query_parameter_default_state(
+                    definition,
+                    timezone_name=timezone_name,
+                    current_time=current_time,
+                )
             )
-        if intent not in {"all_available", "explicit"}:
+        except ExecutionFailure:
+            raise
+        except (ValueContractViolation, ValueError) as error:
+            reason = getattr(error, "message", str(error))
+            code = getattr(error, "code", "invalid_state")
             raise ExecutionFailure(
-                f"Invalid Query Parameter intent for {parameter_id}: {intent}",
+                f"Invalid Query Parameter {definition.id}: {reason}",
                 details={
-                    "code": "query_parameter_intent_invalid",
-                    "id": parameter_id,
-                    "intent": intent,
+                    "code": f"query_parameter_{code}",
+                    "id": definition.id,
+                    "reason": reason,
                 },
-            )
-        if intent == "all_available" and definition.type != "multiple_select":
-            raise ExecutionFailure(
-                f"Query Parameter {parameter_id} cannot use all_available",
-                details={
-                    "code": "query_parameter_intent_cardinality_invalid",
-                    "id": parameter_id,
-                },
-            )
-        resolved[parameter_id] = intent
-    return resolved
+            ) from error
+    return result
 
 
 def resolve_parameter_default(
@@ -140,52 +260,9 @@ def resolve_parameter_default(
     )
 
 
-def resolve_query_parameter_values(
-    definitions: list[Any],
-    values: Mapping[str, Any] | None,
-    *,
-    timezone_name: str,
-    current_time: datetime | None = None,
-) -> dict[str, Any]:
-    provided = dict(values or {})
-    registry = {item.id: item for item in definitions}
-    unknown = sorted(set(provided) - set(registry))
-    if unknown:
-        raise ExecutionFailure(
-            "Unknown Query Parameters",
-            details={"code": "query_parameter_unknown", "ids": unknown},
-        )
-    result: dict[str, Any] = {}
-    for definition in definitions:
-        try:
-            if definition.id in provided:
-                value = normalize_control_value(definition, provided[definition.id])
-            else:
-                value = resolve_parameter_default(
-                    definition,
-                    timezone_name=timezone_name,
-                    current_time=current_time,
-                    enforce_required=True,
-                )
-        except (ValueContractViolation, ValueError) as error:
-            reason = getattr(error, "message", str(error))
-            code = getattr(error, "code", "invalid_default")
-            raise ExecutionFailure(
-                f"Invalid Query Parameter {definition.id}: {reason}",
-                details={
-                    "code": f"query_parameter_{code}",
-                    "id": definition.id,
-                    "reason": reason,
-                },
-            ) from error
-        result[definition.id] = value
-    return result
-
-
 def project_query_inputs(
     bindings: Mapping[str, Any],
-    parameters: Mapping[str, Any],
-    intents: Mapping[str, QueryParameterIntent] | None = None,
+    states: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Project canonical Query Parameters into one node's local input names."""
 
@@ -193,13 +270,27 @@ def project_query_inputs(
     for alias, raw_binding in bindings.items():
         binding = query_input_contract(raw_binding)
         parameter = binding["parameter"]
-        if binding.get("projection") == "intent":
-            projected[alias] = (intents or {}).get(parameter, "explicit")
+        state = dict(states.get(parameter) or {"value": None})
+        projection = binding.get("projection") or "value"
+        if projection == "state":
+            projected[alias] = state
             continue
-        value = parameters.get(parameter)
-        if binding.get("projection") == "present":
-            projected[alias] = not is_empty_control_value(value)
+        if projection == "selection":
+            if "selection" not in state:
+                raise ExecutionFailure(
+                    f"Query input {alias} cannot read selection from {parameter}",
+                    details={"code": "query_input_projection_failed", "alias": alias, "parameter": parameter},
+                )
+            projected[alias] = state["selection"]
             continue
+        if projection == "active":
+            projected[alias] = (
+                state.get("selection") != "all"
+                if "selection" in state
+                else not is_empty_control_value(state.get("value"))
+            )
+            continue
+        value = state.get("value")
         part = binding.get("part")
         if part is not None:
             if not isinstance(value, (list, tuple)) or len(value) != 2:

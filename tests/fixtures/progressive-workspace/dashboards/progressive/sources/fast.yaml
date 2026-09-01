@@ -1,4 +1,4 @@
-schema: dataviz/source/v3
+schema: dataviz/source/v4
 kind: source
 id: fast
 type: python

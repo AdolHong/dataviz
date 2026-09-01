@@ -1,7 +1,7 @@
 // Owner: Runtime protocol, manifest normalization, and shared constants.
-const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v9';
+const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v10';
 const DATAVIZ_INTERACTIVE_WORKER_PROTOCOL = 'dataviz/interactive-worker/v1';
-const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v10';
+const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v11';
 if (window.dataviz.protocol?.schema !== DATAVIZ_RUNTIME_PROTOCOL) {
   throw new Error(`Unsupported Dataviz Runtime protocol: ${window.dataviz.protocol?.schema || 'missing'}`);
 }
@@ -123,13 +123,13 @@ const datavizParameterInputSignature = inputs => JSON.stringify(
 const datavizProjectParameterInputs = inputs => Object.fromEntries(
   Object.entries(inputs || {}).map(([alias, rawBinding]) => {
     const binding = datavizParameterBinding(rawBinding);
-    if (binding.projection === 'intent') {
-      return [alias, window.dataviz.query_parameter_intents?.[binding.parameter] || 'explicit'];
+    const state = window.dataviz.query_parameter_state?.[binding.parameter] || {value:null};
+    if (binding.projection === 'state') return [alias, structuredClone(state)];
+    if (binding.projection === 'selection') return [alias, state.selection || null];
+    if (binding.projection === 'active') {
+      return [alias, state.selection ? state.selection !== 'all' : !datavizIsEmptyValue(state.value)];
     }
-    let value = window.dataviz.query_parameters?.[binding.parameter];
-    if (binding.projection === 'present') {
-      return [alias, !datavizIsEmptyValue(value)];
-    }
+    let value = state.value;
     if (binding.part) {
       if (!Array.isArray(value) || value.length !== 2) {
         const error = new Error(

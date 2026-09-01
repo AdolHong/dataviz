@@ -10,6 +10,7 @@ import yaml
 from pydantic import ValidationError
 
 from dataviz.errors import Diagnostic, WorkspaceError
+from dataviz.protocols import PARAMETER_DOMAIN_SCHEMA, SOURCE_SCHEMA
 from dataviz.workspace.models import (
     DashboardDefinition,
     DatasetTransformDefinition,
@@ -96,7 +97,7 @@ def parse_source_definition(path: Path) -> SourceDefinition:
             "Schema header is required for a standalone definition",
             file=path,
             details={
-                "expected": "dataviz/source/v3",
+                "expected": SOURCE_SCHEMA,
                 "docs": "dataviz schemas source --full --format json",
             },
         )
@@ -110,8 +111,16 @@ def parse_source_definition(path: Path) -> SourceDefinition:
         ) from exc
 
 
-def load_dashboard(path: Path) -> LoadedDashboard:
+def _workspace_root_for_dashboard(dashboard_root: Path) -> Path:
+    for candidate in (dashboard_root, *dashboard_root.parents):
+        if (candidate / "workspace.yaml").is_file():
+            return candidate
+    return dashboard_root
+
+
+def load_dashboard(path: Path, *, workspace_root: Path | None = None) -> LoadedDashboard:
     root = path.resolve()
+    workspace_root = (workspace_root or _workspace_root_for_dashboard(root)).resolve()
     definition_path = root / "dashboard.yaml"
     logic_definition = parse_model(DashboardDefinition, definition_path)
     definition = logic_definition.model_copy(deep=True)
@@ -150,15 +159,21 @@ def load_dashboard(path: Path) -> LoadedDashboard:
 
     for domain_entry in definition.parameter_domains:
         if isinstance(domain_entry, str):
-            domain_path = _require_dashboard_asset(
-                root, root, domain_entry, "Parameter Domain definition"
-            )
+            if domain_entry.startswith("workspace:/"):
+                relative = domain_entry.removeprefix("workspace:/")
+                domain_path = _require_workspace_asset(
+                    workspace_root, relative, "Parameter Domain definition"
+                )
+            else:
+                domain_path = _require_dashboard_asset(
+                    root, root, domain_entry, "Parameter Domain definition"
+                )
             domain = parse_model(ParameterDomainDefinition, domain_path)
         else:
             domain_path = definition_path
             try:
                 domain = ParameterDomainDefinition.model_validate(
-                    {"schema": "dataviz/parameter-domain/v1", **domain_entry}
+                    {"schema": PARAMETER_DOMAIN_SCHEMA, **domain_entry}
                 )
             except ValidationError as exc:
                 raise WorkspaceError(
@@ -170,9 +185,16 @@ def load_dashboard(path: Path) -> LoadedDashboard:
             raise WorkspaceError(
                 f"Duplicate Parameter Domain id: {domain.id}", file=domain_path
             )
-        _require_dashboard_asset(
-            root, domain_path.parent, domain.code, "Parameter Domain SQL"
-        )
+        if _is_within(domain_path, root):
+            _require_dashboard_asset(
+                root, domain_path.parent, domain.code, "Parameter Domain SQL"
+            )
+        else:
+            _require_workspace_asset(
+                workspace_root,
+                str((domain_path.parent / domain.code).resolve().relative_to(workspace_root)),
+                "Parameter Domain SQL",
+            )
         parameter_domains[domain.id] = (domain_path, domain)
 
     for source_entry in definition.sources:
@@ -183,7 +205,7 @@ def load_dashboard(path: Path) -> LoadedDashboard:
             source_path = definition_path
             try:
                 source = SOURCE_DEFINITION_ADAPTER.validate_python(
-                    {"schema": "dataviz/source/v3", **source_entry}
+                    {"schema": SOURCE_SCHEMA, **source_entry}
                 )
             except ValidationError as exc:
                 raise WorkspaceError(
@@ -350,6 +372,21 @@ def _require_dashboard_asset(
             file=dashboard_root / "dashboard.yaml",
             details={
                 "code": "dashboard_asset_outside",
+                "value": value,
+                "resolved_path": str(path),
+            },
+        )
+    return path
+
+
+def _require_workspace_asset(workspace_root: Path, value: str, label: str) -> Path:
+    path = (workspace_root / value).resolve()
+    if not _is_within(path, workspace_root):
+        raise WorkspaceError(
+            f"{label} must stay inside its Workspace",
+            file=workspace_root / "workspace.yaml",
+            details={
+                "code": "workspace_asset_outside",
                 "value": value,
                 "resolved_path": str(path),
             },

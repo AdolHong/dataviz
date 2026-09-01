@@ -21,7 +21,6 @@ from typing import Any
 import typer
 import yaml
 import click
-import pandas as pd
 
 from dataviz import __version__
 from dataviz.analysis import (
@@ -35,7 +34,6 @@ from dataviz.analysis import (
     validate_analysis_describe_producer,
     validate_analysis_result_producer,
 )
-from dataviz.analysis.parameter_options import ParameterOptionsStore
 from dataviz.analysis.results import AnalysisResultStore, result_manifest_hash
 from dataviz.analysis.runner import (
     RunRequest,
@@ -74,7 +72,8 @@ from dataviz.execution import Executor, InteractionExecutor
 from dataviz.execution.dependencies import (
     DEPENDENCY_CONTRACT_SCHEMA,
 )
-from dataviz.execution.parameter_domains import resolve_parameter_domains
+from dataviz.execution.parameter_materializations import ParameterMaterializationStore
+from dataviz.execution.parameters import resolve_query_parameter_states
 from dataviz.maintenance import cleanup_workspace_storage
 from dataviz.plotly_runtime import PLOTLY_JS_VERSION
 from dataviz.protocols import (
@@ -96,7 +95,7 @@ from dataviz.server import create_app
 from dataviz.templates import component_catalog
 from dataviz.target_reference import parse_target_reference
 from dataviz.validation import format_validation_text, validate_preflight
-from dataviz.workspace import load_workspace
+from dataviz.workspace import bundle_dashboard, load_workspace
 from dataviz.input_state import state_from_values
 from dataviz.semantic_validation import validate_dashboard_semantics
 
@@ -221,7 +220,7 @@ def _browser_runtime_benchmark(
     dashboard,
     *,
     timeout_seconds: float,
-    query_parameters: dict[str, Any] | None = None,
+    query_parameter_state: dict[str, Any] | None = None,
     browser_name: str = "chromium",
     repeat: int = 1,
 ) -> dict[str, Any]:
@@ -257,7 +256,7 @@ def _browser_runtime_benchmark(
     query_started = time.perf_counter()
     result = Executor(workspace).run(
         dashboard.definition.id,
-        query_parameters=query_parameters,
+        query_parameter_state=query_parameter_state,
         refresh=True,
     )
     query_ms = (time.perf_counter() - query_started) * 1000
@@ -552,7 +551,7 @@ def _browser_runtime_benchmark(
             "browser": browser_name,
         },
         "query": {
-            "parameters": result.query_parameters,
+            "parameter_state": result.query_parameter_state,
             "duration_ms": round(query_ms, 2),
             "process_max_rss_bytes_before": query_rss_before,
             "process_max_rss_bytes_after": query_rss_after,
@@ -802,7 +801,7 @@ dataviz catalog describe . 'hello::source:data/main'
 dataviz run . 'hello::source:data/main'
 ```
 """,
-        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v13
+        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v14
 kind: dashboard
 id: hello
 title: Hello dashboard
@@ -925,6 +924,20 @@ def tree_workspace(
                 typer.echo(
                     f"{continuation}{detail_branch} {label}: " + ", ".join(values)
                 )
+    except Exception as exc:
+        handle_error(exc)
+
+
+@app.command("bundle")
+def bundle_portable_dashboard(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    dashboard_id: str = typer.Argument(..., help="Dashboard id"),
+    destination: Path = typer.Argument(..., help="Destination portable Workspace"),
+) -> None:
+    """Copy one Dashboard and its shared Parameter Domain source closure."""
+
+    try:
+        print_json(bundle_dashboard(load_workspace(workspace), dashboard_id, destination))
     except Exception as exc:
         handle_error(exc)
 
@@ -1456,7 +1469,7 @@ def frontend_adapters(
     ),
     output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
 ) -> None:
-    """Inspect frontend implementations that consume dataviz/runtime/v9."""
+    """Inspect frontend implementations that consume dataviz/runtime/v10."""
     if output_format not in {"markdown", "json"}:
         raise typer.BadParameter("--format must be markdown or json")
     catalog = frontend_adapter_catalog()
@@ -1982,7 +1995,7 @@ def benchmark(
             loaded,
             loaded.dashboard(dashboard),
             timeout_seconds=timeout_seconds,
-            query_parameters=parse_params(query_param),
+            query_parameter_state=parse_params(query_param),
             browser_name=browser,
             repeat=repeat,
         )
@@ -2334,187 +2347,127 @@ def evidence_promote(
         handle_error(exc)
 
 
-@parameters_app.command("options")
-def parameter_options(
+def _parameter_domain_ids(dashboard: Any, selected: list[str] | None) -> list[str]:
+    available = sorted(dashboard.parameter_domains)
+    requested = list(dict.fromkeys(selected or available))
+    unknown = sorted(set(requested) - set(available))
+    if unknown:
+        raise typer.BadParameter("Unknown Parameter Domain(s): " + ", ".join(unknown))
+    return requested
+
+
+@parameters_app.command("prewarm")
+def parameter_prewarm(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     dashboard_id: str = typer.Argument(..., help="Dashboard id"),
-    parameters: list[str] | None = typer.Option(
-        None,
-        "--parameter",
-        help="Return one dynamic Query Parameter; repeat to select several",
-    ),
-    query_param: list[str] | None = typer.Option(
-        None,
-        "--query-param",
-        help="Optional parent/input value as name=JSON; repeat as needed",
-    ),
-    preview_rows: int = typer.Option(10, "--preview-rows", min=1, max=100),
-    output_format: str = typer.Option("text", "--format", help="text or json"),
+    domains: list[str] | None = typer.Option(None, "--domain", help="Repeat as needed"),
+    refresh: bool = typer.Option(False, "--refresh", help="Force a new generation"),
 ) -> None:
-    """Execute and seal live candidate tables; print only a bounded preview."""
+    """Build Workspace-shared SQL candidate materializations."""
 
     try:
-        if output_format not in {"text", "json"}:
-            raise typer.BadParameter("--format must be text or json")
         loaded = load_workspace(workspace)
         dashboard = loaded.dashboard(dashboard_id)
-        supplied = parse_params(query_param)
-        resolution = resolve_parameter_domains(
-            loaded,
-            dashboard,
-            supplied,
-            timezone_name=loaded.definition.context.timezone,
-            initialized_parameters=set(supplied),
-            strict=False,
-        )
-        available = list(resolution.choices)
-        selected = list(dict.fromkeys(parameters or available))
-        unknown = [parameter for parameter in selected if parameter not in resolution.choices]
-        if unknown:
-            raise typer.BadParameter(
-                "Unknown dynamic Query Parameter(s): " + ", ".join(unknown)
-            )
-        if not selected:
-            if output_format == "json":
-                print_json(
-                    {
-                        "schema": "dataviz/parameter-options/v1",
-                        "status": "ready",
-                        "dashboard": dashboard_id,
-                        "tables": [],
-                        "note": "This Dashboard has no dynamic Query Parameter candidates.",
-                    }
-                )
-            else:
-                typer.echo(f"{dashboard_id}: no dynamic Query Parameter candidates")
-            return
-        definitions = {
-            item.id: item for item in dashboard.definition.query_parameters
-        }
-        domain_ids = {
-            definitions[parameter].options.source for parameter in selected
-        }
-        snapshot = ParameterOptionsStore(workspace).publish(
-            dashboard=dashboard_id,
-            generation=resolution.as_dict()["generation"],
-            query_parameters=supplied,
-            frames={
-                domain_id: frame
-                for domain_id, frame in resolution.frames.items()
-                if domain_id in domain_ids
-            },
-            metadata=resolution.domains,
-        )
-        tables: list[dict[str, Any]] = []
-        for table in snapshot["tables"]:
-            frame = resolution.frames[table["domain"]]
-            tables.append(
-                {
-                    **table,
-                    "preview_rows": min(preview_rows, len(frame)),
-                    "truncated": len(frame) > preview_rows,
-                    "preview": frame.head(preview_rows).to_dict(orient="records"),
-                }
-            )
-        payload = {
-            "schema": "dataviz/parameter-options/v1",
+        store = ParameterMaterializationStore(loaded)
+        records = [
+            store.build(dashboard, domain_id, force=refresh).as_dict()
+            for domain_id in _parameter_domain_ids(dashboard, domains)
+        ]
+        print_json({
+            "schema": "dataviz/parameter-materialization-command/v1",
             "status": "ready",
-            "options_id": snapshot["options_id"],
-            "options_path": snapshot["options_path"],
             "dashboard": dashboard_id,
-            "generation": snapshot["generation"],
-            "query_parameters": supplied,
-            "tables": tables,
-            "note": (
-                "Candidate discovery is optional and this snapshot is immutable; "
-                "dataviz run does not execute or enforce Parameter Domains."
-            ),
-        }
-        if output_format == "json":
-            print_json(payload)
-            return
-        typer.echo(f"READY\nOptions: {snapshot['options_id']}\nPath: {snapshot['options_path']}")
-        for table in tables:
-            typer.echo(f"\n{table['domain']} · {table['rows']} rows")
-            frame = pd.DataFrame(table["preview"])
-            if not frame.empty:
-                typer.echo(frame.to_string(index=False))
-            if table["truncated"]:
-                typer.echo(f"… preview limited to {preview_rows} rows")
-        quoted_workspace = json.dumps(str(workspace.resolve()), ensure_ascii=False)
-        typer.echo("\nNext:")
-        for table in tables:
-            typer.echo(
-                f"  dataviz parameters filter {quoted_workspace} "
-                f"{snapshot['options_id']} --domain {table['domain']}"
-            )
-        typer.echo("\nOptional discovery only; dataviz run does not query this Domain.")
-    except typer.Exit:
-        raise
+            "materializations": records,
+        })
     except Exception as exc:
         handle_error(exc)
 
 
-@parameters_app.command("filter")
-def parameter_options_filter(
+@parameters_app.command("refresh")
+def parameter_refresh(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
-    options_id: str = typer.Argument(..., help="Immutable options snapshot id"),
-    domain: str | None = typer.Option(None, "--domain"),
-    where: list[str] | None = typer.Option(
-        None,
-        "--where",
-        help="Filter a raw Domain column as name=JSON; repeat as needed",
-    ),
-    columns: list[str] | None = typer.Option(
-        None,
-        "--column",
-        help="Return one raw Domain column; repeat as needed",
-    ),
-    offset: int = typer.Option(0, "--offset", min=0),
-    limit: int = typer.Option(10, "--limit", min=1, max=100),
-    output_format: str = typer.Option("text", "--format", help="text or json"),
+    dashboard_id: str = typer.Argument(..., help="Dashboard id"),
+    domains: list[str] | None = typer.Option(None, "--domain"),
 ) -> None:
-    """Filter one sealed candidate table without executing its SQL again."""
+    """Force fresh generations for selected SQL Parameter Domains."""
+
+    parameter_prewarm(workspace, dashboard_id, domains, True)
+
+
+@parameters_app.command("status")
+def parameter_materialization_status(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    dashboard_id: str | None = typer.Argument(None, help="Optional Dashboard id"),
+) -> None:
+    """Inspect current Workspace-shared materialization generations."""
 
     try:
-        if output_format not in {"text", "json"}:
-            raise typer.BadParameter("--format must be text or json")
-        store = ParameterOptionsStore(workspace)
-        manifest = store.load(options_id)
-        domain_id, frame, total = store.read(
-            manifest,
-            domain=domain,
-            filters=parse_params(where),
-            columns=columns,
-            offset=offset,
-            limit=limit,
-        )
-        payload = {
-            "schema": "dataviz/parameter-options-page/v1",
-            "status": "ready",
-            "options_id": options_id,
-            "domain": domain_id,
-            "offset": offset,
-            "limit": limit,
-            "total": total,
-            "truncated": offset + limit < total,
-            "rows": frame.to_dict(orient="records"),
-        }
-        if output_format == "json":
-            print_json(payload)
-            return
-        typer.echo(
-            f"{options_id} · {domain_id} · {total} matching rows · "
-            f"showing {offset}..{min(offset + len(frame), total)}"
-        )
-        if frame.empty:
-            typer.echo("No matching candidates")
+        loaded = load_workspace(workspace)
+        store = ParameterMaterializationStore(loaded)
+        if dashboard_id is None:
+            records = store.list_records()
         else:
-            typer.echo(frame.to_string(index=False))
-        if payload["truncated"]:
-            typer.echo(f"… use --offset {offset + limit} --limit {limit} for more")
-    except typer.Exit:
-        raise
+            dashboard = loaded.dashboard(dashboard_id)
+            records = [
+                store.status(dashboard, domain_id).as_dict()
+                for domain_id in _parameter_domain_ids(dashboard, None)
+            ]
+        print_json({
+            "schema": "dataviz/parameter-materialization-status/v1",
+            "status": "ready",
+            "dashboard": dashboard_id,
+            "materializations": records,
+        })
+    except Exception as exc:
+        handle_error(exc)
+
+
+@parameters_app.command("lookup")
+def parameter_lookup(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    dashboard_id: str = typer.Argument(..., help="Dashboard id"),
+    parameter_id: str = typer.Argument(..., help="Domain-backed Query Parameter id"),
+    parent_state: list[str] | None = typer.Option(
+        None, "--parent-state", help="Parent canonical state as name=JSON; repeat"
+    ),
+    search: str = typer.Option("", "--search"),
+    limit: int = typer.Option(50, "--limit", min=1, max=100),
+    cursor: str | None = typer.Option(None, "--cursor"),
+    selected: list[str] | None = typer.Option(None, "--selected", help="JSON value; repeat"),
+) -> None:
+    """Search one materialized candidate projection without rerunning SQL."""
+
+    try:
+        loaded = load_workspace(workspace)
+        dashboard = loaded.dashboard(dashboard_id)
+        raw_parent_states = parse_params(parent_state)
+        definitions = {item.id: item for item in dashboard.definition.query_parameters}
+        unknown = sorted(set(raw_parent_states) - set(definitions))
+        if unknown:
+            raise typer.BadParameter("Unknown parent Query Parameter(s): " + ", ".join(unknown))
+        parent_states = {
+            name: resolve_query_parameter_states(
+                [definitions[name]],
+                {name: state},
+                timezone_name=loaded.definition.context.timezone,
+            )[name]
+            for name, state in raw_parent_states.items()
+        }
+        selected_values: list[Any] = []
+        for raw in selected or ():
+            try:
+                selected_values.append(json.loads(raw))
+            except json.JSONDecodeError:
+                selected_values.append(raw)
+        print_json(ParameterMaterializationStore(loaded).lookup(
+            dashboard,
+            parameter_id,
+            parent_states=parent_states,
+            search=search,
+            limit=limit,
+            cursor=cursor,
+            selected=selected_values,
+        ))
     except Exception as exc:
         handle_error(exc)
 
@@ -2925,7 +2878,7 @@ def result_inspect(
             "created_at": manifest["created_at"],
             "manifest_hash": result_manifest_hash(manifest),
             "target": manifest["result"].get("target"),
-            "query_parameters": manifest["result"].get("query_parameters", {}),
+            "query_parameter_state": manifest["result"].get("query_parameter_state", {}),
             "effective_controls": manifest["result"].get("effective_controls", {}),
             "consumer_revisions": manifest["result"].get(
                 "consumer_revisions", {"views": {}, "transforms": {}}
@@ -3052,7 +3005,7 @@ def run(
                 workspace=workspace,
                 target=parsed.canonical,
                 also=tuple(also or ()),
-                query_parameters=parse_params(query_param),
+                query_parameter_state=parse_params(query_param),
                 controls=parse_params(control),
                 output_name=output_name,
                 runtime=runtime,
@@ -3123,7 +3076,7 @@ def report(
         loaded = load_workspace(workspace)
         result = Executor(loaded).run(
             dashboard,
-            query_parameters=parse_params(query_param),
+            query_parameter_state=parse_params(query_param),
             refresh=refresh,
         )
         if result.status != "ready" and not (allow_partial and result.status == "partial"):
@@ -3246,7 +3199,7 @@ def report(
                             "path": loaded_dashboard.root.relative_to(loaded.root).as_posix(),
                         },
                     },
-                    "query_parameters": result.query_parameters,
+                    "query_parameter_state": result.query_parameter_state,
                     "effective_controls": resolved_control_state,
                     "consumer_revisions": normalize_consumer_revisions(
                         loaded_dashboard,
@@ -3284,7 +3237,7 @@ def report(
                 "portable_without_network": manifest["portable_without_network"],
                 "portability_scope": manifest["portability_scope"],
                 "network_dependencies": manifest["network_dependencies"],
-                "query_parameters": result.query_parameters,
+                "query_parameter_state": result.query_parameter_state,
                 "control_state": resolved_control_state,
                 "snapshot_interactions": [
                     value.interaction_id for value in interaction_results
@@ -3309,7 +3262,7 @@ def prune_workspace(
     all_state: bool = typer.Option(
         False,
         "--all",
-        help="Select every unprotected Result, Run, options snapshot, and cache entry.",
+        help="Select every unprotected Result, Run, superseded Parameter Domain generation, and cache entry.",
     ),
     keep_runs: int | None = typer.Option(
         None,
@@ -3327,7 +3280,7 @@ def prune_workspace(
         None,
         "--keep-cache-entries",
         min=0,
-        help="Override newest persistent cache and options snapshots to retain.",
+        help="Override newest persistent cache entries to retain.",
     ),
     cache_max_age_hours: float | None = typer.Option(
         None,
@@ -3351,7 +3304,7 @@ def prune_workspace(
     include_cache: bool = typer.Option(True, "--cache/--no-cache"),
     include_results: bool = typer.Option(True, "--results/--no-results"),
 ) -> None:
-    """Preview or remove old Results, Runs, options snapshots, and caches."""
+    """Preview or remove old Results, Runs, superseded Domain generations, and caches."""
     try:
         loaded = load_workspace(workspace)
         runtime = loaded.definition.runtime
@@ -3394,6 +3347,25 @@ def prune_workspace(
             include_results=include_results,
             apply=apply,
         )
+        materializations = (
+            ParameterMaterializationStore(loaded).prune_generations(apply=apply)
+            if include_cache
+            else {
+                "mode": "apply" if apply else "dry-run",
+                "generations": [],
+                "candidate_count": 0,
+                "candidate_bytes": 0,
+                "deleted_count": 0,
+                "deleted": [],
+                "errors": [],
+            }
+        )
+        report["parameter_materializations"] = materializations["generations"]
+        report["candidate_count"] += materializations["candidate_count"]
+        report["candidate_bytes"] += materializations["candidate_bytes"]
+        report["deleted_count"] += materializations["deleted_count"]
+        report["deleted"].extend(materializations["deleted"])
+        report["errors"].extend(materializations["errors"])
         if apply and report["results"]:
             AnalysisResultStore(loaded.root).rebuild_index()
         print_json({"status": "success", **report})

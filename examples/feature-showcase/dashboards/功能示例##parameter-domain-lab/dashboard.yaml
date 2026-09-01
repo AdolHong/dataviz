@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v13
+schema: dataviz/dashboard/v14
 kind: dashboard
 id: parameter-domain-lab
 title: 动态参数域
@@ -13,7 +13,7 @@ query_parameters:
     value_type: text
     label: 省份
     required: true
-    initial: {mode: values, values: [GD]}
+    default: {mode: include, values: [GD]}
     options:
       mode: domain
       source: locations
@@ -25,7 +25,7 @@ query_parameters:
     value_type: text
     label: 城市
     required: false
-    initial: {mode: all}
+    default: {mode: all}
     options:
       mode: domain
       source: locations

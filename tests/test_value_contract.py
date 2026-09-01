@@ -7,10 +7,10 @@ import pytest
 from pydantic import ValidationError
 
 from dataviz.errors import ExecutionFailure
-from dataviz.execution import resolve_query_parameters
 from dataviz.execution.parameters import (
+    normalize_query_parameter_state,
     project_query_inputs,
-    resolve_query_parameter_intents,
+    resolve_query_parameter_states,
 )
 from dataviz.value_contract import normalize_control_value
 from dataviz.workspace.controls import (
@@ -54,7 +54,7 @@ def resolve_control_values(definition, provided=None):
 def test_relative_date_defaults_resolve_once_in_workspace_timezone_and_project_parts():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v13",
+            "schema": "dataviz/dashboard/v14",
             "id": "relative-dates",
             "query_parameters": [
                 {
@@ -71,15 +71,15 @@ def test_relative_date_defaults_resolve_once_in_workspace_timezone_and_project_p
     )
     dashboard = SimpleNamespace(definition=definition)
     # 16:30 UTC is already the next calendar day in Asia/Shanghai.
-    values = resolve_query_parameters(
-        dashboard,
+    values = resolve_query_parameter_states(
+        dashboard.definition.query_parameters,
         None,
         timezone_name="Asia/Shanghai",
         current_time=datetime(2026, 8, 24, 16, 30, tzinfo=timezone.utc),
     )
     source = SqlSourceDefinition.model_validate(
         {
-            "schema": "dataviz/source/v3",
+            "schema": "dataviz/source/v4",
             "id": "sales",
             "type": "sql",
             "adapter": "warehouse",
@@ -98,20 +98,20 @@ def test_relative_date_defaults_resolve_once_in_workspace_timezone_and_project_p
         }
     )
 
-    assert values == {"job_date_range": ["2026-08-22", "2026-08-24"]}
+    assert values == {"job_date_range": {"value": ["2026-08-22", "2026-08-24"]}}
     assert project_query_inputs(source.query_inputs, values) == {
         "start_date": "2026-08-22",
         "end_date": "2026-08-24",
     }
 
 
-def test_query_parameter_intent_distinguishes_all_subset_and_explicit_empty():
+def test_query_parameter_selection_distinguishes_all_include_exclude_and_none():
     definition = QueryParameterDefinition.model_validate(
         {
             "id": "items",
             "type": "multiple_select",
             "value_type": "text",
-            "initial": {"mode": "all"},
+            "default": {"mode": "all"},
             "options": {
                 "mode": "static",
                 "choices": [
@@ -123,34 +123,26 @@ def test_query_parameter_intent_distinguishes_all_subset_and_explicit_empty():
     )
     bindings = {
         "item_values": "items",
-        "item_intent": {"parameter": "items", "projection": "intent"},
+        "item_selection": {"parameter": "items", "projection": "selection"},
+        "item_state": {"parameter": "items", "projection": "state"},
     }
 
-    assert resolve_query_parameter_intents([definition], {}, {}) == {
-        "items": "all_available"
+    assert normalize_query_parameter_state(definition, {"selection": "all", "value": []}) == {
+        "selection": "all", "value": []
     }
-    assert resolve_query_parameter_intents(
-        [definition], {"items": []}, {"items": "explicit"}
-    ) == {"items": "explicit"}
-    assert project_query_inputs(
-        bindings,
-        {"items": []},
-        {"items": "explicit"},
-    ) == {"item_values": [], "item_intent": "explicit"}
-
-    with pytest.raises(ExecutionFailure, match="cannot use all_available"):
-        resolve_query_parameter_intents(
-            [
-                QueryParameterDefinition.model_validate(
-                    {
-                        "id": "item",
-                        "type": "single_input",
-                        "value_type": "text",
-                    }
-                )
-            ],
-            {"item": "A"},
-            {"item": "all_available"},
+    assert normalize_query_parameter_state(
+        definition, {"selection": "exclude", "value": ["B"]}
+    ) == {"selection": "exclude", "value": ["B"]}
+    state = {"items": {"selection": "include", "value": ["A"]}}
+    assert project_query_inputs(bindings, state) == {
+        "item_values": ["A"],
+        "item_selection": "include",
+        "item_state": {"selection": "include", "value": ["A"]},
+    }
+    with pytest.raises(Exception, match="non-empty selection"):
+        normalize_query_parameter_state(
+            definition.model_copy(update={"required": True}),
+            {"selection": "none", "value": []},
         )
 
 
@@ -214,19 +206,19 @@ def test_date_range_default_allows_fixed_and_relative_endpoints():
     dashboard = SimpleNamespace(
         definition=DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v13",
+                "schema": "dataviz/dashboard/v14",
                 "id": "mixed-date-range",
                 "query_parameters": [definition.model_dump(mode="json")],
             }
         )
     )
 
-    assert resolve_query_parameters(
-        dashboard,
+    assert resolve_query_parameter_states(
+        dashboard.definition.query_parameters,
         None,
         timezone_name="Asia/Shanghai",
         current_time=datetime(2026, 8, 24, 8, tzinfo=timezone.utc),
-    ) == {"period": ["2026-08-01", "2026-08-23"]}
+    ) == {"period": {"value": ["2026-08-01", "2026-08-23"]}}
 
 
 def test_control_defaults_are_validated_when_the_dsl_is_loaded():
@@ -292,7 +284,7 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
 
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v13",
+            "schema": "dataviz/dashboard/v14",
             "id": "option-intents",
             "controls": [
                 {
@@ -345,7 +337,7 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
 
     required_inferred = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v13",
+            "schema": "dataviz/dashboard/v14",
             "id": "required-inferred",
             "controls": [
                 {
@@ -373,26 +365,28 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
     }
 
 
-def test_select_initial_policies_are_shared_by_query_parameters_and_controls():
+def test_query_defaults_and_control_initial_policies_are_explicitly_separate():
     choices = [
         {"label": "Alpha", "value": "alpha"},
         {"label": "Beta", "value": "beta"},
     ]
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v13",
+            "schema": "dataviz/dashboard/v14",
             "id": "select-initials",
             "query_parameters": [
                 {
                     "id": "models",
                     "type": "multiple_select",
                     "value_type": "text",
+                    "default": {"mode": "all"},
                     "options": {"mode": "static", "choices": choices},
                 },
                 {
                     "id": "primary",
                     "type": "single_select",
                     "value_type": "text",
+                    "default": {"mode": "first"},
                     "options": {"mode": "static", "choices": choices},
                 },
             ],
@@ -418,11 +412,14 @@ def test_select_initial_policies_are_shared_by_query_parameters_and_controls():
         }
     )
 
-    assert resolve_query_parameters(
-        SimpleNamespace(definition=definition),
+    assert resolve_query_parameter_states(
+        definition.query_parameters,
         None,
         timezone_name="Asia/Shanghai",
-    ) == {"models": ["alpha", "beta"], "primary": "alpha"}
+    ) == {
+        "models": {"selection": "all", "value": []},
+        "primary": {"value": "alpha"},
+    }
     assert resolve_control_values(definition, None) == {
         "dashboard:select-initials/comparison": ["beta"],
         "dashboard:select-initials/focus": None,
@@ -435,7 +432,7 @@ def test_select_initial_policies_are_shared_by_query_parameters_and_controls():
 def test_non_select_inputs_share_typed_defaults_without_select_reconciliation():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v13",
+            "schema": "dataviz/dashboard/v14",
             "id": "typed-input-defaults",
             "query_parameters": [
                 {
@@ -484,11 +481,11 @@ def test_non_select_inputs_share_typed_defaults_without_select_reconciliation():
         }
     )
 
-    assert resolve_query_parameters(
-        SimpleNamespace(definition=definition),
+    assert resolve_query_parameter_states(
+        definition.query_parameters,
         None,
         timezone_name="Asia/Shanghai",
-    ) == {"count": 3, "tags": ["alpha", "beta"]}
+    ) == {"count": {"value": 3}, "tags": {"value": ["alpha", "beta"]}}
     assert resolve_control_values(definition, None) == {
         "dashboard:typed-input-defaults/window": [0.25, 0.75],
         "dashboard:typed-input-defaults/enabled": False,
@@ -509,7 +506,7 @@ def test_non_select_inputs_share_typed_defaults_without_select_reconciliation():
         },
     }
 
-    with pytest.raises(ValidationError, match="initial is only valid"):
+    with pytest.raises(ValidationError, match="Input should be None"):
         QueryParameterDefinition.model_validate(
             {
                 "id": "count",
@@ -793,7 +790,7 @@ def test_portable_numbers_and_dates_reject_cross_runtime_ambiguities():
 def test_query_and_control_resolvers_share_strict_contracts():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v13",
+            "schema": "dataviz/dashboard/v14",
             "id": "contract",
             "query_parameters": [{"id": "batch", "type": "single_input", "value_type": "integer", "default": 7}],
             "controls": [
@@ -825,8 +822,10 @@ def test_query_and_control_resolvers_share_strict_contracts():
     dashboard = SimpleNamespace(definition=definition)
 
     with pytest.raises(ExecutionFailure) as query_error:
-        resolve_query_parameters(
-            dashboard, {"batch": 1.5}, timezone_name="Asia/Shanghai"
+        resolve_query_parameter_states(
+            dashboard.definition.query_parameters,
+            {"batch": {"value": 1.5}},
+            timezone_name="Asia/Shanghai",
         )
     assert query_error.value.details["code"] == "query_parameter_invalid_type"
 

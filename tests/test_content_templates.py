@@ -64,7 +64,7 @@ def test_parameter_content_templates_format_human_facing_values():
 def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v13",
+            "schema": "dataviz/dashboard/v14",
             "id": "hourly-sales",
             "title": "小时销售",
             "controls": [
@@ -157,7 +157,7 @@ def test_selection_content_uses_choice_labels_and_compiles_browser_binding():
 def test_interpolation_is_limited_to_declarative_content_fields():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v13",
+            "schema": "dataviz/dashboard/v14",
             "id": "hourly-sales",
             "title": "商品 {{ parameters.product_id }}",
             "subtitle": "{{ parameters.period }}",
@@ -208,14 +208,14 @@ def test_default_renderer_uses_committed_parameters_in_server_and_export_content
     dashboard = workspace.dashboard("sales-overview")
     result = Executor(workspace).run(
         "sales-overview",
-        query_parameters={"min_query_revenue": 150000},
+        query_parameter_state={"min_query_revenue": {"value": 150000}},
         refresh=True,
     )
     rendered = CanvasRenderer(workspace).render(dashboard, result, asset_mode="inline")
 
     assert '<p class="dv-subtitle">当前取数下限：150000</p>' in rendered
     assert "{{ parameters.min_query_revenue }}" not in rendered
-    assert '"query_parameters": {"min_query_revenue": 150000}' in rendered
+    assert '"query_parameter_state": {"min_query_revenue": {"value": 150000}}' in rendered
 
 
 def test_default_view_shell_renders_static_and_dynamic_descriptions(tmp_path: Path):

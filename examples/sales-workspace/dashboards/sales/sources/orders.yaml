@@ -1,4 +1,4 @@
-schema: dataviz/source/v4
+schema: dataviz/source/v5
 kind: source
 id: orders
 name: 订单文件

@@ -247,6 +247,13 @@
       host.addEventListener('click', onClick, true);
       return () => host.removeEventListener('click', onClick, true);
     };
+    const clearPlotlySelectionOutline = host => {
+      if (!host || !global.Plotly) return;
+      // Plotly persists completed box/lasso geometry in layout.selections.
+      // Dataviz commits the result separately through selectedpoints and the
+      // bound Control, so this gesture outline can remain transient.
+      void global.Plotly.relayout(host, {selections:[]});
+    };
     const chartService = Object.freeze({
       plotly:Object.freeze({
         async mount(host, specification = {}, root = host?.closest?.('.dv-view')) {
@@ -1441,6 +1448,7 @@
         state.controlActionFrame = requestAnimationFrame(() => {
           state.controlActionFrame = null;
           state.renderContext.controlBinding?.emit('select_many', data);
+          clearPlotlySelectionOutline(chartNode);
         });
       };
       chartNode.addEventListener('pointerdown', state.controlPointerDownHandler, true);

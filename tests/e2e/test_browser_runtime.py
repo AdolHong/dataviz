@@ -256,7 +256,7 @@ sections:
         encoding="utf-8",
     )
     (sources / "daily.yaml").write_text(
-        """schema: dataviz/source/v4
+        """schema: dataviz/source/v5
 kind: source
 id: daily
 type: sql
@@ -667,6 +667,15 @@ def test_parameter_domain_cascade_reload_and_tab_restore(page: Page, tmp_path: P
         expect(city_control.locator("[data-control-summary]")).to_have_text("全选")
         assert page.locator("#canvas-frame").get_attribute("data-run-id") == committed_run_id
 
+        # A normal parent edit coordinates the child draft. An old operand
+        # that is invalid in the new parent range must not be merged back into
+        # the visible options as an unavailable pseudo-candidate. Revert is the
+        # only path that deliberately preserves unavailable committed values.
+        city_trigger.click()
+        city_control.get_by_role("button", name="Clear").click()
+        city_control.locator(".dv-choice-option", has_text="深圳").click()
+        expect(city).to_have_values(["SZ"])
+
         # Parent changes issue local Lookup predicates against the same immutable
         # materialization generation. The visible custom controls remain usable.
         province_control = page.locator("#parameter-form .dv-control").filter(has=province)
@@ -679,7 +688,9 @@ def test_parameter_domain_cascade_reload_and_tab_restore(page: Page, tmp_path: P
         province.select_option(["HN"], force=True)
         expect(city.locator("option")).to_have_count(1, timeout=10_000)
         expect(city.locator("option")).to_have_text(["长沙"])
+        expect(city.locator('option[data-unavailable="true"]')).to_have_count(0)
         expect(city).to_have_values([])
+        expect(city).to_have_attribute("data-query-selection", "all")
         expect(page.locator("#run-button")).to_be_enabled()
 
         # Revert restores the parent then rehydrates the child atomically from
@@ -5073,6 +5084,16 @@ def test_plotly_area_selection_gesture_commits_the_bound_control(
         assert selection["intent"] == "explicit"
         assert 0 < len(selection["value"]) < 4
 
+        page.wait_for_function(
+            """() => {
+              const node = document.querySelector('#canvas-frame').contentWindow
+                .document.querySelector('[data-view-id="scatter"] .dv-plotly');
+              return (node.layout?.selections || []).length === 0
+                && !node.querySelector('.select-outline');
+            }""",
+            timeout=10_000,
+        )
+
         mode_title = "Box Select" if dragmode == "select" else "Lasso Select"
         active_tool = chart.locator(f'.modebar-btn[data-title="{mode_title}"]')
         expect(active_tool).to_have_class(re.compile(r"\bactive\b"))
@@ -5116,6 +5137,37 @@ def test_plotly_area_selection_gesture_commits_the_bound_control(
         assert portable_selection == selection
         active_tool.click()
         expect(active_tool).to_have_class(re.compile(r"\bactive\b"))
+        chart.scroll_into_view_if_needed()
+        drag_layer = chart.locator(".nsewdrag")
+        box = drag_layer.bounding_box()
+        assert box is not None
+        points = [
+            (box["x"] + box["width"] * 0.05, box["y"] + box["height"] * 0.45),
+            (box["x"] + box["width"] * 0.95, box["y"] + box["height"] * 0.45),
+            (box["x"] + box["width"] * 0.95, box["y"] + box["height"] * 0.95),
+            (box["x"] + box["width"] * 0.05, box["y"] + box["height"] * 0.95),
+        ]
+        page.mouse.move(*points[0])
+        page.mouse.down()
+        if dragmode == "select":
+            page.mouse.move(*points[2], steps=20)
+        else:
+            for point in [*points[1:], points[0]]:
+                page.mouse.move(*point, steps=8)
+        page.mouse.up()
+        page.wait_for_function(
+            """() => {
+              const node = document.querySelector('[data-view-id="scatter"] .dv-plotly');
+              return (node.layout?.selections || []).length === 0
+                && !node.querySelector('.select-outline');
+            }""",
+            timeout=10_000,
+        )
+        expect(active_tool).to_have_class(re.compile(r"\bactive\b"))
+        portable_selection_after_gesture = page.locator("body").evaluate(
+            "() => window.dataviz.control.state('dashboard:chart-gallery/province')"
+        )
+        assert portable_selection_after_gesture["value"]
         active_tool.click()
         page.wait_for_function(
             """() => document.querySelector('[data-view-id="scatter"] .dv-plotly')
@@ -5125,7 +5177,7 @@ def test_plotly_area_selection_gesture_commits_the_bound_control(
         expect(active_tool).not_to_have_class(re.compile(r"\bactive\b"))
         assert page.locator("body").evaluate(
             "() => window.dataviz.control.state('dashboard:chart-gallery/province')"
-        ) == portable_selection
+        ) == portable_selection_after_gesture
 
 
 @pytest.mark.e2e

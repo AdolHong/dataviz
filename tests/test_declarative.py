@@ -814,7 +814,7 @@ def test_dashboard_definition_assets_cannot_escape_dashboard_folder(tmp_path: Pa
     dashboard_root = root / "dashboards" / "sales-overview"
     outside = root / "outside-source.yaml"
     outside.write_text(
-        """schema: dataviz/source/v4
+        """schema: dataviz/source/v5
 kind: source
 id: outside
 type: file

@@ -63,15 +63,15 @@ sections:
         encoding="utf-8",
     )
     (sources / "metrics.yaml").write_text(
-        """schema: dataviz/source/v4
+        """schema: dataviz/source/v5
 kind: source
 id: metrics
 type: sql
 adapter: warehouse
 code: metrics.sql
 query_filters:
-  province: {parameter: province, field: province_code}
-  city: {parameter: city, field: city_code}
+  province: {parameter: province, field: province_code, empty: match_none}
+  city: {parameter: city, field: city_code, empty: match_none}
 outputs: {main: {kind: table}}
 cache: {mode: none}
 """,
@@ -130,6 +130,28 @@ def _store(root: Path):
     return workspace, workspace.dashboard("domain-lab"), ParameterMaterializationStore(workspace)
 
 
+def _use_single_select_parent(root: Path) -> None:
+    """Make province a scalar parent without using it as a Source query_filter."""
+
+    dashboard = root / "dashboards" / "domain-lab" / "dashboard.yaml"
+    definition = dashboard.read_text(encoding="utf-8")
+    definition = definition.replace("type: multiple_select", "type: single_select", 1)
+    definition = definition.replace(
+        "default: {mode: include, values: [GD]}",
+        "default: {mode: value, value: GD}",
+        1,
+    )
+    dashboard.write_text(definition, encoding="utf-8")
+
+    source = root / "dashboards" / "domain-lab" / "sources" / "metrics.yaml"
+    source.write_text(
+        source.read_text(encoding="utf-8").replace(
+            "  province: {parameter: province, field: province_code}\n", ""
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_shared_domain_contract_contains_only_topology(tmp_path: Path):
     root = _workspace(tmp_path / "workspace")
     workspace = load_workspace(root)
@@ -186,6 +208,64 @@ def test_materialization_is_shared_and_lookup_filters_searches_and_pages(tmp_pat
     assert none["items"] == []
     searched = store.lookup(dashboard, "city", search="shen zhen")
     assert [item["value"] for item in searched["items"]] == ["SZ"]
+
+    selected_outside_search = store.lookup(
+        dashboard,
+        "city",
+        parent_states={"province": {"selection": "include", "value": ["GD"]}},
+        search="guang zhou",
+        selected=["SZ"],
+    )
+    assert [item["value"] for item in selected_outside_search["items"]] == ["GZ"]
+    assert selected_outside_search["selected_items"] == [
+        {
+            "value": "SZ",
+            "label": "深圳",
+            "keywords": ["shen zhen"],
+            "available": True,
+        }
+    ]
+
+
+def test_lookup_filters_by_single_select_parent_canonical_scalar_state(tmp_path: Path):
+    root = _workspace(tmp_path / "workspace")
+    _use_single_select_parent(root)
+    _workspace_loaded, dashboard, store = _store(root)
+    store.build(dashboard, "locations")
+
+    cities = store.lookup(
+        dashboard,
+        "city",
+        parent_states={"province": {"value": "GD"}},
+    )
+    assert [item["value"] for item in cities["items"]] == ["GZ", "SZ"]
+
+    cleared = store.lookup(
+        dashboard,
+        "city",
+        parent_states={"province": {"value": None}},
+    )
+    assert cleared["items"] == []
+
+
+def test_server_lookup_accepts_single_select_parent_state_from_browser(tmp_path: Path):
+    root = _workspace(tmp_path / "workspace")
+    _use_single_select_parent(root)
+    workspace, dashboard, store = _store(root)
+    store.build(dashboard, "locations")
+    client = TestClient(create_app(workspace.root, watch=False))
+
+    response = client.post(
+        "/api/dashboards/domain-lab/parameter-domains/lookup",
+        json={
+            "session_id": "domain_session",
+            "parameter": "city",
+            "parent_states": {"province": {"value": "GD"}},
+        },
+    )
+
+    assert response.status_code == 200
+    assert [item["value"] for item in response.json()["items"]] == ["GZ", "SZ"]
 
 
 def test_lookup_preserves_finite_selected_operands_and_marks_unavailable(tmp_path: Path):

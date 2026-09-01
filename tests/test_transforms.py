@@ -48,7 +48,7 @@ views: []
         encoding="utf-8",
     )
     (dashboard / "sources" / "raw.yaml").write_text(
-        """schema: dataviz/source/v4
+        """schema: dataviz/source/v5
 kind: source
 id: raw
 type: file

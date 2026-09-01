@@ -1,4 +1,4 @@
-schema: dataviz/source/v4
+schema: dataviz/source/v5
 kind: source
 id: metrics
 name: 城市经营指标
@@ -7,8 +7,8 @@ type: sql
 adapter: warehouse
 code: metrics.sql
 query_filters:
-  province_scope: {parameter: provinces, field: province_code}
-  city_scope: {parameter: cities, field: city_code}
+  province_scope: {parameter: provinces, field: province_code, empty: match_none}
+  city_scope: {parameter: cities, field: city_code, empty: match_none}
 outputs:
   main:
     kind: table

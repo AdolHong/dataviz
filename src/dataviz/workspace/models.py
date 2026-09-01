@@ -1007,6 +1007,7 @@ class SqlSourceDefinition(_SourceDefinition):
 class SqlQueryFilterDefinition(Model):
     parameter: StableId
     field: str = Field(min_length=1)
+    empty: Literal["passthrough", "match_none"]
 
     @model_validator(mode="after")
     def validate_field(self):

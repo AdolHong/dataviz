@@ -10,7 +10,7 @@ PARAMETER_DOMAIN_CONTRACT_SCHEMA = "dataviz/parameter-domain-contract/v3"
 PARAMETER_LOOKUP_SCHEMA = "dataviz/parameter-lookup/v1"
 PARAMETER_MATERIALIZATION_SCHEMA = "dataviz/parameter-materialization/v1"
 PRESENTATION_SCHEMA = "dataviz/presentation/v2"
-SOURCE_SCHEMA = "dataviz/source/v4"
+SOURCE_SCHEMA = "dataviz/source/v5"
 DATASET_TRANSFORM_SCHEMA = "dataviz/dataset-transform/v3"
 INTERACTIVE_TRANSFORM_SCHEMA = "dataviz/interactive-transform/v4"
 DEPENDENCY_CONTRACT_SCHEMA = "dataviz/dependency-contract/v11"
@@ -75,6 +75,17 @@ PROTOCOL_BOUNDARIES: tuple[dict[str, Any], ...] = (
         "strictness": "exact-current",
         "compatibility": "package-lockstep",
         "conformance_suite": "control-filter,multi-view-writer",
+    },
+    {
+        "boundary": "authoring-source",
+        "schema": SOURCE_SCHEMA,
+        "owner": "workspace.models/sources.sql",
+        "producer": "Dashboard author / scaffold",
+        "consumer": "Workspace loader and Query executor",
+        "persisted": True,
+        "strictness": "exact-current",
+        "compatibility": "package-lockstep",
+        "conformance_suite": "query-parameter-state,sql-query-filter",
     },
     {
         "boundary": "authoring-interactive-transform",
@@ -197,6 +208,16 @@ PROTOCOL_BOUNDARIES: tuple[dict[str, Any], ...] = (
 
 
 PROTOCOL_CHANGE_RECORDS: tuple[dict[str, str], ...] = (
+    {
+        "change": "sql-query-filter-empty-policy",
+        "classification": "authoring semantic additive and exact-current",
+        "decision": "source v5; dashboard/query state/runtime/result unchanged",
+        "reason": (
+            "each SQL query_filter explicitly maps an empty multiple_input or "
+            "multiple_select none state to passthrough or match_none while all "
+            "continues to mean the complete candidate universe"
+        ),
+    },
     {
         "change": "shared-parameter-materialization-and-compact-query-state",
         "classification": "authoring, private lockstep and persisted semantic breaking",

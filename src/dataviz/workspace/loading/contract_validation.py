@@ -868,11 +868,14 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                                         "query_filter_parameter_unknown",
                                     )
                                 )
-                            elif parameter_definitions[query_filter.parameter].type != "multiple_select":
+                            elif parameter_definitions[query_filter.parameter].type not in {
+                                "multiple_input",
+                                "multiple_select",
+                            }:
                                 diagnostics.append(
                                     Diagnostic(
                                         "error",
-                                        f"Query filter {name} requires multiple_select",
+                                        f"Query filter {name} requires multiple_input or multiple_select",
                                         str(source_path),
                                         f"query_filters.{name}.parameter",
                                         "query_filter_parameter_type_invalid",

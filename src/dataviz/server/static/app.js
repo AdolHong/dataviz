@@ -2083,6 +2083,15 @@ function reconcileLookupState(parameter, response, {preserve = false} = {}) {
   runtime.queryParameterState[parameter.id] = next;
 }
 
+function selectedLookupItemsForState(parameter, selectedItems, {preserve = false} = {}) {
+  if (preserve) return selectedItems || [];
+  const stateEntry = activeRuntime()?.queryParameterState?.[parameter.id];
+  const rawValue = stateEntry?.value;
+  const values = Array.isArray(rawValue) ? rawValue : rawValue == null ? [] : [rawValue];
+  const operands = new Set(values.map(value => JSON.stringify(value)));
+  return (selectedItems || []).filter(item => operands.has(JSON.stringify(item.value)));
+}
+
 async function lookupQueryParameter(parameter, {
   search = '', append = false, refresh = false, preserve = false,
 } = {}) {
@@ -2167,6 +2176,12 @@ async function lookupQueryParameter(parameter, {
       return runtime.queryLookup[parameter.id];
     }
     reconcileLookupState(parameter, response, {preserve});
+    const selectedItems = selectedLookupItemsForState(
+      parameter,
+      response.selected_items || [],
+      {preserve},
+    );
+    runtime.queryLookup[parameter.id].selectedItems = selectedItems;
     if (
       parameter.type === 'single_select'
       && (runtime.queryParameterState?.[parameter.id]?.value == null)
@@ -2179,7 +2194,7 @@ async function lookupQueryParameter(parameter, {
     }
     replaceParameterDomainOptions(parameter, response.items || [], {
       append,
-      selectedItems:response.selected_items || [],
+      selectedItems,
       sync:false,
     });
     const input = $('#parameter-form').elements.namedItem(parameter.id);

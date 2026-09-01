@@ -966,7 +966,7 @@ query_parameters:
                 "Parameter Domain 只提供候选发现与标签，不产生 Named Output、Result 或 Catalog 条目，也不是 Source 参数白名单。",
                 "所有 SQL Domain 都先形成 Workspace 共享 immutable generation；Browser 永远不接收原始关系、SQL、Adapter、物化路径或候选全集。",
                 "同一个 Workspace Domain、定义/代码 hash、Adapter identity 与 visibility scope 可以跨 Dashboard、tab 和用户复用；权限范围不同不得共用。",
-                "options.depends_on 只对当前 generation 做本地 predicate；搜索、级联和 cursor 分页都不重新执行远端 SQL。",
+                "options.depends_on 只对当前 generation 做本地 predicate；single_select 标量按单值 include，multiple_select 按 all/include/exclude/none；搜索、级联和 cursor 分页都不重新执行远端 SQL。",
                 "multiple_select 使用 all/include/exclude/none 紧凑集合；all/none 不带 operands，include/exclude 只保存有限例外，绝不展开 10 万候选。",
                 "Query Card 的 reload 请求刷新共享物化；已有 generation 时继续读旧数据，不清空选择、不恢复 default、不执行正式 Query。",
                 "每次成功 Query 都封存完整 committed canonical state；Revert 按依赖拓扑恢复该 state，不恢复 default，也不执行正式 Query。",
@@ -1009,9 +1009,30 @@ query_parameters:
             "字符串值是 {parameter: <id>, projection: value} 的简写。",
             "part=start/end 仅允许投影 range_input/date；validate 在查询前拒绝错误类型。",
             "candidate multiple 可投影 selection=all/include/exclude/none、有限 value operands、active 约束状态，或把完整 state 交给 Python。",
-            "SQL 优先使用 Source query_filters 与 {{ dataviz_filter:<name> }}，由 Adapter 参数化生成 TRUE/FALSE/IN/NOT IN，永不产生 IN ()。",
+            "SQL 优先使用 Source query_filters 与 {{ dataviz_filter:<name> }}；all 始终生成 TRUE，include/exclude 生成 IN/NOT IN，空 multiple_input 或 multiple_select none 必须用 empty: passthrough|match_none 明确选择 TRUE/FALSE，永不产生 IN ()。",
+            "query_filters 只接受 multiple_input 或 multiple_select；single/range 参数继续使用 query_inputs，不让 SQL Filter 猜测标量语义。",
             "直接消费 candidate multiple 的 value 时必须同时消费 selection，避免把 exclude operands 错当成 include。",
         ],
+        "sql_filter_example": """# dashboard.yaml
+query_parameters:
+  - id: item_nbrs
+    type: multiple_select
+    value_type: text
+    default: {mode: none}
+    clearable: true
+    options:
+      mode: domain
+      source: item_catalog
+      value_field: item_nbr
+      label_field: item_label
+
+# source.yaml
+query_filters:
+  items: {parameter: item_nbrs, field: item_nbr, empty: passthrough}
+
+# source.sql
+# where {{ dataviz_filter:items }}
+""",
         "selection_binding": """query_inputs:
   city_values: cities
   city_selection: {parameter: cities, projection: selection}
@@ -1034,9 +1055,9 @@ query_parameters:
         "summary": "Source 是唯一进入分析 DAG 的外部取数入口，类型为 file、sql 或 python；Parameter Domain 只能查询网页候选元数据，不产生分析 Output。",
         "required": ["schema", "kind", "id", "type", "outputs"],
         "examples": {
-            "file": "{schema: dataviz/source/v4, kind: source, id: sales, type: file, path: data/sales.csv, outputs: {main: {kind: table}}}",
-            "sql": "{schema: dataviz/source/v4, kind: source, id: sales, type: sql, adapter: warehouse, code: sales.sql, query_inputs: {start_date: start_date}, outputs: {main: {kind: table}}}",
-            "python": "{schema: dataviz/source/v4, kind: source, id: api, type: python, code: api.py, outputs: {main: {kind: table}}}",
+            "file": "{schema: dataviz/source/v5, kind: source, id: sales, type: file, path: data/sales.csv, outputs: {main: {kind: table}}}",
+            "sql": "{schema: dataviz/source/v5, kind: source, id: sales, type: sql, adapter: warehouse, code: sales.sql, query_inputs: {start_date: start_date}, outputs: {main: {kind: table}}}",
+            "python": "{schema: dataviz/source/v5, kind: source, id: api, type: python, code: api.py, outputs: {main: {kind: table}}}",
         },
         "timeouts": "SQL/Python 默认 120 秒；SQL timeout_retries 默认 1，超时后立即使用新连接重试。",
         "debug": "Server 的 Sources 面板公开参数化 SQL、解析后 SQL、绑定参数、Adapter 类型、超时和重试证据。",
@@ -1395,7 +1416,7 @@ control_components:
             "version": "4.0.0",
             "grammar": "内置 line/bar/stacked-bar/pie/scatter/heatmap/radar 都生成 Plotly traces 与 layout。",
             "native": "复杂视觉由 Custom Renderer 复用 context.charts.plotly，或直接调用完整 Plotly.js API。",
-            "interaction": "图例、点击、框选、套索与缩放使用 Plotly 事件和 config；再次点击当前激活的矩形/套索工具会退出选择模式并保留已有选区；页面滚动仍由 Dashboard 优先处理。",
+            "interaction": "图例、点击、框选、套索与缩放使用 Plotly 事件和 config；矩形/套索手势提交后自动隐藏临时轮廓并保留 Control 选择，再次点击当前激活的工具可退出选择模式；页面滚动仍由 Dashboard 优先处理。",
             "offline": "Plotly.js 4.0.0 作为固定浏览器资产随 Dataviz 提供；Server 与 portable HTML 使用同一份 JS，不依赖 Python plotly 包。",
         },
         "ownership": {
@@ -1411,7 +1432,7 @@ control_components:
         "recipe_policy": "Dataviz Recipe 只提供少量经过验证的起点，不复制官方示例库、不形成能力白名单，也不替代 Plotly 文档。",
         "service_example": "const state = await context.charts.plotly.mount(node, {data, layout, config});",
         "wheel_and_zoom": {
-            "plotly_default": "内置 Plotly 模板关闭 scrollZoom。没有可写 Control binding 的图不显示工具栏；绑定后只显示矩形选择、套索选择和恢复默认值。再次点击激活的选择工具退出到普通查看模式，不清空选区；下载图片不默认出现。",
+            "plotly_default": "内置 Plotly 模板关闭 scrollZoom。没有可写 Control binding 的图不显示工具栏；绑定后只显示矩形选择、套索选择和恢复默认值。选择手势结束后临时轮廓自动消失，工具保持激活以便连续选择；再次点击激活工具可退出选择模式、回到普通查看且不清空选区。下载图片不默认出现。",
             "explicit_zoom": "缩放、平移和坐标轴恢复不进入默认工具栏；有明确分析需求时通过 config 覆盖，但不得默认截获 Dashboard 的连续滚动。",
             "custom_renderer": "Custom Renderer 使用 context.charts.plotly；只有明确需求时才启用 scrollZoom。",
         },

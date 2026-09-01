@@ -14,7 +14,7 @@ Parameter Domain Contract dataviz/parameter-domain-contract/v3
 Parameter Lookup       dataviz/parameter-lookup/v1
 Parameter Materialization dataviz/parameter-materialization/v1
 Presentation           dataviz/presentation/v2
-Source                 dataviz/source/v4
+Source                 dataviz/source/v5
 Dataset Transform      dataviz/dataset-transform/v3
 Interactive Transform  dataviz/interactive-transform/v4
 Dependency Contract    dataviz/dependency-contract/v11
@@ -99,9 +99,9 @@ Query Parameter → Source → Dataset Transform → Base Named Output
 - Artifact 与 Named Output：`src/dataviz/artifacts/`、`src/dataviz/execution/outputs.py`
 - 缓存：`src/dataviz/execution/cache.py`
 
-Query Run 固化每个 Query Parameter 的 canonical state 和 Base Output。scoped Controls 不进入这张 DAG。每个 Query 节点以 `query_inputs` 声明自己可读的本地 alias；结构化绑定可把 `range_input/date` 投影为 `start`/`end`，也可把候选多选投影为 `selection=all|include|exclude|none`、有限 `value` operands、`active` 或完整 `state`。普通 SQL 优先使用 `query_filters` 与受限 `{{ dataviz_filter:name }}` token，由 Adapter 参数化生成 `TRUE/FALSE/IN/NOT IN`，不会产生 `IN ()`。相对日期默认值先按 Workspace IANA 时区解析为 ISO 日期，再进入 Run、缓存和执行上下文。节点按依赖闭包并发，Output 完成后立即发布；无关分支不互相等待。
+Query Run 固化每个 Query Parameter 的 canonical state 和 Base Output。scoped Controls 不进入这张 DAG。每个 Query 节点以 `query_inputs` 声明自己可读的本地 alias；结构化绑定可把 `range_input/date` 投影为 `start`/`end`，也可把候选多选投影为 `selection=all|include|exclude|none`、有限 `value` operands、`active` 或完整 `state`。普通 SQL 优先使用 `query_filters` 与受限 `{{ dataviz_filter:name }}` token：`all/include/exclude` 参数化生成 `TRUE/IN/NOT IN`，空 `multiple_input` 或候选 `multiple_select none` 由该 consumer 必填的 `empty: passthrough|match_none` 生成 `TRUE/FALSE`，不会产生 `IN ()`。相对日期默认值先按 Workspace IANA 时区解析为 ISO 日期，再进入 Run、缓存和执行上下文。节点按依赖闭包并发，Output 完成后立即发布；无关分支不互相等待。
 
-网页动态候选位于 Query DAG 之前：`Parameter Domain SQL → Workspace shared immutable materialization → Server-local Lookup → Query Parameter draft → Query DAG`。SQL Domain 不按基数分叉，也不读取 Dashboard draft `query_inputs`；它由 definition/code hash、实际 Adapter identity 和 visibility scope 定位 generation，可跨 Dashboard、tab 和同可见范围用户复用。Browser 只持有当前页和有限已选 operands；搜索、generation-bound cursor 分页和 `depends_on` 父级 predicate 都读取同一 pinned Parquet generation，不重新执行远端 SQL。`refresh_after_seconds` 与 `expire_after_seconds` 分开控制 stale-while-revalidate 和 hard expiry；失败只禁用相关 Picker，不得阻断 Query、自由输入或 Workspace 导航。
+网页动态候选位于 Query DAG 之前：`Parameter Domain SQL → Workspace shared immutable materialization → Server-local Lookup → Query Parameter draft → Query DAG`。SQL Domain 不按基数分叉，也不读取 Dashboard draft `query_inputs`；它由 definition/code hash、实际 Adapter identity 和 visibility scope 定位 generation，可跨 Dashboard、tab 和同可见范围用户复用。Browser 只持有当前页和有限已选 operands；搜索、generation-bound cursor 分页和 `depends_on` 父级 predicate 都读取同一 pinned Parquet generation，不重新执行远端 SQL。父 `single_select` 的 canonical 标量按单值 include 解释，父 `multiple_select` 使用 `all/include/exclude/none`。`refresh_after_seconds` 与 `expire_after_seconds` 分开控制 stale-while-revalidate 和 hard expiry；失败只禁用相关 Picker，不得阻断 Query、自由输入或 Workspace 导航。
 
 AI 可按需使用 `dataviz parameters prewarm|status|lookup|refresh` 探索同一物化；`dataviz run` 只消费调用方 state 或可独立解析的 default，绝不为了候选校验而隐式构建物化。Result、Evidence、URL/tab checkpoint、portable HTML 与分享缓存只封存紧凑 state：`all/none` 没有 operands，`include/exclude` 只保存有限 operands；它们不包含 Domain SQL、Parquet、候选页、search 或 cursor。跨 Workspace 搬运单个 Dashboard 使用 `dataviz bundle` 复制共享 Domain definition/SQL 与非敏感 binding manifest，默认不复制 `.dataviz` 或凭据。Parameter Domain 与 Canvas Interactive Runtime 没有执行边，不进入 browser-js 或 Renderer。
 

@@ -864,7 +864,7 @@ include_snapshot: true
                 "files": {
                     "dashboards/analysis/dashboard.yaml": promoted_dashboard,
                     "dashboards/analysis/sources/rows-copy.yaml": (
-                        "schema: dataviz/source/v4\n"
+                        "schema: dataviz/source/v5\n"
                         "kind: source\n"
                         "id: rows-copy\n"
                         "name: 收入副本\n"

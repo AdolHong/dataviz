@@ -23,6 +23,7 @@ import duckdb
 
 from dataviz.auth import AdapterResolver
 from dataviz.errors import ExecutionFailure, QueryTimeoutFailure
+from dataviz.execution.parameters import normalize_query_parameter_state
 from dataviz.sources.sql import execute_sql_query
 from dataviz.value_contract import (
     ValueContractViolation,
@@ -587,14 +588,25 @@ class ParameterMaterializationStore:
         for parent, binding in options.depends_on.items():
             state = dict(parent_states.get(parent) or {"selection": "all", "value": []})
             selection = state.get("selection")
+            raw_value = state.get("value")
+            if selection is None:
+                # Only multiple_select owns all/include/exclude/none. Scalar
+                # parents use {value: scalar}; list-valued free inputs use
+                # {value: [...]}. Both mean an inclusive parent predicate.
+                # Keep 0 and false as real operands and treat only null/empty
+                # collections as no matching parent value.
+                selection = "none" if raw_value is None else "include"
+                values = (
+                    list(raw_value)
+                    if isinstance(raw_value, (list, tuple))
+                    else [raw_value]
+                )
+            else:
+                values = list(raw_value or ())
             if selection == "all":
                 continue
-            if selection == "none":
+            if selection == "none" or not values:
                 predicates.append("FALSE")
-                continue
-            values = list(state.get("value") or ())
-            if not values:
-                predicates.append("FALSE" if selection == "include" else "TRUE")
                 continue
             field = ParameterMaterializationStore._quoted_field(binding.field)
             placeholders = ", ".join("?" for _ in values)
@@ -661,6 +673,12 @@ class ParameterMaterializationStore:
         where_sql = " AND ".join(where) if where else "TRUE"
         base_parameters = [str(record.data_path), *parent_parameters, *tokens]
 
+        parent_where = [f"{value_field} IS NOT NULL", *parent_predicates]
+        parent_where_sql = " AND ".join(parent_where) if parent_where else "TRUE"
+        parent_projection = (
+            f"SELECT DISTINCT {quoted_fields} FROM read_parquet(?) "
+            f"WHERE {parent_where_sql}"
+        )
         projection = (
             f"SELECT DISTINCT {quoted_fields} FROM read_parquet(?) WHERE {where_sql}"
         )
@@ -679,7 +697,8 @@ class ParameterMaterializationStore:
         )
         conflict_query = (
             "WITH projected AS ("
-            f"SELECT DISTINCT {conflict_projection} FROM read_parquet(?) WHERE {where_sql}"
+            f"SELECT DISTINCT {conflict_projection} FROM read_parquet(?) "
+            f"WHERE {parent_where_sql}"
             ") "
             f"SELECT {value_field} FROM projected GROUP BY {value_field} "
             "HAVING COUNT(*) > 1 LIMIT 1"
@@ -694,7 +713,10 @@ class ParameterMaterializationStore:
                     parameters=["VARCHAR"],
                     return_type="VARCHAR",
                 )
-                conflict = connection.execute(conflict_query, base_parameters).fetchone()
+                conflict = connection.execute(
+                    conflict_query,
+                    [str(record.data_path), *parent_parameters],
+                ).fetchone()
                 if conflict is not None:
                     raise ExecutionFailure(
                         f"Parameter Domain {options.source} maps one value to conflicting metadata",
@@ -735,10 +757,10 @@ class ParameterMaterializationStore:
                 if selected:
                     placeholders = ", ".join("?" for _ in selected)
                     selected_frame = connection.execute(
-                        "WITH projected AS (" + projection + ") "
+                        "WITH projected AS (" + parent_projection + ") "
                         f"SELECT {quoted_fields} FROM projected "
                         f"WHERE {value_field} IN ({placeholders})",
-                        [*base_parameters, *selected],
+                        [str(record.data_path), *parent_parameters, *selected],
                     ).fetchdf()
             finally:
                 connection.close()
@@ -792,6 +814,35 @@ class ParameterMaterializationStore:
                 f"Query Parameter {parameter_id} does not use a SQL Parameter Domain",
                 details={"code": "parameter_lookup_not_domain", "parameter": parameter_id},
             )
+        raw_parent_states = dict(parent_states or {})
+        unknown_parents = sorted(set(raw_parent_states) - set(options.depends_on))
+        if unknown_parents:
+            raise ExecutionFailure(
+                f"Parameter Lookup for {parameter_id} received unrelated parent states: "
+                + ", ".join(unknown_parents),
+                details={
+                    "code": "parameter_lookup_parent_unknown",
+                    "parameter": parameter_id,
+                    "parents": unknown_parents,
+                },
+            )
+        normalized_parent_states: dict[str, dict[str, Any]] = {}
+        for parent, raw_state in raw_parent_states.items():
+            try:
+                normalized_parent_states[parent] = normalize_query_parameter_state(
+                    definitions[parent], raw_state, enforce_required=False
+                )
+            except (ValueContractViolation, ValueError) as error:
+                reason = getattr(error, "message", str(error))
+                raise ExecutionFailure(
+                    f"Invalid parent Query Parameter {parent}: {reason}",
+                    details={
+                        "code": "parameter_lookup_parent_state_invalid",
+                        "parameter": parameter_id,
+                        "parent": parent,
+                        "reason": reason,
+                    },
+                ) from error
         limit = min(max(1, int(limit)), LOOKUP_MAX_LIMIT)
         record = self.ensure(dashboard, options.source, background=True)
         if record.generation is None or record.freshness() == "expired":
@@ -843,7 +894,7 @@ class ParameterMaterializationStore:
             "generation": record.generation,
             "parameter": parameter_id,
             "search": query,
-            "parents": parent_states or {},
+            "parents": normalized_parent_states,
         }
         request_signature = hashlib.sha256(
             json.dumps(signature_payload, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
@@ -863,7 +914,7 @@ class ParameterMaterializationStore:
         page, selected_items, total = self._lookup_projected(
             record,
             definition,
-            parent_states=parent_states or {},
+            parent_states=normalized_parent_states,
             search=query,
             limit=limit,
             position=position,

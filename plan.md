@@ -18,9 +18,9 @@
 | 规模与浏览器可靠性 | 当前范围已完成 | 固定 10K/100K/1M 基准和三浏览器契约矩阵已有可复现证据；快速迭代发布默认执行 Chromium 全套，稳定发布、跨浏览器敏感变更或明确要求时再执行 Firefox/WebKit。 |
 | Query Parameter 与 Domain | P3 已完成并随 0.17.0 封版 | SQL Domain 统一形成 Server 共享 immutable materialization，Browser 只走 Lookup 搜索/分页；候选多选使用紧凑 `all/include/exclude/none`，Source 消费规范 state/projection 或受限 SQL filter token，Result/HTML 不携带候选全集。 |
 | Compiler 与应用边界 | P1-B/P1-C 已完成 | `LoadedDashboard` 继续分别持有和缓存三份 canonical lazy Contract；Contract 间已有 derivation dependency 保持显式、单向。`dependencies.py` 已按语义提取私有 derivation 函数，没有增加 owner/wrapper/phase class；`RunRequest → run_analysis() → canonical AnalysisResult` 复用现有 Catalog resolver 与 `AnalysisResultStore`，没有增加 Runner class。 |
-| 当前发行基线 | 0.17.0 已封版 | Query Parameter 紧凑集合、Workspace 共享候选物化、搜索/分页 Lookup、受限 SQL filter token、Dashboard Bundle 与 Plotly 选择工具退出交互已落地。 |
+| 当前发行基线 | 0.18.0 已封版 | Source v5 空集合筛选策略、Parameter Lookup 标量父状态与级联失效候选协调已落地；Query Parameter 紧凑集合、共享候选物化、搜索/分页 Lookup 和 Dashboard Bundle 保持稳定。 |
 
-当前开发基线：Package `0.17.0`、Python 3.11–3.14、`dataviz/dashboard/v14`、`dataviz/parameter-domain/v2`、`dataviz/parameter-domain-contract/v3`、`dataviz/parameter-lookup/v1`、`dataviz/parameter-materialization/v1`、`dataviz/dashboard-bundle/v1`、`dataviz/presentation/v2`、`dataviz/source/v4`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v11`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v5`、`dataviz/runtime/v10`、`dataviz/analysis-result/v4`、`dataviz/analysis-evidence/v4`、Component Registry `5.6.0`。当前 0.x Runtime 是 exact-current、同 package lockstep，没有 capability negotiation。P3 已按 P0.0 决策一次迁移 authoring、private wire 与 persisted Result/Evidence；以后缩小合法 Output 声明、改变持久化 shape 或 public wire 仍必须分别判断版本，不能被“bugfix 不升版”笼统覆盖。
+当前开发基线：Package `0.18.0`、Python 3.11–3.14、`dataviz/dashboard/v14`、`dataviz/parameter-domain/v2`、`dataviz/parameter-domain-contract/v3`、`dataviz/parameter-lookup/v1`、`dataviz/parameter-materialization/v1`、`dataviz/dashboard-bundle/v1`、`dataviz/presentation/v2`、`dataviz/source/v5`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v11`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v5`、`dataviz/runtime/v10`、`dataviz/analysis-result/v4`、`dataviz/analysis-evidence/v4`、Component Registry `5.6.0`。当前 0.x Runtime 是 exact-current、同 package lockstep，没有 capability negotiation。P3 已按 P0.0 决策一次迁移 authoring、private wire 与 persisted Result/Evidence；以后缩小合法 Output 声明、改变持久化 shape 或 public wire 仍必须分别判断版本，不能被“bugfix 不升版”笼统覆盖。
 
 ## 当前优先级
 
@@ -201,7 +201,7 @@ P1 在 P0 与 typed comparison 决策之后调整内部边界，目标是让强�
 
 - [x] 所有 SQL Domain consumer 使用同一 Server-local Lookup；第一页若已覆盖全部候选也只是同一响应的自然结果，不增加 eager/remote/access 等作者 mode。
 - [x] 请求只含 Domain/consumer、父 canonical states、search、limit、opaque cursor 和有限 selected operands；response 在一个 pinned generation 中返回 items、selected_items、exact total、next_cursor 与 freshness。
-- [x] 父 `depends_on` 将 all/include/exclude/none 编译为本地物化 predicate，再做 consumer value/label/metadata distinct；父编辑、搜索和翻页都不执行远端 Domain SQL。
+- [x] 父 `depends_on` 将 `single_select` canonical 标量编译为单值 include，将 `multiple_select` 的 all/include/exclude/none 编译为本地物化 predicate，再做 consumer value/label/metadata distinct；父编辑、搜索和翻页都不执行远端 Domain SQL。
 - [x] 搜索固定 NFKC/casefold、空白 token AND 与 exact/prefix/keywords/substring 排序；拼音和别名只来自 `keywords_field`，不提供 regex、任意 SQL 或模型搜索。
 - [x] cursor 绑定 generation 和稳定 sort tuple；generation/search/parent 改变会取消旧请求并从第一页开始，迟到页不得覆盖新状态。默认 50、上限 100，不提供含糊的“当前页全选”。
 - [x] 已选 operands 与当前页分离；补标签和 unavailable 只处理有限 operands。父级变化协调 include/exclude 有效交集，Revert 原样恢复 committed operands；翻页、搜索和 refresh 不丢失选择。数量摘要由 total 与 compact state 推导，不展开 Tag。
@@ -209,7 +209,7 @@ P1 在 P0 与 typed comparison 决策之后调整内部边界，目标是让强�
 #### P3.4 Source binding、Result 与可搬运性
 
 - [x] Query consumer projection 已收敛为 `value / selection / active / state / start / end`；candidate multiple 的 SQL value consumer 必须同时消费 selection，Python 可直接消费完整 state。候选页、cursor 和物化 metadata 不进入业务代码。
-- [x] 受限 `{{ dataviz_filter:name }}` SQL token 与 `query_filters` 只生成参数化 TRUE/FALSE/IN/NOT IN 并安全扩展列表；不是通用 Jinja。高级作者仍可显式消费 selection/value。
+- [x] Source v5 的受限 `{{ dataviz_filter:name }}` SQL token 与 `query_filters` 为 all/include/exclude 生成参数化 TRUE/IN/NOT IN，并要求每个 consumer 用 `empty: passthrough|match_none` 明确把空 `multiple_input` 或 `multiple_select none` 映射为 TRUE/FALSE；不是通用 Jinja。高级作者仍可显式消费 selection/value。
 - [x] `dataviz run` 支持直接传 canonical state 且不隐式物化候选；Catalog/describe 一次展示 default、selection contract、Domain、父依赖和所需 Source projection。
 - [x] Result/Evidence/URL/checkpoint/分享/HTML 只保存 compact state；all/none 无 operands，include/exclude 只保存有限 operands。分享/HTML 继续锁定参数，不嵌入 SQL、Parquet、候选页、搜索词或 cursor。
 - [x] portable Dashboard bundle 复制共享 Domain definition/SQL 与非敏感 binding manifest，默认不复制 `.dataviz` materialization 或凭据；同 id/hash 复用、同 id/不同 hash 失败。

@@ -75,25 +75,43 @@ def resolve_query_filter_tokens(
         name = match.group(1)
         declaration = declarations[name]
         state = states.get(declaration.parameter)
-        if state is None or state.get("selection") not in {
-            "all",
-            "include",
-            "exclude",
-            "none",
-        }:
+        if state is None:
             raise ExecutionFailure(
-                f"Query filter {name} requires a candidate multiple Query Parameter state",
+                f"Query filter {name} requires a multiple Query Parameter state",
                 details={
                     "code": "query_filter_state_invalid",
                     "filter": name,
                     "parameter": declaration.parameter,
                 },
             )
-        selection = state["selection"]
+        selection = state.get("selection")
+        if selection is None:
+            values = state.get("value")
+            if not isinstance(values, (list, tuple)):
+                raise ExecutionFailure(
+                    f"Query filter {name} requires a multiple_input value list",
+                    details={
+                        "code": "query_filter_state_invalid",
+                        "filter": name,
+                        "parameter": declaration.parameter,
+                    },
+                )
+            if not values:
+                return "TRUE" if declaration.empty == "passthrough" else "FALSE"
+            selection = "include"
+        elif selection not in {"all", "include", "exclude", "none"}:
+            raise ExecutionFailure(
+                f"Query filter {name} has an invalid multiple_select selection",
+                details={
+                    "code": "query_filter_state_invalid",
+                    "filter": name,
+                    "parameter": declaration.parameter,
+                },
+            )
         if selection == "all":
             return "TRUE"
         if selection == "none":
-            return "FALSE"
+            return "TRUE" if declaration.empty == "passthrough" else "FALSE"
         values = list(state.get("value") or ())
         if not values:
             raise ExecutionFailure(

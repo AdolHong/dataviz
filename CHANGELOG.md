@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.18.0 — 2026-09-01
+
+- Source v5 统一 `query_filters` 的空集合消费策略：每个 filter 必须声明 `empty: passthrough | match_none`，从而让空 `multiple_input` 或候选 `multiple_select none` 明确生成 `TRUE/FALSE`；`all` 始终是全集，include/exclude 继续安全生成参数化 `IN/NOT IN`，且永不产生 `IN ()`。
+- Parameter Lookup 修复 `single_select` 父参数的标量 canonical state：`{value: "region"}` 现在编译为单值 include predicate，不再把字符串拆成字符并误走 exclude；空标量返回空候选，集合型父参数与 `all/include/exclude/none` 语义保持不变。
+- 修复级联 Parameter Domain 的失效候选残留：普通父级编辑按既有契约保留有效交集、完全失效时恢复子参数 default，并只渲染协调后仍属于当前 state 的 operands；Revert 仍可明确保留 unavailable committed value。已选项 availability 只由当前 generation 与父范围决定，不再被下拉搜索词误伤。
+- 完整非浏览器 pytest、完整 Chromium E2E、Ruff、JavaScript 语法、Runtime 生成资产一致性与 Component Package 检查共同作为 0.18.0 发布门禁；按要求不运行 Firefox/WebKit 与独立安装冒烟。
+
+## 0.17.1 — 2026-09-01
+
+- Plotly 矩形选择和套索选择提交后自动清除临时轮廓，同时保留已提交的 Control 选择与当前选择工具，便于连续框选；再次点击激活工具仍可退出选择模式。
+- 完整非浏览器 pytest、Ruff、JavaScript 语法、Runtime 生成资产一致性、Component Package 与 wheel/sdist/pip ZIP 构建共同作为 0.17.1 发布门禁；本次按要求不运行浏览器套件与独立安装冒烟。
+
 ## 0.17.0 — 2026-09-01
 
 - P3 将 Query Parameter 候选多选一次迁移为紧凑 `all/include/exclude/none` state；`all/none` 不展开全集，`include/exclude` 只保存有限 operands。Dashboard v14 统一使用 `default`，URL、Tab、Revert、Run、Result/Evidence、分享与 HTML 均封存同一 canonical state，候选全集不会进入结果资产。

@@ -368,7 +368,7 @@ views: []
         encoding="utf-8",
     )
     (sources / "api.yaml").write_text(
-        """schema: dataviz/source/v4
+        """schema: dataviz/source/v5
 kind: source
 id: api
 type: python

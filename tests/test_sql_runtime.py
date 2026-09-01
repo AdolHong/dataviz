@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from dataviz.artifacts import ArtifactStore
 from dataviz.errors import QueryExecutionFailure, QueryTimeoutFailure
@@ -54,7 +55,7 @@ sections:
         f"timeout_retries: {timeout_retries}\n" if timeout_retries is not None else ""
     )
     (sources / "query.yaml").write_text(
-        f"""schema: dataviz/source/v4
+        f"""schema: dataviz/source/v5
 kind: source
 id: query
 type: sql
@@ -154,6 +155,202 @@ query_inputs:
     }
 
 
+@pytest.mark.parametrize(
+    "adapter_yaml",
+    [
+        "type: duckdb\n    database: ':memory:'",
+        "type: sqlalchemy\n    url: sqlite://",
+    ],
+)
+def test_multiple_input_query_filter_treats_empty_as_unconstrained_and_expands_values(
+    tmp_path: Path, adapter_yaml: str
+):
+    root = _sql_workspace(
+        tmp_path / "workspace",
+        """select item_nbr
+from (
+  select 1001 as item_nbr
+  union all select 1002
+  union all select 1003
+) as items
+where {{ dataviz_filter:items }}
+order by item_nbr
+""",
+        adapter_yaml=adapter_yaml,
+    )
+    dashboard_path = root / "dashboards" / "sql-test" / "dashboard.yaml"
+    dashboard_path.write_text(
+        dashboard_path.read_text(encoding="utf-8").replace(
+            "title: SQL test\n",
+            """title: SQL test
+query_parameters:
+  - id: item_nbrs
+    type: multiple_input
+    value_type: integer
+    default: []
+""",
+        ),
+        encoding="utf-8",
+    )
+    source_path = root / "dashboards" / "sql-test" / "sources" / "query.yaml"
+    source_path.write_text(
+        source_path.read_text(encoding="utf-8").replace(
+            "code: query.sql\n",
+            """code: query.sql
+query_filters:
+  items: {parameter: item_nbrs, field: item_nbr, empty: passthrough}
+""",
+        ),
+        encoding="utf-8",
+    )
+    workspace = load_workspace(root)
+    assert validate_workspace(workspace) == []
+
+    unconstrained = Executor(workspace).run(
+        "sql-test",
+        query_parameter_state={"item_nbrs": {"value": []}},
+        refresh=True,
+    )
+    unconstrained_frame = ArtifactStore(root, unconstrained.run_id).read_table(
+        unconstrained.nodes["source:query"].outputs["main"]
+    )
+    unconstrained_query = unconstrained.nodes["source:query"].diagnostics["query"]
+    assert unconstrained_frame["item_nbr"].tolist() == [1001, 1002, 1003]
+    assert "where TRUE" in unconstrained_query["statement"]
+    assert unconstrained_query["parameters"] == {}
+
+    constrained = Executor(workspace).run(
+        "sql-test",
+        query_parameter_state={"item_nbrs": {"value": [1002, 1003]}},
+        refresh=True,
+    )
+    constrained_frame = ArtifactStore(root, constrained.run_id).read_table(
+        constrained.nodes["source:query"].outputs["main"]
+    )
+    constrained_query = constrained.nodes["source:query"].diagnostics["query"]
+    assert constrained_frame["item_nbr"].tolist() == [1002, 1003]
+    assert "IN ()" not in constrained_query["resolved_sql"]
+    assert constrained_query["parameters"] == {
+        "__dv_filter_items": [1002, 1003]
+    }
+
+
+@pytest.mark.parametrize(
+    ("empty_policy", "expected_empty_rows"),
+    [("passthrough", [1001, 1002, 1003]), ("match_none", [])],
+)
+def test_candidate_multiple_query_filter_explicitly_maps_none_state(
+    tmp_path: Path, empty_policy: str, expected_empty_rows: list[int]
+):
+    root = _sql_workspace(
+        tmp_path / empty_policy,
+        """select item_nbr
+from (
+  select 1001 as item_nbr
+  union all select 1002
+  union all select 1003
+) as items
+where {{ dataviz_filter:items }}
+order by item_nbr
+""",
+    )
+    dashboard_path = root / "dashboards" / "sql-test" / "dashboard.yaml"
+    dashboard_path.write_text(
+        dashboard_path.read_text(encoding="utf-8").replace(
+            "title: SQL test\n",
+            """title: SQL test
+query_parameters:
+  - id: item_nbrs
+    type: multiple_select
+    value_type: integer
+    default: {mode: none}
+    clearable: true
+    options:
+      mode: static
+      choices:
+        - {label: Item 1001, value: 1001}
+        - {label: Item 1002, value: 1002}
+        - {label: Item 1003, value: 1003}
+""",
+        ),
+        encoding="utf-8",
+    )
+    source_path = root / "dashboards" / "sql-test" / "sources" / "query.yaml"
+    source_path.write_text(
+        source_path.read_text(encoding="utf-8").replace(
+            "code: query.sql\n",
+            f"""code: query.sql
+query_filters:
+  items: {{parameter: item_nbrs, field: item_nbr, empty: {empty_policy}}}
+""",
+        ),
+        encoding="utf-8",
+    )
+    workspace = load_workspace(root)
+    assert validate_workspace(workspace) == []
+
+    empty_result = Executor(workspace).run(
+        "sql-test",
+        query_parameter_state={"item_nbrs": {"selection": "none", "value": []}},
+        refresh=True,
+    )
+    empty_frame = ArtifactStore(root, empty_result.run_id).read_table(
+        empty_result.nodes["source:query"].outputs["main"]
+    )
+    assert empty_frame["item_nbr"].tolist() == expected_empty_rows
+
+    selected_result = Executor(workspace).run(
+        "sql-test",
+        query_parameter_state={
+            "item_nbrs": {"selection": "include", "value": [1002]}
+        },
+        refresh=True,
+    )
+    selected_frame = ArtifactStore(root, selected_result.run_id).read_table(
+        selected_result.nodes["source:query"].outputs["main"]
+    )
+    assert selected_frame["item_nbr"].tolist() == [1002]
+
+
+def test_query_filter_still_rejects_non_multiple_query_parameters(tmp_path: Path):
+    root = _sql_workspace(
+        tmp_path / "workspace",
+        "select 1 as value where {{ dataviz_filter:item }}",
+    )
+    dashboard_path = root / "dashboards" / "sql-test" / "dashboard.yaml"
+    dashboard_path.write_text(
+        dashboard_path.read_text(encoding="utf-8").replace(
+            "title: SQL test\n",
+            """title: SQL test
+query_parameters:
+  - id: item_nbr
+    type: single_input
+    value_type: integer
+    default: 1001
+""",
+        ),
+        encoding="utf-8",
+    )
+    source_path = root / "dashboards" / "sql-test" / "sources" / "query.yaml"
+    source_path.write_text(
+        source_path.read_text(encoding="utf-8").replace(
+            "code: query.sql\n",
+            """code: query.sql
+query_filters:
+  item: {parameter: item_nbr, field: item_nbr, empty: match_none}
+""",
+        ),
+        encoding="utf-8",
+    )
+
+    diagnostics = validate_workspace(load_workspace(root))
+
+    invalid = next(
+        item for item in diagnostics if item.code == "query_filter_parameter_type_invalid"
+    )
+    assert "multiple_input or multiple_select" in invalid.message
+
+
 def test_sql_timeout_hard_cancels_only_its_node_and_is_structured(tmp_path: Path):
     root = _sql_workspace(
         tmp_path / "workspace",
@@ -211,7 +408,7 @@ def test_sql_timeout_does_not_block_an_independent_fast_branch(tmp_path: Path):
     sources = dashboard / "sources"
     (sources / "fast.csv").write_text("label,value\nready,7\n", encoding="utf-8")
     (sources / "fast.yaml").write_text(
-        """schema: dataviz/source/v4
+        """schema: dataviz/source/v5
 kind: source
 id: fast
 type: file
@@ -352,7 +549,7 @@ def test_timeout_retries_is_rejected_by_the_file_source_schema(tmp_path: Path):
     sources = root / "dashboards" / "sql-test" / "sources"
     (sources / "query.csv").write_text("value\n1\n", encoding="utf-8")
     (sources / "query.yaml").write_text(
-        """schema: dataviz/source/v4
+        """schema: dataviz/source/v5
 kind: source
 id: query
 type: file

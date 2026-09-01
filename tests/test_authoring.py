@@ -149,7 +149,7 @@ def test_machine_readable_component_examples_use_canonical_output_references():
 def test_machine_readable_documentation_examples_match_current_schemas():
     providers = {
         "dataviz/dashboard/v14": DashboardDefinition,
-        "dataviz/source/v4": SOURCE_DEFINITION_ADAPTER,
+        "dataviz/source/v5": SOURCE_DEFINITION_ADAPTER,
         "dataviz/dataset-transform/v3": DatasetTransformDefinition,
         "dataviz/interactive-transform/v4": InteractiveTransformDefinition,
         "dataviz/presentation/v2": PresentationDefinition,

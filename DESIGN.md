@@ -2,7 +2,7 @@
 
 > 快速安装和当前可用命令见 [README](README.md)；后续工作见 [plan.md](plan.md)。安装版本真正接受的字段始终以 `dataviz schemas`、`dataviz docs` 和 `dataviz components` 为准。
 
-本文记录已经落地并可由当前 Schema、CLI、Runtime 和测试证明的契约，以及明确标注的后续目标。当前严格契约是 `dataviz/dashboard/v14`、`dataviz/parameter-domain/v2`、`dataviz/parameter-domain-contract/v3`、`dataviz/parameter-lookup/v1`、`dataviz/parameter-materialization/v1`、`dataviz/dashboard-bundle/v1`、`dataviz/presentation/v2`、`dataviz/source/v4`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v11`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v5`、`dataviz/runtime/v10`、`dataviz/analysis-result/v4`、`dataviz/analysis-evidence/v4` 与 Component Registry `5.6.0`。Input State、共享 Parameter Materialization/Lookup、multi-View writer/consumer binding、唯一 ControlRuntime authority、generation-start applied evidence 与 writer provenance、Layout/Semantic Contract、Chart/Table Service、Renderer 行为矩阵、`inspect layout` 与 visual-check 均已进入实现；当前代码只接受现行严格契约，不保留旧字段 alias、自动迁移或双协议 Runtime。
+本文记录已经落地并可由当前 Schema、CLI、Runtime 和测试证明的契约，以及明确标注的后续目标。当前严格契约是 `dataviz/dashboard/v14`、`dataviz/parameter-domain/v2`、`dataviz/parameter-domain-contract/v3`、`dataviz/parameter-lookup/v1`、`dataviz/parameter-materialization/v1`、`dataviz/dashboard-bundle/v1`、`dataviz/presentation/v2`、`dataviz/source/v5`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v11`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v5`、`dataviz/runtime/v10`、`dataviz/analysis-result/v4`、`dataviz/analysis-evidence/v4` 与 Component Registry `5.6.0`。Input State、共享 Parameter Materialization/Lookup、multi-View writer/consumer binding、唯一 ControlRuntime authority、generation-start applied evidence 与 writer provenance、Layout/Semantic Contract、Chart/Table Service、Renderer 行为矩阵、`inspect layout` 与 visual-check 均已进入实现；当前代码只接受现行严格契约，不保留旧字段 alias、自动迁移或双协议 Runtime。
 
 Dataviz 是一个 workspace-first、AI-friendly 的数据看板工具。看板是普通文件，能够被 Git 管理、复制和审查；Server 面向人提供交互页面，CLI 面向 AI 与自动化提供构建校验、Catalog 发现、Target 执行、不可变 Result 检查和 HTML 报告。
 
@@ -303,7 +303,7 @@ dataviz inspect dependencies WORKSPACE DASHBOARD --format json
 | Query Parameter | `dashboard.query_parameters` | 决定取什么数据 | 新建 Query Run，重新执行 Source/Dataset Transform | 固定为导出时已提交值 |
 | Control | Dashboard/Section/View 的 `controls` | Query 后提供交互输入 | 由 consumer binding 局部筛选、重绘或重算 Interactive Transform | 保持交互；能力取决于 Runtime/export mode |
 
-> **设计状态：当前领域模型与跨 Runtime 迁移已完成。** Dashboard v14、Source v4、Dataset Transform v3、Interactive Transform v4、Dependency Contract v11、State Snapshot v5、Runtime v10 与 Analysis Result/Evidence v4 已在 Schema、Compiler、Server、Browser、HTML、CLI、示例与测试中同步切换；旧 `kind`、双输入协议、旧 comparison 语义、Shell Control shadow、单数 writer projection 和 Query Parameter client-relation 路径都不保留兼容分支。Python、Canvas 与 Web Component 的共享语义由同一语言无关 corpus 验证，Host channel、applied state、writer provenance 与 Query Parameter compact state 由真实浏览器/持久化回归验证。
+> **设计状态：当前领域模型与跨 Runtime 迁移已完成。** Dashboard v14、Source v5、Dataset Transform v3、Interactive Transform v4、Dependency Contract v11、State Snapshot v5、Runtime v10 与 Analysis Result/Evidence v4 已在 Schema、Compiler、Server、Browser、HTML、CLI、示例与测试中同步切换；旧 `kind`、双输入协议、旧 comparison 语义、Shell Control shadow、单数 writer projection 和 Query Parameter client-relation 路径都不保留兼容分支。Python、Canvas 与 Web Component 的共享语义由同一语言无关 corpus 验证，Host channel、applied state、writer provenance 与 Query Parameter compact state 由真实浏览器/持久化回归验证。
 
 ### Input State 只保存事实
 
@@ -317,7 +317,7 @@ Query Parameter 与 Control 不合并为一个作者可见的通用 `states:` �
 | 生命周期 | Query Parameter 的 draft/committed；Control 的 current/applied/revision | 决定所有消费者必须同时提交 |
 | 所有权 | Query Parameter 或 scoped Control 是唯一 owner | 让组件、View 或 Transform 保存第二份影子状态 |
 
-因此两类 canonical entry 必须分开：候选型 Query Parameter 是 `{selection, value}`，其中 `value` 只保存有限 include/exclude operands；Control 是 `{value, revision, intent?}`。`multiple_input` 是自由集合，只保存 `list[T]` value：空列表只是“没有提供值”这一事实，不自动等于不过滤、空结果或恢复默认。是否有值由对应 consumer projection 解释。
+因此两类 canonical entry 必须分开：候选型 Query Parameter 是 `{selection, value}`，其中 `value` 只保存有限 include/exclude operands；Control 是 `{value, revision, intent?}`。`multiple_input` 是自由集合，只保存 `list[T]` value：空列表只是“没有提供值”这一事实，不在 Input State 层自动等于不过滤、空结果或恢复默认。具体 consumer 必须解释它；Source `query_filters` 明确将空自由列表解释为不添加 SQL 约束。
 
 Selection 这个词只保留给用户手势：点击点、选择行、矩形或套索框选。它是一个 writer action，不再是 Control 的固有种类。Compute 同样不再是 Control 的固有种类；它只是某个 Interactive Transform 把 Control 值作为计算参数消费。一个 Control 可以同时驱动即时 View 投影和需要 Apply 的重型 Transform，不能因为声明时被贴上一个 `kind` 就强迫所有 consumer 共用一种提交方式。
 
@@ -345,7 +345,7 @@ View 点击、框选或表格行选择不是第三个一级入口，也不拥有
 Binding 把“读取什么”和“怎样消费”分开，但不允许无意义的任意组合：
 
 1. **Projection**：Query Parameter 可投影 `value | selection | active | state | start | end`；Control value binding 可投影 `value | present | intent`。字符串简写等于 `projection: value`。`present/active` 都把 `0` 与 `false` 视为有效值，但分别服务 Control 与 Query Parameter 生命周期。
-2. **Mode**：Control consumer 使用 `value | filter`；Query consumer 使用 `query_inputs` 或 `query_filters`。Control `filter` 对显式表输入应用 typed 筛选；Query `query_filters` 把 compact selection 参数化编译为 `TRUE/FALSE/IN/NOT IN`。二者不共享一个万能 filter state。
+2. **Mode**：Control consumer 使用 `value | filter`；Query consumer 使用 `query_inputs` 或 `query_filters`。Control `filter` 对显式表输入应用 typed 筛选；Query `query_filters` 把 `all/include/exclude` 参数化编译为 `TRUE/IN/NOT IN`，并要求每个 consumer 用 `empty: passthrough | match_none` 明确决定空 `multiple_input` 或 `multiple_select none` 是 `TRUE` 还是 `FALSE`。二者不共享一个万能 filter state。
 
 `filter` 必须明确目标 `field`，并明确空集合策略：
 
@@ -354,7 +354,7 @@ Binding 把“读取什么”和“怎样消费”分开，但不允许无意义
 | `passthrough` | 空值不添加筛选条件 | 可选 `multiple_input` Item 列表 |
 | `match_none` | 空值产生空结果 | 用户明确清空一个样本选择 |
 
-`empty` 只解释 Control 的自由空集合或 `explicit + []`；候选型 Control 的 `all_available` 由 Control option domain 解析。SQL Source 不使用通用 Control `mode: filter`：普通候选筛选通过 Query Parameter `query_filters` 安全编译；高级 Source 可显式消费 `selection + value` 或完整 `state`。
+`empty` 只解释 Control 的自由空集合或 `explicit + []`；候选型 Control 的 `all_available` 由 Control option domain 解析。SQL Source 不使用通用 Control `mode: filter`：候选 `multiple_select` 与自由 `multiple_input` 都可通过 Query Parameter `query_filters` 安全编译；高级 Source 可显式消费 `selection + value`、`value + present` 或完整 `state`。
 
 目标 Query binding 例如：
 
@@ -487,7 +487,7 @@ Query Parameter 只在用户点击 **查询** 后提交。Shell 分别维护当�
 
 #### Query Parameter v14：统一物化候选与紧凑集合表达式
 
-> **设计状态：已实现。** 当前严格边界为 Dashboard v14、Parameter Domain v2、Contract v3、Lookup/Materialization v1、Source v4、Dependency Contract v11、State Snapshot v5、Runtime v10 与 Analysis Result/Evidence v4。旧 `all_available | explicit` Query state、完整 client relation、Domain `query_inputs` query edge 和 `options_id` 快照已一次迁移删除。
+> **设计状态：已实现。** 当前严格边界为 Dashboard v14、Parameter Domain v2、Contract v3、Lookup/Materialization v1、Source v5、Dependency Contract v11、State Snapshot v5、Runtime v10 与 Analysis Result/Evidence v4。旧 `all_available | explicit` Query state、完整 client relation、Domain `query_inputs` query edge 和 `options_id` 快照已一次迁移删除。
 
 新设计不再按候选基数建立两套作者模型。Query Parameter 只有两种候选来源：
 
@@ -547,8 +547,8 @@ v14 删除候选输入同时存在 `default` 与 `initial` 的双入口，统一
 default: {mode: first}                 # 或 value / none
 
 # multiple_select
-default: {selection: all}              # 或 include / exclude / none
-default: {selection: include, values: [A, B]}
+default: {mode: all}                   # 或 include / exclude / none
+default: {mode: include, values: [A, B]}
 
 # single_input / multiple_input / range_input
 default: ...                            # 直接使用对应 value contract
@@ -586,13 +586,29 @@ where :item_selection = 'all'
    or (:item_selection = 'exclude' and item_nbr not in (... :item_values ...))
 ```
 
-为避免每个作者重复处理空 `IN ()`、列表展开和四态分支，v14 同时提供一个受限的 SQL filter token，而不是引入通用 Jinja：
+为避免每个作者重复处理空 `IN ()`、列表展开和四态分支，Source v5 提供一个受限的 SQL filter token，而不是引入通用 Jinja。例如“Item 下拉为空时不筛选，选中后才按 Item 筛选”使用：
 
 ```yaml
+# dashboard.yaml
+- id: item_nbrs
+  type: multiple_select
+  value_type: text
+  default: {mode: none}
+  clearable: true
+  options:
+    mode: domain
+    source: item_catalog
+    value_field: item_nbr
+    label_field: item_label
+```
+
+```yaml
+# source.yaml
 query_filters:
   item_scope:
     parameter: item_nbrs
-    expression: item_nbr
+    field: item_nbr
+    empty: passthrough
 ```
 
 ```sql
@@ -601,7 +617,7 @@ from fact_sales
 where {{ dataviz_filter:item_scope }}
 ```
 
-Compiler 只允许已声明的精确 token，并按 Adapter dialect 生成参数化 `TRUE / FALSE / IN / NOT IN` predicate；用户值永远不能进入 SQL 文本，`include []` canonicalize 为 `none`，`exclude []` canonicalize 为 `all`，因此执行层永不生成 `IN ()`。需要复杂业务条件时，作者继续使用显式 `selection + value` 投影或 Python Source；标准 filter token 不演变成通用 SQL 模板语言。
+Compiler 只允许已声明的精确 token，并只接受 `multiple_select` 或 `multiple_input`。`all` 始终生成 `TRUE`，`include/exclude` 按 Adapter dialect 生成参数化 `IN / NOT IN`；`include []` canonicalize 为 `none`，`exclude []` canonicalize 为 `all`。每个 `query_filters` consumer 必须声明 `empty: passthrough | match_none`，把自由 `multiple_input []` 或候选 `multiple_select none` 明确编译为 `TRUE` 或 `FALSE`。因此“空值事实”和“空值过滤策略”不再由参数类型暗中绑定。用户值永远不能进入 SQL 文本，执行层也永不生成 `IN ()`。需要复杂业务条件时，作者继续使用显式 `selection + value` 投影、`value + present` 投影或 Python Source；标准 filter token 不演变成通用 SQL 模板语言。
 
 Python `context.query_inputs` 可以直接接收 `projection: state`，但不得把候选物化对象、DataFrame 或 Lookup client 暴露给 Query/Interactive Transform。`dataviz run` 只消费调用方给出的 state 或无需 Domain 即可解析的 default；已知 Item 的 AI 可以直接运行，绝不为了验证候选或补标签而隐式构建物化。
 
@@ -629,7 +645,7 @@ query_parameters:
     type: multiple_select
     value_type: text
     required: false
-    default: {selection: all}
+    default: {mode: all}
     options:
       mode: domain
       source: item-catalog
@@ -698,7 +714,7 @@ Query Card 的 Reload 对 SQL Domain 表示“请求刷新共享候选目录”�
 
 所有 SQL Domain Picker 都通过同一 Server-local Lookup 读取 current generation。请求只包含：Domain/consumer identity、当前父参数的 canonical selection state、普通搜索文本、page limit、opaque cursor，以及需要补标签的有限已选 operands；绝不携带 SQL、Adapter 或原始物化路径。
 
-父级 `depends_on` 不重新执行 SQL。Lookup 把父参数的 `all/include/exclude/none` 直接编译为物化关系上的本地 predicate，再对当前 parameter 的 value/label/metadata 做 distinct projection。一次 item-catalog 可以同时为 Division、Category、Subcategory 和 Item 提供候选；每个字段按自己的投影去重，相同 canonical value 出现冲突 label/metadata 时 generation 构建或查询稳定失败，不能随机取一行。
+父级 `depends_on` 不重新执行 SQL。Lookup 把 `single_select` 父参数的 canonical 标量编译为单值 include predicate，把 `multiple_select` 的 `all/include/exclude/none` 编译为对应集合 predicate，再对当前 parameter 的 value/label/metadata 做 distinct projection；空 scalar/none 得到空候选，缺失父 state 才表示该次 Lookup 不施加父级 predicate。一次 item-catalog 可以同时为 Division、Category、Subcategory 和 Item 提供候选；每个字段按自己的投影去重，相同 canonical value 出现冲突 label/metadata 时 generation 构建或查询稳定失败，不能随机取一行。
 
 搜索规则保持克制且可预测：Unicode NFKC + casefold、空白 token AND；排序优先 exact value、exact label、prefix、keywords、substring，再使用声明的稳定 `sort_field + canonical value`。Runtime 不自动猜拼音；需要 `shenzhen → 深圳` 时由 SQL 在 `keywords_field` 提供拼音/别名。第一版不开放 regex、任意 SQL 搜索表达式或模糊模型检索。
 
@@ -1723,7 +1739,7 @@ HTML 导出和现有分享链接继续作为人类消费看板的已有能力；
 | Parameter Lookup / Materialization | `dataviz/parameter-lookup/v1` / `dataviz/parameter-materialization/v1` |
 | Dashboard Bundle | `dataviz/dashboard-bundle/v1` |
 | Presentation schema | `dataviz/presentation/v2` |
-| Source schema | `dataviz/source/v4` |
+| Source schema | `dataviz/source/v5` |
 | Dashboard Dependency Contract | `dataviz/dependency-contract/v11` |
 | Dashboard Layout Contract | `dataviz/layout-contract/v1` |
 | State Snapshot | `dataviz/state-snapshot/v5` |

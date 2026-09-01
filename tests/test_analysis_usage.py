@@ -53,7 +53,7 @@ title: Fold tests
 """,
         encoding="utf-8",
     )
-    source = """schema: dataviz/source/v4
+    source = """schema: dataviz/source/v5
 kind: source
 id: rows
 name: 收入

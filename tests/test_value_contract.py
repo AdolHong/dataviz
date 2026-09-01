@@ -79,7 +79,7 @@ def test_relative_date_defaults_resolve_once_in_workspace_timezone_and_project_p
     )
     source = SqlSourceDefinition.model_validate(
         {
-            "schema": "dataviz/source/v4",
+            "schema": "dataviz/source/v5",
             "id": "sales",
             "type": "sql",
             "adapter": "warehouse",

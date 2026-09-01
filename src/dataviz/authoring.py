@@ -938,7 +938,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
     elif recipe in {"source.file", "source.sql", "source.python"}:
         source_type = recipe.split(".", 1)[1]
         definition: dict[str, Any] = {
-            "schema": "dataviz/source/v4",
+            "schema": "dataviz/source/v5",
             "kind": "source",
             "id": item_id,
             "type": source_type,

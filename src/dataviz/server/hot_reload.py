@@ -15,6 +15,7 @@ from dataviz.execution.node_support import hash_path
 from dataviz.execution.plan import compile_plan
 from dataviz.protocols import WORKSPACE_CHANGE_SCHEMA
 from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace
+from dataviz.workspace.assets import resolve_workspace_asset_reference
 
 
 ReloadImpact = Literal["navigation", "canvas", "analysis", "query", "server"]
@@ -91,12 +92,23 @@ def _query_signature(dashboard: LoadedDashboard) -> str:
     return _digest({"contract": contract, "code": code_inputs})
 
 
-def _query_file_inputs(dashboard: LoadedDashboard) -> tuple[str, ...]:
+def _query_file_inputs(
+    workspace: LoadedWorkspace,
+    dashboard: LoadedDashboard,
+) -> tuple[str, ...]:
     """Return data files by path without hashing potentially multi-GB inputs."""
     values: set[str] = set()
     for definition_path, definition in dashboard.sources.values():
         if getattr(definition, "type", None) == "file":
-            values.add(str((definition_path.parent / definition.path).resolve()))
+            asset = resolve_workspace_asset_reference(
+                workspace.root,
+                workspace.definition.assets,
+                definition.path,
+                hash_content=False,
+            )
+            values.add(str(asset.path if asset is not None else (
+                definition_path.parent / definition.path
+            ).resolve()))
     return tuple(sorted(values))
 
 
@@ -145,7 +157,10 @@ def _analysis_signature(dashboard: LoadedDashboard) -> str:
     return _digest({"transforms": transforms, "controls": controls})
 
 
-def _canvas_signature(dashboard: LoadedDashboard) -> str:
+def _canvas_signature(
+    workspace: LoadedWorkspace,
+    dashboard: LoadedDashboard,
+) -> str:
     """Fingerprint only files and declarations that can alter the rendered Canvas."""
     definition = dashboard.definition
     asset_paths: set[Path] = set()
@@ -165,6 +180,8 @@ def _canvas_signature(dashboard: LoadedDashboard) -> str:
     readme_path = dashboard.root / "README.md"
     if readme_path.is_file():
         asset_paths.add(readme_path.resolve())
+    for asset_id in definition.assets:
+        asset_paths.add(workspace.asset(asset_id).path)
     return _digest(
         {
             "definition": definition.model_dump(mode="json", by_alias=True),
@@ -198,9 +215,9 @@ class WorkspaceSemanticSnapshot:
             identifier: DashboardSemanticSnapshot(
                 root=str(dashboard.root.resolve()),
                 query=_query_signature(dashboard),
-                query_files=_query_file_inputs(dashboard),
+                query_files=_query_file_inputs(workspace, dashboard),
                 analysis=_analysis_signature(dashboard),
-                canvas=_canvas_signature(dashboard),
+                canvas=_canvas_signature(workspace, dashboard),
             )
             for identifier, dashboard in workspace.dashboards.items()
         }

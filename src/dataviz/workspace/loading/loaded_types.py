@@ -33,6 +33,7 @@ from dataviz.workspace.models import (
 from dataviz.workspace.naming import (
     decode_dashboard_name,
 )
+from dataviz.workspace.assets import ResolvedWorkspaceAsset, resolve_workspace_asset
 
 
 @dataclass(slots=True)
@@ -173,6 +174,9 @@ class LoadedWorkspace:
         if identifier in self.dashboards:
             return self.dashboards[identifier]
         raise WorkspaceError(f"Unknown dashboard: {identifier}")
+
+    def asset(self, identifier: str) -> ResolvedWorkspaceAsset:
+        return resolve_workspace_asset(self.root, self.definition.assets, identifier)
 
     def catalog_entry(self, identifier: str) -> DashboardCatalogEntry:
         for entry in self.catalog:

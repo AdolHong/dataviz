@@ -35,6 +35,7 @@ def test_adapter_bindings_and_all_example_dashboards_run():
         "date-parameter-lab",
         "parameter-domain-lab",
         "parameter-playground",
+        "map-lab",
     }
     executor = Executor(workspace)
     for dashboard_id in workspace.dashboards:
@@ -239,7 +240,7 @@ def test_invalid_adapter_contract_is_reported_by_workspace_validation(tmp_path: 
     root = tmp_path / "workspace"
     (root / "auth").mkdir(parents=True)
     (root / "workspace.yaml").write_text(
-        "schema: dataviz/workspace/v1\nkind: workspace\nid: adapter-validation\n",
+        "schema: dataviz/workspace/v2\nkind: workspace\nid: adapter-validation\n",
         encoding="utf-8",
     )
     (root / "auth" / "adapters.yaml").write_text(
@@ -274,7 +275,7 @@ def test_executor_resolves_adapter_files_once_per_query_run(tmp_path: Path):
     (root / "data-a" / "rows.csv").write_text("value\nA\n", encoding="utf-8")
     (root / "data-b" / "rows.csv").write_text("value\nB\n", encoding="utf-8")
     (root / "workspace.yaml").write_text(
-        """schema: dataviz/workspace/v1
+        """schema: dataviz/workspace/v2
 kind: workspace
 id: adapter-refresh
 title: Adapter refresh
@@ -287,7 +288,7 @@ title: Adapter refresh
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v14
+        """schema: dataviz/dashboard/v16
 kind: dashboard
 id: adapter-refresh
 adapters: {data: files}
@@ -334,7 +335,7 @@ def test_python_source_receives_resolved_workspace_adapter(tmp_path, monkeypatch
     sources.mkdir(parents=True)
     (root / "auth").mkdir()
     (root / "workspace.yaml").write_text(
-        """schema: dataviz/workspace/v1
+        """schema: dataviz/workspace/v2
 kind: workspace
 id: adapter-tests
 title: Adapter tests
@@ -356,7 +357,7 @@ title: Adapter tests
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v14
+        """schema: dataviz/dashboard/v16
 kind: dashboard
 id: adapter-source
 title: Adapter source
@@ -368,7 +369,7 @@ views: []
         encoding="utf-8",
     )
     (sources / "api.yaml").write_text(
-        """schema: dataviz/source/v5
+        """schema: dataviz/source/v6
 kind: source
 id: api
 type: python

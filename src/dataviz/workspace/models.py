@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -10,6 +11,7 @@ from pydantic import (
     Field,
     StringConstraints,
     TypeAdapter,
+    field_validator,
     model_validator,
 )
 
@@ -87,6 +89,25 @@ class WorkspaceFolderDefinition(Model):
     order: int = 0
 
 
+class WorkspaceAssetDefinition(Model):
+    """One reusable local file owned by the Workspace.
+
+    Registration does not expose the file to a browser. A Dashboard must list
+    the Asset explicitly before the Canvas Runtime may read it.
+    """
+
+    path: str = Field(min_length=1)
+    media_type: str | None = None
+
+    @field_validator("path")
+    @classmethod
+    def require_relative_local_path(cls, value: str) -> str:
+        candidate = Path(value)
+        if candidate.is_absolute() or value.startswith(("asset:", "http:", "https:")):
+            raise ValueError("Workspace Asset path must be relative to workspace.yaml")
+        return value
+
+
 class RuntimeDefinition(Model):
     # Plotly ships with the Python package and is always embedded into exported
     # reports. Accepting arbitrary strings here used to imply a configurability
@@ -118,6 +139,7 @@ class WorkspaceDefinition(Model):
     description: str = ""
     context: ContextDefinition = Field(default_factory=ContextDefinition)
     folders: list[WorkspaceFolderDefinition] = Field(default_factory=list)
+    assets: dict[StableId, WorkspaceAssetDefinition] = Field(default_factory=dict)
     runtime: RuntimeDefinition = Field(default_factory=RuntimeDefinition)
 
 
@@ -663,6 +685,7 @@ class DeclarativeViewDefinition(Model):
         "scatter",
         "heatmap",
         "radar",
+        "map",
         "table",
         "perspective",
         "markdown",
@@ -680,6 +703,12 @@ class DeclarativeViewDefinition(Model):
     series: str | None = None
     color: str | None = None
     size: str | None = None
+    mark: Literal["point", "region"] | None = None
+    longitude: str | None = None
+    latitude: str | None = None
+    geojson: StableId | None = None
+    data_key: str | None = None
+    feature_key: str | None = None
     columns: list[str] = Field(default_factory=list)
     aggregate: Literal["sum", "mean", "min", "max", "count", "none"] | None = None
     sort: str | None = None
@@ -721,6 +750,7 @@ class DashboardDefinition(Model):
     context: dict[str, Any] = Field(default_factory=dict)
     assumptions: list[str] = Field(default_factory=list)
     adapters: dict[StableId, StableId] = Field(default_factory=dict)
+    assets: list[StableId] = Field(default_factory=list)
     parameter_domains: list[str | dict[str, Any]] = Field(default_factory=list)
     query_parameters: list[QueryParameterDefinition] = Field(default_factory=list)
     controls: list[ScopedControlDefinition] = Field(default_factory=list)
@@ -973,6 +1003,8 @@ class FileSourceDefinition(_SourceDefinition):
     def require_known_file_format(self):
         if self.format is not None:
             return self
+        if self.path.startswith("asset:"):
+            raise ValueError("File Source using asset:<id> must declare format explicitly")
         suffix = self.path.rsplit(".", 1)[-1].lower() if "." in self.path else ""
         supported = {"csv", "txt", "parquet", "pq", "json", "jsonl", "xlsx", "xls"}
         if suffix not in supported:
@@ -983,6 +1015,8 @@ class FileSourceDefinition(_SourceDefinition):
 
     @model_validator(mode="after")
     def require_single_table_output(self):
+        if self.path.startswith("asset:") and self.adapter is not None:
+            raise ValueError("File Source asset:<id> cannot also declare an adapter")
         if set(self.outputs) != {"main"} or self.outputs["main"].kind != "table":
             raise ValueError("File Source outputs must be exactly main: {kind: table}")
         return self

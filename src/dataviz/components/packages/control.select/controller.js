@@ -90,7 +90,7 @@
     mount.replaceChildren(picker);
 
     const overlay = api.floating(picker, trigger, panel, {
-      width: Number(control.dataset.overlayWidth || 440),
+      width: Number(control.dataset.overlayWidth || 680),
       focus: search,
       onOpen: () => sync(),
     });
@@ -145,6 +145,7 @@
       copy.append(label);
       const group = api.optionGroup(option);
       const detail = option.dataset.description;
+      button.title = [option.textContent, group, detail].filter(Boolean).join('\n');
       if (group || detail) {
         const meta = document.createElement('small');
         meta.textContent = [group, detail].filter(Boolean).join(' · ');
@@ -251,11 +252,14 @@
         searchableCount,
         Math.max(0, Number(control.dataset.searchThreshold || 9)),
       );
-      virtual = enabledByMode(
-        control.dataset.virtualMode || 'auto',
-        allOptions.length,
-        Math.max(1, Number(control.dataset.virtualThreshold || 200)),
-      );
+      // A remote lookup already bounds the DOM to one server page. Keep those
+      // rows variable-height so long business labels can wrap without breaking
+      // fixed-row virtual scroll geometry.
+      virtual = !remoteOptions && enabledByMode(
+          control.dataset.virtualMode || 'auto',
+          allOptions.length,
+          Math.max(1, Number(control.dataset.virtualThreshold || 200)),
+        );
       search.hidden = !searchEnabled;
       if (!searchEnabled) search.value = '';
       const query = search.value.trim().toLocaleLowerCase();
@@ -306,10 +310,15 @@
       else if (['Enter', ' '].includes(event.key)) { event.preventDefault(); choose(active); return; }
       else return;
       event.preventDefault();
-      const top = active * rowHeight;
-      if (top < viewport.scrollTop) viewport.scrollTop = top;
-      else if (top + rowHeight > viewport.scrollTop + viewport.clientHeight) viewport.scrollTop = top + rowHeight - viewport.clientHeight;
+      if (virtual) {
+        const top = active * rowHeight;
+        if (top < viewport.scrollTop) viewport.scrollTop = top;
+        else if (top + rowHeight > viewport.scrollTop + viewport.clientHeight) viewport.scrollTop = top + rowHeight - viewport.clientHeight;
+      }
       render();
+      if (!virtual) {
+        rows.querySelectorAll('.dv-choice-option')[active]?.scrollIntoView({block:'nearest'});
+      }
     });
     all.addEventListener('click', () => {
       if (!input.multiple || input.disabled) return;

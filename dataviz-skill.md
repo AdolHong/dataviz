@@ -24,7 +24,7 @@ Do not load the entire Runtime architecture by default. Do not create a new Sour
 ## Operating principles
 
 - Treat the installed CLI, generated schemas, and Component Registry as the current source of truth. Do not recall fields or commands from an older Dataviz release.
-- Prefer reuse over duplication: discover an existing Output, understand its contract, then run it.
+- Prefer semantic reuse over duplicated business definitions: discover an existing Output, understand its contract, then run it. Keep ordinary business SQL Dashboard-local; share only stable static Workspace Assets and genuinely common Parameter Domains.
 - Prove `Source → Named Output` before spending time on chart options, CSS, or custom rendering.
 - Keep query logic, interactive computation, rendering, and presentation in their respective layers.
 - Run an expensive computation once. Use its immutable `result_id` for inspection, pagination, export, report generation, and Evidence.
@@ -52,10 +52,15 @@ dataviz docs --task custom-renderer --format json
 dataviz docs --task cascading-selection --format json
 dataviz docs --task view-filter --format json
 dataviz docs --task browser-compute --format json
+dataviz docs --task map-view --format json
+dataviz docs --task entity-select --format json
 ```
 
 - Use `interactive` only when a post-query Control must filter inputs, provide a calculation value, or produce a Derived Output.
+- Use `dataviz docs query-parameters --format json` for query-time SQL-backed choices or Parameter Domain cascades. The `cascading-selection` task is specifically for post-query Control candidate cascades over an already loaded Base Output.
 - Use `custom-renderer` only when built-in Views plus Plotly trace/layout/config overrides cannot express the required behavior.
+- Use `map-view` for native longitude/latitude points or values joined to an allowlisted local GeoJSON Asset; do not begin with Custom Renderer code.
+- Use `entity-select` for a searchable large Query Parameter catalog; it scaffolds existing Domain/select/filter contracts and does not create an Entity Runtime.
 - When a component is already known, route directly with `dataviz docs --component <component-id> --format json`.
 
 ### Existing Dashboard
@@ -170,9 +175,35 @@ After the analytical choice:
 3. Use `context.charts.plotly` in a Custom Renderer only for functions, imperative events, or lifecycle behavior that cannot remain declarative.
 4. Use the official Plotly Gallery and source examples as implementation references, not as the ontology for choosing a chart.
 
-For a Plotly View bound to a writable Control, a completed box or lasso gesture commits the selection and then removes only its temporary outline. The active tool remains available for consecutive gestures; clicking that active tool again exits selection mode without clearing the committed Control state.
-
 Keep one Section focused on one analytical question. Titles should name the subject; descriptions should explain the metric, comparison, or how to read the result—not repeat implementation IDs.
+
+### Native geographic analysis
+
+Use a map only when geographic position or region shape changes the judgment. Prefer Bar or Table for precise regional ranking.
+
+```yaml
+# Point locations
+- id: stores
+  template: map
+  mark: point
+  input: source:stores/main
+  longitude: longitude
+  latitude: latitude
+  label: store_name
+
+# GeoJSON regions; china-city must be registered in workspace.yaml and allowlisted in dashboard.assets
+- id: city-sales
+  template: map
+  mark: region
+  input: source:city-sales/main
+  geojson: china-city
+  data_key: city_code
+  feature_key: properties.adcode
+  color: revenue
+  label: city_name
+```
+
+Keep one row per region key before rendering. Point coordinates must be finite; region data keys and GeoJSON feature keys must be unique and joinable. Use `options.trace`, `options.layout`, and `config` for Plotly styling. Read `dataviz docs maps --format json` before using Custom Renderer code.
 
 ## Reuse existing Dashboard knowledge
 
@@ -262,15 +293,21 @@ Use an Analysis Overlay only for an explicitly temporary experiment that substit
 
 - Query Parameters change query identity; Controls own post-query typed state. Each View or Interactive Transform declares whether it consumes that state as a filter or a value. Do not substitute one lifecycle for the other merely for UI convenience.
 - When a Query Parameter needs SQL-backed choices, define one Parameter Domain relation and project stable `value_field` / `label_field` pairs from it. Do not use a normal Source or Interactive Transform to populate Query Parameter options.
+- For a large searchable entity catalog, start with `dataviz scaffold query-parameter.entity-select --id <parameter> --format json`. The Recipe composes the existing Parameter Domain, Domain-backed `multiple_select`, search metadata, and Source `query_filters`; it does not introduce a new parameter type.
 - SQL Domains are always Server-side Workspace shared materializations. Browser Pickers use Lookup search, generation-bound cursor pagination, and local predicates over one immutable generation; they never receive the raw relation or rerun SQL for each parent edit.
-- Reuse an explicit `workspace:/parameter_domains/...` asset when several Dashboards share one catalog. Sharing requires the same definition/code hash, Adapter identity, and visibility scope; never merge unrelated Domains merely because SQL text happens to match.
+- Reuse an explicit `workspace:/parameter_domains/...` Workspace Parameter Domain when several Dashboards share one candidate catalog. It is not a Workspace Asset. Sharing requires the same definition/code hash, Adapter identity, and visibility scope; never merge unrelated Domains merely because SQL text happens to match.
 - Candidate discovery is optional for AI. Use `dataviz parameters prewarm`, `status`, `lookup`, or `refresh` only when candidate exploration is useful. If the value is known, pass canonical Query Parameter state directly to `dataviz run`; Run neither builds nor validates against the UI candidate catalog.
 - Candidate-backed `multiple_select` uses `all/include/exclude/none`. `all` and `none` carry no operands; `include` and `exclude` carry only finite operands. Never expand All into every candidate, invent an `ALL` member, or serialize 99,999 included values after excluding one item.
 - A Source may consume `selection`, finite `value` operands, `active`, or complete `state`. Prefer `query_filters` plus `{{ dataviz_filter:<name> }}` for ordinary SQL predicates. Declare `empty: passthrough` when an empty `multiple_input` or candidate `multiple_select` `none` means no SQL restriction; use `empty: match_none` when it means zero rows. `all` always compiles to `TRUE`, include/exclude to parameterized `IN/NOT IN`. Never hand-expand either form or invent an `ALL` sentinel.
 - For a searchable Item picker whose blank state means “do not filter,” use a Domain-backed `multiple_select` with `default: {mode: none}`, `clearable: true`, and a Source `query_filters` binding with `empty: passthrough`. Lookup remains paged and Server-side; the canonical state stores only finite selected Items. Do not relabel `none` as `all` or add an `item_active` workaround.
 - Treat the last successful Query's canonical Query Parameter state as one committed snapshot. Query Panel Revert restores it through the dependency topology without running Query; a committed operand missing from the latest generation remains visible as unavailable because a Domain is not a Source whitelist.
 - One materialized relation may project Division, Category, Subcategory, Item, or several independent lists. `depends_on` filters the materialized relation and never triggers a remote SQL query: a `single_select` parent is one inclusive scalar, while a `multiple_select` parent uses `all/include/exclude/none`. Omit `depends_on` when lists should not cascade.
-- Use `dataviz bundle <workspace> <dashboard> <destination>` when moving one Dashboard across Workspaces. It copies the shared Domain definition/SQL closure and a non-sensitive binding manifest, but never `.dataviz` materializations or credentials.
+- Use `dataviz bundle <workspace> <dashboard> <destination>` to create a new standalone Workspace snapshot. The destination must be absent or empty; Bundle never imports into, merges with, synchronizes, or overwrites an existing Workspace.
+- Bundle copies the referenced shared Domain definition/SQL, Workspace Asset and non-sensitive binding closure, but never unrelated files, `.dataviz` materializations or credentials. The copied resources are private snapshot dependencies and no longer track the source Workspace.
+- Keep ordinary SQL and files Dashboard-local by default. Share only stable Workspace Assets and genuinely common Parameter Domains; do not create generic shared Sources, Transforms, Views, or business SQL merely to remove small duplication.
+- Keep files used by only one Dashboard inside that Dashboard. When GeoJSON, dictionaries, images, or static data must be shared, register them once under `workspace.yaml: assets`. Registration is private: add an ID to `dashboard.yaml: assets` only when browser code must read it through `context.assets`; a File Source may independently use `path: asset:<id>` with an explicit format.
+- Custom Renderers use `await context.assets.json|text|bytes|blob|url(<id>)`. Do not branch on Server versus HTML transport: Server uses a safe ETag URL, while portable HTML inlines the same declared dependency. Read `dataviz docs workspace-assets --format json` before adding a shared file.
+- Never use `../../`, absolute Downloads paths, remote URLs, or Parameter Domain as a generic file-sharing workaround. `inspect context` exposes only referenced Asset metadata, and `dataviz bundle` copies only the actual Browser/File Source closure into a fresh snapshot.
 - Sources are the only external data entry. Server Dataset Transforms create Base Outputs; Interactive Transforms create Derived Outputs.
 - Renderers consume Named Outputs and View descriptors. Do not put SQL, model inference, or reusable business calculations in Presentation JavaScript.
 - Use Plotly as the author chart interface and the default TanStack-based Table for tabular presentation. Do not introduce another chart/table stack casually.

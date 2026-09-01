@@ -10,17 +10,20 @@
 | --- | --- | --- |
 | 数据执行架构 | 核心语义与 P0 跨 Runtime 一致性已完成 | Query DAG、Interactive DAG、Control/View 影响关系、Named Output、状态隔离和导出边界已经进入版本化 Dependency Contract；共享 conformance corpus 证明 Python、Canvas 与 Web Component 对 P0 契约的相同解释。 |
 | Control 与 Linked Views | P1-A/P1-D 已完成 | `{value, revision, intent?}` 是 canonical Control state，View gesture 与 Header 都只是 typed action producer；Server/Portable 共用托管于 Canvas 的唯一 ControlRuntime。一个 Control 可由多个经 Compiler 校验的 View writer edge 写入，action/rejection/applied evidence 保留 source View。 |
-| Input State / Consumer Binding | v14/v11/v10 迁移与 conformance 已完成 | Query Parameter 使用 compact `all/include/exclude/none` state；Control 保留 `{value, revision, intent?}`。两者共用 typed value contract，但保持独立生命周期；projection、零边界、typed comparison、canonical signature、generation-start evidence、writer provenance 与 consumer revision 已由共享 fixtures/浏览器回归固定。 |
-| Layout 与最终配置 | 已完成 | Dashboard v14 拥有结构；Layout Contract v1、Semantic Validation、`inspect layout`、Server、HTML 与 AI context 使用同一编译结果。 |
-| Renderer 与组件 | 当前范围已完成 | Plotly 是唯一作者图表接口；普通 Table 使用 TanStack Table Core；Perspective 只用于终端用户现场多维探索；21 个 Component Package 均为 package-owned。 |
+| Input State / Consumer Binding | v16/v11/v12 当前契约与 conformance 已完成 | Query Parameter 使用 compact `all/include/exclude/none` state；Control 保留 `{value, revision, intent?}`。两者共用 typed value contract，但保持独立生命周期；projection、零边界、typed comparison、canonical signature、generation-start evidence、writer provenance 与 consumer revision 已由共享 fixtures/浏览器回归固定。 |
+| Layout 与最终配置 | 已完成 | Dashboard v16 拥有结构；Layout Contract v1、Semantic Validation、`inspect layout`、Server、HTML 与 AI context 使用同一编译结果。 |
+| Renderer 与组件 | P5 当前范围已完成 | Plotly 是唯一作者图表接口，原生 Map 覆盖点位与 GeoJSON 区域；普通 Table 使用 TanStack Table Core；Perspective 只用于终端用户现场多维探索；21 个 Component Package 均为 package-owned。 |
 | AI Analysis Plane | 当前范围已完成 | `catalog → run → result → evidence`、物理 Target Reference、不可变 Result、Overlay、Evidence 与 Promote dry-run 已落地。 |
 | AI 开发效率评测 | 工具完成，真实试验暂缓 | 维护者评测工具已与正式产品隔离；没有真实成对试验前不发布 Token 或效率结论。 |
 | 规模与浏览器可靠性 | 当前范围已完成 | 固定 10K/100K/1M 基准和三浏览器契约矩阵已有可复现证据；快速迭代发布默认执行 Chromium 全套，稳定发布、跨浏览器敏感变更或明确要求时再执行 Firefox/WebKit。 |
 | Query Parameter 与 Domain | P3 已完成并随 0.17.0 封版 | SQL Domain 统一形成 Server 共享 immutable materialization，Browser 只走 Lookup 搜索/分页；候选多选使用紧凑 `all/include/exclude/none`，Source 消费规范 state/projection 或受限 SQL filter token，Result/HTML 不携带候选全集。 |
+| Workspace 共享文件 | P4 已完成，进入 0.19.0 | Workspace Asset 注册共享静态文件；Dashboard Browser allowlist 与 File Source `asset:<id>` 独立；Server/portable HTML 共用 `context.assets`，Bundle 复制实际依赖闭包，AI context 只含元数据。 |
+| Bundle 独立快照 | P4.1 已完成，进入 0.19.1 | Bundle 只写入新目录或空目录；staging 完整校验后一次发布，不复用、合并、同步或覆盖已有 Workspace。 |
+| 业务看板最短路径 | P5 已完成 | 原生 Map View 消除常见地图需求对 Custom Renderer/JS/CSS 的依赖；Entity Select Scaffold 组合现有 Parameter Domain、Query Parameter 与 `query_filters`，没有新增 Runtime 状态模型。 |
 | Compiler 与应用边界 | P1-B/P1-C 已完成 | `LoadedDashboard` 继续分别持有和缓存三份 canonical lazy Contract；Contract 间已有 derivation dependency 保持显式、单向。`dependencies.py` 已按语义提取私有 derivation 函数，没有增加 owner/wrapper/phase class；`RunRequest → run_analysis() → canonical AnalysisResult` 复用现有 Catalog resolver 与 `AnalysisResultStore`，没有增加 Runner class。 |
-| 当前发行基线 | 0.18.0 已封版 | Source v5 空集合筛选策略、Parameter Lookup 标量父状态与级联失效候选协调已落地；Query Parameter 紧凑集合、共享候选物化、搜索/分页 Lookup 和 Dashboard Bundle 保持稳定。 |
+| 当前发行基线 | 0.19.1 封版 | Bundle 独立快照、非浏览器全套、静态门禁与发行归档已完成；按本次要求未运行浏览器测试。 |
 
-当前开发基线：Package `0.18.0`、Python 3.11–3.14、`dataviz/dashboard/v14`、`dataviz/parameter-domain/v2`、`dataviz/parameter-domain-contract/v3`、`dataviz/parameter-lookup/v1`、`dataviz/parameter-materialization/v1`、`dataviz/dashboard-bundle/v1`、`dataviz/presentation/v2`、`dataviz/source/v5`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v11`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v5`、`dataviz/runtime/v10`、`dataviz/analysis-result/v4`、`dataviz/analysis-evidence/v4`、Component Registry `5.6.0`。当前 0.x Runtime 是 exact-current、同 package lockstep，没有 capability negotiation。P3 已按 P0.0 决策一次迁移 authoring、private wire 与 persisted Result/Evidence；以后缩小合法 Output 声明、改变持久化 shape 或 public wire 仍必须分别判断版本，不能被“bugfix 不升版”笼统覆盖。
+当前开发基线：Package `0.19.1`、Python 3.11–3.14、`dataviz/workspace/v2`、`dataviz/dashboard/v16`、`dataviz/parameter-domain/v2`、`dataviz/parameter-domain-contract/v3`、`dataviz/parameter-lookup/v1`、`dataviz/parameter-materialization/v1`、`dataviz/dashboard-bundle/v2`、`dataviz/report-manifest/v3`、`dataviz/presentation/v2`、`dataviz/source/v6`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v11`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v5`、`dataviz/runtime/v12`、`dataviz/analysis-result/v4`、`dataviz/analysis-evidence/v4`、Component Registry `5.8.0`。当前 0.x Runtime 是 exact-current、同 package lockstep，没有 capability negotiation。P3/P4 已按 P0.0 决策迁移各自 authoring、private wire 与 portable/persisted 边界；以后缩小合法 Output 声明、改变持久化 shape 或 public wire 仍必须分别判断版本，不能被“bugfix 不升版”笼统覆盖。
 
 ## 当前优先级
 
@@ -203,7 +206,7 @@ P1 在 P0 与 typed comparison 决策之后调整内部边界，目标是让强�
 - [x] 请求只含 Domain/consumer、父 canonical states、search、limit、opaque cursor 和有限 selected operands；response 在一个 pinned generation 中返回 items、selected_items、exact total、next_cursor 与 freshness。
 - [x] 父 `depends_on` 将 `single_select` canonical 标量编译为单值 include，将 `multiple_select` 的 all/include/exclude/none 编译为本地物化 predicate，再做 consumer value/label/metadata distinct；父编辑、搜索和翻页都不执行远端 Domain SQL。
 - [x] 搜索固定 NFKC/casefold、空白 token AND 与 exact/prefix/keywords/substring 排序；拼音和别名只来自 `keywords_field`，不提供 regex、任意 SQL 或模型搜索。
-- [x] cursor 绑定 generation 和稳定 sort tuple；generation/search/parent 改变会取消旧请求并从第一页开始，迟到页不得覆盖新状态。默认 50、上限 100，不提供含糊的“当前页全选”。
+- [x] cursor 绑定 generation 和稳定 sort tuple；generation/search/parent 改变会取消旧请求并从第一页开始，迟到页不得覆盖新状态。Browser 每页 500，CLI 默认 50，统一上限 500；不提供含糊的“当前页全选”。
 - [x] 已选 operands 与当前页分离；补标签和 unavailable 只处理有限 operands。父级变化协调 include/exclude 有效交集，Revert 原样恢复 committed operands；翻页、搜索和 refresh 不丢失选择。数量摘要由 total 与 compact state 推导，不展开 Tag。
 
 #### P3.4 Source binding、Result 与可搬运性
@@ -212,7 +215,7 @@ P1 在 P0 与 typed comparison 决策之后调整内部边界，目标是让强�
 - [x] Source v5 的受限 `{{ dataviz_filter:name }}` SQL token 与 `query_filters` 为 all/include/exclude 生成参数化 TRUE/IN/NOT IN，并要求每个 consumer 用 `empty: passthrough|match_none` 明确把空 `multiple_input` 或 `multiple_select none` 映射为 TRUE/FALSE；不是通用 Jinja。高级作者仍可显式消费 selection/value。
 - [x] `dataviz run` 支持直接传 canonical state 且不隐式物化候选；Catalog/describe 一次展示 default、selection contract、Domain、父依赖和所需 Source projection。
 - [x] Result/Evidence/URL/checkpoint/分享/HTML 只保存 compact state；all/none 无 operands，include/exclude 只保存有限 operands。分享/HTML 继续锁定参数，不嵌入 SQL、Parquet、候选页、搜索词或 cursor。
-- [x] portable Dashboard bundle 复制共享 Domain definition/SQL 与非敏感 binding manifest，默认不复制 `.dataviz` materialization 或凭据；同 id/hash 复用、同 id/不同 hash 失败。
+- [x] portable Dashboard bundle 复制共享 Domain definition/SQL 与非敏感 binding manifest，默认不复制 `.dataviz` materialization 或凭据；0.19.1 起只创建新/空目标的独立快照，不再复用或合并已有 Workspace。
 
 #### P3.5 验收与文档迁移
 
@@ -224,6 +227,56 @@ P1 在 P0 与 typed comparison 决策之后调整内部边界，目标是让强�
 
 - [x] Lasso Select 与 Box Select 进入选择模式后，各自都允许再次点击当前已激活的工具退出并恢复普通查看模式；退出只取消工具激活态，保留已有选区，不隐式触发 `clear` / `reset`。Server 与 portable HTML 已覆盖真实工具栏点击回归。
 - [x] `documentation.py`、`dataviz-skill.md`、product architecture、Scaffold、schemas、examples 和错误建议已统一到当前 P3 契约，旧候选双路径只保留在明确的迁移 change record 中。
+
+### P4：Workspace Asset 与单 Dashboard 可搬运闭包（已完成）
+
+- [x] Workspace v2 注册稳定 Asset ID、相对路径与 MIME；Loader/validate 拒绝缺失文件、绝对路径和 Workspace 逃逸。注册本身不构成 Browser 公开。
+- [x] Dashboard v16 以 `assets` 作为 Browser allowlist；Source v6 的 File Source 可独立读取 `asset:<id>` 且必须显式声明 format。两条引用只共享文件身份，不互相隐式授权。
+- [x] Runtime v12 提供 `context.assets.list/describe/bytes/text/json/blob/url`；Server 使用 Dashboard-scoped URL、ETag 与 MIME，portable HTML 使用 UTF-8/base64 inline，同一 Renderer 不判断 transport。
+- [x] Dashboard Bundle v2 计算 Browser Assets、File Source Assets 与共享 Parameter Domain 的联合闭包；复制被引用定义/文件，不复制无关文件、凭据或 `.dataviz`。0.19.1 的 P4.1 进一步禁止非空目标与增量复用。
+- [x] Report Manifest v3 记录 Asset path-independent hash/size/MIME；`inspect context` 只投影当前依赖 Asset 元数据，不读取内容进入 AI context。
+- [x] 契约、Server route、File Source、report/bundle、hot reload 与 Server/portable Browser parity 均有回归；0.19.0 完整发布门禁见本次发行记录。
+
+### P4.1：Bundle 独立快照收口（0.19.1）
+
+- [x] `dataviz bundle` 只接受不存在或为空的目标目录；普通文件、非空目录和源 Workspace 自身均稳定失败，不读取目标内容做复用或合并。
+- [x] 在目标同级临时目录构建完整 Workspace、Dashboard、共享 Parameter Domain、Workspace Asset 与 Manifest；全部复制、hash 和来源稳定性校验通过后才一次发布。
+- [x] Bundle 是单向、自包含快照，不是 import、merge、sync 或 package manager；输出不修改源 Workspace，也不能覆盖已有 SQL、Asset、Dashboard 或其他用户文件。
+- [x] Dashboard-local 是普通 SQL/文件默认所有权；共享能力只保留 Workspace Asset 与 Workspace Parameter Domain，不扩展为通用 Shared Source/Transform/View/SQL。
+- [x] 回归覆盖空目录成功、非空目录拒绝、旧 Bundle 无法覆盖新 SQL、复制期间来源变化失败且不发布 partial destination、闭包独立运行和凭据/缓存排除。
+- [x] `DESIGN.md`、内置 docs、`dataviz-skill.md`、架构文档、CLI help 与 Changelog 使用一致术语；0.19.1 只运行非浏览器和静态门禁后构建 wheel/sdist/ZIP。
+
+### P5：原生地图表达与实体选择最短路径
+
+目标：让“按经纬度展示点位”“按 GeoJSON 行政区着色”和“搜索并选择十万级 Item”不再要求普通 Dashboard 作者编写 Custom Renderer 或重复拼接一组低层契约。P5 复用当前 Plotly、Workspace Asset、Parameter Domain、compact selection、Control writer 与 Renderer lifecycle，不建立第二套地图引擎、候选状态或共享数据执行模型。
+
+#### P5.0 契约与版本门禁
+
+- [x] 用真实 `map-lab` 同时固定门店点位与行政区指标、离线 GeoJSON、跨 View 选择写回和 Server/portable parity；原生 View 不需要 Dashboard 自带 JS/CSS/Renderer。
+- [x] 按 P0.0 将作者契约升为 Dashboard v16、Runtime v12、Component Registry 5.8.0；Dependency/Result/Evidence/Transform shape 未变，因此不机械升版。
+- [x] 地图文档只在地理位置本身参与分析问题时推荐 Map；普通分类比较仍优先 Bar/Table。
+
+#### P5.1 原生 Map View
+
+- [x] 第一版只支持 `mark: point | region`：point 映射 longitude/latitude，可选 label/color/size；region 通过 Dashboard 已声明的 Workspace GeoJSON Asset，把 `data_key` 与 `feature_key` 连接并映射 label/color。
+- [x] 复用唯一 Plotly Chart Service 和现有 View `options.trace / options.layout / config` 逃生口；没有引入第二套图表包、地图 DSL、远程瓦片依赖或 Python Plotly。
+- [x] point 不强制 GeoJSON；region 的 GeoJSON 来自 Workspace Asset 并进入 Browser allowlist、Bundle、Report Manifest 与 portable HTML 依赖闭包。第一版不支持远程 URL、在线 token、多图层编辑、轨迹、聚合或 GIS 运算。
+- [x] 复用 View lifecycle、Theme、Resize、Empty/Error、tooltip、HTML Export 与 dispose；地图点击/框选只通过现有 `control_binding` writer edge 提交 typed action，没有 map-specific selection state。
+- [x] 静态 `validate` 拒绝缺少字段声明和未暴露 Asset；查询完成后 Renderer 在绘图前拒绝非有限坐标、重复数据/feature key 和无法连接的 key。Server 与 portable HTML 使用同一 Renderer 和本地资产。
+
+#### P5.2 Entity Select Scaffold，不新增 Entity Runtime
+
+- [x] 新增 `dataviz scaffold query-parameter.entity-select`，生成现有 Parameter Domain、Domain-backed `multiple_select`、value/label/keywords/metadata 投影和 Source `query_filters` 示例。
+- [x] 默认示例面向十万级 Item：Server Lookup 搜索/opaque cursor 分页，`default: {mode: none}`、`clearable: true`、`empty: passthrough`；空选择表示不筛选，有限 include 表示只筛选所选 Item，Browser/Result/HTML 不展开候选全集。
+- [x] Recipe 只生成当前严格 Schema 的普通文件，没有新增 `entity_select` value type、状态协议、第二候选 Store 或自动业务合法性白名单。
+
+#### P5.3 渐进文档与诊断降噪
+
+- [x] 增加 `map-view` / `entity-select` focused task、`maps` / `entity-selection` docs 与 Skill 最短路径；完整 Plotly、Workspace Asset 和 Parameter Domain 契约按需展开。
+- [x] 删除对所有旧式/私有 Output 一概提示 semantics 的 advice；public/reviewed/certified SQL 的确定性风险仍保留。
+- [x] strict validate、严格 Scaffold、Plotly/Asset 生成资产、真实 Chromium Server/portable 地图 parity 与相关 Chart/Table/Parameter Domain 非回归通过；本次没有跨浏览器 CSS/交互风险，Firefox/WebKit 不作为 P5 开发门禁。
+
+P5 明确非目标：Workspace 级共享 Source、Transform、View 或业务 SQL。跨 Dashboard 复用仍分别使用 Catalog Output、Workspace Asset 与真正共用的 Workspace Parameter Domain；普通 SQL 保持 Dashboard-local，允许少量复制换取清晰所有权和安全 Bundle。
 
 默认价值顺序如下；顺序不等于人为串联的技术依赖：
 
@@ -237,6 +290,8 @@ P1 在 P0 与 typed comparison 决策之后调整内部边界，目标是让强�
 | 6 | P1-B：`dependencies.py` 内部模块化（已完成） | v10/v1/Manifest/ExecutionPlan/Catalog/inspect/diagnostics exact characterization 已落地；无协议升级或 consumer 迁移 |
 | 7 | P2：当前协议版本与 Analysis producer 门禁（已完成） | `protocols.py` 单一映射、静态文档回归和严格 producer 已落地 |
 | 8 | P3：Query Parameter 紧凑集合与共享物化候选（已完成） | v14/v2/v3/v1 协议迁移、Store、Lookup、Source binding、bundle、UI、完整测试与发行包验证已落地 |
+| 9 | P4：Workspace Asset（已完成） | v2/v15/v6/v11、Bundle v2、Report Manifest v3 与 Browser/portable parity 已落地 |
+| 10 | P5：原生 Map View + Entity Select Scaffold（已完成） | `map-lab` 的 point/region 两个真实 View 已删除 Custom Renderer 需求；复用 P3/P4/Plotly 现有 owner，不引入共享 Source 或第二状态模型 |
 
 P1-A、P1-B、P1-C、P1-D 已作为边界清楚的工作流分别完成；P1-B 只在 characterization expected 冻结后提取私有 derivation，没有迁移 consumer 或改变协议。P2 只增加 current-version 投影门禁与严格 producer，不改变 tolerant reader。P3 作为独立破坏式迁移删除了旧 Parameter Domain 双路径。任何后续删除协议、改变 Analysis reader 兼容性或重命名 public symbol 的决定仍必须先通过 P0.0 gate。
 
@@ -262,7 +317,7 @@ P1-A、P1-B、P1-C、P1-D 已作为边界清楚的工作流分别完成；P1-B �
 
 - 通用原始大表 View 的服务端分页或按需 Record Batch；P3 的 Parameter Lookup cursor 只读取共享候选物化，不自动扩张为任意 View/Output 分页框架。
 - Browser asset bytes 上传、远程 URL 抓取、Blob/data URL 持久化或通用 Binary Artifact materializer；P0 只要求能力矩阵和稳定 fail-fast，完整支持由真实 image/file Result/Share 需求触发，成功物化继续返回现有 `ArtifactDescriptor`。
-- `number-range`、month/quarter/year 日期控件、Transfer、Entity Picker 或 Drawer。
+- `number-range`、month/quarter/year 日期控件、Transfer、通用 Entity Picker Runtime 或 Drawer；P5 只提供组合现有契约的 Entity Select Scaffold。
 - 多套命名 Presentation、HTML Analysis Capsule、HTML Output 提取或远程分享链接分析。
 - 多进程共同写一个 Workspace、内建账号体系、多租户资源配额或不可信代码沙箱。
 - 自动 Apply Promote、自动 certified，或绕开人工审阅的知识写回。
@@ -273,6 +328,7 @@ P1-A、P1-B、P1-C、P1-D 已作为边界清楚的工作流分别完成；P1-B �
 - 可编辑数据逻辑、依赖、布局或样式的通用网页开发器；Mosaic、坐标布局和旧 Widget 协议。
 - 让 Python 直接操作 DOM 或成为第二套 View Renderer。
 - Interactive Transform 隐式访问 Adapter 或重新查询 Source。
+- Workspace 级共享 Source、Transform、View 或业务 SQL；稳定语义通过 Catalog Output 发现，静态文件通过 Workspace Asset 搬运，候选关系通过 Workspace Parameter Domain 复用，普通执行逻辑保持 Dashboard-local。
 - 为 Analysis Plane 复制 Dependency Contract、Query Executor、InteractionExecutor 或 Browser Runtime。
 - 让 AI 通过图像像素反推本可直接读取的 Base/Derived Output。
 - 在没有真实需求和证据前增加空接口、Runtime、图表引擎或重复组件。
@@ -285,7 +341,9 @@ P1-A、P1-B、P1-C、P1-D 已作为边界清楚的工作流分别完成；P1-B �
 
 Typed comparison 完成还必须证明：operator × `value_type` 的允许表、coercion、空值和稳定错误在 Python、Canvas 与 Web Component 完全一致；数值 `2/10`、日期边界、文本排序决策、boolean operator 与不可转换输入均有 fixture；类型只来自声明和可选静态 Schema 校验，不通过逐行数据猜测。任何可观察语义变化必须有单独版本决定。
 
-Query Parameter 与 Parameter Domain 完成还必须证明：static/SQL-materialized 之外没有第三条候选路径；SQL Domain 的远端查询只构建共享 immutable generation，父级、搜索和 cursor 分页都只读 pinned generation；`all/include/exclude/none` 在 Browser、Python、SQL filter、CLI、Result 与 HTML 一致；Reload/Revert、stale/hard expiry、失败回退、并发 lease、Server restart、visibility scope、reader pin/prune 和跨 Dashboard/tab 共享都有确定结果。浏览器只持有当前页与有限 operands，固定规模 benchmark 必须证明响应有界；`dataviz bundle` 只复制共享定义/SQL 与非敏感 binding manifest，不复制 `.dataviz` 或凭据。
+Query Parameter 与 Parameter Domain 完成还必须证明：static/SQL-materialized 之外没有第三条候选路径；SQL Domain 的远端查询只构建共享 immutable generation，父级、搜索和 cursor 分页都只读 pinned generation；`all/include/exclude/none` 在 Browser、Python、SQL filter、CLI、Result 与 HTML 一致；Reload/Revert、stale/hard expiry、失败回退、并发 lease、Server restart、visibility scope、reader pin/prune 和跨 Dashboard/tab 共享都有确定结果。浏览器只持有当前页与有限 operands，固定规模 benchmark 必须证明响应有界；`dataviz bundle` 只复制共享 Domain 定义/SQL、实际引用的 Workspace Asset 与非敏感 binding manifest，不复制 `.dataviz`、无关文件或凭据。
+
+Workspace Asset 完成还必须证明：注册与 Browser allowlist 分离；File Source `asset:<id>` 与 Browser service 不互相授权；所有路径保持在 Workspace 内；Server URL 与 portable inline 对同一 `context.assets` 调用返回等价 bytes/text/JSON；Bundle 闭包包含 Browser/File Source 引用并排除未引用文件；目标不存在/为空门禁、staging hash 校验、来源变化失败清理与一次发布确定；AI context、Report Manifest 与日志只包含元数据而不重复泄露内容。
 
 Control authority 收敛完成还必须证明：Server/Portable 使用同一个 ControlRuntime 实现；hello/restore/ready 不死锁且无 checkpoint 也能启动；Shell 只发送 typed action、保存最后确认 checkpoint 和显示所需 Header projection；只有 ControlRuntime 增加 Control revision，Server Python 不成为第二个 normalization reducer；普通连接采用“逐消息校验 identity”或“握手后绑定 MessageChannel port”中的一种；`consumer_revisions` 可由 Contract、Control state 与 applied revisions 重建且不能驱动执行；consumer 只在其启动时捕获的 generation 真正成功后推进；Result/Export 原子封存自包含的 `applied_control_state`。旧 frame、Contract mismatch、重复 action、stale version、迟到恢复与断连均有确定结果；没有 characterization 反例时，不以额外 transport sequence 或全量实时 audit graph 作为完成条件。
 

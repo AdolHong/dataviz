@@ -1,5 +1,5 @@
 // Owner: Runtime protocol, manifest normalization, and shared constants.
-const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v10';
+const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v12';
 const DATAVIZ_INTERACTIVE_WORKER_PROTOCOL = 'dataviz/interactive-worker/v1';
 const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v11';
 if (window.dataviz.protocol?.schema !== DATAVIZ_RUNTIME_PROTOCOL) {
@@ -740,7 +740,7 @@ const validateInteractiveOutput = (transformId, name, value, definition = {}) =>
 };
 // Owner: shared Runtime host state and public registration surface.
 const datavizRuntime = window.datavizRuntime = {
-  protocol: 'dataviz/runtime/v10',
+  protocol: 'dataviz/runtime/v12',
   transforms: new Map(),
   views: new Map(),
   renderers: new Map(),
@@ -3633,7 +3633,10 @@ document.addEventListener('click', event => {
     node_id:signal.dataset.viewPipelineNode,
   });
 });
-window.addEventListener('pagehide', () => datavizRuntime.dispose(), {once:true});
+window.addEventListener('pagehide', () => {
+  datavizAssets.dispose();
+  datavizRuntime.dispose();
+}, {once:true});
 Object.entries(window.dataviz.portable?.outputs || {}).forEach(([reference, value]) => {
   datavizRuntime.outputSignatures.set(
     canonicalOutputReference(reference),
@@ -3652,6 +3655,72 @@ window.dataviz.getViewControls = viewId => {
     contract.map(item => [item.id, datavizControlValue(item.key)])
   );
 };
+const datavizAssetRecords = Object.freeze({...window.dataviz.assets});
+const datavizAssetTextCache = new Map();
+const datavizAssetJsonCache = new Map();
+const datavizAssetBlobUrls = new Map();
+const datavizAssetRecord = identifier => {
+  const key = String(identifier || '');
+  const record = datavizAssetRecords[key];
+  if (!record) throw new Error(`Unknown Dashboard Asset: ${key}`);
+  return [key, record];
+};
+const datavizAssetBytes = async identifier => {
+  const [_key, record] = datavizAssetRecord(identifier);
+  if (record.transport === 'url') {
+    const response = await fetch(record.url, {credentials:'same-origin'});
+    if (!response.ok) throw new Error(`Dashboard Asset request failed: ${response.status}`);
+    return new Uint8Array(await response.arrayBuffer());
+  }
+  if (record.transport === 'text') return new TextEncoder().encode(record.content || '');
+  if (record.transport === 'base64') {
+    const binary = atob(record.content || '');
+    return Uint8Array.from(binary, value => value.charCodeAt(0));
+  }
+  throw new Error(`Unsupported Dashboard Asset transport: ${record.transport || 'missing'}`);
+};
+const datavizAssets = Object.freeze({
+  list:() => Object.keys(datavizAssetRecords),
+  describe:identifier => {
+    const [id, record] = datavizAssetRecord(identifier);
+    const {content:_content, url:_url, transport, ...metadata} = record;
+    return {id, transport, ...metadata};
+  },
+  bytes:datavizAssetBytes,
+  text:identifier => {
+    const [key, record] = datavizAssetRecord(identifier);
+    if (!datavizAssetTextCache.has(key)) {
+      datavizAssetTextCache.set(key, record.transport === 'text'
+        ? Promise.resolve(record.content || '')
+        : datavizAssetBytes(key).then(value => new TextDecoder().decode(value)));
+    }
+    return datavizAssetTextCache.get(key);
+  },
+  json:identifier => {
+    const [key] = datavizAssetRecord(identifier);
+    if (!datavizAssetJsonCache.has(key)) {
+      datavizAssetJsonCache.set(key, datavizAssets.text(key).then(JSON.parse));
+    }
+    return datavizAssetJsonCache.get(key);
+  },
+  blob:async identifier => {
+    const [_key, record] = datavizAssetRecord(identifier);
+    return new Blob([await datavizAssetBytes(identifier)], {type:record.media_type});
+  },
+  url:async identifier => {
+    const [key, record] = datavizAssetRecord(identifier);
+    if (record.transport === 'url') return record.url;
+    if (!datavizAssetBlobUrls.has(key)) {
+      datavizAssetBlobUrls.set(key, URL.createObjectURL(await datavizAssets.blob(key)));
+    }
+    return datavizAssetBlobUrls.get(key);
+  },
+  dispose:() => {
+    datavizAssetBlobUrls.forEach(value => URL.revokeObjectURL(value));
+    datavizAssetBlobUrls.clear();
+  },
+});
+window.dataviz.assets = datavizAssets;
 window.datavizRuntimeServices = Object.freeze({
   canonicalOutputReference,
   tableRows:datavizTableRows,
@@ -3660,6 +3729,7 @@ window.datavizRuntimeServices = Object.freeze({
   controlCanApply:datavizControlCanApply,
   controlMatches:datavizControlMatches,
   runtimeError:datavizRuntimeError,
+  assets:datavizAssets,
   escape:datavizEscape,
   decodeSpec:node => JSON.parse(new TextDecoder().decode(Uint8Array.from(
     atob(node.dataset.spec),

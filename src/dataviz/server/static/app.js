@@ -2127,7 +2127,7 @@ async function lookupQueryParameter(parameter, {
           parameter:parameter.id,
           parent_states:parentStates,
           search,
-          limit:50,
+          limit:500,
           cursor,
           selected:Array.isArray(stateEntry.value) ? stateEntry.value : [],
           refresh,
@@ -3809,6 +3809,7 @@ window.addEventListener('message', (event) => {
     return;
   }
   if (event.data?.type === 'dataviz:canvas-interaction') {
+    window.datavizComponents?.overlay.closeAll({group: 'data-entry'});
     closeHeaderPopovers();
     return;
   }

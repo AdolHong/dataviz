@@ -7,25 +7,26 @@
 ## 1. 版本边界
 
 ```text
-Workspace              dataviz/workspace/v1
-Dashboard              dataviz/dashboard/v14
+Workspace              dataviz/workspace/v2
+Dashboard              dataviz/dashboard/v16
 Parameter Domain       dataviz/parameter-domain/v2
 Parameter Domain Contract dataviz/parameter-domain-contract/v3
 Parameter Lookup       dataviz/parameter-lookup/v1
 Parameter Materialization dataviz/parameter-materialization/v1
 Presentation           dataviz/presentation/v2
-Source                 dataviz/source/v5
+Source                 dataviz/source/v6
 Dataset Transform      dataviz/dataset-transform/v3
 Interactive Transform  dataviz/interactive-transform/v4
 Dependency Contract    dataviz/dependency-contract/v11
 State Snapshot         dataviz/state-snapshot/v5
-Browser Runtime        dataviz/runtime/v10
+Browser Runtime        dataviz/runtime/v12
 Analysis Result        dataviz/analysis-result/v4
 Analysis Evidence      dataviz/analysis-evidence/v4
 Layout Contract        dataviz/layout-contract/v1
 Workspace Change       dataviz/workspace-change/v1
-Dashboard Bundle       dataviz/dashboard-bundle/v1
-Component Registry     5.6.0
+Dashboard Bundle       dataviz/dashboard-bundle/v2
+Report Manifest        dataviz/report-manifest/v3
+Component Registry     5.8.0
 ```
 
 这些契约独立版本化。Loader 只接受当前严格模型，不包含旧字段 alias、自动迁移或双协议执行分支。
@@ -35,6 +36,7 @@ Component Registry     5.6.0
 - 领域模型：`src/dataviz/workspace/models.py`
 - Workspace 公共加载 façade：`src/dataviz/workspace/loader.py`
 - Workspace 物理 owners：`src/dataviz/workspace/loading/`（parse/load、loaded snapshot、cross-file contract、asset validation、catalog/navigation）
+- Workspace 共享文件身份与安全解析：`src/dataviz/workspace/assets.py`
 - 机器可读 Schema：`src/dataviz/schema_docs.py`
 - CLI 内置手册：`src/dataviz/documentation.py`
 - 渐进 Authoring 路由与 Workspace Scaffold profiles：`src/dataviz/documentation.py`、`src/dataviz/authoring.py`
@@ -59,7 +61,7 @@ Named Output → View consumers
 
 `execution.plan`、`execution.interactive`、Loader 跨文件校验、Canvas、Server Pipeline、HTML manifest、Web Component Adapter、AI context 与 `dataviz inspect dependencies` 都只消费这份契约。不存在第二套按 Control 类型推断边的依赖图。
 
-P1-B 只模块化这份 canonical derivation 的内部实现：`compile_dashboard_dependencies()` 编排 Query/Interactive 图与 binding、Output/View 输入、Control writer/domain/impact、跨 Runtime invariant、reverse index 和 Query Parameter impact 等私有函数，最终仍只生成同一个 v10 Contract。`LoadedDashboard` 继续分别惰性持有 Dependency、Layout 与 Parameter Domain Contract；没有 `CompiledDashboard`、phase class、总编译 pass、中间 cache 或新版本轴。语言无关 characterization fixture 同时冻结 v10、Layout v1、Runtime Manifest、请求级 ExecutionPlan、Catalog/inspect 与关键 diagnostics；编译失败不会缓存 partial Runtime fact。
+P1-B 只模块化这份 canonical derivation 的内部实现：`compile_dashboard_dependencies()` 编排 Query/Interactive 图与 binding、Output/View 输入、Control writer/domain/impact、跨 Runtime invariant、reverse index 和 Query Parameter impact 等私有函数，最终仍只生成同一个 v11 Contract。`LoadedDashboard` 继续分别惰性持有 Dependency、Layout 与 Parameter Domain Contract；没有 `CompiledDashboard`、phase class、总编译 pass、中间 cache 或新版本轴。语言无关 characterization fixture 同时冻结 v11、Layout v1、Runtime Manifest、请求级 ExecutionPlan、Catalog/inspect 与关键 diagnostics；编译失败不会缓存 partial Runtime fact。
 
 编译结果还保存每个 Query Parameter 的最终影响闭包：需要重跑的 Query 节点、随后失效的 Interactive 分支、option Control、内容字段和 View。Control 则分别保存直接数据筛选、Interactive consumer、派生 View 与内容边，避免把“结构 scope”误说成“每次一定重绘”。
 
@@ -103,9 +105,9 @@ Query Run 固化每个 Query Parameter 的 canonical state 和 Base Output。sco
 
 网页动态候选位于 Query DAG 之前：`Parameter Domain SQL → Workspace shared immutable materialization → Server-local Lookup → Query Parameter draft → Query DAG`。SQL Domain 不按基数分叉，也不读取 Dashboard draft `query_inputs`；它由 definition/code hash、实际 Adapter identity 和 visibility scope 定位 generation，可跨 Dashboard、tab 和同可见范围用户复用。Browser 只持有当前页和有限已选 operands；搜索、generation-bound cursor 分页和 `depends_on` 父级 predicate 都读取同一 pinned Parquet generation，不重新执行远端 SQL。父 `single_select` 的 canonical 标量按单值 include 解释，父 `multiple_select` 使用 `all/include/exclude/none`。`refresh_after_seconds` 与 `expire_after_seconds` 分开控制 stale-while-revalidate 和 hard expiry；失败只禁用相关 Picker，不得阻断 Query、自由输入或 Workspace 导航。
 
-AI 可按需使用 `dataviz parameters prewarm|status|lookup|refresh` 探索同一物化；`dataviz run` 只消费调用方 state 或可独立解析的 default，绝不为了候选校验而隐式构建物化。Result、Evidence、URL/tab checkpoint、portable HTML 与分享缓存只封存紧凑 state：`all/none` 没有 operands，`include/exclude` 只保存有限 operands；它们不包含 Domain SQL、Parquet、候选页、search 或 cursor。跨 Workspace 搬运单个 Dashboard 使用 `dataviz bundle` 复制共享 Domain definition/SQL 与非敏感 binding manifest，默认不复制 `.dataviz` 或凭据。Parameter Domain 与 Canvas Interactive Runtime 没有执行边，不进入 browser-js 或 Renderer。
+AI 可按需使用 `dataviz parameters prewarm|status|lookup|refresh` 探索同一物化；`dataviz run` 只消费调用方 state 或可独立解析的 default，绝不为了候选校验而隐式构建物化。Result、Evidence、URL/tab checkpoint、portable HTML 与分享缓存只封存紧凑 state：`all/none` 没有 operands，`include/exclude` 只保存有限 operands；它们不包含 Domain SQL、Parquet、候选页、search 或 cursor。跨 Workspace 搬运单个 Dashboard 使用 `dataviz bundle` 在新目录或空目录创建独立快照，复制共享 Domain definition/SQL、实际引用的 Workspace Asset 与非敏感 binding manifest，默认不复制 `.dataviz`、无关文件或凭据；它不合并或覆盖已有 Workspace。Parameter Domain 与 Canvas Interactive Runtime 没有执行边，不进入 browser-js 或 Renderer。
 
-File、SQL、Python 是 Source 的三种入口。SQL 默认单次超时 120 秒，明确超时后立即额外重试一次；Source 可以覆盖 `timeout_seconds` 与 `timeout_retries`。SQL 面板保存参数化 statement、Resolved SQL、bound parameters、Adapter、耗时、重试和 hash 证据，但不公开凭证。
+File、SQL、Python 是 Source 的三种入口。Workspace v2 可注册共享静态文件；File Source v6 用 `asset:<id>` 读取时显式声明 format。Dashboard v16 的 Browser `assets` allowlist 与 Source 引用相互独立；Runtime v12 的 `context.assets` 在 Server URL 与 portable inline 之间保持同一 API。普通 SQL/文件默认属于 Dashboard；共享只用于稳定 Workspace Asset 与真正共用的 Parameter Domain。`dataviz bundle` 在 staging 中复制两类实际引用的联合闭包并校验 hash 后一次发布，输出不再跟踪源共享资源；`inspect context` 只投影 Asset 元数据。SQL 默认单次超时 120 秒，明确超时后立即额外重试一次；Source 可以覆盖 `timeout_seconds` 与 `timeout_retries`。SQL 面板保存参数化 statement、Resolved SQL、bound parameters、Adapter、耗时、重试和 hash 证据，但不公开凭证。
 
 Python Source 与 Dataset Transform 使用 fresh spawn 子进程，支持硬 timeout、cancel、progress、完整 traceback、声明依赖指纹、多输入和多 Named Output。`context.log(...)` 产生实时 `node_log`，并保存 `dataviz/execution-log/v1` Artifact；Artifact 受 tab session 隔离，Query 节点可在 Sources 证据面板直接检查。
 
@@ -174,7 +176,7 @@ not_run → queued → loading → ready | empty | error | cancelled | unavailab
 
 ## 6. Browser Runtime 与局部更新
 
-Server 与 HTML 共享 `dataviz/runtime/v10` Manifest、Named Output Store 和 Runtime Event。共享主机源码按 Manifest、Value Contract、Output Store、Interactive Scheduler、Control Binding、Renderer Lifecycle 与 bootstrap 分布在 `src/dataviz/server/runtime_src/`；`python tools/build_canvas_runtime.py` 确定性生成 Server 与 HTML 唯一加载的 `server/static/canvas-runtime.js`，`--check` 用于 CI/发布门禁。`runtime.control`、`data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 分别物理拥有输入协调、数据 Adapter、Renderer lifecycle、Section/Repeat 和 Presentation state，借 `dataviz:runtime-ready` 装配到主机，不在 Runtime 源码模块中保留第二份实现。命令式 Renderer 实例拥有其全部引擎资源；Perspective 的 Worker/Table/Viewer 不作为 Canvas 全局单例共享，实例释放时三者共同释放。异步引擎阶段具有有界终态，失败时进入结构化 Fallback/Error，而不是无限 Loading。
+Server 与 HTML 共享 `dataviz/runtime/v12` Manifest、Named Output Store 和 Runtime Event。共享主机源码按 Manifest、Value Contract、Output Store、Interactive Scheduler、Control Binding、Renderer Lifecycle 与 bootstrap 分布在 `src/dataviz/server/runtime_src/`；`python tools/build_canvas_runtime.py` 确定性生成 Server 与 HTML 唯一加载的 `server/static/canvas-runtime.js`，`--check` 用于 CI/发布门禁。`runtime.control`、`data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 分别物理拥有输入协调、数据 Adapter、Renderer lifecycle、Section/Repeat 和 Presentation state，借 `dataviz:runtime-ready` 装配到主机，不在 Runtime 源码模块中保留第二份实现。命令式 Renderer 实例拥有其全部引擎资源；Perspective 的 Worker/Table/Viewer 不作为 Canvas 全局单例共享，实例释放时三者共同释放。异步引擎阶段具有有界终态，失败时进入结构化 Fallback/Error，而不是无限 Loading。
 
 Server Header 中的 `Pipeline` 面板同时展示 Query 节点与 Interactive Transform。Query 状态来自 Run SSE；Browser Interactive 状态通过当前 iframe 的 `dataviz:interactive-status` 消息回传，并同时校验 dashboard/run/frame identity，避免跨 Dashboard 或旧 frame 污染状态。
 
@@ -252,7 +254,7 @@ Server 状态以浏览器 tab 的 `session_id` 为边界。不同 tab、Dashboar
 
 ## 9. Component 与 Presentation
 
-页面结构由 `LoadedDashboard.layout_contract` 以并发安全方式惰性编译为唯一 `dataviz/layout-contract/v1`。当前 Dashboard v14 拥有 Section/View 顺序、模板、columns、span 和全局 gap；Presentation v2 只拥有 Theme、容器外观、Data Entry Component、visual renderer options 与资产。默认 Renderer、Server API、HTML manifest、AI context 和 validate 都消费这份 Contract。Custom Canvas 只公开稳定 Section/View mount points，不伪造任意 CSS 的静态网格。
+页面结构由 `LoadedDashboard.layout_contract` 以并发安全方式惰性编译为唯一 `dataviz/layout-contract/v1`。当前 Dashboard v16 拥有 Section/View 顺序、模板、columns、span 和全局 gap；Presentation v2 只拥有 Theme、容器外观、Data Entry Component、visual renderer options 与资产。默认 Renderer、Server API、HTML manifest、AI context 和 validate 都消费这份 Contract。Custom Canvas 只公开稳定 Section/View mount points，不伪造任意 CSS 的静态网格。
 
 默认 Presentation 使用文档流；删除 `presentation.yaml` 后 Dashboard 仍必须可读、可交互。样式扩展顺序是：
 
@@ -260,7 +262,9 @@ Server 状态以浏览器 tab 的 `session_id` 为边界。不同 tab、Dashboar
 默认组件 → 模板参数 → Theme token/css_class → 自定义 Renderer → 完整 Canvas
 ```
 
-Component Registry v5.6.0 从 `src/dataviz/components/packages/` 扫描 Package。每个 Package 声明 owner、Schema、controller、adapter、功能 CSS、Story 和测试声明。`components check` 只校验这些元数据、资产与声明，pytest/浏览器 E2E 才执行行为。21 个 Package 均为 package-owned；14 个 `control.*` Package 独立承载 Data Entry Component，声明式 View/Section、Data Pipeline 与 Presentation 已迁入各自 owner，`declarative-runtime.js` 与 Runtime 中的重复实现已经删除。
+Component Registry v5.8.0 从 `src/dataviz/components/packages/` 扫描 Package。每个 Package 声明 owner、Schema、controller、adapter、功能 CSS、Story 和测试声明。`components check` 只校验这些元数据、资产与声明，pytest/浏览器 E2E 才执行行为。21 个 Package 均为 package-owned；14 个 `control.*` Package 独立承载 Data Entry Component，声明式 View/Section、Data Pipeline 与 Presentation 已迁入各自 owner，`declarative-runtime.js` 与 Runtime 中的重复实现已经删除。
+
+`view.declarative` 的原生 Map 继续由唯一 Plotly Chart Service 托管：point 映射经纬度，region 通过 Dashboard allowlist 的 Workspace GeoJSON Asset 连接区域指标；Server 与 portable HTML 共用同一资产水合和 Renderer lifecycle。大型实体 Query Parameter 不新增组件或 Runtime owner，`query-parameter.entity-select` Scaffold 只组合已有 Parameter Domain、服务端 Lookup、紧凑 `multiple_select` 与 Source `query_filters`。
 
 `presentation.shell` 还拥有 `control-panel.adaptive`：Server 与导出报告共享 Query Card、自适应列和内部滚动规则。Server Header 横跨 Sidebar 与 Workbench，Dataviz 品牌按钮拥有 Sidebar disclosure，Query 节点信号灯紧随品牌；Sidebar 和 Workbench 从 Header 下方开始。Header 右侧以 Dashboard Controls 和最右侧“查询 + ▼”分段按钮结束：主按钮执行 Query，箭头开合 Query Card，不另设 Parameters 按钮。Query Parameters 位于 Workbench 顶部的正常文档流，Card 内只保留紧凑标题和 label-over-input 网格，不重复查询动作。Card 与 Canvas 共享同一个响应式水平 gutter，不设置独立最大宽度。Server 首次默认展开并记忆 tab 状态，导出报告默认折叠以优先展示分析内容。展开时推开 Canvas，页面滚动时自然离开视口，不成为遮挡分析内容的 sticky/fixed Overlay。Server 的同源 Canvas iframe 通过 Shell Scroll Bridge 与外层形成一个顺序明确的纵向阅读面。Dashboard/Section/View Controls 才属于可由外部点击或 `Esc` 关闭的 Overlay。Query 的 `columns` 是最大列数，`column_width` 是目标轨道宽度；Runtime 读取 Card body 实际宽度计算有效列数，稀疏表单保持有界轨道并在右侧留白。单个控件只有显式 `span: 2` 才跨列。Scoped Controls 默认单列，只有显式配置才进入网格。Shell/Runtime 继续统一拥有值、校验、级联和执行状态。Shell 默认文案保持操作化和紧凑；解释框架概念的长文进入 Docs/Help/Diagnostics，不永久占据 Dashboard。
 

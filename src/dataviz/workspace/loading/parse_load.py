@@ -20,7 +20,9 @@ from dataviz.workspace.models import (
     PresentationDefinition,
     SOURCE_DEFINITION_ADAPTER,
     SourceDefinition,
+    WorkspaceAssetDefinition,
 )
+from dataviz.workspace.assets import resolve_workspace_asset, workspace_asset_id
 from dataviz.workspace.controls import compile_control_contract
 from dataviz.workspace.control_components import resolve_control_component
 from dataviz.view_contracts import validate_view_contract
@@ -118,12 +120,25 @@ def _workspace_root_for_dashboard(dashboard_root: Path) -> Path:
     return dashboard_root
 
 
-def load_dashboard(path: Path, *, workspace_root: Path | None = None) -> LoadedDashboard:
+def load_dashboard(
+    path: Path,
+    *,
+    workspace_root: Path | None = None,
+    workspace_assets: dict[str, WorkspaceAssetDefinition] | None = None,
+) -> LoadedDashboard:
     root = path.resolve()
     workspace_root = (workspace_root or _workspace_root_for_dashboard(root)).resolve()
+    workspace_assets = workspace_assets or {}
     definition_path = root / "dashboard.yaml"
     logic_definition = parse_model(DashboardDefinition, definition_path)
     definition = logic_definition.model_copy(deep=True)
+    for asset_id in definition.assets:
+        resolve_workspace_asset(
+            workspace_root,
+            workspace_assets,
+            asset_id,
+            hash_content=False,
+        )
     presentation_path = root / "presentation.yaml"
     presentation: PresentationDefinition | None = None
     presentation_diagnostics: list[Diagnostic] = []
@@ -218,7 +233,16 @@ def load_dashboard(path: Path, *, workspace_root: Path | None = None) -> LoadedD
         source_data_path = getattr(source, "path", None)
         source_code_path = getattr(source, "code", None)
         if source_data_path and not getattr(source, "adapter", None):
-            _require_dashboard_asset(root, source_path.parent, source_data_path, "Source path")
+            asset_id = workspace_asset_id(source_data_path)
+            if asset_id is not None:
+                resolve_workspace_asset(
+                    workspace_root,
+                    workspace_assets,
+                    asset_id,
+                    hash_content=False,
+                )
+            else:
+                _require_dashboard_asset(root, source_path.parent, source_data_path, "Source path")
         if source_code_path:
             _require_dashboard_asset(root, source_path.parent, source_code_path, "Source code")
         for dependency in getattr(source, "code_dependencies", []):

@@ -1169,6 +1169,7 @@ def test_server_app_controls_are_browser_only():
     assert "sameCanvasIdentity(event.data, identity)" in script
     assert "frame_id=" in script
     assert "closeHeaderPopovers();" in script
+    assert "overlay.closeAll({group: 'data-entry'});" in script
     assert "controlCheckpoint: null" in script
     assert "base_control_version:runtime.controlVersion" in script
     assert "controlStateFromValue" not in script
@@ -1646,11 +1647,11 @@ def test_fast_dag_branch_publishes_output_before_slow_branch_finishes(
     (dashboard_root / "data").mkdir(parents=True)
     (dashboard_root / "transforms").mkdir()
     (root / "workspace.yaml").write_text(
-        "schema: dataviz/workspace/v1\nkind: workspace\nid: progressive\ntitle: Progressive\n",
+        "schema: dataviz/workspace/v2\nkind: workspace\nid: progressive\ntitle: Progressive\n",
         encoding="utf-8",
     )
     (dashboard_root / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v14
+        """schema: dataviz/dashboard/v16
 kind: dashboard
 id: progressive
 title: Progressive branches
@@ -2053,11 +2054,11 @@ def test_query_cancel_is_tab_scoped_and_same_dashboard_run_supersedes(tmp_path: 
     dashboard = root / "dashboards" / "slow"
     (dashboard / "sources").mkdir(parents=True)
     (root / "workspace.yaml").write_text(
-        "schema: dataviz/workspace/v1\nkind: workspace\nid: cancel\ntitle: Cancel\n",
+        "schema: dataviz/workspace/v2\nkind: workspace\nid: cancel\ntitle: Cancel\n",
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v14
+        """schema: dataviz/dashboard/v16
 kind: dashboard
 id: slow
 title: Slow
@@ -2072,7 +2073,7 @@ sections:
         encoding="utf-8",
     )
     (dashboard / "sources" / "slow.yaml").write_text(
-        """schema: dataviz/source/v5
+        """schema: dataviz/source/v6
 kind: source
 id: slow
 type: python

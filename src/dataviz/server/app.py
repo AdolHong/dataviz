@@ -112,7 +112,7 @@ class ParameterLookupRequest(ApiRequest):
     parameter: str = Field(min_length=1)
     parent_states: dict[str, dict[str, Any]] = Field(default_factory=dict)
     search: str = ""
-    limit: int = Field(50, ge=1, le=100)
+    limit: int = Field(500, ge=1, le=500)
     cursor: str | None = None
     selected: list[Any] = Field(default_factory=list)
     refresh: bool = False
@@ -599,6 +599,36 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         if not target.is_relative_to(root) or not target.is_file():
             raise HTTPException(404, "Shared asset not found")
         return FileResponse(target, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/dashboards/{dashboard_id}/assets/{asset_id}")
+    def dashboard_workspace_asset(dashboard_id: str, asset_id: str, request: Request):
+        try:
+            snapshot, dashboard = dashboard_from_disk(
+                dashboard_id,
+                preserve_on_error=True,
+            )
+        except WorkspaceError as error:
+            raise HTTPException(404, "Dashboard not found") from error
+        if asset_id not in dashboard.definition.assets:
+            # Registered Workspace files are private by default. Only a
+            # Dashboard's explicit Browser Asset allowlist can open this route.
+            raise HTTPException(404, "Dashboard Asset not found")
+        try:
+            asset = snapshot.asset(asset_id)
+        except WorkspaceError as error:
+            raise HTTPException(404, "Dashboard Asset not found") from error
+        etag = f'"{asset.content_hash}"'
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers={"ETag": etag})
+        return FileResponse(
+            asset.path,
+            media_type=asset.media_type,
+            headers={
+                "Cache-Control": "private, no-cache",
+                "ETag": etag,
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @app.get("/runtime/plotly.js")
     def plotly_runtime():

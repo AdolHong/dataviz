@@ -54,7 +54,7 @@ def resolve_control_values(definition, provided=None):
 def test_relative_date_defaults_resolve_once_in_workspace_timezone_and_project_parts():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v14",
+            "schema": "dataviz/dashboard/v16",
             "id": "relative-dates",
             "query_parameters": [
                 {
@@ -79,7 +79,7 @@ def test_relative_date_defaults_resolve_once_in_workspace_timezone_and_project_p
     )
     source = SqlSourceDefinition.model_validate(
         {
-            "schema": "dataviz/source/v5",
+            "schema": "dataviz/source/v6",
             "id": "sales",
             "type": "sql",
             "adapter": "warehouse",
@@ -206,7 +206,7 @@ def test_date_range_default_allows_fixed_and_relative_endpoints():
     dashboard = SimpleNamespace(
         definition=DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v14",
+                "schema": "dataviz/dashboard/v16",
                 "id": "mixed-date-range",
                 "query_parameters": [definition.model_dump(mode="json")],
             }
@@ -284,7 +284,7 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
 
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v14",
+            "schema": "dataviz/dashboard/v16",
             "id": "option-intents",
             "controls": [
                 {
@@ -337,7 +337,7 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
 
     required_inferred = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v14",
+            "schema": "dataviz/dashboard/v16",
             "id": "required-inferred",
             "controls": [
                 {
@@ -372,7 +372,7 @@ def test_query_defaults_and_control_initial_policies_are_explicitly_separate():
     ]
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v14",
+            "schema": "dataviz/dashboard/v16",
             "id": "select-initials",
             "query_parameters": [
                 {
@@ -432,7 +432,7 @@ def test_query_defaults_and_control_initial_policies_are_explicitly_separate():
 def test_non_select_inputs_share_typed_defaults_without_select_reconciliation():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v14",
+            "schema": "dataviz/dashboard/v16",
             "id": "typed-input-defaults",
             "query_parameters": [
                 {
@@ -597,6 +597,44 @@ def test_view_templates_reject_ignored_fields_and_require_real_renderer_paths():
         columns=["quality", "speed"],
     )
     assert radar.template == "radar"
+    point_map = DeclarativeViewDefinition(
+        id="stores",
+        template="map",
+        input="source:stores/main",
+        mark="point",
+        longitude="longitude",
+        latitude="latitude",
+        label="store_name",
+    )
+    assert point_map.mark == "point"
+    region_map = DeclarativeViewDefinition(
+        id="regions",
+        template="map",
+        input="source:regions/main",
+        mark="region",
+        geojson="china-city",
+        data_key="city_code",
+        feature_key="properties.adcode",
+        color="revenue",
+    )
+    assert region_map.geojson == "china-city"
+    with pytest.raises(ValidationError, match="mark=point requires: latitude"):
+        DeclarativeViewDefinition(
+            id="broken-point",
+            template="map",
+            input="source:stores/main",
+            mark="point",
+            longitude="longitude",
+        )
+    with pytest.raises(ValidationError, match="mark=region requires: feature_key, color"):
+        DeclarativeViewDefinition(
+            id="broken-region",
+            template="map",
+            input="source:regions/main",
+            mark="region",
+            geojson="china-city",
+            data_key="city_code",
+        )
     with pytest.raises(ValidationError, match="requires one of: input, text"):
         DeclarativeViewDefinition(id="note", template="markdown")
     with pytest.raises(ValidationError, match="does not support aggregate=none"):
@@ -790,7 +828,7 @@ def test_portable_numbers_and_dates_reject_cross_runtime_ambiguities():
 def test_query_and_control_resolvers_share_strict_contracts():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v14",
+            "schema": "dataviz/dashboard/v16",
             "id": "contract",
             "query_parameters": [{"id": "batch", "type": "single_input", "value_type": "integer", "default": 7}],
             "controls": [

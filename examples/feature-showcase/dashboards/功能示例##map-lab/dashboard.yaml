@@ -1,0 +1,71 @@
+schema: dataviz/dashboard/v16
+kind: dashboard
+id: map-lab
+title: 地理分析
+description: 用同一个 Plotly Renderer 验证经纬度点位、GeoJSON 行政区着色与跨 View 选择。
+context:
+  grain: 门店点位或行政片区一行
+assets: [demo-regions]
+controls:
+  - id: region
+    field: region_code
+    type: multiple_select
+    value_type: text
+    label: 片区
+    initial: {mode: all}
+    options:
+      mode: static
+      choices:
+        - {label: 西北片区, value: A}
+        - {label: 东北片区, value: B}
+        - {label: 西南片区, value: C}
+        - {label: 东南片区, value: D}
+sources: [sources/stores.yaml, sources/regions.yaml]
+views:
+  - id: store-points
+    title: 门店点位
+    description: 点位位置参与判断时使用地图；点击或框选会写入同一个片区 Control。
+    template: map
+    mark: point
+    input: source:stores/main
+    longitude: longitude
+    latitude: latitude
+    label: store_name
+    color: revenue
+    size: revenue
+    control_binding: {control: dashboard.region, field: region_code}
+    control_inputs: &region_filter
+      region:
+        mode: filter
+        control: dashboard.region
+        field: region_code
+        inputs: [main]
+        empty: match_none
+  - id: region-revenue
+    title: 片区收入
+    description: 本地 GeoJSON Asset 随 Bundle 和 portable HTML 一起封存。
+    template: map
+    mark: region
+    input: source:regions/main
+    geojson: demo-regions
+    data_key: region_code
+    feature_key: properties.code
+    color: revenue
+    label: region_name
+    control_binding: {control: dashboard.region, field: region_code}
+    control_inputs: *region_filter
+  - id: region-table
+    title: 片区明细
+    template: table
+    input: source:regions/main
+    columns: [region_code, region_name, revenue]
+    control_inputs: *region_filter
+sections:
+  - id: maps
+    title: 位置与区域
+    template: comparison
+    views: [store-points, region-revenue]
+  - id: details
+    title: 数据证据
+    template: stack
+    views: [region-table]

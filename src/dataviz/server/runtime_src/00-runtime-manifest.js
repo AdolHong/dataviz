@@ -1,5 +1,5 @@
 // Owner: Runtime protocol, manifest normalization, and shared constants.
-const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v10';
+const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v12';
 const DATAVIZ_INTERACTIVE_WORKER_PROTOCOL = 'dataviz/interactive-worker/v1';
 const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v11';
 if (window.dataviz.protocol?.schema !== DATAVIZ_RUNTIME_PROTOCOL) {

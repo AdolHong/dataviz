@@ -7,7 +7,11 @@ tests:
   - id: control.select.virtual-dom-bound
     component: control.select
     kind: browser
-    assertions: [one thousand options keep a bounded row DOM, search still covers the complete option set]
+    assertions: [one thousand options keep a bounded row DOM, search still covers the complete option set, fixed virtual rows expose complete labels through a native tooltip]
+  - id: control.select.long-label-readability
+    component: control.select
+    kind: browser
+    assertions: [the popup remains inside the viewport, paged and non-virtual option labels wrap to full text, remote pages do not use fixed-row virtualization]
   - id: control.select.dynamic-reconcile
     component: control.select
     kind: browser

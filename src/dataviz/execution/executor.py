@@ -33,6 +33,7 @@ from dataviz.workspace.loader import (
     LoadedWorkspace,
     dashboard_validation_diagnostics,
 )
+from dataviz.workspace.assets import resolve_workspace_asset_reference
 
 
 def now() -> str:
@@ -503,6 +504,8 @@ class Executor:
                         adapters=adapters,
                         adapter_bindings=dashboard.definition.adapters,
                         node_id=node.id,
+                        workspace_root=self.workspace.root,
+                        workspace_assets=self.workspace.definition.assets,
                         on_retry=on_retry,
                         cancel_event=cancel_event,
                     )
@@ -670,6 +673,8 @@ class Executor:
                 adapters=adapters,
                 adapter_bindings=dashboard.definition.adapters,
                 node_id=node.id,
+                workspace_root=self.workspace.root,
+                workspace_assets=self.workspace.definition.assets,
             )
             return SOURCE_RUNNERS["sql"].diagnostics(request)
         except Exception as error:
@@ -765,6 +770,15 @@ class Executor:
                         value,
                         dashboard.definition.adapters,
                     )
+                elif field == "path" and (
+                    asset := resolve_workspace_asset_reference(
+                        self.workspace.root,
+                        self.workspace.definition.assets,
+                        value,
+                        hash_content=False,
+                    )
+                ) is not None:
+                    path = asset.path
                 else:
                     path = (node.definition_path.parent / value).resolve()
                 if path.exists():

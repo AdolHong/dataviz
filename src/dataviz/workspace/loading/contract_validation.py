@@ -14,7 +14,7 @@ from dataviz.content_templates import (
     content_template_fields,
     inspect_content_template,
 )
-from dataviz.errors import DatavizError, Diagnostic
+from dataviz.errors import DatavizError, Diagnostic, WorkspaceError
 from dataviz.execution.references import parse_output_reference
 from dataviz.execution.parameters import control_input_control, query_input_parameter
 from dataviz.sql_contract import sql_parameter_names
@@ -36,6 +36,7 @@ from dataviz.workspace.loading.asset_validation import (
     _is_within,
     _python_dependency_error,
 )
+from dataviz.workspace.assets import resolve_workspace_asset_reference
 from dataviz.workspace.loading.loaded_types import LoadedDashboard, LoadedWorkspace
 
 
@@ -811,6 +812,28 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                     continue
                 if field == "path" and source_adapter:
                     continue
+                if field == "path":
+                    try:
+                        asset = resolve_workspace_asset_reference(
+                            workspace.root,
+                            workspace.definition.assets,
+                            value,
+                            hash_content=False,
+                        )
+                    except WorkspaceError as error:
+                        diagnostics.append(
+                            Diagnostic(
+                                "error",
+                                error.message,
+                                error.file,
+                                field,
+                                error.details.get("code", "workspace_asset_invalid"),
+                                error.details,
+                            )
+                        )
+                        continue
+                    if asset is not None:
+                        continue
                 path = _code_path(source_path, value)
                 if not _is_within(path, dashboard.root):
                     diagnostics.append(
@@ -1315,6 +1338,7 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         "scatter",
                         "heatmap",
                         "radar",
+                        "map",
                         "table",
                         "perspective",
                     }
@@ -1325,6 +1349,25 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                                 f"View {view.id} template {view.template} requires a table input, got {output_kind}",
                                 definition_path,
                                 "views.input",
+                            )
+                        )
+                    if (
+                        view.template == "map"
+                        and view.mark == "region"
+                        and view.geojson not in dashboard.definition.assets
+                    ):
+                        diagnostics.append(
+                            Diagnostic(
+                                "error",
+                                f"Map View {view.id} GeoJSON Asset {view.geojson!r} is not exposed by this Dashboard",
+                                definition_path,
+                                "views.geojson",
+                                "map_geojson_asset_not_exposed",
+                                {
+                                    "view": view.id,
+                                    "asset": view.geojson,
+                                    "dashboard_assets": sorted(dashboard.definition.assets),
+                                },
                             )
                         )
                     if view.template == "metric" and output_kind == "table" and not view.value:

@@ -1,6 +1,6 @@
 schema: dataviz/component-package/v1
 package: view.declarative
-version: 2.0.0
+version: 2.1.0
 category: view
 purpose: Declarative View descriptors, Renderer adapters and lifecycle state boundaries.
 implementation:
@@ -16,6 +16,7 @@ components:
   - {id: view.scatter, purpose: Relationship between measures, status: stable}
   - {id: view.heatmap, purpose: Two-dimensional intensity matrix, status: stable}
   - {id: view.radar, purpose: Compare measures across entities, status: stable}
+  - {id: view.map, purpose: Point locations and GeoJSON region analysis, status: stable}
   - {id: view.table, purpose: TanStack-powered default data expression table, status: stable}
   - {id: view.perspective, purpose: End-user grouping aggregation pivoting and multidimensional exploration, status: stable}
   - {id: view.markdown, purpose: Narrative text, status: stable}

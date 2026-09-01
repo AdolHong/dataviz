@@ -538,7 +538,7 @@ def test_validate_focus_excludes_another_broken_dashboard(tmp_path: Path):
     broken = workspace / "dashboards" / "broken"
     broken.mkdir()
     (broken / "dashboard.yaml").write_text(
-        "schema: dataviz/dashboard/v14\nkind: dashboard\nid: broken\nretired_field: true\n",
+        "schema: dataviz/dashboard/v16\nkind: dashboard\nid: broken\nretired_field: true\n",
         encoding="utf-8",
     )
 

@@ -91,7 +91,7 @@ def _build_server_derived_workspace(root: Path) -> Path:
     (dashboard / "data").mkdir(parents=True)
     (dashboard / "transforms").mkdir()
     (root / "workspace.yaml").write_text(
-        """schema: dataviz/workspace/v1
+        """schema: dataviz/workspace/v2
 kind: workspace
 id: analysis-tests
 title: Analysis tests
@@ -99,7 +99,7 @@ title: Analysis tests
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v14
+        """schema: dataviz/dashboard/v16
 kind: dashboard
 id: analysis
 title: Analysis
@@ -864,7 +864,7 @@ include_snapshot: true
                 "files": {
                     "dashboards/analysis/dashboard.yaml": promoted_dashboard,
                     "dashboards/analysis/sources/rows-copy.yaml": (
-                        "schema: dataviz/source/v5\n"
+                        "schema: dataviz/source/v6\n"
                         "kind: source\n"
                         "id: rows-copy\n"
                         "name: 收入副本\n"

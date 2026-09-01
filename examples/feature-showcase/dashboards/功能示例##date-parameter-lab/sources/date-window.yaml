@@ -1,4 +1,4 @@
-schema: dataviz/source/v5
+schema: dataviz/source/v6
 kind: source
 id: date-window
 name: 日期参数解析

@@ -32,6 +32,7 @@ from dataviz.documentation import (
     DOC_TOPICS,
     authoring_route_catalog,
     resolve_authoring_route,
+    resolve_doc_topic,
 )
 from dataviz.execution import Executor
 from dataviz.execution.references import parse_output_reference
@@ -52,11 +53,14 @@ from dataviz.workspace.models import (
     DeclarativeViewDefinition,
     InteractiveTransformDefinition,
     LayoutDefinition,
+    ParameterDomainDefinition,
     PresentationDefinition,
     PresentationControlComponentDefinition,
+    QueryParameterDefinition,
     SectionDefinition,
     SOURCE_DEFINITION_ADAPTER,
     ThemeDefinition,
+    WorkspaceDefinition,
 )
 
 
@@ -148,8 +152,9 @@ def test_machine_readable_component_examples_use_canonical_output_references():
 
 def test_machine_readable_documentation_examples_match_current_schemas():
     providers = {
-        "dataviz/dashboard/v14": DashboardDefinition,
-        "dataviz/source/v5": SOURCE_DEFINITION_ADAPTER,
+        "dataviz/workspace/v2": WorkspaceDefinition,
+        "dataviz/dashboard/v16": DashboardDefinition,
+        "dataviz/source/v6": SOURCE_DEFINITION_ADAPTER,
         "dataviz/dataset-transform/v3": DatasetTransformDefinition,
         "dataviz/interactive-transform/v4": InteractiveTransformDefinition,
         "dataviz/presentation/v2": PresentationDefinition,
@@ -308,6 +313,9 @@ def test_docs_catalog_exposes_both_progressive_product_paths():
         "dataviz init <workspace>"
     )
     assert "hello Dashboard" in quickstart["workspace_start"]["rule"]
+    assert resolve_doc_topic("bundle") == "workspace-assets"
+    assert resolve_doc_topic("asset") == "workspace-assets"
+    assert resolve_doc_topic("parameter-domain") == "query-parameters"
 
 
 def test_docs_do_not_restore_removed_chart_cli_or_shell_contracts():
@@ -334,6 +342,8 @@ def test_query_parameter_docs_keep_materialization_and_compact_state_explicit():
     assert "all/include/exclude/none" in rules
     assert "搜索、级联和 cursor 分页" in rules
     assert "不重新执行远端 SQL" in rules
+    assert not any("dataviz bundle" in command for command in query_docs["dynamic_domains"]["operations"])
+    assert "workspace-assets" in query_docs["dynamic_domains"]["portability"]
     assert "city_selection" in query_docs["selection_binding"]
     assert "dataviz init <workspace>" in skill
     assert "intentionally empty Workspace" not in skill
@@ -440,10 +450,12 @@ def test_version_docs_match_the_current_runtime_and_release_gate():
     assert strict["browser_assets"] == {
         "plotly_js": "4.0.0（直接内置，不安装 Python plotly）",
         "tanstack_table_core": "9.2.4（直接内置）",
+        "workspace_asset_service": "Runtime v12 的 context.assets；Server URL 与 portable inline 共用同一作者 API。",
     }
     contract = "\n".join(release["release_contract"])
-    assert "快速迭代默认运行完整 Chromium" in contract
+    assert "默认正式发布运行完整 Chromium" in contract
     assert "稳定发布" in contract and "Firefox/WebKit" in contract
+    assert "快速发布" in contract and "Changelog/发布记录" in contract
     assert "Python plotly 未安装" in contract
 
 
@@ -451,7 +463,7 @@ def test_component_registry_reports_package_owned_implementations():
     catalog = component_catalog()
     report = validate_component_packages(catalog)
 
-    assert COMPONENT_REGISTRY_VERSION == "5.6.0"
+    assert COMPONENT_REGISTRY_VERSION == "5.8.0"
     assert set(component_packages()) == {
         "control.auto-complete",
         "control.cascader",
@@ -500,9 +512,9 @@ def test_component_registry_reports_package_owned_implementations():
         "packages": 21,
         "package_implemented": 21,
         "bridge_implemented": 0,
-        "components": 63,
+        "components": 64,
         "stories": 38,
-        "test_declarations": 75,
+        "test_declarations": 77,
         "errors": [],
     }
     assert set(component_index()) == set(catalog)
@@ -614,6 +626,18 @@ def test_every_scaffold_recipe_matches_the_current_strict_models():
             assert files["dashboards/sample/dashboard.yaml"]
         elif recipe == "dashboard":
             DashboardDefinition.model_validate(yaml.safe_load(files["dashboard.yaml"]))
+        elif recipe == "query-parameter.entity-select":
+            snippet = yaml.safe_load(files["dashboard.entity-select.snippet.yaml"])
+            QueryParameterDefinition.model_validate(snippet["query_parameters"][0])
+            ParameterDomainDefinition.model_validate(
+                yaml.safe_load(files["parameter_domains/sample-catalog.yaml"])
+            )
+            SOURCE_DEFINITION_ADAPTER.validate_python(
+                yaml.safe_load(files["sources/sample-filtered.yaml"])
+            )
+            assert "{{ dataviz_filter:entities }}" in files[
+                "sources/sample-filtered.sql"
+            ]
         elif recipe.startswith("source."):
             SOURCE_DEFINITION_ADAPTER.validate_python(
                 yaml.safe_load(files["sample.yaml"])
@@ -663,7 +687,7 @@ def test_selection_gallery_scaffold_composes_into_a_valid_dashboard(tmp_path: Pa
     dashboard_root = root / "dashboards" / "generated"
     dashboard_root.mkdir(parents=True)
     (root / "workspace.yaml").write_text(
-        "schema: dataviz/workspace/v1\nkind: workspace\nid: generated\ntitle: Generated\n",
+        "schema: dataviz/workspace/v2\nkind: workspace\nid: generated\ntitle: Generated\n",
         encoding="utf-8",
     )
     dashboard_files = scaffold_recipe("dashboard", "generated")["files"]
@@ -742,7 +766,7 @@ def test_scaffold_catalog_is_machine_readable_and_dashboard_recipe_runs(tmp_path
     dashboard_root = root / "dashboards" / "generated"
     dashboard_root.mkdir(parents=True)
     (root / "workspace.yaml").write_text(
-        "schema: dataviz/workspace/v1\nkind: workspace\nid: generated\ntitle: Generated\n",
+        "schema: dataviz/workspace/v2\nkind: workspace\nid: generated\ntitle: Generated\n",
         encoding="utf-8",
     )
     for relative, content in scaffold_recipe("dashboard", "generated")["files"].items():
@@ -775,6 +799,8 @@ def test_authoring_routes_expose_only_the_required_document_closure():
         "cascading-selection",
         "view-filter",
         "browser-compute",
+        "map-view",
+        "entity-select",
     }
     assert minimal["closure"] == ["minimal"]
     assert minimal["concepts"] == [
@@ -988,7 +1014,7 @@ def test_coordinate_layout_fields_are_strictly_rejected(layout):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v14",
+                "schema": "dataviz/dashboard/v16",
                 "kind": "dashboard",
                 "id": "strict",
                 "layout": layout,

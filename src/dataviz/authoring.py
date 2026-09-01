@@ -18,6 +18,7 @@ from dataviz.templates import (
     template_catalog,
 )
 from dataviz.workspace.loader import LoadedDashboard, LoadedWorkspace
+from dataviz.workspace.assets import workspace_asset_id
 from dataviz.workspace.control_components import resolve_control_component
 
 
@@ -108,9 +109,22 @@ def _dependency_content(definition_path: Path, dependencies: list[str]) -> dict[
     return result
 
 
-def _data_file_metadata(definition_path: Path, relative: str | None) -> dict[str, Any] | None:
+def _data_file_metadata(
+    workspace: LoadedWorkspace,
+    definition_path: Path,
+    relative: str | None,
+) -> dict[str, Any] | None:
     if not relative:
         return None
+    identifier = workspace_asset_id(relative)
+    if identifier is not None:
+        asset = workspace.asset(identifier)
+        return {
+            "reference": relative,
+            "workspace_asset": asset.metadata(),
+            "path": _relative(asset.path, workspace.root),
+            "exists": True,
+        }
     path = (definition_path.parent / relative).resolve()
     if not path.is_file():
         return {"path": relative, "exists": False}
@@ -124,7 +138,11 @@ def _source_payload(workspace: LoadedWorkspace, path: Path, definition: Any) -> 
         # File datasets are intentionally not copied into AI context. Their path and
         # byte size are enough to locate them; query/Python code remains reviewable.
         "code": _code_content(path, getattr(definition, "code", None)),
-        "data_file": _data_file_metadata(path, getattr(definition, "path", None)),
+        "data_file": _data_file_metadata(
+            workspace,
+            path,
+            getattr(definition, "path", None),
+        ),
         "code_dependencies": _dependency_content(
             path, getattr(definition, "code_dependencies", [])
         ),
@@ -171,6 +189,38 @@ def _presentation_assets(
             "content": _code_content(dashboard.definition_path, relative),
         }
     return result
+
+
+def _workspace_asset_context(
+    workspace: LoadedWorkspace,
+    dashboard: LoadedDashboard,
+    source_ids: set[str],
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    """Project referenced Workspace Assets without embedding their content."""
+
+    identifiers = set(dashboard.definition.assets)
+    for source_id in source_ids:
+        _path, source = dashboard.sources[source_id]
+        if getattr(source, "type", None) != "file":
+            continue
+        identifier = workspace_asset_id(source.path)
+        if identifier is not None:
+            identifiers.add(identifier)
+
+    workspace_definition = workspace.definition.model_dump(mode="json", by_alias=True)
+    workspace_definition["assets"] = {
+        identifier: workspace_definition["assets"][identifier]
+        for identifier in sorted(identifiers)
+    }
+    assets: dict[str, dict[str, Any]] = {}
+    for identifier in sorted(identifiers):
+        asset = workspace.asset(identifier)
+        assets[identifier] = {
+            **asset.metadata(),
+            "path": _relative(asset.path, workspace.root),
+            "browser_available": identifier in dashboard.definition.assets,
+        }
+    return workspace_definition, assets
 
 
 def _focused_ids(
@@ -594,11 +644,18 @@ def build_context_payload(
             },
         )
 
+    workspace_definition, workspace_assets = _workspace_asset_context(
+        workspace,
+        dashboard,
+        source_ids,
+    )
+
     return {
         "schema": "dataviz/context/v1",
         "mode": "full" if parsed_focus is None else "focused",
         "focus": parsed_focus.canonical if parsed_focus else None,
-        "workspace": workspace.definition.model_dump(mode="json", by_alias=True),
+        "workspace": workspace_definition,
+        "workspace_assets": workspace_assets,
         "workspace_readme": workspace.readme if parsed_focus is None else None,
         "canvas_name": dashboard.canvas_name,
         "content_title": dashboard.title,
@@ -680,6 +737,7 @@ def scaffold_recipes() -> tuple[str, ...]:
     return (
         *SCAFFOLD_PROFILES,
         "dashboard",
+        "query-parameter.entity-select",
         "source.file",
         "source.sql",
         "source.python",
@@ -725,7 +783,7 @@ def scaffold_catalog() -> dict[str, Any]:
 def _profile_files(profile: str, item_id: str) -> dict[str, str]:
     dashboard_root = f"dashboards/{item_id}"
     workspace = {
-        "schema": "dataviz/workspace/v1",
+        "schema": "dataviz/workspace/v2",
         "kind": "workspace",
         "id": f"{item_id}-workspace",
         "title": item_id.replace("-", " ").title(),
@@ -734,7 +792,7 @@ def _profile_files(profile: str, item_id: str) -> dict[str, str]:
         "runtime": {"browser_table_transport": "json"},
     }
     dashboard: dict[str, Any] = {
-        "schema": "dataviz/dashboard/v14",
+        "schema": "dataviz/dashboard/v16",
         "kind": "dashboard",
         "id": item_id,
         "title": item_id.replace("-", " ").title(),
@@ -899,7 +957,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         files = {
             "dashboard.yaml": _yaml(
                 {
-                    "schema": "dataviz/dashboard/v14",
+                    "schema": "dataviz/dashboard/v16",
                     "kind": "dashboard",
                     "id": item_id,
                     "title": item_id.replace("-", " ").title(),
@@ -935,10 +993,96 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
             ),
             "data/data.csv": "category,value\nA,12\nB,19\n",
         }
+    elif recipe == "query-parameter.entity-select":
+        catalog_id = f"{item_id}-catalog"
+        source_id = f"{item_id}-filtered"
+        files = {
+            "dashboard.entity-select.snippet.yaml": _yaml(
+                {
+                    "parameter_domains": [f"parameter_domains/{catalog_id}.yaml"],
+                    "query_parameters": [
+                        {
+                            "id": item_id,
+                            "type": "multiple_select",
+                            "value_type": "text",
+                            "label": item_id.replace("-", " ").title(),
+                            "description": "Search by entity name or identifier; empty means no filter.",
+                            "default": {"mode": "none"},
+                            "clearable": True,
+                            "options": {
+                                "mode": "domain",
+                                "source": catalog_id,
+                                "value_field": "entity_id",
+                                "label_field": "entity_label",
+                                "description_field": "entity_description",
+                                "group_field": "entity_group",
+                                "keywords_field": "search_keywords",
+                            },
+                        }
+                    ],
+                    "sources": [f"sources/{source_id}.yaml"],
+                }
+            ),
+            f"parameter_domains/{catalog_id}.yaml": _yaml(
+                {
+                    "schema": "dataviz/parameter-domain/v2",
+                    "kind": "parameter_domain",
+                    "id": catalog_id,
+                    "name": f"{item_id.replace('-', ' ').title()} catalog",
+                    "description": "Shared materialized choices for server-side search and cursor pagination.",
+                    "type": "sql",
+                    "adapter": "warehouse",
+                    "code": f"{catalog_id}.sql",
+                    "materialization": {
+                        "refresh_after_seconds": 43_200,
+                        "expire_after_seconds": 604_800,
+                    },
+                }
+            ),
+            f"parameter_domains/{catalog_id}.sql": (
+                "select\n"
+                "  cast(entity_id as varchar) as entity_id,\n"
+                "  entity_name as entity_label,\n"
+                "  entity_description,\n"
+                "  entity_group,\n"
+                "  search_keywords\n"
+                "from your_entity_dimension\n"
+                "where is_active = true\n"
+            ),
+            f"sources/{source_id}.yaml": _yaml(
+                {
+                    "schema": "dataviz/source/v6",
+                    "kind": "source",
+                    "id": source_id,
+                    "type": "sql",
+                    "adapter": "warehouse",
+                    "code": f"{source_id}.sql",
+                    "query_filters": {
+                        "entities": {
+                            "parameter": item_id,
+                            "field": "entity_id",
+                            "empty": "passthrough",
+                        }
+                    },
+                    "outputs": {
+                        "main": _scaffold_output(
+                            f"Filtered {item_id.replace('-', ' ')} rows",
+                            "Answer the business question for the explicitly selected entities, or all entities when empty.",
+                            "Describe what one result row represents.",
+                        )
+                    },
+                }
+            ),
+            f"sources/{source_id}.sql": (
+                "select entity_id, metric_value\n"
+                "from your_fact_table\n"
+                "where {{ dataviz_filter:entities }}\n"
+            ),
+        }
     elif recipe in {"source.file", "source.sql", "source.python"}:
         source_type = recipe.split(".", 1)[1]
         definition: dict[str, Any] = {
-            "schema": "dataviz/source/v5",
+            "schema": "dataviz/source/v6",
             "kind": "source",
             "id": item_id,
             "type": source_type,
@@ -1055,6 +1199,15 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                 definition[field] = ["value_field"]
             else:
                 definition[field] = placeholders.get(field, f"{field}_value")
+        if template == "map":
+            definition.update(
+                {
+                    "mark": "point",
+                    "longitude": "longitude",
+                    "latitude": "latitude",
+                    "label": "label_field",
+                }
+            )
         if template == "markdown":
             definition["text"] = placeholders["text"]
         files = {"dashboard.view.snippet.yaml": _yaml([definition])}

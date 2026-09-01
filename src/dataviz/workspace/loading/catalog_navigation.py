@@ -30,6 +30,7 @@ from dataviz.workspace.loading.loaded_types import (
     LoadedWorkspace,
 )
 from dataviz.workspace.loading.parse_load import load_dashboard, parse_model
+from dataviz.workspace.assets import resolve_workspace_asset
 
 
 def _relative_path(root: Path, path: Path) -> str:
@@ -139,8 +140,16 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
         load_diagnostics.append(_diagnostic_from_error(error, code="workspace_definition_invalid"))
         fallback_id = fallback_stable_id(str(root), prefix="workspace")
         definition = WorkspaceDefinition(
-            schema="dataviz/workspace/v1", id=fallback_id, title=root.name
+            schema="dataviz/workspace/v2", id=fallback_id, title=root.name
         )
+
+    for asset_id in definition.assets:
+        try:
+            resolve_workspace_asset(root, definition.assets, asset_id, hash_content=False)
+        except WorkspaceError as error:
+            load_diagnostics.append(
+                _diagnostic_from_error(error, code=error.details.get("code", "workspace_asset_invalid"))
+            )
 
     dashboards_root = root / "dashboards"
     discovered_paths: set[Path] = set()
@@ -172,7 +181,9 @@ def load_workspace(path: Path | str) -> LoadedWorkspace:
             )
         try:
             loaded_by_path[dashboard_path] = load_dashboard(
-                dashboard_path, workspace_root=root
+                dashboard_path,
+                workspace_root=root,
+                workspace_assets=definition.assets,
             )
         except WorkspaceError as error:
             errors_by_path[dashboard_path] = error

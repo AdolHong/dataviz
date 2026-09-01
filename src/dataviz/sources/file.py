@@ -4,6 +4,7 @@ import pandas as pd
 
 from dataviz.errors import SourceFailure
 from dataviz.sources.base import SourceRequest
+from dataviz.workspace.assets import resolve_workspace_asset_reference
 
 
 class FileSourceRunner:
@@ -14,7 +15,19 @@ class FileSourceRunner:
                 definition.adapter, definition.path, request.adapter_bindings
             )
         else:
-            path = (request.definition_path.parent / definition.path).resolve()
+            asset = (
+                resolve_workspace_asset_reference(
+                    request.workspace_root,
+                    request.workspace_assets or {},
+                    definition.path,
+                    hash_content=False,
+                )
+                if request.workspace_root is not None
+                else None
+            )
+            path = asset.path if asset is not None else (
+                request.definition_path.parent / definition.path
+            ).resolve()
         if not path.exists():
             raise SourceFailure("Data file does not exist", file=path)
         format_name = (definition.format or path.suffix.lstrip(".")).lower()

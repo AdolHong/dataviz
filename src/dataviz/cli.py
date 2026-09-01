@@ -771,7 +771,7 @@ def init(path: Path = typer.Argument(..., help="New workspace directory")) -> No
         if any(path.iterdir()):
             raise typer.BadParameter(f"Directory is not empty: {path}")
     files = {
-        "workspace.yaml": """schema: dataviz/workspace/v1
+        "workspace.yaml": """schema: dataviz/workspace/v2
 kind: workspace
 id: my-analysis
 title: My Analysis
@@ -801,7 +801,7 @@ dataviz catalog describe . 'hello::source:data/main'
 dataviz run . 'hello::source:data/main'
 ```
 """,
-        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v14
+        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v16
 kind: dashboard
 id: hello
 title: Hello dashboard
@@ -932,9 +932,12 @@ def tree_workspace(
 def bundle_portable_dashboard(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     dashboard_id: str = typer.Argument(..., help="Dashboard id"),
-    destination: Path = typer.Argument(..., help="Destination portable Workspace"),
+    destination: Path = typer.Argument(
+        ...,
+        help="New path or empty directory for the standalone Workspace snapshot",
+    ),
 ) -> None:
-    """Copy one Dashboard and its shared Parameter Domain source closure."""
+    """Create a standalone Dashboard snapshot without merging or overwriting."""
 
     try:
         print_json(bundle_dashboard(load_workspace(workspace), dashboard_id, destination))
@@ -1469,7 +1472,7 @@ def frontend_adapters(
     ),
     output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
 ) -> None:
-    """Inspect frontend implementations that consume dataviz/runtime/v10."""
+    """Inspect frontend implementations that consume dataviz/runtime/v12."""
     if output_format not in {"markdown", "json"}:
         raise typer.BadParameter("--format must be markdown or json")
     catalog = frontend_adapter_catalog()
@@ -2431,7 +2434,7 @@ def parameter_lookup(
         None, "--parent-state", help="Parent canonical state as name=JSON; repeat"
     ),
     search: str = typer.Option("", "--search"),
-    limit: int = typer.Option(50, "--limit", min=1, max=100),
+    limit: int = typer.Option(50, "--limit", min=1, max=500),
     cursor: str | None = typer.Option(None, "--cursor"),
     selected: list[str] | None = typer.Option(None, "--selected", help="JSON value; repeat"),
 ) -> None:

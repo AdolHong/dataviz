@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v14
+schema: dataviz/dashboard/v16
 kind: dashboard
 id: sales-overview
 title: 销售概览

@@ -1,6 +1,6 @@
 // Owner: shared Runtime host state and public registration surface.
 const datavizRuntime = window.datavizRuntime = {
-  protocol: 'dataviz/runtime/v10',
+  protocol: 'dataviz/runtime/v12',
   transforms: new Map(),
   views: new Map(),
   renderers: new Map(),

@@ -11,7 +11,14 @@
         const rootNode = document.createElement('article');
         const body = document.createElement('div');
         rootNode.append(body);
-        const context = {root: rootNode, body, viewId: `contract-${index}`, runtime, descriptor};
+        const context = {
+          root:rootNode,
+          body,
+          viewId:`contract-${index}`,
+          runtime,
+          descriptor,
+          assets:global.datavizRuntimeServices?.assets,
+        };
         let state;
         for (const phase of ['validate', 'mount', 'update', 'dispose']) {
           if (typeof renderer[phase] !== 'function') {

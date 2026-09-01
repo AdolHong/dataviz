@@ -41,7 +41,7 @@ def test_generated_browser_asset_is_current(builder: str):
 def _workspace(root: Path) -> Path:
     root.mkdir(parents=True)
     (root / "workspace.yaml").write_text(
-        "schema: dataviz/workspace/v1\nkind: workspace\nid: cleanup\ntitle: Cleanup\n",
+        "schema: dataviz/workspace/v2\nkind: workspace\nid: cleanup\ntitle: Cleanup\n",
         encoding="utf-8",
     )
     return root

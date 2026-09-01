@@ -29,7 +29,7 @@ def build_workspace(
     (dashboard / "sources").mkdir(parents=True)
     (dashboard / "transforms").mkdir()
     (root / "workspace.yaml").write_text(
-        """schema: dataviz/workspace/v1
+        """schema: dataviz/workspace/v2
 kind: workspace
 id: transform-tests
 title: Transform tests
@@ -37,7 +37,7 @@ title: Transform tests
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v14
+        """schema: dataviz/dashboard/v16
 kind: dashboard
 id: transform-contract
 title: Transform contract
@@ -48,7 +48,7 @@ views: []
         encoding="utf-8",
     )
     (dashboard / "sources" / "raw.yaml").write_text(
-        """schema: dataviz/source/v5
+        """schema: dataviz/source/v6
 kind: source
 id: raw
 type: file

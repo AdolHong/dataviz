@@ -221,36 +221,6 @@ def validate_dashboard_semantics(dashboard: LoadedDashboard) -> list[Diagnostic]
         for identifier, (_, transform) in dashboard.interactive_transforms.items()
         for name, output in transform.outputs.items()
     )
-    legacy_outputs = sorted(
-        reference
-        for reference, output, _owner_description in analysis_outputs
-        if output.semantics is None
-    )
-    missing_purpose = sorted(
-        reference
-        for reference, output, owner_description in analysis_outputs
-        if output.semantics is None and not (output.description or owner_description).strip()
-    )
-    missing_grain = not str(definition.context.get("grain") or "").strip()
-    if legacy_outputs:
-        diagnostics.append(
-            _diagnostic(
-                dashboard,
-                "advice",
-                "analysis_output_semantics_incomplete",
-                "Reusable Named Outputs should declare output.semantics for AI discovery",
-                "outputs",
-                {
-                    "missing_purpose": missing_purpose,
-                    "missing_grain": missing_grain,
-                    "legacy_outputs": legacy_outputs,
-                    "action": (
-                        "Add output.semantics with visibility, title, purpose, grain and optional caveats. "
-                        "Use visibility=internal for implementation-only Outputs."
-                    ),
-                },
-            )
-        )
     for source_id, (definition_path, source) in dashboard.sources.items():
         if source.type != "sql":
             continue

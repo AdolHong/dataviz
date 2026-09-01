@@ -1,0 +1,20 @@
+schema: dataviz/source/v6
+kind: source
+id: stores
+type: file
+path: stores.csv
+format: csv
+outputs:
+  main:
+    kind: table
+    semantics:
+      visibility: internal
+      title: 门店点位
+      purpose: 为地图提供门店经纬度和片区归属。
+      grain: 每个门店一行。
+    schema:
+      - {name: region_code}
+      - {name: store_name}
+      - {name: longitude}
+      - {name: latitude}
+      - {name: revenue}

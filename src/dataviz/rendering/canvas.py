@@ -31,6 +31,7 @@ from dataviz.filesystem import atomic_write_bytes, atomic_write_text
 from dataviz.plotly_runtime import PLOTLY_JS_VERSION, get_plotlyjs
 from dataviz.state_snapshot import build_state_snapshot, normalize_consumer_revisions
 from dataviz.templates import COMPONENT_REGISTRY_VERSION, RUNTIME_PROTOCOL_SCHEMA
+from dataviz.protocols import REPORT_MANIFEST_SCHEMA
 from dataviz.value_contract import initial_control_value, static_control_choices
 from dataviz.workspace.models import DashboardDefinition, DeclarativeViewDefinition
 from dataviz.workspace.controls import (
@@ -148,6 +149,61 @@ class CanvasRenderer:
             )
         return path
 
+    def _dashboard_assets(
+        self,
+        dashboard: LoadedDashboard,
+        *,
+        asset_mode: str,
+    ) -> dict[str, dict[str, Any]]:
+        """Materialize only the Workspace Assets explicitly exposed by a Dashboard."""
+
+        descriptors: dict[str, dict[str, Any]] = {}
+        for identifier in dashboard.definition.assets:
+            asset = self.workspace.asset(identifier)
+            descriptor: dict[str, Any] = asset.metadata()
+            if asset_mode == "server":
+                descriptor.update(
+                    {
+                        "transport": "url",
+                        "url": (
+                            f"/api/dashboards/{quote(dashboard.definition.id, safe='')}"
+                            f"/assets/{quote(identifier, safe='')}"
+                        ),
+                    }
+                )
+            else:
+                payload = asset.path.read_bytes()
+                textual = asset.media_type.startswith("text/") or asset.media_type in {
+                    "application/json",
+                    "application/geo+json",
+                    "application/javascript",
+                    "application/xml",
+                    "image/svg+xml",
+                }
+                if textual:
+                    try:
+                        content = payload.decode("utf-8")
+                    except UnicodeDecodeError as error:
+                        raise ExecutionFailure(
+                            f"Text Workspace Asset is not valid UTF-8: {identifier}",
+                            file=asset.path,
+                            details={
+                                "code": "workspace_asset_text_encoding_invalid",
+                                "asset": identifier,
+                                "media_type": asset.media_type,
+                            },
+                        ) from error
+                    descriptor.update({"transport": "text", "content": content})
+                else:
+                    descriptor.update(
+                        {
+                            "transport": "base64",
+                            "content": base64.b64encode(payload).decode("ascii"),
+                        }
+                    )
+            descriptors[identifier] = descriptor
+        return descriptors
+
     def _runtime_asset_usage(
         self,
         dashboard: LoadedDashboard,
@@ -172,6 +228,7 @@ class CanvasRenderer:
                 "scatter",
                 "heatmap",
                 "radar",
+                "map",
             }
         ]
         formats = {artifact.format for artifact in outputs.values()}
@@ -415,6 +472,7 @@ class CanvasRenderer:
         needs_plotly = asset_usage["plotly"]
         needs_arrow = asset_usage["arrow"]
         needs_perspective = asset_usage["perspective"]
+        dashboard_assets = self._dashboard_assets(dashboard, asset_mode=asset_mode)
         plotly_script = self._plotly_script(asset_mode) if needs_plotly else ""
         tanstack_table_script = self._tanstack_table_script(asset_mode)
         arrow_script = self._arrow_script() if needs_arrow else ""
@@ -519,6 +577,7 @@ class CanvasRenderer:
             "live": live,
             "interaction": interaction,
             "asset_mode": asset_mode,
+            "assets": dashboard_assets,
             "snapshot_interactions": sorted(snapshot_interactions or set()),
             "view_specs": view_specs,
             "repeat_specs": repeat_specs,
@@ -582,6 +641,7 @@ class CanvasRenderer:
             "scatter",
             "heatmap",
             "radar",
+            "map",
         }
         renderer_label = (
             "plotly"
@@ -1662,6 +1722,7 @@ class CanvasRenderer:
             asset_mode="inline",
             snapshot_interactions=snapshot_interactions or set(),
         )
+        dashboard_assets = self._dashboard_assets(dashboard, asset_mode="inline")
         try:
             rendered = self.render(
                 dashboard,
@@ -1678,7 +1739,7 @@ class CanvasRenderer:
             )
             manifest_content = json.dumps(
                 {
-                    "schema": "dataviz/report-manifest/v2",
+                    "schema": REPORT_MANIFEST_SCHEMA,
                     "runtime": RUNTIME_PROTOCOL_SCHEMA,
                     "dashboard": dashboard.definition.id,
                     "dependency_contract": dependency_contract.as_dict(),
@@ -1700,7 +1761,14 @@ class CanvasRenderer:
                         for reference, descriptor in (derived_outputs or {}).items()
                     },
                     "snapshot_interactions": sorted(snapshot_interactions or set()),
-                    "assets": {},
+                    "assets": {
+                        identifier: {
+                            key: value
+                            for key, value in descriptor.items()
+                            if key not in {"content", "url", "transport"}
+                        }
+                        for identifier, descriptor in dashboard_assets.items()
+                    },
                     "network_dependencies": runtime_assets["network_dependencies"],
                     "portable_without_network": not runtime_assets[
                         "network_dependencies"

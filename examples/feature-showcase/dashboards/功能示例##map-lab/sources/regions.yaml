@@ -1,0 +1,18 @@
+schema: dataviz/source/v6
+kind: source
+id: regions
+type: file
+path: regions.csv
+format: csv
+outputs:
+  main:
+    kind: table
+    semantics:
+      visibility: internal
+      title: 片区指标
+      purpose: 为 GeoJSON 行政区着色提供连接键与指标。
+      grain: 每个片区一行。
+    schema:
+      - {name: region_code}
+      - {name: region_name}
+      - {name: revenue}

@@ -1,4 +1,4 @@
-schema: dataviz/workspace/v1
+schema: dataviz/workspace/v2
 kind: workspace
 id: dataviz-component-gallery
 title: Dataviz Component Gallery

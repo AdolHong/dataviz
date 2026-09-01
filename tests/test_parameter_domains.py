@@ -25,7 +25,7 @@ def _dashboard(root: Path, dashboard_id: str) -> None:
     sources = dashboard / "sources"
     sources.mkdir(parents=True)
     (dashboard / "dashboard.yaml").write_text(
-        f"""schema: dataviz/dashboard/v14
+        f"""schema: dataviz/dashboard/v16
 kind: dashboard
 id: {dashboard_id}
 title: Domain lab
@@ -63,7 +63,7 @@ sections:
         encoding="utf-8",
     )
     (sources / "metrics.yaml").write_text(
-        """schema: dataviz/source/v5
+        """schema: dataviz/source/v6
 kind: source
 id: metrics
 type: sql
@@ -92,7 +92,7 @@ def _workspace(root: Path, *, second_dashboard: bool = False) -> Path:
     (root / "auth").mkdir(parents=True)
     (root / "parameter_domains").mkdir()
     (root / "workspace.yaml").write_text(
-        "schema: dataviz/workspace/v1\nkind: workspace\nid: domain-tests\ntitle: Domain tests\n",
+        "schema: dataviz/workspace/v2\nkind: workspace\nid: domain-tests\ntitle: Domain tests\n",
         encoding="utf-8",
     )
     (root / "auth" / "adapters.yaml").write_text(
@@ -267,6 +267,28 @@ def test_server_lookup_accepts_single_select_parent_state_from_browser(tmp_path:
     assert response.status_code == 200
     assert [item["value"] for item in response.json()["items"]] == ["GZ", "SZ"]
 
+    at_page_limit = client.post(
+        "/api/dashboards/domain-lab/parameter-domains/lookup",
+        json={
+            "session_id": "domain_session",
+            "parameter": "city",
+            "parent_states": {"province": {"value": "GD"}},
+            "limit": 500,
+        },
+    )
+    assert at_page_limit.status_code == 200
+
+    over_page_limit = client.post(
+        "/api/dashboards/domain-lab/parameter-domains/lookup",
+        json={
+            "session_id": "domain_session",
+            "parameter": "city",
+            "parent_states": {"province": {"value": "GD"}},
+            "limit": 501,
+        },
+    )
+    assert over_page_limit.status_code == 422
+
 
 def test_lookup_preserves_finite_selected_operands_and_marks_unavailable(tmp_path: Path):
     root = _workspace(tmp_path / "workspace")
@@ -428,7 +450,7 @@ def test_portable_bundle_copies_shared_domain_closure_without_runtime_state_or_s
     first = runner.invoke(app, ["bundle", str(root), "domain-lab", str(destination)])
     assert first.exit_code == 0, first.output
     payload = json.loads(first.output)
-    assert payload["schema"] == "dataviz/dashboard-bundle/v1"
+    assert payload["schema"] == "dataviz/dashboard-bundle/v2"
     assert payload["materializations_copied"] is False
     assert payload["credentials_copied"] is False
 
@@ -454,16 +476,15 @@ def test_portable_bundle_copies_shared_domain_closure_without_runtime_state_or_s
     ]
     assert "password" not in json.dumps(manifest).casefold()
 
-    repeated = runner.invoke(app, ["bundle", str(root), "domain-lab", str(destination)])
-    assert repeated.exit_code == 0, repeated.output
-    assert "parameter_domains/locations.sql" in json.loads(repeated.output)["reused"]
-
     (destination / "parameter_domains" / "locations.sql").write_text(
-        "select 'conflict'", encoding="utf-8"
+        "select 'newer workspace logic'", encoding="utf-8"
     )
     conflict = runner.invoke(app, ["bundle", str(root), "domain-lab", str(destination)])
     assert conflict.exit_code == 1
-    assert "dashboard_bundle_content_conflict" in conflict.output
+    assert "dashboard_bundle_destination_not_empty" in conflict.output
+    assert (destination / "parameter_domains" / "locations.sql").read_text(
+        encoding="utf-8"
+    ) == "select 'newer workspace logic'"
 
 
 def test_expired_generation_is_not_served_and_restarts_as_building(tmp_path: Path):

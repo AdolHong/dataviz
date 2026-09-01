@@ -1,4 +1,4 @@
-schema: dataviz/source/v5
+schema: dataviz/source/v6
 kind: source
 id: slow
 type: python

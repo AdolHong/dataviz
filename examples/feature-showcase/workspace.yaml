@@ -1,8 +1,12 @@
-schema: dataviz/workspace/v1
+schema: dataviz/workspace/v2
 kind: workspace
 id: feature-showcase
 title: Feature Showcase
 description: 当前 DSL、数据入口、Selection、图表与交互 Runtime 的四个可分享验收看板
+assets:
+  demo-regions:
+    path: assets/maps/demo-regions.geojson
+    media_type: application/geo+json
 context:
   language: zh-CN
   timezone: Asia/Shanghai

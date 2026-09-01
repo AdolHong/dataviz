@@ -9,7 +9,7 @@ const fixture = name => JSON.parse(
 
 const runtimeWindow = {
   dataviz:{
-    protocol:{schema:'dataviz/runtime/v10'},
+    protocol:{schema:'dataviz/runtime/v12'},
     dependency_contract:{schema:'dataviz/dependency-contract/v11'},
     query_parameter_state:{},
   },
@@ -84,7 +84,7 @@ for (const item of fixture('output-capability')) {
 }
 
 const adapterWindow = {
-  dataviz:{protocol:{schema:'dataviz/runtime/v10'}},
+  dataviz:{protocol:{schema:'dataviz/runtime/v12'}},
   customElements:{get:() => null, define:() => {}},
   addEventListener:() => {},
 };
@@ -116,7 +116,7 @@ const runWebFilter = item => {
     operator:isPath ? 'auto' : payload.operator,
   };
   const manifest = {
-    protocol:{schema:'dataviz/runtime/v10'},
+    protocol:{schema:'dataviz/runtime/v12'},
     portable:{outputs:{'source:rows/main':rows}},
     dependency_contract:{
       views:{sample:{

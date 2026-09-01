@@ -86,7 +86,7 @@ def build_interactive_workspace(
     (dashboard / "data").mkdir(parents=True)
     (dashboard / "transforms").mkdir()
     (root / "workspace.yaml").write_text(
-        f"""schema: dataviz/workspace/v1
+        f"""schema: dataviz/workspace/v2
 kind: workspace
 id: interactive-tests
 title: Interactive tests
@@ -97,7 +97,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v14
+        """schema: dataviz/dashboard/v16
 kind: dashboard
 id: interactive
 title: Interactive contract

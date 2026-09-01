@@ -1,0 +1,9 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {"type":"Feature","properties":{"code":"A","name":"西北片区"},"geometry":{"type":"Polygon","coordinates":[[[112,23],[114,23],[114,25],[112,25],[112,23]]]}},
+    {"type":"Feature","properties":{"code":"B","name":"东北片区"},"geometry":{"type":"Polygon","coordinates":[[[114,23],[116,23],[116,25],[114,25],[114,23]]]}},
+    {"type":"Feature","properties":{"code":"C","name":"西南片区"},"geometry":{"type":"Polygon","coordinates":[[[112,21],[114,21],[114,23],[112,23],[112,21]]]}},
+    {"type":"Feature","properties":{"code":"D","name":"东南片区"},"geometry":{"type":"Polygon","coordinates":[[[114,21],[116,21],[116,23],[114,23],[114,21]]]}}
+  ]
+}

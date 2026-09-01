@@ -91,7 +91,7 @@
       : [view.x || view.label, view.series]).filter(Boolean);
     const operation = view.template === 'metric'
       ? 'none'
-      : (view.aggregate || (['scatter', 'table', 'perspective'].includes(view.template)
+      : (view.aggregate || (['scatter', 'map', 'table', 'perspective'].includes(view.template)
         ? 'none'
         : 'sum'));
     if (operation !== 'none' && valueFields.length && groups.length) {
@@ -106,10 +106,99 @@
     }
     return view.limit ? rows.slice(0, view.limit) : rows;
   };
+  const mapPlotlyDescriptor = (view, rows, binding, traceOptions) => {
+    const layoutOptions = view.options?.layout || {};
+    const {geo: geoOptions = {}, ...layoutRest} = layoutOptions;
+    const selectedpoints = binding ? rows.map((row, index) => (
+      bindingSelected(binding, bindingValue(binding, row)) ? index : null
+    )).filter(index => index != null) : undefined;
+    const common = {
+      name:view.title,
+      text:view.label ? rows.map(row => row[view.label]) : undefined,
+      customdata:binding ? rows.map(row => bindingValue(binding, row)) : undefined,
+      selectedpoints,
+    };
+    let trace;
+    if (view.mark === 'point') {
+      const longitude = rows.map(row => Number(row[view.longitude]));
+      const latitude = rows.map(row => Number(row[view.latitude]));
+      const invalidIndex = longitude.findIndex((value, index) => (
+        !Number.isFinite(value) || !Number.isFinite(latitude[index])
+      ));
+      if (invalidIndex >= 0) {
+        throw new Error(
+          `Map View ${view.id} requires finite longitude/latitude at row ${invalidIndex + 1}`
+        );
+      }
+      trace = {
+        ...common,
+        type:'scattergeo',
+        mode:'markers',
+        lon:longitude,
+        lat:latitude,
+        hovertemplate:view.label ? '%{text}<extra></extra>' : undefined,
+        ...traceOptions,
+        marker:{
+          size:view.size ? rows.map(row => row[view.size]) : 9,
+          color:view.color ? rows.map(row => row[view.color]) : undefined,
+          opacity:0.82,
+          line:{width:0.8, color:'rgba(255,255,255,0.9)'},
+          ...(traceOptions.marker || {}),
+        },
+      };
+    } else {
+      const locations = rows.map(row => row[view.data_key]);
+      const seen = new Map();
+      locations.forEach((value, index) => {
+        const key = JSON.stringify(value);
+        if (seen.has(key)) {
+          throw new Error(
+            `Map View ${view.id} requires unique data_key ${view.data_key}; duplicate at rows ${seen.get(key) + 1} and ${index + 1}`
+          );
+        }
+        seen.set(key, index);
+      });
+      trace = {
+        ...common,
+        type:'choropleth',
+        locations,
+        z:rows.map(row => row[view.color]),
+        featureidkey:view.feature_key,
+        hovertemplate:view.label
+          ? '%{text}<br>%{z}<extra></extra>'
+          : '%{location}<br>%{z}<extra></extra>',
+        ...traceOptions,
+        marker:{line:{width:0.7, color:'rgba(255,255,255,0.75)'}, ...(traceOptions.marker || {})},
+      };
+    }
+    return {
+      type:'plotly',
+      data:[trace],
+      layout:{
+        margin:{l:8, r:8, t:8, b:8},
+        paper_bgcolor:'transparent',
+        plot_bgcolor:'transparent',
+        showlegend:false,
+        geo:{
+          fitbounds:'locations',
+          visible:false,
+          bgcolor:'rgba(0,0,0,0)',
+          ...geoOptions,
+        },
+        ...layoutRest,
+      },
+      config:view.config,
+      controlBinding:binding,
+      geojsonAsset:view.mark === 'region' ? view.geojson : undefined,
+    };
+  };
   const plotlyDescriptor = (view, rows, binding = null) => {
     const groups = view.series ? [...new Set(rows.map(row => row[view.series]))] : [null];
     const measures = Array.isArray(view.y) ? view.y : [view.y];
     const traceOptions = view.options?.trace || {};
+    if (view.template === 'map') {
+      return mapPlotlyDescriptor(view, rows, binding, traceOptions);
+    }
     const traces = groups.flatMap(group => measures.map(measure => {
       const selected = group == null ? rows : rows.filter(row => row[view.series] === group);
       const common = {
@@ -248,7 +337,7 @@
         : [view.x || view.label, view.series]).filter(Boolean);
       const operation = view.template === 'metric'
         ? 'none'
-        : (view.aggregate || (['scatter', 'table', 'perspective'].includes(view.template)
+        : (view.aggregate || (['scatter', 'map', 'table', 'perspective'].includes(view.template)
           ? 'none'
           : 'sum'));
       if (operation !== 'none' && valueFields.length && groups.length) {
@@ -318,7 +407,7 @@
   }
 
   root.viewDeclarative = {
-    protocol:'dataviz/runtime/v10',
+    protocol:'dataviz/runtime/v12',
     escape,
     numericAggregate,
     inputReferences,
@@ -327,12 +416,13 @@
     controlBinding,
     bindingValue,
     prepareRows,
+    mapPlotlyDescriptor,
     build,
     registerViews,
   };
   root.descriptors = root.descriptors || new Map();
   root.descriptors.set('view.declarative', {
-    protocol:'dataviz/runtime/v10',
+    protocol:'dataviz/runtime/v12',
     owns:['descriptor-builders', 'renderer-lifecycle'],
   });
 })(window);

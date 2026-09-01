@@ -1172,6 +1172,7 @@ def _compile_writer_edges(
         "scatter",
         "heatmap",
         "radar",
+        "map",
     }
     views_by_id = {view.id: view for view in dashboard.definition.views}
     for view_id, view in views_by_id.items():
@@ -1248,7 +1249,7 @@ def _compile_writer_edges(
             if view.template == "metric"
             else (
                 view.aggregate
-                or ("none" if view.template in {"scatter", "table", "perspective"} else "sum")
+                or ("none" if view.template in {"scatter", "map", "table", "perspective"} else "sum")
             )
         )
         if operation != "none" and value_fields and not set(fields) <= set(group_fields):

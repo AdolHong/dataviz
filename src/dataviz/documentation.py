@@ -28,6 +28,8 @@ AUTHORING_ROUTE_ALIASES = {
     "interaction": "interactive",
     "renderer": "custom-renderer",
     "custom": "custom-renderer",
+    "map": "map-view",
+    "entity": "entity-select",
 }
 
 AUTHORING_DOCUMENTS: dict[str, dict[str, Any]] = {
@@ -71,9 +73,40 @@ AUTHORING_DOCUMENTS: dict[str, dict[str, Any]] = {
             "Run validate, report, then visual-check.",
         ],
     },
+    "map-view": {
+        "requires": ["adapter", "source", "view", "layout", "workspace-asset"],
+        "purpose": "Render point locations or values joined to a local GeoJSON Asset without custom JavaScript.",
+        "path": "Named Output + optional Workspace GeoJSON Asset → native Plotly Map View",
+        "steps": [
+            "Use a map only when geographic position or shape is part of the analytical question.",
+            "Use mark=point with longitude/latitude, or mark=region with an allowlisted GeoJSON Asset and explicit join keys.",
+            "Keep business aggregation in the Source or Transform; one region key must produce one row.",
+            "Run validate, report, then visual-check in both Server and portable HTML.",
+        ],
+        "minimal_example": """views:
+  - id: stores
+    template: map
+    mark: point
+    input: source:stores/main
+    longitude: longitude
+    latitude: latitude
+    label: store_name
+""",
+    },
+    "entity-select": {
+        "requires": ["adapter", "parameter-domain", "query-parameter", "source"],
+        "purpose": "Search and select a large entity catalog without loading all candidates into the Browser.",
+        "path": "Materialized Parameter Domain → server Lookup → compact multiple_select → query_filters",
+        "steps": [
+            "Scaffold the current strict composition instead of inventing an entity_select type.",
+            "Project stable value, label and search keyword columns from one materialized SQL catalog.",
+            "Use default none, clearable true and query_filters empty=passthrough when an empty choice means no filter.",
+            "Keep include operands bounded; use a table/upload join instead of a huge SQL IN list.",
+        ],
+    },
     "cascading-selection": {
         "requires": ["view", "control", "option-domain", "dependency-closure"],
-        "purpose": "Filter a child choice Control's candidates from one or more direct parent Controls.",
+        "purpose": "Filter a post-query child choice Control's candidates from one or more direct parent Controls over an already loaded Base Output.",
         "path": "Base option domain → parent Control → child depends_on → explicit consumers",
         "steps": [
             "Put every candidate and parent field in one immutable Base table output.",
@@ -229,7 +262,7 @@ AUTHORING_ROUTES: dict[str, dict[str, Any]] = {
         "documents": ["minimal-dashboard"],
         "scaffolds": [
             "minimal", "source.file", "source.sql", "source.python",
-            "view.metric", "view.line", "view.bar", "view.table",
+            "view.metric", "view.line", "view.bar", "view.map", "view.table",
         ],
         "commands": [
             "dataviz scaffold minimal --id <dashboard> --output <workspace>",
@@ -265,8 +298,32 @@ AUTHORING_ROUTES: dict[str, dict[str, Any]] = {
         ],
         "excludes": ["control", "interactive-transform"],
     },
+    "map-view": {
+        "summary": "Build a native Plotly point or GeoJSON region Map View.",
+        "inherits": ["minimal"],
+        "documents": ["map-view"],
+        "scaffolds": ["view.map"],
+        "commands": [
+            "dataviz docs maps --format json",
+            "dataviz validate <workspace> --dashboard <dashboard> --format json",
+            "dataviz visual-check <workspace> <dashboard> --target both",
+        ],
+        "excludes": ["renderer-contract", "remote-map-service", "gis-runtime"],
+    },
+    "entity-select": {
+        "summary": "Compose a searchable large entity Query Parameter from existing strict contracts.",
+        "inherits": ["minimal"],
+        "documents": ["entity-select"],
+        "scaffolds": ["query-parameter.entity-select"],
+        "commands": [
+            "dataviz scaffold query-parameter.entity-select --id <parameter> --format json",
+            "dataviz parameters prewarm <workspace> <dashboard>",
+            "dataviz parameters lookup <workspace> <dashboard> <parameter> --search <text>",
+        ],
+        "excludes": ["entity-runtime", "browser-candidate-relation"],
+    },
     "cascading-selection": {
-        "summary": "Build a parent-child choice-Control candidate cascade.",
+        "summary": "Build a post-query parent-child choice-Control candidate cascade; query-time Parameter Domain cascades belong to docs query-parameters.",
         "inherits": ["minimal"],
         "documents": ["cascading-selection"],
         "scaffolds": ["control.select", "control.cascader", "control.tree-select"],
@@ -432,6 +489,7 @@ _CHART_TEMPLATES = (
     "scatter",
     "heatmap",
     "radar",
+    "map",
 )
 _CHART_FIELD_MATRIX = {
     name: {
@@ -475,11 +533,21 @@ DOC_TOPIC_REDIRECTS = {
     "input-component": "data-entry-components",
     "renderer": "renderers",
     "chart": "charts",
+    "map": "maps",
+    "geojson": "maps",
+    "entity-select": "entity-selection",
+    "entity-picker": "entity-selection",
     "view": "charts",
     "source": "sources",
     "parameter": "query-parameters",
     "parameters": "query-parameters",
     "query-parameter": "query-parameters",
+    "parameter-domain": "query-parameters",
+    "query-parameter-domain": "query-parameters",
+    "asset": "workspace-assets",
+    "workspace-asset": "workspace-assets",
+    "shared-file": "workspace-assets",
+    "bundle": "workspace-assets",
     "content": "dashboard",
     "interpolation": "dashboard",
     "title": "dashboard",
@@ -585,6 +653,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "每次修改后运行 validate；未知字段、旧 schema 和不完整引用直接失败。",
             "serve 默认热更新 Workspace；Query Contract 改动只标记 Outdated，不会自动执行查询。",
             "自定义 Presentation/CSS 前读取 design-language；先覆盖 Theme token，再使用局部 css_class。",
+            "普通 SQL 和文件默认留在 Dashboard 内；只有稳定且确实跨 Dashboard 共用的 GeoJSON、字典或其他静态文件才提升为 Workspace Asset。适度复制优于可变的共享依赖，且不得使用 ../../ 越界路径。",
         ],
         "success": [
             "validate 返回 passed=true。",
@@ -592,7 +661,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "result inspect/show 只读取已封存 Artifact，不重新执行数据源。",
             "HTML report 生成，同时写出 report manifest。",
         ],
-        "related": ["progressive-authoring", "workflow", "results", "design-language", "validation", "troubleshooting"],
+        "related": ["progressive-authoring", "workflow", "workspace-assets", "results", "design-language", "validation", "troubleshooting"],
     },
     "analysis-quickstart": {
         "summary": "让 AI 从业务语义发现可复用口径，先理解调用契约，再执行一次并复用不可变 Result。",
@@ -738,6 +807,70 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
         ],
         "related": ["quickstart", "workflow", "components", "ai-authoring"],
     },
+    "workspace-assets": {
+        "summary": "Workspace Asset 让多个 Dashboard 安全复用本地静态文件，并让 Bundle 与离线 HTML 自动携带真实依赖闭包。",
+        "choose": {
+            "dashboard_local": "默认把只属于一个 Dashboard 的 SQL、CSS、JS 和数据文件放在该 Dashboard 内；少量重复优于跨 Dashboard 的可变逻辑依赖。",
+            "workspace_asset": "多个 Dashboard 共用的 GeoJSON、字典、图像或静态数据文件在 workspace.yaml 注册一次。",
+            "file_source": "文件作为 Query 数据输入时使用 File Source；确需共享的稳定文件路径写 asset:<id>，并显式声明 format。",
+            "parameter_domain": "多个 Dashboard 真正共用的 Query Parameter 候选口径可使用 Workspace Parameter Domain；普通 Source/Transform/View/SQL 不提升为共享资源。",
+        },
+        "workspace_example": """# workspace.yaml
+schema: dataviz/workspace/v2
+kind: workspace
+id: retail
+title: Retail
+assets:
+  china-city:
+    path: assets/maps/100000_full_city.json
+    media_type: application/geo+json
+  store-dictionary:
+    path: assets/data/store_dictionary.csv
+    media_type: text/csv""",
+        "dashboard_example": """# dashboard.yaml
+schema: dataviz/dashboard/v16
+kind: dashboard
+id: city-map
+assets: [china-city]  # Browser allowlist and portable-report dependency
+
+sources:
+  - id: shared-dictionary
+    type: file
+    path: asset:store-dictionary  # File Source dependency; no Browser exposure
+    format: csv
+    outputs: {main: {kind: table}}""",
+        "renderer_example": """window.datavizRuntime.registerRenderer('city-map', {
+  async mount(context) {
+    const geojson = await context.assets.json('china-city');
+    // Render with the same code in Server and portable HTML.
+  },
+  update() {},
+  dispose() {},
+});""",
+        "runtime_service": {
+            "api": ["list", "describe", "bytes", "text", "json", "blob", "url"],
+            "server": "Server 通过 Dashboard-scoped safe route 和 ETag 提供文件。",
+            "portable_html": "文本以 UTF-8、二进制以 base64 内嵌；业务代码不判断 transport。",
+            "context": "inspect context 只返回依赖 Asset 的 path/MIME/bytes/hash，不嵌入文件内容。",
+        },
+        "security_and_portability": [
+            "在 workspace.yaml 注册文件不会自动暴露给浏览器；只有 Dashboard.assets 中的显式 allowlist 可由 context.assets 读取。",
+            "File Source 的 asset:<id> 引用与 Browser allowlist 相互独立；Source-only 文件不会获得 Browser URL。",
+            "普通 SQL 和文件默认归 Dashboard 所有；只有稳定且确实跨 Dashboard 共用的文件才注册为 Workspace Asset，少量复制可以换取更清晰的所有权与迁移边界。",
+            "路径必须位于 Workspace 内；不支持绝对路径、远程 URL、软链接逃逸或从 Downloads 读取。",
+            "dataviz bundle 复制 Dashboard 实际引用的 Browser Assets、File Source Assets 和共享 Parameter Domain；不复制未引用文件、凭据或 .dataviz/ 下的 cache。",
+            "Bundle 是单向、自包含快照，不是 import、merge、sync 或 package manager；导出后与源 Workspace 的共享关系已经切断。",
+            "Bundle 目标必须不存在或为空；非空目录稳定失败，绝不复用、合并或覆盖其中的 Dashboard、SQL、Asset 和其他用户文件。",
+            "Bundle 在目标同级临时目录完整复制并校验 hash 后一次发布；复制期间来源变化会失败且不留下 partial destination。",
+        ],
+        "commands": [
+            "dataviz validate <workspace> --dashboard <dashboard-id> --format json",
+            "dataviz inspect context <workspace> <dashboard-id> --format json",
+            "dataviz bundle <workspace> <dashboard-id> <destination>",
+            "dataviz report <workspace> <dashboard-id-or-result-id> --output report.html",
+        ],
+        "related": ["quickstart", "custom-renderer", "validation", "html-export"],
+    },
     "pipeline": {
         "summary": "稳定主链分成不可变取数阶段与可重复交互计算阶段。",
         "contract": [
@@ -880,7 +1013,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "id": "CLI、DAG、API 与 Presentation 使用的稳定程序身份。",
             "title": "页面内容，可与文件夹名不同；为空时回退到文件夹末级名称。",
         },
-        "minimal_example": """schema: dataviz/dashboard/v14
+        "minimal_example": """schema: dataviz/dashboard/v16
 kind: dashboard
 id: sales-overview
 title: 销售概览
@@ -965,6 +1098,7 @@ query_parameters:
             "rules": [
                 "Parameter Domain 只提供候选发现与标签，不产生 Named Output、Result 或 Catalog 条目，也不是 Source 参数白名单。",
                 "所有 SQL Domain 都先形成 Workspace 共享 immutable generation；Browser 永远不接收原始关系、SQL、Adapter、物化路径或候选全集。",
+                "Browser Lookup 每页返回 500 个纯文本/元数据候选并通过 opaque cursor 继续；CLI 为控制终端和 AI token 密度默认 50、可显式提高到 500。",
                 "同一个 Workspace Domain、定义/代码 hash、Adapter identity 与 visibility scope 可以跨 Dashboard、tab 和用户复用；权限范围不同不得共用。",
                 "options.depends_on 只对当前 generation 做本地 predicate；single_select 标量按单值 include，multiple_select 按 all/include/exclude/none；搜索、级联和 cursor 分页都不重新执行远端 SQL。",
                 "multiple_select 使用 all/include/exclude/none 紧凑集合；all/none 不带 operands，include/exclude 只保存有限例外，绝不展开 10 万候选。",
@@ -981,8 +1115,8 @@ query_parameters:
                 "dataviz parameters status <workspace> [dashboard]",
                 "dataviz parameters lookup <workspace> <dashboard> <parameter> --search <text> --limit 10",
                 "dataviz parameters refresh <workspace> <dashboard>",
-                "dataviz bundle <workspace> <dashboard> <destination>",
             ],
+            "portability": "需要搬运 Dashboard 及其共享 Domain 闭包时读取 dataviz docs workspace-assets；Bundle 不是日常候选域运维操作。",
         },
         "date_range": {
             "definition": """- id: job_date_range
@@ -1039,6 +1173,35 @@ query_filters:
 """,
         "related": ["sources", "dataset-transforms", "interactive-transforms", "data-entry-components"],
     },
+    "entity-selection": {
+        "summary": "大型实体候选使用现有 Parameter Domain、服务端 Lookup、紧凑多选状态和 query_filters；不新增 Entity Runtime。",
+        "scaffold": "dataviz scaffold query-parameter.entity-select --id item-nbr --format json",
+        "default_contract": {
+            "parameter": "multiple_select + options.mode=domain + default.mode=none + clearable=true",
+            "lookup": "候选全集只在 Server 物化；Browser 按搜索词和 opaque cursor 读取页面。",
+            "query": "query_filters.empty=passthrough：空选择不筛选；有限 include 只筛选所选实体。",
+            "portable": "Result 与 HTML 只保存 canonical selection，不嵌入候选全集、cursor 或物化文件。",
+        },
+        "recipe_files": [
+            "Parameter Domain definition and SQL",
+            "Dashboard Query Parameter snippet",
+            "SQL Source definition with query_filters and statement placeholder",
+        ],
+        "rules": [
+            "value_field 使用稳定机器 ID；label/description/group/keywords 只帮助人搜索和识别，不改变参数值。",
+            "实体目录可跨 Dashboard 作为真正共用的 Workspace Parameter Domain；普通业务 Source/SQL 仍保持 Dashboard-local。",
+            "不要把十万候选展开成 all operands；all/none 是无 operands 的紧凑状态，include/exclude 只存有限例外。",
+            "max_explicit_values 限制显式选择；需要几千 ID 时改用上传清单或临时表 Join，不生成巨大 IN。",
+            "Parameter Domain 是候选建议而非合法性白名单；已提交但最新目录缺失的值显示 unavailable，不静默删除。",
+        ],
+        "operations": [
+            "dataviz parameters prewarm <workspace> <dashboard>",
+            "dataviz parameters status <workspace> [dashboard]",
+            "dataviz parameters lookup <workspace> <dashboard> <parameter> --search <text> --limit 50",
+            "dataviz parameters refresh <workspace> <dashboard>",
+        ],
+        "related": ["query-parameters", "sources", "workspace-assets", "validation"],
+    },
     "adapters": {
         "summary": "连接配置属于 Workspace；可分享的 Dashboard 只引用逻辑 Adapter 名。",
         "supported": ["duckdb", "mysql", "starrocks", "sqlalchemy", "file root", "Python Source adapter config"],
@@ -1055,9 +1218,9 @@ query_filters:
         "summary": "Source 是唯一进入分析 DAG 的外部取数入口，类型为 file、sql 或 python；Parameter Domain 只能查询网页候选元数据，不产生分析 Output。",
         "required": ["schema", "kind", "id", "type", "outputs"],
         "examples": {
-            "file": "{schema: dataviz/source/v5, kind: source, id: sales, type: file, path: data/sales.csv, outputs: {main: {kind: table}}}",
-            "sql": "{schema: dataviz/source/v5, kind: source, id: sales, type: sql, adapter: warehouse, code: sales.sql, query_inputs: {start_date: start_date}, outputs: {main: {kind: table}}}",
-            "python": "{schema: dataviz/source/v5, kind: source, id: api, type: python, code: api.py, outputs: {main: {kind: table}}}",
+            "file": "{schema: dataviz/source/v6, kind: source, id: sales, type: file, path: data/sales.csv, outputs: {main: {kind: table}}}",
+            "sql": "{schema: dataviz/source/v6, kind: source, id: sales, type: sql, adapter: warehouse, code: sales.sql, query_inputs: {start_date: start_date}, outputs: {main: {kind: table}}}",
+            "python": "{schema: dataviz/source/v6, kind: source, id: api, type: python, code: api.py, outputs: {main: {kind: table}}}",
         },
         "timeouts": "SQL/Python 默认 120 秒；SQL timeout_retries 默认 1，超时后立即使用新连接重试。",
         "debug": "Server 的 Sources 面板公开参数化 SQL、解析后 SQL、绑定参数、Adapter 类型、超时和重试证据。",
@@ -1218,7 +1381,7 @@ timeout_seconds: 120
             "checkbox": "随所在 Query/Control 工作流提交的 boolean。",
             "switch": "立即发出 input/change 的 boolean；执行策略仍由外层工作流决定。",
             "radio-group": "少量可见单选；不合成 All/Clear。",
-            "select": "平面单选或多选；search/virtual 支持 auto/always/never。单选不提供批量操作。",
+            "select": "平面单选或多选；下拉在视口内提供更宽阅读面，分页/非虚拟候选自动换行显示全文，本地大列表使用固定行高虚拟化并以 Tooltip 提供全文。search/virtual 支持 auto/always/never；单选不提供批量操作。",
             "checkbox-group": "2–5 个并列选项的直接多选；不显示全选、反选或清空工具栏。",
             "cascader": "用 path_fields 逐级浏览并选择完整路径。",
             "tree-select": "在窄弹层中搜索、展开和选择层级路径。",
@@ -1307,7 +1470,7 @@ timeout_seconds: 120
                 "control.checkbox": "Ant Checkbox；一个 staged boolean。",
                 "control.switch": "Ant Switch；一个 immediate boolean。",
                 "control.radio-group": "Ant Radio.Group；一个真实 scalar choice，无 All/Clear。",
-                "control.select": "Ant Select；单/多选、分组、搜索、max tag、虚拟列表。",
+                "control.select": "Ant Select；单/多选、分组、搜索、max tag、视口约束宽弹层，以及兼顾长标签全文与本地大列表性能的虚拟列表。",
                 "control.checkbox-group": "Ant Checkbox.Group；2–5 个小规模显式多选，无批量工具栏。",
                 "control.cascader": "Ant Cascader；完整层级 path，单选或多选。",
                 "control.tree-select": "Ant TreeSelect；可搜索、展开的层级 path。",
@@ -1414,7 +1577,7 @@ control_components:
         "rule": "先验证数据口径、字段、聚合和 Named Output，再用 Plotly trace/layout/config 调整视觉细节。",
         "plotly_runtime": {
             "version": "4.0.0",
-            "grammar": "内置 line/bar/stacked-bar/pie/scatter/heatmap/radar 都生成 Plotly traces 与 layout。",
+            "grammar": "内置 line/bar/stacked-bar/pie/scatter/heatmap/radar/map 都生成 Plotly traces 与 layout。",
             "native": "复杂视觉由 Custom Renderer 复用 context.charts.plotly，或直接调用完整 Plotly.js API。",
             "interaction": "图例、点击、框选、套索与缩放使用 Plotly 事件和 config；矩形/套索手势提交后自动隐藏临时轮廓并保留 Control 选择，再次点击当前激活的工具可退出选择模式；页面滚动仍由 Dashboard 优先处理。",
             "offline": "Plotly.js 4.0.0 作为固定浏览器资产随 Dataviz 提供；Server 与 portable HTML 使用同一份 JS，不依赖 Python plotly 包。",
@@ -1436,6 +1599,55 @@ control_components:
             "explicit_zoom": "缩放、平移和坐标轴恢复不进入默认工具栏；有明确分析需求时通过 config 覆盖，但不得默认截获 Dashboard 的连续滚动。",
             "custom_renderer": "Custom Renderer 使用 context.charts.plotly；只有明确需求时才启用 scrollZoom。",
         },
+    },
+    "maps": {
+        "summary": "原生 Map View 用唯一 Plotly Renderer 表达经纬度点位或本地 GeoJSON 区域指标；位置必须真正参与分析问题。",
+        "point_example": """- id: stores
+  template: map
+  mark: point
+  input: source:stores/main
+  longitude: longitude
+  latitude: latitude
+  label: store_name
+  color: sales
+  size: revenue
+""",
+        "region_example": """# workspace.yaml
+assets:
+  china-city: {path: assets/maps/china-city.geojson, media_type: application/geo+json}
+
+# dashboard.yaml
+assets: [china-city]
+views:
+  - id: city-sales
+    template: map
+    mark: region
+    input: source:city-sales/main
+    geojson: china-city
+    data_key: city_code
+    feature_key: properties.adcode
+    color: revenue
+    label: city_name
+""",
+        "contracts": {
+            "point": "longitude/latitude 必填；label/color/size 可选。经纬度必须是有限数值。",
+            "region": "geojson/data_key/feature_key/color 必填；数据 key 与 GeoJSON feature key 都必须唯一且能连接。",
+            "asset": "GeoJSON 必须先在 workspace.yaml 注册，再由 Dashboard.assets 显式 allowlist；Bundle 与 portable HTML 自动携带。",
+            "interaction": "control_binding 继续写同一 ControlRuntime；点击、矩形和套索选择不创建地图专属状态。",
+            "escape_hatch": "复杂样式继续使用 options.trace、options.layout 和 config；只有超出 point/region 时才使用 Custom Renderer。",
+        },
+        "non_goals": [
+            "远程底图 URL 或 token",
+            "轨迹、热力聚合、地理编码与 GIS 运算",
+            "Python plotly 或第二套地图引擎",
+            "仅因为存在地区字段就自动选地图",
+        ],
+        "commands": [
+            "dataviz scaffold view.map --id stores --format json",
+            "dataviz validate <workspace> --dashboard <dashboard> --format json",
+            "dataviz visual-check <workspace> <dashboard> --target both",
+        ],
+        "related": ["charts", "workspace-assets", "controls", "validation", "html-export"],
     },
     "tables": {
         "summary": "Table 是默认数据表达组件；Perspective 只用于赋予终端用户临时分组、聚合、透视和多维探索能力。",
@@ -1748,6 +1960,7 @@ assets:
         "recommended_command": "dataviz validate <workspace> --dashboard <dashboard-id> --format json",
         "coverage": [
             "schema、未知字段、重复 ID 和本地路径边界",
+            "Workspace Asset 注册、Dashboard Browser allowlist、File Source asset:<id> 引用与 Workspace 内路径约束",
             "显式 Output 引用、缺失 Output、两个 DAG 的环和跨 Runtime 非法依赖",
             "Query/Control namespace、Control type、consumer binding、作用域可见性与 trigger 冲突",
             "Interactive export.mode 与浏览器 Runtime 资产",
@@ -1775,6 +1988,7 @@ assets:
         "current": {
             key: CURRENT_PROTOCOL_SCHEMAS[key]
             for key in (
+                "workspace",
                 "dashboard",
                 "parameter_domain",
                 "presentation",
@@ -1786,6 +2000,8 @@ assets:
                 "target_reference",
                 "analysis_result",
                 "analysis_evidence",
+                "dashboard_bundle",
+                "report_manifest",
                 "layout_contract",
                 "state_snapshot",
             )
@@ -1793,6 +2009,7 @@ assets:
         "browser_assets": {
             "plotly_js": "4.0.0（直接内置，不安装 Python plotly）",
             "tanstack_table_core": "9.2.4（直接内置）",
+            "workspace_asset_service": "Runtime v12 的 context.assets；Server URL 与 portable inline 共用同一作者 API。",
         },
         "rules": [
             "未知字段 extra=forbid。",
@@ -1813,8 +2030,9 @@ assets:
         "commands": ["dataviz version", "uv build", "python scripts/build_release_zip.py"],
         "release_contract": [
             "Python 3.11–3.14 运行 unit/contract tests。",
-            "快速迭代默认运行完整 Chromium Runtime tests；稳定发布、跨浏览器敏感修改或明确要求时再重复 Firefox/WebKit。",
-            "wheel、sdist、pip ZIP 在干净 venv 中运行 version/schemas/components check/init/validate/report smoke。",
+            "默认正式发布运行完整 Chromium Runtime tests；稳定发布、跨浏览器敏感修改或明确要求时再重复 Firefox/WebKit。",
+            "默认正式发布在干净 venv 中对 wheel、sdist、pip ZIP 运行 version/schemas/components check/init/validate/report smoke。",
+            "明确约定的快速发布可以缩小浏览器或 smoke 范围，但必须在 Changelog/发布记录中写明省略项，不能把临时例外改写成默认质量门禁。",
             "干净环境确认 Python plotly 未安装，并核对 version 与报告中的 Plotly.js 固定版本。",
             "发行包排除 .venv、build、缓存和运行 Artifact。",
         ],
@@ -1886,6 +2104,9 @@ assets:
             {"symptom": "Interactive Transform 失败", "action": "检查 Runtime、trigger、canonical state、generation 与 export.mode；browser-js Derived Output 使用 --runtime browser。"},
             {"symptom": "需要查看更多结果", "action": "不要重新 run；使用 result show 的 --offset/--limit 分页，或 result export 原样复制一个 Artifact。"},
             {"symptom": "Result 引用的 File Source 已变化", "action": "Result 保留实际读取的 path/hash 收据；重新执行产生新 Result，不修改旧 manifest。"},
+            {"symptom": "多个 Dashboard 共享 GeoJSON/静态文件", "action": "使用 workspace.yaml assets 注册、Dashboard.assets 显式暴露，并用 dataviz bundle 搬运依赖闭包；不要使用 ../../ 或绝对路径。"},
+            {"symptom": "Bundle 报 dashboard_bundle_destination_not_empty", "action": "选择不存在或为空的新目标目录；Bundle 只创建快照，绝不导入、合并、同步或覆盖已有 Workspace。"},
+            {"symptom": "Bundle 报 dashboard_bundle_source_changed", "action": "来源文件在复制期间发生变化；等待写入结束后重新执行 Bundle，失败过程不会发布 partial destination。"},
             {"symptom": "查询成功但 View 为空", "action": "检查 Named Output 字段、类型、显式 Control filter 后行数和 View input。"},
             {"symptom": "Server 正常但 HTML 失败", "action": "检查 export.mode；server-python 不能离线重算，browser-js 的代码和依赖必须随报告嵌入。"},
             {"symptom": "源码环境 ModuleNotFoundError", "action": "在 dataviz-tool 下运行 uv sync --python 3.12 --extra dev --no-editable --reinstall-package ai-dataviz；后续 CLI 使用 uv run --no-editable dataviz。"},

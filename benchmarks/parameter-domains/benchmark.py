@@ -41,7 +41,7 @@ def _workspace(root: Path, rows: int) -> Path:
     domains.mkdir()
     auth.mkdir()
     (root / "workspace.yaml").write_text(
-        "schema: dataviz/workspace/v1\nkind: workspace\nid: parameter-scale\n"
+        "schema: dataviz/workspace/v2\nkind: workspace\nid: parameter-scale\n"
         "title: Parameter scale benchmark\n",
         encoding="utf-8",
     )
@@ -75,7 +75,7 @@ from range({rows}) values(i)
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v14
+        """schema: dataviz/dashboard/v15
 kind: dashboard
 id: parameter-scale
 title: Parameter scale

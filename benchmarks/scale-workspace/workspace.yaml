@@ -1,4 +1,4 @@
-schema: dataviz/workspace/v1
+schema: dataviz/workspace/v2
 kind: workspace
 id: runtime-scale-benchmark
 title: Runtime Scale Benchmark

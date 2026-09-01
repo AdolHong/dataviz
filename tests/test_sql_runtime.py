@@ -28,7 +28,7 @@ def _sql_workspace(
     sources.mkdir(parents=True)
     (root / "auth").mkdir()
     (root / "workspace.yaml").write_text(
-        "schema: dataviz/workspace/v1\nkind: workspace\nid: sql-tests\ntitle: SQL tests\n",
+        "schema: dataviz/workspace/v2\nkind: workspace\nid: sql-tests\ntitle: SQL tests\n",
         encoding="utf-8",
     )
     (root / "auth" / "adapters.local.yaml").write_text(
@@ -36,7 +36,7 @@ def _sql_workspace(
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v14
+        """schema: dataviz/dashboard/v16
 kind: dashboard
 id: sql-test
 title: SQL test
@@ -55,7 +55,7 @@ sections:
         f"timeout_retries: {timeout_retries}\n" if timeout_retries is not None else ""
     )
     (sources / "query.yaml").write_text(
-        f"""schema: dataviz/source/v5
+        f"""schema: dataviz/source/v6
 kind: source
 id: query
 type: sql
@@ -408,7 +408,7 @@ def test_sql_timeout_does_not_block_an_independent_fast_branch(tmp_path: Path):
     sources = dashboard / "sources"
     (sources / "fast.csv").write_text("label,value\nready,7\n", encoding="utf-8")
     (sources / "fast.yaml").write_text(
-        """schema: dataviz/source/v5
+        """schema: dataviz/source/v6
 kind: source
 id: fast
 type: file
@@ -420,7 +420,7 @@ cache: {mode: none}
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v14
+        """schema: dataviz/dashboard/v16
 kind: dashboard
 id: sql-test
 title: SQL test
@@ -549,7 +549,7 @@ def test_timeout_retries_is_rejected_by_the_file_source_schema(tmp_path: Path):
     sources = root / "dashboards" / "sql-test" / "sources"
     (sources / "query.csv").write_text("value\n1\n", encoding="utf-8")
     (sources / "query.yaml").write_text(
-        """schema: dataviz/source/v5
+        """schema: dataviz/source/v6
 kind: source
 id: query
 type: file

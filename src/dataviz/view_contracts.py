@@ -59,6 +59,17 @@ VIEW_TEMPLATE_CONTRACTS: dict[str, dict[str, Any]] = {
         "optional": ["sort", "limit", "options", "config"],
         "field_references": ["label", "columns", "sort"],
     },
+    "map": {
+        "purpose": "Analyze point locations or values joined to GeoJSON regions",
+        "required": ["input", "mark"],
+        "optional": [
+            "longitude", "latitude", "geojson", "data_key", "feature_key",
+            "label", "color", "size", "sort", "limit", "options", "config",
+        ],
+        "field_references": [
+            "longitude", "latitude", "data_key", "label", "color", "size", "sort",
+        ],
+    },
     "table": {
         "purpose": "TanStack-powered default data expression table",
         "required": ["input"],
@@ -138,6 +149,20 @@ def validate_view_contract(view: Any) -> Any:
             raise ValueError(
                 f"View template {view.template} does not support "
                 f"aggregate={view.aggregate}"
+            )
+    if view.template == "map":
+        required_by_mark = {
+            "point": ("longitude", "latitude"),
+            "region": ("geojson", "data_key", "feature_key", "color"),
+        }
+        missing = [
+            field
+            for field in required_by_mark[view.mark]
+            if _is_missing(getattr(view, field, None))
+        ]
+        if missing:
+            raise ValueError(
+                f"View template map mark={view.mark} requires: {', '.join(missing)}"
             )
     return view
 

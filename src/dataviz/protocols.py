@@ -3,20 +3,20 @@ from __future__ import annotations
 from typing import Any
 
 
-WORKSPACE_SCHEMA = "dataviz/workspace/v1"
-DASHBOARD_SCHEMA = "dataviz/dashboard/v14"
+WORKSPACE_SCHEMA = "dataviz/workspace/v2"
+DASHBOARD_SCHEMA = "dataviz/dashboard/v16"
 PARAMETER_DOMAIN_SCHEMA = "dataviz/parameter-domain/v2"
 PARAMETER_DOMAIN_CONTRACT_SCHEMA = "dataviz/parameter-domain-contract/v3"
 PARAMETER_LOOKUP_SCHEMA = "dataviz/parameter-lookup/v1"
 PARAMETER_MATERIALIZATION_SCHEMA = "dataviz/parameter-materialization/v1"
 PRESENTATION_SCHEMA = "dataviz/presentation/v2"
-SOURCE_SCHEMA = "dataviz/source/v5"
+SOURCE_SCHEMA = "dataviz/source/v6"
 DATASET_TRANSFORM_SCHEMA = "dataviz/dataset-transform/v3"
 INTERACTIVE_TRANSFORM_SCHEMA = "dataviz/interactive-transform/v4"
 DEPENDENCY_CONTRACT_SCHEMA = "dataviz/dependency-contract/v11"
 LAYOUT_CONTRACT_SCHEMA = "dataviz/layout-contract/v1"
 STATE_SNAPSHOT_SCHEMA = "dataviz/state-snapshot/v5"
-RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v10"
+RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v12"
 TARGET_REFERENCE_SCHEMA = "dataviz/target-reference/v1"
 ANALYSIS_ENTRY_SCHEMA = "dataviz/analysis-entry/v1"
 ANALYSIS_CATALOG_SCHEMA = "dataviz/analysis-catalog/v1"
@@ -24,7 +24,8 @@ ANALYSIS_DESCRIBE_SCHEMA = "dataviz/analysis-describe/v1"
 ANALYSIS_RESULT_SCHEMA = "dataviz/analysis-result/v4"
 ANALYSIS_EVIDENCE_SCHEMA = "dataviz/analysis-evidence/v4"
 WORKSPACE_CHANGE_SCHEMA = "dataviz/workspace-change/v1"
-DASHBOARD_BUNDLE_SCHEMA = "dataviz/dashboard-bundle/v1"
+DASHBOARD_BUNDLE_SCHEMA = "dataviz/dashboard-bundle/v2"
+REPORT_MANIFEST_SCHEMA = "dataviz/report-manifest/v3"
 
 
 CURRENT_PROTOCOL_SCHEMAS: dict[str, str] = {
@@ -50,10 +51,22 @@ CURRENT_PROTOCOL_SCHEMAS: dict[str, str] = {
     "analysis_evidence": ANALYSIS_EVIDENCE_SCHEMA,
     "workspace_change": WORKSPACE_CHANGE_SCHEMA,
     "dashboard_bundle": DASHBOARD_BUNDLE_SCHEMA,
+    "report_manifest": REPORT_MANIFEST_SCHEMA,
 }
 
 
 PROTOCOL_BOUNDARIES: tuple[dict[str, Any], ...] = (
+    {
+        "boundary": "portable-report-manifest",
+        "schema": REPORT_MANIFEST_SCHEMA,
+        "owner": "rendering.canvas",
+        "producer": "dataviz report/export",
+        "consumer": "Portable HTML audit and share tooling",
+        "persisted": True,
+        "strictness": "exact-current",
+        "compatibility": "major-revision",
+        "conformance_suite": "workspace-assets,portable-html",
+    },
     {
         "boundary": "portable-dashboard-bundle",
         "schema": DASHBOARD_BUNDLE_SCHEMA,

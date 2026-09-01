@@ -1,4 +1,4 @@
-schema: dataviz/source/v5
+schema: dataviz/source/v6
 kind: source
 id: parameterized
 name: 参数化 DuckDB 查询

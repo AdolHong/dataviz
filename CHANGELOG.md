@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- 新增原生 Plotly Map View：`mark: point` 使用经纬度，`mark: region` 通过 Dashboard allowlist 的 Workspace GeoJSON Asset 连接区域指标；Server 与 portable HTML 复用同一 Asset Service、Renderer lifecycle 与 Control writer，不增加地图状态或第二图表引擎。
+- 新增 `query-parameter.entity-select` Scaffold，把现有共享 Parameter Domain、服务端搜索/游标分页、紧凑 `multiple_select` 和 Source `query_filters` 组合为十万级实体候选最短路径；普通业务 Source/SQL 仍保持 Dashboard-local。
+- Dashboard 升为 v16、Runtime 升为 v12、Component Registry 升为 5.8.0；Result、Evidence、Dependency 与 Transform shape 未改变。普通私有探索 Output 不再收到一概补 semantics 的非阻塞 advice。
+
+## 0.19.1 — 2026-09-01
+
+- `dataviz bundle` 收敛为单向、自包含快照：只允许写入新目录或空目录，非空目标稳定失败，不再复用、合并或覆盖已有 Dashboard、SQL、Workspace Asset 与其他用户文件。
+- Bundle 在目标同级临时目录完整构建并验证来源/目标 hash 后一次发布；复制期间来源发生变化会失败且不留下 partial destination。共享继续只服务于源 Workspace 内的 Asset 与 Parameter Domain，导出结果不承担 import、sync 或源码合并职责。
+- 完整非浏览器 pytest、Ruff、JavaScript 语法、Runtime 生成资产一致性、Component Package 与四个示例 Workspace strict validate 共同作为 0.19.1 门禁；按要求不运行浏览器测试与独立安装冒烟。
+
+## 0.19.0 — 2026-09-01
+
+- 新增 Workspace Asset：`workspace.yaml` 可注册多个 Dashboard 共用的 GeoJSON、字典、图像或静态数据；Dashboard v15 以显式 `assets` allowlist 授权 Browser，File Source v6 可独立读取 `asset:<id>`，两条路径不会互相扩大权限。
+- Runtime v11 为 Custom Renderer 提供传输无关的 `context.assets.list/describe/bytes/text/json/blob/url`；Server 使用安全 Dashboard route、MIME 与 ETag，portable HTML 使用 UTF-8/base64 内嵌。Report Manifest v3 只记录 hash/size/MIME，AI context 只投影引用元数据。
+- Dashboard Bundle v2 复制 Browser Asset、File Source Asset 与共享 Parameter Domain 的联合依赖闭包；未引用文件、凭据和 `.dataviz` 不进入目标，同内容复用，定义/内容冲突稳定失败并回滚。
+
+- Query Parameter Select 候选框在用户点击 Dashboard Canvas 正文时自动收起；Query Panel 本身保持展开，便于继续编辑参数。
+- Select 长候选标签默认获得视口约束的宽弹层与完整原生 Tooltip；服务端分页和普通非虚拟列表使用可变行高自动换行，本地大列表继续使用固定行高虚拟化与省略显示，不新增 Dashboard Presentation 选择题。
+- Browser Parameter Lookup 每页由 50 提升到 500 个候选，Server/CLI 上限同步为 500；CLI 默认仍为 50，避免 AI 候选探索无意输出过多 token。
+- 完整非浏览器 pytest、完整 Chromium E2E、Firefox/WebKit Runtime E2E、Ruff、JavaScript 语法、Runtime 生成资产一致性与 Component Package 检查共同作为 0.19.0 发布门禁；按要求不执行独立安装冒烟。
+
 ## 0.18.0 — 2026-09-01
 
 - Source v5 统一 `query_filters` 的空集合消费策略：每个 filter 必须声明 `empty: passthrough | match_none`，从而让空 `multiple_input` 或候选 `multiple_select none` 明确生成 `TRUE/FALSE`；`all` 始终是全集，include/exclude 继续安全生成参数化 `IN/NOT IN`，且永不产生 `IN ()`。

@@ -38,7 +38,7 @@ def _build_fold_workspace(root: Path) -> Path:
     (root / "auth").mkdir(parents=True)
     (root / "dashboards").mkdir()
     (root / "workspace.yaml").write_text(
-        """schema: dataviz/workspace/v1
+        """schema: dataviz/workspace/v2
 kind: workspace
 id: fold-tests
 title: Fold tests
@@ -53,7 +53,7 @@ title: Fold tests
 """,
         encoding="utf-8",
     )
-    source = """schema: dataviz/source/v5
+    source = """schema: dataviz/source/v6
 kind: source
 id: rows
 name: 收入
@@ -76,7 +76,7 @@ outputs:
         dashboard = root / "dashboards" / dashboard_id
         (dashboard / "sources").mkdir(parents=True)
         (dashboard / "dashboard.yaml").write_text(
-            f"""schema: dataviz/dashboard/v14
+            f"""schema: dataviz/dashboard/v16
 kind: dashboard
 id: {dashboard_id}
 title: {dashboard_id}

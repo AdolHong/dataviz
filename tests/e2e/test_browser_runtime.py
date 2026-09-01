@@ -28,9 +28,12 @@ from playwright.sync_api import (
 
 from dataviz.server import create_app
 from dataviz.cli import _copy_gallery_workspace
+from dataviz.execution import Executor
 from dataviz.execution.parameter_materializations import ParameterMaterializationStore
 import dataviz.execution.parameter_materializations as parameter_materializations
 from dataviz.errors import ExecutionFailure
+from dataviz.protocols import DASHBOARD_SCHEMA, WORKSPACE_SCHEMA
+from dataviz.rendering import CanvasRenderer
 from dataviz.workspace import load_workspace
 
 
@@ -203,7 +206,7 @@ def _build_same_view_dependency_workspace(root: Path) -> Path:
     sources.mkdir(parents=True)
     auth.mkdir()
     (root / "workspace.yaml").write_text(
-        """schema: dataviz/workspace/v1
+        """schema: dataviz/workspace/v2
 kind: workspace
 id: same-view-controls
 title: Same View Controls
@@ -220,7 +223,7 @@ folders: []
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v14
+        """schema: dataviz/dashboard/v16
 kind: dashboard
 id: same-view-controls
 title: Same View Controls
@@ -256,7 +259,7 @@ sections:
         encoding="utf-8",
     )
     (sources / "daily.yaml").write_text(
-        """schema: dataviz/source/v5
+        """schema: dataviz/source/v6
 kind: source
 id: daily
 type: sql
@@ -293,7 +296,7 @@ def _build_scale_workspace(root: Path, *, rows: int = 150_000) -> Path:
     sources.mkdir()
     auth.mkdir()
     (root / "workspace.yaml").write_text(
-        """schema: dataviz/workspace/v1
+        """schema: dataviz/workspace/v2
 kind: workspace
 id: scale-runtime
 title: Scale Runtime
@@ -315,7 +318,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v14
+        """schema: dataviz/dashboard/v16
 kind: dashboard
 id: scale
 title: Scale Runtime
@@ -407,7 +410,7 @@ def _build_interactive_runtime_workspace(root: Path) -> Path:
     (dashboard / "sources").mkdir(parents=True)
     (dashboard / "transforms").mkdir()
     (root / "workspace.yaml").write_text(
-        """schema: dataviz/workspace/v1
+        """schema: dataviz/workspace/v2
 kind: workspace
 id: interactive-runtime-e2e
 title: Interactive Runtime E2E
@@ -415,7 +418,7 @@ title: Interactive Runtime E2E
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v14
+        """schema: dataviz/dashboard/v16
 kind: dashboard
 id: runtime-matrix
 title: Interactive Runtime Matrix
@@ -731,12 +734,12 @@ def test_parameter_domain_lookup_search_and_cursor_pagination(page: Page, tmp_pa
     dashboard_root = workspace / "dashboards" / "功能示例##parameter-domain-lab"
     domain_path = dashboard_root / "parameter_domains" / "locations.yaml"
     domain_path.write_text(
-        domain_path.read_text(encoding="utf-8").replace("max_rows: 100", "max_rows: 200"),
+        domain_path.read_text(encoding="utf-8").replace("max_rows: 100", "max_rows: 700"),
         encoding="utf-8",
     )
     rows = ",\n".join(
         f"  ('GD', '广东', 1, 'C{index:03d}', '城市 {index:03d}', {index})"
-        for index in range(1, 121)
+        for index in range(1, 621)
     )
     (dashboard_root / "parameter_domains" / "locations.sql").write_text(
         "select * from (values\n"
@@ -765,27 +768,31 @@ def test_parameter_domain_lookup_search_and_cursor_pagination(page: Page, tmp_pa
         page.on("response", record_response)
         _open_dashboard(page, base_url, "parameter-domain-lab")
         city = page.locator('select[name="cities"]')
-        expect(city.locator("option")).to_have_count(50, timeout=20_000)
+        expect(city.locator("option")).to_have_count(500, timeout=20_000)
         city_control = page.locator("#parameter-form .dv-control").filter(has=city)
         city_control.locator("[data-control-trigger]").click()
         search = city_control.locator(".dv-choice-search")
+        expect(city_control.locator(".dv-select-options")).not_to_have_class(
+            re.compile(r"\bis-virtual\b")
+        )
 
         # This member is outside the first page, so finding it proves that the
         # Picker used remote Lookup search rather than filtering only loaded DOM.
-        search.fill("城市 119")
+        search.fill("城市 619")
         expect(city_control.locator(".dv-choice-option")).to_have_count(1, timeout=10_000)
-        expect(city_control.locator(".dv-choice-option")).to_contain_text("城市 119")
+        expect(city_control.locator(".dv-choice-option")).to_contain_text("城市 619")
 
         search.fill("")
-        expect(city.locator("option")).to_have_count(50, timeout=10_000)
+        expect(city.locator("option")).to_have_count(500, timeout=10_000)
         viewport = city_control.locator(".dv-select-options")
         viewport.evaluate(
             "node => { node.scrollTop = node.scrollHeight; node.dispatchEvent(new Event('scroll')); }"
         )
-        expect(city.locator("option")).to_have_count(100, timeout=10_000)
+        expect(city.locator("option")).to_have_count(620, timeout=10_000)
 
         payloads = [request.post_data_json for request in requests if request.post_data]
-        assert any(payload.get("search") == "城市 119" for payload in payloads)
+        assert any(payload.get("search") == "城市 619" for payload in payloads)
+        assert all(payload.get("limit") == 500 for payload in payloads)
         assert any(payload.get("cursor") for payload in payloads)
         assert all("sql" not in payload and "adapter" not in payload for payload in payloads)
         generations = {payload["generation"] for payload in ready_responses}
@@ -1709,7 +1716,7 @@ def test_web_component_reference_adapter_consumes_runtime_v2_without_canvas_runt
     page: Page,
 ):
     manifest = {
-        "protocol": {"schema": "dataviz/runtime/v10", "component_registry_version": "3.0.0"},
+        "protocol": {"schema": "dataviz/runtime/v12", "component_registry_version": "3.0.0"},
         "control_state": {
             "dashboard:probe/region": {
                 "intent": "explicit",
@@ -1802,7 +1809,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
         )
         assert {
             owner_contract[key] for key in ("runtime", "data", "view", "section", "presentation")
-        } == {"dataviz/runtime/v10"}
+        } == {"dataviz/runtime/v12"}
         assert {
             "data.pipeline",
             "view.declarative",
@@ -2009,6 +2016,33 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
             grouped_select.locator("select").evaluate("select => select.selectedOptions.length")
             == 0
         )
+        grouped_select.locator(".dv-choice-search").fill("")
+        long_label = "这是一个需要完整阅读的超长商品名称" * 12
+        grouped_select.locator("select option").first.evaluate(
+            "(option, label) => { option.textContent = label; }",
+            long_label,
+        )
+        grouped_select.evaluate("control => control._syncControl?.()")
+        long_row = grouped_select.locator(".dv-choice-option").first
+        expect(long_row).to_have_attribute("title", re.compile(long_label[:20]))
+        long_label_layout = long_row.evaluate(
+            """row => {
+              const label = row.querySelector('strong');
+              const panel = row.closest('.dv-select-panel');
+              const panelRect = panel.getBoundingClientRect();
+              return {
+                whiteSpace:getComputedStyle(label).whiteSpace,
+                rowHeight:row.getBoundingClientRect().height,
+                panelWidth:panelRect.width,
+                panelRight:panelRect.right,
+                viewportWidth:document.documentElement.clientWidth,
+              };
+            }"""
+        )
+        assert long_label_layout["whiteSpace"] == "normal"
+        assert long_label_layout["rowHeight"] > 38
+        assert long_label_layout["panelWidth"] >= 600
+        assert long_label_layout["panelRight"] <= long_label_layout["viewportWidth"] - 8
         grouped_select.locator(".dv-choice-search").press("Escape")
 
         cascader = selections.locator('[data-control-component="cascader"]')
@@ -2078,6 +2112,11 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
         expect(virtual.locator("[data-control-panel]")).to_be_visible()
         rendered = virtual.locator(".dv-select-rows .dv-choice-option").count()
         assert 1 <= rendered < 40
+        virtual_row = virtual.locator(".dv-choice-option").first
+        expect(virtual_row).not_to_have_attribute("title", "")
+        assert virtual_row.locator("strong").evaluate(
+            "label => getComputedStyle(label).whiteSpace"
+        ) == "nowrap"
         virtual.locator(".dv-choice-search").fill("Store 1000")
         expect(virtual.locator(".dv-select-panel footer small")).to_contain_text("1 matching")
         assert virtual.locator(".dv-select-rows .dv-choice-option").count() == 1
@@ -2415,6 +2454,16 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(page: Page, 
         assert selector_geometry["right"] <= selector_geometry["width"] - 11
         assert selector_geometry["bottom"] <= selector_geometry["height"] - 11, selector_geometry
 
+        # Pointer events inside the Canvas iframe cannot reach the Shell's
+        # ordinary outside-click handler. Its authenticated interaction
+        # message must dismiss Shell-owned data-entry overlays without
+        # collapsing the Query Panel itself.
+        page.frame_locator("#canvas-frame").locator("body").click(position={"x": 8, "y": 8})
+        expect(selector_panel).to_be_hidden()
+        expect(panel).to_be_visible()
+
+        trigger.click()
+        expect(selector_panel).to_be_visible()
         page.keyboard.press("Escape")
         expect(selector_panel).to_be_hidden()
         toggle.click()
@@ -5514,3 +5563,184 @@ def test_cancelled_query_branch_reaches_a_terminal_view_state(page: Page, tmp_pa
         expect(cancelled_slow).to_have_attribute("data-view-status", "cancelled", timeout=20_000)
         expect(cancelled_slow).to_contain_text("Computation cancelled")
         expect(cancelled_fast).to_have_attribute("data-view-status", "ready")
+
+
+@pytest.mark.e2e
+def test_workspace_asset_service_matches_server_and_portable_html(page: Page, tmp_path: Path):
+    workspace = _copy_workspace(MINIMAL, tmp_path / "workspace-assets")
+    workspace_definition_path = workspace / "workspace.yaml"
+    workspace_definition = yaml.safe_load(
+        workspace_definition_path.read_text(encoding="utf-8")
+    )
+    workspace_definition["schema"] = WORKSPACE_SCHEMA
+    workspace_definition["assets"] = {
+        "china-city": {
+            "path": "assets/maps/china-city.geojson",
+            "media_type": "application/geo+json",
+        }
+    }
+    workspace_definition_path.write_text(
+        yaml.safe_dump(workspace_definition, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    map_path = workspace / "assets" / "maps" / "china-city.geojson"
+    map_path.parent.mkdir(parents=True)
+    map_path.write_text(
+        json.dumps(
+            {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "properties": {"name": "深圳"},
+                        "geometry": {"type": "Point", "coordinates": [114.1, 22.5]},
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    dashboard_root = workspace / "dashboards" / "sales-overview"
+    (dashboard_root / "presentation.yaml").unlink()
+    definition_path = dashboard_root / "dashboard.yaml"
+    definition = yaml.safe_load(definition_path.read_text(encoding="utf-8"))
+    definition["schema"] = DASHBOARD_SCHEMA
+    definition["assets"] = ["china-city"]
+    definition.setdefault("canvas", {})["scripts"] = ["assets/map-renderer.js"]
+    definition["views"].append(
+        {
+            "id": "asset-map",
+            "title": "Asset Map",
+            "template": "custom",
+            "renderer": "asset-map",
+            "input": "source:sales/main",
+        }
+    )
+    definition["sections"].append(
+        {"id": "asset-map-section", "title": "Map", "views": ["asset-map"]}
+    )
+    definition_path.write_text(
+        yaml.safe_dump(definition, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    renderer_path = dashboard_root / "assets" / "map-renderer.js"
+    renderer_path.parent.mkdir(parents=True, exist_ok=True)
+    renderer_path.write_text(
+        """window.datavizRuntime.registerRenderer('asset-map', {
+  async mount(context) {
+    const geo = await context.assets.json('china-city');
+    const bytes = await context.assets.bytes('china-city');
+    const assetUrl = await context.assets.url('china-city');
+    context.body.dataset.assetFeature = geo.features[0].properties.name;
+    context.body.dataset.assetTransport = context.assets.describe('china-city').transport;
+    context.body.dataset.assetBytes = String(bytes.byteLength);
+    context.body.dataset.assetUrlKind = assetUrl.startsWith('blob:') ? 'blob' : 'server';
+    context.body.textContent = `${geo.type}: ${geo.features.length}`;
+    return {};
+  },
+  async update(context) { return this.mount(context); },
+  dispose() {},
+});
+""",
+        encoding="utf-8",
+    )
+
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        _run_and_wait(page)
+        page.wait_for_function(
+            """async () => {
+              const sessionId = sessionStorage.getItem('dataviz.tab-session.v2');
+              const response = await fetch(`/api/session/runs?session_id=${encodeURIComponent(sessionId)}`);
+              const payload = await response.json();
+              return payload.runs.some(item => item.dashboard_id === 'sales-overview' && item.status === 'ready');
+            }""",
+            timeout=30_000,
+        )
+        identity = page.evaluate(
+            """async () => {
+              const sessionId = sessionStorage.getItem('dataviz.tab-session.v2');
+              const response = await fetch(`/api/session/runs?session_id=${encodeURIComponent(sessionId)}`);
+              const payload = await response.json();
+              const run = payload.runs.find(item => item.dashboard_id === 'sales-overview' && item.status === 'ready');
+              return {sessionId, runId:run.run_id};
+            }"""
+        )
+        page.goto(
+            f"{base_url}/api/dashboards/sales-overview/canvas"
+            f"?session_id={identity['sessionId']}&run_id={identity['runId']}",
+            wait_until="domcontentloaded",
+        )
+        body = page.locator('[data-view-id="asset-map"] .dv-view-body')
+        expect(body).to_have_attribute("data-asset-feature", "深圳", timeout=20_000)
+        expect(body).to_have_attribute("data-asset-transport", "url")
+        expect(body).to_have_attribute("data-asset-url-kind", "server")
+        assert int(body.get_attribute("data-asset-bytes") or 0) > 0
+
+    loaded = load_workspace(workspace)
+    result = Executor(loaded).run("sales-overview")
+    report_path = CanvasRenderer(loaded).write_report(
+        loaded.dashboard("sales-overview"),
+        result,
+        tmp_path / "workspace-asset-report.html",
+    )
+
+    with _running_static_server(report_path.parent) as report_url:
+        page.goto(f"{report_url}/{report_path.name}", wait_until="domcontentloaded")
+        body = page.locator('[data-view-id="asset-map"] .dv-view-body')
+        expect(body).to_have_attribute("data-asset-feature", "深圳", timeout=20_000)
+        expect(body).to_have_attribute("data-asset-transport", "text")
+        expect(body).to_have_attribute("data-asset-url-kind", "blob")
+        assert int(body.get_attribute("data-asset-bytes") or 0) > 0
+
+
+@pytest.mark.e2e
+def test_native_map_point_region_asset_and_selection_match_server_and_portable(
+    page: Page,
+    tmp_path: Path,
+):
+    workspace = _copy_workspace(SHOWCASE, tmp_path / "native-map")
+
+    def assert_maps_ready(root) -> None:
+        point = root.locator('[data-view-id="store-points"]')
+        region = root.locator('[data-view-id="region-revenue"]')
+        expect(point).to_have_attribute("data-view-status", "ready", timeout=20_000)
+        expect(region).to_have_attribute("data-view-status", "ready", timeout=20_000)
+        assert point.locator(".dv-plotly").evaluate(
+            "node => ({type:node.data[0].type, count:node.data[0].lon.length})"
+        ) == {"type": "scattergeo", "count": 8}
+        assert region.locator(".dv-plotly").evaluate(
+            "node => ({type:node.data[0].type, features:node.data[0].geojson.features.length})"
+        ) == {"type": "choropleth", "features": 4}
+
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "map-lab")
+        _run_and_wait(page)
+        frame = page.frame(name="canvas-frame")
+        assert frame is not None
+        assert_maps_ready(frame)
+        frame.locator('[data-view-id="region-revenue"] .dv-plotly').evaluate(
+            "node => node.emit('plotly_click', {points:[{customdata:'D'}]})"
+        )
+        page.wait_for_function(
+            """() => {
+              const frame = document.querySelector('#canvas-frame').contentWindow;
+              const state = frame.dataviz.control.state('dashboard:map-lab/region');
+              return state?.intent === 'explicit' && state?.value?.length === 1
+                && state.value[0] === 'D';
+            }""",
+            timeout=10_000,
+        )
+
+    loaded = load_workspace(workspace)
+    result = Executor(loaded).run("map-lab")
+    report_path = CanvasRenderer(loaded).write_report(
+        loaded.dashboard("map-lab"),
+        result,
+        tmp_path / "native-map.html",
+    )
+    with _running_static_server(report_path.parent) as report_url:
+        page.goto(f"{report_url}/{report_path.name}", wait_until="domcontentloaded")
+        assert_maps_ready(page)

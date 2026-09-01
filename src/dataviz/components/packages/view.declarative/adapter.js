@@ -41,6 +41,7 @@
       runtime,
       charts:chartService,
       tables:tableService,
+      assets:services.assets,
       controlBinding:bindingContext(root, key, descriptor, generation),
     });
     const setRendererSignal = (root, status, {active = null} = {}) => {
@@ -192,7 +193,14 @@
     });
     const plotlyStructuralSignature = specification => JSON.stringify({
       data:(specification?.data || []).map(trace => Object.fromEntries(
-        Object.entries(trace || {}).filter(([key]) => key !== 'selectedpoints')
+        Object.entries(trace || {})
+          .filter(([key]) => key !== 'selectedpoints')
+          .map(([key, value]) => [
+            key,
+            key === 'geojson' && specification?.geojsonSignature
+              ? specification.geojsonSignature
+              : value,
+          ])
       )),
       layout:specification?.layout || {},
       config:specification?.config || {},
@@ -232,6 +240,66 @@
           }),
         },
       };
+    };
+    const geojsonFeatureIndexes = new WeakMap();
+    const materializePlotlyDescriptor = async (descriptor, renderContext) => {
+      if (!descriptor.geojsonAsset) {
+        return managedPlotlyDescriptor(descriptor, renderContext);
+      }
+      const geojson = await renderContext.assets.json(descriptor.geojsonAsset);
+      if (!geojson || typeof geojson !== 'object' || !Array.isArray(geojson.features)) {
+        throw new Error(
+          `GeoJSON Asset ${descriptor.geojsonAsset} must be a FeatureCollection with features[]`
+        );
+      }
+      const regionTrace = (descriptor.data || []).find(trace => trace?.type === 'choropleth');
+      const featurePath = String(regionTrace?.featureidkey || 'id').split('.');
+      const featureValue = feature => featurePath.reduce(
+        (value, part) => value == null ? undefined : value[part],
+        feature,
+      );
+      const featureIndexKey = featurePath.join('.');
+      let indexes = geojsonFeatureIndexes.get(geojson);
+      if (!indexes) {
+        indexes = new Map();
+        geojsonFeatureIndexes.set(geojson, indexes);
+      }
+      let featureKeys = indexes.get(featureIndexKey);
+      if (!featureKeys) {
+        featureKeys = new Set();
+        (geojson?.features || []).forEach((feature, index) => {
+          const value = featureValue(feature);
+          if (value == null || value === '') {
+            throw new Error(
+              `GeoJSON Asset ${descriptor.geojsonAsset} feature ${index + 1} has no ${regionTrace?.featureidkey}`
+            );
+          }
+          const signature = JSON.stringify(value);
+          if (featureKeys.has(signature)) {
+            throw new Error(
+              `GeoJSON Asset ${descriptor.geojsonAsset} has duplicate ${regionTrace?.featureidkey}: ${value}`
+            );
+          }
+          featureKeys.add(signature);
+        });
+        indexes.set(featureIndexKey, featureKeys);
+      }
+      const missingLocations = (regionTrace?.locations || []).filter(
+        value => !featureKeys.has(JSON.stringify(value)),
+      );
+      if (missingLocations.length) {
+        throw new Error(
+          `GeoJSON Asset ${descriptor.geojsonAsset} does not contain map keys: ${missingLocations.slice(0, 5).join(', ')}`
+        );
+      }
+      const {geojsonAsset: _asset, ...resolved} = descriptor;
+      return managedPlotlyDescriptor({
+        ...resolved,
+        geojsonSignature:`${descriptor.geojsonAsset}:${featureIndexKey}`,
+        data:(resolved.data || []).map(trace => (
+          trace?.type === 'choropleth' ? {...trace, geojson} : trace
+        )),
+      }, renderContext);
     };
     const installPlotlyDragModeToggle = host => {
       const onClick = event => {
@@ -1483,7 +1551,7 @@
         const chartNode = document.createElement('div');
         chartNode.className = 'dv-chart dv-plotly';
         renderContext.body.append(chartNode);
-        const specification = managedPlotlyDescriptor(descriptor, renderContext);
+        const specification = await materializePlotlyDescriptor(descriptor, renderContext);
         const chart = await chartService.plotly.mount(
           chartNode, specification, renderContext.root
         );
@@ -1508,9 +1576,8 @@
       async update(renderContext, descriptor, state) {
         state.descriptor = descriptor;
         state.renderContext = renderContext;
-        await chartService.plotly.update(
-          state, managedPlotlyDescriptor(descriptor, renderContext), renderContext.root
-        );
+        const specification = await materializePlotlyDescriptor(descriptor, renderContext);
+        await chartService.plotly.update(state, specification, renderContext.root);
         syncPlotlyInteractions(state, descriptor);
         return state;
       },
@@ -1564,7 +1631,7 @@
     });
 
     const adapter = {
-      protocol:'dataviz/runtime/v10',
+      protocol:'dataviz/runtime/v12',
       lifecycle:Object.freeze({
         hooks:Object.freeze(['validate', 'mount', 'update', 'dispose']),
         phases:Object.freeze([
@@ -1609,9 +1676,9 @@
       if (!rootNode || !body || !key) return;
       const spec = services.decodeSpec(chartNode);
       const renderContext = context(rootNode, body, key, spec);
-      const pending = chartService.plotly.mount(
-        chartNode, managedPlotlyDescriptor(spec, renderContext), rootNode
-      ).then(chart => {
+      const pending = materializePlotlyDescriptor(spec, renderContext).then(specification => (
+        chartService.plotly.mount(chartNode, specification, rootNode)
+      )).then(chart => {
         const state = {
           ...chart,
           descriptor:spec,

@@ -58,7 +58,7 @@ class NavigationEditor:
     def _read(self) -> dict[str, Any]:
         if not self.workspace_path.exists():
             return {
-                "schema": "dataviz/workspace/v1",
+                "schema": "dataviz/workspace/v2",
                 "kind": "workspace",
                 "id": fallback_stable_id(str(self.root), prefix="workspace"),
                 "title": self.root.name,

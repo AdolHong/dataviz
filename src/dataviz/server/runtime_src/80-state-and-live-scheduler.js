@@ -276,11 +276,22 @@ const datavizManualTargetsForControlKeys = keys => {
 };
 window.dataviz.applyControls = async (options = {}) => {
   const previous = window.dataviz.current_control_state || null;
+  const selectedKeys = options.keys ? new Set(options.keys) : null;
   // Dynamic selects are empty until their immutable option domain is hydrated;
   // preserve the compiled initial state during the first pass.
-  if (previous != null) readControlInputs({keys:options.keys ? new Set(options.keys) : null});
-  refreshControlOptionDomains();
-  readControlInputs({keys:options.keys ? new Set(options.keys) : null});
+  if (previous != null && options.canonicalStateCommitted !== true) {
+    readControlInputs({keys:selectedKeys});
+  }
+  refreshControlOptionDomains({
+    canonicalKeys:options.canonicalStateCommitted === true ? selectedKeys : null,
+  });
+  if (options.canonicalStateCommitted === true) {
+    const canonical = datavizControlStateSnapshot();
+    setControlInputs(Object.fromEntries(
+      Object.entries(canonical).filter(([key]) => !selectedKeys || selectedKeys.has(key))
+    ));
+  }
+  readControlInputs({keys:selectedKeys});
   const current = datavizControlStateSnapshot();
   const changed = datavizChangedControlKeys(previous, current);
   window.dataviz.current_control_state = structuredClone(current);
@@ -426,6 +437,13 @@ const setControlInputs = states => {
     if (!(key in (states || {}))) return;
     const input = control.querySelector('[data-control-state-input]');
     if (!input || input.disabled) return;
+    if (
+      input === document.activeElement
+      && input.dataset.localDraftInvalid === 'true'
+    ) {
+      input._syncChoiceControl?.();
+      return;
+    }
     const definition = datavizControlDefinition(key);
     const value = datavizControlValue(key);
     const encode = item => datavizEncodeControlValue(input, item, {

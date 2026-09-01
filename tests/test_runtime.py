@@ -385,7 +385,7 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert "canvasTop <= 1 && shellTop > 1" in report
     assert '"dependency_contract": {' in report
     assert '"views": {"revenue": {"inputs":' in report
-    assert "const refreshControlOptionDomains = () =>" in report
+    assert "const refreshControlOptionDomains = ({canonicalKeys = null} = {}) =>" in report
     assert "dependency_contract?.control_order" in report
     assert "dependency_ancestors" in report
     assert "Commit each compiled Control" in report
@@ -400,7 +400,8 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert "options.awaitConsumers === false" in report
     assert "changedControlKeys:changed || Object.keys(current)" in report
     assert "if (!relevant && missingOutput && this.activeTransforms.has(id)) return;" in report
-    assert "refreshControlOptionDomains();\n  readControlInputs(" in report
+    assert "refreshControlOptionDomains({\n    canonicalKeys:" in report
+    assert "readControlInputs({keys:selectedKeys});" in report
     assert "affectedViews(changed, new Set())" in report
     assert "changedControlKeys == null" in report
     assert "datavizControlCanApply" in report

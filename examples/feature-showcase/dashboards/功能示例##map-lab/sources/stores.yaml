@@ -13,7 +13,8 @@ outputs:
       purpose: 为地图提供门店经纬度和片区归属。
       grain: 每个门店一行。
     schema:
-      - {name: region_code}
+      - {name: city}
+      - {name: store_nbr}
       - {name: store_name}
       - {name: longitude}
       - {name: latitude}

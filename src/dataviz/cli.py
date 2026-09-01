@@ -801,7 +801,7 @@ dataviz catalog describe . 'hello::source:data/main'
 dataviz run . 'hello::source:data/main'
 ```
 """,
-        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v16
+        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v17
 kind: dashboard
 id: hello
 title: Hello dashboard
@@ -1472,7 +1472,7 @@ def frontend_adapters(
     ),
     output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
 ) -> None:
-    """Inspect frontend implementations that consume dataviz/runtime/v12."""
+    """Inspect frontend implementations that consume dataviz/runtime/v13."""
     if output_format not in {"markdown", "json"}:
         raise typer.BadParameter("--format must be markdown or json")
     catalog = frontend_adapter_catalog()

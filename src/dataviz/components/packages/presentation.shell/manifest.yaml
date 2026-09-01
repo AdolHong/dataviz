@@ -1,6 +1,6 @@
 schema: dataviz/component-package/v1
 package: presentation.shell
-version: 1.9.0
+version: 1.9.1
 category: presentation
 purpose: Stable layout, theme and semantic component-state contracts around declarative content.
 implementation:

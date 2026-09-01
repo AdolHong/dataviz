@@ -1270,7 +1270,9 @@ def test_header_uses_node_signal_lights_and_ends_with_share_controls_then_run():
     style = (ROOT / "src" / "dataviz" / "server" / "static" / "server.css").read_text()
     canvas_renderer = (ROOT / "src" / "dataviz" / "rendering" / "canvas.py").read_text()
 
-    brand_end = template.index("</button>", template.index('class="brand dv-shell-brand"'))
+    brand_end = template.index(
+        "</button>", template.index('class="brand dv-runtime-brand dv-shell-brand"')
+    )
     signals = template.index('id="query-diagnostics"')
     actions = template.index('class="topbar-actions dv-shell-header-actions"')
     share = template.index('id="share-control"')
@@ -1300,14 +1302,20 @@ def test_header_uses_node_signal_lights_and_ends_with_share_controls_then_run():
     assert ".pipeline-signal-list{display:flex;align-items:center;gap:8px" in style
     assert ".pipeline-signal:hover{background:transparent}" in style
     assert ".pipeline-signal:focus-visible .pipeline-signal__tooltip" not in style
-    assert 'class="header-control__chevron"' in template
-    assert 'class="header-control__mark" aria-hidden="true">C</span>' in template
-    assert '<strong class="header-control__label">DASHBOARD CONTROLS</strong>' in template
+    assert 'class="header-control__chevron dv-shell-control__chevron"' in template
+    assert (
+        'class="header-control__mark dv-shell-control__mark" '
+        'aria-hidden="true">C</span>' in template
+    )
+    assert (
+        '<strong class="header-control__label dv-shell-control__label">'
+        'DASHBOARD CONTROLS</strong>' in template
+    )
     assert '<small id="dashboard-control-meta" hidden>' in template
-    assert 'class="dv-control-chevron"' in canvas_renderer
-    assert '<strong>DASHBOARD CONTROLS</strong>' in canvas_renderer
-    assert '#dashboard-controls-control>.header-control__trigger{' in style
-    assert 'background:#fff;\n  border:1px solid #e6e9e5;' in style
+    assert 'class="dv-control-chevron dv-shell-control__chevron"' in canvas_renderer
+    assert '<strong class="dv-shell-control__label">DASHBOARD CONTROLS</strong>' in canvas_renderer
+    assert '#dashboard-controls-control>.header-control__trigger{' not in style
+    assert 'Dashboard Control visuals are owned by presentation.shell' in style
     assert '.button--run{color:#fff;background:#25282d;border-color:#25282d' in style
     assert 'background:#303a78' not in style[style.index('.query-run-control__toggle{'):style.index('.query-run-control__chevron{')]
     assert "<i>⌄</i>" not in canvas_renderer
@@ -1349,7 +1357,7 @@ def test_server_sidebar_is_resizable_collapsible_and_tab_local():
     style = (ROOT / "src" / "dataviz" / "server" / "static" / "server.css").read_text()
 
     assert 'id="sidebar-toggle"' in template
-    assert '<button id="sidebar-toggle" class="brand dv-shell-brand"' in template
+    assert '<button id="sidebar-toggle" class="brand dv-runtime-brand dv-shell-brand"' in template
     assert '<h1 id="workspace-title">Dashboards</h1>' not in template
     assert 'class="sidebar-toggle"' not in template
     assert 'id="add-root-folder"' not in template
@@ -1651,7 +1659,7 @@ def test_fast_dag_branch_publishes_output_before_slow_branch_finishes(
         encoding="utf-8",
     )
     (dashboard_root / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v16
+        """schema: dataviz/dashboard/v17
 kind: dashboard
 id: progressive
 title: Progressive branches
@@ -2058,7 +2066,7 @@ def test_query_cancel_is_tab_scoped_and_same_dashboard_run_supersedes(tmp_path: 
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v16
+        """schema: dataviz/dashboard/v17
 kind: dashboard
 id: slow
 title: Slow

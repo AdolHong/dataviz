@@ -31,6 +31,7 @@ from dataviz.protocols import DEPENDENCY_CONTRACT_SCHEMA
 from dataviz.workspace.models import (
     InferredOptionDomainDefinition,
     ViewControlBindingDefinition,
+    ViewControlWriteDefinition,
 )
 
 if TYPE_CHECKING:
@@ -328,20 +329,36 @@ class ControlFilterDependency:
 
 
 @dataclass(frozen=True, slots=True)
+class ViewControlWriteDependency:
+    control: str
+    fields: tuple[str, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"control": self.control, "fields": list(self.fields)}
+
+
+@dataclass(frozen=True, slots=True)
 class ViewControlBindingDependency:
     view_id: str
     control: str
     fields: tuple[str, ...]
     renderer: str
+    role: Literal["primary", "context"] = "primary"
+    writes: tuple[ViewControlWriteDependency, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "source_view": self.view_id,
             "control": self.control,
             "fields": list(self.fields),
             "renderer": self.renderer,
             "actions": ["select", "select_many", "clear", "reset"],
         }
+        if self.role != "primary":
+            payload["role"] = self.role
+        if self.writes:
+            payload["writes"] = [write.as_dict() for write in self.writes]
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -1184,51 +1201,6 @@ def _compile_writer_edges(
             if isinstance(raw_binding, str)
             else raw_binding
         )
-        control_key = _resolve_control_reference(
-            binding.control,
-            dashboard_id=dashboard.definition.id,
-            view_id=view_id,
-            section_for_view=section_for_view,
-        )
-        target = registry.get(control_key)
-        if target is None:
-            raise ValidationFailure(
-                f"View {view_id} binds unknown Control: {binding.control}",
-                details={
-                    "code": "view_control_binding_unknown",
-                    "view": view_id,
-                    "control": binding.control,
-                    "resolved_key": control_key,
-                },
-            )
-        if control_key not in view_controls.get(view_id, ()):
-            raise ValidationFailure(
-                f"Control {control_key} is outside View {view_id} scope",
-                details={
-                    "code": "view_control_binding_out_of_scope",
-                    "view": view_id,
-                    "control": control_key,
-                },
-            )
-        narrower = sorted(
-            item["control"]
-            for item in view_control_inputs.get(view_id, {}).values()
-            if item.get("mode") == "filter"
-            and item["control"] != control_key
-            and scope_rank[registry[item["control"]].origin] > scope_rank[target.origin]
-        )
-        if narrower:
-            raise ValidationFailure(
-                f"View {view_id} cannot narrow bound Control {control_key} with "
-                + ", ".join(narrower),
-                details={
-                    "code": "view_control_binding_reverse_scope",
-                    "view": view_id,
-                    "control": control_key,
-                    "narrower_controls": narrower,
-                },
-            )
-        fields = tuple([binding.field] if binding.field else _control_value_fields(target))
         value_fields = (
             [view.z]
             if view.template == "heatmap"
@@ -1252,18 +1224,6 @@ def _compile_writer_edges(
                 or ("none" if view.template in {"scatter", "map", "table", "perspective"} else "sum")
             )
         )
-        if operation != "none" and value_fields and not set(fields) <= set(group_fields):
-            raise ValidationFailure(
-                f"View {view_id} aggregates away its Control binding field",
-                details={
-                    "code": "view_control_binding_aggregate_ambiguous",
-                    "view": view_id,
-                    "control": control_key,
-                    "fields": list(fields),
-                    "group_fields": group_fields,
-                    "aggregate": operation,
-                },
-            )
         if view.template == "custom":
             renderer = view.renderer or "custom"
         elif view.template == "table":
@@ -1286,35 +1246,142 @@ def _compile_writer_edges(
             if output_definitions[reference].kind == "table"
             and output_definitions[reference].schema_
         ]
-        if declared_tables and not any(
-            all(any(column.name == field for column in output.schema_) for field in fields)
-            for output in declared_tables
-        ):
-            raise ValidationFailure(
-                f"View {view_id} binding fields are absent from its declared table schema",
-                details={
-                    "code": "view_control_binding_field_unknown",
-                    "view": view_id,
-                    "control": control_key,
-                    "fields": list(fields),
-                    "references": list(references),
-                },
+        targets: list[tuple[ViewControlWriteDefinition, Literal["primary", "context"]]] = [
+            (
+                ViewControlWriteDefinition(control=binding.control, field=binding.field),
+                "primary",
+            ),
+            *((write, "context") for write in binding.writes),
+        ]
+        compiled_targets: list[
+            tuple[str, tuple[str, ...], Literal["primary", "context"]]
+        ] = []
+        seen_controls: set[str] = set()
+        for target_binding, role in targets:
+            control_key = _resolve_control_reference(
+                target_binding.control,
+                dashboard_id=dashboard.definition.id,
+                view_id=view_id,
+                section_for_view=section_for_view,
             )
-        _validate_writer_schema_type(
-            fields=fields,
-            definition=target.definition,
-            view_id=view_id,
-            references=references,
-            output_definitions=output_definitions,
+            target = registry.get(control_key)
+            if target is None:
+                raise ValidationFailure(
+                    f"View {view_id} binds unknown Control: {target_binding.control}",
+                    details={
+                        "code": "view_control_binding_unknown",
+                        "view": view_id,
+                        "control": target_binding.control,
+                        "resolved_key": control_key,
+                        "role": role,
+                    },
+                )
+            if control_key in seen_controls:
+                raise ValidationFailure(
+                    f"View {view_id} writes Control {control_key} more than once",
+                    details={
+                        "code": "view_control_binding_duplicate_target",
+                        "view": view_id,
+                        "control": control_key,
+                    },
+                )
+            seen_controls.add(control_key)
+            if control_key not in view_controls.get(view_id, ()):
+                raise ValidationFailure(
+                    f"Control {control_key} is outside View {view_id} scope",
+                    details={
+                        "code": "view_control_binding_out_of_scope",
+                        "view": view_id,
+                        "control": control_key,
+                        "role": role,
+                    },
+                )
+            narrower = sorted(
+                item["control"]
+                for item in view_control_inputs.get(view_id, {}).values()
+                if item.get("mode") == "filter"
+                and item["control"] != control_key
+                and scope_rank[registry[item["control"]].origin] > scope_rank[target.origin]
+            )
+            if narrower:
+                raise ValidationFailure(
+                    f"View {view_id} cannot narrow bound Control {control_key} with "
+                    + ", ".join(narrower),
+                    details={
+                        "code": "view_control_binding_reverse_scope",
+                        "view": view_id,
+                        "control": control_key,
+                        "narrower_controls": narrower,
+                        "role": role,
+                    },
+                )
+            fields = tuple(
+                [target_binding.field]
+                if target_binding.field
+                else _control_value_fields(target)
+            )
+            if operation != "none" and value_fields and not set(fields) <= set(group_fields):
+                raise ValidationFailure(
+                    f"View {view_id} aggregates away its Control binding field",
+                    details={
+                        "code": "view_control_binding_aggregate_ambiguous",
+                        "view": view_id,
+                        "control": control_key,
+                        "fields": list(fields),
+                        "group_fields": group_fields,
+                        "aggregate": operation,
+                        "role": role,
+                    },
+                )
+            if declared_tables and not any(
+                all(any(column.name == field for column in output.schema_) for field in fields)
+                for output in declared_tables
+            ):
+                raise ValidationFailure(
+                    f"View {view_id} binding fields are absent from its declared table schema",
+                    details={
+                        "code": "view_control_binding_field_unknown",
+                        "view": view_id,
+                        "control": control_key,
+                        "fields": list(fields),
+                        "references": list(references),
+                        "role": role,
+                    },
+                )
+            _validate_writer_schema_type(
+                fields=fields,
+                definition=target.definition,
+                view_id=view_id,
+                references=references,
+                output_definitions=output_definitions,
+            )
+            compiled_targets.append((control_key, fields, role))
+
+        primary_control, primary_fields, _ = compiled_targets[0]
+        writes = tuple(
+            ViewControlWriteDependency(control=control, fields=fields)
+            for control, fields, role in compiled_targets
+            if role == "context"
         )
         compiled_binding = ViewControlBindingDependency(
             view_id=view_id,
-            control=control_key,
-            fields=fields,
+            control=primary_control,
+            fields=primary_fields,
             renderer=renderer,
+            writes=writes,
         )
         view_control_bindings[view_id] = compiled_binding
-        writers_by_control[control_key].append(compiled_binding)
+        writers_by_control[primary_control].append(compiled_binding)
+        for write in writes:
+            writers_by_control[write.control].append(
+                ViewControlBindingDependency(
+                    view_id=view_id,
+                    control=write.control,
+                    fields=write.fields,
+                    renderer=renderer,
+                    role="context",
+                )
+            )
     return view_control_bindings, writers_by_control
 
 

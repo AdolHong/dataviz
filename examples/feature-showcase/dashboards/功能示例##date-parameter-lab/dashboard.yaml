@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v16
+schema: dataviz/dashboard/v17
 kind: dashboard
 id: date-parameter-lab
 title: 日期参数实验室

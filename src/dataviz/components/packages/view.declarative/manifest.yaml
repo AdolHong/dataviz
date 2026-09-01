@@ -1,6 +1,6 @@
 schema: dataviz/component-package/v1
 package: view.declarative
-version: 2.1.0
+version: 2.2.0
 category: view
 purpose: Declarative View descriptors, Renderer adapters and lifecycle state boundaries.
 implementation:

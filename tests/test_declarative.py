@@ -916,7 +916,7 @@ def test_removed_schema_fields_are_rejected(removed_fragment):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v16",
+                "schema": "dataviz/dashboard/v17",
                 "kind": "dashboard",
                 "id": "strict",
                 **removed_fragment,
@@ -977,7 +977,7 @@ def test_layout_and_view_bounds_are_enforced(fragment, location):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v16",
+                "schema": "dataviz/dashboard/v17",
                 "kind": "dashboard",
                 "id": "strict",
                 **fragment,
@@ -1023,15 +1023,18 @@ def test_default_renderer_builds_templates_and_portable_report(tmp_path: Path):
     assert "Optional presentation-only polish" in report
     assert "min-height:420px" in report
     assert "global.dataviz?.view_specs" in report
-    assert '"schema": "dataviz/runtime/v12"' in report
-    assert '"schema": "dataviz/dependency-contract/v11"' in report
+    assert '"schema": "dataviz/runtime/v13"' in report
+    assert '"schema": "dataviz/dependency-contract/v12"' in report
     assert 'data-view-pipeline-node="source:sales"' in report
     assert 'data-view-renderer-signal data-status="not_run" hidden' in report
     assert 'class="dv-view-type-label">plotly</small>' in report
     assert 'data-view-status-label hidden' in report
     assert 'class="dv-runtime-brand dv-shell-brand" aria-label="Dataviz"' in report
-    assert 'class="dv-runtime-brand__mark" aria-hidden="true">D/V</span>' in report
-    assert '<strong>DATAVIZ</strong>' in report
+    assert (
+        'class="dv-runtime-brand__mark dv-shell-brand__mark" '
+        'aria-hidden="true">D/V</span>' in report
+    )
+    assert '<strong class="dv-shell-brand__name">DATAVIZ</strong>' in report
     assert "datavizSetViewPipelineNodeStatus(`interactive:${id}`, status)" in report
     assert "setRendererSignal(root, 'loading', {active:true})" in report
     assert "signal.hidden = ![" in report

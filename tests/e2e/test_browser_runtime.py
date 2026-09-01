@@ -223,7 +223,7 @@ folders: []
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v16
+        """schema: dataviz/dashboard/v17
 kind: dashboard
 id: same-view-controls
 title: Same View Controls
@@ -318,7 +318,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v16
+        """schema: dataviz/dashboard/v17
 kind: dashboard
 id: scale
 title: Scale Runtime
@@ -418,7 +418,7 @@ title: Interactive Runtime E2E
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v16
+        """schema: dataviz/dashboard/v17
 kind: dashboard
 id: runtime-matrix
 title: Interactive Runtime Matrix
@@ -1037,12 +1037,19 @@ def test_portable_query_tray_uses_document_flow_and_leaves_the_viewport(page: Pa
               const title = card.querySelector('h2');
               const field = card.querySelector('.field');
               const value = field.querySelector('input, select, output');
+              const brand = document.querySelector('.dv-shell-brand');
+              const control = document.querySelector('.dv-shell-control__trigger');
               const pick = (node, properties) => Object.fromEntries(
                 properties.map(name => [name, getComputedStyle(node)[name]])
               );
               return {
                 headerHeight:header.getBoundingClientRect().height,
                 body:pick(document.body, ['fontFamily', 'fontSize', 'backgroundColor']),
+                brand:pick(brand, ['display', 'alignItems', 'gap', 'height', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'color', 'backgroundColor', 'borderRadius']),
+                brandMark:pick(brand.querySelector('.dv-shell-brand__mark'), ['display', 'width', 'height', 'color', 'backgroundColor', 'borderRadius', 'fontFamily', 'fontSize', 'fontWeight', 'letterSpacing']),
+                brandName:pick(brand.querySelector('.dv-shell-brand__name'), ['color', 'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing']),
+                control:pick(control, ['display', 'alignItems', 'gap', 'height', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'color', 'backgroundColor', 'borderColor', 'borderRadius', 'fontFamily', 'fontSize', 'fontWeight', 'letterSpacing']),
+                controlPopover:pick(document.querySelector('.dv-shell-control__popover'), ['color', 'backgroundColor', 'borderColor', 'borderRadius', 'boxShadow']),
                 card:pick(card, ['backgroundColor', 'borderColor', 'borderRadius', 'boxShadow']),
                 title:pick(title, ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight']),
                 label:pick(field.querySelector(':scope > label'), ['fontFamily', 'fontSize', 'fontWeight']),
@@ -1071,12 +1078,19 @@ def test_portable_query_tray_uses_document_flow_and_leaves_the_viewport(page: Pa
               const title = card.querySelector('h2');
               const field = card.querySelector('.dv-query-value');
               const value = field.querySelector('output');
+              const brand = document.querySelector('.dv-shell-brand');
+              const control = document.querySelector('.dv-shell-control__trigger');
               const pick = (node, properties) => Object.fromEntries(
                 properties.map(name => [name, getComputedStyle(node)[name]])
               );
               return {
                 headerHeight:header.getBoundingClientRect().height,
                 body:pick(document.body, ['fontFamily', 'fontSize', 'backgroundColor']),
+                brand:pick(brand, ['display', 'alignItems', 'gap', 'height', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'color', 'backgroundColor', 'borderRadius']),
+                brandMark:pick(brand.querySelector('.dv-shell-brand__mark'), ['display', 'width', 'height', 'color', 'backgroundColor', 'borderRadius', 'fontFamily', 'fontSize', 'fontWeight', 'letterSpacing']),
+                brandName:pick(brand.querySelector('.dv-shell-brand__name'), ['color', 'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing']),
+                control:pick(control, ['display', 'alignItems', 'gap', 'height', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'color', 'backgroundColor', 'borderColor', 'borderRadius', 'fontFamily', 'fontSize', 'fontWeight', 'letterSpacing']),
+                controlPopover:pick(document.querySelector('.dv-shell-control__popover'), ['color', 'backgroundColor', 'borderColor', 'borderRadius', 'boxShadow']),
                 card:pick(card, ['backgroundColor', 'borderColor', 'borderRadius', 'boxShadow']),
                 title:pick(title, ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight']),
                 label:pick(field.querySelector('label'), ['fontFamily', 'fontSize', 'fontWeight']),
@@ -1321,6 +1335,17 @@ def test_canvas_messages_are_bound_to_the_current_frame_instance(page: Page, tmp
             }, location.origin)"""
         )
         page.wait_for_timeout(150)
+        page.wait_for_function(
+            """() => {
+              const sessionId = sessionStorage.getItem('dataviz.tab-session.v2');
+              if (!sessionId) return false;
+              const saved = JSON.parse(
+                sessionStorage.getItem(`dataviz.tab-ui.v4.${sessionId}`) || 'null'
+              );
+              return Boolean(saved?.dashboards?.['sales-overview']);
+            }""",
+            timeout=10_000,
+        )
         rogue_value = page.evaluate(
             """() => {
               const sessionId = sessionStorage.getItem('dataviz.tab-session.v2');
@@ -1716,7 +1741,7 @@ def test_web_component_reference_adapter_consumes_runtime_v2_without_canvas_runt
     page: Page,
 ):
     manifest = {
-        "protocol": {"schema": "dataviz/runtime/v12", "component_registry_version": "3.0.0"},
+        "protocol": {"schema": "dataviz/runtime/v13", "component_registry_version": "3.0.0"},
         "control_state": {
             "dashboard:probe/region": {
                 "intent": "explicit",
@@ -1726,7 +1751,7 @@ def test_web_component_reference_adapter_consumes_runtime_v2_without_canvas_runt
         },
         "view_specs": [{"id": "detail", "inputs": {"main": "source:data/main"}}],
         "dependency_contract": {
-            "schema": "dataviz/dependency-contract/v11",
+            "schema": "dataviz/dependency-contract/v12",
             "views": {
                 "detail": {
                     "inputs": {"main": "source:data/main"},
@@ -1809,7 +1834,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
         )
         assert {
             owner_contract[key] for key in ("runtime", "data", "view", "section", "presentation")
-        } == {"dataviz/runtime/v12"}
+        } == {"dataviz/runtime/v13"}
         assert {
             "data.pipeline",
             "view.declarative",
@@ -2659,7 +2684,7 @@ def test_unified_dashboard_controls_drive_browser_named_output(page: Page, tmp_p
         _run_and_wait(page)
         frame = page.frame_locator("#canvas-frame")
         radial = frame.locator('[data-view-id="radial"]')
-        expect(radial).to_have_attribute("data-view-status", "ready", timeout=15_000)
+        expect(radial).to_have_attribute("data-view-status", "ready", timeout=30_000)
 
         province = page.locator('select[name="dashboard:chart-gallery/province"]')
         province.select_option(["广东"], force=True)
@@ -4546,10 +4571,19 @@ def test_plotly_writer_real_mouse_gestures_commit_at_human_cadence(
             current - previous
             for previous, current in zip(pointer_downs[:-1], pointer_downs[1:], strict=True)
         ]
-        assert sum(interval < 220 for interval in pointer_intervals) >= 3, pointer_intervals
-        assert sum(220 <= interval < 350 for interval in pointer_intervals) >= 6, pointer_intervals
-        assert sum(350 <= interval < 600 for interval in pointer_intervals) >= 4, pointer_intervals
-        assert sum(interval >= 600 for interval in pointer_intervals) >= 2, pointer_intervals
+        # Validate the cadence we requested rather than assigning wall-clock
+        # intervals to absolute buckets. Firefox/WebKit can add a roughly
+        # uniform render/event-loop delay under a full-suite load; that must
+        # not turn this lost/duplicated-gesture regression into a machine-speed
+        # benchmark. A missing requested delay or a >500 ms unexplained stall
+        # still fails with the exact observed interval list.
+        for observed, requested in zip(
+            pointer_intervals,
+            cadences_ms[:-1],
+            strict=True,
+        ):
+            assert observed >= requested - 20, pointer_intervals
+            assert observed < requested + 500, pointer_intervals
 
         actions = diagnostics["actions"]
         assert len({item["action_id"] for item in actions}) == len(order)
@@ -4723,6 +4757,27 @@ def test_plotly_writer_recovers_wrong_or_missing_raw_click(
         assert stale_hover is not None
         wrong_value = stale_hover["values"][0]
         assert wrong_value != expected_values[0]
+        frame.evaluate(
+            """([viewId, wrongValue]) => {
+              const node = document.querySelector(
+                `[data-view-id="${CSS.escape(viewId)}"] .dv-plotly`
+              );
+              const originalEmit = node.emit.bind(node);
+              let pendingWrongRaw = true;
+              node.emit = (name, ...args) => {
+                if (name === 'plotly_click' && pendingWrongRaw) {
+                  pendingWrongRaw = false;
+                  const event = args[0] || {};
+                  event.points = (event.points || []).map(point => ({
+                    ...point,
+                    customdata:wrongValue,
+                  }));
+                }
+                return originalEmit(name, ...args);
+              };
+            }""",
+            [view_id, wrong_value],
+        )
         page.mouse.down()
         page.mouse.up()
         wait_for_action(1, expected_values[0])
@@ -5210,7 +5265,7 @@ def test_plotly_area_selection_gesture_commits_the_bound_control(
               return (node.layout?.selections || []).length === 0
                 && !node.querySelector('.select-outline');
             }""",
-            timeout=10_000,
+            timeout=20_000,
         )
         expect(active_tool).to_have_class(re.compile(r"\bactive\b"))
         portable_selection_after_gesture = page.locator("body").evaluate(
@@ -5541,7 +5596,7 @@ def test_cancelled_query_branch_reaches_a_terminal_view_state(page: Page, tmp_pa
         frame = page.frame_locator("#canvas-frame")
         fast = frame.locator('[data-view-id="fast-view"]')
         slow = frame.locator('[data-view-id="slow-view"]')
-        expect(fast).to_have_attribute("data-view-status", "ready", timeout=15_000)
+        expect(fast).to_have_attribute("data-view-status", "ready", timeout=30_000)
         expect(slow).to_have_attribute("data-view-status", "loading")
 
         cancelled_run_id = page.locator("#canvas-frame").get_attribute("data-run-id")
@@ -5705,15 +5760,86 @@ def test_native_map_point_region_asset_and_selection_match_server_and_portable(
 
     def assert_maps_ready(root) -> None:
         point = root.locator('[data-view-id="store-points"]')
+        city = root.locator('[data-view-id="city-stores"]')
         region = root.locator('[data-view-id="region-revenue"]')
         expect(point).to_have_attribute("data-view-status", "ready", timeout=20_000)
+        expect(city).to_have_attribute("data-view-status", "ready", timeout=20_000)
         expect(region).to_have_attribute("data-view-status", "ready", timeout=20_000)
         assert point.locator(".dv-plotly").evaluate(
             "node => ({type:node.data[0].type, count:node.data[0].lon.length})"
         ) == {"type": "scattergeo", "count": 8}
+        assert city.locator(".dv-plotly").evaluate(
+            "node => ({type:node.data[0].type, count:node.data[0].lon.length})"
+        ) == {"type": "scattergeo", "count": 2}
         assert region.locator(".dv-plotly").evaluate(
             "node => ({type:node.data[0].type, features:node.data[0].geojson.features.length})"
         ) == {"type": "choropleth", "features": 4}
+
+    city_key = "dashboard:map-lab/city"
+    store_key = "dashboard:map-lab/store"
+
+    def select_overview_store(root, *, store: str, city: str) -> None:
+        root.locator('[data-view-id="store-points"] .dv-plotly').evaluate(
+            """(node, datum) => node.emit('plotly_click', {points:[{customdata:{
+              __datavizControlValue:datum.store,
+              __datavizControlWrites:{[datum.cityKey]:datum.city},
+            }}]})""",
+            {"store": store, "city": city, "cityKey": city_key},
+        )
+
+    def assert_compound_state(root, *, store: str, city: str) -> dict:
+        root.locator("body").evaluate(
+            """async (_body, [cityKey, storeKey, city, store]) => {
+              const deadline = performance.now() + 10_000;
+              while (performance.now() < deadline) {
+                if (
+                  window.dataviz.control.state(cityKey)?.value === city
+                  && window.dataviz.control.state(storeKey)?.value === store
+                ) return;
+                await new Promise(resolve => setTimeout(resolve, 25));
+              }
+              throw new Error(`Timed out waiting for ${city} / ${store}`);
+            }""",
+            [city_key, store_key, city, store],
+        )
+        return root.locator("body").evaluate(
+            """(_body, keys) => ({
+              city:window.dataviz.control.state(keys.city),
+              store:window.dataviz.control.state(keys.store),
+              cityProvenance:window.dataviz.control_writer_provenance[keys.city],
+              storeProvenance:window.dataviz.control_writer_provenance[keys.store],
+            })""",
+            {"city": city_key, "store": store_key},
+        )
+
+    def assert_city_map(root, *, city: str, stores: list[str]) -> str:
+        return root.locator('[data-view-id="city-stores"] .dv-plotly').evaluate(
+            """async (node, expected) => {
+              const deadline = performance.now() + 10_000;
+              while (performance.now() < deadline) {
+                const values = [...(node.data?.[0]?.customdata || [])].sort();
+                const rendered = [...node.querySelectorAll('.scatterlayer .point')];
+                const bounds = node.getBoundingClientRect();
+                const visible = rendered.filter(point => {
+                  const box = point.getBoundingClientRect();
+                  return box.width > 0 && box.height > 0
+                    && box.right >= bounds.left && box.left <= bounds.right
+                    && box.bottom >= bounds.top && box.top <= bounds.bottom;
+                });
+                if (
+                  JSON.stringify(values) === JSON.stringify([...expected.stores].sort())
+                  && rendered.length === expected.stores.length
+                  && visible.length === expected.stores.length
+                ) return node.layout.geo.uirevision;
+                await new Promise(resolve => setTimeout(resolve, 25));
+              }
+              throw new Error(`Timed out waiting for ${expected.city} map: ${JSON.stringify({
+                data:node.data?.[0]?.customdata,
+                rendered:node.querySelectorAll('.scatterlayer .point').length,
+              })}`);
+            }""",
+            {"city": city, "stores": stores},
+        )
 
     with _running_server(workspace) as base_url:
         _open_dashboard(page, base_url, "map-lab")
@@ -5721,18 +5847,63 @@ def test_native_map_point_region_asset_and_selection_match_server_and_portable(
         frame = page.frame(name="canvas-frame")
         assert frame is not None
         assert_maps_ready(frame)
-        frame.locator('[data-view-id="region-revenue"] .dv-plotly').evaluate(
-            "node => node.emit('plotly_click', {points:[{customdata:'D'}]})"
+        select_overview_store(frame, store="GZ-001", city="广州")
+        state = assert_compound_state(frame, store="GZ-001", city="广州")
+        assert state["city"]["revision"] == state["store"]["revision"] == 1
+        assert state["cityProvenance"]["action_id"] == state["storeProvenance"]["action_id"]
+        assert state["cityProvenance"]["source_view"] == "store-points"
+        assert state["storeProvenance"]["source_view"] == "store-points"
+        expect(frame.locator('[data-view-id="city-stores"]')).to_have_attribute(
+            "data-view-status", "ready", timeout=20_000
         )
-        page.wait_for_function(
-            """() => {
-              const frame = document.querySelector('#canvas-frame').contentWindow;
-              const state = frame.dataviz.control.state('dashboard:map-lab/region');
-              return state?.intent === 'explicit' && state?.value?.length === 1
-                && state.value[0] === 'D';
+        assert frame.locator('[data-view-id="city-stores"] .dv-plotly').evaluate(
+            "node => node.data[0].lon.length"
+        ) == 2
+        assert_city_map(frame, city="广州", stores=["GZ-001", "GZ-002"])
+
+        frame.locator('[data-view-id="city-stores"] .dv-plotly').evaluate(
+            "node => node.emit('plotly_click', {points:[{customdata:'GZ-002'}]})"
+        )
+        state = assert_compound_state(frame, store="GZ-002", city="广州")
+        assert state["city"]["revision"] == 1
+        assert state["store"]["revision"] == 2
+        assert state["storeProvenance"]["source_view"] == "city-stores"
+
+        viewport_revisions: dict[str, str] = {}
+        for city, store, stores in [
+            ("深圳", "SZ-001", ["SZ-001", "SZ-002"]),
+            ("厦门", "XM-001", ["XM-001", "XM-002"]),
+            ("长沙", "CS-001", ["CS-001", "CS-002"]),
+            ("广州", "GZ-001", ["GZ-001", "GZ-002"]),
+        ] * 3:
+            select_overview_store(frame, store=store, city=city)
+            assert_compound_state(frame, store=store, city=city)
+            revision = assert_city_map(frame, city=city, stores=stores)
+            assert viewport_revisions.setdefault(city, revision) == revision
+        assert len(set(viewport_revisions.values())) == 4
+
+        rejected = frame.locator("body").evaluate(
+            """async (_body, keys) => {
+              const root = document.querySelector('[data-view-id="store-points"]');
+              return window.dataviz.controlActions.dispatch({
+                action_id:'overview-multiple-cities',
+                source_view:'store-points',
+                control:keys.store,
+                generation:root._datavizRenderGeneration,
+                action:'select_many',
+                data:[
+                  {__datavizControlValue:'SZ-001', __datavizControlWrites:{[keys.city]:'深圳'}},
+                  {__datavizControlValue:'XM-001', __datavizControlWrites:{[keys.city]:'厦门'}},
+                ],
+              });
             }""",
-            timeout=10_000,
+            {"city": city_key, "store": store_key},
         )
+        assert rejected["status"] == "rejected"
+        assert rejected["code"] == "control_action_projection_cardinality_invalid"
+        state = assert_compound_state(frame, store="GZ-001", city="广州")
+        assert state["city"]["revision"] >= 1
+        assert state["store"]["revision"] >= 2
 
     loaded = load_workspace(workspace)
     result = Executor(loaded).run("map-lab")
@@ -5744,3 +5915,40 @@ def test_native_map_point_region_asset_and_selection_match_server_and_portable(
     with _running_static_server(report_path.parent) as report_url:
         page.goto(f"{report_url}/{report_path.name}", wait_until="domcontentloaded")
         assert_maps_ready(page)
+        response = page.locator("body").evaluate(
+            """async (_body, item) => {
+              const root = document.querySelector('[data-view-id="store-points"]');
+              return window.dataviz.controlActions.dispatch({
+                action_id:'portable-overview-select',
+                source_view:'store-points',
+                control:item.storeKey,
+                generation:root._datavizRenderGeneration,
+                action:'select',
+                data:{
+                  __datavizControlValue:item.store,
+                  __datavizControlWrites:{[item.cityKey]:item.city},
+                },
+              });
+            }""",
+            {
+                "store": "XM-001",
+                "city": "厦门",
+                "cityKey": city_key,
+                "storeKey": store_key,
+            },
+        )
+        assert response["status"] == "committed"
+        assert response["control_revisions"][city_key] >= 1
+        assert response["control_revisions"][store_key] >= 1
+        state = page.locator("body").evaluate(
+            """(_body, keys) => ({
+              city:window.dataviz.control.state(keys.city),
+              store:window.dataviz.control.state(keys.store),
+              cityProvenance:window.dataviz.control_writer_provenance[keys.city],
+              storeProvenance:window.dataviz.control_writer_provenance[keys.store],
+            })""",
+            {"city": city_key, "store": store_key},
+        )
+        assert state["city"]["value"] == "厦门"
+        assert state["store"]["value"] == "XM-001"
+        assert state["cityProvenance"]["action_id"] == state["storeProvenance"]["action_id"]

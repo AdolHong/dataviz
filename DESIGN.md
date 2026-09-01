@@ -2,7 +2,7 @@
 
 > 快速安装和当前可用命令见 [README](README.md)；后续工作见 [plan.md](plan.md)。安装版本真正接受的字段始终以 `dataviz schemas`、`dataviz docs` 和 `dataviz components` 为准。
 
-本文记录已经落地并可由当前 Schema、CLI、Runtime 和测试证明的契约，以及明确标注的后续目标。当前严格契约是 `dataviz/workspace/v2`、`dataviz/dashboard/v16`、`dataviz/parameter-domain/v2`、`dataviz/parameter-domain-contract/v3`、`dataviz/parameter-lookup/v1`、`dataviz/parameter-materialization/v1`、`dataviz/dashboard-bundle/v2`、`dataviz/report-manifest/v3`、`dataviz/presentation/v2`、`dataviz/source/v6`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v11`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v5`、`dataviz/runtime/v12`、`dataviz/analysis-result/v4`、`dataviz/analysis-evidence/v4` 与 Component Registry `5.8.0`。Input State、共享 Parameter Materialization/Lookup、Workspace Asset、原生 Map、Entity Select Scaffold、multi-View writer/consumer binding、唯一 ControlRuntime authority、generation-start applied evidence 与 writer provenance、Layout/Semantic Contract、Chart/Table Service、Renderer 行为矩阵、`inspect layout` 与 visual-check 均已进入实现；当前代码只接受现行严格契约，不保留旧字段 alias、自动迁移或双协议 Runtime。
+本文记录已经落地并可由当前 Schema、CLI、Runtime 和测试证明的契约，以及明确标注的后续目标。当前严格契约是 `dataviz/workspace/v2`、`dataviz/dashboard/v17`、`dataviz/parameter-domain/v2`、`dataviz/parameter-domain-contract/v3`、`dataviz/parameter-lookup/v1`、`dataviz/parameter-materialization/v1`、`dataviz/dashboard-bundle/v2`、`dataviz/report-manifest/v3`、`dataviz/presentation/v2`、`dataviz/source/v6`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v12`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v5`、`dataviz/runtime/v13`、`dataviz/analysis-result/v4`、`dataviz/analysis-evidence/v4` 与 Component Registry `5.9.0`。Input State、共享 Parameter Materialization/Lookup、Workspace Asset、原生 Map、Entity Select Scaffold、multi-View writer/consumer binding、唯一 ControlRuntime authority、generation-start applied evidence 与 writer provenance、Layout/Semantic Contract、Chart/Table Service、Renderer 行为矩阵、`inspect layout` 与 visual-check 均已进入实现；当前代码只接受现行严格契约，不保留旧字段 alias、自动迁移或双协议 Runtime。
 
 Dataviz 是一个 workspace-first、AI-friendly 的数据看板工具。看板是普通文件，能够被 Git 管理、复制和审查；Server 面向人提供交互页面，CLI 面向 AI 与自动化提供构建校验、Catalog 发现、Target 执行、不可变 Result 检查和 HTML 报告。
 
@@ -224,7 +224,7 @@ Source/main → View → 默认 Presentation
 
 ### Canonical derivation 与 Dependency Contract
 
-每次 Workspace 载入或热更新都会创建新的不可变 Dashboard 快照；当前实现为每个快照惰性编译一次版本化的 `dataviz/dependency-contract/v11`。同一快照内的执行、交互和渲染层共享同一个契约对象，不能重复编译或各自解释 DSL。它包含：
+每次 Workspace 载入或热更新都会创建新的不可变 Dashboard 快照；当前实现为每个快照惰性编译一次版本化的 `dataviz/dependency-contract/v12`。同一快照内的执行、交互和渲染层共享同一个契约对象，不能重复编译或各自解释 DSL。它包含：
 
 - Query 节点的输入 alias、上游节点、Named Output、拓扑顺序、下游 View/option Control，以及每个节点允许读取的 Query Parameter；
 - 每个 Query Parameter 的直接消费者和最终受影响 Query 节点、Interactive 分支、option Control、内容字段与 View；
@@ -233,7 +233,7 @@ Source/main → View → 默认 Presentation
 - Control 的作用域、显式直接父节点、传递祖先/后代、拓扑顺序、候选域 Base Output、直接数据 View、Interactive consumer、派生 View、内容绑定和最终影响上界；
 - Named Output 到直接 View consumer 的反向索引，以及首次水合的固定顺序。
 
-Dependency Contract 编译 `state owner → writer / consumer binding`。每条 consumer edge 携带 mode、projection、field/inputs、empty policy、trigger 和直接/传递影响；每条 View writer edge 携带 source View 与 action/value mapping。当前 v11 为同一 Control 保留零到多个按 View 声明顺序稳定排列的 writer edges，并投影 Query Parameter v14 的 compact state 与 Lookup/Source binding；Planner、Server、Browser、HTML 与 CLI 只消费这份 binding graph，不能再根据 DOM 或字段名重新猜测效果。
+Dependency Contract 编译 `state owner → writer / consumer binding`。每条 consumer edge 携带 mode、projection、field/inputs、empty policy、trigger 和直接/传递影响；每条 View writer edge 携带 source View 与 action/value mapping。当前 v12 为同一 Control 保留零到多个按 View 声明顺序稳定排列的 writer edges，并投影 Query Parameter v14 的 compact state 与 Lookup/Source binding；Planner、Server、Browser、HTML 与 CLI 只消费这份 binding graph，不能再根据 DOM 或字段名重新猜测效果。
 
 下面这些层只能消费或投影该契约，不能各自再推导一张“差不多”的图：
 
@@ -246,7 +246,7 @@ Canvas Runtime / HTML Export / Web Component Adapter
 
 诊断 UI 也是该契约的只读投影，不维护第二份依赖图：Header 只显示 Source 与 Dataset Transform 的 Query 层状态；每个 View 的标题栏按拓扑序持有自身可达的 Query/Interactive 节点和最终 Renderer 状态。View 信号灯只在 `queued/loading/stale/error/cancelled/unavailable` 时出现，`not_run/ready/empty` 自动隐藏。这样正常阅读没有常驻技术噪音，分支卡住时又能直接定位到具体 Source、Interactive Transform 或 Renderer；导出 HTML 的 Query 节点已经固化为 Ready，因此只会短暂显示端侧计算和渲染状态。
 
-Browser Runtime 注册 Transform 和 View 时核对 data inputs、Control inputs、Query Parameter inputs 与 Output names。任何语义字段不一致都直接失败，不能静默运行另一张图；当前 Runtime v12 的 binding canonicalizer 已保留 `value/present/selection/active/state/range part` projection，语义字段同时进入 drift assertion 和 cache identity。注册 payload 只承担 assertion，调度器、View 等待态和声明式 Renderer 实际读取的输入来自 Dependency Contract，不能“校验契约后又执行原始配置”。浏览器不根据 DOM 或作用域层级猜测 Control 依赖，统一使用契约中的 `control_order`、`depends_on` 与 `dependency_ancestors`。
+Browser Runtime 注册 Transform 和 View 时核对 data inputs、Control inputs、Query Parameter inputs 与 Output names。任何语义字段不一致都直接失败，不能静默运行另一张图；当前 Runtime v13 的 binding canonicalizer 已保留 `value/present/selection/active/state/range part` projection，语义字段同时进入 drift assertion 和 cache identity。注册 payload 只承担 assertion，调度器、View 等待态和声明式 Renderer 实际读取的输入来自 Dependency Contract，不能“校验契约后又执行原始配置”。浏览器不根据 DOM 或作用域层级猜测 Control 依赖，统一使用契约中的 `control_order`、`depends_on` 与 `dependency_ancestors`。
 
 候选型 Control 使用 `depends_on` 声明直接父节点。引用采用相对 owner 的稳定前缀：`dashboard.<id>`、`section.<id>`、`view.<id>`。Dashboard 只能引用当前 Dashboard；Section 只能引用当前 Dashboard 或本 Section；View 只能引用当前 Dashboard、所在 Section 或自身 View，不能跨兄弟容器。Compiler 解析 canonical key、计算传递闭包和拓扑顺序，并拒绝未知引用、越界和完整环路径。Runtime 按拓扑顺序协调候选域并一次提交 canonical Control 快照；链 `A depends_on B`、`B depends_on C` 只写两条直接边，A 自动拥有 B/C 两个有效祖先。是否被某个 consumer 当作 filter 与候选依赖无关。
 
@@ -303,7 +303,7 @@ dataviz inspect dependencies WORKSPACE DASHBOARD --format json
 | Query Parameter | `dashboard.query_parameters` | 决定取什么数据 | 新建 Query Run，重新执行 Source/Dataset Transform | 固定为导出时已提交值 |
 | Control | Dashboard/Section/View 的 `controls` | Query 后提供交互输入 | 由 consumer binding 局部筛选、重绘或重算 Interactive Transform | 保持交互；能力取决于 Runtime/export mode |
 
-> **设计状态：当前领域模型与跨 Runtime 迁移已完成。** Dashboard v16、Source v6、Dataset Transform v3、Interactive Transform v4、Dependency Contract v11、State Snapshot v5、Runtime v12 与 Analysis Result/Evidence v4 已在 Schema、Compiler、Server、Browser、HTML、CLI、示例与测试中同步切换；旧 `kind`、双输入协议、旧 comparison 语义、Shell Control shadow、单数 writer projection 和 Query Parameter client-relation 路径都不保留兼容分支。Python、Canvas 与 Web Component 的共享语义由同一语言无关 corpus 验证，Host channel、applied state、writer provenance 与 Query Parameter compact state 由真实浏览器/持久化回归验证。
+> **设计状态：当前领域模型与跨 Runtime 迁移已完成。** Dashboard v17、Source v6、Dataset Transform v3、Interactive Transform v4、Dependency Contract v12、State Snapshot v5、Runtime v13 与 Analysis Result/Evidence v4 已在 Schema、Compiler、Server、Browser、HTML、CLI、示例与测试中同步切换；旧 `kind`、双输入协议、旧 comparison 语义、Shell Control shadow、单数 writer projection 和 Query Parameter client-relation 路径都不保留兼容分支。Python、Canvas 与 Web Component 的共享语义由同一语言无关 corpus 验证，Host channel、applied state、writer provenance 与 Query Parameter compact state 由真实浏览器/持久化回归验证。
 
 ### Input State 只保存事实
 
@@ -409,7 +409,7 @@ Canvas View/Transform 现在都在 consumer 启动时捕获 `generation + applie
 
 ### 跨 Runtime 可执行语义规范
 
-> **设计状态：P0 已闭合。** typed comparison 最初在 Dashboard v12、Dependency Contract v8 与 Runtime v7 落地；当前 Dependency v11/Runtime v12 继续通过同一组 fixtures 约束 Python、Canvas Runtime 与 Web Component 的 projection、filter、value、revision 和 Output destination 语义。Query selection、`present(0/false)`、零端点、typed comparison、canonical signature、consumer revision 与 Browser asset fail-fast 已进入快速回归；以后修改 expected 必须先经过版本判断。
+> **设计状态：P0 已闭合。** typed comparison 最初在 Dashboard v12、Dependency Contract v8 与 Runtime v7 落地；当前 Dependency v12/Runtime v13 继续通过同一组 fixtures 约束 Python、Canvas Runtime 与 Web Component 的 projection、filter、value、revision 和 Output destination 语义。Query selection、`present(0/false)`、零端点、typed comparison、canonical signature、consumer revision 与 Browser asset fail-fast 已进入快速回归；以后修改 expected 必须先经过版本判断。
 
 跨语言实现无法真正共享一份执行代码，但必须共享一份可执行事实表。规范采用少量语言无关 JSON fixture，而不是再创造一个通用规则引擎：
 
@@ -487,7 +487,7 @@ Query Parameter 只在用户点击 **查询** 后提交。Shell 分别维护当�
 
 #### Query Parameter v14：统一物化候选与紧凑集合表达式
 
-> **设计状态：已实现。** 当前严格边界为 Dashboard v16、Parameter Domain v2、Contract v3、Lookup/Materialization v1、Source v6、Dependency Contract v11、State Snapshot v5、Runtime v12 与 Analysis Result/Evidence v4。旧 `all_available | explicit` Query state、完整 client relation、Domain `query_inputs` query edge 和 `options_id` 快照已一次迁移删除。
+> **设计状态：已实现。** 当前严格边界为 Dashboard v17、Parameter Domain v2、Contract v3、Lookup/Materialization v1、Source v6、Dependency Contract v12、State Snapshot v5、Runtime v13 与 Analysis Result/Evidence v4。旧 `all_available | explicit` Query state、完整 client relation、Domain `query_inputs` query edge 和 `options_id` 快照已一次迁移删除。
 
 新设计不再按候选基数建立两套作者模型。Query Parameter 只有两种候选来源：
 
@@ -773,7 +773,7 @@ control_inputs:
 - `mode: filter` 只裁剪 `inputs` 明确列出的 table alias；必须声明字段、operator 与空值策略。
 - `mode: value` 把 `value | present | intent` 投影到 consumer-local alias，不隐式改写表。
 - 同一 Control 可以被不同 View/Transform 以不同 mode 消费，也可以同时驱动 `auto` 与 `apply/manual` 分支。
-- View 的 `control_binding` 是 writer edge。当前 Dashboard v16 / Dependency v11 允许同一 Control 拥有零到多个按声明顺序排列的 writer View；Plotly、Table 与 Custom Renderer 通过携带 action identity/source View 的 `select / select_many / clear / reset` Action 写 canonical state。
+- View 的 `control_binding` 是 writer edge。当前 Dashboard v17 / Dependency v12 允许同一 Control 拥有零到多个按声明顺序排列的 writer View，并允许一次 gesture 通过 `writes` 原子投影上下文 Controls；Plotly、Table 与 Custom Renderer 通过携带 action identity/source View 的 `select / select_many / clear / reset` Action 写 canonical state。
 
 Runtime 分开维护 current state 与 applied state，并为每个 View/Interactive Transform 记录 applied revision。即时 consumer 可以使用新 revision 更新，显式 Apply consumer 继续指向旧 revision，直到用户提交；标题、内容插值、状态摘要和 provenance 必须引用真正产生当前结果的 applied state，不能把未应用草稿伪装成结果上下文。
 
@@ -1355,7 +1355,7 @@ Dataset Transform 与 `server-python` Interactive Transform 都是可信单机 P
 
 ### 原生 Map View 与实体选择作者捷径
 
-> **设计状态：P5 已实现。** Dashboard v16、Runtime v12 与 Component Registry 5.8.0 已接受下述 Map 字段和 Renderer projection；Dependency、Result、Evidence 与 Transform shape 未变，因此未机械升版。Entity Select 仍只是现有严格契约的 Scaffold 组合，不是新的 Runtime 对象。
+> **设计状态：P5 已实现。** 原生 Map 最初由 Dashboard v16 / Runtime v12 引入；P5.4 的 compound writer 将当前边界推进到 Dashboard v17、Dependency Contract v12、Runtime v13 与 Component Registry 5.9.0。State Snapshot、Result/Evidence 与 Transform shape 未变。Entity Select 仍只是现有严格契约的 Scaffold 组合，不是新的 Runtime 对象。
 
 原生地图继续使用唯一 Plotly Chart Service。第一版只表达两种分析 mark：
 
@@ -1385,6 +1385,36 @@ Dataset Transform 与 `server-python` Interactive Transform 都是可信单机 P
 
 `point` 不要求 GeoJSON；`region` 的 `geojson` 是 Dashboard 已显式 allowlist 的 Workspace Asset ID，因此自动进入 Bundle、Report Manifest 和 portable HTML 的依赖闭包。两种 mark 都复用普通 View 的 Theme、tooltip、Empty/Error、Resize、Export、dispose，以及 `options.trace / options.layout / config` Plotly 逃生口。点击或框选需要写 Control 时继续使用现有 `control_binding` writer edge 和 typed action，不增加地图专属选择状态。
 
+地图的典型分析路径是 Overview → Detail，而不是两个互不相关的地图。全国门店图必须保持全局上下文；点击一个门店后，同一行的 `city` 与 `store_nbr` 应一次提交，城市图再按 City 过滤并按 Store 高亮，随后城市图可以继续只改 Store。为此 P5.4 扩展通用 View writer，而不是增加 Map callback：
+
+```yaml
+# 全国图：Store 是主 binding，决定自身高亮；City 是同手势上下文。
+control_binding:
+  control: dashboard.store
+  field: store_nbr
+  writes:
+    - control: dashboard.city
+      field: city
+
+# 城市图：消费 City，但只写 Store。
+control_inputs:
+  city:
+    mode: filter
+    control: dashboard.city
+    field: city
+    inputs: [main]
+    empty: match_none
+control_binding: {control: dashboard.store, field: store_nbr}
+```
+
+`writes` 是有序、声明式的额外 writer projection。主 `control/field` 仍是该 View 的 selected projection，附加目标不改变全国图自身的高亮语义。一次 `select` / `select_many` / `clear` / `reset` 只有一个 `action_id`：Runtime 先从同一 datum 集合投影全部目标并完成 scope、字段、类型、cardinality、source View 与 generation 校验，任何目标失败都不得产生 partial commit；全部合法后才一次写入 canonical Control state，按现有 Control dependency order 调和候选域并调度一次受影响消费者。`select_many` 对每个目标稳定去重；single-value Control 若得到多个不同值，整次 action 以稳定错误拒绝，不猜测 first/last。Query Parameter 不可成为 View writer 目标。
+
+Dependency Contract 为主目标与每个附加目标分别保存 writer edge，使 inspect/impact 仍能回答哪个 View 可写哪个 Control；View projection 同时保留完整 compound binding 供 Runtime 验证。State Snapshot、Result 与 Evidence 不新增 batch 状态：每个实际改变的 Control 继续记录 writer provenance，同一原子手势由相同 `action_id / source_view / action` 关联。Shell 仍只是 action producer/checkpoint mirror，compound commit 只发生在唯一 ControlRuntime。
+
+地理详情 View 的 viewport 必须跟随“实际点位集合”，不能跟随 Store 高亮状态。Runtime 为 Map descriptor 生成由坐标/区域 key 决定的稳定 `geo.uirevision`：City 改变时必须重新 `fitbounds`，同城 Store 切换则保留视野。Plotly `react/restyle` 与 `ResizeObserver` 不得并发修改同一地理子图；resize 在更新期间只记录一次 pending，待当前 generation 完成后合并执行，避免数据已更新但新点位落在旧城市视野之外。
+
+这项能力只解决“一个可视手势从同一行写多个已声明 Control”。它不是通用事件编排器，不执行 Query Parameter、SQL、任意 callback、跨 Dashboard action，也不允许用顺序 dispatch 模拟事务。Dashboard v17、Dependency Contract v12、Runtime v13 与 Component Registry 5.9.0 是这次可观察契约扩展；持久化 State Snapshot/Result/Evidence shape 不变。
+
 第一版不承诺远程底图 URL、在线 token、多图层编辑、轨迹、热力聚合、地理编码或 GIS 运算。地图只有在位置本身参与分析问题时才优于 Bar/Table；存在地区字段不是自动选图理由。静态 `validate` 在不执行 Source 的前提下拒绝缺少作者字段、声明 Schema 中字段不存在和 Asset 未暴露；真实数据到达后，同一 Renderer 在绘图前拒绝非有限经纬度、重复 data/feature key 与无法连接的 key。Server 与 portable HTML 运行同一 Renderer。
 
 “实体选择器”不成为新的 Query Parameter type。P5 先提供 `dataviz scaffold query-parameter.entity-select`，生成现有 Workspace Parameter Domain、Domain-backed `multiple_select`、value/label/keywords/metadata 投影和 Source `query_filters`。十万级 Item 的默认 Recipe 使用 Server Lookup/opaque cursor、`default: {mode: none}`、`clearable: true` 与 `empty: passthrough`：空选择表示不施加 Item 条件，有限 include 表示筛选所选 Item，候选全集不进入 Browser、Result 或 HTML。只有多个真实项目仍证明这组声明是主要 friction 时，才另行评估编译期语法糖；不得为接口对称新增 Entity Runtime、第二候选 Store 或另一套 selection state。
@@ -1394,6 +1424,8 @@ P5 同时收紧作者噪音：缺少 `semantics` 不再对所有普通私有/探
 值语义、作用域与展示组件是三个正交维度。`dashboard.yaml` 拥有 type/default/required/clearable/options/suggestions/min/max/step/path_fields 等可验证逻辑；Control 的 Dashboard/Section/View 位置拥有作用域；`presentation.yaml.control_components` 只选择 UI 组件及 `span` 等视觉排版。Single Select 只渲染声明的真实选项，不合成 `All`、`Select all` 或 `Invert`，但 optional Single Select 可以显式 `clearable: true`，从一个值回到明确空状态。Checkbox Group 只用于 2–5 个少量并列多选：可清空时直接取消最后一项，必选时保留最后一项，不额外显示 All/Invert/Clear 工具栏。更大的平面多选使用 Select，层级多选使用 Cascader 或 TreeSelect。
 
 DatePicker 与 RangePicker 不使用浏览器原生 `date` 外观作为产品界面，因为其日期格式、图标、日历语言和弹层样式会随浏览器漂移。两者统一显示并保存 `YYYY-MM-DD`：输入连续八位数字时按 `yyyy → mm → dd` 自动分段，例如 `20260809` 变为 `2026-08-09`；粘贴和直接编辑 ISO 文本走同一路径，真实日期、min/max 与范围顺序继续按值契约校验。日历按钮只负责打开同款 Dataviz 浮层，不取代文本输入；浮层标题以年、月下拉框支持直接跳转，左右箭头只用于相邻月微调。RangePicker 在一个连续边框内提供两个无独立边框的可编辑端点，宽屏显示相邻双月、窄屏收敛为单月；preset、键盘导航与范围边界属于同一个 Component Contract，没有 preset 时不保留空工具条，没有 Clear/Apply 动作时也不重复显示已在输入框中可见的日期范围。组件语义不决定网格宽度，因此 RangePicker 默认也只占一轨。
+
+聚焦中且未通过校验的 DatePicker 文本是本地 UI draft，不是 canonical Control state。Server Shell 和 Canvas 可继续镜像 committed snapshot，但在该输入仍聚焦时不得用 committed value 覆盖草稿、清除 `aria-invalid` 或误发 Control action；用户修正后按正常 typed action 提交，`Escape` 则明确回到上次 committed value。
 
 Table 是默认的数据表达组件，而不是缩减版分析工具。它应覆盖列选择与顺序、标题、格式、对齐、宽度、固定列、排序、筛选、分页、展开、选择、自定义 header/cell/footer、虚拟化接入和可访问性等表格表达能力。Perspective 只在产品明确需要赋予终端用户临时分组、聚合、透视和多维探索能力时使用；普通明细、排行、对账、分组展示或格式化输出不应因为 Table 能力不足而退到 Perspective。
 
@@ -1424,7 +1456,7 @@ Workspace 加载采用同样的物理 owner 边界。`workspace/loader.py` 只�
 | `runtime.control` | canonical native value、共享事件、键盘与浮层桥接 |
 | `control.*` | 每个 Data Entry Component 的唯一 controller、adapter、CSS、Story 与测试声明 |
 
-Package 内的 `test.yaml` 是机器可读验收声明，不是测试执行器；`dataviz components check` 验证 Package 元数据、资产和声明，真实行为由 pytest 与浏览器 E2E 执行。当前 Registry v5.8.0 有 21 个 package-owned Package，其中 14 个是独立 `control.*` Data Entry Package，不存在 bridge implementation。
+Package 内的 `test.yaml` 是机器可读验收声明，不是测试执行器；`dataviz components check` 验证 Package 元数据、资产和声明，真实行为由 pytest 与浏览器 E2E 执行。当前 Registry v5.9.0 有 21 个 package-owned Package，其中 14 个是独立 `control.*` Data Entry Package，不存在 bridge implementation。
 
 Gallery 是这些契约的可执行说明，而不是截图目录。Control、View、Section 各自拥有 ready/loading/stale/empty/error/cancelled/unavailable 七状态矩阵；Select 另外提供真实含 10、100、1,000 个原生 option 的 Story，验证搜索、自动虚拟化、键盘和有界可视 DOM。
 
@@ -1801,21 +1833,21 @@ HTML 导出和现有分享链接继续作为人类消费看板的已有能力；
 
 | 契约 | 版本 |
 | --- | --- |
-| Dashboard schema | `dataviz/dashboard/v16` |
+| Dashboard schema | `dataviz/dashboard/v17` |
 | Parameter Domain / Contract | `dataviz/parameter-domain/v2` / `dataviz/parameter-domain-contract/v3` |
 | Parameter Lookup / Materialization | `dataviz/parameter-lookup/v1` / `dataviz/parameter-materialization/v1` |
 | Dashboard Bundle | `dataviz/dashboard-bundle/v2` |
 | Portable Report Manifest | `dataviz/report-manifest/v3` |
 | Presentation schema | `dataviz/presentation/v2` |
 | Source schema | `dataviz/source/v6` |
-| Dashboard Dependency Contract | `dataviz/dependency-contract/v11` |
+| Dashboard Dependency Contract | `dataviz/dependency-contract/v12` |
 | Dashboard Layout Contract | `dataviz/layout-contract/v1` |
 | State Snapshot | `dataviz/state-snapshot/v5` |
-| Browser Runtime Manifest/Event | `dataviz/runtime/v12` |
+| Browser Runtime Manifest/Event | `dataviz/runtime/v13` |
 | Dataset Transform schema | `dataviz/dataset-transform/v3` |
 | Interactive Transform schema | `dataviz/interactive-transform/v4` |
 | Analysis Result / Evidence | `dataviz/analysis-result/v4` / `dataviz/analysis-evidence/v4` |
-| Component Registry | `5.8.0` |
+| Component Registry | `5.9.0` |
 
 已经实现：
 
@@ -1829,13 +1861,13 @@ HTML 导出和现有分享链接继续作为人类消费看板的已有能力；
 8. `validate`、`run`、`result`、`docs`、`schemas`、`components`、`inspect` 和 Scaffold 使用同一当前契约。
 9. 同一 tab 只恢复最后一次 ControlRuntime 确认且 Contract hash 匹配的 checkpoint；不同 tab、Dashboard、用户、Query Run 与 Interaction generation 相互隔离。父页面/Canvas 的每条 Control channel 消息同时校验 origin、当前 `event.source` 与 dashboard/run/frame identity。
 10. 仓库维护工具 `dataviz-authoring-eval` 可以用固定任务、经过完整性校验的 approach prompt、输入完整性、逐项验收证据、真实客户端 Token、首次成功率、修正轮次和耗时对比 Dataviz 与 standalone HTML；它不进入正式产品包，缺失 Token 不做估算。
-11. `runtime.control`、`data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 已完整迁入物理 owner Package；Runtime v12 通过公开 ready event 装配且 dispose 幂等。
+11. `runtime.control`、`data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 已完整迁入物理 owner Package；Runtime v13 通过公开 ready event 装配且 dispose 幂等。
 12. Gallery 已覆盖四类组件的七状态矩阵，以及真实 10/100/1,000 选项 Select Story；Story 元数据、页面目标与 Chromium 行为测试使用同一 Package。
 13. `control_inputs` 已进入 Server `ExecutionContext` 和 Browser Runtime 的公共输入边界；filter binding 先裁剪声明的表输入，value binding 再提供局部值。operator × `value_type`、空值、零边界和转换错误已由 Python、Canvas 与 Web Component 共用的 conformance fixtures 固定。
 14. 动态 Control option domain 从 Base Output 建立；首次运行按 hello/restore timeout → hydration → domain reconciliation → checkpoint coordination → canonical snapshot 初始化。`canvas-ready` 表示 ControlRuntime 已可接受 action，不等待 Interactive consumer；Browser Interactive 状态通过 frame identity 约束的事件同步到 Server `Pipeline` 面板。
 15. Query、Interactive、Control、Output 与 View 的边已由单一 Dependency Contract 编译；Planner、Server、Browser、Export、CLI 与 AI context 以其投影为目标事实。Query/Interactive 节点只能读取声明的参数；Browser 注册校验输入/输出名称及包含 `projection` 的 canonical binding signature，drift 不再因 projection 归一化丢失而漏报。
 16. Control 的 canonical entry 是 `{value, revision, intent?}`；Query Parameter 则是独立的 `{value}` 或 compact `{selection: all|include|exclude|none, value}`。Component、Repeat、View、两种 Interactive Runtime、tab 恢复与 HTML Export 只消费各自声明的投影；Python、Canvas 与 Web Component 的手写解释器由同一语言无关 conformance corpus 约束。
-17. 每个 View 可通过一条 `control_binding` 写现有 Control；Dependency Contract v11 为同一 Control 编译零到多个有序 writer edges。Plotly、Table 和 Custom Renderer 只通过携带 action identity/source View 的类型化 Adapter Action 写 canonical state；Compiler/Runtime 拒绝越界、字段/类型/聚合歧义、伪造 source View、旧 generation 与反向作用域依赖。
+17. 每个 View 可通过一条 `control_binding` 写现有 Control；Dependency Contract v12 为同一 Control 编译零到多个有序 writer edges，并把 compound binding 的每个目标投影为独立 edge。Plotly、Table 和 Custom Renderer 只通过携带 action identity/source View 的类型化 Adapter Action 写 canonical state；Compiler/Runtime 拒绝越界、字段/类型/聚合歧义、伪造 source View、旧 generation、single-value 多值投影与反向作用域依赖，任一 compound target 失败都不产生 partial commit。
 18. Layout Contract v1 是声明式页面结构的唯一编译结果；Dashboard 拥有顺序、模板、columns 与 span，Presentation v2 只拥有视觉。默认 Renderer、Server、HTML、AI context 与 validate 共用该契约，自定义 Canvas 只暴露稳定 mount points。
 19. Semantic Validation 在最终 Layout/Dependency/Renderer 配置上输出稳定 error/warning/advice；`inspect layout` 公开编译后的行列与来源，不维护第二张布局图。
 20. `state-snapshot/v5` 是当前分析状态的只读证据；每个有 applied revision 的 View/Transform 同时保存 generation 启动时实际消费的 `applied_control_state`，View writer revision 还保存 action/source View 对齐的 `applied_writer_provenance`；失败、取消、超时与 superseded generation 不推进。默认画布不展示状态胶囊；作者显式启用后才展示 committed/applied 值与待应用 revision。
@@ -1853,7 +1885,7 @@ P0 已完成 Query projection、零边界、typed comparison、canonical signatu
 | Control authority | P1-A 已完成：Server/Portable 共用 Canvas-hosted ControlRuntime；Shell 只发 typed action、保存已确认 checkpoint、显示 operational snapshot | 已完成；private lockstep channel、严格 Server canonical boundary、generation-start evidence 与当前 persisted v5/v4 schema 共同守住边界 |
 | Browser `image/file` materialization | portable snapshot 与 CLI Result 已稳定 fail-fast；live/portable interactive display 不被错误禁止 | 真实持久化需求出现后再设计 `LogicalOutput → materializer → ArtifactDescriptor`，不以多义字符串冒充本地路径 |
 | 多 View writer | P1-D 已完成：v13/v10 将一个 Control 投影为零到多个有序 writer edges；v9 action/rejection 与 v4/v3 evidence 保留 source View | 已完成；真实 `chart-gallery` 的 replace/clear/reset、伪造 source、stale generation 以及 Server/Portable/Result 回归共同守住边界 |
-| Compiler 内部 | P1-B 已完成：`LoadedDashboard` 分别持有 Dependency、Layout、Parameter Domain lazy Contract；`dependencies.py` 以私有 derivation 函数编译当前 v11 Contract | 已完成；exact characterization 守住 v11/v1/Manifest/ExecutionPlan/Catalog/inspect/diagnostics，不增加 owner/wrapper、phase class、中间 cache 或新版本轴 |
+| Compiler 内部 | P1-B 已完成：`LoadedDashboard` 分别持有 Dependency、Layout、Parameter Domain lazy Contract；`dependencies.py` 以私有 derivation 函数编译当前 v12 Contract | 已完成；exact characterization 守住 v12/v1/Manifest/ExecutionPlan/Catalog/inspect/diagnostics，不增加 owner/wrapper、phase class、中间 cache 或新版本轴 |
 | 编译失败 | exception 加 recovery-only diagnostics；失败 derivation 不缓存 partial Contract | 当前边界保留；只有真实多错误定位证据证明收益后才考虑最轻 accumulator/typed return，达到 parity 后才收缩 recovery，不预设 outcome 类 |
 | Analysis run | `RunRequest → run_analysis() → canonical AnalysisResult` 已成为唯一显式 Target 应用边界 | 继续复用现有 Catalog resolver 与 `AnalysisResultStore`；CLI `run` 已退化为 Adapter，未来只有同语义的显式 Target API 才复用该函数 |
 | 当前协议版本 | `protocols.py` 维护唯一 current Schema URI 映射；Protocol Registry、Schema Catalog、CLI `version`、内置 docs 和当前版本表由回归测试校验 | 已完成；版本变化必须先改 canonical mapping，再同步严格模型与受测文档投影 |

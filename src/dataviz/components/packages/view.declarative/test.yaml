@@ -8,7 +8,7 @@ tests:
   - {id: view.scatter.lifecycle, component: view.scatter, kind: renderer, assertions: [mount, update, dispose]}
   - {id: view.heatmap.lifecycle, component: view.heatmap, kind: renderer, assertions: [mount, update, dispose]}
   - {id: view.radar.lifecycle, component: view.radar, kind: renderer, assertions: [mount, update, dispose]}
-  - {id: view.map.lifecycle, component: view.map, kind: renderer, assertions: [point, region, workspace-asset, mount, update, selection, dispose, portable-html]}
+  - {id: view.map.lifecycle, component: view.map, kind: renderer, assertions: [point, region, workspace-asset, mount, update, selection, atomic-compound-writer, dispose, portable-html]}
   - {id: view.table.lifecycle, component: view.table, kind: renderer, assertions: [tanstack-core, default-style, mount, update, dispose, sort, search, pagination, column-pinning, control-binding, wheel-boundary, default-count-hidden, explicit-count-visible, portable-html]}
   - {id: view.perspective.lifecycle, component: view.perspective, kind: renderer, assertions: [mount, update, dispose, wheel-boundary]}
   - {id: view.markdown.lifecycle, component: view.markdown, kind: renderer, assertions: [mount, update, dispose]}

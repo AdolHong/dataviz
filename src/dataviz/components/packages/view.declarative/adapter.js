@@ -315,12 +315,23 @@
       host.addEventListener('click', onClick, true);
       return () => host.removeEventListener('click', onClick, true);
     };
-    const clearPlotlySelectionOutline = host => {
+    const clearPlotlySelectionOutline = async host => {
       if (!host || !global.Plotly) return;
       // Plotly persists completed box/lasso geometry in layout.selections.
       // Dataviz commits the result separately through selectedpoints and the
-      // bound Control, so this gesture outline can remain transient.
-      void global.Plotly.relayout(host, {selections:[]});
+      // bound Control, so this gesture outline can remain transient. Plotly
+      // can finalize that geometry after plotly_selected handlers return
+      // (notably in WebKit), therefore clear from the next frame and verify a
+      // bounded number of times instead of racing the event producer.
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await global.Plotly.relayout(host, {selections:[]});
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        if (
+          !(host.layout?.selections || []).length
+          && !host.querySelector('.select-outline')
+        ) return;
+      }
     };
     const chartService = Object.freeze({
       plotly:Object.freeze({
@@ -342,9 +353,17 @@
             node:host,
             specification,
             observer:null,
+            updating:false,
+            resizePending:false,
+            disposed:false,
             releaseDragModeToggle:installPlotlyDragModeToggle(host),
           };
           state.observer = new ResizeObserver(() => {
+            if (state.disposed) return;
+            if (state.updating) {
+              state.resizePending = true;
+              return;
+            }
             runtime.metrics.renderers.resizes += 1;
             global.Plotly?.Plots?.resize?.(host);
           });
@@ -353,40 +372,61 @@
         },
         async update(state, specification = {}, root = state?.node?.closest?.('.dv-view')) {
           if (!state?.node) throw new Error('Plotly chart state is missing its host');
-          const selectionOnly = Boolean(
-            state.specification?.controlBinding
-            && specification.controlBinding
-            && plotlyStructuralSignature(state.specification)
-              === plotlyStructuralSignature(specification)
-          );
-          if (selectionOnly) {
-            const previousSelection = plotlySelectedPoints(state.specification);
-            const nextSelection = plotlySelectedPoints(specification);
-            if (JSON.stringify(previousSelection) !== JSON.stringify(nextSelection)) {
-              await global.Plotly.restyle(
-                state.node,
-                {selectedpoints:nextSelection},
-                nextSelection.map((_value, index) => index),
-              );
+          state.updating = true;
+          try {
+            const selectionOnly = Boolean(
+              state.specification?.controlBinding
+              && specification.controlBinding
+              && plotlyStructuralSignature(state.specification)
+                === plotlyStructuralSignature(specification)
+            );
+            if (selectionOnly) {
+              const previousSelection = plotlySelectedPoints(state.specification);
+              const nextSelection = plotlySelectedPoints(specification);
+              if (JSON.stringify(previousSelection) !== JSON.stringify(nextSelection)) {
+                await global.Plotly.restyle(
+                  state.node,
+                  {selectedpoints:nextSelection},
+                  nextSelection.map((_value, index) => index),
+                );
+              }
+              state.specification = specification;
+              return state;
             }
+            await global.Plotly.react(
+              state.node,
+              specification.data || [],
+              plotlyTheme(root, specification.layout || {}),
+              plotlyConfig(specification.config || {}),
+            );
             state.specification = specification;
             return state;
+          } finally {
+            state.updating = false;
+            if (state.resizePending && !state.disposed) {
+              state.resizePending = false;
+              requestAnimationFrame(() => {
+                if (state.disposed || state.updating) {
+                  state.resizePending = !state.disposed;
+                  return;
+                }
+                runtime.metrics.renderers.resizes += 1;
+                global.Plotly?.Plots?.resize?.(state.node);
+              });
+            }
           }
-          await global.Plotly.react(
-            state.node,
-            specification.data || [],
-            plotlyTheme(root, specification.layout || {}),
-            plotlyConfig(specification.config || {}),
-          );
-          state.specification = specification;
-          return state;
         },
         resize(state) {
           if (!state?.node) return;
+          if (state.updating) {
+            state.resizePending = true;
+            return;
+          }
           runtime.metrics.renderers.resizes += 1;
           global.Plotly?.Plots?.resize?.(state.node);
         },
         dispose(state) {
+          if (state) state.disposed = true;
           state?.observer?.disconnect?.();
           state?.releaseDragModeToggle?.();
           if (state?.node) global.Plotly?.purge?.(state.node);
@@ -1431,6 +1471,13 @@
         clearPlotlyPointerFallback(state);
         return;
       }
+      const writerDatum = datum => (
+        datum
+        && typeof datum === 'object'
+        && Object.prototype.hasOwnProperty.call(datum, '__datavizControlValue')
+          ? datum
+          : {__datavizControlValue:datum}
+      );
       const emitSelection = datum => {
         if (datum === undefined) return;
         if (state.controlActionFrame != null) {
@@ -1438,9 +1485,7 @@
           state.controlActionFrame = null;
         }
         runtime.metrics.renderers.interactions += 1;
-        state.renderContext.controlBinding?.emit('select', {
-          __datavizControlValue:datum,
-        });
+        state.renderContext.controlBinding?.emit('select', writerDatum(datum));
       };
       state.controlPointerDownHandler = event => {
         if (event.button !== 0 || event.isPrimary === false) return;
@@ -1498,9 +1543,9 @@
         emitSelection(event?.points?.[0]?.customdata);
       };
       state.controlSelectedHandler = event => {
-        const keyed = new Map((event?.points || []).map(point => ({
-          __datavizControlValue:point.customdata,
-        })).filter(item => item.__datavizControlValue !== undefined).map(item => [
+        const keyed = new Map((event?.points || []).map(point => (
+          writerDatum(point.customdata)
+        )).filter(item => item.__datavizControlValue !== undefined).map(item => [
           JSON.stringify(item.__datavizControlValue), item,
         ]));
         const data = [...keyed.values()];
@@ -1516,7 +1561,7 @@
         state.controlActionFrame = requestAnimationFrame(() => {
           state.controlActionFrame = null;
           state.renderContext.controlBinding?.emit('select_many', data);
-          clearPlotlySelectionOutline(chartNode);
+          void clearPlotlySelectionOutline(chartNode);
         });
       };
       chartNode.addEventListener('pointerdown', state.controlPointerDownHandler, true);
@@ -1631,7 +1676,7 @@
     });
 
     const adapter = {
-      protocol:'dataviz/runtime/v12',
+      protocol:'dataviz/runtime/v13',
       lifecycle:Object.freeze({
         hooks:Object.freeze(['validate', 'mount', 'update', 'dispose']),
         phases:Object.freeze([

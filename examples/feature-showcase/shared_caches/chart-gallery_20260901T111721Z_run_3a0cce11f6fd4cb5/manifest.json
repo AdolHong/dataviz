@@ -1,0 +1,194 @@
+{
+  "schema": "dataviz/shared-cache/v1",
+  "share_id": "chart-gallery_20260901T111721Z_run_3a0cce11f6fd4cb5",
+  "dashboard_id": "chart-gallery",
+  "run_id": "run_3a0cce11f6fd4cb5",
+  "created_at": "2026-09-01T11:17:21.124522+00:00",
+  "url": "/shared/chart-gallery_20260901T111721Z_run_3a0cce11f6fd4cb5",
+  "query_parameter_state": {},
+  "control_state": {
+    "dashboard:chart-gallery/province": {
+      "value": [
+        "广东",
+        "湖南",
+        "福建",
+        "浙江"
+      ],
+      "revision": 0,
+      "intent": "explicit"
+    },
+    "dashboard:chart-gallery/radar_city_count": {
+      "value": 5,
+      "revision": 0
+    }
+  },
+  "consumer_revisions": {
+    "views": {
+      "composition": {
+        "trigger": "auto",
+        "stale": false,
+        "controls": {
+          "dashboard:chart-gallery/province": {
+            "effective_revision": 0,
+            "applied_revision": 0,
+            "stale": false
+          }
+        },
+        "applied_control_state": {
+          "dashboard:chart-gallery/province": {
+            "value": [
+              "广东",
+              "湖南",
+              "福建",
+              "浙江"
+            ],
+            "revision": 0,
+            "intent": "explicit"
+          }
+        },
+        "applied_writer_provenance": {}
+      },
+      "ranking": {
+        "trigger": "auto",
+        "stale": false,
+        "controls": {
+          "dashboard:chart-gallery/province": {
+            "effective_revision": 0,
+            "applied_revision": 0,
+            "stale": false
+          }
+        },
+        "applied_control_state": {
+          "dashboard:chart-gallery/province": {
+            "value": [
+              "广东",
+              "湖南",
+              "福建",
+              "浙江"
+            ],
+            "revision": 0,
+            "intent": "explicit"
+          }
+        },
+        "applied_writer_provenance": {}
+      },
+      "records": {
+        "trigger": "auto",
+        "stale": false,
+        "controls": {
+          "dashboard:chart-gallery/province": {
+            "effective_revision": 0,
+            "applied_revision": 0,
+            "stale": false
+          }
+        },
+        "applied_control_state": {
+          "dashboard:chart-gallery/province": {
+            "value": [
+              "广东",
+              "湖南",
+              "福建",
+              "浙江"
+            ],
+            "revision": 0,
+            "intent": "explicit"
+          }
+        },
+        "applied_writer_provenance": {}
+      },
+      "scatter": {
+        "trigger": "auto",
+        "stale": false,
+        "controls": {
+          "dashboard:chart-gallery/province": {
+            "effective_revision": 0,
+            "applied_revision": 0,
+            "stale": false
+          }
+        },
+        "applied_control_state": {
+          "dashboard:chart-gallery/province": {
+            "value": [
+              "广东",
+              "湖南",
+              "福建",
+              "浙江"
+            ],
+            "revision": 0,
+            "intent": "explicit"
+          }
+        },
+        "applied_writer_provenance": {}
+      },
+      "trend": {
+        "trigger": "auto",
+        "stale": false,
+        "controls": {
+          "dashboard:chart-gallery/province": {
+            "effective_revision": 0,
+            "applied_revision": 0,
+            "stale": false
+          }
+        },
+        "applied_control_state": {
+          "dashboard:chart-gallery/province": {
+            "value": [
+              "广东",
+              "湖南",
+              "福建",
+              "浙江"
+            ],
+            "revision": 0,
+            "intent": "explicit"
+          }
+        },
+        "applied_writer_provenance": {}
+      }
+    },
+    "transforms": {
+      "latest-metrics": {
+        "trigger": "auto",
+        "stale": false,
+        "controls": {
+          "dashboard:chart-gallery/province": {
+            "effective_revision": 0,
+            "applied_revision": 0,
+            "stale": false
+          },
+          "dashboard:chart-gallery/radar_city_count": {
+            "effective_revision": 0,
+            "applied_revision": 0,
+            "stale": false
+          }
+        },
+        "applied_control_state": {
+          "dashboard:chart-gallery/province": {
+            "value": [
+              "广东",
+              "湖南",
+              "福建",
+              "浙江"
+            ],
+            "revision": 0,
+            "intent": "explicit"
+          },
+          "dashboard:chart-gallery/radar_city_count": {
+            "value": 5,
+            "revision": 0
+          }
+        },
+        "applied_writer_provenance": {}
+      }
+    }
+  },
+  "artifacts": [
+    {
+      "artifact_id": "source_metrics--ea7ed51cf3ef",
+      "path": "artifacts/source_metrics--ea7ed51cf3ef_55f5c3d7df06.parquet",
+      "content_hash": "55f5c3d7df06c1fe7dfd1d496a9eeb39d9e91598481caa2b997e825223ae663b",
+      "kind": "table",
+      "format": "parquet"
+    }
+  ],
+  "result_id": "result_20260901_111721_6dedefcd52"
+}

@@ -4,7 +4,7 @@ from typing import Any
 
 
 WORKSPACE_SCHEMA = "dataviz/workspace/v2"
-DASHBOARD_SCHEMA = "dataviz/dashboard/v16"
+DASHBOARD_SCHEMA = "dataviz/dashboard/v17"
 PARAMETER_DOMAIN_SCHEMA = "dataviz/parameter-domain/v2"
 PARAMETER_DOMAIN_CONTRACT_SCHEMA = "dataviz/parameter-domain-contract/v3"
 PARAMETER_LOOKUP_SCHEMA = "dataviz/parameter-lookup/v1"
@@ -13,10 +13,10 @@ PRESENTATION_SCHEMA = "dataviz/presentation/v2"
 SOURCE_SCHEMA = "dataviz/source/v6"
 DATASET_TRANSFORM_SCHEMA = "dataviz/dataset-transform/v3"
 INTERACTIVE_TRANSFORM_SCHEMA = "dataviz/interactive-transform/v4"
-DEPENDENCY_CONTRACT_SCHEMA = "dataviz/dependency-contract/v11"
+DEPENDENCY_CONTRACT_SCHEMA = "dataviz/dependency-contract/v12"
 LAYOUT_CONTRACT_SCHEMA = "dataviz/layout-contract/v1"
 STATE_SNAPSHOT_SCHEMA = "dataviz/state-snapshot/v5"
-RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v12"
+RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v13"
 TARGET_REFERENCE_SCHEMA = "dataviz/target-reference/v1"
 ANALYSIS_ENTRY_SCHEMA = "dataviz/analysis-entry/v1"
 ANALYSIS_CATALOG_SCHEMA = "dataviz/analysis-catalog/v1"
@@ -87,7 +87,7 @@ PROTOCOL_BOUNDARIES: tuple[dict[str, Any], ...] = (
         "persisted": True,
         "strictness": "exact-current",
         "compatibility": "package-lockstep",
-        "conformance_suite": "control-filter,multi-view-writer",
+        "conformance_suite": "control-filter,multi-view-writer,compound-control-writer",
     },
     {
         "boundary": "authoring-source",
@@ -154,7 +154,8 @@ PROTOCOL_BOUNDARIES: tuple[dict[str, Any], ...] = (
         "strictness": "exact-current",
         "compatibility": "package-lockstep",
         "conformance_suite": (
-            "input-binding,control-filter,consumer-revision,multi-view-writer"
+            "input-binding,control-filter,consumer-revision,multi-view-writer,"
+            "compound-control-writer"
         ),
     },
     {
@@ -168,7 +169,7 @@ PROTOCOL_BOUNDARIES: tuple[dict[str, Any], ...] = (
         "compatibility": "package-lockstep",
         "conformance_suite": (
             "input-binding,control-filter,value-signature,output-capability,"
-            "multi-view-writer"
+            "multi-view-writer,compound-control-writer"
         ),
     },
     {
@@ -221,6 +222,19 @@ PROTOCOL_BOUNDARIES: tuple[dict[str, Any], ...] = (
 
 
 PROTOCOL_CHANGE_RECORDS: tuple[dict[str, str], ...] = (
+    {
+        "change": "atomic-compound-control-writer",
+        "classification": "authoring and private lockstep additive",
+        "decision": (
+            "dashboard v17, dependency contract v12, runtime v13 and component registry 5.9.0; "
+            "state snapshot v5 and analysis result/evidence v4 unchanged"
+        ),
+        "reason": (
+            "one View gesture may project the same selected datum into a primary Control and "
+            "declared context Controls; the unique ControlRuntime validates and commits the "
+            "whole action atomically while existing per-Control provenance shares one action id"
+        ),
+    },
     {
         "change": "sql-query-filter-empty-policy",
         "classification": "authoring semantic additive and exact-current",

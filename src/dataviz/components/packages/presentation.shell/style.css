@@ -486,6 +486,16 @@ details.dv-state-chip > summary::after {
   --dv-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   --dv-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   --dv-shell-header-height: 58px;
+  --dv-shell-bg: #fff;
+  --dv-shell-surface: #fff;
+  --dv-shell-line: #e6e8e4;
+  --dv-shell-ink: #27322d;
+  --dv-shell-muted: #747b76;
+  --dv-shell-accent: #4451a3;
+  --dv-shell-accent-strong: #26306f;
+  --dv-shell-soft: #f5f6fb;
+  --dv-shell-green: #2f8f64;
+  --dv-shell-shadow-float: 0 18px 48px rgba(26, 35, 29, .12);
 }
 body {
   font-family: var(--dv-font-sans);
@@ -570,8 +580,120 @@ body {
 .dv-runtime-header > .dv-runtime-actions {
   margin-left: auto;
 }
-.dv-shell-brand {
+.dv-runtime-brand.dv-shell-brand {
+  display: inline-flex;
   flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  height: 40px;
+  padding: 4px 7px 4px 4px;
+  color: var(--dv-shell-ink);
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  text-align: left;
+}
+.dv-shell-brand__mark {
+  display: grid;
+  flex: 0 0 32px;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: #fff;
+  background: #303a78;
+  border-radius: 8px;
+  font: 650 10px/1 var(--dv-font-mono);
+  letter-spacing: .02em;
+}
+.dv-shell-brand__name {
+  color: inherit;
+  font: 650 12px/1 var(--dv-font-mono);
+  letter-spacing: .16em;
+}
+button.dv-shell-brand {
+  cursor: pointer;
+  transition: color .14s ease, background .14s ease;
+}
+button.dv-shell-brand:hover { background: #f4f5f4; }
+button.dv-shell-brand:focus-visible {
+  outline: 2px solid rgba(68, 81, 163, .38);
+  outline-offset: 2px;
+}
+.dv-shell-control[data-control-origin="dashboard"] > .dv-shell-control__trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 40px;
+  padding: 0 14px;
+  color: var(--dv-shell-ink);
+  background: var(--dv-shell-surface);
+  border: 1px solid var(--dv-shell-line);
+  border-radius: 7px;
+  list-style: none;
+  cursor: pointer;
+  font: 650 9px var(--dv-font-mono);
+  letter-spacing: .06em;
+  transition: color .14s ease, background .14s ease, border-color .14s ease;
+}
+.dv-shell-control[data-control-origin="dashboard"] > .dv-shell-control__trigger::-webkit-details-marker {
+  display: none;
+}
+.dv-shell-control[data-control-origin="dashboard"] > .dv-shell-control__trigger:hover,
+.dv-shell-control[data-control-origin="dashboard"][open] > .dv-shell-control__trigger {
+  color: var(--dv-shell-accent-strong);
+  background: var(--dv-shell-soft);
+  border-color: #a8aed1;
+}
+.dv-shell-control[data-control-origin="dashboard"] > .dv-shell-control__trigger > .dv-shell-control__mark {
+  display: grid;
+  flex: 0 0 18px;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  color: #fff;
+  background: var(--dv-shell-green);
+  border-radius: 4px;
+  font: 700 8px/1 var(--dv-font-mono);
+}
+.dv-shell-control[data-control-origin="dashboard"] > .dv-shell-control__trigger > .dv-shell-control__label {
+  color: inherit;
+  font: 650 9px/1 var(--dv-font-mono);
+  letter-spacing: .06em;
+  white-space: nowrap;
+}
+.dv-shell-control[data-control-origin="dashboard"] > .dv-shell-control__trigger > .dv-shell-control__chevron {
+  display: grid;
+  flex: 0 0 16px;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin: 0 0 0 auto;
+  color: inherit;
+  background: transparent;
+  border-radius: 0;
+  transform: rotate(0deg);
+  transform-origin: 50% 50%;
+  transition: transform .16s ease;
+}
+.dv-shell-control[data-control-origin="dashboard"] .dv-shell-control__chevron svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.dv-shell-control[open] .dv-shell-control__chevron { transform: rotate(180deg); }
+.dv-shell-control > .dv-shell-control__popover {
+  color: var(--dv-shell-ink);
+  background: var(--dv-shell-surface);
+  border: 1px solid var(--dv-shell-line);
+  border-radius: 12px;
+  box-shadow: var(--dv-shell-shadow-float);
 }
 .dv-query-card-host,
 .query-parameters-control.dv-query-card-host,

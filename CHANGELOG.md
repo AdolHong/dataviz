@@ -1,10 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.20.1 — 2026-09-01
+
+- Server 与 portable HTML 的共同 Shell 视觉统一归属 `presentation.shell`：Dataviz Logo、品牌字体、Dashboard Control 触发器及弹层表面使用同一组语义类和设计 Token，不再由 `server.css` 与 `canvas.css` 分别解释。
+- 新增跨宿主 Chromium 回归，逐属性比较 Header 高度、基础字体、Logo、品牌文字、Dashboard Control 与 Query Card；Server 导航、查询动作和 portable 固化状态仍保留各自能力边界。
+- 发布门禁执行完整非浏览器 pytest 与单套 Chromium E2E；按快速迭代约定不运行 Firefox、WebKit 和独立安装冒烟。
+
+## 0.20.0 — 2026-09-01
+
+- View `control_binding.writes` 允许一次可视手势从同一 datum 原子投影主 Control 与多个上下文 Control；唯一 ControlRuntime 在任何状态写入前完成 scope、字段、类型、cardinality、source View 与 generation 校验，拒绝时不产生 partial commit。
+- `map-lab` 变成真实 Overview → Detail：全国门店图一次更新 City + Store，城市图按 City 过滤并继续写 Store，全国上下文不被详情状态反向裁剪；Server 与 portable HTML 共享同一行为。
+- Map viewport 以实际坐标/区域 key 集合作为 Plotly `geo.uirevision`：跨 City 重新 fitbounds，同城 Store 高亮保留视野；Plotly update 期间合并 ResizeObserver，避免详情地图数据已更新但显示在旧城市视野而呈现空白。
+- Plotly 矩形/套索手势在 `plotly_selected` 完成后以有限 settle 步骤清理临时选区，不再与 WebKit 的延后几何写入竞态；选择工具仍保持激活，便于连续选择。
+- DatePicker 保留当前聚焦且未通过真实日期校验的本地草稿，Shell/Canvas committed snapshot 不再提前覆盖文本或清除 `aria-invalid`。
 
 - 新增原生 Plotly Map View：`mark: point` 使用经纬度，`mark: region` 通过 Dashboard allowlist 的 Workspace GeoJSON Asset 连接区域指标；Server 与 portable HTML 复用同一 Asset Service、Renderer lifecycle 与 Control writer，不增加地图状态或第二图表引擎。
 - 新增 `query-parameter.entity-select` Scaffold，把现有共享 Parameter Domain、服务端搜索/游标分页、紧凑 `multiple_select` 和 Source `query_filters` 组合为十万级实体候选最短路径；普通业务 Source/SQL 仍保持 Dashboard-local。
-- Dashboard 升为 v16、Runtime 升为 v12、Component Registry 升为 5.8.0；Result、Evidence、Dependency 与 Transform shape 未改变。普通私有探索 Output 不再收到一概补 semantics 的非阻塞 advice。
+- Dashboard 升为 v17、Dependency Contract 升为 v12、Runtime 升为 v13、Component Registry 升为 5.9.0；State Snapshot 与 Analysis Result/Evidence 继续使用 v5/v4，并以相同 action ID 关联每个 Control 的既有 writer provenance。普通私有探索 Output 不再收到一概补 semantics 的非阻塞 advice。
+- 非浏览器 pytest 全套、Chromium 完整 E2E、Firefox/WebKit Runtime E2E、Ruff、JavaScript 协议一致性、Runtime 生成资产、Component Package 与四个示例 Workspace strict validate 共同作为 0.20.0 发布门禁；wheel/sdist/ZIP 通过独立安装冒烟。
 
 ## 0.19.1 — 2026-09-01
 

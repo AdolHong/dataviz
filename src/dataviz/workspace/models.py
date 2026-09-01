@@ -259,11 +259,19 @@ ControlDependencyReference = Annotated[
 ]
 
 
-class ViewControlBindingDefinition(Model):
-    """Bind one View interaction outlet to one canonical Control state."""
+class ViewControlWriteDefinition(Model):
+    """Project the same View gesture into one additional canonical Control."""
 
     control: ControlDependencyReference
     field: str | None = None
+
+
+class ViewControlBindingDefinition(Model):
+    """Bind one View gesture atomically to one primary and optional context Controls."""
+
+    control: ControlDependencyReference
+    field: str | None = None
+    writes: list[ViewControlWriteDefinition] = Field(default_factory=list)
 
 
 class _ValueControlDefinition(Model):

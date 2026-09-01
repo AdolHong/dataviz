@@ -828,7 +828,7 @@ assets:
     path: assets/data/store_dictionary.csv
     media_type: text/csv""",
         "dashboard_example": """# dashboard.yaml
-schema: dataviz/dashboard/v16
+schema: dataviz/dashboard/v17
 kind: dashboard
 id: city-map
 assets: [china-city]  # Browser allowlist and portable-report dependency
@@ -1013,7 +1013,7 @@ sources:
             "id": "CLI、DAG、API 与 Presentation 使用的稳定程序身份。",
             "title": "页面内容，可与文件夹名不同；为空时回退到文件夹末级名称。",
         },
-        "minimal_example": """schema: dataviz/dashboard/v16
+        "minimal_example": """schema: dataviz/dashboard/v17
 kind: dashboard
 id: sales-overview
 title: 销售概览
@@ -1412,23 +1412,29 @@ timeout_seconds: 120
             "Runtime 在 Transform 代码执行前应用 mode: filter，并把 mode: value 投影到 context.control_inputs。",
         ],
         "view_control_binding": {
-            "summary": "一个 Control 可由多个经过 Compiler 校验的 Bound View 写入；Control Component 与所有合法 View selection gesture 都只向同一 ControlRuntime 发送 typed action。",
+            "summary": "一个 Control 可由多个 Bound View 写入；一次 View gesture 也可从同一 datum 原子更新主 Control 与声明过的上下文 Controls，所有写入仍只经过唯一 ControlRuntime。",
             "example": """views:
   - id: store-map
     input: source:stores/main
-    template: scatter
-    x: lng
-    y: lat
+    template: map
+    mark: point
+    longitude: lng
+    latitude: lat
     control_binding:
-      control: section.selected_store
+      control: dashboard.selected_store
       field: store_id
+      writes:
+        - {control: dashboard.selected_city, field: city}
 """,
             "supported": ["Plotly point/selection event", "Table row", "typed Custom Renderer outlet"],
             "rules": [
                 "Control owns values and candidate domain; it never declares highlight, row, cell, Renderer or callback.",
-                "The bound View receives candidate rows after ancestor Controls but before the target Control filters itself.",
+                "主 control/field 决定该 View 的 selected projection；writes 只携带同一手势的上下文，不改变主高亮语义。",
+                "The bound View receives candidate rows after ancestor Controls but before the primary target Control filters itself.",
                 "A View event can only dispatch select, select_many, clear or reset through context.controlBinding.emit; clear is explicit empty while reset restores the declared initial policy.",
-                "Unknown targets, duplicate writer edges from one View, narrower reverse-scope candidate dependencies, ambiguous aggregate mappings, unsupported Renderers and missing fields fail validation; multiple valid Views may write the same Control.",
+                "Runtime 先验证全部 target 再一次提交；任一字段、类型、scope、generation 或 single-value cardinality 无效都会拒绝整次 action，不产生 partial state。",
+                "select_many 对每个目标稳定去重；single-value Control 获得多个不同值时拒绝，不能猜 first/last。clear/reset 原子作用于主目标和全部 writes。",
+                "Unknown targets, duplicate targets from one View, narrower reverse-scope candidate dependencies, ambiguous aggregate mappings, unsupported Renderers and missing fields fail validation; multiple valid Views may write the same Control.",
             ],
         },
         "dynamic_option_example": """controls:
@@ -1629,11 +1635,35 @@ views:
     color: revenue
     label: city_name
 """,
+        "overview_detail_example": """# 全国图保留全部门店；一次点击同时写 City + Store
+- id: all-stores
+  template: map
+  mark: point
+  input: source:stores/main
+  longitude: longitude
+  latitude: latitude
+  control_binding:
+    control: dashboard.store
+    field: store_nbr
+    writes:
+      - {control: dashboard.city, field: city}
+
+# 城市图只消费 City，并允许继续选择 Store
+- id: city-stores
+  template: map
+  mark: point
+  input: source:stores/main
+  longitude: longitude
+  latitude: latitude
+  control_inputs:
+    city: {mode: filter, control: dashboard.city, field: city, inputs: [main], empty: match_none}
+  control_binding: {control: dashboard.store, field: store_nbr}
+""",
         "contracts": {
             "point": "longitude/latitude 必填；label/color/size 可选。经纬度必须是有限数值。",
             "region": "geojson/data_key/feature_key/color 必填；数据 key 与 GeoJSON feature key 都必须唯一且能连接。",
             "asset": "GeoJSON 必须先在 workspace.yaml 注册，再由 Dashboard.assets 显式 allowlist；Bundle 与 portable HTML 自动携带。",
-            "interaction": "control_binding 继续写同一 ControlRuntime；点击、矩形和套索选择不创建地图专属状态。",
+            "interaction": "control_binding 继续写同一 ControlRuntime；writes 可让一次点击原子更新 Store 与 City。全国图不要消费详情 City/Store，城市图消费 City 并继续写 Store；点击、矩形和套索不创建地图专属状态。内置 Map 会在点位集合变化时重新 fitbounds，只改高亮则保留当前视野。",
             "escape_hatch": "复杂样式继续使用 options.trace、options.layout 和 config；只有超出 point/region 时才使用 Custom Renderer。",
         },
         "non_goals": [
@@ -2009,7 +2039,7 @@ assets:
         "browser_assets": {
             "plotly_js": "4.0.0（直接内置，不安装 Python plotly）",
             "tanstack_table_core": "9.2.4（直接内置）",
-            "workspace_asset_service": "Runtime v12 的 context.assets；Server URL 与 portable inline 共用同一作者 API。",
+            "workspace_asset_service": "Runtime v13 的 context.assets；Server URL 与 portable inline 共用同一作者 API。",
         },
         "rules": [
             "未知字段 extra=forbid。",

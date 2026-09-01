@@ -34,10 +34,23 @@
   const controlBinding = (view, state) => (
     state.dependency_contract?.views?.[view.id]?.control_binding || null
   );
-  const bindingValue = (binding, row) => {
+  const bindingValue = (binding, row, fields = binding?.fields || []) => {
     if (!binding || !row || typeof row !== 'object') return null;
-    const values = (binding.fields || []).map(field => row[field]);
+    const values = fields.map(field => row[field]);
     return values.length === 1 ? values[0] : values;
+  };
+  const bindingDatum = (binding, row) => {
+    const value = bindingValue(binding, row);
+    if (!(binding?.writes || []).length) return value;
+    return {
+      __datavizControlValue:value,
+      __datavizControlWrites:Object.fromEntries(
+        binding.writes.map(write => [
+          write.control,
+          bindingValue(binding, row, write.fields || []),
+        ])
+      ),
+    };
   };
   const bindingDescriptor = (view, state, rows) => {
     const binding = controlBinding(view, state);
@@ -54,6 +67,15 @@
       .filter(value => value != null)
       .map(bindingValueSignature)
   ).has(bindingValueSignature(value));
+  const mapViewportRevision = values => {
+    let hash = 2166136261;
+    const text = JSON.stringify(values);
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `dataviz-map-${values.length}-${(hash >>> 0).toString(16)}`;
+  };
   const selectRows = (view, state) => {
     const contract = state.dependency_contract?.views?.[view.id]?.filter_contract || [];
     const boundControl = controlBinding(view, state)?.control;
@@ -115,13 +137,15 @@
     const common = {
       name:view.title,
       text:view.label ? rows.map(row => row[view.label]) : undefined,
-      customdata:binding ? rows.map(row => bindingValue(binding, row)) : undefined,
+      customdata:binding ? rows.map(row => bindingDatum(binding, row)) : undefined,
       selectedpoints,
     };
     let trace;
+    let viewportValues;
     if (view.mark === 'point') {
       const longitude = rows.map(row => Number(row[view.longitude]));
       const latitude = rows.map(row => Number(row[view.latitude]));
+      viewportValues = longitude.map((value, index) => [value, latitude[index]]);
       const invalidIndex = longitude.findIndex((value, index) => (
         !Number.isFinite(value) || !Number.isFinite(latitude[index])
       ));
@@ -148,6 +172,7 @@
       };
     } else {
       const locations = rows.map(row => row[view.data_key]);
+      viewportValues = locations;
       const seen = new Map();
       locations.forEach((value, index) => {
         const key = JSON.stringify(value);
@@ -183,6 +208,7 @@
           fitbounds:'locations',
           visible:false,
           bgcolor:'rgba(0,0,0,0)',
+          uirevision:mapViewportRevision(viewportValues || []),
           ...geoOptions,
         },
         ...layoutRest,
@@ -205,7 +231,7 @@
         name:[group, measures.length > 1 ? measure : null].filter(Boolean).join(' · ') || view.title,
         x:selected.map(row => row[view.x]),
         y:selected.map(row => row[measure]),
-        customdata:binding ? selected.map(row => bindingValue(binding, row)) : undefined,
+        customdata:binding ? selected.map(row => bindingDatum(binding, row)) : undefined,
         selectedpoints:binding ? selected.map((row, index) => (
           bindingSelected(binding, bindingValue(binding, row)) ? index : null
         )).filter(index => index != null) : undefined,
@@ -247,7 +273,7 @@
         type:'pie',
         labels:rows.map(row => row[view.label || view.x]),
         values:rows.map(row => row[view.value || view.y]),
-        customdata:binding ? rows.map(row => bindingValue(binding, row)) : undefined,
+        customdata:binding ? rows.map(row => bindingDatum(binding, row)) : undefined,
         pull:binding ? rows.map(row => (
           bindingSelected(binding, bindingValue(binding, row)) ? 0.08 : 0
         )) : undefined,
@@ -275,7 +301,7 @@
         theta,
         r:[...view.columns.map(field => row[field]), row[view.columns[0]]],
         customdata:binding
-          ? theta.map(() => bindingValue(binding, row))
+          ? theta.map(() => bindingDatum(binding, row))
           : undefined,
         ...traceOptions,
       })));
@@ -407,7 +433,7 @@
   }
 
   root.viewDeclarative = {
-    protocol:'dataviz/runtime/v12',
+    protocol:'dataviz/runtime/v13',
     escape,
     numericAggregate,
     inputReferences,
@@ -415,6 +441,7 @@
     selectRows,
     controlBinding,
     bindingValue,
+    bindingDatum,
     prepareRows,
     mapPlotlyDescriptor,
     build,
@@ -422,7 +449,7 @@
   };
   root.descriptors = root.descriptors || new Map();
   root.descriptors.set('view.declarative', {
-    protocol:'dataviz/runtime/v12',
+    protocol:'dataviz/runtime/v13',
     owns:['descriptor-builders', 'renderer-lifecycle'],
   });
 })(window);

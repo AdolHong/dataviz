@@ -1,7 +1,7 @@
 (function installDatavizWebComponentAdapter(global) {
   'use strict';
 
-  const PROTOCOL = 'dataviz/runtime/v12';
+  const PROTOCOL = 'dataviz/runtime/v13';
   const canonical = reference => {
     const raw = String(reference || '').trim();
     if (!raw) throw new Error('Output reference cannot be empty');

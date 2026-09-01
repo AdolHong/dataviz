@@ -153,7 +153,7 @@ def test_machine_readable_component_examples_use_canonical_output_references():
 def test_machine_readable_documentation_examples_match_current_schemas():
     providers = {
         "dataviz/workspace/v2": WorkspaceDefinition,
-        "dataviz/dashboard/v16": DashboardDefinition,
+        "dataviz/dashboard/v17": DashboardDefinition,
         "dataviz/source/v6": SOURCE_DEFINITION_ADAPTER,
         "dataviz/dataset-transform/v3": DatasetTransformDefinition,
         "dataviz/interactive-transform/v4": InteractiveTransformDefinition,
@@ -450,7 +450,7 @@ def test_version_docs_match_the_current_runtime_and_release_gate():
     assert strict["browser_assets"] == {
         "plotly_js": "4.0.0（直接内置，不安装 Python plotly）",
         "tanstack_table_core": "9.2.4（直接内置）",
-        "workspace_asset_service": "Runtime v12 的 context.assets；Server URL 与 portable inline 共用同一作者 API。",
+        "workspace_asset_service": "Runtime v13 的 context.assets；Server URL 与 portable inline 共用同一作者 API。",
     }
     contract = "\n".join(release["release_contract"])
     assert "默认正式发布运行完整 Chromium" in contract
@@ -463,7 +463,7 @@ def test_component_registry_reports_package_owned_implementations():
     catalog = component_catalog()
     report = validate_component_packages(catalog)
 
-    assert COMPONENT_REGISTRY_VERSION == "5.8.0"
+    assert COMPONENT_REGISTRY_VERSION == "5.9.0"
     assert set(component_packages()) == {
         "control.auto-complete",
         "control.cascader",
@@ -1014,7 +1014,7 @@ def test_coordinate_layout_fields_are_strictly_rejected(layout):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v16",
+                "schema": "dataviz/dashboard/v17",
                 "kind": "dashboard",
                 "id": "strict",
                 "layout": layout,

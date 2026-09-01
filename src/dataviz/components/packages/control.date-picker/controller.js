@@ -74,6 +74,8 @@
     function setError(message = '') {
       input.setCustomValidity(message);
       input.setAttribute('aria-invalid', String(Boolean(message)));
+      if (message) input.dataset.localDraftInvalid = 'true';
+      else delete input.dataset.localDraftInvalid;
       const output = control.querySelector('[data-control-error]');
       if (output) {
         output.textContent = message;
@@ -246,6 +248,13 @@
     clear.addEventListener('click', () => commit(''));
 
     function sync() {
+      // Host/Canvas snapshots contain committed Control state. While the user
+      // is editing an invalid local date, mirroring that state must not erase
+      // the draft or its validation evidence before it can be corrected.
+      if (document.activeElement === input && input.dataset.localDraftInvalid === 'true') {
+        renderCalendar();
+        return;
+      }
       if (document.activeElement !== input) {
         selected = parseIso(input.value) ? input.value : '';
         cursor = monthStart(parseIso(selected || today));

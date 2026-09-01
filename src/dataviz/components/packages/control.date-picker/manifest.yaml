@@ -1,6 +1,6 @@
 schema: dataviz/component-package/v1
 package: control.date-picker
-version: 2.0.0
+version: 2.0.1
 category: data-entry
 purpose: Choose or type one ISO calendar date through the shared Dataviz calendar surface.
 implementation: {mode: package, sources: []}

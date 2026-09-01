@@ -1,0 +1,297 @@
+{
+  "schema": "dataviz/query-result/v1",
+  "run_id": "run_3a0cce11f6fd4cb5",
+  "status": "ready",
+  "workspace": "feature-showcase",
+  "dashboard": "chart-gallery",
+  "query_scope": "dashboard",
+  "query_targets": [
+    "source:metrics"
+  ],
+  "query_nodes": [
+    "source:metrics"
+  ],
+  "query_contract_hash": "70e7bc5df54f5538dc7b36c912957b5af22b912889b3efa3ac0aba575a1c8503",
+  "started_at": "2026-09-01T11:17:18.573884+00:00",
+  "finished_at": "2026-09-01T11:17:19.163293+00:00",
+  "query_parameter_state": {},
+  "nodes": {
+    "source:metrics": {
+      "node_id": "source:metrics",
+      "node_type": "source",
+      "status": "ready",
+      "result_origin": "executed",
+      "freshness": "current",
+      "started_at": "2026-09-01T11:17:18.574167+00:00",
+      "finished_at": "2026-09-01T11:17:19.163073+00:00",
+      "duration_ms": 588,
+      "outputs": {
+        "main": {
+          "artifact_id": "source_metrics--ea7ed51cf3ef",
+          "kind": "table",
+          "format": "parquet",
+          "path": ".dataviz/runs/run_3a0cce11f6fd4cb5/artifacts/source_metrics--ea7ed51cf3ef.parquet",
+          "mime_type": "application/vnd.apache.parquet",
+          "schema": [
+            {
+              "name": "province",
+              "dtype": "str"
+            },
+            {
+              "name": "city",
+              "dtype": "str"
+            },
+            {
+              "name": "quarter",
+              "dtype": "str"
+            },
+            {
+              "name": "revenue",
+              "dtype": "int32"
+            },
+            {
+              "name": "orders",
+              "dtype": "int32"
+            },
+            {
+              "name": "customers",
+              "dtype": "int32"
+            }
+          ],
+          "preview": [
+            {
+              "province": "广东",
+              "city": "深圳",
+              "quarter": "2025-Q1",
+              "revenue": 82,
+              "orders": 63,
+              "customers": 118
+            },
+            {
+              "province": "广东",
+              "city": "深圳",
+              "quarter": "2025-Q2",
+              "revenue": 91,
+              "orders": 69,
+              "customers": 132
+            },
+            {
+              "province": "广东",
+              "city": "广州",
+              "quarter": "2025-Q1",
+              "revenue": 74,
+              "orders": 58,
+              "customers": 96
+            },
+            {
+              "province": "广东",
+              "city": "广州",
+              "quarter": "2025-Q2",
+              "revenue": 86,
+              "orders": 66,
+              "customers": 111
+            },
+            {
+              "province": "湖南",
+              "city": "长沙",
+              "quarter": "2025-Q1",
+              "revenue": 66,
+              "orders": 48,
+              "customers": 84
+            },
+            {
+              "province": "湖南",
+              "city": "长沙",
+              "quarter": "2025-Q2",
+              "revenue": 75,
+              "orders": 55,
+              "customers": 92
+            },
+            {
+              "province": "福建",
+              "city": "厦门",
+              "quarter": "2025-Q1",
+              "revenue": 70,
+              "orders": 52,
+              "customers": 78
+            },
+            {
+              "province": "福建",
+              "city": "厦门",
+              "quarter": "2025-Q2",
+              "revenue": 81,
+              "orders": 59,
+              "customers": 89
+            },
+            {
+              "province": "浙江",
+              "city": "杭州",
+              "quarter": "2025-Q1",
+              "revenue": 88,
+              "orders": 71,
+              "customers": 126
+            },
+            {
+              "province": "浙江",
+              "city": "杭州",
+              "quarter": "2025-Q2",
+              "revenue": 96,
+              "orders": 76,
+              "customers": 141
+            }
+          ],
+          "metadata": {
+            "row_count": 10,
+            "output": "main",
+            "title": "城市经营指标"
+          },
+          "content_hash": "55f5c3d7df06c1fe7dfd1d496a9eeb39d9e91598481caa2b997e825223ae663b"
+        }
+      },
+      "diagnostics": {
+        "query": {
+          "kind": "sql",
+          "source_file": "dashboards/功能示例##chart-gallery/sources/metrics.sql",
+          "adapter_reference": "warehouse",
+          "adapter_name": "demo-duckdb",
+          "adapter_type": "duckdb",
+          "statement": "select province, city, quarter, revenue, orders, customers from (values\n  ('广东','深圳','2025-Q1',82,63,118),('广东','深圳','2025-Q2',91,69,132),\n  ('广东','广州','2025-Q1',74,58,96),('广东','广州','2025-Q2',86,66,111),\n  ('湖南','长沙','2025-Q1',66,48,84),('湖南','长沙','2025-Q2',75,55,92),\n  ('福建','厦门','2025-Q1',70,52,78),('福建','厦门','2025-Q2',81,59,89),\n  ('浙江','杭州','2025-Q1',88,71,126),('浙江','杭州','2025-Q2',96,76,141)\n) as t(province,city,quarter,revenue,orders,customers)\n",
+          "resolved_sql": "select province, city, quarter, revenue, orders, customers from (values\n  ('广东','深圳','2025-Q1',82,63,118),('广东','深圳','2025-Q2',91,69,132),\n  ('广东','广州','2025-Q1',74,58,96),('广东','广州','2025-Q2',86,66,111),\n  ('湖南','长沙','2025-Q1',66,48,84),('湖南','长沙','2025-Q2',75,55,92),\n  ('福建','厦门','2025-Q1',70,52,78),('福建','厦门','2025-Q2',81,59,89),\n  ('浙江','杭州','2025-Q1',88,71,126),('浙江','杭州','2025-Q2',96,76,141)\n) as t(province,city,quarter,revenue,orders,customers)\n",
+          "parameters": {},
+          "input_bindings": {},
+          "query_filters": {},
+          "timeout_seconds": 120.0,
+          "timeout_retries": 1,
+          "query_hash": "ae6003513174156a1576edcbe65bd89e986fc7caf05c310bcdf379578e9bf46a",
+          "inspection_warning": null
+        }
+      },
+      "log": null,
+      "error": null
+    }
+  },
+  "outputs": {
+    "source:metrics/main": {
+      "artifact_id": "source_metrics--ea7ed51cf3ef",
+      "kind": "table",
+      "format": "parquet",
+      "path": ".dataviz/runs/run_3a0cce11f6fd4cb5/artifacts/source_metrics--ea7ed51cf3ef.parquet",
+      "mime_type": "application/vnd.apache.parquet",
+      "schema": [
+        {
+          "name": "province",
+          "dtype": "str"
+        },
+        {
+          "name": "city",
+          "dtype": "str"
+        },
+        {
+          "name": "quarter",
+          "dtype": "str"
+        },
+        {
+          "name": "revenue",
+          "dtype": "int32"
+        },
+        {
+          "name": "orders",
+          "dtype": "int32"
+        },
+        {
+          "name": "customers",
+          "dtype": "int32"
+        }
+      ],
+      "preview": [
+        {
+          "province": "广东",
+          "city": "深圳",
+          "quarter": "2025-Q1",
+          "revenue": 82,
+          "orders": 63,
+          "customers": 118
+        },
+        {
+          "province": "广东",
+          "city": "深圳",
+          "quarter": "2025-Q2",
+          "revenue": 91,
+          "orders": 69,
+          "customers": 132
+        },
+        {
+          "province": "广东",
+          "city": "广州",
+          "quarter": "2025-Q1",
+          "revenue": 74,
+          "orders": 58,
+          "customers": 96
+        },
+        {
+          "province": "广东",
+          "city": "广州",
+          "quarter": "2025-Q2",
+          "revenue": 86,
+          "orders": 66,
+          "customers": 111
+        },
+        {
+          "province": "湖南",
+          "city": "长沙",
+          "quarter": "2025-Q1",
+          "revenue": 66,
+          "orders": 48,
+          "customers": 84
+        },
+        {
+          "province": "湖南",
+          "city": "长沙",
+          "quarter": "2025-Q2",
+          "revenue": 75,
+          "orders": 55,
+          "customers": 92
+        },
+        {
+          "province": "福建",
+          "city": "厦门",
+          "quarter": "2025-Q1",
+          "revenue": 70,
+          "orders": 52,
+          "customers": 78
+        },
+        {
+          "province": "福建",
+          "city": "厦门",
+          "quarter": "2025-Q2",
+          "revenue": 81,
+          "orders": 59,
+          "customers": 89
+        },
+        {
+          "province": "浙江",
+          "city": "杭州",
+          "quarter": "2025-Q1",
+          "revenue": 88,
+          "orders": 71,
+          "customers": 126
+        },
+        {
+          "province": "浙江",
+          "city": "杭州",
+          "quarter": "2025-Q2",
+          "revenue": 96,
+          "orders": 76,
+          "customers": 141
+        }
+      ],
+      "metadata": {
+        "row_count": 10,
+        "output": "main",
+        "title": "城市经营指标"
+      },
+      "content_hash": "55f5c3d7df06c1fe7dfd1d496a9eeb39d9e91598481caa2b997e825223ae663b"
+    }
+  },
+  "warnings": []
+}

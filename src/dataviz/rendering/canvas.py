@@ -1337,14 +1337,15 @@ class CanvasRenderer:
                 else ""
             )
             control_block = (
-                f'<details class="dv-runtime-control" name="dv-runtime-header-control" '
+                f'<details class="dv-runtime-control dv-shell-control" name="dv-runtime-header-control" '
                 f'data-runtime-popover data-overlay-group="runtime-header" data-control-origin="dashboard" '
                 f'data-overlay-floating="true" {control_panel_attributes}>'
-                '<summary><span class="dv-context-controls__mark">C</span>'
-                '<strong>DASHBOARD CONTROLS</strong>'
-                '<span class="dv-control-chevron" aria-hidden="true"><svg viewBox="0 0 16 16">'
+                '<summary class="dv-shell-control__trigger">'
+                '<span class="dv-context-controls__mark dv-shell-control__mark">C</span>'
+                '<strong class="dv-shell-control__label">DASHBOARD CONTROLS</strong>'
+                '<span class="dv-control-chevron dv-shell-control__chevron" aria-hidden="true"><svg viewBox="0 0 16 16">'
                 '<path d="m4 6 4 4 4-4"/></svg></span></summary>'
-                '<div class="dv-runtime-popover dv-runtime-popover--controls">'
+                '<div class="dv-runtime-popover dv-runtime-popover--controls dv-shell-control__popover">'
                 f'<div class="dv-runtime-control-groups">{control_group}</div>{footer}'
                 '</div></details>'
             )
@@ -1367,8 +1368,8 @@ class CanvasRenderer:
         return (
             '<header class="dv-runtime-header dv-shell-header" aria-label="Report controls">'
             '<div class="dv-runtime-brand dv-shell-brand" aria-label="Dataviz">'
-            '<span class="dv-runtime-brand__mark" aria-hidden="true">D/V</span>'
-            '<strong>DATAVIZ</strong></div>'
+            '<span class="dv-runtime-brand__mark dv-shell-brand__mark" aria-hidden="true">D/V</span>'
+            '<strong class="dv-shell-brand__name">DATAVIZ</strong></div>'
             '<nav class="dv-runtime-actions dv-shell-header-actions" '
             'aria-label="Dataset and analysis controls">'
             f'{control_block}{query_control}</nav></header>'

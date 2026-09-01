@@ -11,9 +11,9 @@
   <div class="shell">
     <header class="topbar dv-shell-header">
       <div class="topbar-leading">
-        <button id="sidebar-toggle" class="brand dv-shell-brand" type="button" aria-controls="dashboard-sidebar" aria-expanded="true" aria-label="收起导航栏" aria-keyshortcuts="B" title="收起导航栏 (B)">
-          <span class="brand-mark" aria-hidden="true">D/V</span>
-          <strong>DATAVIZ</strong>
+        <button id="sidebar-toggle" class="brand dv-runtime-brand dv-shell-brand" type="button" aria-controls="dashboard-sidebar" aria-expanded="true" aria-label="收起导航栏" aria-keyshortcuts="B" title="收起导航栏 (B)">
+          <span class="brand-mark dv-runtime-brand__mark dv-shell-brand__mark" aria-hidden="true">D/V</span>
+          <strong class="dv-shell-brand__name">DATAVIZ</strong>
         </button>
         <div id="query-diagnostics" class="pipeline-signals" data-status="idle" aria-label="Data pipeline status">
           <span id="query-diagnostics-label" aria-live="polite" hidden>Not run</span>
@@ -33,14 +33,14 @@
             <button id="download-button" type="button" disabled>导出 HTML</button>
           </div>
         </details>
-        <details id="dashboard-controls-control" class="header-control" data-header-popover data-dv-control-panel data-control-role="dashboard" data-control-count="0" data-overlay-floating="true" data-overlay-width="760">
-          <summary class="header-control__trigger" title="左键打开控件，右键编辑默认配置">
-            <span class="header-control__mark" aria-hidden="true">C</span>
-            <strong class="header-control__label">DASHBOARD CONTROLS</strong>
+        <details id="dashboard-controls-control" class="header-control dv-shell-control" data-header-popover data-dv-control-panel data-control-role="dashboard" data-control-origin="dashboard" data-control-count="0" data-overlay-floating="true" data-overlay-width="760">
+          <summary class="header-control__trigger dv-shell-control__trigger" title="左键打开控件，右键编辑默认配置">
+            <span class="header-control__mark dv-shell-control__mark" aria-hidden="true">C</span>
+            <strong class="header-control__label dv-shell-control__label">DASHBOARD CONTROLS</strong>
             <small id="dashboard-control-meta" hidden>None</small>
-            <span class="header-control__chevron" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></svg></span>
+            <span class="header-control__chevron dv-shell-control__chevron" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></svg></span>
           </summary>
-          <div class="header-control__popover header-control__popover--controls">
+          <div class="header-control__popover header-control__popover--controls dv-shell-control__popover">
             <div class="dashboard-control-groups">
               <section id="dashboard-control-group" class="dashboard-control-group">
                 <form id="dashboard-control-form" class="control-form"></form>

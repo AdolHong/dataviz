@@ -99,7 +99,7 @@ title: Analysis tests
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v16
+        """schema: dataviz/dashboard/v17
 kind: dashboard
 id: analysis
 title: Analysis

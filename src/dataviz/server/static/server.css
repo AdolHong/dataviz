@@ -362,24 +362,7 @@ body.sidebar-collapsed #sidebar-toggle{color:#4451a3;border:0}
 .pipeline-signal:hover .pipeline-signal__tooltip{opacity:1;transform:translate(-50%,0)}
 .pipeline-signals:empty{display:none}
 
-/* Controls is a deliberate command immediately before Run. */
-#dashboard-controls-control>.header-control__trigger{
-  height:40px;
-  gap:8px;
-  padding:0 14px;
-  color:#20242b;
-  background:#fff;
-  border:1px solid #e6e9e5;
-  border-radius:7px;
-  font:650 9px "SFMono-Regular",Consolas,monospace;
-  letter-spacing:.06em;
-}
-#dashboard-controls-control>.header-control__trigger:hover,
-#dashboard-controls-control[open]>.header-control__trigger{
-  color:#26306f;
-  background:#f5f6fb;
-  border-color:#a8aed1;
-}
+/* Dashboard Control visuals are owned by presentation.shell for host parity. */
 .header-control__mark{
   display:grid!important;
   flex:0 0 18px;

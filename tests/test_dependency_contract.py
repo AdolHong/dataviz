@@ -27,7 +27,7 @@ WORKER = ROOT / "tests" / "fixtures" / "browser-worker-workspace"
 PROGRESSIVE = ROOT / "tests" / "fixtures" / "progressive-workspace"
 MINIMAL = ROOT / "examples" / "minimal-workspace"
 FROZEN_DIAGNOSTICS = json.loads(
-    (ROOT / "tests" / "fixtures" / "dependency-v11-characterization.json").read_text(
+    (ROOT / "tests" / "fixtures" / "dependency-v12-characterization.json").read_text(
         encoding="utf-8"
     )
 )["diagnostics"]
@@ -260,6 +260,66 @@ def test_view_control_binding_accepts_a_second_valid_writer(tmp_path: Path):
     assert [
         edge.view_id for edge in contract.controls["dashboard:sales-overview/region"].writer_edges
     ] == ["revenue-trend", "region-comparison"]
+
+
+def test_view_control_binding_compiles_atomic_context_writes(tmp_path: Path):
+    workspace, dashboard_path, definition = _copy_bound_view_workspace(tmp_path)
+    definition["controls"].append(
+        {
+            "id": "day",
+            "field": "day",
+            "type": "single_select",
+            "value_type": "date",
+            "initial": {"mode": "empty"},
+            "options": {"mode": "infer", "source": "source:sales/main"},
+        }
+    )
+    view = next(item for item in definition["views"] if item["id"] == "sales-detail")
+    view["control_binding"] = {
+        "control": "dashboard.region",
+        "field": "region",
+        "writes": [{"control": "dashboard.day", "field": "day"}],
+    }
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    contract = load_workspace(workspace).dashboard("sales-overview").dependency_contract
+    binding = contract.view_control_bindings["sales-detail"].as_dict()
+    assert binding["control"] == "dashboard:sales-overview/region"
+    assert binding["writes"] == [
+        {"control": "dashboard:sales-overview/day", "fields": ["day"]}
+    ]
+    day_edges = contract.controls["dashboard:sales-overview/day"].writer_edges
+    assert [edge.as_dict() for edge in day_edges] == [
+        {
+            "source_view": "sales-detail",
+            "control": "dashboard:sales-overview/day",
+            "fields": ["day"],
+            "renderer": "table",
+            "actions": ["select", "select_many", "clear", "reset"],
+            "role": "context",
+        }
+    ]
+
+
+def test_view_control_binding_rejects_duplicate_compound_target(tmp_path: Path):
+    workspace, dashboard_path, definition = _copy_bound_view_workspace(tmp_path)
+    view = next(item for item in definition["views"] if item["id"] == "region-comparison")
+    view["control_binding"] = {
+        "control": "dashboard.region",
+        "field": "region",
+        "writes": [{"control": "dashboard.region", "field": "region"}],
+    }
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationFailure) as caught:
+        _ = load_workspace(workspace).dashboard("sales-overview").dependency_contract
+    assert caught.value.as_dict()["code"] == "view_control_binding_duplicate_target"
 
 
 def test_view_control_binding_rejects_declared_writer_value_type_mismatch(
@@ -567,7 +627,7 @@ def test_dependency_contract_is_directly_inspectable_by_ai_and_humans():
 
     assert machine.exit_code == 0, machine.stdout
     assert machine.stdout.lstrip().startswith("{")
-    assert '"schema": "dataviz/dependency-contract/v11"' in machine.stdout
+    assert '"schema": "dataviz/dependency-contract/v12"' in machine.stdout
     assert human.exit_code == 0, human.stdout
     assert "Query DAG" in human.stdout
     assert "Query Parameters" in human.stdout

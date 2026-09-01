@@ -1,7 +1,7 @@
 // Owner: Runtime protocol, manifest normalization, and shared constants.
-const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v12';
+const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v13';
 const DATAVIZ_INTERACTIVE_WORKER_PROTOCOL = 'dataviz/interactive-worker/v1';
-const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v11';
+const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v12';
 if (window.dataviz.protocol?.schema !== DATAVIZ_RUNTIME_PROTOCOL) {
   throw new Error(`Unsupported Dataviz Runtime protocol: ${window.dataviz.protocol?.schema || 'missing'}`);
 }
@@ -740,7 +740,7 @@ const validateInteractiveOutput = (transformId, name, value, definition = {}) =>
 };
 // Owner: shared Runtime host state and public registration surface.
 const datavizRuntime = window.datavizRuntime = {
-  protocol: 'dataviz/runtime/v12',
+  protocol: 'dataviz/runtime/v13',
   transforms: new Map(),
   views: new Map(),
   renderers: new Map(),
@@ -2077,6 +2077,75 @@ const datavizControlBindingValue = (binding, datum) => {
   const values = (binding?.fields || []).map(field => datum[field]);
   return values.length === 1 ? values[0] : values;
 };
+const datavizControlBindingWriteValue = (write, datum) => {
+  if (
+    datum
+    && typeof datum === 'object'
+    && datum.__datavizControlWrites
+    && Object.prototype.hasOwnProperty.call(datum.__datavizControlWrites, write.control)
+  ) return structuredClone(datum.__datavizControlWrites[write.control]);
+  if (!datum || typeof datum !== 'object') return undefined;
+  const values = (write?.fields || []).map(field => datum[field]);
+  return values.some(value => value === undefined)
+    ? undefined
+    : values.length === 1 ? values[0] : values;
+};
+const datavizControlBindingTargets = binding => [
+  {control:binding.control, fields:binding.fields || [], primary:true},
+  ...(binding.writes || []).map(write => ({...write, primary:false})),
+];
+const datavizControlBindingTargetValue = (target, datum) => (
+  target.primary
+    ? datavizControlBindingValue(target, datum)
+    : datavizControlBindingWriteValue(target, datum)
+);
+const datavizDistinctControlActionValues = values => {
+  const unique = new Map();
+  values.forEach(value => unique.set(datavizValueSignature(value), value));
+  return [...unique.values()];
+};
+const datavizControlActionTargetState = (binding, target, event) => {
+  const definition = datavizControlDefinition(target.control);
+  const current = datavizControlEntry(target.control);
+  if (event.action === 'reset') return datavizNormalizeControlState(target.control);
+  let value;
+  if (event.action === 'clear') {
+    value = definition.type === 'range_input' ? [] : (
+      ['multiple_input', 'multiple_select'].includes(definition.type) ? [] : null
+    );
+  } else {
+    const data = event.action === 'select_many'
+      ? (Array.isArray(event.data) ? event.data : [])
+      : [event.data];
+    const projected = datavizDistinctControlActionValues(data.map(datum => {
+      const candidate = datavizControlBindingTargetValue(target, datum);
+      if (candidate === undefined || (
+        Array.isArray(candidate) && candidate.some(item => item === undefined)
+      )) {
+        throw datavizContractError(
+          'control_action_projection_missing',
+          `View ${event.source_view} did not provide ${target.control}`,
+        );
+      }
+      return candidate;
+    }));
+    const multiple = ['multiple_input', 'multiple_select'].includes(definition.type);
+    if (!multiple && projected.length > 1) {
+      throw datavizContractError(
+        'control_action_projection_cardinality_invalid',
+        `View ${event.source_view} projected multiple values into ${target.control}`,
+      );
+    }
+    value = multiple ? projected : (projected[0] ?? null);
+  }
+  return datavizNormalizeControlState(target.control, {
+    intent:'explicit',
+    value:datavizNormalizeControlValue(definition, value, {
+      namespace:'control', key:target.control,
+    }),
+    revision:Number(current.revision || 0),
+  });
+};
 const datavizDispatchControlAction = event => {
   const sourceView = typeof event?.source_view === 'string' ? event.source_view : '';
   const actionId = typeof event?.action_id === 'string' ? event.action_id.trim() : '';
@@ -2115,34 +2184,22 @@ const datavizDispatchControlAction = event => {
     if (!currentRoot || currentRoot !== root) {
       return datavizViewActionRejection(event, 'stale_view_generation');
     }
-    const definition = datavizControlDefinition(binding.control);
-    const current = datavizControlEntry(binding.control);
-    let next;
-    let value;
-    if (event.action === 'reset') {
-      next = datavizNormalizeControlState(binding.control);
-    } else if (event.action === 'clear') value = definition.type === 'range_input' ? [] : (
-      ['multiple_input', 'multiple_select'].includes(definition.type) ? [] : null
-    );
-    else if (event.action === 'select_many') {
-      value = (event.data || []).map(datum => datavizControlBindingValue(binding, datum));
-    } else if (event.action === 'select') {
-      const selected = datavizControlBindingValue(binding, event.data);
-      value = ['multiple_input', 'multiple_select'].includes(definition.type) ? [selected] : selected;
-    } else {
+    if (!['reset', 'clear', 'select_many', 'select'].includes(event.action)) {
       throw datavizContractError(
         'control_action_unknown',
         `Unknown Control action: ${event.action}`,
       );
     }
-    if (!next) next = datavizNormalizeControlState(binding.control, {
-      intent:'explicit',
-      value:datavizNormalizeControlValue(definition, value, {
-        namespace:'control', key:binding.control,
-      }),
-      revision:Number(current.revision || 0),
-    });
-    if (JSON.stringify(current) === JSON.stringify(next)) {
+    const targets = datavizControlBindingTargets(binding);
+    const candidates = Object.fromEntries(targets.map(target => [
+      target.control,
+      datavizControlActionTargetState(binding, target, event),
+    ]));
+    const changedKeys = targets.map(target => target.control).filter(control => (
+      JSON.stringify(datavizControlEntry(control)) !== JSON.stringify(candidates[control])
+    ));
+    if (!changedKeys.length) {
+      const current = datavizControlEntry(binding.control);
       return {
         status:'noop',
         revision:Number(current.revision || 0),
@@ -2150,20 +2207,34 @@ const datavizDispatchControlAction = event => {
         source_view:sourceView,
       };
     }
-    next = {...next, revision:Number(current.revision || 0) + 1};
     const revision = ++datavizControlActionRevision;
-    datavizControlState()[binding.control] = next;
-    datavizControlWriterProvenance()[binding.control] = {
-      revision:next.revision,
-      action_id:actionId,
-      source_view:sourceView,
-      action:event.action,
-    };
-    setControlInputs({[binding.control]:next});
-    await window.dataviz.applyControls({keys:[binding.control]});
+    const nextStates = Object.fromEntries(changedKeys.map(control => {
+      const next = {
+        ...candidates[control],
+        revision:Number(datavizControlEntry(control).revision || 0) + 1,
+      };
+      datavizControlState()[control] = next;
+      datavizControlWriterProvenance()[control] = {
+        revision:next.revision,
+        action_id:actionId,
+        source_view:sourceView,
+        action:event.action,
+      };
+      return [control, next];
+    }));
+    await window.dataviz.applyControls({
+      keys:changedKeys,
+      canonicalStateCommitted:true,
+    });
     return {
       status:'committed',
-      revision:next.revision,
+      revision:Number(datavizControlEntry(binding.control).revision || 0),
+      ...(targets.length > 1 ? {
+        control_revisions:Object.fromEntries(targets.map(target => [
+          target.control,
+          Number(datavizControlEntry(target.control).revision || 0),
+        ])),
+      } : {}),
       action_revision:revision,
       action_id:actionId,
       source_view:sourceView,
@@ -2368,7 +2439,7 @@ const datavizReconcileHeadlessControlDomain = (key, availability) => {
     {intent},
   );
 };
-const refreshControlOptionDomains = () => {
+const refreshControlOptionDomains = ({canonicalKeys = null} = {}) => {
   const occurrences = datavizControlOccurrences();
   const controls = Array.from(document.querySelectorAll('[data-control-key]'));
   const order = window.dataviz.dependency_contract?.control_order || [];
@@ -2459,8 +2530,14 @@ const refreshControlOptionDomains = () => {
       syncPortableChoices(control);
     });
     // Commit each compiled Control before deriving its declared dependents.
+    // A compound View action has already committed canonical state; in that
+    // path stale DOM must be updated from state instead of overwriting it.
     // The browser does not rebuild Control dependency edges from DOM order.
-    readControlInputs({keys:new Set([key])});
+    if (canonicalKeys?.has(key)) {
+      setControlInputs({[key]:structuredClone(datavizControlEntry(key))});
+    } else {
+      readControlInputs({keys:new Set([key])});
+    }
   });
   publishDashboardControlOptions(occurrences);
 };
@@ -2914,11 +2991,22 @@ const datavizManualTargetsForControlKeys = keys => {
 };
 window.dataviz.applyControls = async (options = {}) => {
   const previous = window.dataviz.current_control_state || null;
+  const selectedKeys = options.keys ? new Set(options.keys) : null;
   // Dynamic selects are empty until their immutable option domain is hydrated;
   // preserve the compiled initial state during the first pass.
-  if (previous != null) readControlInputs({keys:options.keys ? new Set(options.keys) : null});
-  refreshControlOptionDomains();
-  readControlInputs({keys:options.keys ? new Set(options.keys) : null});
+  if (previous != null && options.canonicalStateCommitted !== true) {
+    readControlInputs({keys:selectedKeys});
+  }
+  refreshControlOptionDomains({
+    canonicalKeys:options.canonicalStateCommitted === true ? selectedKeys : null,
+  });
+  if (options.canonicalStateCommitted === true) {
+    const canonical = datavizControlStateSnapshot();
+    setControlInputs(Object.fromEntries(
+      Object.entries(canonical).filter(([key]) => !selectedKeys || selectedKeys.has(key))
+    ));
+  }
+  readControlInputs({keys:selectedKeys});
   const current = datavizControlStateSnapshot();
   const changed = datavizChangedControlKeys(previous, current);
   window.dataviz.current_control_state = structuredClone(current);
@@ -3064,6 +3152,13 @@ const setControlInputs = states => {
     if (!(key in (states || {}))) return;
     const input = control.querySelector('[data-control-state-input]');
     if (!input || input.disabled) return;
+    if (
+      input === document.activeElement
+      && input.dataset.localDraftInvalid === 'true'
+    ) {
+      input._syncChoiceControl?.();
+      return;
+    }
     const definition = datavizControlDefinition(key);
     const value = datavizControlValue(key);
     const encode = item => datavizEncodeControlValue(input, item, {

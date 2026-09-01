@@ -1929,6 +1929,13 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
 function setFormValues(form, values, {sync = true} = {}) {
   for (const input of form.elements) {
     if (!input.name || !(input.name in values)) continue;
+    if (
+      input === document.activeElement
+      && input.dataset.localDraftInvalid === 'true'
+    ) {
+      if (sync) input._syncChoiceControl?.();
+      continue;
+    }
     const value = values[input.name];
     if (input.dataset.valueType === 'boolean' && input.tagName === 'SELECT') input.value = value == null ? '' : JSON.stringify(value);
     else if (input.dataset.valueType === 'boolean') input.checked = Boolean(value);

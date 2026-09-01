@@ -205,6 +205,26 @@ Use a map only when geographic position or region shape changes the judgment. Pr
 
 Keep one row per region key before rendering. Point coordinates must be finite; region data keys and GeoJSON feature keys must be unique and joinable. Use `options.trace`, `options.layout`, and `config` for Plotly styling. Read `dataviz docs maps --format json` before using Custom Renderer code.
 
+Native Map viewport follows the rendered coordinate/region-key set: changing the City refits the detail map, while changing only the selected Store preserves the current city view. Do not bind viewport state to the highlight Control or add a callback that manually calls Plotly relayout.
+
+For geographic Overview → Detail, keep the overview unfiltered and use one compound writer action instead of callback chains or sequential Control writes:
+
+```yaml
+# Overview: primary Store highlight plus contextual City write.
+control_binding:
+  control: dashboard.store
+  field: store_nbr
+  writes:
+    - {control: dashboard.city, field: city}
+
+# Detail: filter by City and keep writing only Store.
+control_inputs:
+  city: {mode: filter, control: dashboard.city, field: city, inputs: [main], empty: match_none}
+control_binding: {control: dashboard.store, field: store_nbr}
+```
+
+All fields must come from the same selected datum. One gesture is atomic: if any target is invalid, none commit. A multi-row gesture may write a single-value context Control only when every selected row projects the same distinct value. Do not make the overview consume the detail Controls, and do not emulate this transaction with sequential events.
+
 ## Reuse existing Dashboard knowledge
 
 Use the physical tree for project navigation and Catalog for semantic discovery:

@@ -792,6 +792,9 @@ def test_authoring_routes_expose_only_the_required_document_closure():
     transform = resolve_authoring_route(component="interactive-transform.browser-js")
 
     assert catalog["default"] == "minimal"
+    assert catalog["schema"] == "dataviz/authoring-route-catalog/v2"
+    assert catalog["routes"]["map-view"]["scaffolds"] == ["view.map"]
+    assert "scaffold" not in catalog["routes"]["map-view"]
     assert set(catalog["routes"]) == {
         "minimal",
         "interactive",

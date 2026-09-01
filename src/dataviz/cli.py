@@ -1084,10 +1084,7 @@ def documentation(
     task: str | None = typer.Option(
         None,
         "--task",
-        help=(
-            "Return the minimum authoring closure for a route such as minimal, "
-            "cascading-selection, view-filter, browser-compute, or custom-renderer"
-        ),
+        help="Return the minimum authoring closure for a route listed by dataviz docs",
     ),
     component: str | None = typer.Option(
         None,
@@ -2024,10 +2021,6 @@ def benchmark(
         handle_error(exc)
 
 
-def _analysis_entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
-    return analysis_entry_summary(entry)
-
-
 def _analysis_parameter_text(entry: dict[str, Any]) -> str:
     parts: list[str] = []
     for parameter in entry.get("parameter_contracts", []):
@@ -2185,7 +2178,7 @@ def _analysis_catalog_payload(catalog, entries: list[dict[str, Any]]) -> dict[st
         "schema": ANALYSIS_CATALOG_SCHEMA,
         "generation": catalog.generation,
         "count": len(entries),
-        "entries": [_analysis_entry_summary(entry) for entry in entries],
+        "entries": [analysis_entry_summary(entry) for entry in entries],
         "diagnostics": list(getattr(catalog, "diagnostics", [])) + (
             [
                 {
@@ -2222,10 +2215,6 @@ def _analysis_validate_kind(kind: str | None) -> str | None:
             "--kind must be base, derived, source, view, or all"
         )
     return normalized
-
-
-def _analysis_artifact_binding(loaded, dashboard, entry, store, artifact) -> dict[str, Any]:
-    return analysis_artifact_binding(loaded, dashboard, entry, store, artifact)
 
 
 def _analysis_result_text(payload: dict[str, Any]) -> None:
@@ -2642,7 +2631,7 @@ def catalog_describe(
                     continue
                 seen.add(resolved["reference"])
                 entry = (
-                    _analysis_entry_summary(resolved)
+                    analysis_entry_summary(resolved)
                     if detail == "summary"
                     else resolved
                 )
@@ -2739,10 +2728,6 @@ def catalog_describe(
         raise
     except Exception as exc:
         handle_error(exc)
-
-
-def _analysis_artifact_value(store: ArtifactStore, artifact, limit: int) -> tuple[Any, bool]:
-    return analysis_artifact_value(store, artifact, limit)
 
 
 @result_app.command("list")
@@ -2957,25 +2942,6 @@ def result_export(
         handle_error(exc)
 
 
-def _analysis_artifact_payload(
-    *,
-    entry: dict[str, Any],
-    artifact,
-    value: Any,
-    truncated: bool,
-    run_id: str,
-    duration_ms: int | None,
-) -> dict[str, Any]:
-    return analysis_artifact_payload(
-        entry=entry,
-        artifact=artifact,
-        value=value,
-        truncated=truncated,
-        run_id=run_id,
-        duration_ms=duration_ms,
-    )
-
-
 @app.command()
 def run(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
@@ -3172,9 +3138,9 @@ def report(
                 entry = catalog.resolve(canonical)
             except Exception:
                 continue
-            value, truncated = _analysis_artifact_value(artifact_store, artifact, 10)
+            value, truncated = analysis_artifact_value(artifact_store, artifact, 10)
             result_outputs.append(
-                _analysis_artifact_payload(
+                analysis_artifact_payload(
                     entry=entry,
                     artifact=artifact,
                     value=value,
@@ -3183,7 +3149,7 @@ def report(
                     duration_ms=None,
                 )
             )
-            result_bindings[canonical] = _analysis_artifact_binding(
+            result_bindings[canonical] = analysis_artifact_binding(
                 loaded, loaded_dashboard, entry, artifact_store, artifact
             )
         sealed = seal_analysis_result(

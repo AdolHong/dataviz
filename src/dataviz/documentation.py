@@ -464,13 +464,13 @@ def resolve_authoring_route(
 
 def authoring_route_catalog() -> dict[str, Any]:
     return {
-        "schema": "dataviz/authoring-route-catalog/v1",
+        "schema": "dataviz/authoring-route-catalog/v2",
         "default": "minimal",
         "routes": {
             identifier: {
                 "summary": definition["summary"],
                 "inherits": definition["inherits"],
-                "scaffold": identifier,
+                "scaffolds": definition["scaffolds"],
             }
             for identifier, definition in AUTHORING_ROUTES.items()
         },
@@ -1171,7 +1171,7 @@ query_filters:
   city_values: cities
   city_selection: {parameter: cities, projection: selection}
 """,
-        "related": ["sources", "dataset-transforms", "interactive-transforms", "data-entry-components"],
+        "related": ["entity-selection", "sources", "dataset-transforms", "interactive-transforms", "data-entry-components"],
     },
     "entity-selection": {
         "summary": "大型实体候选使用现有 Parameter Domain、服务端 Lookup、紧凑多选状态和 query_filters；不新增 Entity Runtime。",

@@ -117,7 +117,7 @@
   };
   root.state = {statuses, apply, hydrate};
   root.presentationShell = {
-    protocol:'dataviz/runtime/v13',
+    protocol:'dataviz/runtime/v14',
     coordinates:false,
     customCanvas:true,
     applyControlPanel,

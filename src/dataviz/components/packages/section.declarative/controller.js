@@ -102,7 +102,7 @@
   };
 
   root.sectionDeclarative = {
-    protocol:'dataviz/runtime/v13',
+    protocol:'dataviz/runtime/v14',
     flow:'document',
     coordinates:false,
     repeatTitle,

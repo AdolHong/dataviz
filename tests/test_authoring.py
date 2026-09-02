@@ -153,7 +153,7 @@ def test_machine_readable_component_examples_use_canonical_output_references():
 def test_machine_readable_documentation_examples_match_current_schemas():
     providers = {
         "dataviz/workspace/v2": WorkspaceDefinition,
-        "dataviz/dashboard/v17": DashboardDefinition,
+        "dataviz/dashboard/v18": DashboardDefinition,
         "dataviz/source/v6": SOURCE_DEFINITION_ADAPTER,
         "dataviz/dataset-transform/v3": DatasetTransformDefinition,
         "dataviz/interactive-transform/v4": InteractiveTransformDefinition,
@@ -342,6 +342,7 @@ def test_query_parameter_docs_keep_materialization_and_compact_state_explicit():
     assert "all/include/exclude/none" in rules
     assert "搜索、级联和 cursor 分页" in rules
     assert "不重新执行远端 SQL" in rules
+    assert "页面刷新与首次 Dashboard hydration" in rules
     assert not any("dataviz bundle" in command for command in query_docs["dynamic_domains"]["operations"])
     assert "workspace-assets" in query_docs["dynamic_domains"]["portability"]
     assert "city_selection" in query_docs["selection_binding"]
@@ -349,6 +350,7 @@ def test_query_parameter_docs_keep_materialization_and_compact_state_explicit():
     assert "intentionally empty Workspace" not in skill
     assert "canonical Query Parameter state" in skill
     assert "all/include/exclude/none" in skill
+    assert "compact-state restoration" in skill
     assert "Workspace 共享物化" in design
     assert "generation-bound opaque cursor" in design
 
@@ -446,7 +448,7 @@ def test_version_docs_match_the_current_runtime_and_release_gate():
     release = DOC_TOPICS["versioning-release"]
 
     assert strict["current"]["layout_contract"] == "dataviz/layout-contract/v1"
-    assert strict["current"]["state_snapshot"] == "dataviz/state-snapshot/v5"
+    assert strict["current"]["state_snapshot"] == "dataviz/state-snapshot/v6"
     assert strict["browser_assets"] == {
         "plotly_js": "4.0.0（直接内置，不安装 Python plotly）",
         "tanstack_table_core": "9.2.4（直接内置）",
@@ -463,7 +465,7 @@ def test_component_registry_reports_package_owned_implementations():
     catalog = component_catalog()
     report = validate_component_packages(catalog)
 
-    assert COMPONENT_REGISTRY_VERSION == "5.9.0"
+    assert COMPONENT_REGISTRY_VERSION == "6.0.0"
     assert set(component_packages()) == {
         "control.auto-complete",
         "control.cascader",
@@ -680,6 +682,25 @@ def test_every_scaffold_recipe_matches_the_current_strict_models():
     )[0]
     assert selection_gallery["controls"][0]["id"] == "groups"
     assert selection_gallery["repeat"]["control"] == "groups"
+
+
+def test_browser_transform_docs_and_scaffold_show_the_declared_context_contract():
+    scaffold = scaffold_recipe("interactive-transform.browser-js", "sample")["files"]
+    worker = scaffold["sample.js"]
+    docs = DOC_TOPICS["interactive-transforms"]
+    browser_task = AUTHORING_DOCUMENTS["browser-compute"]
+
+    assert "context.inputs.data" in worker
+    assert "context.control_inputs.factor" in worker
+    assert set(docs["runtime_context"]) == {
+        "inputs",
+        "query_inputs",
+        "control_inputs",
+        "progress",
+        "boundary",
+    }
+    assert "context.control_inputs.factor" in browser_task["worker_example"]
+    assert "context.selections" in docs["runtime_context"]["control_inputs"]
 
 
 def test_selection_gallery_scaffold_composes_into_a_valid_dashboard(tmp_path: Path):
@@ -1017,7 +1038,7 @@ def test_coordinate_layout_fields_are_strictly_rejected(layout):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v17",
+                "schema": "dataviz/dashboard/v18",
                 "kind": "dashboard",
                 "id": "strict",
                 "layout": layout,
@@ -1095,7 +1116,10 @@ def test_custom_renderer_scaffold_includes_style_and_contract(tmp_path: Path):
     assert 'node.className = "renderer-team-spark"' in script
     assert "context.charts.plotly" in script
     assert "context.tables.tanstack" in script
+    assert "descriptor.inputs.main" in script
     assert ".renderer-team-spark" in style
+    view = yaml.safe_load((target / "dashboard.view.snippet.yaml").read_text())[0]
+    assert view["input"] == "source:data/main"
     assets = yaml.safe_load((target / "presentation.asset.snippet.yaml").read_text())
     assert assets["assets"]["css"] == ["assets/team.spark.css"]
 
@@ -1216,3 +1240,23 @@ def test_component_docs_only_offer_fields_consumed_by_each_view_path():
     assert "engine" not in line["presentation"]["options"]
     assert image["behavior"]["input"] == "Self-contained; consumes no Named Output"
     assert "engine" not in radar["logic"]
+
+
+def test_table_static_emphasis_is_documented_and_owned_by_declarative_package():
+    table = component_catalog()["view.table"]
+    package = (
+        ROOT
+        / "src"
+        / "dataviz"
+        / "components"
+        / "packages"
+        / "view.declarative"
+    )
+    adapter = (package / "adapter.js").read_text(encoding="utf-8")
+    style = (package / "style.css").read_text(encoding="utf-8")
+
+    assert "emphasis.columns" in table["behavior"]["optional_features"]
+    assert "options.emphasis?.columns" in adapter
+    assert "node.dataset.emphasis = 'true'" in adapter
+    assert 'th[data-emphasis="true"]' in style
+    assert 'td[data-emphasis="true"]' in style

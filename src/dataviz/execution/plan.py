@@ -41,6 +41,7 @@ def compile_plan(
     dashboard: LoadedDashboard,
     *,
     targets: list[str] | None = None,
+    provided_outputs: set[str] | None = None,
 ) -> ExecutionPlan:
     dependency_contract = dashboard.dependency_contract
     nodes: dict[str, PlanNode] = {}
@@ -85,7 +86,23 @@ def compile_plan(
     if unknown:
         raise ValidationFailure(f"Unknown execution targets: {', '.join(sorted(unknown))}")
 
-    selected = dependency_contract.query_closure(selected_targets)
+    provided_nodes = {
+        parse_output_reference(reference).node_id
+        for reference in (provided_outputs or set())
+    }
+    selected: set[str] = set()
+
+    def include(node_id: str) -> None:
+        if node_id in selected:
+            return
+        selected.add(node_id)
+        if node_id in provided_nodes:
+            return
+        for dependency in dependency_contract.query_dependencies[node_id]:
+            include(dependency)
+
+    for target_node in selected_targets:
+        include(target_node)
 
     selected_nodes = {node_id: node for node_id, node in nodes.items() if node_id in selected}
     return ExecutionPlan(nodes=selected_nodes, targets=selected_targets)

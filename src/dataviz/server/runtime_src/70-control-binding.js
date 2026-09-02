@@ -364,14 +364,18 @@ window.dataviz.control = {
 };
 let datavizControlActionRevision = 0;
 let datavizControlActionQueue = Promise.resolve();
-const datavizControlBindingForView = viewId => (
-  window.dataviz.dependency_contract?.views?.[viewId]?.control_binding || null
+const datavizControlBindingForView = (viewId, sourceLayer = null) => (
+  sourceLayer == null
+    ? (window.dataviz.dependency_contract?.views?.[viewId]?.control_binding || null)
+    : (window.dataviz.dependency_contract?.views?.[viewId]
+      ?.layer_control_bindings?.[sourceLayer] || null)
 );
 const datavizViewActionRejection = (event, code) => ({
   status:'rejected',
   code,
   action_id:typeof event?.action_id === 'string' ? event.action_id : null,
   source_view:typeof event?.source_view === 'string' ? event.source_view : null,
+  ...(typeof event?.source_layer === 'string' ? {source_layer:event.source_layer} : {}),
 });
 const datavizControlBindingValue = (binding, datum) => {
   if (datum && Object.prototype.hasOwnProperty.call(datum, '__datavizControlValue')) {
@@ -452,11 +456,12 @@ const datavizControlActionTargetState = (binding, target, event) => {
 };
 const datavizDispatchControlAction = event => {
   const sourceView = typeof event?.source_view === 'string' ? event.source_view : '';
+  const sourceLayer = typeof event?.source_layer === 'string' ? event.source_layer : null;
   const actionId = typeof event?.action_id === 'string' ? event.action_id.trim() : '';
   if (!actionId || actionId.length > 128) {
     return Promise.resolve(datavizViewActionRejection(event, 'control_action_id_invalid'));
   }
-  const binding = datavizControlBindingForView(sourceView);
+  const binding = datavizControlBindingForView(sourceView, sourceLayer);
   if (!binding || binding.control !== event?.control) {
     return Promise.resolve(datavizViewActionRejection(
       event,
@@ -509,6 +514,7 @@ const datavizDispatchControlAction = event => {
         revision:Number(current.revision || 0),
         action_id:actionId,
         source_view:sourceView,
+        ...(sourceLayer == null ? {} : {source_layer:sourceLayer}),
       };
     }
     const revision = ++datavizControlActionRevision;
@@ -522,6 +528,7 @@ const datavizDispatchControlAction = event => {
         revision:next.revision,
         action_id:actionId,
         source_view:sourceView,
+        ...(sourceLayer == null ? {} : {source_layer:sourceLayer}),
         action:event.action,
       };
       return [control, next];
@@ -542,6 +549,7 @@ const datavizDispatchControlAction = event => {
       action_revision:revision,
       action_id:actionId,
       source_view:sourceView,
+      ...(sourceLayer == null ? {} : {source_layer:sourceLayer}),
     };
   }).catch(error => {
     const code = error?.code || error?.details?.code || 'control_action_invalid';

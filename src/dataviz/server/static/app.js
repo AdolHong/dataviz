@@ -37,6 +37,7 @@ function runtimeFor(dashboardId) {
       eventSource: null,
       nodeErrors: {},
       nodeStatuses: {},
+      interactiveTraces: {},
       queryStatus: 'idle',
       queryLabel: 'Not run',
       message: 'Data pipeline is ready to run.',
@@ -53,6 +54,8 @@ function runtimeFor(dashboardId) {
       queryDomainRequestGeneration: 0,
       queryDomainController: null,
       queryLookup: {},
+      queryAuthorMode: false,
+      queryTransitionEvidence: {},
     });
   }
   return state.dashboardStates.get(dashboardId);
@@ -1393,6 +1396,7 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
   const defaultValue = defaultState.value;
   const wrapper = document.createElement('div');
   wrapper.className = 'field';
+  if (behavior.query) wrapper.dataset.queryParameterId = parameter.id;
   const label = document.createElement('label');
   const inputId = `input-${name.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
   label.htmlFor = inputId;
@@ -1566,7 +1570,48 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
   error.hidden = true;
   control.append(input, mount, error);
   wrapper.append(control);
+  if (behavior.query) {
+    const evidence = document.createElement('output');
+    evidence.className = 'query-parameter-evidence';
+    evidence.dataset.queryParameterEvidence = parameter.id;
+    evidence.hidden = true;
+    wrapper.append(evidence);
+  }
   return wrapper;
+}
+
+function renderQueryAuthorEvidence() {
+  const runtime = activeRuntime();
+  const enabled = Boolean(runtime?.queryAuthorMode);
+  const toggle = $('#query-parameter-author-mode');
+  if (toggle) {
+    toggle.dataset.active = String(enabled);
+    toggle.setAttribute('aria-pressed', String(enabled));
+  }
+  for (const parameter of state.dashboard?.query_parameters || []) {
+    const output = document.querySelector(
+      `[data-query-parameter-evidence="${CSS.escape(parameter.id)}"]`
+    );
+    if (!output) continue;
+    output.hidden = !enabled;
+    if (!enabled) continue;
+    const canonical = runtime.queryParameterState?.[parameter.id] || {};
+    const lookup = runtime.queryLookup?.[parameter.id] || {};
+    const values = Array.isArray(canonical.value)
+      ? canonical.value
+      : canonical.value == null ? [] : [canonical.value];
+    const parents = Object.keys(parameter.options?.depends_on || {});
+    const transition = runtime.queryTransitionEvidence?.[parameter.id];
+    output.textContent = [
+      `state=${canonical.selection || 'value'}`,
+      `operands=${values.length}`,
+      Number.isFinite(Number(lookup.total)) ? `available=${lookup.total}` : null,
+      Number.isFinite(Number(lookup.unavailableCount))
+        ? `unavailable=${lookup.unavailableCount}` : null,
+      parents.length ? `depends_on=${parents.join(',')}` : null,
+      transition?.action ? `transition=${transition.action}` : null,
+    ].filter(Boolean).join(' · ');
+  }
 }
 
 function controlField(control) {
@@ -1681,6 +1726,14 @@ function captureDashboardControlIntent(event) {
     || 'explicit';
 }
 
+function syncDashboardControlIntent(input, entry) {
+  if (!(input instanceof HTMLSelectElement) || !input.multiple) return;
+  window.datavizComponents?.controls?.setSelectionIntent?.(
+    input,
+    entry?.intent === 'all_available' ? 'all_available' : 'explicit',
+  );
+}
+
 function syncDashboardControlOptions(controls = []) {
   const form = $('#dashboard-control-form');
   for (const control of controls) {
@@ -1726,7 +1779,13 @@ function syncDashboardControlOptions(controls = []) {
       controlValueFromState(dashboardControl(control.key)?.definition, control.state),
       ])),
   );
-  for (const input of form.elements) input._syncChoiceControl?.();
+  const stateByKey = new Map(controls.map(control => [control.key, control.state]));
+  for (const input of form.elements) {
+    if (!runtime?.controlDraftActions.has(input.name)) {
+      syncDashboardControlIntent(input, stateByKey.get(input.name));
+    }
+    input._syncChoiceControl?.();
+  }
 }
 
 function syncDashboardControlForm(runtime = activeRuntime()) {
@@ -1741,7 +1800,12 @@ function syncDashboardControlForm(runtime = activeRuntime()) {
         controlValueFromState(control.definition, controls[control.key]),
       ])),
   );
-  for (const input of $('#dashboard-control-form').elements) input._syncChoiceControl?.();
+  for (const input of $('#dashboard-control-form').elements) {
+    if (!runtime.controlDraftActions.has(input.name)) {
+      syncDashboardControlIntent(input, controls[input.name]);
+    }
+    input._syncChoiceControl?.();
+  }
 }
 
 function applyControlOperationalSnapshot(snapshot, {ready = false} = {}) {
@@ -1873,6 +1937,7 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
     };
   }
   setQueryParameterStates(runtime.queryParameterState || committedQueryState(runtime) || {});
+  renderQueryAuthorEvidence();
   // Freeze resolved relative defaults as concrete tab-local values on first
   // hydration. A full page reload in the same tab must restore these values
   // instead of silently re-evaluating `today` from a newer Workspace payload.
@@ -1918,7 +1983,12 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
   if (dynamicQueryParameters().length) {
     runtime.queryDomainReady = true;
     updateParameterDomainUi();
-    void resolveQueryParameterDomains();
+    // Initial hydration is state restoration, not a new parent edit. Preserve
+    // finite URL/tab/committed operands while Lookup restores labels and marks
+    // values missing from the current generation as unavailable.
+    void resolveQueryParameterDomains({
+      targetSnapshot:structuredClone(runtime.queryParameterState || {}),
+    });
   } else {
     runtime.queryDomainReady = true;
     updateParameterDomainUi();
@@ -1991,6 +2061,18 @@ function dynamicQueryParameters() {
   return (state.dashboard?.query_parameters || []).filter(
     parameter => parameter.options?.mode === 'domain',
   );
+}
+
+function syncRemoteParameterOptions(input) {
+  if (!input) return;
+  if (typeof input._syncRemoteChoiceOptions === 'function') {
+    input._syncRemoteChoiceOptions();
+    return;
+  }
+  // Keep Lookup compatible with a page whose Server shell and component asset
+  // were loaded across a package restart. The stable Select sync hook existed
+  // before the remote-paint specialization and still projects native options.
+  input._syncChoiceControl?.();
 }
 
 function updateParameterDomainUi() {
@@ -2088,6 +2170,19 @@ function reconcileLookupState(parameter, response, {preserve = false} = {}) {
       : {selection:'all', value:[]};
   }
   runtime.queryParameterState[parameter.id] = next;
+  runtime.queryTransitionEvidence[parameter.id] = {
+    action:JSON.stringify(next) === JSON.stringify(current)
+      ? 'retained'
+      : next.selection === 'all'
+      ? 'all'
+      : next.selection === current.selection
+      ? 'valid_intersection'
+      : 'default',
+    previous_selection:current.selection,
+    next_selection:next.selection,
+    previous_operands:Array.isArray(current.value) ? current.value.length : 0,
+    next_operands:Array.isArray(next.value) ? next.value.length : 0,
+  };
 }
 
 function selectedLookupItemsForState(parameter, selectedItems, {preserve = false} = {}) {
@@ -2171,7 +2266,7 @@ async function lookupQueryParameter(parameter, {
         input.dataset.queryTotal = '0';
         input.dataset.queryFreshness = response.freshness || 'missing';
         input.disabled = true;
-        input._syncChoiceControl?.();
+        syncRemoteParameterOptions(input);
       }
       const needsFirst = parameter.default?.mode === 'first'
         && runtime.queryParameterState?.[parameter.id]?.value == null;
@@ -2189,6 +2284,10 @@ async function lookupQueryParameter(parameter, {
       {preserve},
     );
     runtime.queryLookup[parameter.id].selectedItems = selectedItems;
+    runtime.queryLookup[parameter.id].total = Number(response.total || 0);
+    runtime.queryLookup[parameter.id].unavailableCount = (
+      response.selected_items || []
+    ).filter(item => !item.available).length;
     if (
       parameter.type === 'single_select'
       && (runtime.queryParameterState?.[parameter.id]?.value == null)
@@ -2213,10 +2312,9 @@ async function lookupQueryParameter(parameter, {
       // itself after a narrow query returns fewer than the UI threshold.
       if (!search) input.dataset.queryUniverseTotal = String(response.total || 0);
       input.dataset.queryFreshness = response.freshness || 'missing';
-      input._syncChoiceControl?.();
+      syncRemoteParameterOptions(input);
     }
-    setQueryParameterStates(runtime.queryParameterState, {sync:false});
-    window.datavizComponents?.controls?.sync($('#parameter-form'));
+    renderQueryAuthorEvidence();
     runtime.queryDomainGeneration = response.generation || runtime.queryDomainGeneration;
     state.workspaceRevision = Math.max(state.workspaceRevision, Number(response.workspace_revision || 0));
     return runtime.queryLookup[parameter.id];
@@ -2895,6 +2993,18 @@ function renderNodeInspector(node, record, runNode, failure = null) {
   );
   summary.append(stamp, facts);
   body.append(summary);
+
+  const runtime = activeRuntime();
+  const trace = runtime?.interactiveTraces?.[node.id];
+  if (runtime?.queryAuthorMode && node.type === 'interactive_transform' && trace) {
+    body.append(inspectorCodeSection({
+      eyebrow: 'REFRESH CAUSE',
+      title: 'Why this transform refreshed',
+      note: 'Runtime-only author evidence. It is derived from the current dependency plan and is not persisted as a second execution record.',
+      code: JSON.stringify(trace, null, 2),
+      copyLabel: 'Copy refresh cause',
+    }));
+  }
 
   if (failure) {
     const message = inspectorElement('section', 'node-inspector__section node-inspector__section--failure');
@@ -3684,6 +3794,12 @@ $('#query-parameters-toggle').addEventListener('click', toggleQueryParameters);
 $('#query-parameter-options-reload').addEventListener('click', () => {
   void resolveQueryParameterDomains({refresh:true, announce:true});
 });
+$('#query-parameter-author-mode').addEventListener('click', () => {
+  const runtime = activeRuntime();
+  if (!runtime) return;
+  runtime.queryAuthorMode = !runtime.queryAuthorMode;
+  renderQueryAuthorEvidence();
+});
 $('#query-parameters-revert').addEventListener('click', () => {
   void revertQueryParameters();
 });
@@ -3707,6 +3823,7 @@ const onQueryDraft = event => {
   const input = event.target;
   if (runtime) {
     runtime.queryParameterState = structuredClone(parameterState);
+    renderQueryAuthorEvidence();
     const descendants = new Set(
       input?.name
         ? state.dashboard?.parameter_domain_contract?.descendants?.[input.name] || []
@@ -3844,6 +3961,9 @@ window.addEventListener('message', (event) => {
     ]);
     if (!runtime || !nodeId.startsWith('interactive:') || !allowed.has(event.data.status)) return;
     runtime.nodeStatuses[nodeId] = event.data.status;
+    if (event.data.trace && typeof event.data.trace === 'object') {
+      runtime.interactiveTraces[nodeId] = structuredClone(event.data.trace);
+    }
     if (event.data.error) runtime.nodeErrors[nodeId] = event.data.error;
     else if (event.data.status === 'ready') delete runtime.nodeErrors[nodeId];
     const node = document.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`);

@@ -1,7 +1,7 @@
 // Owner: Runtime protocol, manifest normalization, and shared constants.
-const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v13';
+const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v14';
 const DATAVIZ_INTERACTIVE_WORKER_PROTOCOL = 'dataviz/interactive-worker/v1';
-const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v12';
+const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v13';
 if (window.dataviz.protocol?.schema !== DATAVIZ_RUNTIME_PROTOCOL) {
   throw new Error(`Unsupported Dataviz Runtime protocol: ${window.dataviz.protocol?.schema || 'missing'}`);
 }
@@ -740,7 +740,7 @@ const validateInteractiveOutput = (transformId, name, value, definition = {}) =>
 };
 // Owner: shared Runtime host state and public registration surface.
 const datavizRuntime = window.datavizRuntime = {
-  protocol: 'dataviz/runtime/v13',
+  protocol: 'dataviz/runtime/v14',
   transforms: new Map(),
   views: new Map(),
   renderers: new Map(),
@@ -1130,25 +1130,50 @@ Object.assign(datavizRuntime, {
   markTransformStale(id) {
     this.transformViews(id).forEach(viewId => {
       const root = this.viewAdapter?.node(viewId);
-      if (root) this.viewAdapter?.setStatus(root, 'stale', 'run analysis');
+      if (!root) return;
+      root._datavizUpdatingTransforms?.delete(id);
+      this.viewAdapter?.setUpdating(root, false);
+      this.viewAdapter?.setStatus(root, 'stale', 'run analysis');
     });
     this.publishTransformStatus(id, 'stale', {message:'Inputs changed; run analysis'});
   },
-  markTransformLoading(id, message = 'running analysis') {
+  markTransformLoading(id, message = 'running analysis', trace = null) {
     this.transformViews(id).forEach(viewId => {
       const root = this.viewAdapter?.node(viewId);
-      if (root) this.viewAdapter?.setStatus(root, 'loading', message);
+      if (!root) return;
+      if (!(root._datavizUpdatingTransforms instanceof Set)) {
+        root._datavizUpdatingTransforms = new Set();
+      }
+      root._datavizUpdatingTransforms.add(id);
+      if (this.viewAdapter?.states.has(viewId)) {
+        this.viewAdapter?.setUpdating(root, true, message);
+      } else {
+        this.viewAdapter?.setStatus(root, 'loading', message);
+      }
     });
-    this.publishTransformStatus(id, 'loading', {message});
+    this.publishTransformStatus(id, 'loading', {message, trace});
   },
-  markTransformReady(id) {
-    this.transformViews(id, 'direct').forEach(viewId => {
+  markTransformReady(id, trace = null) {
+    this.transformViews(id).forEach(viewId => {
       const root = this.viewAdapter?.node(viewId);
       if (!root) return;
+      root._datavizUpdatingTransforms?.delete(id);
+      if (root._datavizUpdatingTransforms?.size) return;
+      this.viewAdapter?.setUpdating(root, false);
       const renderer = this.viewAdapter?.states.get(viewId)?.type || 'ready';
       this.viewAdapter?.setStatus(root, 'ready', renderer);
     });
-    this.publishTransformStatus(id, 'ready');
+    this.publishTransformStatus(id, 'ready', {trace});
+  },
+  markTransformTerminal(id, status, message) {
+    this.transformViews(id).forEach(viewId => {
+      const root = this.viewAdapter?.node(viewId);
+      if (!root) return;
+      root._datavizUpdatingTransforms?.delete(id);
+      if (root._datavizUpdatingTransforms?.size) return;
+      this.viewAdapter?.setUpdating(root, false);
+      this.viewAdapter?.setStatus(root, status, message || status);
+    });
   },
   publishTransformStatus(id, status, details = {}) {
     datavizSetViewPipelineNodeStatus(`interactive:${id}`, status);
@@ -1162,6 +1187,7 @@ Object.assign(datavizRuntime, {
         code:details.error.code || details.error.details?.code || 'interactive_transform_error',
         message:details.error.message || String(details.error),
       } : null,
+      trace:details.trace || null,
     });
   },
   async runTransforms(changedControlKeys = [], seedChangedOutputs = [], options = {}) {
@@ -1252,6 +1278,7 @@ Object.assign(datavizRuntime, {
             localChanged.add(reference);
           });
           renderOutputDelta(localChanged);
+          this.markTransformTerminal(id, 'unavailable', error.message);
           this.publishTransformStatus(id, 'unavailable', {message:error.message, error});
           return;
         }
@@ -1306,7 +1333,19 @@ Object.assign(datavizRuntime, {
             this.transformControlInputs(id),
             capturedControlState,
           );
-          this.markTransformLoading(id);
+          const triggerTrace = {
+            changed_controls:Object.values(this.transformControlInputs(id))
+              .map(binding => binding.control)
+              .filter(control => changedControls == null || changedControls.has(control)),
+            changed_inputs:Object.values(references)
+              .filter(reference => changedOutputs.has(reference)),
+            missing_outputs:requiredOutputReferences.filter(reference => (
+              !Object.prototype.hasOwnProperty.call(outputs, reference)
+            )),
+            manual:manualClosure.has(id),
+            query_executed:false,
+          };
+          this.markTransformLoading(id, 'running analysis', triggerTrace);
           const inputValues = Object.fromEntries(
             Object.entries(references).map(([name, reference]) => [name, outputs[reference]])
           );
@@ -1376,15 +1415,18 @@ Object.assign(datavizRuntime, {
             capturedControlState,
             capturedWriterProvenance,
           );
+          this.markTransformReady(id, {
+            ...triggerTrace,
+            changed_outputs:[...localChanged],
+            affected_views:this.affectedViews([], localChanged),
+          });
           if (localChanged.size) {
             renderOutputDelta(localChanged);
-            this.publishTransformStatus(id, 'ready');
-          } else {
-            this.markTransformReady(id);
           }
         } catch (error) {
           if (this.transformRequests.get(id) !== request) return;
           if (error?.name === 'AbortError' || error?.code === 'interactive_transform_cancelled') {
+            this.markTransformTerminal(id, 'cancelled', error.message);
             this.publishTransformStatus(id, 'cancelled', {message:error.message, error});
             return;
           }
@@ -1399,6 +1441,7 @@ Object.assign(datavizRuntime, {
             localChanged.add(reference);
           });
           renderOutputDelta(localChanged);
+          this.markTransformTerminal(id, 'error', error.message);
           this.publishTransformStatus(id, 'error', {message:error.message, error});
           console.error(`[dataviz:interactive-transform:${id}]`, error);
         }
@@ -2060,14 +2103,18 @@ window.dataviz.control = {
 };
 let datavizControlActionRevision = 0;
 let datavizControlActionQueue = Promise.resolve();
-const datavizControlBindingForView = viewId => (
-  window.dataviz.dependency_contract?.views?.[viewId]?.control_binding || null
+const datavizControlBindingForView = (viewId, sourceLayer = null) => (
+  sourceLayer == null
+    ? (window.dataviz.dependency_contract?.views?.[viewId]?.control_binding || null)
+    : (window.dataviz.dependency_contract?.views?.[viewId]
+      ?.layer_control_bindings?.[sourceLayer] || null)
 );
 const datavizViewActionRejection = (event, code) => ({
   status:'rejected',
   code,
   action_id:typeof event?.action_id === 'string' ? event.action_id : null,
   source_view:typeof event?.source_view === 'string' ? event.source_view : null,
+  ...(typeof event?.source_layer === 'string' ? {source_layer:event.source_layer} : {}),
 });
 const datavizControlBindingValue = (binding, datum) => {
   if (datum && Object.prototype.hasOwnProperty.call(datum, '__datavizControlValue')) {
@@ -2148,11 +2195,12 @@ const datavizControlActionTargetState = (binding, target, event) => {
 };
 const datavizDispatchControlAction = event => {
   const sourceView = typeof event?.source_view === 'string' ? event.source_view : '';
+  const sourceLayer = typeof event?.source_layer === 'string' ? event.source_layer : null;
   const actionId = typeof event?.action_id === 'string' ? event.action_id.trim() : '';
   if (!actionId || actionId.length > 128) {
     return Promise.resolve(datavizViewActionRejection(event, 'control_action_id_invalid'));
   }
-  const binding = datavizControlBindingForView(sourceView);
+  const binding = datavizControlBindingForView(sourceView, sourceLayer);
   if (!binding || binding.control !== event?.control) {
     return Promise.resolve(datavizViewActionRejection(
       event,
@@ -2205,6 +2253,7 @@ const datavizDispatchControlAction = event => {
         revision:Number(current.revision || 0),
         action_id:actionId,
         source_view:sourceView,
+        ...(sourceLayer == null ? {} : {source_layer:sourceLayer}),
       };
     }
     const revision = ++datavizControlActionRevision;
@@ -2218,6 +2267,7 @@ const datavizDispatchControlAction = event => {
         revision:next.revision,
         action_id:actionId,
         source_view:sourceView,
+        ...(sourceLayer == null ? {} : {source_layer:sourceLayer}),
         action:event.action,
       };
       return [control, next];
@@ -2238,6 +2288,7 @@ const datavizDispatchControlAction = event => {
       action_revision:revision,
       action_id:actionId,
       source_view:sourceView,
+      ...(sourceLayer == null ? {} : {source_layer:sourceLayer}),
     };
   }).catch(error => {
     const code = error?.code || error?.details?.code || 'control_action_invalid';
@@ -2812,7 +2863,7 @@ const datavizBuildStateSnapshot = () => {
     };
   });
   const snapshot = {
-    schema:'dataviz/state-snapshot/v5',
+    schema:'dataviz/state-snapshot/v6',
     dashboard:window.dataviz.dashboard_id,
     query_stale:queryStale,
     items,

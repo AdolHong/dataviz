@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v17
+schema: dataviz/dashboard/v18
 kind: dashboard
 id: sales
 title: 销售脉搏

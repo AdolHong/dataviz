@@ -8,7 +8,7 @@
 
 ```text
 Workspace              dataviz/workspace/v2
-Dashboard              dataviz/dashboard/v17
+Dashboard              dataviz/dashboard/v18
 Parameter Domain       dataviz/parameter-domain/v2
 Parameter Domain Contract dataviz/parameter-domain-contract/v3
 Parameter Lookup       dataviz/parameter-lookup/v1
@@ -17,16 +17,16 @@ Presentation           dataviz/presentation/v2
 Source                 dataviz/source/v6
 Dataset Transform      dataviz/dataset-transform/v3
 Interactive Transform  dataviz/interactive-transform/v4
-Dependency Contract    dataviz/dependency-contract/v12
-State Snapshot         dataviz/state-snapshot/v5
-Browser Runtime        dataviz/runtime/v13
-Analysis Result        dataviz/analysis-result/v4
-Analysis Evidence      dataviz/analysis-evidence/v4
+Dependency Contract    dataviz/dependency-contract/v13
+State Snapshot         dataviz/state-snapshot/v6
+Browser Runtime        dataviz/runtime/v14
+Analysis Result        dataviz/analysis-result/v5
+Analysis Evidence      dataviz/analysis-evidence/v5
 Layout Contract        dataviz/layout-contract/v1
 Workspace Change       dataviz/workspace-change/v1
 Dashboard Bundle       dataviz/dashboard-bundle/v2
 Report Manifest        dataviz/report-manifest/v3
-Component Registry     5.9.0
+Component Registry     6.0.0
 ```
 
 这些契约独立版本化。Loader 只接受当前严格模型，不包含旧字段 alias、自动迁移或双协议执行分支。
@@ -49,7 +49,7 @@ Component Registry     5.9.0
 
 ## 2. 单一 Dependency Contract
 
-Dashboard 快照的 `dependency_contract` 属性以并发安全的首次初始化惰性编译并缓存唯一的 `dataviz/dependency-contract/v12`；热更新创建新快照和新契约。同一快照的所有消费者读取同一个对象。它同时拥有：
+Dashboard 快照的 `dependency_contract` 属性以并发安全的首次初始化惰性编译并缓存唯一的 `dataviz/dependency-contract/v13`；热更新创建新快照和新契约。同一快照的所有消费者读取同一个对象。它同时拥有：
 
 ```text
 Query Parameter → Query Node inputs/dependencies/outputs → downstream Views
@@ -178,7 +178,7 @@ not_run → queued → loading → ready | empty | error | cancelled | unavailab
 
 ## 6. Browser Runtime 与局部更新
 
-Server 与 HTML 共享 `dataviz/runtime/v13` Manifest、Named Output Store 和 Runtime Event。共享主机源码按 Manifest、Value Contract、Output Store、Interactive Scheduler、Control Binding、Renderer Lifecycle 与 bootstrap 分布在 `src/dataviz/server/runtime_src/`；`python tools/build_canvas_runtime.py` 确定性生成 Server 与 HTML 唯一加载的 `server/static/canvas-runtime.js`，`--check` 用于 CI/发布门禁。`runtime.control`、`data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 分别物理拥有输入协调、数据 Adapter、Renderer lifecycle、Section/Repeat 和 Presentation state，借 `dataviz:runtime-ready` 装配到主机，不在 Runtime 源码模块中保留第二份实现。命令式 Renderer 实例拥有其全部引擎资源；Perspective 的 Worker/Table/Viewer 不作为 Canvas 全局单例共享，实例释放时三者共同释放。异步引擎阶段具有有界终态，失败时进入结构化 Fallback/Error，而不是无限 Loading。
+Server 与 HTML 共享 `dataviz/runtime/v14` Manifest、Named Output Store 和 Runtime Event。共享主机源码按 Manifest、Value Contract、Output Store、Interactive Scheduler、Control Binding、Renderer Lifecycle 与 bootstrap 分布在 `src/dataviz/server/runtime_src/`；`python tools/build_canvas_runtime.py` 确定性生成 Server 与 HTML 唯一加载的 `server/static/canvas-runtime.js`，`--check` 用于 CI/发布门禁。`runtime.control`、`data.pipeline`、`view.declarative`、`section.declarative`、`presentation.shell` 分别物理拥有输入协调、数据 Adapter、Renderer lifecycle、Section/Repeat 和 Presentation state，借 `dataviz:runtime-ready` 装配到主机，不在 Runtime 源码模块中保留第二份实现。命令式 Renderer 实例拥有其全部引擎资源；Perspective 的 Worker/Table/Viewer 不作为 Canvas 全局单例共享，实例释放时三者共同释放。异步引擎阶段具有有界终态，失败时进入结构化 Fallback/Error，而不是无限 Loading。
 
 Server Header 中的 `Pipeline` 面板同时展示 Query 节点与 Interactive Transform。Query 状态来自 Run SSE；Browser Interactive 状态通过当前 iframe 的 `dataviz:interactive-status` 消息回传，并同时校验 dashboard/run/frame identity，避免跨 Dashboard 或旧 frame 污染状态。
 
@@ -264,7 +264,7 @@ Server 状态以浏览器 tab 的 `session_id` 为边界。不同 tab、Dashboar
 默认组件 → 模板参数 → Theme token/css_class → 自定义 Renderer → 完整 Canvas
 ```
 
-Component Registry v5.9.0 从 `src/dataviz/components/packages/` 扫描 Package。每个 Package 声明 owner、Schema、controller、adapter、功能 CSS、Story 和测试声明。`components check` 只校验这些元数据、资产与声明，pytest/浏览器 E2E 才执行行为。21 个 Package 均为 package-owned；14 个 `control.*` Package 独立承载 Data Entry Component，声明式 View/Section、Data Pipeline 与 Presentation 已迁入各自 owner，`declarative-runtime.js` 与 Runtime 中的重复实现已经删除。
+Component Registry v6.0.0 从 `src/dataviz/components/packages/` 扫描 Package。每个 Package 声明 owner、Schema、controller、adapter、功能 CSS、Story 和测试声明。`components check` 只校验这些元数据、资产与声明，pytest/浏览器 E2E 才执行行为。21 个 Package 均为 package-owned；14 个 `control.*` Package 独立承载 Data Entry Component，声明式 View/Section、Data Pipeline 与 Presentation 已迁入各自 owner，`declarative-runtime.js` 与 Runtime 中的重复实现已经删除。
 
 `view.declarative` 的原生 Map 继续由唯一 Plotly Chart Service 托管：point 映射经纬度，region 通过 Dashboard allowlist 的 Workspace GeoJSON Asset 连接区域指标；Server 与 portable HTML 共用同一资产水合和 Renderer lifecycle。Overview → Detail 使用通用 compound Control writer，不增加地图事件协议。大型实体 Query Parameter 不新增组件或 Runtime owner，`query-parameter.entity-select` Scaffold 只组合已有 Parameter Domain、服务端 Lookup、紧凑 `multiple_select` 与 Source `query_filters`。
 

@@ -1,7 +1,7 @@
 // Owner: Runtime protocol, manifest normalization, and shared constants.
-const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v13';
+const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v14';
 const DATAVIZ_INTERACTIVE_WORKER_PROTOCOL = 'dataviz/interactive-worker/v1';
-const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v12';
+const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v13';
 if (window.dataviz.protocol?.schema !== DATAVIZ_RUNTIME_PROTOCOL) {
   throw new Error(`Unsupported Dataviz Runtime protocol: ${window.dataviz.protocol?.schema || 'missing'}`);
 }

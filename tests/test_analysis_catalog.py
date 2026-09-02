@@ -10,7 +10,12 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from dataviz.analysis import create_analysis_evidence, ensure_analysis_catalog
+from dataviz.analysis import (
+    RunRequest,
+    create_analysis_evidence,
+    ensure_analysis_catalog,
+    run_analysis,
+)
 from dataviz.analysis.contracts import (
     AnalysisCatalog,
     AnalysisDescribe,
@@ -20,6 +25,7 @@ from dataviz.analysis.contracts import (
 from dataviz.analysis.results import AnalysisResultStore
 from dataviz.cli import app
 from dataviz.errors import ValidationFailure
+from dataviz.execution import Executor
 from dataviz.target_reference import TargetReferenceContract, parse_target_reference
 from dataviz.workspace.models import OutputDefinition
 
@@ -37,7 +43,7 @@ def test_analysis_result_stores_text_and_html_as_native_bytes(
     value = "<strong>hello</strong>" if kind == "html" else "hello"
     published = store.publish(
         {
-            "schema": "dataviz/analysis-result/v4",
+            "schema": "dataviz/analysis-result/v5",
             "status": "ready",
             "outputs": [
                 {
@@ -99,7 +105,7 @@ title: Analysis tests
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v17
+        """schema: dataviz/dashboard/v18
 kind: dashboard
 id: analysis
 title: Analysis
@@ -207,7 +213,7 @@ def test_analysis_contracts_publish_machine_json_schemas():
         "dataviz/analysis-describe/v1"
     )
     assert AnalysisResult.model_json_schema()["properties"]["schema"]["const"] == (
-        "dataviz/analysis-result/v4"
+        "dataviz/analysis-result/v5"
     )
 
 
@@ -396,7 +402,7 @@ def test_analysis_cli_all_show_and_run_base_output(isolated_workspace):
     )
     assert executed.exit_code == 0, executed.output
     result = json.loads(executed.output)
-    assert result["schema"] == "dataviz/analysis-result/v4"
+    assert result["schema"] == "dataviz/analysis-result/v5"
     assert result["status"] == "ready"
     assert result["outputs"][0]["rows"] == 1
     assert result["lineage"]["query_nodes"] == ["source:date-window"]
@@ -487,6 +493,55 @@ def test_analysis_cli_executes_file_sql_and_dataset_transform(tmp_path: Path):
         "dataset:sales-metrics",
     }
     assert dataset_payload["outputs"][0]["preview"][0]["forecast_revenue"] > 0
+
+
+def test_dataset_transform_can_reuse_immutable_result_inputs_without_requery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    workspace = tmp_path / "sales-workspace"
+    shutil.copytree(SALES_WORKSPACE, workspace)
+    catalog = ensure_analysis_catalog(workspace)
+    transform = next(
+        entry
+        for entry in catalog.entries
+        if entry["reference"] == "sales::dataset:sales-metrics/trend"
+    )
+    initial_payload = run_analysis(RunRequest(workspace=workspace, target="sales"))
+
+    baseline = next(
+        output
+        for output in initial_payload["outputs"]
+        if output["reference"] == transform["reference"]
+    )["preview"]
+
+    original_execute_node = Executor._execute_node
+
+    def reject_source_execution(self, node, *args, **kwargs):
+        if node.kind == "source":
+            raise AssertionError(f"unexpected live Source execution: {node.id}")
+        return original_execute_node(self, node, *args, **kwargs)
+
+    monkeypatch.setattr(Executor, "_execute_node", reject_source_execution)
+    payload = run_analysis(
+        RunRequest(
+            workspace=workspace,
+            target=transform["reference"],
+            from_result_id=initial_payload["result_id"],
+            detail="debug",
+        )
+    )
+    assert payload["status"] == "ready"
+    assert payload["outputs"][0]["preview"] == baseline
+    assert payload["provenance"]["input_result"]["result_id"] == initial_payload["result_id"]
+    assert set(payload["lineage"]["query_nodes"]) == {
+        "source:orders",
+        "source:targets",
+        "dataset:sales-metrics",
+    }
+    assert payload["nodes"]["source:orders"]["result_origin"] == "result"
+    assert payload["nodes"]["source:targets"]["result_origin"] == "result"
+    assert payload["nodes"]["dataset:sales-metrics"]["result_origin"] == "executed"
 
 
 def test_analysis_cli_runs_server_derived_output(tmp_path: Path):
@@ -682,7 +737,7 @@ def test_analysis_evidence_preserves_consumer_revision_audit(tmp_path: Path):
     evidence, destination = create_analysis_evidence(
         workspace,
         {
-            "schema": "dataviz/analysis-result/v4",
+            "schema": "dataviz/analysis-result/v5",
             "status": "ready",
             "target": {"reference": "sales::interactive:forecast/main"},
             "consumer_revisions": consumer_revisions,
@@ -705,7 +760,7 @@ def test_analysis_result_rejects_inconsistent_consumer_revision_audit():
     with pytest.raises(ValueError, match="stale flag"):
         AnalysisResult.model_validate(
             {
-                "schema": "dataviz/analysis-result/v4",
+                "schema": "dataviz/analysis-result/v5",
                 "status": "ready",
                 "consumer_revisions": {
                     "views": {

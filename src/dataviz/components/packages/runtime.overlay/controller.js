@@ -189,6 +189,32 @@
     if (focusTarget) requestAnimationFrame(() => focusTarget.focus({preventScroll: true}));
   }
 
+  function refresh(record, options = {}) {
+    if (!isOpen(record)) return false;
+    const focused = options.preserveFocus && record.panel?.contains?.(document.activeElement)
+      ? document.activeElement
+      : null;
+    const selection = focused && typeof focused.selectionStart === 'number'
+      ? {start:focused.selectionStart, end:focused.selectionEnd}
+      : null;
+
+    // Reattach an already-open Popover after its asynchronously supplied
+    // children change. Chromium can otherwise keep the previous nested
+    // top-layer surface until the user closes and reopens the picker.
+    if (record.topLayer) {
+      hideFromTopLayer(record);
+      showInTopLayer(record);
+    }
+    position(record);
+    if (focused?.isConnected) {
+      focused.focus({preventScroll: true});
+      if (selection && typeof focused.setSelectionRange === 'function') {
+        focused.setSelectionRange(selection.start, selection.end);
+      }
+    }
+    return true;
+  }
+
   function register(options) {
     const owner = options.owner;
     if (!owner || owner._datavizOverlayRecord) return owner?._datavizOverlayRecord || null;
@@ -253,6 +279,7 @@
       open: value => open(record, value),
       close: value => close(record, value),
       toggle: value => isOpen(record) ? close(record, value) : open(record, value),
+      refresh: value => refresh(record, value),
       reposition: () => position(record),
       isOpen: () => isOpen(record),
       destroy: () => records.delete(record),

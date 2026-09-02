@@ -679,6 +679,24 @@ class PresentationDefinition(Model):
     canvas: PresentationCanvasDefinition = Field(default_factory=PresentationCanvasDefinition)
 
 
+class MapLayerDefinition(Model):
+    """One ordered data/mark projection inside a native Plotly Map View."""
+
+    id: StableId
+    input: str
+    mark: Literal["point", "region"]
+    longitude: str | None = None
+    latitude: str | None = None
+    geojson: StableId | None = None
+    data_key: str | None = None
+    feature_key: str | None = None
+    label: str | None = None
+    color: str | None = None
+    size: str | None = None
+    options: dict[str, Any] = Field(default_factory=dict)
+    control_binding: ControlDependencyReference | ViewControlBindingDefinition | None = None
+
+
 class DeclarativeViewDefinition(Model):
     id: StableId
     title: str | None = None
@@ -717,6 +735,7 @@ class DeclarativeViewDefinition(Model):
     geojson: StableId | None = None
     data_key: str | None = None
     feature_key: str | None = None
+    layers: list[MapLayerDefinition] = Field(default_factory=list)
     columns: list[str] = Field(default_factory=list)
     aggregate: Literal["sum", "mean", "min", "max", "count", "none"] | None = None
     sort: str | None = None
@@ -734,10 +753,14 @@ class DeclarativeViewDefinition(Model):
     @property
     def input_ref(self) -> str | None:
         """Return the primary named output consumed by this View."""
-        return self.input or self.inputs.get("main")
+        return self.input or self.inputs.get("main") or (
+            self.layers[0].input if self.layers else None
+        )
 
     @property
     def input_refs(self) -> dict[str, str]:
+        if self.layers:
+            return {layer.id: layer.input for layer in self.layers}
         refs = dict(self.inputs)
         if self.input:
             refs.setdefault("main", self.input)

@@ -25,7 +25,7 @@ class NodeResult(BaseModel):
         "cancelled",
         "unavailable",
     ]
-    result_origin: Literal["executed", "cache", "generation"] | None = None
+    result_origin: Literal["executed", "cache", "generation", "result"] | None = None
     freshness: Literal["current", "stale"] = "current"
     started_at: str | None = None
     finished_at: str | None = None

@@ -16,7 +16,7 @@ from dataviz.workspace import load_workspace
 
 ROOT = Path(__file__).resolve().parents[1]
 CHARACTERIZATION = json.loads(
-    (ROOT / "tests" / "fixtures" / "dependency-v12-characterization.json").read_text(
+    (ROOT / "tests" / "fixtures" / "dependency-v13-characterization.json").read_text(
         encoding="utf-8"
     )
 )
@@ -61,7 +61,7 @@ def _interactive_plan_projection(dashboard, target: str) -> list[dict]:
     ]
 
 
-def test_dependency_v12_contract_manifest_layout_and_plans_are_characterized():
+def test_dependency_v13_contract_manifest_layout_and_plans_are_characterized():
     assert CHARACTERIZATION["schema"] == "dataviz/dependency-characterization/v1"
     for expected in CHARACTERIZATION["cases"].values():
         workspace = load_workspace(ROOT / expected["workspace"])

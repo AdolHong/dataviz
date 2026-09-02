@@ -270,6 +270,17 @@
   overflow-wrap: anywhere;
   white-space: normal;
 }
+
+.dv-table th[data-emphasis="true"] {
+  color: var(--dv-ink, #1f2937);
+  background: color-mix(in srgb, var(--dv-accent, #4657a7) 9%, transparent);
+}
+
+.dv-table td[data-emphasis="true"] {
+  color: var(--dv-ink, #1f2937);
+  font-weight: 650;
+  background: color-mix(in srgb, var(--dv-accent, #4657a7) 5%, transparent);
+}
 .dv-table [data-pinned] {
   position: sticky;
   z-index: 1;

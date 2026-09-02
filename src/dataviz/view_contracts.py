@@ -61,11 +61,13 @@ VIEW_TEMPLATE_CONTRACTS: dict[str, dict[str, Any]] = {
     },
     "map": {
         "purpose": "Analyze point locations or values joined to GeoJSON regions",
-        "required": ["input", "mark"],
+        "required": [],
         "optional": [
             "longitude", "latitude", "geojson", "data_key", "feature_key",
             "label", "color", "size", "sort", "limit", "options", "config",
+            "input", "mark", "layers",
         ],
+        "one_of": [["input", "layers"]],
         "field_references": [
             "longitude", "latitude", "data_key", "label", "color", "size", "sort",
         ],
@@ -151,6 +153,37 @@ def validate_view_contract(view: Any) -> Any:
                 f"aggregate={view.aggregate}"
             )
     if view.template == "map":
+        if view.layers and any(
+            not _is_missing(getattr(view, field, None))
+            for field in (
+                "input", "inputs", "mark", "longitude", "latitude", "geojson",
+                "data_key", "feature_key", "label", "color", "size", "control_binding",
+            )
+        ):
+            raise ValueError(
+                "View template map layers cannot be combined with single-mark fields "
+                "or View-level control_binding"
+            )
+        if view.layers:
+            identifiers = [layer.id for layer in view.layers]
+            if len(set(identifiers)) != len(identifiers):
+                raise ValueError("View template map requires unique layer ids")
+            for layer in view.layers:
+                required_by_mark = {
+                    "point": ("longitude", "latitude"),
+                    "region": ("geojson", "data_key", "feature_key", "color"),
+                }
+                missing = [
+                    field
+                    for field in required_by_mark[layer.mark]
+                    if _is_missing(getattr(layer, field, None))
+                ]
+                if missing:
+                    raise ValueError(
+                        f"View template map layer={layer.id} mark={layer.mark} requires: "
+                        + ", ".join(missing)
+                    )
+            return view
         required_by_mark = {
             "point": ("longitude", "latitude"),
             "region": ("geojson", "data_key", "feature_key", "color"),
@@ -167,8 +200,26 @@ def validate_view_contract(view: Any) -> Any:
     return view
 
 
-def referenced_view_fields(view: Any) -> set[str]:
+def referenced_view_fields(view: Any, input_alias: str | None = None) -> set[str]:
     """Return statically declared table columns consumed by one View template."""
+    if view.template == "map" and view.layers:
+        layers = [
+            layer for layer in view.layers
+            if input_alias is None or layer.id == input_alias
+        ]
+        return {
+            value
+            for layer in layers
+            for value in (
+                layer.longitude,
+                layer.latitude,
+                layer.data_key,
+                layer.label,
+                layer.color,
+                layer.size,
+            )
+            if isinstance(value, str) and value
+        }
     fields: set[str] = set()
     for property_name in VIEW_TEMPLATE_CONTRACTS[view.template].get(
         "field_references", []

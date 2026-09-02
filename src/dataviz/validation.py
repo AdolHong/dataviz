@@ -40,6 +40,8 @@ def _diagnostic_category(item: Diagnostic) -> str:
         return "sql-contracts"
     if code.startswith("source_asset_"):
         return "data-graph"
+    if code.startswith(("runtime_asset_", "browser_")):
+        return "runtime-dependencies"
     if code.startswith("content_") or "selection" in field or "selection" in message:
         return "content-contracts"
     if (
@@ -50,8 +52,7 @@ def _diagnostic_category(item: Diagnostic) -> str:
     ):
         return "presentation-assets"
     if (
-        code.startswith("runtime_asset_")
-        or "python_dependencies" in field
+        "python_dependencies" in field
         or "code_dependencies" in field
         or "dependency" in message
     ):
@@ -121,6 +122,11 @@ def _hint_for(item: Diagnostic) -> str:
         return "Bind this node's `query_inputs` entry to a declared Dashboard `query_parameters` id, or remove it."
     if code.startswith("runtime_asset_"):
         return "Use an http(s) URL, or keep the UTF-8 JavaScript file inside the Workspace and reference it with a relative path."
+    if code == "browser_context_selections_removed":
+        return (
+            "Declare the Control under Interactive Transform `control_inputs`, then "
+            "read its local alias from `context.control_inputs.<alias>`."
+        )
     if code in {"dataset_cycle", "interactive_cycle"}:
         return "Break the reported dependency cycle; every input must point to an earlier explicit Named Output."
     if field.startswith(("inputs", "views", "sections")) or "reference" in item.message.lower():

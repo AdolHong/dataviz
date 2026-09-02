@@ -223,7 +223,7 @@ folders: []
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v17
+        """schema: dataviz/dashboard/v18
 kind: dashboard
 id: same-view-controls
 title: Same View Controls
@@ -318,7 +318,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v17
+        """schema: dataviz/dashboard/v18
 kind: dashboard
 id: scale
 title: Scale Runtime
@@ -418,7 +418,7 @@ title: Interactive Runtime E2E
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v17
+        """schema: dataviz/dashboard/v18
 kind: dashboard
 id: runtime-matrix
 title: Interactive Runtime Matrix
@@ -712,11 +712,21 @@ def test_parameter_domain_cascade_reload_and_tab_restore(page: Page, tmp_path: P
         expect(city).to_have_values([])
         assert len(domain_requests) > requests_before_reload
 
+        # A full page reload restores the exact compact draft before Domain
+        # hydration. Lookup only supplies the selected label/availability; it
+        # must not reinterpret restoration as a fresh parent edit and erase the
+        # finite operand.
+        city_trigger.click()
+        city_control.get_by_role("button", name="Clear").click()
+        city_control.locator(".dv-choice-option", has_text="深圳").click()
+        expect(city).to_have_values(["SZ"])
+        expect(city).to_have_attribute("data-query-selection", "include")
         page.reload(wait_until="domcontentloaded")
         expect(page.locator("#run-button")).to_be_enabled(timeout=10_000)
         expect(province).to_have_values(["GD"])
         expect(city.locator("option")).to_have_count(2, timeout=20_000)
-        expect(city).to_have_values([])
+        expect(city).to_have_values(["SZ"])
+        expect(city).to_have_attribute("data-query-selection", "include")
 
         _run_and_wait(page)
         with page.expect_download(timeout=20_000) as download_info:
@@ -725,7 +735,7 @@ def test_parameter_domain_cascade_reload_and_tab_restore(page: Page, tmp_path: P
         assert "parameter-domains/lookup" not in report
         assert "locations.sql" not in report
         assert '"provinces": {"selection": "include", "value": ["GD"]}' in report
-        assert '"cities": {"selection": "all", "value": []}' in report
+        assert '"cities": {"selection": "include", "value": ["SZ"]}' in report
 
 
 @pytest.mark.e2e
@@ -781,6 +791,56 @@ def test_parameter_domain_lookup_search_and_cursor_pagination(page: Page, tmp_pa
         search.fill("城市 619")
         expect(city_control.locator(".dv-choice-option")).to_have_count(1, timeout=10_000)
         expect(city_control.locator(".dv-choice-option")).to_contain_text("城市 619")
+        expect(city_control.locator("[data-control-trigger]")).to_have_attribute(
+            "aria-expanded", "true"
+        )
+        expect(city_control.locator(".dv-select-panel")).to_be_visible()
+        expect(search).to_be_focused()
+
+        # A realistic broad CJK lookup returns multiple rows rather than one
+        # exact hit. The open Top Layer must consume the same option generation
+        # as the native Select without a close/reopen cycle.
+        search.fill("城市 6")
+        expect(city.locator("option")).to_have_count(135, timeout=10_000)
+        expect(city_control.locator(".dv-choice-option")).to_have_count(135)
+        native_labels = city.locator("option").all_text_contents()
+        visible_labels = city_control.locator(
+            ".dv-choice-option .dv-select-option__copy strong"
+        ).all_text_contents()
+        assert visible_labels == native_labels
+        expect(city_control.locator("[data-control-trigger]")).to_have_attribute(
+            "aria-expanded", "true"
+        )
+        expect(city_control.locator(".dv-select-panel")).to_be_visible()
+        expect(search).to_be_focused()
+
+        # Real Chinese text entry uses an IME composition lifecycle. Remote
+        # Lookup must not rebuild the open picker for an intermediate composing
+        # value; it runs after compositionend and paints the committed result
+        # without requiring the user to close and reopen the Select.
+        requests_before_composition = len(requests)
+        search.dispatch_event("compositionstart", {"data": ""})
+        search.evaluate(
+            """node => {
+              node.value = '城市 618';
+              node.dispatchEvent(new InputEvent('input', {
+                bubbles: true,
+                data: '城市 618',
+                inputType: 'insertCompositionText',
+                isComposing: true,
+              }));
+            }"""
+        )
+        page.wait_for_timeout(300)
+        assert len(requests) == requests_before_composition
+        search.dispatch_event("compositionend", {"data": "城市 618"})
+        expect(city_control.locator(".dv-choice-option")).to_have_count(1, timeout=10_000)
+        expect(city_control.locator(".dv-choice-option")).to_contain_text("城市 618")
+        expect(city_control.locator("[data-control-trigger]")).to_have_attribute(
+            "aria-expanded", "true"
+        )
+        expect(city_control.locator(".dv-select-panel")).to_be_visible()
+        expect(search).to_be_focused()
 
         search.fill("")
         expect(city.locator("option")).to_have_count(500, timeout=10_000)
@@ -792,6 +852,8 @@ def test_parameter_domain_lookup_search_and_cursor_pagination(page: Page, tmp_pa
 
         payloads = [request.post_data_json for request in requests if request.post_data]
         assert any(payload.get("search") == "城市 619" for payload in payloads)
+        assert any(payload.get("search") == "城市 618" for payload in payloads)
+        assert any(payload.get("search") == "城市 6" for payload in payloads)
         assert all(payload.get("limit") == 500 for payload in payloads)
         assert any(payload.get("cursor") for payload in payloads)
         assert all("sql" not in payload and "adapter" not in payload for payload in payloads)
@@ -1741,7 +1803,7 @@ def test_web_component_reference_adapter_consumes_runtime_v2_without_canvas_runt
     page: Page,
 ):
     manifest = {
-        "protocol": {"schema": "dataviz/runtime/v13", "component_registry_version": "3.0.0"},
+        "protocol": {"schema": "dataviz/runtime/v14", "component_registry_version": "3.0.0"},
         "control_state": {
             "dashboard:probe/region": {
                 "intent": "explicit",
@@ -1751,7 +1813,7 @@ def test_web_component_reference_adapter_consumes_runtime_v2_without_canvas_runt
         },
         "view_specs": [{"id": "detail", "inputs": {"main": "source:data/main"}}],
         "dependency_contract": {
-            "schema": "dataviz/dependency-contract/v12",
+            "schema": "dataviz/dependency-contract/v13",
             "views": {
                 "detail": {
                     "inputs": {"main": "source:data/main"},
@@ -1834,7 +1896,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
         )
         assert {
             owner_contract[key] for key in ("runtime", "data", "view", "section", "presentation")
-        } == {"dataviz/runtime/v13"}
+        } == {"dataviz/runtime/v14"}
         assert {
             "data.pipeline",
             "view.declarative",
@@ -2662,8 +2724,13 @@ def test_server_header_hydrates_dataset_driven_dashboard_selection_options(
         assert selector.evaluate(
             "select => [...select.selectedOptions].map(option => option.value)"
         ) == ["华东", "华北", "华南"]
+        selector_summary = header.locator("[data-control-summary]")
+        expect(selector_summary).to_have_text("全选")
+        expect(selector).to_have_attribute("data-selection-intent", "all_available")
 
         selector.select_option(["华南"], force=True)
+        expect(selector_summary).to_have_text("华南")
+        expect(selector).to_have_attribute("data-selection-intent", "explicit")
         frame = page.frame_locator("#canvas-frame")
         expect(frame.locator('[data-view-id="total-revenue"]')).to_contain_text(
             "449,000", timeout=10_000
@@ -3881,6 +3948,9 @@ def test_browser_js_interactive_worker_cancellation_timeout_and_serializable_err
             }""",
             timeout=10_000,
         )
+        expect(table).to_have_attribute("data-view-status", "ready")
+        expect(table).to_have_attribute("data-view-updating", "true")
+        expect(table).to_contain_text("20")
         delay.evaluate(
             "input => { input.value = '1'; input.dispatchEvent(new Event('change', {bubbles:true})); }"
         )
@@ -3898,6 +3968,7 @@ def test_browser_js_interactive_worker_cancellation_timeout_and_serializable_err
             timeout=10_000,
         )
         expect(table).to_have_attribute("data-view-status", "ready")
+        expect(table).not_to_have_attribute("data-view-updating", "true")
         applied_before_timeout = frame.locator("body").evaluate(
             """() => window.dataviz.stateSnapshot().consumer_revisions
               .transforms.scaled"""
@@ -5072,7 +5143,7 @@ def test_multi_view_linked_brushing_preserves_writer_provenance_across_runtime(
             )
         )
         result = manifest["result"]
-        assert result["schema"] == "dataviz/analysis-result/v4"
+        assert result["schema"] == "dataviz/analysis-result/v5"
         records_evidence = result["consumer_revisions"]["views"]["records"]
         assert records_evidence["applied_writer_provenance"][control_key] == {
             "revision": 4,
@@ -5107,7 +5178,7 @@ def test_multi_view_linked_brushing_preserves_writer_provenance_across_runtime(
             })""",
             control_key,
         )
-        assert snapshot["schema"] == "dataviz/state-snapshot/v5"
+        assert snapshot["schema"] == "dataviz/state-snapshot/v6"
         assert snapshot["state"]["value"] == ["广东"]
         assert (
             snapshot["provenance"]
@@ -5764,6 +5835,9 @@ def test_native_map_point_region_asset_and_selection_match_server_and_portable(
         region = root.locator('[data-view-id="region-revenue"]')
         expect(point).to_have_attribute("data-view-status", "ready", timeout=20_000)
         expect(city).to_have_attribute("data-view-status", "ready", timeout=20_000)
+        if region.get_attribute("data-view-status") == "error":
+            detail = region.locator(".dv-view-error").inner_text()
+            raise AssertionError(f"region-revenue renderer failed: {detail}")
         expect(region).to_have_attribute("data-view-status", "ready", timeout=20_000)
         assert point.locator(".dv-plotly").evaluate(
             "node => ({type:node.data[0].type, count:node.data[0].lon.length})"

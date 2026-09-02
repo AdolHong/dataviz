@@ -948,6 +948,82 @@ class ParameterMaterializationStore:
             "last_error": record.last_error,
         }
 
+    def inspect_state(
+        self,
+        dashboard: LoadedDashboard,
+        parameter_id: str,
+        *,
+        state: Mapping[str, Any],
+        parent_states: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Inspect one existing candidate generation without creating or refreshing it."""
+
+        definitions = {item.id: item for item in dashboard.definition.query_parameters}
+        definition = definitions.get(parameter_id)
+        if definition is None:
+            raise ExecutionFailure(
+                f"Unknown Query Parameter: {parameter_id}",
+                details={"code": "query_parameter_unknown", "id": parameter_id},
+            )
+        options = definition.options
+        if not isinstance(options, ParameterDomainOptionDefinition):
+            return {
+                "status": "not_domain_backed",
+                "generation": None,
+                "freshness": "unknown",
+                "candidate_count": None,
+                "effective_selected_count": None,
+                "unavailable_count": None,
+            }
+        record = self.status(dashboard, options.source)
+        if (
+            record.generation is None
+            or record.data_path is None
+            or record.freshness() == "expired"
+        ):
+            return {
+                "status": "unavailable",
+                "domain": options.source,
+                "generation": record.generation,
+                "freshness": record.freshness(),
+                "candidate_count": None,
+                "effective_selected_count": None,
+                "unavailable_count": None,
+                "last_error": record.last_error,
+            }
+        raw = state.get("value")
+        selected = list(raw) if isinstance(raw, (list, tuple)) else ([] if raw is None else [raw])
+        _, selected_items, total = self._lookup_projected(
+            record,
+            definition,
+            parent_states=parent_states or {},
+            search="",
+            limit=1,
+            position=0,
+            selected=selected,
+        )
+        available_operands = sum(bool(item.get("available")) for item in selected_items)
+        unavailable = len(selected_items) - available_operands
+        selection = state.get("selection")
+        if selection == "all":
+            effective = total
+        elif selection == "none":
+            effective = 0
+        elif selection == "exclude":
+            effective = max(0, total - available_operands)
+        else:
+            effective = available_operands
+        return {
+            "status": "ready",
+            "domain": options.source,
+            "generation": record.generation,
+            "freshness": record.freshness(),
+            "materialized_rows": record.rows,
+            "candidate_count": total,
+            "effective_selected_count": effective,
+            "unavailable_count": unavailable,
+        }
+
     def list_records(self) -> list[dict[str, Any]]:
         with self._connect() as connection:
             rows = connection.execute(

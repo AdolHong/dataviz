@@ -97,7 +97,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v17
+        """schema: dataviz/dashboard/v18
 kind: dashboard
 id: interactive
 title: Interactive contract

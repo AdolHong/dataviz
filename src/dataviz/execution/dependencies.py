@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 from typing import Any, Iterable, Literal, TYPE_CHECKING
@@ -343,6 +343,7 @@ class ViewControlBindingDependency:
     control: str
     fields: tuple[str, ...]
     renderer: str
+    source_layer: str | None = None
     role: Literal["primary", "context"] = "primary"
     writes: tuple[ViewControlWriteDependency, ...] = ()
 
@@ -354,6 +355,8 @@ class ViewControlBindingDependency:
             "renderer": self.renderer,
             "actions": ["select", "select_many", "clear", "reset"],
         }
+        if self.source_layer is not None:
+            payload["source_layer"] = self.source_layer
         if self.role != "primary":
             payload["role"] = self.role
         if self.writes:
@@ -588,6 +591,9 @@ class DashboardDependencyContract:
     view_control_contract: dict[str, tuple[EffectiveControl, ...]]
     view_control_inputs: dict[str, dict[str, dict[str, Any]]]
     view_control_bindings: dict[str, ViewControlBindingDependency]
+    view_layer_control_bindings: dict[
+        str, dict[str, ViewControlBindingDependency]
+    ]
     output_view_consumers: dict[str, tuple[str, ...]]
     control_option_domains: dict[str, tuple[str, ...]]
     control_order: tuple[str, ...]
@@ -723,9 +729,19 @@ class DashboardDependencyContract:
                         if view_id in self.view_control_bindings
                         else None
                     ),
+                    "layer_control_bindings": {
+                        layer_id: binding.as_dict()
+                        for layer_id, binding in sorted(
+                            self.view_layer_control_bindings.get(view_id, {}).items()
+                        )
+                    },
                 }
                 for view_id in sorted(self.view_inputs)
-                if self.view_control_inputs.get(view_id) or view_id in self.view_control_bindings
+                if (
+                    self.view_control_inputs.get(view_id)
+                    or view_id in self.view_control_bindings
+                    or view_id in self.view_layer_control_bindings
+                )
             },
             "transforms": {
                 identifier: {
@@ -811,6 +827,12 @@ class DashboardDependencyContract:
                         if view_id in self.view_control_bindings
                         else None
                     ),
+                    "layer_control_bindings": {
+                        layer_id: binding.as_dict()
+                        for layer_id, binding in sorted(
+                            self.view_layer_control_bindings.get(view_id, {}).items()
+                        )
+                    },
                 }
                 for view_id, inputs in self.view_inputs.items()
             },
@@ -877,6 +899,12 @@ class DashboardDependencyContract:
                         if key in self.view_control_bindings
                         else None
                     ),
+                    "layer_control_bindings": {
+                        layer_id: binding.as_dict()
+                        for layer_id, binding in sorted(
+                            self.view_layer_control_bindings.get(key, {}).items()
+                        )
+                    },
                 }
                 for key, value in self.view_inputs.items()
             },
@@ -1172,6 +1200,7 @@ def _compile_writer_edges(
     view_controls: dict[str, tuple[str, ...]],
     view_inputs: dict[str, dict[str, str]],
     output_definitions: dict[str, Any],
+    writer_views: Iterable[Any] | None = None,
 ) -> tuple[
     dict[str, ViewControlBindingDependency],
     dict[str, list[ViewControlBindingDependency]],
@@ -1191,7 +1220,12 @@ def _compile_writer_edges(
         "radar",
         "map",
     }
-    views_by_id = {view.id: view for view in dashboard.definition.views}
+    views_by_id = {
+        view.id: view
+        for view in (
+            writer_views if writer_views is not None else dashboard.definition.views
+        )
+    }
     for view_id, view in views_by_id.items():
         raw_binding = view.control_binding
         if raw_binding is None:
@@ -1383,6 +1417,69 @@ def _compile_writer_edges(
                 )
             )
     return view_control_bindings, writers_by_control
+
+
+def _compile_map_layer_writer_edges(
+    dashboard: LoadedDashboard,
+    *,
+    registry: dict[str, EffectiveControl],
+    section_for_view: dict[str, Any],
+    view_control_inputs: dict[str, dict[str, dict[str, Any]]],
+    view_controls: dict[str, tuple[str, ...]],
+    view_inputs: dict[str, dict[str, str]],
+    output_definitions: dict[str, Any],
+) -> tuple[
+    dict[str, dict[str, ViewControlBindingDependency]],
+    dict[str, list[ViewControlBindingDependency]],
+]:
+    """Compile layer writers through the same canonical View writer rules."""
+
+    bindings: dict[str, dict[str, ViewControlBindingDependency]] = {}
+    writers: dict[str, list[ViewControlBindingDependency]] = {
+        key: [] for key in registry
+    }
+    for view in dashboard.definition.views:
+        if view.template != "map" or not view.layers:
+            continue
+        for layer in view.layers:
+            if layer.control_binding is None:
+                continue
+            synthetic = view.model_copy(
+                update={
+                    "input": layer.input,
+                    "inputs": {},
+                    "layers": [],
+                    "mark": layer.mark,
+                    "longitude": layer.longitude,
+                    "latitude": layer.latitude,
+                    "geojson": layer.geojson,
+                    "data_key": layer.data_key,
+                    "feature_key": layer.feature_key,
+                    "label": layer.label,
+                    "color": layer.color,
+                    "size": layer.size,
+                    "control_binding": layer.control_binding,
+                }
+            )
+            local_bindings, local_writers = _compile_writer_edges(
+                dashboard,
+                registry=registry,
+                section_for_view=section_for_view,
+                view_control_inputs=view_control_inputs,
+                view_controls=view_controls,
+                view_inputs={view.id: {"main": view_inputs[view.id][layer.id]}},
+                output_definitions=output_definitions,
+                writer_views=[synthetic],
+            )
+            compiled = replace(
+                local_bindings[view.id], source_layer=layer.id
+            )
+            bindings.setdefault(view.id, {})[layer.id] = compiled
+            for control, edges in local_writers.items():
+                writers[control].extend(
+                    replace(edge, source_layer=layer.id) for edge in edges
+                )
+    return bindings, writers
 
 
 def _compile_presentation_roots(
@@ -2123,6 +2220,19 @@ def compile_dashboard_dependencies(
         view_inputs=view_inputs,
         output_definitions=output_definitions,
     )
+    view_layer_control_bindings, layer_writers_by_control = (
+        _compile_map_layer_writer_edges(
+            dashboard,
+            registry=registry,
+            section_for_view=section_for_view,
+            view_control_inputs=view_control_inputs,
+            view_controls=view_controls,
+            view_inputs=view_inputs,
+            output_definitions=output_definitions,
+        )
+    )
+    for control, edges in layer_writers_by_control.items():
+        writers_by_control[control].extend(edges)
     option_domains = _complete_option_domains(
         option_domains=option_domains,
         view_control_contract=view_control_contract,
@@ -2228,6 +2338,7 @@ def compile_dashboard_dependencies(
         view_control_contract=view_control_contract,
         view_control_inputs=view_control_inputs,
         view_control_bindings=view_control_bindings,
+        view_layer_control_bindings=view_layer_control_bindings,
         output_view_consumers={
             key: tuple(sorted(value)) for key, value in output_view_consumers.items()
         },

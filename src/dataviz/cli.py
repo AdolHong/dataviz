@@ -74,6 +74,7 @@ from dataviz.execution.dependencies import (
 )
 from dataviz.execution.parameter_materializations import ParameterMaterializationStore
 from dataviz.execution.parameters import resolve_query_parameter_states
+from dataviz.execution.query_inspection import inspect_query as build_query_inspection
 from dataviz.maintenance import cleanup_workspace_storage
 from dataviz.plotly_runtime import PLOTLY_JS_VERSION
 from dataviz.protocols import (
@@ -801,7 +802,7 @@ dataviz catalog describe . 'hello::source:data/main'
 dataviz run . 'hello::source:data/main'
 ```
 """,
-        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v17
+        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v18
 kind: dashboard
 id: hello
 title: Hello dashboard
@@ -1469,7 +1470,7 @@ def frontend_adapters(
     ),
     output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
 ) -> None:
-    """Inspect frontend implementations that consume dataviz/runtime/v13."""
+    """Inspect frontend implementations that consume dataviz/runtime/v14."""
     if output_format not in {"markdown", "json"}:
         raise typer.BadParameter("--format must be markdown or json")
     catalog = frontend_adapter_catalog()
@@ -1866,6 +1867,70 @@ def inspect_layout(
                     f"- [{diagnostic['level'].upper()}] {diagnostic['code']}: "
                     f"{diagnostic['message']}"
                 )
+    except Exception as exc:
+        handle_error(exc)
+
+
+@inspect_app.command("query")
+def inspect_query_command(
+    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    dashboard: str = typer.Argument(...),
+    source: str = typer.Option(..., "--source", help="SQL Source id"),
+    query_param: list[str] | None = typer.Option(
+        None,
+        "--query-param",
+        help="Canonical Query Parameter state as name=JSON; repeat",
+    ),
+    state: Path | None = typer.Option(
+        None,
+        "--state",
+        exists=True,
+        dir_okay=False,
+        help="JSON object containing canonical Query Parameter states",
+    ),
+    output_format: str = typer.Option("json", "--format", help="json or text"),
+) -> None:
+    """Explain canonical Query Parameter and SQL filter compilation without executing."""
+
+    try:
+        if output_format not in {"json", "text"}:
+            raise typer.BadParameter("--format must be json or text")
+        if state is not None and query_param:
+            raise typer.BadParameter("Use either --state or --query-param, not both")
+        raw_state: dict[str, Any]
+        if state is None:
+            raw_state = parse_params(query_param)
+        else:
+            decoded = json.loads(state.read_text(encoding="utf-8"))
+            if not isinstance(decoded, dict):
+                raise typer.BadParameter("--state must contain one JSON object")
+            raw_state = decoded
+        payload = build_query_inspection(
+            load_workspace(workspace),
+            dashboard,
+            source,
+            query_parameter_state=raw_state,
+        )
+        if output_format == "json":
+            print_json(payload)
+            return
+        typer.echo(f"# Query inspection · {dashboard} · source:{payload['source']}\n")
+        typer.echo("Executed: no")
+        for parameter in payload["parameters"]:
+            selection = parameter.get("selection") or "value"
+            operands = ", ".join(map(str, parameter["operands"])) or "none"
+            typer.echo(
+                f"- {parameter['id']}: {selection}; active={str(parameter['active']).lower()}; "
+                f"operands={operands}"
+            )
+        query = payload["query"]
+        typer.echo("\n## Query filters")
+        for name, item in query.get("query_filters", {}).items():
+            typer.echo(f"- {name}: {item.get('predicate', 'unavailable')}")
+        typer.echo("\n## Parameterized statement\n")
+        typer.echo(query.get("statement", ""))
+        if query.get("inspection_warning"):
+            typer.echo(f"\nWarning: {query['inspection_warning']}")
     except Exception as exc:
         handle_error(exc)
 
@@ -2963,6 +3028,11 @@ def run(
     overlay: str | None = typer.Option(None, "--overlay"),
     dry_run: bool = typer.Option(False, "--dry-run"),
     allow_partial: bool = typer.Option(False, "--allow-partial"),
+    from_result: str | None = typer.Option(
+        None,
+        "--from-result",
+        help="Reuse exact Dataset Transform inputs from one immutable Result",
+    ),
 ) -> None:
     """Execute a Dashboard or canonical data Target and seal one immutable Result."""
     try:
@@ -2986,6 +3056,7 @@ def run(
                 detail=_result_detail(detail),
                 overlay=Path(overlay) if overlay is not None else None,
                 dry_run=dry_run,
+                from_result_id=from_result,
             )
         )
         if published.get("schema") == "dataviz/analysis-overlay-explanation/v1":

@@ -32,7 +32,7 @@ def test_state_snapshot_separates_committed_and_draft_values():
         },
     )
 
-    assert snapshot["schema"] == "dataviz/state-snapshot/v5"
+    assert snapshot["schema"] == "dataviz/state-snapshot/v6"
     parameter = next(
         item for item in snapshot["items"] if item["entry_type"] == "query_parameter"
     )
@@ -57,7 +57,7 @@ def test_default_canvas_embeds_snapshot_and_summary_hosts():
 
     assert dashboard.presentation is not None
     assert dashboard.presentation.state_summary.enabled is False
-    assert '"schema": "dataviz/state-snapshot/v5"' in rendered
+    assert '"schema": "dataviz/state-snapshot/v6"' in rendered
     assert 'data-state-summary-scope="dashboard"' in rendered
     assert 'data-state-summary-scope="section"' in rendered
     assert 'data-state-summary-scope="view"' in rendered
@@ -192,6 +192,40 @@ def test_consumer_revision_seals_valid_writer_provenance():
         "revision": 1,
         "action_id": "ranking-select-guangdong",
         "source_view": "ranking",
+        "action": "select",
+    }
+
+
+def test_consumer_revision_seals_map_layer_writer_provenance():
+    dashboard = load_workspace(SHOWCASE).dashboard("map-lab")
+    key = "dashboard:map-lab/store"
+    state = {"value": "SZ-001", "revision": 2}
+    evidence = normalize_consumer_revisions(
+        dashboard,
+        {key: state},
+        {"views": {"region-table": {key: 2}}, "transforms": {}},
+        {"views": {"region-table": {key: state}}, "transforms": {}},
+        {
+            "views": {
+                "region-table": {
+                    key: {
+                        "revision": 2,
+                        "action_id": "region-map-store-select",
+                        "source_view": "region-revenue",
+                        "source_layer": "stores",
+                        "action": "select",
+                    }
+                }
+            },
+            "transforms": {},
+        },
+    )
+
+    assert evidence["views"]["region-table"]["applied_writer_provenance"][key] == {
+        "revision": 2,
+        "action_id": "region-map-store-select",
+        "source_view": "region-revenue",
+        "source_layer": "stores",
         "action": "select",
     }
 

@@ -44,6 +44,101 @@ def _duplicates(values: list[str]) -> list[str]:
     return sorted({value for value in values if values.count(value) > 1})
 
 
+def _javascript_code_without_literals(source: str) -> str:
+    """Preserve JavaScript code while blanking comments and literal text."""
+
+    output: list[str] = []
+    index = 0
+    state = "code"
+    quote = ""
+    while index < len(source):
+        current = source[index]
+        following = source[index + 1] if index + 1 < len(source) else ""
+        if state == "code":
+            if current == "/" and following == "/":
+                output.extend((" ", " "))
+                index += 2
+                state = "line-comment"
+                continue
+            if current == "/" and following == "*":
+                output.extend((" ", " "))
+                index += 2
+                state = "block-comment"
+                continue
+            if current in {"'", '"', "`"}:
+                output.append(" ")
+                quote = current
+                state = "literal"
+                index += 1
+                continue
+            output.append(current)
+            index += 1
+            continue
+        if state == "line-comment":
+            output.append("\n" if current == "\n" else " ")
+            index += 1
+            if current == "\n":
+                state = "code"
+            continue
+        if state == "block-comment":
+            if current == "*" and following == "/":
+                output.extend((" ", " "))
+                index += 2
+                state = "code"
+            else:
+                output.append("\n" if current == "\n" else " ")
+                index += 1
+            continue
+        if current == "\\":
+            output.append(" ")
+            index += 1
+            if index < len(source):
+                output.append("\n" if source[index] == "\n" else " ")
+                index += 1
+            continue
+        output.append("\n" if current == "\n" else " ")
+        index += 1
+        if current == quote:
+            state = "code"
+    return "".join(output)
+
+
+def _uses_removed_browser_context_selections(source: str) -> bool:
+    code = _javascript_code_without_literals(source)
+    return bool(
+        re.search(r"\bcontext\s*(?:\?\s*)?\.\s*selections\b", code)
+    )
+
+
+def _validate_browser_context_usage(
+    path: Path,
+    *,
+    field: str,
+    diagnostics: list[Diagnostic],
+) -> None:
+    if not path.is_file():
+        return
+    try:
+        source = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return
+    if _uses_removed_browser_context_selections(source):
+        diagnostics.append(
+            Diagnostic(
+                "error",
+                "Browser Interactive Transform uses removed context.selections; "
+                "declare a control_inputs alias and read context.control_inputs.<alias>",
+                str(path),
+                field,
+                "browser_context_selections_removed",
+                {
+                    "removed": "context.selections",
+                    "replacement": "context.control_inputs.<alias>",
+                },
+            )
+        )
+
+
 def _cycle_nodes(graph: dict[str, set[str]]) -> list[str]:
     incoming = {node: set(dependencies) for node, dependencies in graph.items()}
     ready = [node for node, dependencies in incoming.items() if not dependencies]
@@ -1164,6 +1259,18 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             "browser_dependency_outside_transform_package",
                         )
                     )
+            if transform.runtime == "browser-js":
+                _validate_browser_context_usage(
+                    code_path,
+                    field="code",
+                    diagnostics=diagnostics,
+                )
+                for dependency in transform.code_dependencies:
+                    _validate_browser_context_usage(
+                        _code_path(transform_path, dependency),
+                        field="code_dependencies",
+                        diagnostics=diagnostics,
+                    )
             if transform.runtime == "server-python":
                 for dependency in transform.python_dependencies:
                     if message := _python_dependency_error(dependency):
@@ -1327,7 +1434,7 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                             "views.inputs",
                         )
                     )
-                elif name == "main":
+                else:
                     output_kind = _reference_kind(reference, dashboard)
                     output_definition = _reference_output_definition(reference, dashboard)
                     table_templates = {
@@ -1351,26 +1458,43 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                                 "views.input",
                             )
                         )
-                    if (
-                        view.template == "map"
-                        and view.mark == "region"
-                        and view.geojson not in dashboard.definition.assets
-                    ):
+                    map_assets = []
+                    if view.template == "map":
+                        if view.layers:
+                            map_assets = [
+                                layer.geojson
+                                for layer in view.layers
+                                if layer.id == name and layer.mark == "region"
+                            ]
+                        elif name == "main" and view.mark == "region":
+                            map_assets = [view.geojson]
+                    missing_map_assets = [
+                        asset
+                        for asset in map_assets
+                        if asset not in dashboard.definition.assets
+                    ]
+                    if missing_map_assets:
                         diagnostics.append(
                             Diagnostic(
                                 "error",
-                                f"Map View {view.id} GeoJSON Asset {view.geojson!r} is not exposed by this Dashboard",
+                                f"Map View {view.id} GeoJSON Asset {missing_map_assets[0]!r} is not exposed by this Dashboard",
                                 definition_path,
-                                "views.geojson",
+                                "views.layers.geojson" if view.layers else "views.geojson",
                                 "map_geojson_asset_not_exposed",
                                 {
                                     "view": view.id,
-                                    "asset": view.geojson,
+                                    "layer": name if view.layers else None,
+                                    "asset": missing_map_assets[0],
                                     "dashboard_assets": sorted(dashboard.definition.assets),
                                 },
                             )
                         )
-                    if view.template == "metric" and output_kind == "table" and not view.value:
+                    if (
+                        name == "main"
+                        and view.template == "metric"
+                        and output_kind == "table"
+                        and not view.value
+                    ):
                         diagnostics.append(
                             Diagnostic(
                                 "error",
@@ -1385,7 +1509,9 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         and output_definition.schema_
                     ):
                         declared_fields = {column.name for column in output_definition.schema_}
-                        unknown_fields = sorted(referenced_view_fields(view) - declared_fields)
+                        unknown_fields = sorted(
+                            referenced_view_fields(view, name) - declared_fields
+                        )
                         if unknown_fields:
                             diagnostics.append(
                                 Diagnostic(

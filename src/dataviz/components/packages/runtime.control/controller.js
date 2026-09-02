@@ -303,6 +303,12 @@
       control.dataset.controlHydrated = 'true';
       control._datavizControl = instance || {};
       input._syncChoiceControl = () => control._datavizControl?.sync?.();
+      input._syncRemoteChoiceOptions = () => {
+        if (typeof control._datavizControl?.syncRemoteOptions === 'function') {
+          return control._datavizControl.syncRemoteOptions();
+        }
+        return control._datavizControl?.sync?.();
+      };
       control._syncControl = input._syncChoiceControl;
       input._syncChoiceControl();
     });

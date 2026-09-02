@@ -255,25 +255,50 @@ Object.assign(datavizRuntime, {
   markTransformStale(id) {
     this.transformViews(id).forEach(viewId => {
       const root = this.viewAdapter?.node(viewId);
-      if (root) this.viewAdapter?.setStatus(root, 'stale', 'run analysis');
+      if (!root) return;
+      root._datavizUpdatingTransforms?.delete(id);
+      this.viewAdapter?.setUpdating(root, false);
+      this.viewAdapter?.setStatus(root, 'stale', 'run analysis');
     });
     this.publishTransformStatus(id, 'stale', {message:'Inputs changed; run analysis'});
   },
-  markTransformLoading(id, message = 'running analysis') {
+  markTransformLoading(id, message = 'running analysis', trace = null) {
     this.transformViews(id).forEach(viewId => {
       const root = this.viewAdapter?.node(viewId);
-      if (root) this.viewAdapter?.setStatus(root, 'loading', message);
+      if (!root) return;
+      if (!(root._datavizUpdatingTransforms instanceof Set)) {
+        root._datavizUpdatingTransforms = new Set();
+      }
+      root._datavizUpdatingTransforms.add(id);
+      if (this.viewAdapter?.states.has(viewId)) {
+        this.viewAdapter?.setUpdating(root, true, message);
+      } else {
+        this.viewAdapter?.setStatus(root, 'loading', message);
+      }
     });
-    this.publishTransformStatus(id, 'loading', {message});
+    this.publishTransformStatus(id, 'loading', {message, trace});
   },
-  markTransformReady(id) {
-    this.transformViews(id, 'direct').forEach(viewId => {
+  markTransformReady(id, trace = null) {
+    this.transformViews(id).forEach(viewId => {
       const root = this.viewAdapter?.node(viewId);
       if (!root) return;
+      root._datavizUpdatingTransforms?.delete(id);
+      if (root._datavizUpdatingTransforms?.size) return;
+      this.viewAdapter?.setUpdating(root, false);
       const renderer = this.viewAdapter?.states.get(viewId)?.type || 'ready';
       this.viewAdapter?.setStatus(root, 'ready', renderer);
     });
-    this.publishTransformStatus(id, 'ready');
+    this.publishTransformStatus(id, 'ready', {trace});
+  },
+  markTransformTerminal(id, status, message) {
+    this.transformViews(id).forEach(viewId => {
+      const root = this.viewAdapter?.node(viewId);
+      if (!root) return;
+      root._datavizUpdatingTransforms?.delete(id);
+      if (root._datavizUpdatingTransforms?.size) return;
+      this.viewAdapter?.setUpdating(root, false);
+      this.viewAdapter?.setStatus(root, status, message || status);
+    });
   },
   publishTransformStatus(id, status, details = {}) {
     datavizSetViewPipelineNodeStatus(`interactive:${id}`, status);
@@ -287,6 +312,7 @@ Object.assign(datavizRuntime, {
         code:details.error.code || details.error.details?.code || 'interactive_transform_error',
         message:details.error.message || String(details.error),
       } : null,
+      trace:details.trace || null,
     });
   },
   async runTransforms(changedControlKeys = [], seedChangedOutputs = [], options = {}) {
@@ -377,6 +403,7 @@ Object.assign(datavizRuntime, {
             localChanged.add(reference);
           });
           renderOutputDelta(localChanged);
+          this.markTransformTerminal(id, 'unavailable', error.message);
           this.publishTransformStatus(id, 'unavailable', {message:error.message, error});
           return;
         }
@@ -431,7 +458,19 @@ Object.assign(datavizRuntime, {
             this.transformControlInputs(id),
             capturedControlState,
           );
-          this.markTransformLoading(id);
+          const triggerTrace = {
+            changed_controls:Object.values(this.transformControlInputs(id))
+              .map(binding => binding.control)
+              .filter(control => changedControls == null || changedControls.has(control)),
+            changed_inputs:Object.values(references)
+              .filter(reference => changedOutputs.has(reference)),
+            missing_outputs:requiredOutputReferences.filter(reference => (
+              !Object.prototype.hasOwnProperty.call(outputs, reference)
+            )),
+            manual:manualClosure.has(id),
+            query_executed:false,
+          };
+          this.markTransformLoading(id, 'running analysis', triggerTrace);
           const inputValues = Object.fromEntries(
             Object.entries(references).map(([name, reference]) => [name, outputs[reference]])
           );
@@ -501,15 +540,18 @@ Object.assign(datavizRuntime, {
             capturedControlState,
             capturedWriterProvenance,
           );
+          this.markTransformReady(id, {
+            ...triggerTrace,
+            changed_outputs:[...localChanged],
+            affected_views:this.affectedViews([], localChanged),
+          });
           if (localChanged.size) {
             renderOutputDelta(localChanged);
-            this.publishTransformStatus(id, 'ready');
-          } else {
-            this.markTransformReady(id);
           }
         } catch (error) {
           if (this.transformRequests.get(id) !== request) return;
           if (error?.name === 'AbortError' || error?.code === 'interactive_transform_cancelled') {
+            this.markTransformTerminal(id, 'cancelled', error.message);
             this.publishTransformStatus(id, 'cancelled', {message:error.message, error});
             return;
           }
@@ -524,6 +566,7 @@ Object.assign(datavizRuntime, {
             localChanged.add(reference);
           });
           renderOutputDelta(localChanged);
+          this.markTransformTerminal(id, 'error', error.message);
           this.publishTransformStatus(id, 'error', {message:error.message, error});
           console.error(`[dataviz:interactive-transform:${id}]`, error);
         }

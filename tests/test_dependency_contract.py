@@ -27,7 +27,7 @@ WORKER = ROOT / "tests" / "fixtures" / "browser-worker-workspace"
 PROGRESSIVE = ROOT / "tests" / "fixtures" / "progressive-workspace"
 MINIMAL = ROOT / "examples" / "minimal-workspace"
 FROZEN_DIAGNOSTICS = json.loads(
-    (ROOT / "tests" / "fixtures" / "dependency-v12-characterization.json").read_text(
+    (ROOT / "tests" / "fixtures" / "dependency-v13-characterization.json").read_text(
         encoding="utf-8"
     )
 )["diagnostics"]
@@ -426,6 +426,23 @@ def test_same_view_dependencies_compile_direct_edges_transitive_closure_and_orde
     assert positions[province_key] < positions[city_key] < positions[dow_key] < positions[dates_key]
 
 
+def test_map_layers_compile_distinct_inputs_and_writer_provenance():
+    workspace = load_workspace(FEATURES)
+    dashboard = workspace.dashboard("map-lab")
+    contract = dashboard.dependency_contract
+
+    assert contract.view_inputs["region-revenue"] == {
+        "regions": "source:regions/main",
+        "stores": "source:stores/main",
+    }
+    binding = contract.view_layer_control_bindings["region-revenue"]["stores"]
+    assert binding.control == "dashboard:map-lab/store"
+    assert binding.source_layer == "stores"
+    projected = contract.runtime_manifest()["views"]["region-revenue"]
+    assert projected["control_binding"] is None
+    assert projected["layer_control_bindings"]["stores"]["source_layer"] == "stores"
+
+
 @pytest.mark.parametrize(
     ("reference", "expected_code"),
     [
@@ -627,7 +644,7 @@ def test_dependency_contract_is_directly_inspectable_by_ai_and_humans():
 
     assert machine.exit_code == 0, machine.stdout
     assert machine.stdout.lstrip().startswith("{")
-    assert '"schema": "dataviz/dependency-contract/v12"' in machine.stdout
+    assert '"schema": "dataviz/dependency-contract/v13"' in machine.stdout
     assert human.exit_code == 0, human.stdout
     assert "Query DAG" in human.stdout
     assert "Query Parameters" in human.stdout

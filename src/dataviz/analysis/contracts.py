@@ -145,6 +145,7 @@ class AnalysisWriterProvenance(AnalysisContract):
     revision: int = Field(ge=0)
     action_id: str = Field(min_length=1, max_length=128)
     source_view: str = Field(min_length=1)
+    source_layer: str | None = Field(default=None, min_length=1)
     action: Literal["select", "select_many", "clear", "reset"]
 
 
@@ -213,6 +214,7 @@ class AnalysisResult(AnalysisContract):
     lineage: dict[str, Any] = Field(default_factory=dict)
     provenance: dict[str, Any] = Field(default_factory=dict)
     timing: dict[str, Any] = Field(default_factory=dict)
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
     next_actions: list[str] = Field(default_factory=list)
     error: dict[str, Any] | None = None
     resolved_target: AnalysisEntry | dict[str, Any] | None = None
@@ -245,6 +247,7 @@ class AnalysisEvidence(AnalysisContract):
     consumer_revisions: AnalysisConsumerRevisions = Field(
         default_factory=AnalysisConsumerRevisions
     )
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
     snapshot: list[dict[str, Any]] = Field(default_factory=list)
 
     @model_validator(mode="after")

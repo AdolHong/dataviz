@@ -56,6 +56,28 @@ def resolve_query_filter_tokens(
 ) -> tuple[str, dict[str, Any]]:
     """Resolve the only supported SQL template token into parameterized predicates."""
 
+    statement, parameters, _ = resolve_query_filter_tokens_with_evidence(
+        query,
+        declarations,
+        states,
+        adapter_type=adapter_type,
+    )
+    return statement, parameters
+
+
+def resolve_query_filter_tokens_with_evidence(
+    query: str,
+    declarations: dict[str, Any],
+    states: dict[str, dict[str, Any]],
+    *,
+    adapter_type: str,
+) -> tuple[str, dict[str, Any], dict[str, dict[str, Any]]]:
+    """Compile query-filter tokens and return a read-only explanation projection.
+
+    Execution and author inspection call this same function so predicates cannot
+    drift between the plan an author sees and the SQL the adapter receives.
+    """
+
     tokens = _QUERY_FILTER_TOKEN.findall(query)
     unknown = sorted(set(tokens) - set(declarations))
     if unknown:
@@ -70,6 +92,7 @@ def resolve_query_filter_tokens(
             details={"code": "query_filter_unused", "filters": unused},
         )
     parameters: dict[str, Any] = {}
+    evidence: dict[str, dict[str, Any]] = {}
 
     def replacement(match: re.Match[str]) -> str:
         name = match.group(1)
@@ -97,7 +120,16 @@ def resolve_query_filter_tokens(
                     },
                 )
             if not values:
-                return "TRUE" if declaration.empty == "passthrough" else "FALSE"
+                predicate = "TRUE" if declaration.empty == "passthrough" else "FALSE"
+                evidence[name] = {
+                    "parameter": declaration.parameter,
+                    "field": declaration.field,
+                    "selection": "none",
+                    "operands": [],
+                    "predicate": predicate,
+                    "parameter_names": [],
+                }
+                return predicate
             selection = "include"
         elif selection not in {"all", "include", "exclude", "none"}:
             raise ExecutionFailure(
@@ -109,9 +141,26 @@ def resolve_query_filter_tokens(
                 },
             )
         if selection == "all":
+            evidence[name] = {
+                "parameter": declaration.parameter,
+                "field": declaration.field,
+                "selection": "all",
+                "operands": [],
+                "predicate": "TRUE",
+                "parameter_names": [],
+            }
             return "TRUE"
         if selection == "none":
-            return "TRUE" if declaration.empty == "passthrough" else "FALSE"
+            predicate = "TRUE" if declaration.empty == "passthrough" else "FALSE"
+            evidence[name] = {
+                "parameter": declaration.parameter,
+                "field": declaration.field,
+                "selection": "none",
+                "operands": [],
+                "predicate": predicate,
+                "parameter_names": [],
+            }
+            return predicate
         values = list(state.get("value") or ())
         if not values:
             raise ExecutionFailure(
@@ -124,9 +173,18 @@ def resolve_query_filter_tokens(
             predicate = f"{declaration.field} = ANY(:{parameter})"
         else:
             predicate = f"{declaration.field} IN :{parameter}"
-        return f"NOT ({predicate})" if selection == "exclude" else predicate
+        resolved = f"NOT ({predicate})" if selection == "exclude" else predicate
+        evidence[name] = {
+            "parameter": declaration.parameter,
+            "field": declaration.field,
+            "selection": selection,
+            "operands": values,
+            "predicate": resolved,
+            "parameter_names": [parameter],
+        }
+        return resolved
 
-    return _QUERY_FILTER_TOKEN.sub(replacement, query), parameters
+    return _QUERY_FILTER_TOKEN.sub(replacement, query), parameters, evidence
 
 
 def _relative_debug_path(path: Path, workspace_root: Path) -> str:
@@ -432,6 +490,7 @@ class SqlSourceRunner:
         )
         adapter_type = "unknown"
         inspection_warning = None
+        filter_evidence: dict[str, dict[str, Any]] = {}
         secrets = request.adapters.redaction_values(
             adapter_reference,
             request.adapter_bindings,
@@ -442,7 +501,7 @@ class SqlSourceRunner:
                 request.adapter_bindings,
             )
             adapter_type = str(adapter.get("type") or "unknown")
-            query, filter_parameters = resolve_query_filter_tokens(
+            query, filter_parameters, filter_evidence = resolve_query_filter_tokens_with_evidence(
                 query,
                 definition.query_filters,
                 request.context.query_parameter_state,
@@ -476,7 +535,10 @@ class SqlSourceRunner:
                     for alias, binding in definition.query_inputs.items()
                 },
                 "query_filters": {
-                    key: value.model_dump(mode="json")
+                    key: {
+                        **value.model_dump(mode="json"),
+                        **filter_evidence.get(key, {}),
+                    }
                     for key, value in definition.query_filters.items()
                 },
                 "timeout_seconds": timeout_seconds,

@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.20.6 — 2026-09-02
+
+- 远程 Parameter Domain Lookup 更新已打开的 Select 时，由 Overlay 原子刷新 Chromium Top Layer，不再依赖重复 animation frame；搜索词、输入焦点和光标位置保持不变。Chromium 回归覆盖 135 条中文宽泛搜索结果，并校验可见 rows 与原生 options 属于同一结果页。
+- Server Header Dashboard Control 完整投影 canonical multiple-select `intent`：`all_available` 显示“全选”，`explicit` 显示具体标签；快照同步不覆盖尚未提交的 draft intent。
+- Control action 的可选 `source_layer` 只在真实 Layer writer 存在时返回，普通单层 View 不再泄漏 `null` 字段；多图层 Map 的单一 writer 同时兼容省略的 `writes` 集合。
+- 发布门禁按要求执行完整非浏览器 pytest 与完整 Chromium E2E；不运行 Firefox、WebKit 或独立安装冒烟。
+
+## 0.20.5 — 2026-09-02
+
+- 修复 Workspace Asset File Source 的 Analysis Result 封存：Source Reader 与 source receipt 统一解析 `asset:<id>`，不再出现执行成功但 Result 发布阶段把 Asset 当作 Dashboard 相对路径的情况。
+- Interactive Transform 重算采用 stale-while-update：已有 View 保留当前可读内容并显示轻量 `updating`，新 generation 成功后原位替换；首次加载仍使用完整 Loading，ready/cancelled/error/unavailable 都会清理更新状态。
+- Server 作者模式的 Interactive 节点检查器新增当前会话刷新因果，显示触发 Control/输入、缺失与实际变化 Output、受影响 View，并明确该分支没有执行 Query；诊断不进入 State Snapshot、Result 或 Evidence。
+- Custom Renderer 文档、Skill 与 Scaffold 补齐既有多命名输入能力；Map 文档增加服务端 GeoJSON 裁剪 Recipe。输出级 Interactive 依赖保持延后，不新增 DSL 或协议版本。
+- 发布门禁执行完整非浏览器 pytest、Runtime 生成资产、JavaScript 语法与发行包校验；按要求不运行浏览器测试或独立安装冒烟。
+
+## 0.20.4 — 2026-09-02
+
+- 远程 Select 识别中文输入法 composition 生命周期：组合中的临时文本不触发 Lookup，`compositionend` 后才查询并更新仍然打开的候选浮层；同时保留旧 Select 同步钩子作为跨重启资产兼容回退。
+- 新增中文 IME Chromium 回归，验证组合过程中不查询、提交后候选立即更新，并且下拉浮层与搜索焦点保持不变。
+
+## 0.20.3 — 2026-09-02
+
+- 打开的远程 Select 在 Lookup 返回后立即更新当前 rows，并在下一次 animation frame 重提交流式 Overlay paint/reposition；下拉框和搜索焦点保持不变，不再需要关闭并重开才能看到搜索结果。
+- 发布门禁执行相关非浏览器测试、JavaScript 语法检查和聚焦 Chromium 搜索/分页回归；不运行完整浏览器矩阵或独立安装冒烟。
+
+## 0.20.2 — 2026-09-02
+
+- P6 作者反馈闭环完成：新增只读 `inspect query`、Dataset Transform `run --from-result`、原生 Plotly Map `layers`、Query Parameter 作者投影与 TanStack Table `emphasis.columns`；相应 Dashboard、Dependency、Runtime、State、Analysis 与 Component Registry 契约已同步升级并删除旧 characterization 命名残余。
+- Parameter Domain Lookup 成功后只更新并同步当前 Select，不再重写全部 Query Parameter 原生状态或重新同步整个表单；保留既有 request generation、级联 reconciliation、焦点与搜索状态边界。
+- 页面刷新与首次 Dashboard hydration 将 URL/tab/committed compact Query Parameter state 作为恢复快照；Domain Lookup 只补标签和 availability，不再把恢复误当成父级编辑而丢失已选 Item。
+- Browser Interactive Transform 文档与 Scaffold 明确展示 `context.inputs / context.query_inputs / context.control_inputs`；静态 `validate` 在不执行 Worker 的前提下拒绝真实代码中的旧 `context.selections`，同时忽略注释、普通字符串和模板文本。
+- 发布门禁按本次要求执行完整非浏览器 pytest、Runtime 生成资产检查、JavaScript 语法与发行构建；不运行浏览器 E2E 和独立安装冒烟。
+
 ## 0.20.1 — 2026-09-01
 
 - Server 与 portable HTML 的共同 Shell 视觉统一归属 `presentation.shell`：Dataviz Logo、品牌字体、Dashboard Control 触发器及弹层表面使用同一组语义类和设计 Token，不再由 `server.css` 与 `canvas.css` 分别解释。

@@ -117,6 +117,7 @@ def create_analysis_evidence(
                 "consumer_revisions": validated.get(
                     "consumer_revisions", {"views": {}, "transforms": {}}
                 ),
+                "diagnostics": validated.get("diagnostics", {}),
                 "snapshot": snapshots,
             }
         )

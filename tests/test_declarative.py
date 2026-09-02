@@ -183,6 +183,16 @@ def test_cli_docs_provide_onboarding_chart_recipes_and_error_recovery():
         "columns",
     ]
     assert "engine" not in chart_docs["field_matrix"]["radar"]
+    renderers = CliRunner().invoke(app, ["docs", "renderers", "--format", "json"])
+    assert renderers.exit_code == 0
+    renderer_docs = json.loads(renderers.stdout)
+    assert "descriptor.inputs.geography" in renderer_docs["named_inputs"]["javascript"]
+    assert "descriptor.inputs.main" in renderer_docs["named_inputs"]["javascript"]
+    maps = CliRunner().invoke(app, ["docs", "maps", "--format", "json"])
+    assert maps.exit_code == 0
+    assert "Polygon" in json.dumps(
+        json.loads(maps.stdout)["geographic_clipping_recipe"], ensure_ascii=False
+    )
     strict = CliRunner().invoke(app, ["docs", "strict-schema", "--format", "json"])
     assert strict.exit_code == 0
     assert "不提供 deprecated 层" in json.loads(strict.stdout)["summary"]
@@ -258,7 +268,7 @@ def test_run_cli_reads_an_explicit_named_source_output():
     assert result.exit_code == 0, result.stdout
     payload = json.loads(result.stdout)
     assert payload["target"]["reference"] == "sales-overview::source:sales/main"
-    assert payload["schema"] == "dataviz/analysis-result/v4"
+    assert payload["schema"] == "dataviz/analysis-result/v5"
     assert len(payload["outputs"][0]["preview"]) == 1
     assert payload["outputs"][0]["truncated"] is True
     assert payload["result_id"].startswith("result_")
@@ -272,7 +282,7 @@ def test_run_cli_reads_an_explicit_named_source_output():
     )
     assert debug.exit_code == 0, debug.stdout
     debug_payload = json.loads(debug.stdout)
-    assert debug_payload["schema"] == "dataviz/analysis-result/v4"
+    assert debug_payload["schema"] == "dataviz/analysis-result/v5"
     assert debug_payload["outputs"][0]["kind"] == "table"
     assert debug_payload["nodes"]["source:sales"]["diagnostics"]
 
@@ -916,7 +926,7 @@ def test_removed_schema_fields_are_rejected(removed_fragment):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v17",
+                "schema": "dataviz/dashboard/v18",
                 "kind": "dashboard",
                 "id": "strict",
                 **removed_fragment,
@@ -977,7 +987,7 @@ def test_layout_and_view_bounds_are_enforced(fragment, location):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v17",
+                "schema": "dataviz/dashboard/v18",
                 "kind": "dashboard",
                 "id": "strict",
                 **fragment,
@@ -1023,8 +1033,8 @@ def test_default_renderer_builds_templates_and_portable_report(tmp_path: Path):
     assert "Optional presentation-only polish" in report
     assert "min-height:420px" in report
     assert "global.dataviz?.view_specs" in report
-    assert '"schema": "dataviz/runtime/v13"' in report
-    assert '"schema": "dataviz/dependency-contract/v12"' in report
+    assert '"schema": "dataviz/runtime/v14"' in report
+    assert '"schema": "dataviz/dependency-contract/v13"' in report
     assert 'data-view-pipeline-node="source:sales"' in report
     assert 'data-view-renderer-signal data-status="not_run" hidden' in report
     assert 'class="dv-view-type-label">plotly</small>' in report

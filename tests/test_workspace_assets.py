@@ -8,6 +8,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from dataviz.authoring import build_context_payload
+from dataviz.analysis.runner import RunRequest, run_analysis
 from dataviz.errors import WorkspaceError
 from dataviz.execution import Executor
 from dataviz.protocols import DASHBOARD_SCHEMA, SOURCE_SCHEMA, WORKSPACE_SCHEMA
@@ -141,6 +142,18 @@ def test_workspace_asset_file_source_server_route_report_and_bundle(tmp_path: Pa
     assert result.status == "ready"
     table = result.outputs["source:sales/main"]
     assert table.metadata["row_count"] == 2
+
+    analysis = run_analysis(
+        RunRequest(
+            workspace=root,
+            target="asset-map::source:sales/main",
+            preview_rows=2,
+        ),
+        workspace,
+    )
+    assert analysis["status"] == "ready"
+    assert analysis["outputs"][0]["rows"] == 2
+    assert analysis["outputs"][0]["storage"]["mode"] == "source-receipt"
 
     client = TestClient(create_app(root))
     response = client.get("/api/dashboards/asset-map/assets/china-city")

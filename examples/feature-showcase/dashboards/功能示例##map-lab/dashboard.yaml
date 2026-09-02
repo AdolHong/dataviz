@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v17
+schema: dataviz/dashboard/v18
 kind: dashboard
 id: map-lab
 title: 地理下钻分析
@@ -73,16 +73,27 @@ views:
       layout:
         geo: {fitbounds: locations, projection: {type: mercator}}
   - id: region-revenue
-    title: 片区收入
-    description: 本地 GeoJSON Asset 随 Bundle 和 portable HTML 一起封存。
+    title: 片区收入与门店
+    description: 同一 Plotly Map 生命周期组合 GeoJSON 区域与门店点位。
     template: map
-    mark: region
-    input: source:regions/main
-    geojson: demo-regions
-    data_key: region_code
-    feature_key: properties.code
-    color: revenue
-    label: region_name
+    layers:
+      - id: regions
+        input: source:regions/main
+        mark: region
+        geojson: demo-regions
+        data_key: region_code
+        feature_key: properties.code
+        color: revenue
+        label: region_name
+      - id: stores
+        input: source:stores/main
+        mark: point
+        longitude: longitude
+        latitude: latitude
+        label: store_name
+        color: revenue
+        size: revenue
+        control_binding: {control: dashboard.store, field: store_nbr}
   - id: region-table
     title: 当前城市门店明细
     template: table

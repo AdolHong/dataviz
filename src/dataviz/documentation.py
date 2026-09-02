@@ -75,11 +75,12 @@ AUTHORING_DOCUMENTS: dict[str, dict[str, Any]] = {
     },
     "map-view": {
         "requires": ["adapter", "source", "view", "layout", "workspace-asset"],
-        "purpose": "Render point locations or values joined to a local GeoJSON Asset without custom JavaScript.",
-        "path": "Named Output + optional Workspace GeoJSON Asset → native Plotly Map View",
+        "purpose": "Render one point/region mark or ordered point + GeoJSON layers without custom JavaScript.",
+        "path": "Named Output(s) + optional Workspace GeoJSON Asset → one native Plotly Map View",
         "steps": [
             "Use a map only when geographic position or shape is part of the analytical question.",
             "Use mark=point with longitude/latitude, or mark=region with an allowlisted GeoJSON Asset and explicit join keys.",
+            "Use layers only when region and point marks must share one viewport; each Layer declares its own id, input and optional Control binding.",
             "Keep business aggregation in the Source or Transform; one region key must produce one row.",
             "Run validate, report, then visual-check in both Server and portable HTML.",
         ],
@@ -230,6 +231,11 @@ control_inputs:
 outputs:
   main: {kind: table}
 export: {mode: interactive}""",
+        "worker_example": """function transform(context) {
+  const rows = context.inputs.rows || [];
+  const factor = Number(context.control_inputs.factor ?? 1);
+  return {main: rows.map(row => ({...row, value: Number(row.value) * factor}))};
+}""",
         "allowed_fields": {
             "control": [
                 "id", "type", "value_type", "label", "default",
@@ -242,6 +248,7 @@ export: {mode: interactive}""",
         },
         "common_errors": [
             "Reading global state directly instead of declaring a control_inputs alias.",
+            "Reading removed context.selections instead of context.control_inputs.<alias>; validate reports browser_context_selections_removed without executing the Worker.",
             "Pointing a View at the Transform id without an output name.",
             "Returning a shape that disagrees with the declared output kind.",
             "Choosing server-python for code that must remain interactive in portable HTML.",
@@ -299,7 +306,7 @@ AUTHORING_ROUTES: dict[str, dict[str, Any]] = {
         "excludes": ["control", "interactive-transform"],
     },
     "map-view": {
-        "summary": "Build a native Plotly point or GeoJSON region Map View.",
+        "summary": "Build a native Plotly point, GeoJSON region, or ordered multi-Layer Map View.",
         "inherits": ["minimal"],
         "documents": ["map-view"],
         "scaffolds": ["view.map"],
@@ -637,11 +644,13 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "dataviz tree <workspace>",
             "dataviz inspect context <workspace> <dashboard-id> --focus view:<view-id> --format json",
             "dataviz inspect dependencies <workspace> <dashboard-id> --format json",
+            "dataviz inspect query <workspace> <dashboard-id> --source <source-id> --query-param key=value --format json",
             "dataviz validate <workspace> --dashboard <dashboard-id> --format json",
             "dataviz run <workspace> <dashboard-id> --query-param key=value",
             "dataviz result inspect <workspace> <result-id>",
             "dataviz result show <workspace> <result-id> '<dashboard-id>::source:<id>/<output>'",
             "dataviz report <workspace> <result-id> --output report.html",
+            "dataviz run <workspace> '<dataset-output>' --from-result <result-id>",
             "dataviz visual-check <workspace> <dashboard-id> --target both",
             "dataviz serve <workspace> --port 8080",
         ],
@@ -752,6 +761,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "show 分页读取；export 只复制一个选定的原生 Artifact，不转换格式、不修改 Result。",
             "直接 File Source 默认只封存实际读取的 path/hash 收据，不复制大型原文件；再次读取会核验变化。",
             "只有携带完整 Presentation 快照且 renderability 允许的 Dashboard/View Result 才能生成完整报告。",
+            "--from-result 只允许 Dataset Transform 复用其已声明、reference/kind/Schema/hash 兼容的输入 Artifact；不匹配时失败，绝不回退重查 Source。",
         ],
         "related": ["analysis-quickstart", "evidence-promotion", "maintenance", "html-export"],
     },
@@ -828,7 +838,7 @@ assets:
     path: assets/data/store_dictionary.csv
     media_type: text/csv""",
         "dashboard_example": """# dashboard.yaml
-schema: dataviz/dashboard/v17
+schema: dataviz/dashboard/v18
 kind: dashboard
 id: city-map
 assets: [china-city]  # Browser allowlist and portable-report dependency
@@ -1013,7 +1023,7 @@ sources:
             "id": "CLI、DAG、API 与 Presentation 使用的稳定程序身份。",
             "title": "页面内容，可与文件夹名不同；为空时回退到文件夹末级名称。",
         },
-        "minimal_example": """schema: dataviz/dashboard/v17
+        "minimal_example": """schema: dataviz/dashboard/v18
 kind: dashboard
 id: sales-overview
 title: 销售概览
@@ -1104,6 +1114,7 @@ query_parameters:
                 "multiple_select 使用 all/include/exclude/none 紧凑集合；all/none 不带 operands，include/exclude 只保存有限例外，绝不展开 10 万候选。",
                 "Query Card 的 reload 请求刷新共享物化；已有 generation 时继续读旧数据，不清空选择、不恢复 default、不执行正式 Query。",
                 "每次成功 Query 都封存完整 committed canonical state；Revert 按依赖拓扑恢复该 state，不恢复 default，也不执行正式 Query。",
+                "页面刷新与首次 Dashboard hydration 先恢复 URL/tab/committed compact state，再由 Lookup 按依赖拓扑补标签；有限 include/exclude operands 不会被当作新的父级编辑而静默删除。",
                 "最新 generation 中缺失的 committed operand 仍显示为 unavailable，不会静默删除。",
                 "Domain 失败只禁用当前 Dashboard 的查询；切换 Dashboard 会取消旧请求，损坏的草稿不能锁住 Shell 导航。",
                 "dataviz run 不隐式物化或查询候选；已知参数值的 AI 可直接提交 canonical state。",
@@ -1147,6 +1158,11 @@ query_parameters:
             "query_filters 只接受 multiple_input 或 multiple_select；single/range 参数继续使用 query_inputs，不让 SQL Filter 猜测标量语义。",
             "直接消费 candidate multiple 的 value 时必须同时消费 selection，避免把 exclude operands 错当成 include。",
         ],
+        "author_diagnostics": {
+            "cli": "dataviz inspect query <workspace> <dashboard> --source <source> --query-param '<id>=<json>'",
+            "ui": "Query Card 的 { } 按钮只读显示 canonical state、operand/available/unavailable 数、depends_on 与最近一次确定性协调结果；它不改变 Query。",
+            "boundary": "inspect query 只解释参数化 statement、脱敏 bindings 和 query_filter predicate，不执行 Source，也不隐式创建候选物化。实际行数、耗时、缓存与错误仍以 Result/Execution evidence 为准。",
+        },
         "sql_filter_example": """# dashboard.yaml
 query_parameters:
   - id: item_nbrs
@@ -1275,6 +1291,13 @@ timeout_seconds: 120
         "runtimes": {
             "browser-js": "JavaScript Web Worker；Server 与 HTML 共用；支持 Promise、progress、timeout、cancel。",
             "server-python": "独立服务端进程；可用任意已安装 Python 依赖；不能访问 Adapter；HTML 只允许 snapshot/unavailable。",
+        },
+        "runtime_context": {
+            "inputs": "context.inputs.<alias> 或 context.input(<alias>) 读取 inputs 中声明的 Base/Derived Named Output；table 输入也可用 context.table(<alias>)。",
+            "query_inputs": "context.query_inputs.<alias> 只读取 query_inputs 中显式声明的 Query Parameter projection。",
+            "control_inputs": "context.control_inputs.<alias> 只读取 control_inputs 中 mode:value 的局部 alias；mode:filter 已在代码执行前过滤对应输入。不存在 context.selections。",
+            "progress": "context.progress(value, message) 报告当前 generation 的有限进度；旧 generation 被 supersede 后不能覆盖新结果。",
+            "boundary": "Browser Worker 没有 DOM、Adapter、Source、全局 Control Store 或隐式 Query API；YAML 未声明的值不进入 context。",
         },
         "runtime_choice": {
             "default_order": ["browser-js", "server-python"],
@@ -1565,6 +1588,17 @@ control_components:
             "rule": "Renderer 作者只实现四个 hook；平台宿主负责 Empty/Restore，Adapter/Chart Service 负责 Interaction/Resize，Server 与 portable HTML 必须通过同一矩阵。",
         },
         "isolation": "一个 Renderer 失败只影响自己的 View；输入没有变化时不 update。",
+        "named_inputs": {
+            "yaml": """- id: geography-and-stores
+  template: custom
+  renderer: geography-and-stores
+  input: interactive:geo-scope/stores
+  inputs:
+    geography: dataset:map-geography/main
+""",
+            "javascript": "const stores = descriptor.inputs.main;\nconst geography = descriptor.inputs.geography;",
+            "rule": "input 是主 Named Output，inputs 中每个 alias 是额外 Named Output；不要为了让 Renderer 接收多张表而拼接 row_kind 混合表。descriptor.rows 只保留主输入捷径。",
+        },
         "chart_service": {
             "api": "Custom Renderer 使用 context.charts.plotly 的 mount/update/resize/dispose，输入是 Plotly data/layout/config。",
             "ownership": "平台统一 Theme、responsive、page-first wheel、ResizeObserver、首屏 bootstrap、更新、Empty/Restore 与释放。",
@@ -1607,7 +1641,7 @@ control_components:
         },
     },
     "maps": {
-        "summary": "原生 Map View 用唯一 Plotly Renderer 表达经纬度点位或本地 GeoJSON 区域指标；位置必须真正参与分析问题。",
+        "summary": "原生 Map View 用唯一 Plotly Renderer 表达经纬度点位、本地 GeoJSON 区域指标，或同一 viewport 内的有序 layers；位置必须真正参与分析问题。",
         "point_example": """- id: stores
   template: map
   mark: point
@@ -1659,12 +1693,41 @@ views:
     city: {mode: filter, control: dashboard.city, field: city, inputs: [main], empty: match_none}
   control_binding: {control: dashboard.store, field: store_nbr}
 """,
+        "layers_example": """- id: city-and-stores
+  template: map
+  layers:
+    - id: boundary
+      input: source:city-metrics/main
+      mark: region
+      geojson: china-city
+      data_key: city_code
+      feature_key: properties.adcode
+      color: revenue
+    - id: stores
+      input: source:stores/main
+      mark: point
+      longitude: longitude
+      latitude: latitude
+      label: store_name
+      control_binding: {control: dashboard.store, field: store_nbr}
+""",
         "contracts": {
             "point": "longitude/latitude 必填；label/color/size 可选。经纬度必须是有限数值。",
             "region": "geojson/data_key/feature_key/color 必填；数据 key 与 GeoJSON feature key 都必须唯一且能连接。",
             "asset": "GeoJSON 必须先在 workspace.yaml 注册，再由 Dashboard.assets 显式 allowlist；Bundle 与 portable HTML 自动携带。",
             "interaction": "control_binding 继续写同一 ControlRuntime；writes 可让一次点击原子更新 Store 与 City。全国图不要消费详情 City/Store，城市图消费 City 并继续写 Store；点击、矩形和套索不创建地图专属状态。内置 Map 会在点位集合变化时重新 fitbounds，只改高亮则保留当前视野。",
+            "layers": "单 mark 与 layers 互斥。每个 Layer 有独立 input/mark/字段与可选 control_binding，但共享一个 Plotly 生命周期、viewport 和 ControlRuntime；writer provenance 同时记录 source_view/source_layer。",
             "escape_hatch": "复杂样式继续使用 options.trace、options.layout 和 config；只有超出 point/region 时才使用 Custom Renderer。",
+        },
+        "geographic_clipping_recipe": {
+            "when": "全国 GeoJSON 太大，或结果只涉及少量省市时，在 server-python Dataset Transform 中按实际行政区范围裁剪，再把结果作为 Named Output 交给 Map。",
+            "steps": [
+                "先规范化 province_code/city_code，并显式处理直辖市。",
+                "同时接受 Polygon 与 MultiPolygon；无效 Geometry 应修复或稳定失败，不能静默丢弃。",
+                "只保留当前结果范围需要的 features，并保留 join key 与必要 label。",
+                "Map viewport 从裁剪后区域和可见点位的并集计算；Store 高亮变化不应重新 fit。",
+            ],
+            "boundary": "这是 Transform Recipe，不是 GIS DSL。聚合、空间裁剪和业务范围属于 Python/JavaScript；View 只负责渲染与交互。",
         },
         "non_goals": [
             "远程底图 URL 或 token",
@@ -1692,10 +1755,22 @@ views:
             "offline": "Server 与 portable HTML 共用 Dataviz 本地打包的固定版本资产。",
         },
         "options": {
-            "presentation": ["labels", "formats", "align", "widths", "striped", "compact", "wrap", "layout", "show_count"],
+            "presentation": ["labels", "formats", "align", "widths", "wrap", "emphasis.columns", "striped", "compact", "layout", "show_count"],
             "behavior": ["sortable", "initial_sort", "sort_desc_first", "searchable", "initial_search", "page_size", "hidden_columns", "column_order", "pinned_columns"],
-            "rule": "默认只显示表头和数据；show_count、搜索框和分页都必须由作者显式启用。",
+            "rule": "默认只显示表头和数据；show_count、搜索框和分页都必须由作者显式启用。emphasis.columns 只静态强调少量关键列，不表达条件样式或业务计算。",
         },
+        "declarative_example": """- id: revenue-detail
+  template: table
+  input: source:revenue/main
+  options:
+    labels: {store_nbr: Store, revenue: Revenue}
+    formats: {revenue: ',.2f'}
+    align: {revenue: right}
+    widths: {store_nbr: 160}
+    wrap: false
+    emphasis:
+      columns: [revenue]
+""",
         "custom_service": {
             "managed": "context.tables.tanstack.mount(node, {data, columns, options}) 返回可 update/resize/dispose 的托管 state。",
             "raw": "context.tables.tanstack.core 暴露 constructTable、tableFeatures、ColumnDef 所需函数和完整 feature/plugin 原语；作者可完全自定义 markup 与 CSS。",

@@ -97,7 +97,7 @@ const datavizBuildStateSnapshot = () => {
     };
   });
   const snapshot = {
-    schema:'dataviz/state-snapshot/v5',
+    schema:'dataviz/state-snapshot/v6',
     dashboard:window.dataviz.dashboard_id,
     query_stale:queryStale,
     items,

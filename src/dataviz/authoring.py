@@ -792,7 +792,7 @@ def _profile_files(profile: str, item_id: str) -> dict[str, str]:
         "runtime": {"browser_table_transport": "json"},
     }
     dashboard: dict[str, Any] = {
-        "schema": "dataviz/dashboard/v17",
+        "schema": "dataviz/dashboard/v18",
         "kind": "dashboard",
         "id": item_id,
         "title": item_id.replace("-", " ").title(),
@@ -928,7 +928,10 @@ def _profile_files(profile: str, item_id: str) -> dict[str, str]:
             "    return {node};\n"
             "  },\n"
             "  update(_context, descriptor, state) {\n"
-            "    state.node.textContent = JSON.stringify(descriptor.rows || [], null, 2);\n"
+            "    // descriptor.inputs.main is the primary input; additional View inputs\n"
+            "    // are available under their declared aliases.\n"
+            "    const rows = descriptor.inputs.main || descriptor.rows || [];\n"
+            "    state.node.textContent = JSON.stringify(rows, null, 2);\n"
             "    return state;\n"
             "  },\n"
             "  dispose(_context, state) { state.node.remove(); },\n"
@@ -957,7 +960,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         files = {
             "dashboard.yaml": _yaml(
                 {
-                    "schema": "dataviz/dashboard/v17",
+                    "schema": "dataviz/dashboard/v18",
                     "kind": "dashboard",
                     "id": item_id,
                     "title": item_id.replace("-", " ").title(),
@@ -1167,6 +1170,8 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
             ),
             f"{item_id}.{suffix}": (
                 "function transform(context) {\n"
+                "  // inputs/query_inputs/control_inputs aliases come only from this Transform YAML.\n"
+                "  // Example: a declared control_inputs.factor is context.control_inputs.factor.\n"
                 "  return {main: context.inputs.data.map(row => ({...row}))};\n"
                 "}\n"
                 if suffix == "js"
@@ -1202,6 +1207,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         if template == "map":
             definition.update(
                 {
+                    "input": "source:data/main",
                     "mark": "point",
                     "longitude": "longitude",
                     "latitude": "latitude",
@@ -1387,7 +1393,9 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                 "    return {node};\n"
                 "  },\n"
                 "  update(_context, descriptor, state) {\n"
-                "    state.node.textContent = JSON.stringify(descriptor.rows || descriptor.value);\n"
+                "    // Add View inputs aliases when this renderer consumes more outputs.\n"
+                "    const rows = descriptor.inputs.main || descriptor.rows || [];\n"
+                "    state.node.textContent = JSON.stringify(rows);\n"
                 "    return state;\n"
                 "  },\n"
                 "  dispose(_context, state) { state.node.remove(); },\n"

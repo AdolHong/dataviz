@@ -72,11 +72,12 @@ dataviz tree <workspace>
 dataviz inspect context <workspace> <dashboard> --focus view:<id> --format json
 dataviz inspect dependencies <workspace> <dashboard> --format json
 dataviz inspect layout <workspace> <dashboard> --format json
+dataviz inspect query <workspace> <dashboard> --source <source-id> --query-param key=value --format json
 ```
 
 Use `dataviz schemas <schema> --full --format json` only when exact fields are needed. Use `dataviz components list` to discover components, `dataviz components show <component-id> --format json` for one contract, and `dataviz components check --format json` to validate installed packages. Use `dataviz scaffold <recipe> --format json` for a small current-schema example instead of copying an old Dashboard.
 
-Use `dataviz docs --search '<term>'` or `dataviz docs troubleshooting` when a diagnostic or Runtime boundary is unclear. Read architecture documents only when changing the Runtime itself.
+Use `inspect query` before running when the question is how canonical Query Parameter state becomes `query_filter` predicates and bound values. It is an explanation only: `executed: false` means row counts, cache hits, timings, and failures remain Result/Execution evidence. Use `dataviz docs --search '<term>'` or `dataviz docs troubleshooting` when a diagnostic or Runtime boundary is unclear. Read architecture documents only when changing the Runtime itself.
 
 ## Quick start: build a Dashboard
 
@@ -181,7 +182,9 @@ Keep one Section focused on one analytical question. Titles should name the subj
 
 Use a map only when geographic position or region shape changes the judgment. Prefer Bar or Table for precise regional ranking.
 
-Start with `dataviz docs --task map-view --format json`, then read `dataviz docs maps --format json` for the current point, GeoJSON region, viewport, Asset, and Overview → Detail contracts. Keep the overview independent of detail filters. When one gesture must update several Controls, use the documented compound writer action; do not emulate an atomic selection with callback chains or sequential writes.
+Start with `dataviz docs --task map-view --format json`, then read `dataviz docs maps --format json` for point, GeoJSON region, `layers`, viewport, Asset, and Overview → Detail contracts. Use one Map View with explicit `layers` when region boundaries and point locations must share a viewport; each Layer owns its input and optional Control binding, while the View keeps one Plotly lifecycle and one ControlRuntime. Keep the overview independent of detail filters. When one gesture must update several Controls, use the documented compound writer action; do not emulate an atomic selection with callback chains or sequential writes.
+
+When a national GeoJSON is too large but the result covers only a few regions, clip it in a server Python Dataset Transform and emit the reduced geography as a Named Output. Normalize administrative codes, handle municipalities, Polygon/MultiPolygon, invalid geometry, and derive the viewport from the reduced feature/point set. This is ordinary Transform code, not a reason to add GIS DSL.
 
 ## Reuse existing Dashboard knowledge
 
@@ -239,6 +242,8 @@ dataviz run <workspace> '<target-reference>' \
 
 Use `--also '<target-reference>'` to seal compatible additional Outputs in the same execution. Let `--runtime auto` select the declared Runtime unless debugging a specific Runtime boundary. Use `--allow-network` only when the target explicitly requires external browser access.
 
+To debug a Dataset Transform without querying its upstream Source again, run the same canonical Transform Target with `--from-result <result-id>`. Dataviz accepts only the Transform's declared direct inputs when reference, kind, Schema, and stored Artifact hash remain compatible; mismatch fails and never falls back to the database. This creates a new immutable Result and leaves the input Result unchanged. Do not use it for Dashboard or Interactive targets.
+
 The terminal preview is not the stored result size. `run` executes the full reachable DAG, seals the complete native Artifacts, and returns a `result_id`; `--preview-rows` changes only stdout. Do not rerun just to see more rows.
 
 Read the sealed Result instead:
@@ -272,10 +277,16 @@ Use an Analysis Overlay only for an explicitly temporary experiment that substit
 - Query Parameters change query identity; Controls own post-query typed state. Each View or Interactive Transform declares whether it consumes that state as a filter or a value. Do not substitute one lifecycle for the other merely for UI convenience.
 - SQL-backed Query Parameter choices belong to Parameter Domains, not Sources or Interactive Transforms. Candidate discovery is optional for AI: known values may be passed directly as canonical Query Parameter state without loading the UI catalog.
 - Candidate-backed `multiple_select` uses `all/include/exclude/none`; compact states never expand the full candidate relation. Prefer Source `query_filters` and explicitly choose whether an empty selection passes through or matches no rows. Read `dataviz docs query-parameters --format json` before implementing SQL-backed choices, cascades, Revert, or large entity lookup.
+- Treat page reload and initial Dashboard hydration as compact-state restoration, not as a new parent edit. URL/tab/committed `include` or `exclude` operands must survive while Lookup restores labels; values absent from the latest generation remain unavailable instead of being silently removed.
+- When debugging Query Parameters in Server, enable the Query Card `{ }` author projection to see selection mode, operand counts, available/unavailable counts, dependencies, and the latest deterministic reconciliation. It is read-only and does not replace `inspect query` or Result evidence.
 - Keep ordinary SQL and files Dashboard-local. Share only genuinely common Parameter Domains and stable Workspace Assets. Read `dataviz docs workspace-assets --format json` before registering shared files or creating a Bundle; never use parent traversal or absolute local paths as a portability shortcut.
 - Sources are the only external data entry. Server Dataset Transforms create Base Outputs; Interactive Transforms create Derived Outputs.
+- Browser Interactive Transform code reads only YAML-declared aliases: `context.inputs.<alias>`, `context.query_inputs.<alias>`, and `context.control_inputs.<alias>`. `mode: filter` is applied before execution; `mode: value` appears in `control_inputs`. Never use the removed `context.selections` API.
 - Renderers consume Named Outputs and View descriptors. Do not put SQL, model inference, or reusable business calculations in Presentation JavaScript.
+- A Custom View declares its primary `input` and may add named `inputs` aliases; read them as `descriptor.inputs.main` and `descriptor.inputs.<alias>`. Keep geography, stores, summaries, and other relations separate; do not concatenate unrelated tables with a synthetic `row_kind` merely to pass them to one Renderer. `descriptor.rows` is only the primary-input shortcut.
+- During Interactive Transform recomputation, an already mounted View may keep its prior content with an `updating` signal. Treat it as visual continuity only: new consumer evidence is committed only after the current generation succeeds. In Server author mode, inspect an Interactive node to see the Control/Input cause, changed Outputs, affected Views, and confirmation that no Query ran.
 - Use Plotly as the author chart interface and the default TanStack-based Table for tabular presentation. Do not introduce another chart/table stack casually.
+- For declarative Table presentation, reuse `labels`, `formats`, `align`, `widths`, and `wrap`; use `options.emphasis.columns` only to statically emphasize a few important columns. Conditional formatting and custom cells belong to TanStack/Custom Renderer code, not another DSL.
 - Keep Dashboard logic in `dashboard.yaml`; keep optional visual overrides in `presentation.yaml` and narrowly scoped assets.
 
 ### Change one layer at a time

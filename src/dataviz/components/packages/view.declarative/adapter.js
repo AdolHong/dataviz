@@ -18,19 +18,51 @@
     const node = id => document.querySelector(
       `.dv-view[data-view-id="${CSS.escape(id)}"]`
     );
+    const hasControlBinding = descriptor => Boolean(
+      descriptor?.controlBinding
+      || Object.keys(descriptor?.controlBindings || {}).length
+    );
     const bindingContext = (root, key, descriptor, generation) => {
-      const binding = descriptor?.controlBinding;
+      const bindings = descriptor?.controlBindings || {};
+      const binding = descriptor?.controlBinding || Object.values(bindings)[0];
       if (!binding) return null;
       return {
         ...binding,
-        emit:(action, data = null) => global.dataviz.controlActions.dispatch({
-          action_id:crypto.randomUUID(),
-          source_view:key,
-          control:binding.control,
-          generation:root?._datavizRenderGeneration ?? generation ?? 0,
-          action,
-          data,
-        }),
+        emit:(action, data = null) => {
+          if (action === 'reset' && !descriptor?.controlBinding) {
+            return Promise.all(Object.entries(bindings).map(([sourceLayer, target]) => (
+              global.dataviz.controlActions.dispatch({
+                action_id:crypto.randomUUID(),
+                source_view:key,
+                source_layer:sourceLayer,
+                control:target.control,
+                generation:root?._datavizRenderGeneration ?? generation ?? 0,
+                action,
+                data:null,
+              })
+            )));
+          }
+          const sourceLayers = [...new Set(
+            (Array.isArray(data) ? data : [data])
+              .map(item => item?.__datavizSourceLayer)
+              .filter(item => item != null)
+          )];
+          if (sourceLayers.length > 1) {
+            return Promise.resolve({status:'rejected', code:'control_action_mixed_layers'});
+          }
+          const sourceLayer = sourceLayers[0] ?? data?.__datavizSourceLayer ?? null;
+          const effective = sourceLayer == null ? binding : bindings[sourceLayer];
+          if (!effective) return Promise.resolve({status:'rejected', code:'control_action_layer_invalid'});
+          return global.dataviz.controlActions.dispatch({
+            action_id:crypto.randomUUID(),
+            source_view:key,
+            ...(sourceLayer == null ? {} : {source_layer:sourceLayer}),
+            control:effective.control,
+            generation:root?._datavizRenderGeneration ?? generation ?? 0,
+            action,
+            data,
+          });
+        },
       };
     };
     const context = (root, body, key, descriptor = null, generation = null) => ({
@@ -59,6 +91,7 @@
     };
     const applyStatus = (root, status, label = status) => {
       if (!root) return;
+      if (status !== 'loading') delete root.dataset.viewUpdating;
       root.dataset.viewStatus = status;
       components.state?.apply(root, status, {label});
       const statusNode = root.querySelector('[data-view-status-label]');
@@ -72,6 +105,18 @@
           setRendererSignal(root, status);
         }
       }
+    };
+    const applyUpdating = (root, active = true, label = 'updating') => {
+      if (!root) return;
+      if (!active) {
+        delete root.dataset.viewUpdating;
+        return;
+      }
+      root.dataset.viewUpdating = 'true';
+      root.setAttribute('aria-busy', 'true');
+      const statusNode = root.querySelector('[data-view-status-label]');
+      if (statusNode) statusNode.textContent = label;
+      setRendererSignal(root, 'loading', {active:true});
     };
     const releaseWheelAtBoundary = (
       host,
@@ -243,62 +288,79 @@
     };
     const geojsonFeatureIndexes = new WeakMap();
     const materializePlotlyDescriptor = async (descriptor, renderContext) => {
-      if (!descriptor.geojsonAsset) {
+      const requests = descriptor.geojsonAssets || (
+        descriptor.geojsonAsset ? [{
+          trace:(descriptor.data || []).findIndex(trace => trace?.type === 'choropleth'),
+          asset:descriptor.geojsonAsset,
+        }] : []
+      );
+      if (!requests.length) {
         return managedPlotlyDescriptor(descriptor, renderContext);
       }
-      const geojson = await renderContext.assets.json(descriptor.geojsonAsset);
-      if (!geojson || typeof geojson !== 'object' || !Array.isArray(geojson.features)) {
-        throw new Error(
-          `GeoJSON Asset ${descriptor.geojsonAsset} must be a FeatureCollection with features[]`
+      const data = [...(descriptor.data || [])];
+      const signatures = [];
+      for (const request of requests) {
+        const regionTrace = data[request.trace];
+        if (!regionTrace || regionTrace.type !== 'choropleth') {
+          throw new Error(`GeoJSON Asset ${request.asset} points to a non-region trace`);
+        }
+        const geojson = await renderContext.assets.json(request.asset);
+        if (!geojson || typeof geojson !== 'object' || !Array.isArray(geojson.features)) {
+          throw new Error(
+            `GeoJSON Asset ${request.asset} must be a FeatureCollection with features[]`
+          );
+        }
+        const featurePath = String(regionTrace.featureidkey || 'id').split('.');
+        const featureValue = feature => featurePath.reduce(
+          (value, part) => value == null ? undefined : value[part],
+          feature,
         );
-      }
-      const regionTrace = (descriptor.data || []).find(trace => trace?.type === 'choropleth');
-      const featurePath = String(regionTrace?.featureidkey || 'id').split('.');
-      const featureValue = feature => featurePath.reduce(
-        (value, part) => value == null ? undefined : value[part],
-        feature,
-      );
-      const featureIndexKey = featurePath.join('.');
-      let indexes = geojsonFeatureIndexes.get(geojson);
-      if (!indexes) {
-        indexes = new Map();
-        geojsonFeatureIndexes.set(geojson, indexes);
-      }
-      let featureKeys = indexes.get(featureIndexKey);
-      if (!featureKeys) {
-        featureKeys = new Set();
-        (geojson?.features || []).forEach((feature, index) => {
-          const value = featureValue(feature);
-          if (value == null || value === '') {
-            throw new Error(
-              `GeoJSON Asset ${descriptor.geojsonAsset} feature ${index + 1} has no ${regionTrace?.featureidkey}`
-            );
-          }
-          const signature = JSON.stringify(value);
-          if (featureKeys.has(signature)) {
-            throw new Error(
-              `GeoJSON Asset ${descriptor.geojsonAsset} has duplicate ${regionTrace?.featureidkey}: ${value}`
-            );
-          }
-          featureKeys.add(signature);
-        });
-        indexes.set(featureIndexKey, featureKeys);
-      }
-      const missingLocations = (regionTrace?.locations || []).filter(
-        value => !featureKeys.has(JSON.stringify(value)),
-      );
-      if (missingLocations.length) {
-        throw new Error(
-          `GeoJSON Asset ${descriptor.geojsonAsset} does not contain map keys: ${missingLocations.slice(0, 5).join(', ')}`
+        const featureIndexKey = featurePath.join('.');
+        let indexes = geojsonFeatureIndexes.get(geojson);
+        if (!indexes) {
+          indexes = new Map();
+          geojsonFeatureIndexes.set(geojson, indexes);
+        }
+        let featureKeys = indexes.get(featureIndexKey);
+        if (!featureKeys) {
+          featureKeys = new Set();
+          (geojson.features || []).forEach((feature, index) => {
+            const value = featureValue(feature);
+            if (value == null || value === '') {
+              throw new Error(
+                `GeoJSON Asset ${request.asset} feature ${index + 1} has no ${regionTrace.featureidkey}`
+              );
+            }
+            const signature = JSON.stringify(value);
+            if (featureKeys.has(signature)) {
+              throw new Error(
+                `GeoJSON Asset ${request.asset} has duplicate ${regionTrace.featureidkey}: ${value}`
+              );
+            }
+            featureKeys.add(signature);
+          });
+          indexes.set(featureIndexKey, featureKeys);
+        }
+        const missingLocations = (regionTrace.locations || []).filter(
+          value => !featureKeys.has(JSON.stringify(value)),
         );
+        if (missingLocations.length) {
+          throw new Error(
+            `GeoJSON Asset ${request.asset} does not contain map keys: ${missingLocations.slice(0, 5).join(', ')}`
+          );
+        }
+        data[request.trace] = {...regionTrace, geojson};
+        signatures.push(`${request.asset}:${featureIndexKey}`);
       }
-      const {geojsonAsset: _asset, ...resolved} = descriptor;
+      const {
+        geojsonAsset: _asset,
+        geojsonAssets: _assets,
+        ...resolved
+      } = descriptor;
       return managedPlotlyDescriptor({
         ...resolved,
-        geojsonSignature:`${descriptor.geojsonAsset}:${featureIndexKey}`,
-        data:(resolved.data || []).map(trace => (
-          trace?.type === 'choropleth' ? {...trace, geojson} : trace
-        )),
+        geojsonSignature:signatures.join('|'),
+        data,
       }, renderContext);
     };
     const installPlotlyDragModeToggle = host => {
@@ -375,8 +437,8 @@
           state.updating = true;
           try {
             const selectionOnly = Boolean(
-              state.specification?.controlBinding
-              && specification.controlBinding
+              hasControlBinding(state.specification)
+              && hasControlBinding(specification)
               && plotlyStructuralSignature(state.specification)
                 === plotlyStructuralSignature(specification)
             );
@@ -557,6 +619,7 @@
             datavizColumn:column,
             datavizAlign:inferTableAlign(rows, column, options.align?.[column]),
             datavizWrap:Boolean(options.wrap || options.wrap_columns?.includes?.(column)),
+            datavizEmphasis:Boolean(options.emphasis?.columns?.includes?.(column)),
           },
         };
       });
@@ -602,6 +665,7 @@
           pinning:normalizeColumnPinning(options),
           pageSize,
           sortable:options.sortable !== false,
+          emphasis:options.emphasis?.columns || [],
         }),
       };
     };
@@ -611,6 +675,7 @@
       node.dataset.column = columnName;
       node.dataset.align = meta.datavizAlign || options.align?.[columnName] || 'left';
       if (meta.datavizWrap) node.dataset.wrap = 'true';
+      if (meta.datavizEmphasis) node.dataset.emphasis = 'true';
       const pinned = column.getIsPinned?.();
       if (column.columnDef.size != null || pinned) {
         node.style.width = `${column.getSize()}px`;
@@ -1301,7 +1366,8 @@
     const renderInto = (root, key, producer) => {
       const previousStatus = root?.dataset.viewStatus || null;
       setRendererSignal(root, 'loading', {active:true});
-      applyStatus(root, 'loading', 'rendering');
+      if (states.has(key)) applyUpdating(root, true, 'updating');
+      else applyStatus(root, 'loading', 'rendering');
       if (root) {
         delete root.dataset.rendererError;
         root._datavizRenderGeneration = (root._datavizRenderGeneration || 0) + 1;
@@ -1465,7 +1531,7 @@
         document.removeEventListener('pointercancel', state.controlPointerCancelHandler, true);
         state.controlPointerCancelHandler = null;
       }
-      if (!descriptor.controlBinding) {
+      if (!hasControlBinding(descriptor)) {
         state.controlPointerCandidate = null;
         state.controlPointerRelease = null;
         clearPlotlyPointerFallback(state);
@@ -1546,7 +1612,7 @@
         const keyed = new Map((event?.points || []).map(point => (
           writerDatum(point.customdata)
         )).filter(item => item.__datavizControlValue !== undefined).map(item => [
-          JSON.stringify(item.__datavizControlValue), item,
+          JSON.stringify([item.__datavizSourceLayer ?? null, item.__datavizControlValue]), item,
         ]));
         const data = [...keyed.values()];
         // Plotly can emit an empty selection after a point click or a
@@ -1676,7 +1742,7 @@
     });
 
     const adapter = {
-      protocol:'dataviz/runtime/v13',
+      protocol:'dataviz/runtime/v14',
       lifecycle:Object.freeze({
         hooks:Object.freeze(['validate', 'mount', 'update', 'dispose']),
         phases:Object.freeze([
@@ -1687,6 +1753,7 @@
       states,
       node,
       setStatus:applyStatus,
+      setUpdating:applyUpdating,
       renderInto,
       render:(id, producer) => renderInto(node(id), id, producer),
       completion:rendererCompletion,

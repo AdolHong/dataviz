@@ -272,25 +272,38 @@ def _normalize_writer_provenance(
         )
     action_id = value.get("action_id")
     source_view = value.get("source_view")
+    source_layer = value.get("source_layer")
     action = value.get("action")
     if not isinstance(action_id, str) or not action_id.strip() or len(action_id) > 128:
         raise ValidationFailure(
             f"Writer provenance at {path} has an invalid action_id",
             details={"code": "control_writer_action_id_invalid", "path": path},
         )
-    allowed_views = {
-        edge.view_id
+    allowed_sources = {
+        (edge.view_id, edge.source_layer)
         for edge in dashboard.dependency_contract.controls[control].writer_edges
     }
-    if not isinstance(source_view, str) or source_view not in allowed_views:
+    source = (source_view, source_layer)
+    if (
+        not isinstance(source_view, str)
+        or (source_layer is not None and not isinstance(source_layer, str))
+        or source not in allowed_sources
+    ):
         raise ValidationFailure(
-            f"Writer provenance at {path} has an invalid source View",
+            f"Writer provenance at {path} has an invalid source View/Layer",
             details={
                 "code": "control_writer_source_view_invalid",
                 "path": path,
                 "control": control,
                 "source_view": source_view,
-                "allowed_views": sorted(allowed_views),
+                "source_layer": source_layer,
+                "allowed_sources": [
+                    {"source_view": view, "source_layer": layer}
+                    for view, layer in sorted(
+                        allowed_sources,
+                        key=lambda item: (item[0], item[1] or ""),
+                    )
+                ],
             },
         )
     if action not in {"select", "select_many", "clear", "reset"}:
@@ -306,6 +319,7 @@ def _normalize_writer_provenance(
         "revision": revision,
         "action_id": action_id,
         "source_view": source_view,
+        **({"source_layer": source_layer} if source_layer is not None else {}),
         "action": action,
     }
 

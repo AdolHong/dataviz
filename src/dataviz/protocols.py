@@ -4,25 +4,26 @@ from typing import Any
 
 
 WORKSPACE_SCHEMA = "dataviz/workspace/v2"
-DASHBOARD_SCHEMA = "dataviz/dashboard/v17"
+DASHBOARD_SCHEMA = "dataviz/dashboard/v18"
 PARAMETER_DOMAIN_SCHEMA = "dataviz/parameter-domain/v2"
 PARAMETER_DOMAIN_CONTRACT_SCHEMA = "dataviz/parameter-domain-contract/v3"
 PARAMETER_LOOKUP_SCHEMA = "dataviz/parameter-lookup/v1"
 PARAMETER_MATERIALIZATION_SCHEMA = "dataviz/parameter-materialization/v1"
+QUERY_INSPECTION_SCHEMA = "dataviz/query-inspection/v1"
 PRESENTATION_SCHEMA = "dataviz/presentation/v2"
 SOURCE_SCHEMA = "dataviz/source/v6"
 DATASET_TRANSFORM_SCHEMA = "dataviz/dataset-transform/v3"
 INTERACTIVE_TRANSFORM_SCHEMA = "dataviz/interactive-transform/v4"
-DEPENDENCY_CONTRACT_SCHEMA = "dataviz/dependency-contract/v12"
+DEPENDENCY_CONTRACT_SCHEMA = "dataviz/dependency-contract/v13"
 LAYOUT_CONTRACT_SCHEMA = "dataviz/layout-contract/v1"
-STATE_SNAPSHOT_SCHEMA = "dataviz/state-snapshot/v5"
-RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v13"
+STATE_SNAPSHOT_SCHEMA = "dataviz/state-snapshot/v6"
+RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v14"
 TARGET_REFERENCE_SCHEMA = "dataviz/target-reference/v1"
 ANALYSIS_ENTRY_SCHEMA = "dataviz/analysis-entry/v1"
 ANALYSIS_CATALOG_SCHEMA = "dataviz/analysis-catalog/v1"
 ANALYSIS_DESCRIBE_SCHEMA = "dataviz/analysis-describe/v1"
-ANALYSIS_RESULT_SCHEMA = "dataviz/analysis-result/v4"
-ANALYSIS_EVIDENCE_SCHEMA = "dataviz/analysis-evidence/v4"
+ANALYSIS_RESULT_SCHEMA = "dataviz/analysis-result/v5"
+ANALYSIS_EVIDENCE_SCHEMA = "dataviz/analysis-evidence/v5"
 WORKSPACE_CHANGE_SCHEMA = "dataviz/workspace-change/v1"
 DASHBOARD_BUNDLE_SCHEMA = "dataviz/dashboard-bundle/v2"
 REPORT_MANIFEST_SCHEMA = "dataviz/report-manifest/v3"
@@ -35,6 +36,7 @@ CURRENT_PROTOCOL_SCHEMAS: dict[str, str] = {
     "parameter_domain_contract": PARAMETER_DOMAIN_CONTRACT_SCHEMA,
     "parameter_lookup": PARAMETER_LOOKUP_SCHEMA,
     "parameter_materialization": PARAMETER_MATERIALIZATION_SCHEMA,
+    "query_inspection": QUERY_INSPECTION_SCHEMA,
     "presentation": PRESENTATION_SCHEMA,
     "source": SOURCE_SCHEMA,
     "dataset_transform": DATASET_TRANSFORM_SCHEMA,
@@ -56,6 +58,17 @@ CURRENT_PROTOCOL_SCHEMAS: dict[str, str] = {
 
 
 PROTOCOL_BOUNDARIES: tuple[dict[str, Any], ...] = (
+    {
+        "boundary": "query-inspection",
+        "schema": QUERY_INSPECTION_SCHEMA,
+        "owner": "execution.query_inspection/sources.sql",
+        "producer": "dataviz inspect query",
+        "consumer": "Dashboard authors and AI tooling",
+        "persisted": False,
+        "strictness": "exact-current",
+        "compatibility": "package-lockstep",
+        "conformance_suite": "query-parameter-state,sql-query-filter,redaction",
+    },
     {
         "boundary": "portable-report-manifest",
         "schema": REPORT_MANIFEST_SCHEMA,
@@ -226,7 +239,7 @@ PROTOCOL_CHANGE_RECORDS: tuple[dict[str, str], ...] = (
         "change": "atomic-compound-control-writer",
         "classification": "authoring and private lockstep additive",
         "decision": (
-            "dashboard v17, dependency contract v12, runtime v13 and component registry 5.9.0; "
+            "dashboard v17, dependency contract v12, runtime v13 and component registry 6.0.0; "
             "state snapshot v5 and analysis result/evidence v4 unchanged"
         ),
         "reason": (

@@ -1218,6 +1218,95 @@ def test_query_parameters_are_an_inline_query_card_toggled_by_the_header_run_con
     ]
 
 
+def test_query_parameter_author_mode_is_a_read_only_canonical_projection():
+    template = (ROOT / "src" / "dataviz" / "server" / "templates" / "index.html").read_text()
+    script = (ROOT / "src" / "dataviz" / "server" / "static" / "app.js").read_text()
+    style = (ROOT / "src" / "dataviz" / "server" / "static" / "server.css").read_text()
+
+    assert 'id="query-parameter-author-mode"' in template
+    assert "queryAuthorMode: false" in script
+    assert "function renderQueryAuthorEvidence()" in script
+    projection = script[
+        script.index("function renderQueryAuthorEvidence()"):
+        script.index("function controlField(control)")
+    ]
+    assert "runtime.queryParameterState" in projection
+    assert "runtime.queryLookup" in projection
+    assert "runtime.queryTransitionEvidence" in projection
+    assert "depends_on=" in projection
+    assert "fetch(" not in projection
+    assert "request(" not in projection
+    assert ".query-parameter-evidence[hidden]{display:none}" in style
+
+
+def test_parameter_lookup_success_syncs_only_the_changed_select():
+    script = (ROOT / "src" / "dataviz" / "server" / "static" / "app.js").read_text()
+    lookup = script[
+        script.index("async function lookupQueryParameter"):
+        script.index("async function resolveQueryParameterDomains")
+    ]
+
+    assert "syncRemoteParameterOptions(input);" in lookup
+    assert "controls?.sync($('#parameter-form'))" not in lookup
+    assert "setQueryParameterStates(runtime.queryParameterState" not in lookup
+
+    fallback = script[
+        script.index("function syncRemoteParameterOptions"):
+        script.index("function updateParameterDomainUi")
+    ]
+    assert "input._syncRemoteChoiceOptions" in fallback
+    assert "input._syncChoiceControl?.();" in fallback
+
+    select = (
+        ROOT / "src" / "dataviz" / "components" / "packages"
+        / "control.select" / "controller.js"
+    ).read_text()
+    assert "function syncRemoteOptions()" in select
+    assert "overlay.refresh?.({preserveFocus:true});" in select
+    remote_sync = select[
+        select.index("function syncRemoteOptions()"):
+        select.index("const scheduleRemoteLookup")
+    ]
+    assert "requestAnimationFrame" not in remote_sync
+    assert "search.addEventListener('compositionstart'" in select
+    assert "search.addEventListener('compositionend'" in select
+    assert "if (searchComposing || event.isComposing) return;" in select
+
+
+def test_dashboard_control_header_projects_canonical_multiple_select_intent():
+    script = (ROOT / "src" / "dataviz" / "server" / "static" / "app.js").read_text()
+    helper = script[
+        script.index("function syncDashboardControlIntent"):
+        script.index("function syncDashboardControlOptions")
+    ]
+    options_sync = script[
+        script.index("function syncDashboardControlOptions"):
+        script.index("function syncDashboardControlForm")
+    ]
+    form_sync = script[
+        script.index("function syncDashboardControlForm"):
+        script.index("function applyControlOperationalSnapshot")
+    ]
+
+    assert "entry?.intent === 'all_available'" in helper
+    assert "controls?.setSelectionIntent" in helper
+    assert "syncDashboardControlIntent(input, stateByKey.get(input.name));" in options_sync
+    assert "syncDashboardControlIntent(input, controls[input.name]);" in form_sync
+    assert "controlDraftActions.has(input.name)" in options_sync
+    assert "controlDraftActions.has(input.name)" in form_sync
+
+
+def test_initial_parameter_domain_hydration_preserves_restored_operands():
+    script = (ROOT / "src" / "dataviz" / "server" / "static" / "app.js").read_text()
+    selection = script[
+        script.index("function selectDashboard"):
+        script.index("function setFormValues")
+    ]
+
+    assert "targetSnapshot:structuredClone(runtime.queryParameterState || {})" in selection
+    assert "void resolveQueryParameterDomains();" not in selection
+
+
 def test_control_trays_show_business_fields_without_runtime_taxonomy():
     template = (ROOT / "src" / "dataviz" / "server" / "templates" / "index.html").read_text()
     script = (ROOT / "src" / "dataviz" / "server" / "static" / "app.js").read_text()
@@ -1659,7 +1748,7 @@ def test_fast_dag_branch_publishes_output_before_slow_branch_finishes(
         encoding="utf-8",
     )
     (dashboard_root / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v17
+        """schema: dataviz/dashboard/v18
 kind: dashboard
 id: progressive
 title: Progressive branches
@@ -2066,7 +2155,7 @@ def test_query_cancel_is_tab_scoped_and_same_dashboard_run_supersedes(tmp_path: 
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v17
+        """schema: dataviz/dashboard/v18
 kind: dashboard
 id: slow
 title: Slow

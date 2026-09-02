@@ -25,6 +25,7 @@ from dataviz.execution import (
     resolve_dashboard_query_parameter_state,
 )
 from dataviz.execution.plan import compile_plan
+from dataviz.execution.references import parse_output_reference
 from dataviz.execution.outputs import validate_output_destination
 from dataviz.filesystem import sha256_file
 from dataviz.input_state import state_from_values
@@ -37,6 +38,7 @@ from dataviz.state_snapshot import (
 )
 from dataviz.target_reference import parse_target_reference
 from dataviz.workspace import load_workspace
+from dataviz.workspace.assets import resolve_workspace_asset_reference
 from dataviz.workspace.controls import scoped_control_registry
 from dataviz.workspace.loading.loaded_types import LoadedWorkspace
 
@@ -68,6 +70,7 @@ class RunRequest:
     detail: RunDetail = "summary"
     overlay: Path | None = None
     dry_run: bool = False
+    from_result_id: str | None = None
 
 
 def analysis_entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
@@ -176,6 +179,67 @@ def _artifact_evidence(reference: str, artifact) -> dict[str, Any]:
     }
 
 
+def _finite_state_summary(state: dict[str, Any], *, limit: int = 20) -> dict[str, Any]:
+    raw = state.get("value")
+    values = list(raw) if isinstance(raw, (list, tuple)) else ([] if raw is None else [raw])
+    return {
+        **({"selection": state["selection"]} if "selection" in state else {}),
+        "operand_count": len(values),
+        "operands": values[:limit],
+        "operands_truncated": len(values) > limit,
+    }
+
+
+def _execution_diagnostics(dashboard, query_result, interactions=()) -> dict[str, Any]:
+    """Project only empty/failure causes proven by completed execution records."""
+
+    evidence: list[dict[str, Any]] = []
+    for node_id, node in query_result.nodes.items():
+        if node.status == "empty":
+            reason = "source_zero_rows" if node.node_type == "source" else "transform_zero_rows"
+            item: dict[str, Any] = {"reason": reason, "node": node_id}
+            query = node.diagnostics.get("query") if isinstance(node.diagnostics, dict) else None
+            if isinstance(query, dict) and query.get("query_filters"):
+                item["filters"] = {
+                    key: {
+                        name: value.get(name)
+                        for name in ("parameter", "selection", "predicate")
+                        if value.get(name) is not None
+                    }
+                    for key, value in query["query_filters"].items()
+                }
+            evidence.append(item)
+        elif node.status == "unavailable" and (node.error or {}).get("type") == "dependency_failed":
+            evidence.append({"reason": "upstream_failed", "node": node_id})
+    for interaction in interactions:
+        for node_id, node in interaction.nodes.items():
+            if node.status == "empty":
+                transform_id = node_id.split(":", 1)[-1]
+                bindings = dashboard.dependency_contract.interactive_control_inputs.get(
+                    transform_id, {}
+                )
+                filters = {
+                    alias: {
+                        "control": binding["control"],
+                        **_finite_state_summary(
+                            interaction.control_state.get(binding["control"], {})
+                        ),
+                    }
+                    for alias, binding in bindings.items()
+                    if binding.get("mode") == "filter"
+                }
+                evidence.append(
+                    {
+                        "reason": "control_filter_zero_rows" if filters else "transform_zero_rows",
+                        "node": node_id,
+                        **({"filters": filters} if filters else {}),
+                    }
+                )
+            elif node.status == "unavailable" and (node.error or {}).get("type") == "dependency_failed":
+                evidence.append({"reason": "upstream_failed", "node": node_id})
+    return {"empty": evidence} if evidence else {}
+
+
 def analysis_artifact_payload(
     *,
     entry: dict[str, Any],
@@ -211,7 +275,15 @@ def analysis_artifact_binding(loaded, dashboard, entry, store, artifact) -> dict
                     dashboard.definition.adapters,
                 )
             else:
-                path = (definition_path.parent / definition.path).resolve()
+                asset = resolve_workspace_asset_reference(
+                    loaded.root,
+                    loaded.definition.assets,
+                    definition.path,
+                    hash_content=False,
+                )
+                path = asset.path if asset is not None else (
+                    definition_path.parent / definition.path
+                ).resolve()
             return {
                 "source_path": path,
                 "format": definition.format or path.suffix.lstrip(".").lower(),
@@ -292,6 +364,127 @@ def _preflight_request(request: RunRequest) -> None:
         _invalid("timeout_seconds must be positive")
     if request.dry_run and request.overlay is None:
         _invalid("--dry-run requires --overlay")
+    if request.from_result_id and request.overlay is not None:
+        _invalid("--from-result cannot be combined with --overlay")
+
+
+def _output_definition(dashboard, reference: str):
+    parsed = parse_output_reference(reference)
+    kind, identifier = parsed.node_id.split(":", 1)
+    if kind == "source":
+        definition = dashboard.sources[identifier][1]
+    elif kind == "dataset":
+        definition = dashboard.dataset_transforms[identifier][1]
+    else:
+        raise ValidationFailure(
+            f"Result input must be a base Named Output: {reference}",
+            details={"code": "analysis_result_input_kind_invalid", "reference": reference},
+        )
+    return definition.outputs[parsed.output]
+
+
+def _result_seed_inputs(request: RunRequest, dashboard, entry) -> tuple[
+    dict[str, dict[str, Any]], dict[str, dict[str, Any]], dict[str, Any]
+]:
+    result_id = request.from_result_id
+    assert result_id is not None
+    node_id = str(entry.get("node_id") or "")
+    if entry.get("kind") != "base_output" or not node_id.startswith("dataset:"):
+        _invalid(
+            "--from-result currently supports Dataset Transform Outputs only",
+            code="analysis_from_result_target_invalid",
+        )
+    if request.query_parameter_state:
+        _invalid(
+            "--from-result restores the input Result Query Parameters; do not pass --query-param",
+            code="analysis_from_result_parameter_override",
+        )
+    input_references = dashboard.dependency_contract.data_inputs[node_id]
+    store = AnalysisResultStore(request.workspace)
+    with store.lease(result_id):
+        manifest = store.load(result_id)
+        previous = manifest.get("result") or {}
+        if previous.get("status") not in {"ready", "partial"}:
+            raise ValidationFailure(
+                "Only a ready/partial Result can provide Transform inputs",
+                details={
+                    "code": "analysis_from_result_not_ready",
+                    "result_id": result_id,
+                    "status": previous.get("status"),
+                },
+            )
+        available = {
+            str(item.get("reference", "")).split("::", 1)[-1]: item
+            for item in previous.get("outputs", [])
+        }
+        seeds: dict[str, dict[str, Any]] = {}
+        provenance_inputs: list[dict[str, Any]] = []
+        for alias, reference in input_references.items():
+            output = available.get(reference)
+            if output is None:
+                raise ValidationFailure(
+                    f"Result {result_id} does not contain required input {reference}",
+                    details={
+                        "code": "analysis_from_result_input_missing",
+                        "result_id": result_id,
+                        "input": alias,
+                        "reference": reference,
+                        "available": sorted(available),
+                    },
+                )
+            expected = _output_definition(dashboard, reference)
+            if output.get("kind") != expected.kind:
+                raise ValidationFailure(
+                    f"Result input {reference} is {output.get('kind')}, expected {expected.kind}",
+                    details={
+                        "code": "analysis_from_result_kind_mismatch",
+                        "reference": reference,
+                        "expected": expected.kind,
+                        "actual": output.get("kind"),
+                    },
+                )
+            expected_schema = [
+                item.model_dump(mode="json") for item in (expected.schema_ or [])
+            ]
+            actual_schema = list(output.get("schema") or [])
+            if expected_schema and actual_schema and expected_schema != actual_schema:
+                raise ValidationFailure(
+                    f"Result input {reference} Schema differs from the current Output contract",
+                    details={
+                        "code": "analysis_from_result_schema_mismatch",
+                        "reference": reference,
+                        "expected": expected_schema,
+                        "actual": actual_schema,
+                    },
+                )
+            rows = output.get("rows")
+            limit = max(1, int(rows)) if isinstance(rows, int) else 2_147_483_647
+            value, total = store.read_output(manifest, output, limit=limit)
+            if total is not None and rows is not None and total != rows:
+                raise ValidationFailure(
+                    f"Result input {reference} row count changed while reading",
+                    details={"code": "analysis_from_result_row_count_mismatch"},
+                )
+            seeds[reference] = {
+                "value": value,
+                "result_id": result_id,
+                "reference": output.get("reference"),
+                "content_hash": output.get("content_hash"),
+            }
+            provenance_inputs.append(
+                {
+                    "alias": alias,
+                    "reference": output.get("reference"),
+                    "kind": output.get("kind"),
+                    "rows": output.get("rows"),
+                    "content_hash": output.get("content_hash"),
+                }
+            )
+        query_state = dict(previous.get("query_parameter_state") or {})
+    return query_state, seeds, {
+        "result_id": result_id,
+        "inputs": provenance_inputs,
+    }
 
 
 def _resolve_parameters(loaded, dashboard, states: dict[str, Any]):
@@ -310,9 +503,16 @@ def _run_dashboard(
     catalog,
     dashboard_id: str,
 ) -> dict[str, Any]:
-    if any((request.also, request.controls, request.output_name, request.overlay, request.dry_run)):
+    if any((
+        request.also,
+        request.controls,
+        request.output_name,
+        request.overlay,
+        request.dry_run,
+        request.from_result_id,
+    )):
         _invalid(
-            "Dashboard targets do not accept --also, --control, --output, or --overlay"
+            "Dashboard targets do not accept --also, --control, --output, --overlay, or --from-result"
         )
     executor = Executor(loaded)
     dashboard = executor.ensure_valid(dashboard_id)
@@ -416,6 +616,7 @@ def _run_dashboard(
             "dashboard": dashboard_id,
         },
         "timing": {"query_ms": round((time.perf_counter() - started) * 1000, 2)},
+        "diagnostics": _execution_diagnostics(dashboard, execution),
     }
     failed_nodes = [node for node in execution.nodes.values() if node.status == "error"]
     if failed_nodes:
@@ -515,7 +716,17 @@ def _run_data_target(
                 "overlay": _overlay_payload(variant),
             }
 
-    query_state = _resolve_parameters(loaded, dashboard, request.query_parameter_state)
+    seeded_outputs: dict[str, dict[str, Any]] = {}
+    input_result_provenance: dict[str, Any] | None = None
+    if request.from_result_id:
+        query_state, seeded_outputs, input_result_provenance = _result_seed_inputs(
+            request,
+            dashboard,
+            entry,
+        )
+        query_state = _resolve_parameters(loaded, dashboard, query_state)
+    else:
+        query_state = _resolve_parameters(loaded, dashboard, request.query_parameter_state)
     output_name = None if requested_entry.get("kind") == "view" else request.output_name
     executor_options = (
         {
@@ -614,6 +825,7 @@ def _run_data_target(
             targets=target_references,
             refresh=request.refresh,
             run_id=variant.analysis_run_id if variant is not None else None,
+            seeded_outputs=seeded_outputs,
             _dashboard=dashboard,
         )
         query_ms = round((time.perf_counter() - started) * 1000, 2)
@@ -630,6 +842,7 @@ def _run_data_target(
                 target_references,
                 query_ms,
                 variant,
+                input_result_provenance,
             )
         else:
             published = _finish_derived(
@@ -690,6 +903,7 @@ def _finish_base(
     target_references,
     query_ms,
     variant,
+    input_result_provenance,
 ):
     artifacts = [(target, result.outputs.get(target)) for target in target_references]
     missing = [target for target, artifact in artifacts if artifact is None]
@@ -713,7 +927,14 @@ def _finish_base(
                 "query_nodes": result.query_nodes,
                 "query_targets": result.query_targets,
             },
-            provenance={"query_contract_hash": result.query_contract_hash},
+            provenance={
+                "query_contract_hash": result.query_contract_hash,
+                **(
+                    {"input_result": input_result_provenance}
+                    if input_result_provenance
+                    else {}
+                ),
+            },
         )
     store = ArtifactStore(loaded.root, result.run_id)
     outputs = []
@@ -755,8 +976,14 @@ def _finish_base(
                 _artifact_evidence(reference, artifact)
                 for reference, artifact in sorted(result.outputs.items())
             ],
+            **(
+                {"input_result": input_result_provenance}
+                if input_result_provenance
+                else {}
+            ),
         },
         "timing": {"query_ms": query_ms},
+        "diagnostics": _execution_diagnostics(dashboard, result),
     }
     if variant is not None:
         payload["overlay"] = _overlay_payload(variant)
@@ -860,6 +1087,7 @@ def _finish_derived(
                 "runtime": declared_runtime,
             },
             "timing": {"query_ms": query_ms, **browser_batch["timing"]},
+            "diagnostics": _execution_diagnostics(dashboard, run_result),
         }
         if variant is not None:
             payload["overlay"] = _overlay_payload(variant)
@@ -1006,6 +1234,11 @@ def _finish_derived(
             "runtime": "server-python",
         },
         "timing": {"query_ms": query_ms, "interactive_ms": interaction_ms},
+        "diagnostics": _execution_diagnostics(
+            dashboard,
+            run_result,
+            [interaction for _target, interaction, _artifact in interactions],
+        ),
     }
     if variant is not None:
         payload["overlay"] = _overlay_payload(variant)

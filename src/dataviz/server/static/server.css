@@ -268,6 +268,9 @@ body.sidebar-collapsed #sidebar-toggle{color:#4451a3;border:0}
 .query-domain-reload:disabled{cursor:default;opacity:.55}
 .query-domain-reload svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .query-domain-reload.is-loading svg{animation:query-domain-spin .8s linear infinite}
+.query-author-mode{font:600 10px "DM Mono",monospace}.query-author-mode[data-active="true"]{color:#fff;background:#25282d}
+.query-parameter-evidence{display:block;margin-top:7px;padding:6px 8px;color:#58615d;background:#f4f5f3;border-left:2px solid #7185d8;font:10px/1.45 "DM Mono",monospace;overflow-wrap:anywhere}
+.query-parameter-evidence[hidden]{display:none}
 @keyframes query-domain-spin{to{transform:rotate(360deg)}}
 .pipeline-reload{margin-top:12px;padding:7px 0;color:#626873;background:transparent;border:0;cursor:pointer;font:600 9px "SFMono-Regular",Consolas,monospace;letter-spacing:.06em;text-transform:uppercase}
 .pipeline-reload:hover{color:#303a78}

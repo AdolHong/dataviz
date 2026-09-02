@@ -31,29 +31,32 @@
     const references = inputReferences(view, state);
     return references.main || Object.values(references)[0];
   };
-  const controlBinding = (view, state) => (
-    state.dependency_contract?.views?.[view.id]?.control_binding || null
+  const controlBinding = (view, state, layerId = null) => (
+    layerId == null
+      ? (state.dependency_contract?.views?.[view.id]?.control_binding || null)
+      : (state.dependency_contract?.views?.[view.id]?.layer_control_bindings?.[layerId] || null)
   );
   const bindingValue = (binding, row, fields = binding?.fields || []) => {
     if (!binding || !row || typeof row !== 'object') return null;
     const values = fields.map(field => row[field]);
     return values.length === 1 ? values[0] : values;
   };
-  const bindingDatum = (binding, row) => {
+  const bindingDatum = (binding, row, sourceLayer = null) => {
     const value = bindingValue(binding, row);
-    if (!(binding?.writes || []).length) return value;
+    if (!(binding?.writes || []).length && sourceLayer == null) return value;
     return {
       __datavizControlValue:value,
+      ...(sourceLayer == null ? {} : {__datavizSourceLayer:sourceLayer}),
       __datavizControlWrites:Object.fromEntries(
-        binding.writes.map(write => [
+        (binding.writes || []).map(write => [
           write.control,
           bindingValue(binding, row, write.fields || []),
         ])
       ),
     };
   };
-  const bindingDescriptor = (view, state, rows) => {
-    const binding = controlBinding(view, state);
+  const bindingDescriptor = (view, state, rows, layerId = null) => {
+    const binding = controlBinding(view, state, layerId);
     if (!binding) return null;
     return {
       ...binding,
@@ -84,6 +87,23 @@
       item.key === boundControl
       || state.control.matches(row, item, state.control.state(item.key))
     )));
+  };
+  const selectLayerRows = (view, layer, state) => {
+    const contract = state.dependency_contract?.views?.[view.id]?.filter_contract || [];
+    const boundControl = controlBinding(view, state, layer.id)?.control;
+    const reference = inputReferences(view, state)[layer.id];
+    let rows = state.data.table(reference).rows().filter(row => contract.every(item => (
+      item.key === boundControl
+      || state.control.matches(row, item, state.control.state(item.key))
+    )));
+    if (view.sort) {
+      const descending = view.sort.startsWith('-');
+      const field = descending ? view.sort.slice(1) : view.sort;
+      rows.sort((a, b) => (
+        a[field] > b[field] ? 1 : a[field] < b[field] ? -1 : 0
+      ) * (descending ? -1 : 1));
+    }
+    return view.limit ? rows.slice(0, view.limit) : rows;
   };
   const aggregate = (rows, groupFields, valueFields, operation = 'sum') => {
     const groups = new Map();
@@ -216,6 +236,67 @@
       config:view.config,
       controlBinding:binding,
       geojsonAsset:view.mark === 'region' ? view.geojson : undefined,
+    };
+  };
+  const layeredMapPlotlyDescriptor = (view, state, layerRows) => {
+    const traces = [];
+    const viewportValues = [];
+    const geojsonAssets = [];
+    const controlBindings = {};
+    view.layers.forEach((layer, layerIndex) => {
+      const rows = layerRows[layer.id] || [];
+      const binding = bindingDescriptor(view, state, rows, layer.id);
+      if (binding) controlBindings[layer.id] = binding;
+      const traceOptions = {
+        ...(view.options?.trace || {}),
+        ...(layer.options?.trace || {}),
+      };
+      const projected = mapPlotlyDescriptor(
+        {...view, ...layer, layers:[]},
+        rows,
+        binding,
+        traceOptions,
+      );
+      const trace = projected.data[0];
+      trace.name = layer.options?.name || layer.id;
+      if (binding && Array.isArray(trace.customdata)) {
+        trace.customdata = rows.map(row => bindingDatum(binding, row, layer.id));
+      }
+      traces.push(trace);
+      const layerViewport = layer.mark === 'point'
+        ? rows.map(row => [Number(row[layer.longitude]), Number(row[layer.latitude])])
+        : rows.map(row => row[layer.data_key]);
+      viewportValues.push(...layerViewport.map(value => [layer.id, value]));
+      if (layer.mark === 'region') {
+        geojsonAssets.push({trace:layerIndex, asset:layer.geojson});
+      }
+    });
+    const layoutOptions = view.options?.layout || {};
+    const {geo: geoOptions = {}, ...layoutRest} = layoutOptions;
+    const stableViewport = viewportValues
+      .map(value => JSON.stringify(value))
+      .sort()
+      .map(value => JSON.parse(value));
+    return {
+      type:'plotly',
+      data:traces,
+      layout:{
+        margin:{l:8, r:8, t:8, b:8},
+        paper_bgcolor:'transparent',
+        plot_bgcolor:'transparent',
+        showlegend:view.options?.showlegend ?? traces.length > 1,
+        geo:{
+          fitbounds:'locations',
+          visible:false,
+          bgcolor:'rgba(0,0,0,0)',
+          uirevision:mapViewportRevision(stableViewport),
+          ...geoOptions,
+        },
+        ...layoutRest,
+      },
+      config:view.config,
+      controlBindings,
+      geojsonAssets,
     };
   };
   const plotlyDescriptor = (view, rows, binding = null) => {
@@ -353,6 +434,18 @@
         html:`<div class="dv-metric"><strong>${escape(formatted)}</strong><span>${escape(view.label || view.title || '')}</span></div>`,
       };
     }
+    if (view.template === 'map' && (view.layers || []).length) {
+      const layerRows = Object.fromEntries(
+        view.layers.map(layer => [layer.id, selectLayerRows(view, layer, state)])
+      );
+      const descriptor = layeredMapPlotlyDescriptor(view, state, layerRows);
+      const empty = Object.values(layerRows).every(rows => rows.length === 0);
+      return {
+        ...descriptor,
+        empty,
+        emptyMessage:view.options?.empty_text || 'No rows match the current selections.',
+      };
+    }
     let rows = preparedRows == null ? prepareRows(view, state) : [...preparedRows];
     if (preparedRows != null) {
       const valueFields = view.template === 'heatmap'
@@ -427,13 +520,15 @@
     const views = global.dataviz?.view_specs || [];
     const repeated = new Set((global.dataviz?.repeat_specs || []).map(spec => spec.view));
     views.filter(view => !repeated.has(view.id)).forEach(view => runtime.registerView(view.id, {
-      inputs:{...(view.inputs || {}), ...(view.input ? {main:view.input} : {})},
+      inputs:(view.layers || []).length
+        ? Object.fromEntries(view.layers.map(layer => [layer.id, layer.input]))
+        : {...(view.inputs || {}), ...(view.input ? {main:view.input} : {})},
       render:state => state.renderView(view.id, () => build(view, state)),
     }));
   }
 
   root.viewDeclarative = {
-    protocol:'dataviz/runtime/v13',
+    protocol:'dataviz/runtime/v14',
     escape,
     numericAggregate,
     inputReferences,
@@ -444,12 +539,13 @@
     bindingDatum,
     prepareRows,
     mapPlotlyDescriptor,
+    layeredMapPlotlyDescriptor,
     build,
     registerViews,
   };
   root.descriptors = root.descriptors || new Map();
   root.descriptors.set('view.declarative', {
-    protocol:'dataviz/runtime/v13',
+    protocol:'dataviz/runtime/v14',
     owns:['descriptor-builders', 'renderer-lifecycle'],
   });
 })(window);

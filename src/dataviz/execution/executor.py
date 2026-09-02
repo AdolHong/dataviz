@@ -23,6 +23,7 @@ from dataviz.execution.parameters import (
     resolve_query_parameter_states,
 )
 from dataviz.execution.plan import PlanNode, compile_plan
+from dataviz.execution.references import parse_output_reference
 from dataviz.execution.python_process import execute_python_node
 from dataviz.execution.results import NodeResult, RunResult
 from dataviz.redaction import redact_text, redact_value
@@ -136,6 +137,7 @@ class Executor:
         snapshot_observer: SnapshotObserver | None = None,
         run_id: str | None = None,
         cancel_event: threading.Event | None = None,
+        seeded_outputs: dict[str, dict[str, Any]] | None = None,
         _dashboard: LoadedDashboard | None = None,
     ) -> RunResult:
         dashboard = _dashboard or self.ensure_valid(dashboard_id)
@@ -152,7 +154,12 @@ class Executor:
         # Keeping it local also prevents concurrent Dashboard Runs from replacing
         # each other's credentials/configuration mid-execution.
         adapters = AdapterResolver(self.workspace.root)
-        plan = compile_plan(dashboard, targets=targets)
+        seeded_outputs = dict(seeded_outputs or {})
+        plan = compile_plan(
+            dashboard,
+            targets=targets,
+            provided_outputs=set(seeded_outputs),
+        )
         run_id = run_id or f"run_{uuid.uuid4().hex[:16]}"
         store = ArtifactStore(self.workspace.root, run_id)
         result = RunResult(
@@ -206,6 +213,92 @@ class Executor:
             data={"targets": sorted(plan.targets), "query_parameter_state": parameters},
         )
         pending = set(plan.nodes)
+        required_outputs = {
+            reference.canonical
+            for node in plan.nodes.values()
+            for reference in node.inputs.values()
+        }
+        required_outputs.update(targets or ())
+        seed_groups: dict[str, dict[str, dict[str, Any]]] = {}
+        for reference, seed in seeded_outputs.items():
+            parsed = parse_output_reference(reference)
+            if parsed.node_id not in plan.nodes:
+                raise ExecutionFailure(
+                    f"Seeded Result Output is outside this execution plan: {reference}",
+                    details={"code": "result_seed_outside_plan", "reference": reference},
+                )
+            seed_groups.setdefault(parsed.node_id, {})[parsed.output] = seed
+        for node_id, outputs in seed_groups.items():
+            needed = {
+                parse_output_reference(reference).output
+                for reference in required_outputs
+                if parse_output_reference(reference).node_id == node_id
+            }
+            missing = sorted(needed - set(outputs))
+            if missing:
+                raise ExecutionFailure(
+                    f"Result seed does not cover required outputs for {node_id}: "
+                    + ", ".join(missing),
+                    details={
+                        "code": "result_seed_incomplete",
+                        "node": node_id,
+                        "missing": missing,
+                    },
+                )
+            node = plan.nodes[node_id]
+            values = {name: seed["value"] for name, seed in outputs.items() if name in needed}
+            descriptors = normalize_outputs(
+                values,
+                store=store,
+                node_id=node_id,
+                declared={name: node.definition.outputs[name] for name in values},
+                named=True,
+                metadata={
+                    "title": getattr(node.definition, "name", None) or node.local_id,
+                    "origin": "analysis_result",
+                },
+            )
+            evidence = {
+                "seeded_from_result": sorted(
+                    {
+                        str(seed.get("result_id"))
+                        for seed in outputs.values()
+                        if seed.get("result_id")
+                    }
+                ),
+                "source_artifacts": {
+                    name: {
+                        "reference": seed.get("reference"),
+                        "content_hash": seed.get("content_hash"),
+                    }
+                    for name, seed in outputs.items()
+                    if name in values
+                },
+            }
+            seeded_node = NodeResult(
+                node_id=node_id,
+                node_type=node.kind,
+                status=output_status(descriptors),
+                result_origin="result",
+                started_at=now(),
+                finished_at=now(),
+                duration_ms=0,
+                outputs=descriptors,
+                diagnostics=evidence,
+            )
+            result.nodes[node_id] = seeded_node
+            for name, descriptor in descriptors.items():
+                result.outputs[f"{node_id}/{name}"] = descriptor
+            pending.discard(node_id)
+            emit(
+                "node_ready",
+                node,
+                duration_ms=0,
+                data={
+                    "origin": "result",
+                    "outputs": sorted(f"{node_id}/{name}" for name in descriptors),
+                },
+            )
         running: dict[Future, str] = {}
         max_workers = max(1, workspace_definition.runtime.max_workers)
 

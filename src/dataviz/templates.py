@@ -116,7 +116,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
         "behavior": {
             "runtime": "Locally bundled @tanstack/table-core 9.2.4; no React or Runtime CDN",
             "defaults": "Dataviz owns semantic DOM, accessible headers, styling, numeric alignment, sorting and Control Binding",
-            "optional_features": ["searchable", "page_size", "hidden_columns", "column_order", "pinned_columns", "widths"],
+            "optional_features": ["labels", "formats", "align", "widths", "wrap", "emphasis.columns", "searchable", "page_size", "hidden_columns", "column_order", "pinned_columns"],
             "custom_service": "context.tables.tanstack provides managed lifecycle; context.tables.tanstack.core exposes the complete headless API",
             "wheel_boundary": "Scroll the table only while it can consume vertical movement; otherwise continue scrolling the page",
         },
@@ -259,6 +259,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
         },
         "behavior": {
             "contract": "Pure serializable sync/async function returning a Named Output object",
+            "context": "Read only declared aliases from context.inputs, context.query_inputs, and context.control_inputs; context.selections does not exist",
             "invalidation": "Only declared Selection dependencies and downstream Views update",
             "execution": "Dedicated Web Worker with cancellation and a hard timeout",
             "registration": "window.datavizRuntime.registerInteractiveTransform(spec, {code, entrypoint})",
@@ -290,6 +291,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
         "behavior": {
             "isolation": "A renderer failure marks only its View failed",
             "state": "Runtime retains renderer state per View id",
+            "inputs": "Declare input as the primary Named Output and optional inputs as additional aliases; read them from descriptor.inputs.main / descriptor.inputs.<alias>. descriptor.rows is only the primary-input convenience projection",
             "platform_matrix": [
                 "mount", "update", "empty", "restore",
                 "interaction", "resize", "dispose", "export",
@@ -301,7 +303,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
 }
 
 
-COMPONENT_REGISTRY_VERSION = "5.9.0"
+COMPONENT_REGISTRY_VERSION = "6.0.0"
 
 
 def _generated_component_templates() -> dict[str, dict[str, Any]]:

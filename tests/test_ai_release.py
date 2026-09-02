@@ -127,7 +127,7 @@ def test_generated_schema_cli_uses_strict_installed_models():
 
 def test_dsl_schema_versions_are_literals_not_descriptive_strings():
     assert DashboardDefinition.model_validate(
-        {"schema": "dataviz/dashboard/v17", "kind": "dashboard", "id": "current"}
+        {"schema": "dataviz/dashboard/v18", "kind": "dashboard", "id": "current"}
     ).id == "current"
     with pytest.raises(ValidationError):
         DashboardDefinition.model_validate(
@@ -159,7 +159,7 @@ def test_machine_identifiers_are_portable_and_unambiguous(identifier: str):
     with pytest.raises(ValidationError):
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v17",
+                "schema": "dataviz/dashboard/v18",
                 "kind": "dashboard",
                 "id": identifier,
             }
@@ -181,7 +181,7 @@ def test_old_dashboard_is_rejected_and_no_migration_command_is_exposed(tmp_path:
     entry = next(item for item in workspace.catalog if item.id == "hello")
     assert entry.status == "invalid"
     assert any(
-        "dataviz/dashboard/v17" in str(item.details)
+        "dataviz/dashboard/v18" in str(item.details)
         for item in workspace.load_diagnostics
         if item.code == "dashboard_invalid"
     )
@@ -327,7 +327,7 @@ def test_reference_frontend_adapter_is_exportable_and_has_no_canvas_runtime_depe
         app, ["frontend-adapters", "web-component", "--output", str(output)]
     )
 
-    assert catalog["web-component"]["protocol"] == "dataviz/runtime/v13"
+    assert catalog["web-component"]["protocol"] == "dataviz/runtime/v14"
     assert catalog["web-component"]["dependency"] == "none"
     assert "DatavizRuntimeV3Client" in source
     assert "datavizRuntime." not in source

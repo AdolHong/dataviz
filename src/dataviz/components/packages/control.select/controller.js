@@ -20,6 +20,7 @@
     let active = 0;
     let virtual = false;
     let searchTimer = null;
+    let searchComposing = false;
 
     const querySelection = () => input.dataset.querySelection || 'all';
     const querySelected = option => {
@@ -277,17 +278,43 @@
       if (overlay.isOpen()) overlay.reposition();
     }
 
-    search.addEventListener('input', () => {
+    function syncRemoteOptions() {
+      sync();
+      if (!overlay.isOpen()) return;
+      // The rows are already current. Refresh the floating surface itself so a
+      // nested Chromium Top Layer cannot retain the pre-Lookup paint. Overlay
+      // refresh preserves the active search input and its caret.
+      overlay.refresh?.({preserveFocus:true});
+    }
+
+    const scheduleRemoteLookup = () => {
+      window.clearTimeout(searchTimer);
+      searchTimer = window.setTimeout(() => {
+        void input._remoteLookup?.({search:search.value.trim()});
+      }, 180);
+    };
+    search.addEventListener('compositionstart', () => {
+      searchComposing = true;
+      window.clearTimeout(searchTimer);
+    });
+    search.addEventListener('compositionend', () => {
+      searchComposing = false;
+      if (remoteOptions) scheduleRemoteLookup();
+    });
+    search.addEventListener('input', event => {
       viewport.scrollTop = 0;
       active = 0;
       if (!remoteOptions) {
         sync();
         return;
       }
-      window.clearTimeout(searchTimer);
-      searchTimer = window.setTimeout(() => {
-        void input._remoteLookup?.({search:search.value.trim()});
-      }, 180);
+      // CJK input methods emit intermediate `input` events while the candidate
+      // text is still being composed. Replacing an open top-layer picker during
+      // that lifecycle can leave Chromium displaying the pre-lookup rows until
+      // the picker is closed and reopened. Query only after composition commits;
+      // a subsequent ordinary input event merely restarts the same debounce.
+      if (searchComposing || event.isComposing) return;
+      scheduleRemoteLookup();
     });
     search.addEventListener('keydown', event => {
       if (event.key !== 'ArrowDown' || !filtered.length) return;
@@ -351,6 +378,7 @@
 
     return {
       sync,
+      syncRemoteOptions,
       overlay,
       metrics: () => ({total: api.options(input).length, matching: filtered.length, rendered: rows.childElementCount, virtual}),
     };

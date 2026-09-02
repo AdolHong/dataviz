@@ -44,6 +44,71 @@ def test_validate_preflight_has_stable_ai_contract_and_dashboard_scope(tmp_path:
     }
 
 
+def test_validate_rejects_removed_browser_context_without_literal_false_positives(
+    tmp_path: Path,
+):
+    workspace = _copy_workspace(tmp_path)
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    transform_root = dashboard_path.parent / "transforms"
+    transform_root.mkdir()
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    definition["interactive_transforms"] = ["transforms/legacy.yaml"]
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    (transform_root / "legacy.yaml").write_text(
+        """schema: dataviz/interactive-transform/v4
+kind: interactive_transform
+id: legacy
+runtime: browser-js
+code: legacy.js
+inputs: {rows: source:sales/main}
+control_inputs:
+  region: {mode: value, control: dashboard.region}
+outputs: {main: {kind: table}}
+export: {mode: interactive}
+""",
+        encoding="utf-8",
+    )
+    code_path = transform_root / "legacy.js"
+    code_path.write_text(
+        """function transform(context) {
+  // context.selections must not trigger from a comment.
+  const note = "context.selections";
+  const template = `context.selections`;
+  return {main: context.inputs.rows};
+}
+""",
+        encoding="utf-8",
+    )
+
+    clean = validate_preflight(workspace, dashboard_id="sales-overview")
+    assert "browser_context_selections_removed" not in {
+        item["code"] for item in clean["diagnostics"]
+    }
+
+    code_path.write_text(
+        """function transform(context) {
+  const region = context?.selections.region;
+  return {main: context.inputs.rows.filter(row => row.region === region)};
+}
+""",
+        encoding="utf-8",
+    )
+    report = validate_preflight(workspace, dashboard_id="sales-overview")
+    diagnostic = next(
+        item
+        for item in report["diagnostics"]
+        if item["code"] == "browser_context_selections_removed"
+    )
+
+    assert report["status"] == "invalid"
+    assert report["queries_executed"] == 0
+    assert diagnostic["category"] == "runtime-dependencies"
+    assert diagnostic["details"]["replacement"] == "context.control_inputs.<alias>"
+
+
 def test_validate_detects_undeclared_and_unused_sql_parameters(tmp_path: Path):
     workspace = _copy_workspace(tmp_path)
     sql = workspace / "dashboards" / "sales-overview" / "sources" / "sales.sql"
@@ -538,7 +603,7 @@ def test_validate_focus_excludes_another_broken_dashboard(tmp_path: Path):
     broken = workspace / "dashboards" / "broken"
     broken.mkdir()
     (broken / "dashboard.yaml").write_text(
-        "schema: dataviz/dashboard/v17\nkind: dashboard\nid: broken\nretired_field: true\n",
+        "schema: dataviz/dashboard/v18\nkind: dashboard\nid: broken\nretired_field: true\n",
         encoding="utf-8",
     )
 

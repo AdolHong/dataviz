@@ -802,7 +802,7 @@ dataviz catalog describe . 'hello::source:data/main'
 dataviz run . 'hello::source:data/main'
 ```
 """,
-        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v18
+        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v19
 kind: dashboard
 id: hello
 title: Hello dashboard
@@ -2420,7 +2420,7 @@ def parameter_prewarm(
     domains: list[str] | None = typer.Option(None, "--domain", help="Repeat as needed"),
     refresh: bool = typer.Option(False, "--refresh", help="Force a new generation"),
 ) -> None:
-    """Build Workspace-shared SQL candidate materializations."""
+    """Build Dashboard-owned SQL candidate materializations."""
 
     try:
         loaded = load_workspace(workspace)
@@ -2456,7 +2456,7 @@ def parameter_materialization_status(
     workspace: Path = typer.Argument(..., exists=True, file_okay=False),
     dashboard_id: str | None = typer.Argument(None, help="Optional Dashboard id"),
 ) -> None:
-    """Inspect current Workspace-shared materialization generations."""
+    """Inspect current Parameter Domain materialization generations."""
 
     try:
         loaded = load_workspace(workspace)

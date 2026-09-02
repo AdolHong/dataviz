@@ -19,13 +19,18 @@ const datavizRuntime = window.datavizRuntime = {
   transformGenerations: new Map(),
   workerUrls: new Map(),
   interactionCache: new Map(),
+  interactionCacheLimit: 64,
+  transformCacheEvidence: new Map(),
   controlImpactSignatures: new Map(),
   initializing: false,
   initializationPromise: null,
   authorMode: false,
   interactiveAdapters: Object.create(null),
   metrics: {
-    interactiveTransforms: {started:0, completed:0, cancelled:0, timedOut:0, failed:0, cacheHits:0},
+    interactiveTransforms: {
+      started:0, completed:0, cancelled:0, timedOut:0, failed:0,
+      cacheHits:0, cacheMisses:0, cacheEvictions:0,
+    },
     transports: {started:0, completed:0, failed:0, arrowRows:0, arrowBytes:0, totalMs:0},
     renderers: {
       mounts:0, updates:0, empty:0, restores:0, interactions:0,

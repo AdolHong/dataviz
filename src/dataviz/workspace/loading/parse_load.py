@@ -175,14 +175,21 @@ def load_dashboard(
     for domain_entry in definition.parameter_domains:
         if isinstance(domain_entry, str):
             if domain_entry.startswith("workspace:/"):
-                relative = domain_entry.removeprefix("workspace:/")
-                domain_path = _require_workspace_asset(
-                    workspace_root, relative, "Parameter Domain definition"
+                raise WorkspaceError(
+                    "Parameter Domain definitions and SQL must be Dashboard-local",
+                    file=definition_path,
+                    details={
+                        "code": "parameter_domain_workspace_reference_removed",
+                        "reference": domain_entry,
+                        "action": (
+                            "Copy the Parameter Domain definition and SQL into this "
+                            "Dashboard, then use a Dashboard-relative path"
+                        ),
+                    },
                 )
-            else:
-                domain_path = _require_dashboard_asset(
-                    root, root, domain_entry, "Parameter Domain definition"
-                )
+            domain_path = _require_dashboard_asset(
+                root, root, domain_entry, "Parameter Domain definition"
+            )
             domain = parse_model(ParameterDomainDefinition, domain_path)
         else:
             domain_path = definition_path
@@ -200,16 +207,9 @@ def load_dashboard(
             raise WorkspaceError(
                 f"Duplicate Parameter Domain id: {domain.id}", file=domain_path
             )
-        if _is_within(domain_path, root):
-            _require_dashboard_asset(
-                root, domain_path.parent, domain.code, "Parameter Domain SQL"
-            )
-        else:
-            _require_workspace_asset(
-                workspace_root,
-                str((domain_path.parent / domain.code).resolve().relative_to(workspace_root)),
-                "Parameter Domain SQL",
-            )
+        _require_dashboard_asset(
+            root, domain_path.parent, domain.code, "Parameter Domain SQL"
+        )
         parameter_domains[domain.id] = (domain_path, domain)
 
     for source_entry in definition.sources:
@@ -396,21 +396,6 @@ def _require_dashboard_asset(
             file=dashboard_root / "dashboard.yaml",
             details={
                 "code": "dashboard_asset_outside",
-                "value": value,
-                "resolved_path": str(path),
-            },
-        )
-    return path
-
-
-def _require_workspace_asset(workspace_root: Path, value: str, label: str) -> Path:
-    path = (workspace_root / value).resolve()
-    if not _is_within(path, workspace_root):
-        raise WorkspaceError(
-            f"{label} must stay inside its Workspace",
-            file=workspace_root / "workspace.yaml",
-            details={
-                "code": "workspace_asset_outside",
                 "value": value,
                 "resolved_path": str(path),
             },

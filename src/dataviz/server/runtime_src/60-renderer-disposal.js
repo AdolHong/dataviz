@@ -11,6 +11,7 @@ Object.assign(datavizRuntime, {
     this.workerUrls.forEach(url => URL.revokeObjectURL(url));
     this.workerUrls.clear();
     this.interactionCache.clear();
+    this.transformCacheEvidence.clear();
     this.controlImpactSignatures.clear();
     Object.values(this.interactiveAdapters).forEach(adapter => adapter.dispose());
   },

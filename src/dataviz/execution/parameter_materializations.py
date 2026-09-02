@@ -1,4 +1,4 @@
-"""Workspace-shared immutable materializations for SQL Parameter Domains."""
+"""Dashboard-owned SQL Parameter Domains with session-shared materializations."""
 
 from __future__ import annotations
 
@@ -148,7 +148,7 @@ class MaterializationRecord:
 
 
 class ParameterMaterializationStore:
-    """One Workspace-local registry shared by every Dashboard, user and tab."""
+    """Workspace-local registry whose generations are isolated by Dashboard."""
 
     def __init__(self, workspace: LoadedWorkspace):
         self.workspace = workspace

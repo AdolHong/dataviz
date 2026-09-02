@@ -85,12 +85,25 @@
         const gap = Number.parseFloat(global.getComputedStyle(grid).columnGap) || 10;
         const fitting = Math.max(1, Math.floor((available + gap) / (columnWidth + gap)));
         const effective = Math.max(1, Math.min(count || 1, columns, fitting));
+        if (owner.dataset.controlEffectiveColumns === String(effective)) return;
         owner.style.setProperty('--dv-control-columns', String(effective));
         owner.dataset.controlEffectiveColumns = String(effective);
       };
       updateColumns();
       if (typeof global.ResizeObserver === 'function') {
-        owner._datavizControlPanelResizeObserver = new global.ResizeObserver(updateColumns);
+        let updateScheduled = false;
+        owner._datavizControlPanelResizeObserver = new global.ResizeObserver(() => {
+          if (updateScheduled) return;
+          updateScheduled = true;
+          // ResizeObserver callbacks must remain measurement-only. Applying a
+          // responsive grid column inside the same delivery cycle can resize
+          // the observed grid again, which WebKit reports as an undelivered
+          // notification loop. Commit the idempotent style change next frame.
+          global.requestAnimationFrame(() => {
+            updateScheduled = false;
+            if (owner.isConnected) updateColumns();
+          });
+        });
         owner._datavizControlPanelResizeObserver.observe(owner);
         const grid = owner.querySelector(queryGridSelector);
         if (grid) owner._datavizControlPanelResizeObserver.observe(grid);

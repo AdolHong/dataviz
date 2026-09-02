@@ -153,7 +153,7 @@ def test_machine_readable_component_examples_use_canonical_output_references():
 def test_machine_readable_documentation_examples_match_current_schemas():
     providers = {
         "dataviz/workspace/v2": WorkspaceDefinition,
-        "dataviz/dashboard/v18": DashboardDefinition,
+        "dataviz/dashboard/v19": DashboardDefinition,
         "dataviz/source/v6": SOURCE_DEFINITION_ADAPTER,
         "dataviz/dataset-transform/v3": DatasetTransformDefinition,
         "dataviz/interactive-transform/v4": InteractiveTransformDefinition,
@@ -338,20 +338,20 @@ def test_query_parameter_docs_keep_materialization_and_compact_state_explicit():
     skill = (ROOT / "dataviz-skill.md").read_text(encoding="utf-8")
     design = (ROOT / "DESIGN.md").read_text(encoding="utf-8")
 
-    assert "共享 immutable generation" in rules
+    assert "同一 Dashboard 的 immutable generation" in rules
     assert "all/include/exclude/none" in rules
     assert "搜索、级联和 cursor 分页" in rules
     assert "不重新执行远端 SQL" in rules
     assert "页面刷新与首次 Dashboard hydration" in rules
     assert not any("dataviz bundle" in command for command in query_docs["dynamic_domains"]["operations"])
-    assert "workspace-assets" in query_docs["dynamic_domains"]["portability"]
+    assert "Workspace Asset" in query_docs["dynamic_domains"]["portability"]
     assert "city_selection" in query_docs["selection_binding"]
     assert "dataviz init <workspace>" in skill
     assert "intentionally empty Workspace" not in skill
     assert "canonical Query Parameter state" in skill
     assert "all/include/exclude/none" in skill
     assert "compact-state restoration" in skill
-    assert "Workspace 共享物化" in design
+    assert "Dashboard-owned 候选物化" in design
     assert "generation-bound opaque cursor" in design
 
     public_docs = "\n".join(
@@ -827,10 +827,12 @@ def test_authoring_routes_expose_only_the_required_document_closure():
     interactive = resolve_authoring_route("interactive")
     renderer = resolve_authoring_route(component="view.custom")
     transform = resolve_authoring_route(component="interactive-transform.browser-js")
+    lookup = resolve_authoring_route("lookup")
 
     assert catalog["default"] == "minimal"
     assert catalog["schema"] == "dataviz/authoring-route-catalog/v2"
     assert catalog["routes"]["map-view"]["scaffolds"] == ["view.map"]
+    assert lookup["task"] == "entity-select"
     assert "scaffold" not in catalog["routes"]["map-view"]
     assert set(catalog["routes"]) == {
         "minimal",
@@ -1054,7 +1056,7 @@ def test_coordinate_layout_fields_are_strictly_rejected(layout):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v18",
+                "schema": "dataviz/dashboard/v19",
                 "kind": "dashboard",
                 "id": "strict",
                 "layout": layout,
@@ -1214,7 +1216,14 @@ def test_author_runtime_projects_view_cost_and_custom_renderer_lifecycle_evidenc
     assert "const datavizValueProfile" in runtime
     assert "viewRefreshEvidence: new Map()" in runtime
     assert "changedOutputReferences" in runtime
+    assert "changed_input_aliases" in runtime
+    assert "failed_input:{" in runtime
+    assert "Waiting for input ${missingInput.alias}" in runtime
     assert "duration_ms:Number(durationMs.toFixed(2))" in runtime
+    assert "interactionCacheLimit: 64" in runtime
+    assert "cacheMisses:0" in runtime
+    assert "cacheEvictions:0" in runtime
+    assert "cache:structuredClone(this.transformCacheEvidence.get(id) || null)" in runtime
     assert "runtime.viewRenderEvidence.set(key" in adapter
     assert "runtime.rendererLifecycleEvidence.get(key)" in adapter
     assert "custom_renderer_dispose_missing" in adapter

@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v18
+schema: dataviz/dashboard/v19
 kind: dashboard
 id: source-lab
 title: 数据源实验室

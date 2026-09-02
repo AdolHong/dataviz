@@ -35,7 +35,7 @@ def _elapsed(action: Callable[[], Any]) -> tuple[Any, float]:
 
 def _workspace(root: Path, rows: int) -> Path:
     dashboard = root / "dashboards" / "parameter-scale"
-    domains = root / "parameter_domains"
+    domains = dashboard / "parameter_domains"
     auth = root / "auth"
     dashboard.mkdir(parents=True)
     domains.mkdir()
@@ -75,12 +75,12 @@ from range({rows}) values(i)
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v15
+        """schema: dataviz/dashboard/v19
 kind: dashboard
 id: parameter-scale
 title: Parameter scale
 adapters: {warehouse: benchmark}
-parameter_domains: [workspace:/parameter_domains/items.yaml]
+parameter_domains: [parameter_domains/items.yaml]
 query_parameters:
   - id: division
     type: multiple_select

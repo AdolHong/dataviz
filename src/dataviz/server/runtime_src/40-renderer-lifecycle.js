@@ -28,22 +28,36 @@ Object.assign(datavizRuntime, {
     const completions = [];
     this.views.forEach((definition, id) => {
       if (affected && !affected.has(id)) return;
-      const references = Object.values(definition.inputs).map(canonicalOutputReference);
-      const failedReference = references.find(reference => {
+      const inputReferences = Object.entries(definition.inputs).map(([alias, reference]) => ({
+        alias,
+        reference:canonicalOutputReference(reference),
+      }));
+      const references = inputReferences.map(item => item.reference);
+      const failedInput = inputReferences.find(({reference}) => {
         if (this.outputErrors.has(reference)) return true;
         const canonical = canonicalOutputReference(reference);
         return canonical.startsWith('interactive:') && this.transformErrors.has(canonical.slice('interactive:'.length).split('/')[0]);
       });
-      if (failedReference) {
-        const canonical = canonicalOutputReference(failedReference);
+      if (failedInput) {
+        const {alias, reference:canonical} = failedInput;
         const transformId = canonical.startsWith('interactive:') ? canonical.slice('interactive:'.length).split('/')[0] : null;
         const failure = this.outputErrors.get(canonical) || this.transformErrors.get(transformId);
+        this.viewRefreshEvidence.set(id, {
+          initial:Boolean(context.initial),
+          query_executed:Boolean(context.queryExecuted),
+          failed_input:{
+            alias,
+            reference:canonical,
+            code:failure?.code || failure?.details?.code || 'view_input_failed',
+            message:failure?.message || String(failure || 'Output failed'),
+          },
+        });
         const failureCode = String(failure?.code || failure?.details?.code || '').toLocaleLowerCase();
         if (failureCode.includes('cancel')) {
           this.viewAdapter?.cancelled(
             this.viewAdapter.node(id),
             id,
-            failure?.message || `Computation cancelled: ${canonical}`,
+            `Input ${alias} cancelled: ${failure?.message || canonical}`,
           );
           return;
         }
@@ -51,23 +65,34 @@ Object.assign(datavizRuntime, {
           this.viewAdapter?.unavailable(
             this.viewAdapter.node(id),
             id,
-            failure?.message || `Runtime unavailable: ${canonical}`,
+            `Input ${alias} unavailable: ${failure?.message || canonical}`,
           );
           return;
         }
         this.viewAdapter?.renderInto(this.viewAdapter.node(id), id, () => {
-          throw failure || new Error(`Output failed: ${canonical}`);
+          throw datavizRuntimeError({
+            code:failure?.code || failure?.details?.code || 'view_input_failed',
+            message:`Input ${alias} failed: ${failure?.message || canonical}`,
+            input_alias:alias,
+            input_reference:canonical,
+            cause:failure || null,
+          });
         });
         return;
       }
-      const missingReference = references.find(reference =>
+      const missingInput = inputReferences.find(({reference}) =>
         !Object.prototype.hasOwnProperty.call(window.dataviz.portable?.outputs || {}, reference)
       );
-      if (missingReference) {
+      if (missingInput) {
+        this.viewRefreshEvidence.set(id, {
+          initial:Boolean(context.initial),
+          query_executed:Boolean(context.queryExecuted),
+          waiting_input:{alias:missingInput.alias, reference:missingInput.reference},
+        });
         this.viewAdapter?.waiting(
           this.viewAdapter.node(id),
           id,
-          `Waiting for ${missingReference}`,
+          `Waiting for input ${missingInput.alias}: ${missingInput.reference}`,
         );
         return;
       }
@@ -91,6 +116,12 @@ Object.assign(datavizRuntime, {
         changed_inputs:references.filter(reference => (
           changedOutputReferences.has(canonicalOutputReference(reference))
         )),
+        changed_input_aliases:inputReferences
+          .filter(({reference}) => changedOutputReferences.has(reference))
+          .map(({alias}) => alias),
+        input_aliases:Object.fromEntries(
+          inputReferences.map(({alias, reference}) => [alias, reference])
+        ),
         interactive_transforms:transformTraces,
         query_executed:Boolean(context.queryExecuted),
       });

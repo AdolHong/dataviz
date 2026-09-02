@@ -1242,6 +1242,10 @@ def test_query_parameter_author_mode_is_a_read_only_canonical_projection():
     assert "runtime.queryLookup" in projection
     assert "runtime.queryTransitionEvidence" in projection
     assert "depends_on=" in projection
+    assert "lookup=" in projection
+    assert "request_ms=" in projection
+    assert "commit_ms=" in projection
+    assert "visible_refresh_ms=" in projection
     assert "fetch(" not in projection
     assert "request(" not in projection
     assert ".query-parameter-evidence[hidden]{display:none}" in style
@@ -1258,6 +1262,10 @@ def test_parameter_lookup_success_syncs_only_the_changed_select():
     assert "controls?.sync($('#parameter-form'))" not in lookup
     assert "setQueryParameterStates(runtime.queryParameterState" not in lookup
     assert "selected:queryParameterStateValues(stateEntry)" in lookup
+    assert "queryParameterLookupRequestIsCurrent" in lookup
+    assert "parentSignature" in lookup
+    assert "setQueryParameterLookupBusy(parameter.id, true)" in lookup
+    assert "setQueryParameterLookupBusy(parameter.id, false)" in lookup
 
     state_values = script[
         script.index("function queryParameterStateValues"):
@@ -1771,7 +1779,7 @@ def test_fast_dag_branch_publishes_output_before_slow_branch_finishes(
         encoding="utf-8",
     )
     (dashboard_root / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v18
+        """schema: dataviz/dashboard/v19
 kind: dashboard
 id: progressive
 title: Progressive branches
@@ -2178,7 +2186,7 @@ def test_query_cancel_is_tab_scoped_and_same_dashboard_run_supersedes(tmp_path: 
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v18
+        """schema: dataviz/dashboard/v19
 kind: dashboard
 id: slow
 title: Slow

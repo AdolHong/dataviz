@@ -792,7 +792,7 @@ def _profile_files(profile: str, item_id: str) -> dict[str, str]:
         "runtime": {"browser_table_transport": "json"},
     }
     dashboard: dict[str, Any] = {
-        "schema": "dataviz/dashboard/v18",
+        "schema": "dataviz/dashboard/v19",
         "kind": "dashboard",
         "id": item_id,
         "title": item_id.replace("-", " ").title(),
@@ -960,7 +960,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         files = {
             "dashboard.yaml": _yaml(
                 {
-                    "schema": "dataviz/dashboard/v18",
+                    "schema": "dataviz/dashboard/v19",
                     "kind": "dashboard",
                     "id": item_id,
                     "title": item_id.replace("-", " ").title(),

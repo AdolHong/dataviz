@@ -778,13 +778,18 @@ const datavizRuntime = window.datavizRuntime = {
   transformGenerations: new Map(),
   workerUrls: new Map(),
   interactionCache: new Map(),
+  interactionCacheLimit: 64,
+  transformCacheEvidence: new Map(),
   controlImpactSignatures: new Map(),
   initializing: false,
   initializationPromise: null,
   authorMode: false,
   interactiveAdapters: Object.create(null),
   metrics: {
-    interactiveTransforms: {started:0, completed:0, cancelled:0, timedOut:0, failed:0, cacheHits:0},
+    interactiveTransforms: {
+      started:0, completed:0, cancelled:0, timedOut:0, failed:0,
+      cacheHits:0, cacheMisses:0, cacheEvictions:0,
+    },
     transports: {started:0, completed:0, failed:0, arrowRows:0, arrowBytes:0, totalMs:0},
     renderers: {
       mounts:0, updates:0, empty:0, restores:0, interactions:0,
@@ -1115,30 +1120,61 @@ Object.assign(datavizRuntime, {
       ),
       query_inputs:datavizProjectParameterInputs(this.transformParameterInputs(id)),
       control_state:Object.fromEntries(
-        Object.values(this.transformControlInputs(id)).map(binding => [
-          binding.control,
-          datavizControlEntryFrom(controlState, binding.control),
-        ])
+        Object.values(this.transformControlInputs(id)).map(binding => {
+          const entry = datavizControlEntryFrom(controlState, binding.control);
+          // Revision is audit evidence, not input semantics. Excluding it lets
+          // a Transform reuse a result when the user returns to an equivalent
+          // canonical value/intent state.
+          return [binding.control, {
+            value:structuredClone(entry.value),
+            intent:entry.intent || 'explicit',
+          }];
+        })
       ),
     });
   },
   async executeTransform(id, item, inputValues, generation, controlState) {
     const key = this.transformCacheKey(id, item, inputValues, controlState);
-    if (item.spec.cache?.mode !== 'none' && this.interactionCache.has(key)) {
+    const cacheEnabled = item.spec.cache?.mode !== 'none';
+    if (!cacheEnabled) {
+      this.transformCacheEvidence.set(id, {status:'disabled', entries:this.interactionCache.size});
+    } else if (this.interactionCache.has(key)) {
+      const cached = this.interactionCache.get(key);
+      // Map insertion order is the LRU order.
+      this.interactionCache.delete(key);
+      this.interactionCache.set(key, cached);
       this.metrics.interactiveTransforms.cacheHits += 1;
-      return datavizCacheClone(this.interactionCache.get(key));
+      this.transformCacheEvidence.set(id, {status:'hit', entries:this.interactionCache.size});
+      return datavizCacheClone(cached);
     }
     const inflightKey = `${id}\u0000${key}`;
     const existing = this.inflightTransforms.get(inflightKey);
-    if (existing) return datavizCacheClone(await existing);
+    if (existing) {
+      this.transformCacheEvidence.set(id, {status:'inflight', entries:this.interactionCache.size});
+      return datavizCacheClone(await existing);
+    }
+    if (cacheEnabled) {
+      this.metrics.interactiveTransforms.cacheMisses += 1;
+      this.transformCacheEvidence.set(id, {status:'miss', entries:this.interactionCache.size});
+    }
     const execution = (async () => {
       const adapter = this.interactiveAdapters[item.spec.runtime];
       if (!adapter) throw new Error(`Unsupported Interactive Runtime: ${item.spec.runtime}`);
       adapter.validate(item);
       const prepared = await adapter.prepare(item, inputValues, {controlState});
       const value = await adapter.execute(id, item, prepared, {generation, controlState});
-      if (item.spec.cache?.mode !== 'none') {
+      if (cacheEnabled) {
         this.interactionCache.set(key, datavizCacheClone(value));
+        while (this.interactionCache.size > this.interactionCacheLimit) {
+          const oldest = this.interactionCache.keys().next().value;
+          this.interactionCache.delete(oldest);
+          this.metrics.interactiveTransforms.cacheEvictions += 1;
+        }
+        this.transformCacheEvidence.set(id, {
+          status:'stored',
+          entries:this.interactionCache.size,
+          evictions:this.metrics.interactiveTransforms.cacheEvictions,
+        });
       }
       return value;
     })();
@@ -1460,6 +1496,7 @@ Object.assign(datavizRuntime, {
           this.markTransformReady(id, {
             ...triggerTrace,
             duration_ms:Number(durationMs.toFixed(2)),
+            cache:structuredClone(this.transformCacheEvidence.get(id) || null),
             inputs:inputProfiles,
             outputs:outputProfiles,
             changed_outputs:[...localChanged],
@@ -1527,22 +1564,36 @@ Object.assign(datavizRuntime, {
     const completions = [];
     this.views.forEach((definition, id) => {
       if (affected && !affected.has(id)) return;
-      const references = Object.values(definition.inputs).map(canonicalOutputReference);
-      const failedReference = references.find(reference => {
+      const inputReferences = Object.entries(definition.inputs).map(([alias, reference]) => ({
+        alias,
+        reference:canonicalOutputReference(reference),
+      }));
+      const references = inputReferences.map(item => item.reference);
+      const failedInput = inputReferences.find(({reference}) => {
         if (this.outputErrors.has(reference)) return true;
         const canonical = canonicalOutputReference(reference);
         return canonical.startsWith('interactive:') && this.transformErrors.has(canonical.slice('interactive:'.length).split('/')[0]);
       });
-      if (failedReference) {
-        const canonical = canonicalOutputReference(failedReference);
+      if (failedInput) {
+        const {alias, reference:canonical} = failedInput;
         const transformId = canonical.startsWith('interactive:') ? canonical.slice('interactive:'.length).split('/')[0] : null;
         const failure = this.outputErrors.get(canonical) || this.transformErrors.get(transformId);
+        this.viewRefreshEvidence.set(id, {
+          initial:Boolean(context.initial),
+          query_executed:Boolean(context.queryExecuted),
+          failed_input:{
+            alias,
+            reference:canonical,
+            code:failure?.code || failure?.details?.code || 'view_input_failed',
+            message:failure?.message || String(failure || 'Output failed'),
+          },
+        });
         const failureCode = String(failure?.code || failure?.details?.code || '').toLocaleLowerCase();
         if (failureCode.includes('cancel')) {
           this.viewAdapter?.cancelled(
             this.viewAdapter.node(id),
             id,
-            failure?.message || `Computation cancelled: ${canonical}`,
+            `Input ${alias} cancelled: ${failure?.message || canonical}`,
           );
           return;
         }
@@ -1550,23 +1601,34 @@ Object.assign(datavizRuntime, {
           this.viewAdapter?.unavailable(
             this.viewAdapter.node(id),
             id,
-            failure?.message || `Runtime unavailable: ${canonical}`,
+            `Input ${alias} unavailable: ${failure?.message || canonical}`,
           );
           return;
         }
         this.viewAdapter?.renderInto(this.viewAdapter.node(id), id, () => {
-          throw failure || new Error(`Output failed: ${canonical}`);
+          throw datavizRuntimeError({
+            code:failure?.code || failure?.details?.code || 'view_input_failed',
+            message:`Input ${alias} failed: ${failure?.message || canonical}`,
+            input_alias:alias,
+            input_reference:canonical,
+            cause:failure || null,
+          });
         });
         return;
       }
-      const missingReference = references.find(reference =>
+      const missingInput = inputReferences.find(({reference}) =>
         !Object.prototype.hasOwnProperty.call(window.dataviz.portable?.outputs || {}, reference)
       );
-      if (missingReference) {
+      if (missingInput) {
+        this.viewRefreshEvidence.set(id, {
+          initial:Boolean(context.initial),
+          query_executed:Boolean(context.queryExecuted),
+          waiting_input:{alias:missingInput.alias, reference:missingInput.reference},
+        });
         this.viewAdapter?.waiting(
           this.viewAdapter.node(id),
           id,
-          `Waiting for ${missingReference}`,
+          `Waiting for input ${missingInput.alias}: ${missingInput.reference}`,
         );
         return;
       }
@@ -1590,6 +1652,12 @@ Object.assign(datavizRuntime, {
         changed_inputs:references.filter(reference => (
           changedOutputReferences.has(canonicalOutputReference(reference))
         )),
+        changed_input_aliases:inputReferences
+          .filter(({reference}) => changedOutputReferences.has(reference))
+          .map(({alias}) => alias),
+        input_aliases:Object.fromEntries(
+          inputReferences.map(({alias, reference}) => [alias, reference])
+        ),
         interactive_transforms:transformTraces,
         query_executed:Boolean(context.queryExecuted),
       });
@@ -1819,6 +1887,7 @@ Object.assign(datavizRuntime, {
     this.workerUrls.forEach(url => URL.revokeObjectURL(url));
     this.workerUrls.clear();
     this.interactionCache.clear();
+    this.transformCacheEvidence.clear();
     this.controlImpactSignatures.clear();
     Object.values(this.interactiveAdapters).forEach(adapter => adapter.dispose());
   },

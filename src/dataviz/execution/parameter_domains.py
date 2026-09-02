@@ -1,4 +1,4 @@
-"""Compile the declarative topology of shared Parameter Domain consumers."""
+"""Compile the declarative topology of Dashboard Parameter Domain consumers."""
 
 from __future__ import annotations
 

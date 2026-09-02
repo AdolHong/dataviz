@@ -65,29 +65,6 @@ def _workspace_payload(
     return payload
 
 
-def _workspace_domain_files(
-    workspace: LoadedWorkspace,
-    dashboard: LoadedDashboard,
-) -> list[tuple[Path, Path]]:
-    files: dict[Path, Path] = {}
-    for definition_path, definition in dashboard.parameter_domains.values():
-        if definition_path == dashboard.definition_path or definition_path.is_relative_to(dashboard.root):
-            continue
-        try:
-            definition_relative = definition_path.relative_to(workspace.root)
-            code_path = (definition_path.parent / definition.code).resolve()
-            code_relative = code_path.relative_to(workspace.root)
-        except ValueError as error:
-            raise WorkspaceError(
-                "Workspace Parameter Domain dependency escapes the Workspace",
-                file=definition_path,
-                details={"code": "dashboard_bundle_dependency_escape"},
-            ) from error
-        files[definition_relative] = definition_path
-        files[code_relative] = code_path
-    return sorted((source, relative) for relative, source in files.items())
-
-
 def _workspace_asset_files(
     workspace: LoadedWorkspace,
     dashboard: LoadedDashboard,
@@ -241,10 +218,9 @@ def bundle_dashboard(
         )
         for path in _portable_files(dashboard.root)
     ]
-    domain_pairs = _workspace_domain_files(workspace, dashboard)
     asset_files = _workspace_asset_files(workspace, dashboard)
     asset_pairs = [(source, relative) for _identifier, source, relative in asset_files]
-    source_pairs = [*dashboard_pairs, *domain_pairs, *asset_pairs]
+    source_pairs = [*dashboard_pairs, *asset_pairs]
     workspace_content = yaml.safe_dump(
         _workspace_payload(workspace, dashboard_workspace_asset_ids(dashboard)),
         allow_unicode=True,
@@ -268,9 +244,9 @@ def bundle_dashboard(
             "id": dashboard_id,
             "path": target_dashboard_relative.as_posix(),
             "content_hash": source_dashboard_hash,
-            "parameter_domains": [
-                _snapshot_record(records, relative) for _source, relative in domain_pairs
-            ],
+            # Parameter Domain definitions and SQL are Dashboard-owned and are
+            # already included in the Dashboard directory snapshot.
+            "parameter_domains": [],
             "assets": [
                 {"id": identifier, **_snapshot_record(records, relative)}
                 for identifier, _source, relative in asset_files

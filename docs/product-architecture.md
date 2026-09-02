@@ -8,7 +8,7 @@
 
 ```text
 Workspace              dataviz/workspace/v2
-Dashboard              dataviz/dashboard/v18
+Dashboard              dataviz/dashboard/v19
 Parameter Domain       dataviz/parameter-domain/v2
 Parameter Domain Contract dataviz/parameter-domain-contract/v3
 Parameter Lookup       dataviz/parameter-lookup/v1
@@ -96,7 +96,7 @@ Query Parameter → Source → Dataset Transform → Base Named Output
 - 执行：`src/dataviz/execution/executor.py`
 - Query Parameter 解析与节点本地投影：`src/dataviz/execution/parameters.py`
 - Parameter Domain Contract：`src/dataviz/execution/parameter_domains.py`
-- Workspace 共享物化、Lookup、刷新 lease 与 generation pin：`src/dataviz/execution/parameter_materializations.py`
+- Dashboard 候选物化、Lookup、刷新 lease 与 generation pin：`src/dataviz/execution/parameter_materializations.py`
 - Workspace 时区相对日期：`src/dataviz/relative_dates.py`
 - Source Runner：`src/dataviz/sources/`
 - Python 子进程：`src/dataviz/execution/python_process.py`
@@ -105,11 +105,11 @@ Query Parameter → Source → Dataset Transform → Base Named Output
 
 Query Run 固化每个 Query Parameter 的 canonical state 和 Base Output。scoped Controls 不进入这张 DAG。每个 Query 节点以 `query_inputs` 声明自己可读的本地 alias；结构化绑定可把 `range_input/date` 投影为 `start`/`end`，也可把候选多选投影为 `selection=all|include|exclude|none`、有限 `value` operands、`active` 或完整 `state`。普通 SQL 优先使用 `query_filters` 与受限 `{{ dataviz_filter:name }}` token：`all/include/exclude` 参数化生成 `TRUE/IN/NOT IN`，空 `multiple_input` 或候选 `multiple_select none` 由该 consumer 必填的 `empty: passthrough|match_none` 生成 `TRUE/FALSE`，不会产生 `IN ()`。相对日期默认值先按 Workspace IANA 时区解析为 ISO 日期，再进入 Run、缓存和执行上下文。节点按依赖闭包并发，Output 完成后立即发布；无关分支不互相等待。
 
-网页动态候选位于 Query DAG 之前：`Parameter Domain SQL → Workspace shared immutable materialization → Server-local Lookup → Query Parameter draft → Query DAG`。SQL Domain 不按基数分叉，也不读取 Dashboard draft `query_inputs`；它由 definition/code hash、实际 Adapter identity 和 visibility scope 定位 generation，可跨 Dashboard、tab 和同可见范围用户复用。Browser 只持有当前页和有限已选 operands；搜索、generation-bound cursor 分页和 `depends_on` 父级 predicate 都读取同一 pinned Parquet generation，不重新执行远端 SQL。父 `single_select` 的 canonical 标量按单值 include 解释，父 `multiple_select` 使用 `all/include/exclude/none`。`refresh_after_seconds` 与 `expire_after_seconds` 分开控制 stale-while-revalidate 和 hard expiry；失败只禁用相关 Picker，不得阻断 Query、自由输入或 Workspace 导航。
+网页动态候选位于 Query DAG 之前：`Dashboard Parameter Domain SQL → immutable materialization → Server-local Lookup → Query Parameter draft → Query DAG`。定义与 SQL 必须位于所属 Dashboard，不按基数分叉，也不读取 draft `query_inputs`；generation 由 Dashboard-local definition/code path 与 hash、实际 Adapter identity 和 visibility scope 定位。同一 Dashboard 的多个用户与 tab 可复用 generation，不同 Dashboard 不共享取数定义或物化。Browser 只持有当前页和有限已选 operands；搜索、generation-bound cursor 分页和 `depends_on` 父级 predicate 都读取同一 pinned Parquet generation，不重新执行远端 SQL。父 `single_select` 的 canonical 标量按单值 include 解释，父 `multiple_select` 使用 `all/include/exclude/none`。`refresh_after_seconds` 与 `expire_after_seconds` 分开控制 stale-while-revalidate 和 hard expiry；失败只禁用相关 Picker，不得阻断 Query、自由输入或 Workspace 导航。
 
-AI 可按需使用 `dataviz parameters prewarm|status|lookup|refresh` 探索同一物化；`dataviz run` 只消费调用方 state 或可独立解析的 default，绝不为了候选校验而隐式构建物化。Result、Evidence、URL/tab checkpoint、portable HTML 与分享缓存只封存紧凑 state：`all/none` 没有 operands，`include/exclude` 只保存有限 operands；它们不包含 Domain SQL、Parquet、候选页、search 或 cursor。跨 Workspace 搬运单个 Dashboard 使用 `dataviz bundle` 在新目录或空目录创建独立快照，复制共享 Domain definition/SQL、实际引用的 Workspace Asset 与非敏感 binding manifest，默认不复制 `.dataviz`、无关文件或凭据；它不合并或覆盖已有 Workspace。Parameter Domain 与 Canvas Interactive Runtime 没有执行边，不进入 browser-js 或 Renderer。
+AI 可按需使用 `dataviz parameters prewarm|status|lookup|refresh` 探索当前 Dashboard 的物化；`dataviz run` 只消费调用方 state 或可独立解析的 default，绝不为了候选校验而隐式构建物化。Result、Evidence、URL/tab checkpoint、portable HTML 与分享缓存只封存紧凑 state：`all/none` 没有 operands，`include/exclude` 只保存有限 operands；它们不包含 Domain SQL、Parquet、候选页、search 或 cursor。跨 Workspace 搬运单个 Dashboard 使用 `dataviz bundle` 在新目录或空目录创建独立快照：Dashboard-local Domain definition/SQL 已随目录复制，额外闭包只包含实际引用的 Workspace Asset 与非敏感 binding manifest；默认不复制 `.dataviz`、无关文件或凭据，也不合并或覆盖已有 Workspace。Parameter Domain 与 Canvas Interactive Runtime 没有执行边，不进入 browser-js 或 Renderer。
 
-File、SQL、Python 是 Source 的三种入口。Workspace v2 可注册共享静态文件；File Source v6 用 `asset:<id>` 读取时显式声明 format。Dashboard v17 的 Browser `assets` allowlist 与 Source 引用相互独立；Runtime v13 的 `context.assets` 在 Server URL 与 portable inline 之间保持同一 API。普通 SQL/文件默认属于 Dashboard；共享只用于稳定 Workspace Asset 与真正共用的 Parameter Domain。`dataviz bundle` 在 staging 中复制两类实际引用的联合闭包并校验 hash 后一次发布，输出不再跟踪源共享资源；`inspect context` 只投影 Asset 元数据。SQL 默认单次超时 120 秒，明确超时后立即额外重试一次；Source 可以覆盖 `timeout_seconds` 与 `timeout_retries`。SQL 面板保存参数化 statement、Resolved SQL、bound parameters、Adapter、耗时、重试和 hash 证据，但不公开凭证。
+File、SQL、Python 是 Source 的三种入口。Workspace v2 可注册共享静态文件；File Source v6 用 `asset:<id>` 读取时显式声明 format。Dashboard 的 Browser `assets` allowlist 与 Source 引用相互独立；`context.assets` 在 Server URL 与 portable inline 之间保持同一 API。Source SQL、Parameter Domain SQL 与普通文件属于 Dashboard；只有稳定本地文件使用 Workspace Asset。`dataviz bundle` 在 staging 中复制 Dashboard 与实际引用的 Asset 闭包并校验 hash 后一次发布，输出不再跟踪源共享资源；`inspect context` 只投影 Asset 元数据。SQL 默认单次超时 120 秒，明确超时后立即额外重试一次；Source 可以覆盖 `timeout_seconds` 与 `timeout_retries`。SQL 面板保存参数化 statement、Resolved SQL、bound parameters、Adapter、耗时、重试和 hash 证据，但不公开凭证。
 
 Python Source 与 Dataset Transform 使用 fresh spawn 子进程，支持硬 timeout、cancel、progress、完整 traceback、声明依赖指纹、多输入和多 Named Output。`context.log(...)` 产生实时 `node_log`，并保存 `dataviz/execution-log/v1` Artifact；Artifact 受 tab session 隔离，Query 节点可在 Sources 证据面板直接检查。
 
@@ -266,7 +266,7 @@ Server 状态以浏览器 tab 的 `session_id` 为边界。不同 tab、Dashboar
 
 Component Registry v6.0.0 从 `src/dataviz/components/packages/` 扫描 Package。每个 Package 声明 owner、Schema、controller、adapter、功能 CSS、Story 和测试声明。`components check` 只校验这些元数据、资产与声明，pytest/浏览器 E2E 才执行行为。21 个 Package 均为 package-owned；14 个 `control.*` Package 独立承载 Data Entry Component，声明式 View/Section、Data Pipeline 与 Presentation 已迁入各自 owner，`declarative-runtime.js` 与 Runtime 中的重复实现已经删除。
 
-`view.declarative` 的原生 Map 继续由唯一 Plotly Chart Service 托管：point 映射经纬度，region 通过 Dashboard allowlist 的 Workspace GeoJSON Asset 连接区域指标；Server 与 portable HTML 共用同一资产水合和 Renderer lifecycle。Overview → Detail 使用通用 compound Control writer，不增加地图事件协议。大型实体 Query Parameter 不新增组件或 Runtime owner，`query-parameter.entity-select` Scaffold 只组合已有 Parameter Domain、服务端 Lookup、紧凑 `multiple_select` 与 Source `query_filters`。
+`view.declarative` 的原生 Map 继续由唯一 Plotly Chart Service 托管：point 映射经纬度，region 通过 Dashboard allowlist 的 Workspace GeoJSON Asset 连接区域指标；Server 与 portable HTML 共用同一资产水合和 Renderer lifecycle。Overview → Detail 使用通用 compound Control writer，不增加地图事件协议。大型实体 Query Parameter 不新增组件或 Runtime owner，`query-parameter.entity-select` Scaffold 只组合 Dashboard-local Parameter Domain、服务端 Lookup、紧凑 `multiple_select` 与 Source `query_filters`。
 
 `presentation.shell` 还拥有 `control-panel.adaptive`：Server 与导出报告共享 Query Card、自适应列和内部滚动规则。Server Header 横跨 Sidebar 与 Workbench，Dataviz 品牌按钮拥有 Sidebar disclosure，Query 节点信号灯紧随品牌；Sidebar 和 Workbench 从 Header 下方开始。Header 右侧以 Dashboard Controls 和最右侧“查询 + ▼”分段按钮结束：主按钮执行 Query，箭头开合 Query Card，不另设 Parameters 按钮。Query Parameters 位于 Workbench 顶部的正常文档流，Card 内只保留紧凑标题和 label-over-input 网格，不重复查询动作。Card 与 Canvas 共享同一个响应式水平 gutter，不设置独立最大宽度。Server 首次默认展开并记忆 tab 状态，导出报告默认折叠以优先展示分析内容。展开时推开 Canvas，页面滚动时自然离开视口，不成为遮挡分析内容的 sticky/fixed Overlay。Server 的同源 Canvas iframe 通过 Shell Scroll Bridge 与外层形成一个顺序明确的纵向阅读面。Dashboard/Section/View Controls 才属于可由外部点击或 `Esc` 关闭的 Overlay。Query 的 `columns` 是最大列数，`column_width` 是目标轨道宽度；Runtime 读取 Card body 实际宽度计算有效列数，稀疏表单保持有界轨道并在右侧留白。单个控件只有显式 `span: 2` 才跨列。Scoped Controls 默认单列，只有显式配置才进入网格。Shell/Runtime 继续统一拥有值、校验、级联和执行状态。Shell 默认文案保持操作化和紧凑；解释框架概念的长文进入 Docs/Help/Diagnostics，不永久占据 Dashboard。
 

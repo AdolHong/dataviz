@@ -223,7 +223,7 @@ folders: []
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v18
+        """schema: dataviz/dashboard/v19
 kind: dashboard
 id: same-view-controls
 title: Same View Controls
@@ -318,7 +318,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v18
+        """schema: dataviz/dashboard/v19
 kind: dashboard
 id: scale
 title: Scale Runtime
@@ -418,7 +418,7 @@ title: Interactive Runtime E2E
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v18
+        """schema: dataviz/dashboard/v19
 kind: dashboard
 id: runtime-matrix
 title: Interactive Runtime Matrix
@@ -924,6 +924,74 @@ def test_remote_single_select_search_repaints_with_scalar_state(page: Page, tmp_
 
 
 @pytest.mark.e2e
+def test_remote_lookup_late_failure_cannot_replace_newer_success(page: Page, tmp_path: Path):
+    workspace = _copy_workspace(SHOWCASE, tmp_path / "parameter-domain-late-failure")
+    dashboard_root = workspace / "dashboards" / "功能示例##parameter-domain-lab"
+    domain_path = dashboard_root / "parameter_domains" / "locations.yaml"
+    domain_path.write_text(
+        domain_path.read_text(encoding="utf-8").replace("max_rows: 100", "max_rows: 700"),
+        encoding="utf-8",
+    )
+    rows = ",\n".join(
+        f"  ('GD', '广东', 1, 'C{index:03d}', '城市 {index:03d}', {index})"
+        for index in range(1, 621)
+    )
+    (dashboard_root / "parameter_domains" / "locations.sql").write_text(
+        "select * from (values\n"
+        + rows
+        + "\n) as locations("
+        "province_code, province_name, province_order, city_code, city_name, city_order)\n",
+        encoding="utf-8",
+    )
+    page.add_init_script(
+        """(() => {
+          const nativeFetch = window.fetch.bind(window);
+          window.__datavizLookupSearches = [];
+          window.fetch = async (input, init = {}) => {
+            const url = String(input);
+            let search = null;
+            if (url.includes('/parameter-domains/lookup') && init.body) {
+              search = JSON.parse(init.body).search;
+              window.__datavizLookupSearches.push(search);
+            }
+            const response = await nativeFetch(input, init);
+            if (search === '城市 61') {
+              await new Promise(resolve => setTimeout(resolve, 700));
+              throw new Error('simulated late lookup failure');
+            }
+            return response;
+          };
+        })();"""
+    )
+
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "parameter-domain-lab")
+        city = page.locator('select[name="cities"]')
+        expect(city.locator("option")).to_have_count(500, timeout=20_000)
+        control = page.locator("#parameter-form .dv-control").filter(has=city)
+        control.locator("[data-control-trigger]").click()
+        search = control.locator(".dv-choice-search")
+
+        search.fill("城市 61")
+        page.wait_for_function(
+            "window.__datavizLookupSearches.includes('城市 61')"
+        )
+        search.fill("城市 619")
+        expect(control.locator(".dv-choice-option", has_text="城市 619")).to_have_count(
+            1, timeout=10_000
+        )
+        page.wait_for_timeout(900)
+        expect(control.locator(".dv-choice-option", has_text="城市 619")).to_have_count(1)
+        expect(control).to_have_attribute("aria-busy", "false")
+
+        page.locator("#query-parameter-author-mode").click()
+        evidence = page.locator('[data-query-parameter-evidence="cities"]')
+        expect(evidence).to_contain_text("lookup=ready")
+        expect(evidence).to_contain_text("request_ms=")
+        expect(evidence).to_contain_text("visible_refresh_ms=")
+
+
+@pytest.mark.e2e
 def test_parameter_domain_failure_does_not_trap_dashboard_navigation(page: Page, tmp_path: Path):
     workspace = _copy_workspace(SHOWCASE, tmp_path / "parameter-domain-failure")
     domain_sql = (
@@ -984,23 +1052,11 @@ def test_sidebar_updates_dashboard_url_before_dynamic_domain_hydration(
 
 
 @pytest.mark.e2e
-def test_parameter_domain_generation_is_shared_across_dashboards_and_browser_contexts(
+def test_parameter_domain_generation_is_scoped_per_dashboard(
     page: Page, tmp_path: Path
 ):
-    workspace = _copy_workspace(SHOWCASE, tmp_path / "parameter-domain-shared")
+    workspace = _copy_workspace(SHOWCASE, tmp_path / "parameter-domain-scoped")
     original = workspace / "dashboards" / "功能示例##parameter-domain-lab"
-    shared = workspace / "parameter_domains"
-    shared.mkdir()
-    shutil.copy2(original / "parameter_domains" / "locations.yaml", shared / "locations.yaml")
-    shutil.copy2(original / "parameter_domains" / "locations.sql", shared / "locations.sql")
-    dashboard_path = original / "dashboard.yaml"
-    dashboard_path.write_text(
-        dashboard_path.read_text(encoding="utf-8").replace(
-            "parameter_domains: [parameter_domains/locations.yaml]",
-            "parameter_domains: [workspace:/parameter_domains/locations.yaml]",
-        ),
-        encoding="utf-8",
-    )
     copied = workspace / "dashboards" / "功能示例##parameter-domain-lab-copy"
     shutil.copytree(original, copied)
     copied_dashboard = copied / "dashboard.yaml"
@@ -1026,8 +1082,8 @@ def test_parameter_domain_generation_is_shared_across_dashboards_and_browser_con
                 rows = connection.execute(
                     "SELECT generation, status FROM materializations"
                 ).fetchall()
-            assert len(rows) == 1
-            assert rows[0][0] and rows[0][1] == "ready"
+            assert len(rows) == 2
+            assert all(generation and status == "ready" for generation, status in rows)
         finally:
             second_context.close()
 
@@ -4034,6 +4090,51 @@ def test_share_link_keeps_browser_interactions_and_uses_workspace_cache(page: Pa
             timeout=10_000,
         )
         expect(shared_table).to_have_attribute("data-view-status", "ready")
+
+
+@pytest.mark.e2e
+def test_browser_transform_session_cache_reuses_equivalent_control_state(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(WORKER, tmp_path / "worker-session-cache")
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "worker-runtime")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        table = frame.locator('[data-view-id="scaled-table"]')
+        expect(table).to_have_attribute("data-view-status", "ready", timeout=15_000)
+        delay = page.locator('input[name="dashboard:worker-runtime/delay_ms"]')
+
+        delay.evaluate(
+            "input => { input.value = '6'; input.dispatchEvent(new Event('change', {bubbles:true})); }"
+        )
+        page.wait_for_function(
+            """() => document.querySelector('#canvas-frame').contentWindow.dataviz
+              .control.value('dashboard:worker-runtime/delay_ms') === 6""",
+            timeout=10_000,
+        )
+        delay.evaluate(
+            "input => { input.value = '5'; input.dispatchEvent(new Event('change', {bubbles:true})); }"
+        )
+        page.wait_for_function(
+            """() => {
+              const runtime = document.querySelector('#canvas-frame').contentWindow.datavizRuntime;
+              return runtime.interactiveTraces.get('scaled')?.cache?.status === 'hit';
+            }""",
+            timeout=10_000,
+        )
+        cache = frame.locator("body").evaluate(
+            """() => ({
+              metrics:window.datavizRuntime.metrics.interactiveTransforms,
+              evidence:window.datavizRuntime.interactiveTraces.get('scaled').cache,
+              entries:window.datavizRuntime.interactionCache.size,
+              limit:window.datavizRuntime.interactionCacheLimit,
+            })"""
+        )
+        assert cache["metrics"]["cacheHits"] >= 1
+        assert cache["metrics"]["cacheMisses"] >= 1
+        assert cache["evidence"]["status"] == "hit"
+        assert cache["entries"] <= cache["limit"] == 64
 
 
 @pytest.mark.e2e

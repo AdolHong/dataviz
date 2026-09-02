@@ -977,7 +977,7 @@ class CacheDefinition(Model):
 
 
 class ParameterDomainDefinition(Model):
-    """A shared materialized SQL catalog used only for Query Parameter choices."""
+    """A Dashboard-owned materialized SQL catalog for Query Parameter choices."""
 
     schema_: Literal[PARAMETER_DOMAIN_SCHEMA] = Field(alias="schema")
     kind: Literal["parameter_domain"] = "parameter_domain"

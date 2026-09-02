@@ -683,14 +683,14 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                 )
 
         for domain_id, (domain_path, domain) in dashboard.parameter_domains.items():
-            if not _is_within(domain_path, workspace.root):
+            if not _is_within(domain_path, dashboard.root):
                 diagnostics.append(
                     Diagnostic(
                         "error",
-                        "Parameter Domain definition must stay inside its Workspace",
+                        "Parameter Domain definition must stay inside its Dashboard",
                         str(domain_path),
                         "parameter_domains",
-                        "parameter_domain_definition_outside_workspace",
+                        "parameter_domain_definition_outside_dashboard",
                     )
                 )
             if adapter_resolver:
@@ -709,14 +709,14 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         )
                     )
             code_path = _code_path(domain_path, domain.code)
-            if not _is_within(code_path, workspace.root):
+            if not _is_within(code_path, dashboard.root):
                 diagnostics.append(
                     Diagnostic(
                         "error",
-                        "Parameter Domain SQL must stay inside its Workspace",
+                        "Parameter Domain SQL must stay inside its Dashboard",
                         str(code_path),
                         "code",
-                        "parameter_domain_sql_outside_workspace",
+                        "parameter_domain_sql_outside_dashboard",
                     )
                 )
             elif not code_path.is_file():

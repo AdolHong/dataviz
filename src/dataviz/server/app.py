@@ -1077,7 +1077,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
     def lookup_parameter_domain_options(
         dashboard_id: str, request: ParameterLookupRequest
     ):
-        """Read one page from a shared immutable Parameter Domain generation."""
+        """Read one page from a Dashboard-owned immutable Parameter Domain generation."""
 
         if watch:
             workspace_watcher.flush()

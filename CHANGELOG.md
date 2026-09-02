@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.21.1 — 2026-09-02
+
+- Remote Parameter Lookup 的成功、失败、分页与父级变化统一经过 Dashboard identity、request generation 和 parent-state signature 门禁；迟到失败不再覆盖较新的成功结果，当前 Picker 独立暴露 busy 状态。
+- Query Parameter 作者投影新增 Lookup status/request generation 以及 request、Picker commit、visible-refresh 分段耗时；`dataviz docs --task lookup` 提供大型实体候选的最短文档路由。
+- Browser Interactive Transform 的 session cache 忽略纯审计 revision、采用内部有界 LRU，并把 hit/miss/eviction 投影到既有会话 trace；没有增加 cache DSL 或持久化协议。
+- 多输入 View 的等待、失败与变化证据明确指出 input alias 和 canonical Output reference，方便直接定位故障输入，不增加 Renderer API。
+- 发布门禁完成：完整非浏览器测试、Chromium/Firefox/WebKit 完整 E2E、Runtime 生成资产与 JavaScript 语法检查，以及 wheel、sdist、ZIP 三种最终发行物的独立干净安装、版本、Schema、组件、Workspace 初始化、严格校验与 Report 冒烟均通过。
+
+## 0.21.0 — 2026-09-02
+
+- Parameter Domain 的 definition/SQL 改为 Dashboard-owned；删除 `workspace:/parameter_domains/...` 引用和跨 Dashboard generation 共享。相似看板允许复制并独立演进候选 SQL，同一 Dashboard 的用户与 tab 仍可复用 immutable materialization。
+- Workspace 共享面只保留稳定静态 Asset。Bundle 复制完整 Dashboard 目录与实际引用的 Asset 闭包，不再解析、复制或合并 Workspace SQL；旧引用以 `parameter_domain_workspace_reference_removed` 明确拒绝并给出迁移动作。
+- Dashboard 严格契约升为 `dataviz/dashboard/v19`，Scaffold、示例、fixture、benchmark、内置文档、Skill、DESIGN 与 plan 同步断代，不保留旧语法兼容分支。
+- Server 作者模式的 View renderer signal 说明刷新因果、Query 是否执行、浏览器输入 rows/bytes、mount/update timing 与 Custom Renderer lifecycle warning；`dataviz renderer test` 明确验证空 mount、hook failure 和 dispose 后遗留 DOM 的边界。会话诊断不进入 immutable Result/Evidence，也不宣称检测任意第三方监听器泄漏。
+- Query Panel 的响应式列数在 `ResizeObserver` 下一帧幂等提交，避免 WebKit 在远程候选下拉重绘时产生 undelivered notification loop；Chromium、Firefox 与 WebKit 完整 E2E 均通过。
+- 发布门禁完成：完整非浏览器 pytest、Ruff、Runtime/Component 一致性、四个代表性 Workspace 严格校验、源码 Query/Report，以及 wheel、sdist、ZIP 三个干净环境的安装与 Report 冒烟均通过。
+
 ## 0.20.9 — 2026-09-02
 
 - `dataviz docs --task custom-renderer` 的最小渐进闭包直接展示 `input` + named `inputs` 与 `descriptor.inputs.<alias>`，明确禁止为了绕过假想的单表限制而拼接 `row_kind` 混合表；同时提供进入完整 Renderer 文档的命令。

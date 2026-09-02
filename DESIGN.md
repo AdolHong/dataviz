@@ -2,7 +2,7 @@
 
 > 快速安装和当前可用命令见 [README](README.md)；后续工作见 [plan.md](plan.md)。安装版本真正接受的字段始终以 `dataviz schemas`、`dataviz docs` 和 `dataviz components` 为准。
 
-本文记录已经落地并可由当前 Schema、CLI、Runtime 和测试证明的契约，以及明确标注的后续目标。当前严格契约是 `dataviz/workspace/v2`、`dataviz/dashboard/v18`、`dataviz/parameter-domain/v2`、`dataviz/parameter-domain-contract/v3`、`dataviz/parameter-lookup/v1`、`dataviz/parameter-materialization/v1`、`dataviz/dashboard-bundle/v2`、`dataviz/report-manifest/v3`、`dataviz/presentation/v2`、`dataviz/source/v6`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v13`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v6`、`dataviz/runtime/v14`、`dataviz/analysis-result/v5`、`dataviz/analysis-evidence/v5` 与 Component Registry `6.0.0`。Input State、共享 Parameter Materialization/Lookup、Workspace Asset、原生 Map、Entity Select Scaffold、multi-View writer/consumer binding、唯一 ControlRuntime authority、generation-start applied evidence 与 writer provenance、Layout/Semantic Contract、Chart/Table Service、Renderer 行为矩阵、`inspect layout` 与 visual-check 均已进入实现；当前代码只接受现行严格契约，不保留旧字段 alias、自动迁移或双协议 Runtime。
+本文记录已经落地并可由当前 Schema、CLI、Runtime 和测试证明的契约，以及明确标注的后续目标。当前严格契约是 `dataviz/workspace/v2`、`dataviz/dashboard/v19`、`dataviz/parameter-domain/v2`、`dataviz/parameter-domain-contract/v3`、`dataviz/parameter-lookup/v1`、`dataviz/parameter-materialization/v1`、`dataviz/dashboard-bundle/v2`、`dataviz/report-manifest/v3`、`dataviz/presentation/v2`、`dataviz/source/v6`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v13`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v6`、`dataviz/runtime/v14`、`dataviz/analysis-result/v5`、`dataviz/analysis-evidence/v5` 与 Component Registry `6.0.0`。Input State、Dashboard Parameter Materialization/Lookup、Workspace Asset、原生 Map、Entity Select Scaffold、multi-View writer/consumer binding、唯一 ControlRuntime authority、generation-start applied evidence 与 writer provenance、Layout/Semantic Contract、Chart/Table Service、Renderer 行为矩阵、`inspect layout` 与 visual-check 均已进入实现；当前代码只接受现行严格契约，不保留旧字段 alias、自动迁移或双协议 Runtime。
 
 Dataviz 是一个 workspace-first、AI-friendly 的数据看板工具。看板是普通文件，能够被 Git 管理、复制和审查；Server 面向人提供交互页面，CLI 面向 AI 与自动化提供构建校验、Catalog 发现、Target 执行、不可变 Result 检查和 HTML 报告。
 
@@ -113,7 +113,7 @@ Dataviz 可以支持复杂数据流，但不能要求普通作者理解 Runtime 
 | 可维护性 | 文件越短、模块越多越好 | 同一语义的 canonical owner 和解释器数量下降，跨 Runtime fixtures 能发现漂移 |
 | 渐进披露 | 把领域概念全部合并 | 普通路径只暴露任务所需概念，高级路径仍保留完整能力与明确边界 |
 
-本轮识别的偶然复杂度包括：同一 binding、empty value、filter、revision、Output 和错误在 Pydantic、Python、编译字典、HTTP、Canvas JavaScript 与 Web Component 中被重复解释；单一编译事实逐渐集中成平面 Contract；CLI/Server 曾各自承担显式 Target 应用语义；Shell/Canvas 曾同时保存并合并 Control shadow。P0 与 P1-A/P1-B/P1-C/P1-D 已分别关闭跨 Runtime 漂移、双 authority、Compiler 单体内部推导、重复应用语义和单 writer 限制；P3 已用共享物化与 Lookup 删除旧 Domain client/query 双路径。后续重构成功的衡量标准仍不是文件、类或协议名字减少了多少，而是：
+本轮识别的偶然复杂度包括：同一 binding、empty value、filter、revision、Output 和错误在 Pydantic、Python、编译字典、HTTP、Canvas JavaScript 与 Web Component 中被重复解释；单一编译事实逐渐集中成平面 Contract；CLI/Server 曾各自承担显式 Target 应用语义；Shell/Canvas 曾同时保存并合并 Control shadow。P0 与 P1-A/P1-B/P1-C/P1-D 已分别关闭跨 Runtime 漂移、双 authority、Compiler 单体内部推导、重复应用语义和单 writer 限制；P3 已用 Dashboard-owned 物化与 Lookup 删除旧 Domain client/query 双路径。后续重构成功的衡量标准仍不是文件、类或协议名字减少了多少，而是：
 
 - 一个领域事实只有一个 canonical owner；
 - 多语言实现消费同一 conformance corpus；
@@ -303,7 +303,7 @@ dataviz inspect dependencies WORKSPACE DASHBOARD --format json
 | Query Parameter | `dashboard.query_parameters` | 决定取什么数据 | 新建 Query Run，重新执行 Source/Dataset Transform | 固定为导出时已提交值 |
 | Control | Dashboard/Section/View 的 `controls` | Query 后提供交互输入 | 由 consumer binding 局部筛选、重绘或重算 Interactive Transform | 保持交互；能力取决于 Runtime/export mode |
 
-> **设计状态：当前领域模型与跨 Runtime 迁移已完成。** Dashboard v17、Source v6、Dataset Transform v3、Interactive Transform v4、Dependency Contract v12、State Snapshot v5、Runtime v13 与 Analysis Result/Evidence v4 已在 Schema、Compiler、Server、Browser、HTML、CLI、示例与测试中同步切换；旧 `kind`、双输入协议、旧 comparison 语义、Shell Control shadow、单数 writer projection 和 Query Parameter client-relation 路径都不保留兼容分支。Python、Canvas 与 Web Component 的共享语义由同一语言无关 corpus 验证，Host channel、applied state、writer provenance 与 Query Parameter compact state 由真实浏览器/持久化回归验证。
+> **设计状态：当前领域模型与跨 Runtime 迁移已完成。** Dashboard v19、Source v6、Dataset Transform v3、Interactive Transform v4、Dependency Contract v13、State Snapshot v6、Runtime v14 与 Analysis Result/Evidence v5 已在 Schema、Compiler、Server、Browser、HTML、CLI、示例与测试中同步切换；旧 `kind`、双输入协议、旧 comparison 语义、Shell Control shadow、单数 writer projection、Query Parameter client-relation 路径和 Workspace SQL 引用都不保留兼容分支。Python、Canvas 与 Web Component 的共享语义由同一语言无关 corpus 验证，Host channel、applied state、writer provenance 与 Query Parameter compact state 由真实浏览器/持久化回归验证。
 
 ### Input State 只保存事实
 
@@ -483,18 +483,18 @@ typed comparison 的 v10 → v11 迁移没有顺带改变 Query/Interactive 两�
 
 Query Parameter 只在用户点击 **查询** 后提交。Shell 分别维护当前 Dashboard 的 draft 与最后一次成功 Query 的 committed snapshot；修改草稿不会改写旧 Result。每个参数只保存一份 canonical typed state，节点只能通过声明的 `query_inputs` 或 `query_filters` 读取投影后的本地值，未声明的全局参数不可见。
 
-候选多选不再保存平行 values/intents，也不再使用 `all_available | explicit`。当前公开集合表达式是 `all/include/exclude/none`；SQL Parameter Domain 不再拥有 client-relation/query-edge 两条路径，而是统一进入 Server 共享物化与 Lookup。下面的完整章节是现行实现，不是未来提案。
+候选多选不再保存平行 values/intents，也不再使用 `all_available | explicit`。当前公开集合表达式是 `all/include/exclude/none`；SQL Parameter Domain 不再拥有 client-relation/query-edge 两条路径，而是统一进入 Dashboard-owned Server 物化与 Lookup。下面的完整章节是现行实现，不是未来提案。
 
 #### Query Parameter v14：统一物化候选与紧凑集合表达式
 
-> **设计状态：已实现。** 当前严格边界为 Dashboard v17、Parameter Domain v2、Contract v3、Lookup/Materialization v1、Source v6、Dependency Contract v12、State Snapshot v5、Runtime v13 与 Analysis Result/Evidence v4。旧 `all_available | explicit` Query state、完整 client relation、Domain `query_inputs` query edge 和 `options_id` 快照已一次迁移删除。
+> **设计状态：已实现。** 当前严格边界为 Dashboard v19、Parameter Domain v2、Contract v3、Lookup/Materialization v1、Source v6、Dependency Contract v13、State Snapshot v6、Runtime v14 与 Analysis Result/Evidence v5。旧 `all_available | explicit` Query state、完整 client relation、Domain `query_inputs` query edge、`options_id` 快照和 Workspace Parameter Domain 引用已一次迁移删除。
 
 新设计不再按候选基数建立两套作者模型。Query Parameter 只有两种候选来源：
 
 | 候选来源 | 作者语义 | Runtime 行为 |
 | --- | --- | --- |
 | `static` | Dashboard 内声明的封闭小枚举 | 随 Dashboard 定义到达浏览器，不执行 SQL |
-| SQL Parameter Domain | 可跨 Dashboard 复用的候选关系 | 一律先在 Server 物化为 Workspace 共享 immutable generation；Browser 只读取去重后的搜索/分页投影 |
+| SQL Parameter Domain | Dashboard-owned 候选关系 | 一律先在 Server 物化为当前 Dashboard 的 immutable generation；Browser 只读取去重后的搜索/分页投影 |
 
 SQL Domain 不再拥有“完整关系下发 Browser”与“Server Lookup”两个 access mode。行数少时第一页可能已经包含全部候选，行数多时继续分页；这只是同一 Lookup 的物理结果，不形成新的 DSL 分支、容量回退或作者决策。Browser 永远不持有 SQL Domain 原始关系；Server 物化使用作者声明的 row/byte guard、受控磁盘目录和可观测构建结果。
 
@@ -621,24 +621,24 @@ Compiler 只允许已声明的精确 token，并只接受 `multiple_select` 或 
 
 Python `context.query_inputs` 可以直接接收 `projection: state`，但不得把候选物化对象、DataFrame 或 Lookup client 暴露给 Query/Interactive Transform。`dataviz run` 只消费调用方给出的 state 或无需 Domain 即可解析的 default；已知 Item 的 AI 可以直接运行，绝不为了验证候选或补标签而隐式构建物化。
 
-##### Workspace 共享物化
+##### Dashboard-owned 候选物化
 
-可复用 SQL Domain 是显式 Workspace 资产，而不是“两个 Dashboard 的 SQL 文本碰巧相同就自动合并”。建议目录和引用形态如下：
+Parameter Domain 是所属 Dashboard 的取数口径，不是 Workspace 共享代码。相似看板允许复制一份较小的 Domain definition/SQL 并独立演进；修改其中一个看板不会改变其他看板。稳定 GeoJSON、字典或图片等文件才进入 Workspace Asset。目录和引用形态如下：
 
 ```text
 workspace/
-  parameter_domains/
-    item-catalog/
-      domain.yaml
-      items.sql
   dashboards/
-    .../dashboard.yaml
+    item-analysis/
+      dashboard.yaml
+      parameter_domains/
+        item-catalog.yaml
+        items.sql
 ```
 
 ```yaml
 # dashboard.yaml
 parameter_domains:
-  - workspace:/parameter_domains/item-catalog/domain.yaml
+  - parameter_domains/item-catalog.yaml
 
 query_parameters:
   - id: item_nbrs
@@ -660,7 +660,7 @@ query_parameters:
 ```
 
 ```yaml
-# parameter_domains/item-catalog/domain.yaml
+# dashboards/item-analysis/parameter_domains/item-catalog.yaml
 schema: dataviz/parameter-domain/v2
 kind: parameter_domain
 id: item-catalog
@@ -673,9 +673,9 @@ materialization:
   expire_after_seconds: 604800       # 7d 后硬过期，不再作为候选服务
 ```
 
-省略时默认 `refresh_after_seconds=43200`、`expire_after_seconds=604800`；hard expiry 必须严格晚于 refresh due。它们分别回答“何时应后台更新”和“旧 generation 最晚何时禁止继续服务”，不能合并成一个含糊 TTL。作者可以按业务更新频率调整，但页面请求不能临时覆盖共享资产的生命周期。
+省略时默认 `refresh_after_seconds=43200`、`expire_after_seconds=604800`；hard expiry 必须严格晚于 refresh due。它们分别回答“何时应后台更新”和“旧 generation 最晚何时禁止继续服务”，不能合并成一个含糊 TTL。作者可以按业务更新频率调整，但页面请求不能临时覆盖 Dashboard 定义的生命周期。
 
-Dashboard 的 `adapters` binding 继续把 Domain 中的逻辑 Adapter 映射到 Workspace `auth/adapters*.yaml` 中的实际 Adapter。多个 Dashboard 只有显式引用同一 Workspace Domain、解析到相同 definition/code hash、实际 Adapter identity 和数据可见范围时才共用 generation；不同定义或权限范围绝不因 SQL hash 相同自动复用。第一版共享物化禁止读取 Dashboard Query Parameter `query_inputs`，因为这会把一个目录重新碎片化为每个 draft 的远端 SQL 查询；Division/Category/Subcategory 等父条件都在已经物化的关系上本地过滤。若一个候选 SQL 无法在作者声明的 Server guard 内形成完整目录，应重新定义候选资产，而不是运行时退回远程逐字搜索。
+Dashboard 的 `adapters` binding 继续把 Domain 中的逻辑 Adapter 映射到 Workspace `auth/adapters*.yaml` 中的实际 Adapter。同一 Dashboard、实际 Adapter identity 和 visibility scope 下的用户与 tab 可以读取同一 immutable generation；不同 Dashboard 即使 definition 与 SQL 内容相同也不共用 generation。Domain 禁止读取 Query Parameter `query_inputs`，Division/Category/Subcategory 等父条件都在已经物化的关系上本地过滤。若一个候选 SQL 无法在作者声明的 Server guard 内形成完整目录，应重新定义该 Dashboard 的候选口径，而不是运行时退回远程逐字搜索。
 
 物化文件不进入 `dashboards/`：
 
@@ -687,7 +687,7 @@ Dashboard 的 `adapters` binding 继续把 Domain 中的逻辑 Adapter 映射到
     data.parquet
 ```
 
-`materialization-key` 至少包含 Workspace、Domain definition/code hash、实际 Adapter identity 和非敏感 visibility scope；不得把明文凭据写进 key/manifest。Workspace 级共享要求 Adapter 提供稳定的非敏感数据可见范围标识；相同身份可跨用户/tab/Dashboard 共享，行级权限不同的 principal 必须生成不同 key。当前没有账号体系的单租户 Server 只能在同一 Adapter visibility 下共享，不能把这一点宣传成任意多租户隔离。
+`materialization-key` 至少包含 Workspace、Dashboard-local definition path/code hash、实际 Adapter identity 和非敏感 visibility scope；不得把明文凭据写进 key/manifest。相同 Dashboard 与 visibility scope 可跨用户/tab 共享，行级权限不同的 principal 必须生成不同 key；不同 Dashboard path 必须生成不同 key。当前没有账号体系的单租户 Server 不能把这一点宣传成任意多租户隔离。
 
 每个 generation immutable。构建完成后先校验 Schema、row guard、字段与 metadata conflict，写入临时目录，再原子切换 current pointer；读请求在生命周期内 pin 一个 generation，不会看到半份新数据。SQLite transaction + 有时限 refresh lease 保证同一个 key 同时只有一个 builder；其他 tab/用户继续读当前 generation。Server 重启后从 manifest/index 恢复，过期 lease 可被安全接管。旧 generation 在没有 reader 且超过 grace period 后由 `dataviz prune` preview-first 清理；不承诺多个独立 Server 进程或网络文件系统共同写一个 Workspace。
 
@@ -706,7 +706,7 @@ missing → building → fresh → stale → expired
 - `expired`：超过 `expire_after_seconds`，旧数据不能再作为候选；当前 Dashboard 的相关 Picker 显示不可用/构建中，但全局导航、其他 Dashboard 和自由输入参数不受阻断。
 - `missing`：首次没有可用 generation 时启动一次构建。长 SQL 不阻塞 Server 启动；生产使用可以通过 CLI prewarm 或外部计划任务提前构建。
 
-Query Card 的 Reload 对 SQL Domain 表示“请求刷新共享候选目录”，不清空选择、不恢复 default、不执行正式 Query。若已有 generation，刷新期间继续使用旧候选并显示克制的更新状态；重复点击和其他 tab 的请求被同一 lease 合并。新 generation 原子发布后，只刷新候选标签/计数/当前页；draft state 按 canonical selection 保持，`all/exclude` 不展开，明确 include/exclude operands 缺失时显示 unavailable 而不静默删除。正式 Query 仍需用户点击 Header 查询。
+Query Card 的 Reload 对 SQL Domain 表示“请求刷新当前 Dashboard 的候选目录”，不清空选择、不恢复 default、不执行正式 Query。若已有 generation，刷新期间继续使用旧候选并显示克制的更新状态；重复点击和同一 Dashboard 其他 tab 的请求被同一 lease 合并。新 generation 原子发布后，只刷新候选标签/计数/当前页；draft state 按 canonical selection 保持，`all/exclude` 不展开，明确 include/exclude operands 缺失时显示 unavailable 而不静默删除。正式 Query 仍需用户点击 Header 查询。
 
 候选服务不可用也不等于 Query Parameter 非法。只要 draft/committed state 已可独立解析，用户和 AI 仍可提交 Query；`all`、`none`、显式 `value/include/exclude` 都不依赖 Lookup 成功。只有尚未解析的 SQL-Domain `default: first` 必须等待 materialization。该规则确保两分钟的候选构建不能锁住一个已经知道 Item ID 的查询，更不能锁住 Workspace 导航。
 
@@ -714,7 +714,7 @@ Query Card 的 Reload 对 SQL Domain 表示“请求刷新共享候选目录”�
 
 所有 SQL Domain Picker 都通过同一 Server-local Lookup 读取 current generation。请求只包含：Domain/consumer identity、当前父参数的 canonical selection state、普通搜索文本、page limit、opaque cursor，以及需要补标签的有限已选 operands；绝不携带 SQL、Adapter 或原始物化路径。
 
-Lookup 成功后的 Browser 提交边界是当前 Picker，而不是整个 Query Parameter 表单：Runtime 先替换该 Picker 的当前页、已选标签、cursor 与 freshness，再只调用该 Select 的同步入口。它不得重写 canonical draft、重建其他 Parameter Control，或在首屏绘制前执行一次全表单 `controls.sync()`；URL、作者证据和其他非视觉投影继续消费既有状态，不成为候选结果可见的前置步骤。这样搜索响应返回后可以立即绘制，同时保留输入焦点、搜索词、展开状态、滚动位置与并发 request generation 门禁。
+Lookup 成功后的 Browser 提交边界是当前 Picker，而不是整个 Query Parameter 表单：Runtime 先替换该 Picker 的当前页、已选标签、cursor 与 freshness，再只调用该 Select 的同步入口。它不得重写 canonical draft、重建其他 Parameter Control，或在首屏绘制前执行一次全表单 `controls.sync()`；URL、作者证据和其他非视觉投影继续消费既有状态，不成为候选结果可见的前置步骤。这样搜索响应返回后可以立即绘制，同时保留输入焦点、搜索词、展开状态与滚动位置。成功、失败、分页重试都必须同时通过 Dashboard identity、request generation 与父参数 canonical signature 门禁；迟到错误与旧父级响应和迟到成功一样不能覆盖新状态。当前 Picker 独立暴露 `aria-busy`，作者投影记录 request、Picker commit 与跨 animation frame 的 visible-refresh 耗时，但不把临时性能数据写入 Result。
 
 父级 `depends_on` 不重新执行 SQL。Lookup 把 `single_select` 父参数的 canonical 标量编译为单值 include predicate，把 `multiple_select` 的 `all/include/exclude/none` 编译为对应集合 predicate，再对当前 parameter 的 value/label/metadata 做 distinct projection；空 scalar/none 得到空候选，缺失父 state 才表示该次 Lookup 不施加父级 predicate。一次 item-catalog 可以同时为 Division、Category、Subcategory 和 Item 提供候选；每个字段按自己的投影去重，相同 canonical value 出现冲突 label/metadata 时 generation 构建或查询稳定失败，不能随机取一行。
 
@@ -726,7 +726,7 @@ Lookup 成功后的 Browser 提交边界是当前 Picker，而不是整个 Query
 
 Picker 的数量摘要从同一 pinned generation 的 `total` 与紧凑 state 推导：`all → total`、`include → operands count`、`exclude → total - valid exception count`、`none → 0`。UI 对 all 只显示“全部”，对 exclude 显示“全部，排除 N 项”，绝不渲染前几个 Tag 再加 `+99998`。
 
-下一阶段可以提供显式作者模式，但它只能投影现有 reducer 的 canonical state 与 transition evidence。普通用户继续看到业务文案；作者模式可显示 `selection / operands / available / unavailable / parent dependency / transition result`，并在父级变化时解释子参数是保持、求有效交集、恢复 default、转为 all，还是被 Revert 作为 unavailable 保留。该解释不能另存一份选择历史、把 unavailable 混入 available candidates，或为了展示诊断重新执行 Domain SQL。
+显式作者模式只能投影现有 reducer 的 canonical state、Lookup lifecycle 与 transition evidence。普通用户继续看到业务文案；作者模式显示 `selection / operands / available / unavailable / parent dependency / request generation / request+commit+visible-refresh timing / transition result`，并在父级变化时解释子参数是保持、求有效交集、恢复 default、转为 all，还是被 Revert 作为 unavailable 保留。该解释不能另存一份选择历史、把 unavailable 混入 available candidates，或为了展示诊断重新执行 Domain SQL。
 
 Lookup 可以有短期 process-local page cache，但它不是第二个事实源，也不改变 materialization freshness。验收基准至少覆盖 10K、100K、250K rows 的首次本地查询、连续搜索、三级父过滤、并发 tab 和 generation 切换；性能优化可以采用 DuckDB/Parquet 扫描、内部索引或预计算 normalized search column，但不得泄露成多套作者 DSL。
 
@@ -736,13 +736,13 @@ AI 候选探索复用同一物化与 Lookup，不再执行并复制第二份候�
 
 Result、Evidence、URL/tab checkpoint、分享链接和 portable HTML 只封存 canonical Query Parameter state。`all/none` 不带 values，`include/exclude` 只带受限 operands；它们不嵌入 Domain SQL、物化 Parquet、候选页、搜索词、cursor 或 10 万项全集。HTML/分享页面继续锁定 Query Parameter，显示“全部”“仅 3 项”“全部但排除 1 项”或“无”，不能刷新候选或再次 RUN。
 
-`workspace:/...` 使 Dashboard 在同一 Workspace 内移动时仍能引用共享 Domain。跨 Workspace 单独搬运 Dashboard 使用 portable bundle 命令计算依赖闭包并复制 Domain definition/SQL、必要的非敏感 Adapter binding 声明和 manifest；默认不复制 `.dataviz` 物化数据或凭据。Bundle 只创建新目录或替换调用方明确提供的空目录，是与源 Workspace 切断共享关系的独立快照；它不导入、合并、同步或覆盖已有 Workspace。若将来允许显式携带预热物化，必须作为独立安全选项并重新校验 visibility scope、过期时间和数据敏感性，不能成为默认行为。
+Parameter Domain definition/SQL 位于 Dashboard 目录，因此同 Workspace 移动或跨 Workspace Bundle 时随目录自然搬运。Portable Bundle 只需额外计算 Workspace Asset 闭包与非敏感 Adapter binding manifest；默认不复制 `.dataviz` 物化数据或凭据。Bundle 只创建新目录或替换调用方明确提供的空目录，是与源 Workspace 切断共享关系的独立快照；它不导入、合并、同步或覆盖已有 Workspace。若将来允许显式携带预热物化，必须作为独立安全选项并重新校验 visibility scope、过期时间和数据敏感性，不能成为默认行为。
 
 ##### 版本与完成门禁
 
 这次可观察语义断代已经通过 P0.0 inventory 一次迁移 Dashboard default/Query state、Parameter Domain definition/Contract/Lookup、Source SQL filter token、Runtime Query transaction 和 Result/Evidence persisted shape。物化 manifest 与 Lookup 分别使用 `dataviz/parameter-materialization/v1`、`dataviz/parameter-lookup/v1`；分页 envelope 不再机械另造协议。
 
-完成证据已经覆盖：static 与 SQL-materialized 两种候选来源无第三条回退路径；共享 generation 不因父级/搜索/分页重跑远端 SQL；`all/include/exclude/none` 在 Browser、Python、SQL filter token、CLI、Result 与 HTML 解释一致；空列表不产生非法 SQL；stale refresh、hard expiry、失败回退、并发 lease、Server restart、visibility scope、cursor generation、reader pin 与 prune 都有确定结果。固定 10K/100K/250K benchmark 还证明 Lookup response 只携带有界页和有限 operands。
+完成证据已经覆盖：static 与 SQL-materialized 两种候选来源无第三条回退路径；Dashboard generation 不因父级/搜索/分页重跑远端 SQL，且不同 Dashboard 不共享取数定义或 generation；`all/include/exclude/none` 在 Browser、Python、SQL filter token、CLI、Result 与 HTML 解释一致；空列表不产生非法 SQL；stale refresh、hard expiry、失败回退、并发 lease、Server restart、visibility scope、cursor generation、reader pin 与 prune 都有确定结果。固定 10K/100K/250K benchmark还证明 Lookup response 只携带有界页和有限 operands。
 
 相对日期不是自由格式字符串。当前严格语法只接受 `anchor: today` 与整数日偏移 `offset: ±Nd/0d`。日期范围是两个独立 Date Atom 的有序对，每个端点可以是固定 ISO 日期，也可以是相对表达式，因此可以表达“固定开始日 + 相对结束日”。默认值编辑器也直接编辑这两个 Atom：每个端点只有“固定日期/相对今天”模式和一个随模式切换的值控件，不同时维护隐藏的 fixed/offset 副本，不使用 `start_offset/end_offset` 范围对象；固定模式复用运行界面的 ISO DatePicker 输入、日历与校验，相对模式使用整数 offset。`today` 按 `workspace.context.timezone` 求值，并在 tab 首次构建参数表单或 CLI Run 开始时解析为具体 ISO 日期。Query Run、缓存指纹、SQL 绑定和 HTML Export 保存的都是这个具体值；导出页不会在第二天重新解释“today”。Server 启动时不预计算，避免跨午夜后继续使用旧日期。
 
@@ -1161,7 +1161,7 @@ Renderer 只使用传输无关的 `context.assets.list/describe/bytes/text/json/
 
 所有 Asset 路径必须相对 `workspace.yaml` 且解析后仍位于 Workspace 内；绝对路径、远程 URL、软链接逃逸和 `../../` 越界均失败。`inspect context` 只投影当前 Dashboard/焦点引用的 path、MIME、bytes、hash 与 Browser availability，不把 GeoJSON 或二进制内容塞入 AI context。
 
-`dataviz bundle <workspace> <dashboard> <destination>` 计算 Browser allowlist、File Source 和共享 Parameter Domain 的联合依赖闭包：只复制被引用文件及定义，不复制无关 Workspace Asset、凭据、`.dataviz` materialization 或 cache。Dashboard-local 是普通 SQL 与文件的默认所有权；Workspace 共享只保留稳定 Asset 与真正共用的 Parameter Domain，不扩展为通用 Shared Source/Transform/View/SQL。
+`dataviz bundle <workspace> <dashboard> <destination>` 复制完整 Dashboard 目录，并计算 Browser allowlist 与 File Source 引用的 Workspace Asset 闭包；不复制无关 Asset、凭据、`.dataviz` materialization 或 cache。Source 与 Parameter Domain 的 SQL/定义均由 Dashboard 所有，Workspace 共享只保留稳定文件 Asset。
 
 Bundle 是单向、自包含的交付快照，不是 import、merge、sync 或 package manager。目标必须不存在或为空；非空目录在读取或写入其内容前稳定失败。实现先在目标同级临时目录复制完整闭包，校验复制内容、来源 hash、Workspace definition 与 Manifest 后再一次发布；复制期间来源变化会失败并清理 staging，不留下 partial destination，也不修改源 Workspace。导出后的 Asset/Domain 是 Bundle 私有副本，不再跟踪源 Workspace。Report Manifest v3 记录 Asset hash/size/MIME，不重复记录已经内嵌在 HTML 中的内容。
 
@@ -1364,7 +1364,9 @@ Workspace Python 工具库暂不进入当前设计。它不是单纯“共享一
 
 Interactive Transform 的执行边界仍是整个 Transform，而 View 更新边界是实际发生变化的 Named Output。Runtime 在 generation 启动时捕获输入与 Control state，完成后比较每个 Output 的稳定 value signature；只有 signature 改变的 Output 才进入影响闭包并重绘下游 View。已经挂载且仍有可读内容的 View 在等待新 generation 时保留旧画面并显示轻量 `updating`，首次没有内容时才进入完整 Loading。旧内容只是视觉连续性，不会被标记为新 generation 的 applied evidence。
 
-作者模式可以从当前 Dependency Contract 与 Runtime 调度事实解释一次交互刷新：触发它的 Control、变化的上游/缺失 Output、manual 标记、实际变化的 Output、受影响 View，以及 `query_executed: false`。这份因果 trace 是当前 Server 会话的只读诊断，不是第二套状态 Store，不进入 State Snapshot、Result 或 Evidence；不可变审计仍以 consumer applied state 和执行证据为准。
+作者模式可以从当前 Dependency Contract 与 Runtime 调度事实解释一次交互刷新：触发它的 Control、变化的上游/缺失 Output、manual 标记、实际变化的 Output、受影响 View，以及 `query_executed`。Interactive 节点展示 producer trace 和本次 session cache hit/miss/stored 状态；每个 View renderer signal 再投影“该 View 为什么更新”、多输入 alias 到 canonical reference 的映射、变化/等待/失败的具体 alias、实际输入 rows/bytes、最近一次 mount/update 耗时和 Custom Renderer lifecycle warning。rows/bytes 来自浏览器实际消费值的 Arrow 或 canonical JSON 表示，timing 只代表当前会话最近一次成功 generation。这些都是只读诊断，不是第二套状态 Store，也不进入 State Snapshot、Result 或 Evidence；不可变审计仍以 consumer applied state 和执行证据为准。
+
+browser-js 的 session cache 只缓存完整 Transform 输出。其 key 使用 Output value signature、Transform code/dependency、Runtime version、Query inputs 及 Control 的 canonical value/intent；revision 是审计顺序而非输入语义，不单独制造 cache miss。缓存是有界的进程内 LRU，实现上限不是 Dashboard 作者配置，也不形成新的持久化层；命中、未命中和淘汰只进入当前会话 metrics/trace。
 
 Custom View 已有多命名输入，不新增 Renderer 协议：
 
@@ -1378,6 +1380,8 @@ Custom View 已有多命名输入，不新增 Renderer 协议：
 ```
 
 Renderer 通过 `descriptor.inputs.main` 与 `descriptor.inputs.geography` 读取完整 Named Output；`descriptor.rows` 只是主输入的兼容捷径。业务数据不能为了规避未知能力而拼成带 `row_kind` 的混合表。输入仍由 Dependency Compiler 验证、Output Store 提供，并共享现有 mount/update/dispose、Control Binding 与 Export 生命周期。
+
+`dataviz renderer test` 对可信 Custom Renderer 执行 validate/mount/update/dispose contract，记录 hook 次数，并稳定拒绝空 mount、hook failure 与 dispose 后遗留 DOM。Server 作者模式按 View 显示同一组可观察 lifecycle evidence。该检查不扫描任意第三方事件监听器或推断浏览器内存泄漏；不能把无法证明的资源诊断写成通过保证。
 
 Workspace Asset 作为 File Source 时，Reader 与 Analysis Result source receipt 必须调用同一个 Workspace Asset resolver；`asset:<id>` 不能在封存阶段重新被解释成 Dashboard 相对路径。Bundle/Report 继续只携带真实依赖闭包。
 
@@ -1480,7 +1484,7 @@ Dependency Contract 为主目标与每个附加目标分别保存 writer edge，
 
 第一版不承诺远程底图 URL、在线 token、多图层编辑、轨迹、热力聚合、地理编码或 GIS 运算。地图只有在位置本身参与分析问题时才优于 Bar/Table；存在地区字段不是自动选图理由。静态 `validate` 在不执行 Source 的前提下拒绝缺少作者字段、声明 Schema 中字段不存在和 Asset 未暴露；真实数据到达后，同一 Renderer 在绘图前拒绝非有限经纬度、重复 data/feature key 与无法连接的 key。Server 与 portable HTML 运行同一 Renderer。
 
-“实体选择器”不成为新的 Query Parameter type。P5 先提供 `dataviz scaffold query-parameter.entity-select`，生成现有 Workspace Parameter Domain、Domain-backed `multiple_select`、value/label/keywords/metadata 投影和 Source `query_filters`。十万级 Item 的默认 Recipe 使用 Server Lookup/opaque cursor、`default: {mode: none}`、`clearable: true` 与 `empty: passthrough`：空选择表示不施加 Item 条件，有限 include 表示筛选所选 Item，候选全集不进入 Browser、Result 或 HTML。只有多个真实项目仍证明这组声明是主要 friction 时，才另行评估编译期语法糖；不得为接口对称新增 Entity Runtime、第二候选 Store 或另一套 selection state。
+“实体选择器”不成为新的 Query Parameter type。P5 先提供 `dataviz scaffold query-parameter.entity-select`，生成 Dashboard-local Parameter Domain、Domain-backed `multiple_select`、value/label/keywords/metadata 投影和 Source `query_filters`。十万级 Item 的默认 Recipe 使用 Server Lookup/opaque cursor、`default: {mode: none}`、`clearable: true` 与 `empty: passthrough`：空选择表示不施加 Item 条件，有限 include 表示筛选所选 Item，候选全集不进入 Browser、Result 或 HTML。只有多个真实项目仍证明这组声明是主要 friction 时，才另行评估编译期语法糖；不得为接口对称新增 Entity Runtime、第二候选 Store 或另一套 selection state。
 
 P5 同时收紧作者噪音：缺少 `semantics` 不再对所有普通私有/探索 Output 一概产生 advice；已经声明为 public/reviewed/certified 的 Output 仍接受 SQL wildcard、字段引用与 Evidence 文件等确定性检查。focused docs 和 Skill 先展示 Map/Entity Recipe 的最短路径，完整 Plotly、Workspace Asset 与 Parameter Domain 契约按需展开。
 
@@ -1898,7 +1902,7 @@ HTML 导出和现有分享链接继续作为人类消费看板的已有能力；
 
 | 契约 | 版本 |
 | --- | --- |
-| Dashboard schema | `dataviz/dashboard/v18` |
+| Dashboard schema | `dataviz/dashboard/v19` |
 | Parameter Domain / Contract | `dataviz/parameter-domain/v2` / `dataviz/parameter-domain-contract/v3` |
 | Parameter Lookup / Materialization | `dataviz/parameter-lookup/v1` / `dataviz/parameter-materialization/v1` |
 | Dashboard Bundle | `dataviz/dashboard-bundle/v2` |
@@ -1940,13 +1944,13 @@ HTML 导出和现有分享链接继续作为人类消费看板的已有能力；
 22. Custom Renderer 通过 `context.charts.plotly` 复用平台 Theme、滚轮、Resize、Update 与 Dispose；`visual-check` 对 Server/Report 执行真实浏览器几何和永久 Loading 检查并保存截图。
 23. AI Analysis Plane 提供可重建 Catalog、规范物理 Target Reference、语义密集 `catalog list/search`、批量 `catalog describe`、Result-centric `run`、`result list/show/inspect/export`、Base/Derived/View 调度、两种 Interactive Runtime 与本地 Analysis Overlay；它们复用现有 Dependency Contract 与 Runtime，Analysis Result/Evidence v4 封存紧凑 Query Parameter state、自包含 consumer applied Control 与 writer provenance evidence。
 24. P1-A 的唯一 ControlRuntime authority 已落地：Shell 只发送 typed `set/apply`、镜像 operational snapshot 与可丢弃 checkpoint；只有 Canvas reducer 修改 Control/revision。Server Python 对 canonical snapshot 做严格幂等验证，signature 改变则以 `control_state_not_canonical` 拒绝。
-25. Workspace Asset v2/v15/v6/v11 闭环已落地：Workspace 注册共享本地文件，Dashboard Browser allowlist 与 File Source `asset:<id>` 保持独立；Server/portable HTML 共用 `context.assets`，Bundle v2 复制真实依赖闭包，Report Manifest v3 记录不可变元数据。
+25. Workspace Asset v2/v19/v6/v14 闭环已落地：Workspace 注册共享本地文件，Dashboard Browser allowlist 与 File Source `asset:<id>` 保持独立；Server/portable HTML 共用 `context.assets`，Bundle v2 复制真实依赖闭包，Report Manifest v3 记录不可变元数据。
 
-P0 已完成 Query projection、零边界、typed comparison、canonical signature、consumer revision 与 Output destination 的三端一致性修复；P1-A/P1-B/P1-C/P1-D 已分别关闭双 Control authority、Compiler 单体内部推导、重复显式 Target 应用语义与单 writer 表达限制；P3 已完成 Query Parameter 紧凑集合与共享物化候选迁移。共享 fixtures、Runtime source/bundle 检查和 Chromium 回归是后续修改这些语义的门禁。当前实现与后续边界：
+P0 已完成 Query projection、零边界、typed comparison、canonical signature、consumer revision 与 Output destination 的三端一致性修复；P1-A/P1-B/P1-C/P1-D 已分别关闭双 Control authority、Compiler 单体内部推导、重复显式 Target 应用语义与单 writer 表达限制；P3 已完成 Query Parameter 紧凑集合与 Dashboard-owned 物化候选迁移。共享 fixtures、Runtime source/bundle 检查和 Chromium 回归是后续修改这些语义的门禁。当前实现与后续边界：
 
 | 领域 | 当前事实 | 目标状态或候选边界 |
 | --- | --- | --- |
-| Query Parameter 与 Parameter Domain | P3 已统一为 Server 共享 immutable materialization、Server-local Lookup 与 `all/include/exclude/none` compact state；`depends_on` 只编译为 pinned generation 上的本地 predicate | 已完成；共享 conformance、lifecycle/concurrency 单测、真实 Chromium 搜索/分页/级联/恢复/失败隔离和 10K/100K/250K benchmark 共同守住边界 |
+| Query Parameter 与 Parameter Domain | P3 已统一为 Dashboard-owned immutable materialization、Server-local Lookup 与 `all/include/exclude/none` compact state；`depends_on` 只编译为 pinned generation 上的本地 predicate | 已完成；conformance、lifecycle/concurrency 单测、真实浏览器搜索/分页/级联/恢复/失败隔离和 10K/100K/250K benchmark 共同守住边界 |
 | Control authority | P1-A 已完成：Server/Portable 共用 Canvas-hosted ControlRuntime；Shell 只发 typed action、保存已确认 checkpoint、显示 operational snapshot | 已完成；private lockstep channel、严格 Server canonical boundary、generation-start evidence 与当前 persisted v5/v4 schema 共同守住边界 |
 | Browser `image/file` materialization | portable snapshot 与 CLI Result 已稳定 fail-fast；live/portable interactive display 不被错误禁止 | 真实持久化需求出现后再设计 `LogicalOutput → materializer → ArtifactDescriptor`，不以多义字符串冒充本地路径 |
 | 多 View writer | P1-D 已完成：v13/v10 将一个 Control 投影为零到多个有序 writer edges；v9 action/rejection 与 v4/v3 evidence 保留 source View | 已完成；真实 `chart-gallery` 的 replace/clear/reset、伪造 source、stale generation 以及 Server/Portable/Result 回归共同守住边界 |
@@ -1987,7 +1991,7 @@ Component Registry 独立版本化，只在公共组件契约变化时升级，�
 - 不支持一个 View 同时归属多个任意 Filter Group。
 - 不提供 Mosaic、Widget 坐标或拖拽画布协议。
 - 不把凭证写进 Dashboard，也不让 Dataset/Interactive Transform 获得隐式 Adapter。
-- 不提供 Workspace 级共享 Source、Transform、View 或业务 SQL。复用稳定业务语义时发现 Catalog Output，复用静态文件时使用 Workspace Asset，复用候选关系时使用 Workspace Parameter Domain；普通执行逻辑保持 Dashboard-local，允许少量复制换取明确所有权与安全 Bundle。
+- 不提供 Workspace 级共享 Source、Transform、View、Parameter Domain 或业务 SQL。复用稳定业务语义时发现 Catalog Output，复用静态文件时使用 Workspace Asset；所有取数逻辑保持 Dashboard-local，允许少量复制换取明确所有权与安全 Bundle。
 - 不为实验性字段、Schema 或 Runtime 保留 alias、自动迁移或双协议分支。
 - 不要求普通 Dashboard 编写自定义 HTML/CSS/JS；完整 Canvas 只是最后逃生口。
 - 不为 AI Analysis Plane 复制 Dependency Contract、Query Executor、InteractionExecutor 或 Browser Runtime。
@@ -2019,4 +2023,4 @@ Authoring document、跨 Runtime wire 和持久化 Result/Evidence 的可观察 
 8. 唯一 canonical protocol metadata source 及其 Schema Catalog/protocol inventory 投影都只能登记已有事实并可重建；它不能成为 Dashboard、依赖、执行或权限的第二事实来源。
 9. Canonical producer 默认严格；Analysis v1 是当前已知例外。需要 tolerant reader 时必须把未知字段的保留、hash、忽略和升级规则写清楚：持久化扩展使用显式 `extensions`，临时诊断使用非持久化 `debug`，不能用一个开放核心对象替代两者。
 10. 不为当前目标预埋 HTML 分析提取、远程执行、通用二进制上传或另一套知识存储；未来能力由真实需求重新立项。
-11. SQL Parameter Domain 只允许 Server 共享物化与 Lookup；Browser 不接收完整关系，父级/搜索/分页不重跑远端 SQL，容量不足也不得触发第二种执行路径。
+11. SQL Parameter Domain 由 Dashboard 独立拥有，只允许同一 Dashboard 的 Server materialization 与 Lookup 复用；Browser 不接收完整关系，父级/搜索/分页不重跑远端 SQL，容量不足也不得触发第二种执行路径。

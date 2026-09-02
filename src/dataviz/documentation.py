@@ -30,6 +30,9 @@ AUTHORING_ROUTE_ALIASES = {
     "custom": "custom-renderer",
     "map": "map-view",
     "entity": "entity-select",
+    "lookup": "entity-select",
+    "remote-select": "entity-select",
+    "large-select": "entity-select",
 }
 
 AUTHORING_DOCUMENTS: dict[str, dict[str, Any]] = {
@@ -56,13 +59,14 @@ AUTHORING_DOCUMENTS: dict[str, dict[str, Any]] = {
             "Declare each consumer as mode: filter or mode: value; do not infer behavior from the Control component.",
             "Declare only the inputs consumed by the Interactive Transform.",
             "Inspect the compiled dependency closure before debugging Runtime behavior.",
-            "In Server author mode, click the Interactive node to inspect the triggering Control/Input, changed Named Outputs, affected Views, and query_executed=false.",
+            "In Server author mode, click the Interactive node for the producer trace; click a View renderer signal for the View-centric cause, changed Outputs, query_executed evidence, input rows/bytes and render timing.",
             "Run validate, report, then visual-check.",
         ],
         "incremental_boundary": {
             "execution": "One Control change executes the affected Transform as one function and one generation.",
             "rendering": "Runtime compares each Named Output by stable value signature and redraws only Views reached from Outputs that actually changed.",
             "authoring": "Split genuinely independent expensive computations into separate Transforms; outputs.<name>.depends_on_controls is not a supported field.",
+            "evidence": "Author-mode traces describe the latest successful session generation and are not immutable Result/Evidence records.",
         },
     },
     "custom-renderer": {
@@ -75,8 +79,10 @@ AUTHORING_DOCUMENTS: dict[str, dict[str, Any]] = {
         "steps": [
             "Start from a working declarative Source and Named Output.",
             "Keep unrelated relations as separate View input/inputs aliases; read descriptor.inputs.main and descriptor.inputs.<alias> instead of joining them with a synthetic row_kind.",
+            "In Server author mode, inspect the View signal to see changed input aliases; waiting and failure evidence names the exact alias and canonical Output reference.",
             "Register one Renderer with validate, mount, update and dispose hooks.",
             "Let the platform own empty, restore, interaction, resize and export behavior.",
+            "Run dataviz renderer test before browser validation; it exercises mount/update/dispose and rejects an empty mount or DOM left behind after dispose.",
             "Run validate, report, then visual-check.",
         ],
         "named_inputs_example": {
@@ -318,6 +324,7 @@ AUTHORING_ROUTES: dict[str, dict[str, Any]] = {
         "scaffolds": ["custom-renderer", "renderer.custom", "view.custom"],
         "commands": [
             "dataviz scaffold custom-renderer --id <dashboard> --output <workspace>",
+            "dataviz renderer test <renderer.js> --renderer-id <renderer-id>",
             "dataviz docs renderers --format json",
             "dataviz components show renderer.custom --format json",
             "dataviz components gallery --output component-gallery.html",
@@ -570,6 +577,8 @@ DOC_TOPIC_REDIRECTS = {
     "query-parameter": "query-parameters",
     "parameter-domain": "query-parameters",
     "query-parameter-domain": "query-parameters",
+    "lookup": "query-parameters",
+    "remote-select": "query-parameters",
     "asset": "workspace-assets",
     "workspace-asset": "workspace-assets",
     "shared-file": "workspace-assets",
@@ -842,7 +851,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "dashboard_local": "默认把只属于一个 Dashboard 的 SQL、CSS、JS 和数据文件放在该 Dashboard 内；少量重复优于跨 Dashboard 的可变逻辑依赖。",
             "workspace_asset": "多个 Dashboard 共用的 GeoJSON、字典、图像或静态数据文件在 workspace.yaml 注册一次。",
             "file_source": "文件作为 Query 数据输入时使用 File Source；确需共享的稳定文件路径写 asset:<id>，并显式声明 format。",
-            "parameter_domain": "多个 Dashboard 真正共用的 Query Parameter 候选口径可使用 Workspace Parameter Domain；普通 Source/Transform/View/SQL 不提升为共享资源。",
+            "parameter_domain": "Query Parameter 候选口径与 SQL 始终放在所属 Dashboard；相似看板复制后独立演进，不建立 Workspace SQL 引用。",
         },
         "workspace_example": """# workspace.yaml
 schema: dataviz/workspace/v2
@@ -857,7 +866,7 @@ assets:
     path: assets/data/store_dictionary.csv
     media_type: text/csv""",
         "dashboard_example": """# dashboard.yaml
-schema: dataviz/dashboard/v18
+schema: dataviz/dashboard/v19
 kind: dashboard
 id: city-map
 assets: [china-city]  # Browser allowlist and portable-report dependency
@@ -887,7 +896,7 @@ sources:
             "File Source 的 asset:<id> 引用与 Browser allowlist 相互独立；Source-only 文件不会获得 Browser URL。",
             "普通 SQL 和文件默认归 Dashboard 所有；只有稳定且确实跨 Dashboard 共用的文件才注册为 Workspace Asset，少量复制可以换取更清晰的所有权与迁移边界。",
             "路径必须位于 Workspace 内；不支持绝对路径、远程 URL、软链接逃逸或从 Downloads 读取。",
-            "dataviz bundle 复制 Dashboard 实际引用的 Browser Assets、File Source Assets 和共享 Parameter Domain；不复制未引用文件、凭据或 .dataviz/ 下的 cache。",
+            "dataviz bundle 复制完整 Dashboard 目录及其实际引用的 Workspace Assets；不复制未引用文件、凭据或 .dataviz/ 下的 cache。Parameter Domain 定义与 SQL 已属于 Dashboard 目录。",
             "Bundle 是单向、自包含快照，不是 import、merge、sync 或 package manager；导出后与源 Workspace 的共享关系已经切断。",
             "Bundle 目标必须不存在或为空；非空目录稳定失败，绝不复用、合并或覆盖其中的 Dashboard、SQL、Asset 和其他用户文件。",
             "Bundle 在目标同级临时目录完整复制并校验 hash 后一次发布；复制期间来源变化会失败且不留下 partial destination。",
@@ -1042,7 +1051,7 @@ sources:
             "id": "CLI、DAG、API 与 Presentation 使用的稳定程序身份。",
             "title": "页面内容，可与文件夹名不同；为空时回退到文件夹末级名称。",
         },
-        "minimal_example": """schema: dataviz/dashboard/v18
+        "minimal_example": """schema: dataviz/dashboard/v19
 kind: dashboard
 id: sales-overview
 title: 销售概览
@@ -1103,10 +1112,10 @@ sections:
         "related": ["dashboard", "presentation", "validation"],
     },
     "query-parameters": {
-        "summary": "Query Parameter 创建不可变 Query Run；每个参数只保存一份 canonical state，SQL 候选统一由 Server 共享物化并通过 Lookup 搜索或分页。",
+        "summary": "Query Parameter 创建不可变 Query Run；每个参数只保存一份 canonical state，Dashboard-owned SQL 候选由 Server 物化并通过 Lookup 搜索或分页。",
         "dynamic_domains": {
             "purpose": "一个 SQL Domain 物化一张完整候选关系；多个 Query Parameter 可从不同字段去重投影，父级变化只在该 generation 上过滤，不重跑 SQL。",
-            "example": """parameter_domains: [workspace:/parameter_domains/locations/domain.yaml]
+            "example": """parameter_domains: [parameter_domains/locations/domain.yaml]
 query_parameters:
   - id: province
     type: multiple_select
@@ -1126,12 +1135,12 @@ query_parameters:
 """,
             "rules": [
                 "Parameter Domain 只提供候选发现与标签，不产生 Named Output、Result 或 Catalog 条目，也不是 Source 参数白名单。",
-                "所有 SQL Domain 都先形成 Workspace 共享 immutable generation；Browser 永远不接收原始关系、SQL、Adapter、物化路径或候选全集。",
+                "Parameter Domain 定义与 SQL 必须位于所属 Dashboard；修改一个看板的候选口径不会改变其他看板。Browser 永远不接收原始关系、SQL、Adapter、物化路径或候选全集。",
                 "Browser Lookup 每页返回 500 个纯文本/元数据候选并通过 opaque cursor 继续；CLI 为控制终端和 AI token 密度默认 50、可显式提高到 500。",
-                "同一个 Workspace Domain、定义/代码 hash、Adapter identity 与 visibility scope 可以跨 Dashboard、tab 和用户复用；权限范围不同不得共用。",
+                "同一 Dashboard 的 immutable generation 可由多个用户和 tab 复用；不同 Dashboard 即使 SQL 文本相同也拥有独立定义与 generation。",
                 "options.depends_on 只对当前 generation 做本地 predicate；single_select 标量按单值 include，multiple_select 按 all/include/exclude/none；搜索、级联和 cursor 分页都不重新执行远端 SQL。",
                 "multiple_select 使用 all/include/exclude/none 紧凑集合；all/none 不带 operands，include/exclude 只保存有限例外，绝不展开 10 万候选。",
-                "Query Card 的 reload 请求刷新共享物化；已有 generation 时继续读旧数据，不清空选择、不恢复 default、不执行正式 Query。",
+                "Query Card 的 reload 请求刷新当前 Dashboard 的候选物化；已有 generation 时继续读旧数据，不清空选择、不恢复 default、不执行正式 Query。",
                 "每次成功 Query 都封存完整 committed canonical state；Revert 按依赖拓扑恢复该 state，不恢复 default，也不执行正式 Query。",
                 "页面刷新与首次 Dashboard hydration 先恢复 URL/tab/committed compact state，再由 Lookup 按依赖拓扑补标签；有限 include/exclude operands 不会被当作新的父级编辑而静默删除。",
                 "最新 generation 中缺失的 committed operand 仍显示为 unavailable，不会静默删除。",
@@ -1146,7 +1155,7 @@ query_parameters:
                 "dataviz parameters lookup <workspace> <dashboard> <parameter> --search <text> --limit 10",
                 "dataviz parameters refresh <workspace> <dashboard>",
             ],
-            "portability": "需要搬运 Dashboard 及其共享 Domain 闭包时读取 dataviz docs workspace-assets；Bundle 不是日常候选域运维操作。",
+            "portability": "Parameter Domain 定义与 SQL 随 Dashboard 目录自然搬运；稳定共享文件使用 Workspace Asset，并由 Bundle 复制依赖闭包。",
         },
         "date_range": {
             "definition": """- id: job_date_range
@@ -1179,7 +1188,8 @@ query_parameters:
         ],
         "author_diagnostics": {
             "cli": "dataviz inspect query <workspace> <dashboard> --source <source> --query-param '<id>=<json>'",
-            "ui": "Query Card 的 { } 按钮只读显示 canonical state、operand/available/unavailable 数、depends_on 与最近一次确定性协调结果；它不改变 Query。",
+            "ui": "Query Card 的 { } 按钮只读显示 canonical state、operand/available/unavailable 数、depends_on、Lookup status/request generation、request/commit/visible-refresh 耗时与最近一次确定性协调结果；它不改变 Query。",
+            "lookup_timing": "request_ms 覆盖 Browser request 到响应；commit_ms 是响应写入当前 Picker；visible_refresh_ms 是同步后跨两个 animation frame 的可见刷新检查，不是像素级 paint 测量。",
             "boundary": "inspect query 只解释参数化 statement、脱敏 bindings 和 query_filter predicate，不执行 Source，也不隐式创建候选物化。实际行数、耗时、缓存与错误仍以 Result/Execution evidence 为准。",
         },
         "sql_filter_example": """# dashboard.yaml
@@ -1224,7 +1234,7 @@ query_filters:
         ],
         "rules": [
             "value_field 使用稳定机器 ID；label/description/group/keywords 只帮助人搜索和识别，不改变参数值。",
-            "实体目录可跨 Dashboard 作为真正共用的 Workspace Parameter Domain；普通业务 Source/SQL 仍保持 Dashboard-local。",
+            "实体候选 SQL 与所属 Dashboard 一起维护；跨 Dashboard 允许少量复制，避免共享取数口径的隐式影响。稳定字典或 GeoJSON 才使用 Workspace Asset。",
             "不要把十万候选展开成 all operands；all/none 是无 operands 的紧凑状态，include/exclude 只存有限例外。",
             "max_explicit_values 限制显式选择；需要几千 ID 时改用上传清单或临时表 Join，不生成巨大 IN。",
             "Parameter Domain 是候选建议而非合法性白名单；已提交但最新目录缺失的值显示 unavailable，不静默删除。",
@@ -1343,6 +1353,7 @@ timeout_seconds: 120
             "输入只能是已声明 Base/Derived Output；没有 Adapter，也没有 Source API。",
             "server-python 输入来自同一 tab、Dashboard 和 Query Run 的不可变 Artifact；交互阶段禁止重查 Source。",
             "generation 采用最后写入获胜，旧任务不能覆盖新结果。",
+            "browser-js session cache 使用语义输入签名并有内部 LRU 上限；Control revision 本身不制造 miss，命中/未命中/淘汰进入当前会话 trace，不成为作者 DSL 或业务 Result。",
             "Transform 仍按函数整体执行；Runtime 按每个 Named Output 的稳定 value signature 收窄 View 更新，不支持 outputs.<name>.depends_on_controls。",
             "server-python 可调用 context.progress 与 context.log；日志保存为结构化 Artifact。",
         ],
@@ -1353,6 +1364,7 @@ timeout_seconds: 120
                 "missing and actually changed Named Outputs",
                 "affected Views",
                 "query_executed=false",
+                "session cache hit/miss/stored state",
             ],
             "boundary": "This is session-local scheduling evidence; immutable audit remains in Result consumer applied state.",
         },
@@ -1616,6 +1628,9 @@ control_components:
                 "interaction", "resize", "dispose", "export",
             ],
             "rule": "Renderer 作者只实现四个 hook；平台宿主负责 Empty/Restore，Adapter/Chart Service 负责 Interaction/Resize，Server 与 portable HTML 必须通过同一矩阵。",
+            "contract_test": "dataviz renderer test 记录 mount/update/dispose 次数，并拒绝空 mount、dispose 后遗留 DOM 或 hook 失败。",
+            "author_evidence": "Server 作者模式按 View 展示最近一次 mount/update 耗时、输入 rows/bytes 与可观察的 lifecycle warning；这些会话诊断不进入 Result/Evidence。",
+            "boundary": "生命周期检查只验证 hook、Renderer state 与可观察 DOM，不宣称能够侦测任意第三方事件监听器泄漏。",
         },
         "isolation": "一个 Renderer 失败只影响自己的 View；输入没有变化时不 update。",
         "named_inputs": {
@@ -2182,7 +2197,7 @@ assets:
             "内置数值聚合使用线性 reducer，避免大数组展开触发 JavaScript 参数上限。",
             "节点独立发布，失败分支不阻塞无关分支。",
             "runtime.max_concurrent_runs 与 max_concurrent_interactions 分别限制单机并发 Query/Server 交互任务。",
-            "Execution Artifact、NodeCache、共享 Parameter Materialization 与不可变 Result 只写入 Workspace/.dataviz；默认缓存由 tab session 隔离，Server Interactive 复用同一 Query Run。",
+            "Execution Artifact、NodeCache、Dashboard Parameter Materialization 与不可变 Result 只写入 Workspace/.dataviz；默认缓存由 tab session 隔离，Server Interactive 复用同一 Query Run。",
             "Run、cache、Worker、Renderer 与订阅均有 dispose/淘汰路径。",
         ],
         "current_limits": [
@@ -2207,14 +2222,16 @@ assets:
             "query": "耗时与 CLI 进程峰值 RSS；包含 DuckDB/Arrow 等 native 分配。",
             "browser": "页面就绪时间、进程树 RSS 峰值/释放后回落、Chromium 主 renderer JS heap。",
             "runtime": "Arrow 行/字节/耗时、Interactive 与 Renderer 生命周期、View 终态和 console error。",
+            "author_view": "Server 作者模式的 View renderer signal 投影最近一次刷新原因、是否执行 Query、Named Output 输入 rows/bytes、Renderer mount/update 耗时与 Custom Renderer lifecycle warning。",
         },
+        "author_evidence_boundary": "rows/bytes 是浏览器实际消费值的 Arrow 字节数或 canonical JSON 字节数；timing 属于当前会话最新成功 generation，不是持久化性能承诺，也不写入 immutable Result/Evidence。",
         "memory_scope": "进程树 RSS 包含 Playwright driver、browser、workers、native Arrow 与 GPU helper；JS heap 不包含 Worker/native 内存。Firefox/WebKit 不公开 performance.memory 时返回 null，不伪造估值。",
         "fixed_fixture": "benchmarks/scale-workspace 的 row_count=10000/100000/1000000；结果与方法见 docs/runtime-performance.md。",
         "decision": "1M 聚合链路可完成后仍不自动推出通用分页；原始明细 View、候选型 Control 和高基数组合需各自基准触发。",
         "boundary": "Runtime 性能基准只衡量页面运行规模与资源生命周期。",
     },
     "maintenance": {
-        "summary": "安全预览并清理 Workspace 的不可变 Result、Execution Artifact、共享候选物化旧 generation 和持久缓存。",
+        "summary": "安全预览并清理 Workspace 的不可变 Result、Execution Artifact、Dashboard 候选物化旧 generation 和持久缓存。",
         "commands": [
             "dataviz prune <workspace>",
             "dataviz prune <workspace> --keep-runs 20 --run-max-age-hours 48",
@@ -2240,9 +2257,12 @@ assets:
             {"symptom": "需要查看更多结果", "action": "不要重新 run；使用 result show 的 --offset/--limit 分页，或 result export 原样复制一个 Artifact。"},
             {"symptom": "Result 引用的 File Source 已变化", "action": "Result 保留实际读取的 path/hash 收据；重新执行产生新 Result，不修改旧 manifest。"},
             {"symptom": "多个 Dashboard 共享 GeoJSON/静态文件", "action": "使用 workspace.yaml assets 注册、Dashboard.assets 显式暴露，并用 dataviz bundle 搬运依赖闭包；不要使用 ../../ 或绝对路径。"},
+            {"symptom": "多个 Dashboard 想共用候选或业务 SQL", "action": "不要建立 Workspace SQL 引用；把 Parameter Domain/Source SQL 复制到各 Dashboard 并独立演进。只有稳定本地文件使用 Workspace Asset。"},
+            {"symptom": "Parameter Lookup 返回 200 但下拉候选未刷新", "action": "打开 Query Card 作者模式，核对 lookup status、request generation 与 request/commit/visible-refresh 耗时；确认 native options 与可见 rows 属于同一最新请求。迟到成功或失败都不得覆盖较新的搜索或父级状态。"},
             {"symptom": "Bundle 报 dashboard_bundle_destination_not_empty", "action": "选择不存在或为空的新目标目录；Bundle 只创建快照，绝不导入、合并、同步或覆盖已有 Workspace。"},
             {"symptom": "Bundle 报 dashboard_bundle_source_changed", "action": "来源文件在复制期间发生变化；等待写入结束后重新执行 Bundle，失败过程不会发布 partial destination。"},
             {"symptom": "查询成功但 View 为空", "action": "检查 Named Output 字段、类型、显式 Control filter 后行数和 View input。"},
+            {"symptom": "多输入 View 等待或失败", "action": "点击 View renderer signal；refresh evidence 会指出 waiting_input/failed_input alias、canonical reference 与 changed_input_aliases，不要先把多张表拼成 row_kind。"},
             {"symptom": "Server 正常但 HTML 失败", "action": "检查 export.mode；server-python 不能离线重算，browser-js 的代码和依赖必须随报告嵌入。"},
             {"symptom": "源码环境 ModuleNotFoundError", "action": "在 dataviz-tool 下运行 uv sync --python 3.12 --extra dev --no-editable --reinstall-package ai-dataviz；后续 CLI 使用 uv run --no-editable dataviz。"},
         ],

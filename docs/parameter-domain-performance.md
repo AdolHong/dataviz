@@ -1,6 +1,6 @@
 # Parameter Domain performance
 
-SQL Parameter Domains are built once as immutable Workspace-shared Parquet generations. Browser Lookup responses stay bounded to 50 rows by default and 100 rows at most; parent filtering, search, paging, and selected-label hydration read the same pinned generation and do not rerun Domain SQL.
+Each Dashboard owns its SQL Parameter Domain definition and SQL. The Server builds an immutable Parquet generation that the same Dashboard may reuse across users and tabs; different Dashboards never share the query definition or generation. Browser Lookup responses stay bounded; parent filtering, search, paging, and selected-label hydration read the same pinned generation and do not rerun Domain SQL.
 
 The fixed maintainer benchmark covers 10K, 100K, and 250K rows:
 

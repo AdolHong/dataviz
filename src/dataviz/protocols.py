@@ -4,7 +4,7 @@ from typing import Any
 
 
 WORKSPACE_SCHEMA = "dataviz/workspace/v2"
-DASHBOARD_SCHEMA = "dataviz/dashboard/v18"
+DASHBOARD_SCHEMA = "dataviz/dashboard/v19"
 PARAMETER_DOMAIN_SCHEMA = "dataviz/parameter-domain/v2"
 PARAMETER_DOMAIN_CONTRACT_SCHEMA = "dataviz/parameter-domain-contract/v3"
 PARAMETER_LOOKUP_SCHEMA = "dataviz/parameter-lookup/v1"
@@ -139,7 +139,7 @@ PROTOCOL_BOUNDARIES: tuple[dict[str, Any], ...] = (
         "boundary": "parameter-domain-lookup",
         "schema": PARAMETER_LOOKUP_SCHEMA,
         "owner": "execution.parameter_materializations",
-        "producer": "Workspace materialization store",
+        "producer": "Dashboard-scoped materialization store",
         "consumer": "Dashboard Shell and parameters lookup CLI",
         "persisted": False,
         "strictness": "exact-current",
@@ -150,7 +150,7 @@ PROTOCOL_BOUNDARIES: tuple[dict[str, Any], ...] = (
         "boundary": "parameter-domain-materialization",
         "schema": PARAMETER_MATERIALIZATION_SCHEMA,
         "owner": "execution.parameter_materializations",
-        "producer": "Workspace materialization builder",
+        "producer": "Dashboard-scoped materialization builder",
         "consumer": "Parameter Lookup, refresh/status CLI and prune",
         "persisted": True,
         "strictness": "exact-current",
@@ -236,6 +236,16 @@ PROTOCOL_BOUNDARIES: tuple[dict[str, Any], ...] = (
 
 PROTOCOL_CHANGE_RECORDS: tuple[dict[str, str], ...] = (
     {
+        "change": "dashboard-owned-parameter-domain",
+        "classification": "authoring semantic breaking",
+        "decision": "dashboard v19; materialization and lookup wire revisions unchanged",
+        "reason": (
+            "Parameter Domain definition and SQL now belong to one Dashboard; users and tabs "
+            "of that Dashboard may reuse an immutable generation, while different Dashboards "
+            "keep independent query logic and generations"
+        ),
+    },
+    {
         "change": "atomic-compound-control-writer",
         "classification": "authoring and private lockstep additive",
         "decision": (
@@ -259,7 +269,7 @@ PROTOCOL_CHANGE_RECORDS: tuple[dict[str, str], ...] = (
         ),
     },
     {
-        "change": "shared-parameter-materialization-and-compact-query-state",
+        "change": "server-materialization-and-compact-query-state",
         "classification": "authoring, private lockstep and persisted semantic breaking",
         "decision": (
             "dashboard v14, parameter domain v2, parameter domain contract v3, "
@@ -268,7 +278,7 @@ PROTOCOL_CHANGE_RECORDS: tuple[dict[str, str], ...] = (
             "analysis result v4 and analysis evidence v4"
         ),
         "reason": (
-            "SQL candidate relations are shared immutable Server materializations; "
+            "SQL candidate relations become immutable Server materializations; "
             "Lookup owns search, parent predicates and cursor pages; candidate-backed "
             "multiple select persists all/include/exclude/none without expanding the universe"
         ),
@@ -303,7 +313,7 @@ PROTOCOL_CHANGE_RECORDS: tuple[dict[str, str], ...] = (
         "classification": "superseded historical private lockstep change",
         "decision": (
             "parameter-domain contract v2 and resolution v2; superseded by "
-            "shared-parameter-materialization-and-compact-query-state"
+            "server-materialization-and-compact-query-state"
         ),
         "reason": (
             "records the former client-relation generation only; current Runtime no "

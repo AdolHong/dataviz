@@ -12,25 +12,28 @@ from typer.testing import CliRunner
 
 from dataviz.artifacts import ArtifactStore
 from dataviz.cli import app
-from dataviz.errors import ExecutionFailure
+from dataviz.errors import ExecutionFailure, WorkspaceError
 from dataviz.execution import Executor
 from dataviz.execution.parameter_materializations import ParameterMaterializationStore
 import dataviz.execution.parameter_materializations as parameter_materializations
 from dataviz.server import create_app
 from dataviz.workspace import load_workspace, validate_workspace
+from dataviz.workspace.loader import load_dashboard
 
 
 def _dashboard(root: Path, dashboard_id: str) -> None:
     dashboard = root / "dashboards" / dashboard_id
     sources = dashboard / "sources"
+    domains = dashboard / "parameter_domains"
     sources.mkdir(parents=True)
+    domains.mkdir()
     (dashboard / "dashboard.yaml").write_text(
-        f"""schema: dataviz/dashboard/v18
+        f"""schema: dataviz/dashboard/v19
 kind: dashboard
 id: {dashboard_id}
 title: Domain lab
 adapters: {{warehouse: demo}}
-parameter_domains: [workspace:/parameter_domains/locations.yaml]
+parameter_domains: [parameter_domains/locations.yaml]
 query_parameters:
   - id: province
     type: multiple_select
@@ -62,6 +65,26 @@ sections:
 """,
         encoding="utf-8",
     )
+    (domains / "locations.yaml").write_text(
+        """schema: dataviz/parameter-domain/v2
+kind: parameter_domain
+id: locations
+type: sql
+adapter: warehouse
+code: locations.sql
+materialization: {refresh_after_seconds: 43200, expire_after_seconds: 604800}
+""",
+        encoding="utf-8",
+    )
+    (domains / "locations.sql").write_text(
+        """select * from (values
+('GD', '广东', 'guang dong', 'SZ', '深圳', 'shen zhen'),
+('GD', '广东', 'guang dong', 'GZ', '广州', 'guang zhou'),
+('HN', '湖南', 'hu nan', 'CS', '长沙', 'chang sha')
+) as locations(province_code, province_name, province_keywords, city_code, city_name, city_keywords)
+""",
+        encoding="utf-8",
+    )
     (sources / "metrics.yaml").write_text(
         """schema: dataviz/source/v6
 kind: source
@@ -90,33 +113,12 @@ order by province_code, city_code
 
 def _workspace(root: Path, *, second_dashboard: bool = False) -> Path:
     (root / "auth").mkdir(parents=True)
-    (root / "parameter_domains").mkdir()
     (root / "workspace.yaml").write_text(
         "schema: dataviz/workspace/v2\nkind: workspace\nid: domain-tests\ntitle: Domain tests\n",
         encoding="utf-8",
     )
     (root / "auth" / "adapters.yaml").write_text(
         "adapters:\n  demo:\n    type: duckdb\n    database: ':memory:'\n",
-        encoding="utf-8",
-    )
-    (root / "parameter_domains" / "locations.yaml").write_text(
-        """schema: dataviz/parameter-domain/v2
-kind: parameter_domain
-id: locations
-type: sql
-adapter: warehouse
-code: locations.sql
-materialization: {refresh_after_seconds: 43200, expire_after_seconds: 604800}
-""",
-        encoding="utf-8",
-    )
-    (root / "parameter_domains" / "locations.sql").write_text(
-        """select * from (values
-('GD', '广东', 'guang dong', 'SZ', '深圳', 'shen zhen'),
-('GD', '广东', 'guang dong', 'GZ', '广州', 'guang zhou'),
-('HN', '湖南', 'hu nan', 'CS', '长沙', 'chang sha')
-) as locations(province_code, province_name, province_keywords, city_code, city_name, city_keywords)
-""",
         encoding="utf-8",
     )
     _dashboard(root, "domain-lab")
@@ -152,7 +154,7 @@ def _use_single_select_parent(root: Path) -> None:
     )
 
 
-def test_shared_domain_contract_contains_only_topology(tmp_path: Path):
+def test_dashboard_domain_contract_contains_only_topology(tmp_path: Path):
     root = _workspace(tmp_path / "workspace")
     workspace = load_workspace(root)
     dashboard = workspace.dashboard("domain-lab")
@@ -171,14 +173,16 @@ def test_shared_domain_contract_contains_only_topology(tmp_path: Path):
     )
 
 
-def test_materialization_is_shared_and_lookup_filters_searches_and_pages(tmp_path: Path):
+def test_materialization_is_dashboard_scoped_and_lookup_filters_searches_and_pages(
+    tmp_path: Path,
+):
     root = _workspace(tmp_path / "workspace", second_dashboard=True)
     workspace, dashboard, store = _store(root)
-    record = store.build(dashboard, "locations")
+    store.build(dashboard, "locations")
 
     copied = workspace.dashboard("domain-lab-copy")
-    assert store.identity(dashboard, "locations")[0] == store.identity(copied, "locations")[0]
-    assert store.status(copied, "locations").generation == record.generation
+    assert store.identity(dashboard, "locations")[0] != store.identity(copied, "locations")[0]
+    assert store.status(copied, "locations").generation is None
 
     first = store.lookup(dashboard, "province", limit=1)
     assert first["status"] == "ready"
@@ -187,7 +191,6 @@ def test_materialization_is_shared_and_lookup_filters_searches_and_pages(tmp_pat
     second = store.lookup(dashboard, "province", limit=1, cursor=first["next_cursor"])
     assert len(second["items"]) == 1
     assert second["next_cursor"] is None
-
     cities = store.lookup(
         dashboard,
         "city",
@@ -225,6 +228,27 @@ def test_materialization_is_shared_and_lookup_filters_searches_and_pages(tmp_pat
             "available": True,
         }
     ]
+
+
+def test_workspace_parameter_domain_reference_is_rejected_with_migration_action(
+    tmp_path: Path,
+):
+    root = _workspace(tmp_path / "workspace")
+    dashboard_root = root / "dashboards" / "domain-lab"
+    dashboard_path = dashboard_root / "dashboard.yaml"
+    dashboard_path.write_text(
+        dashboard_path.read_text(encoding="utf-8").replace(
+            "parameter_domains: [parameter_domains/locations.yaml]",
+            "parameter_domains: [workspace:/parameter_domains/locations.yaml]",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WorkspaceError) as failure:
+        load_dashboard(dashboard_root, workspace_root=root)
+
+    assert failure.value.as_dict()["code"] == "parameter_domain_workspace_reference_removed"
+    assert "Dashboard-relative" in failure.value.details["action"]
 
 
 def test_lookup_filters_by_single_select_parent_canonical_scalar_state(tmp_path: Path):
@@ -315,7 +339,7 @@ def test_cursor_is_generation_bound(tmp_path: Path):
     _workspace_loaded, dashboard, store = _store(root)
     store.build(dashboard, "locations")
     cursor = store.lookup(dashboard, "city", limit=1)["next_cursor"]
-    domain_sql = root / "parameter_domains" / "locations.sql"
+    domain_sql = root / "dashboards" / "domain-lab" / "parameter_domains" / "locations.sql"
     domain_sql.write_text(domain_sql.read_text(encoding="utf-8").replace("长沙", "长沙市"), encoding="utf-8")
     workspace, dashboard, store = _store(root)
     store.build(dashboard, "locations", force=True)
@@ -356,7 +380,7 @@ def test_prune_never_removes_current_generation(tmp_path: Path):
 def test_executor_uses_canonical_state_without_materializing_candidates(tmp_path: Path):
     root = _workspace(tmp_path / "workspace")
     workspace = load_workspace(root)
-    (root / "parameter_domains" / "locations.sql").write_text(
+    (root / "dashboards" / "domain-lab" / "parameter_domains" / "locations.sql").write_text(
         "this SQL must not run during Dashboard execution", encoding="utf-8"
     )
 
@@ -425,7 +449,9 @@ def test_server_lookup_does_not_embed_rows_or_lock_workspace_navigation(tmp_path
 
 def test_materialization_guards_are_server_side(tmp_path: Path):
     root = _workspace(tmp_path / "workspace")
-    definition = root / "parameter_domains" / "locations.yaml"
+    definition = (
+        root / "dashboards" / "domain-lab" / "parameter_domains" / "locations.yaml"
+    )
     definition.write_text(
         definition.read_text(encoding="utf-8").replace(
             "materialization:", "max_rows: 2\nmaterialization:"
@@ -438,7 +464,7 @@ def test_materialization_guards_are_server_side(tmp_path: Path):
     assert failure.value.details["code"] == "parameter_materialization_row_limit"
 
 
-def test_portable_bundle_copies_shared_domain_closure_without_runtime_state_or_secrets(
+def test_portable_bundle_keeps_local_domain_without_runtime_state_or_secrets(
     tmp_path: Path,
 ):
     root = _workspace(tmp_path / "workspace")
@@ -455,13 +481,21 @@ def test_portable_bundle_copies_shared_domain_closure_without_runtime_state_or_s
     assert payload["credentials_copied"] is False
 
     assert (destination / "dashboards" / "domain-lab" / "dashboard.yaml").is_file()
-    assert (destination / "parameter_domains" / "locations.yaml").is_file()
-    assert (destination / "parameter_domains" / "locations.sql").is_file()
+    bundled_domain = (
+        destination
+        / "dashboards"
+        / "domain-lab"
+        / "parameter_domains"
+        / "locations.yaml"
+    )
+    bundled_sql = bundled_domain.with_name("locations.sql")
+    assert bundled_domain.is_file()
+    assert bundled_sql.is_file()
     assert not (destination / ".dataviz").exists()
     assert not (destination / "auth").exists()
     bundled = load_workspace(destination).dashboard("domain-lab")
     assert bundled.parameter_domains["locations"][0] == (
-        destination / "parameter_domains" / "locations.yaml"
+        bundled_domain
     )
     manifest = json.loads((destination / "dataviz-bundle.json").read_text(encoding="utf-8"))
     assert manifest["dashboards"][0]["adapter_bindings"] == [
@@ -476,15 +510,13 @@ def test_portable_bundle_copies_shared_domain_closure_without_runtime_state_or_s
     ]
     assert "password" not in json.dumps(manifest).casefold()
 
-    (destination / "parameter_domains" / "locations.sql").write_text(
+    bundled_sql.write_text(
         "select 'newer workspace logic'", encoding="utf-8"
     )
     conflict = runner.invoke(app, ["bundle", str(root), "domain-lab", str(destination)])
     assert conflict.exit_code == 1
     assert "dashboard_bundle_destination_not_empty" in conflict.output
-    assert (destination / "parameter_domains" / "locations.sql").read_text(
-        encoding="utf-8"
-    ) == "select 'newer workspace logic'"
+    assert bundled_sql.read_text(encoding="utf-8") == "select 'newer workspace logic'"
 
 
 def test_expired_generation_is_not_served_and_restarts_as_building(tmp_path: Path):

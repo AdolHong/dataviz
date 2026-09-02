@@ -44,7 +44,7 @@
         ]
       },
       "catalog_entry_count": 9,
-      "catalog_entries_sha256": "e2dbea3bec0ddb001fc0cec448cd3f4b26052a980b0af1f127ed50cdd517a299"
+      "catalog_entries_sha256": "ced59f55144a035ee994a295cb38e44e535796cdf3c52deb6f1ddcb7ced51bec"
     },
     "cascade-explorer": {
       "workspace": "examples/feature-showcase",

@@ -216,30 +216,61 @@ Object.assign(datavizRuntime, {
       ),
       query_inputs:datavizProjectParameterInputs(this.transformParameterInputs(id)),
       control_state:Object.fromEntries(
-        Object.values(this.transformControlInputs(id)).map(binding => [
-          binding.control,
-          datavizControlEntryFrom(controlState, binding.control),
-        ])
+        Object.values(this.transformControlInputs(id)).map(binding => {
+          const entry = datavizControlEntryFrom(controlState, binding.control);
+          // Revision is audit evidence, not input semantics. Excluding it lets
+          // a Transform reuse a result when the user returns to an equivalent
+          // canonical value/intent state.
+          return [binding.control, {
+            value:structuredClone(entry.value),
+            intent:entry.intent || 'explicit',
+          }];
+        })
       ),
     });
   },
   async executeTransform(id, item, inputValues, generation, controlState) {
     const key = this.transformCacheKey(id, item, inputValues, controlState);
-    if (item.spec.cache?.mode !== 'none' && this.interactionCache.has(key)) {
+    const cacheEnabled = item.spec.cache?.mode !== 'none';
+    if (!cacheEnabled) {
+      this.transformCacheEvidence.set(id, {status:'disabled', entries:this.interactionCache.size});
+    } else if (this.interactionCache.has(key)) {
+      const cached = this.interactionCache.get(key);
+      // Map insertion order is the LRU order.
+      this.interactionCache.delete(key);
+      this.interactionCache.set(key, cached);
       this.metrics.interactiveTransforms.cacheHits += 1;
-      return datavizCacheClone(this.interactionCache.get(key));
+      this.transformCacheEvidence.set(id, {status:'hit', entries:this.interactionCache.size});
+      return datavizCacheClone(cached);
     }
     const inflightKey = `${id}\u0000${key}`;
     const existing = this.inflightTransforms.get(inflightKey);
-    if (existing) return datavizCacheClone(await existing);
+    if (existing) {
+      this.transformCacheEvidence.set(id, {status:'inflight', entries:this.interactionCache.size});
+      return datavizCacheClone(await existing);
+    }
+    if (cacheEnabled) {
+      this.metrics.interactiveTransforms.cacheMisses += 1;
+      this.transformCacheEvidence.set(id, {status:'miss', entries:this.interactionCache.size});
+    }
     const execution = (async () => {
       const adapter = this.interactiveAdapters[item.spec.runtime];
       if (!adapter) throw new Error(`Unsupported Interactive Runtime: ${item.spec.runtime}`);
       adapter.validate(item);
       const prepared = await adapter.prepare(item, inputValues, {controlState});
       const value = await adapter.execute(id, item, prepared, {generation, controlState});
-      if (item.spec.cache?.mode !== 'none') {
+      if (cacheEnabled) {
         this.interactionCache.set(key, datavizCacheClone(value));
+        while (this.interactionCache.size > this.interactionCacheLimit) {
+          const oldest = this.interactionCache.keys().next().value;
+          this.interactionCache.delete(oldest);
+          this.metrics.interactiveTransforms.cacheEvictions += 1;
+        }
+        this.transformCacheEvidence.set(id, {
+          status:'stored',
+          entries:this.interactionCache.size,
+          evictions:this.metrics.interactiveTransforms.cacheEvictions,
+        });
       }
       return value;
     })();
@@ -561,6 +592,7 @@ Object.assign(datavizRuntime, {
           this.markTransformReady(id, {
             ...triggerTrace,
             duration_ms:Number(durationMs.toFixed(2)),
+            cache:structuredClone(this.transformCacheEvidence.get(id) || null),
             inputs:inputProfiles,
             outputs:outputProfiles,
             changed_outputs:[...localChanged],

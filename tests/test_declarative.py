@@ -926,7 +926,7 @@ def test_removed_schema_fields_are_rejected(removed_fragment):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v18",
+                "schema": "dataviz/dashboard/v19",
                 "kind": "dashboard",
                 "id": "strict",
                 **removed_fragment,
@@ -987,7 +987,7 @@ def test_layout_and_view_bounds_are_enforced(fragment, location):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v18",
+                "schema": "dataviz/dashboard/v19",
                 "kind": "dashboard",
                 "id": "strict",
                 **fragment,

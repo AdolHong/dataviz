@@ -1605,13 +1605,23 @@ function renderQueryAuthorEvidence() {
       : canonical.value == null ? [] : [canonical.value];
     const parents = Object.keys(parameter.options?.depends_on || {});
     const transition = runtime.queryTransitionEvidence?.[parameter.id];
+    const timings = lookup.timings || {};
     output.textContent = [
       `state=${canonical.selection || 'value'}`,
       `operands=${values.length}`,
+      lookup.status ? `lookup=${lookup.status}` : null,
+      Number.isFinite(Number(lookup.requestGeneration))
+        ? `request=${lookup.requestGeneration}` : null,
       Number.isFinite(Number(lookup.total)) ? `available=${lookup.total}` : null,
       Number.isFinite(Number(lookup.unavailableCount))
         ? `unavailable=${lookup.unavailableCount}` : null,
       parents.length ? `depends_on=${parents.join(',')}` : null,
+      Number.isFinite(Number(timings.request_ms))
+        ? `request_ms=${timings.request_ms}` : null,
+      Number.isFinite(Number(timings.commit_ms))
+        ? `commit_ms=${timings.commit_ms}` : null,
+      Number.isFinite(Number(timings.visible_refresh_ms))
+        ? `visible_refresh_ms=${timings.visible_refresh_ms}` : null,
       transition?.action ? `transition=${transition.action}` : null,
     ].filter(Boolean).join(' · ');
   }
@@ -2205,6 +2215,31 @@ function selectedLookupItemsForState(parameter, selectedItems, {preserve = false
   return (selectedItems || []).filter(item => operands.has(JSON.stringify(item.value)));
 }
 
+function queryParameterLookupParentStates(parameter, runtime) {
+  return Object.fromEntries(
+    Object.keys(parameter.options?.depends_on || {}).map(parent => [
+      parent,
+      structuredClone(runtime.queryParameterState?.[parent] || {selection:'all', value:[]}),
+    ]),
+  );
+}
+
+function queryParameterLookupRequestIsCurrent({
+  dashboard, runtime, parameter, requestGeneration, parentSignature,
+}) {
+  if (state.dashboard?.id !== dashboard.id || activeRuntime() !== runtime) return false;
+  const current = runtime.queryLookup?.[parameter.id];
+  if (current?.requestGeneration !== requestGeneration) return false;
+  if (current?.parentSignature !== parentSignature) return false;
+  return JSON.stringify(queryParameterLookupParentStates(parameter, runtime)) === parentSignature;
+}
+
+function setQueryParameterLookupBusy(parameterId, busy) {
+  const input = $('#parameter-form')?.elements.namedItem(parameterId);
+  const control = input?.closest('.dv-control');
+  if (control) control.setAttribute('aria-busy', String(Boolean(busy)));
+}
+
 async function lookupQueryParameter(parameter, {
   search = '', append = false, refresh = false, preserve = false,
 } = {}) {
@@ -2218,18 +2253,23 @@ async function lookupQueryParameter(parameter, {
   previous.controller?.abort();
   window.clearTimeout(previous.retryTimer);
   const controller = new AbortController();
+  const parentStates = queryParameterLookupParentStates(parameter, runtime);
+  const parentSignature = JSON.stringify(parentStates);
+  const requestStarted = performance.now();
   runtime.queryLookup[parameter.id] = {
-    ...previous, search, controller, requestGeneration, status:'loading',
+    ...previous,
+    search,
+    controller,
+    requestGeneration,
+    parentSignature,
+    status:'loading',
+    timings:null,
   };
   runtime.queryDomainPending = true;
+  setQueryParameterLookupBusy(parameter.id, true);
   updateParameterDomainUi();
+  renderQueryAuthorEvidence();
   const stateEntry = runtime.queryParameterState?.[parameter.id] || {value:[]};
-  const parentStates = Object.fromEntries(
-    Object.keys(parameter.options.depends_on || {}).map(parent => [
-      parent,
-      structuredClone(runtime.queryParameterState?.[parent] || {selection:'all', value:[]}),
-    ]),
-  );
   try {
     const response = await request(
       `/api/dashboards/${encodeURIComponent(dashboard.id)}/parameter-domains/lookup`,
@@ -2247,10 +2287,11 @@ async function lookupQueryParameter(parameter, {
         }),
       },
     );
-    if (
-      state.dashboard?.id !== dashboard.id
-      || runtime.queryLookup[parameter.id]?.requestGeneration !== requestGeneration
-    ) return null;
+    const responseReceived = performance.now();
+    const currentRequest = () => queryParameterLookupRequestIsCurrent({
+      dashboard, runtime, parameter, requestGeneration, parentSignature,
+    });
+    if (!currentRequest()) return null;
     const items = append
       ? [...(previous.items || []), ...(response.items || [])]
       : (response.items || []);
@@ -2264,7 +2305,9 @@ async function lookupQueryParameter(parameter, {
       status:response.status || 'unavailable',
       search,
       requestGeneration,
+      parentSignature,
       controller:null,
+      timings:{request_ms:Number((responseReceived - requestStarted).toFixed(2))},
     };
     if (response.status !== 'ready') {
       const input = $('#parameter-form').elements.namedItem(parameter.id);
@@ -2286,6 +2329,7 @@ async function lookupQueryParameter(parameter, {
         if (state.dashboard?.id === dashboard.id) void lookupQueryParameter(parameter, {search});
       }, 1000);
       runtime.queryLookup[parameter.id].retryTimer = retryTimer;
+      renderQueryAuthorEvidence();
       return runtime.queryLookup[parameter.id];
     }
     reconcileLookupState(parameter, response, {preserve});
@@ -2325,26 +2369,50 @@ async function lookupQueryParameter(parameter, {
       input.dataset.queryFreshness = response.freshness || 'missing';
       syncRemoteParameterOptions(input);
     }
+    const committed = performance.now();
+    runtime.queryLookup[parameter.id].timings.commit_ms = Number(
+      (committed - responseReceived).toFixed(2)
+    );
     renderQueryAuthorEvidence();
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (!currentRequest()) return;
+      runtime.queryLookup[parameter.id].timings.visible_refresh_ms = Number(
+        (performance.now() - committed).toFixed(2)
+      );
+      renderQueryAuthorEvidence();
+    }));
     runtime.queryDomainGeneration = response.generation || runtime.queryDomainGeneration;
     state.workspaceRevision = Math.max(state.workspaceRevision, Number(response.workspace_revision || 0));
     return runtime.queryLookup[parameter.id];
   } catch (error) {
     if (error.name === 'AbortError') return null;
+    if (!queryParameterLookupRequestIsCurrent({
+      dashboard, runtime, parameter, requestGeneration, parentSignature,
+    })) return null;
     if (append && error.code === 'parameter_lookup_cursor_stale') {
       return lookupQueryParameter(parameter, {search, refresh, preserve});
     }
     runtime.queryLookup[parameter.id] = {
-      ...previous, status:'error', error:error.message, controller:null, requestGeneration,
+      ...previous,
+      status:'error',
+      error:error.message,
+      controller:null,
+      requestGeneration,
+      parentSignature,
+      timings:{request_ms:Number((performance.now() - requestStarted).toFixed(2))},
     };
     const needsFirst = parameter.default?.mode === 'first'
       && runtime.queryParameterState?.[parameter.id]?.value == null;
     if (needsFirst) runtime.queryDomainReady = false;
+    renderQueryAuthorEvidence();
     return null;
   } finally {
     runtime.queryDomainPending = dynamicQueryParameters().some(item => (
       runtime.queryLookup[item.id]?.status === 'loading'
     ));
+    if (queryParameterLookupRequestIsCurrent({
+      dashboard, runtime, parameter, requestGeneration, parentSignature,
+    })) setQueryParameterLookupBusy(parameter.id, false);
     updateParameterDomainUi();
   }
 }

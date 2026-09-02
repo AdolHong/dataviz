@@ -24,7 +24,7 @@ Do not load the entire Runtime architecture by default. Do not create a new Sour
 ## Operating principles
 
 - Treat the installed CLI, generated schemas, and Component Registry as the current source of truth. Do not recall fields or commands from an older Dataviz release.
-- Prefer semantic reuse over duplicated business definitions: discover an existing Output, understand its contract, then run it. Keep ordinary business SQL Dashboard-local; share only stable static Workspace Assets and genuinely common Parameter Domains.
+- Prefer semantic reuse through published Outputs, not shared source code: discover an existing Output, understand its contract, then run it. Keep Source SQL and Parameter Domain SQL Dashboard-local; share only stable static Workspace Assets.
 - Prove `Source → Named Output` before spending time on chart options, CSS, or custom rendering.
 - Keep query logic, interactive computation, rendering, and presentation in their respective layers.
 - Run an expensive computation once. Use its immutable `result_id` for inspection, pagination, export, report generation, and Evidence.
@@ -54,11 +54,13 @@ dataviz docs --task view-filter --format json
 dataviz docs --task browser-compute --format json
 dataviz docs --task map-view --format json
 dataviz docs --task entity-select --format json
+dataviz docs --task lookup --format json
 ```
 
 - Use `interactive` only when a post-query Control must filter inputs, provide a calculation value, or produce a Derived Output.
-- The `interactive` task also states the current incremental boundary: one Transform function executes as a generation, while only Views downstream of actually changed Named Outputs redraw. In Server author mode, click the Interactive node to inspect the cause and confirm that no Query ran.
+- The `interactive` task also states the current incremental boundary: one Transform function executes as a generation, while only Views downstream of actually changed Named Outputs redraw. In Server author mode, click the Interactive node for its producer trace, or a View renderer signal for View-centric cause, query/no-query evidence, input rows/bytes, render timing and lifecycle warnings.
 - Use `dataviz docs query-parameters --format json` for query-time SQL-backed choices or Parameter Domain cascades. The `cascading-selection` task is specifically for post-query Control candidate cascades over an already loaded Base Output.
+- If a remote Picker is slow or stale, enable the Query Card author projection before changing SQL. It separates Lookup status/request generation, request time, Picker commit time and visible-refresh timing; a late success or failure must never replace a newer search or parent state.
 - Use `custom-renderer` only when built-in Views plus Plotly trace/layout/config overrides cannot express the required behavior. If it needs multiple relations, declare `input` plus named `inputs` and read `descriptor.inputs`; never concatenate unrelated rows merely to fit a presumed one-table Renderer API.
 - Use `map-view` for native longitude/latitude points or values joined to an allowlisted local GeoJSON Asset; do not begin with Custom Renderer code.
 - Use `entity-select` for a searchable large Query Parameter catalog; it scaffolds existing Domain/select/filter contracts and does not create an Entity Runtime.
@@ -276,16 +278,19 @@ Use an Analysis Overlay only for an explicitly temporary experiment that substit
 ### Preserve architectural boundaries
 
 - Query Parameters change query identity; Controls own post-query typed state. Each View or Interactive Transform declares whether it consumes that state as a filter or a value. Do not substitute one lifecycle for the other merely for UI convenience.
-- SQL-backed Query Parameter choices belong to Parameter Domains, not Sources or Interactive Transforms. Candidate discovery is optional for AI: known values may be passed directly as canonical Query Parameter state without loading the UI catalog.
+- SQL-backed Query Parameter choices belong to Dashboard-local Parameter Domains, not Sources or Interactive Transforms. Candidate discovery is optional for AI: known values may be passed directly as canonical Query Parameter state without loading the UI catalog.
 - Candidate-backed `multiple_select` uses `all/include/exclude/none`; compact states never expand the full candidate relation. Prefer Source `query_filters` and explicitly choose whether an empty selection passes through or matches no rows. Read `dataviz docs query-parameters --format json` before implementing SQL-backed choices, cascades, Revert, or large entity lookup.
 - Treat page reload and initial Dashboard hydration as compact-state restoration, not as a new parent edit. URL/tab/committed `include` or `exclude` operands must survive while Lookup restores labels; values absent from the latest generation remain unavailable instead of being silently removed.
-- When debugging Query Parameters in Server, enable the Query Card `{ }` author projection to see selection mode, operand counts, available/unavailable counts, dependencies, and the latest deterministic reconciliation. It is read-only and does not replace `inspect query` or Result evidence.
-- Keep ordinary SQL and files Dashboard-local. Share only genuinely common Parameter Domains and stable Workspace Assets. Read `dataviz docs workspace-assets --format json` before registering shared files or creating a Bundle; never use parent traversal or absolute local paths as a portability shortcut.
+- When debugging Query Parameters in Server, enable the Query Card `{ }` author projection to see selection mode, operand counts, available/unavailable counts, dependencies, Lookup request generation/timing, and the latest deterministic reconciliation. It is read-only and does not replace `inspect query` or Result evidence.
+- Keep Source SQL and Parameter Domain SQL Dashboard-local. Duplicate and independently evolve small SQL definitions when multiple Dashboards need similar candidates; never use `workspace:/...` for executable query logic. Share stable files through Workspace Assets. Read `dataviz docs workspace-assets --format json` before registering shared files or creating a Bundle; never use parent traversal or absolute local paths as a portability shortcut.
 - Sources are the only external data entry. Server Dataset Transforms create Base Outputs; Interactive Transforms create Derived Outputs.
 - Browser Interactive Transform code reads only YAML-declared aliases: `context.inputs.<alias>`, `context.query_inputs.<alias>`, and `context.control_inputs.<alias>`. `mode: filter` is applied before execution; `mode: value` appears in `control_inputs`. Never use the removed `context.selections` API.
 - Renderers consume Named Outputs and View descriptors. Do not put SQL, model inference, or reusable business calculations in Presentation JavaScript.
 - A Custom View declares its primary `input` and may add named `inputs` aliases; read them as `descriptor.inputs.main` and `descriptor.inputs.<alias>`. Keep geography, stores, summaries, and other relations separate; do not concatenate unrelated tables with a synthetic `row_kind` merely to pass them to one Renderer. `descriptor.rows` is only the primary-input shortcut.
-- During Interactive Transform recomputation, an already mounted View may keep its prior content with an `updating` signal. Treat it as visual continuity only: new consumer evidence is committed only after the current generation succeeds. In Server author mode, inspect an Interactive node to see the Control/Input cause, changed Outputs, affected Views, and confirmation that no Query ran.
+- During Interactive Transform recomputation, an already mounted View may keep its prior content with an `updating` signal. Treat it as visual continuity only: new consumer evidence is committed only after the current generation succeeds. In Server author mode, inspect an Interactive node for the producer trace and click the affected View's renderer signal for the View-centric refresh path, browser input rows/bytes and mount/update timing. These are latest-session diagnostics, not immutable Result/Evidence.
+- Browser Interactive Transforms already run in Workers, isolate superseded generations, execute independent DAG branches concurrently, skip Views behind unchanged Named Outputs, and use a bounded session cache. Inspect the existing trace for cache hit/miss before proposing Worker, output-dependency, or cache DSL.
+- For a multi-input View, the renderer signal reports changed input aliases and identifies a waiting or failed alias with its canonical Output reference. Diagnose that alias directly; do not merge unrelated relations merely to hide an input error.
+- Run `dataviz renderer test <renderer.js> --renderer-id <id>` for Custom Renderer hooks. It exercises mount/update/dispose and rejects empty mount, hook failure, or DOM left after dispose; it does not claim to detect arbitrary third-party listener leaks.
 - Use Plotly as the author chart interface and the default TanStack-based Table for tabular presentation. Do not introduce another chart/table stack casually.
 - For declarative Table presentation, reuse `labels`, `formats`, `align`, `widths`, and `wrap`; use `options.emphasis.columns` only to statically emphasize a few important columns. Conditional formatting and custom cells belong to TanStack/Custom Renderer code, not another DSL.
 - Keep Dashboard logic in `dashboard.yaml`; keep optional visual overrides in `presentation.yaml` and narrowly scoped assets.
@@ -318,7 +323,7 @@ Check populated, empty, loading, error, stale, cancelled, and unavailable states
 
 ### Control stored artifacts
 
-Result, Execution Artifact, shared Parameter Materialization, and cache cleanup is explicit and preview-first:
+Result, Execution Artifact, Dashboard Parameter Materialization, and cache cleanup is explicit and preview-first:
 
 ```bash
 dataviz prune <workspace>

@@ -989,6 +989,7 @@ def test_remote_lookup_late_failure_cannot_replace_newer_success(page: Page, tmp
         expect(evidence).to_contain_text("lookup=ready")
         expect(evidence).to_contain_text("request_ms=")
         expect(evidence).to_contain_text("visible_refresh_ms=")
+        expect(page.locator('[data-query-parameter-evidence-copy="cities"]')).to_be_visible()
 
 
 @pytest.mark.e2e
@@ -2980,6 +2981,7 @@ def test_unified_dashboard_controls_drive_browser_named_output(page: Page, tmp_p
         expect(inspector).to_contain_text("Why this View updated")
         expect(inspector).to_contain_text("Renderer input and timing")
         expect(inspector).to_contain_text("latest-metrics")
+        expect(inspector.locator("#node-inspector-copy-diagnosis")).to_be_visible()
         inspector.locator(".dialog-close").click()
 
         page.locator("#sidebar-toggle").click()

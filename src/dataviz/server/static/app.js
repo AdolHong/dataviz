@@ -1578,9 +1578,45 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
     evidence.className = 'query-parameter-evidence';
     evidence.dataset.queryParameterEvidence = parameter.id;
     evidence.hidden = true;
-    wrapper.append(evidence);
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'query-parameter-evidence-copy';
+    copy.dataset.queryParameterEvidenceCopy = parameter.id;
+    copy.textContent = '复制诊断';
+    copy.hidden = true;
+    copy.addEventListener('click', () => {
+      const diagnosis = queryParameterDiagnosis(parameter, activeRuntime());
+      void copyEvidence(JSON.stringify(diagnosis, null, 2), copy);
+    });
+    wrapper.append(evidence, copy);
   }
   return wrapper;
+}
+
+function queryParameterDiagnosis(parameter, runtime) {
+  const canonical = structuredClone(runtime?.queryParameterState?.[parameter.id] || {});
+  const lookup = runtime?.queryLookup?.[parameter.id] || {};
+  return {
+    kind:'query_parameter',
+    dashboard:state.dashboard?.id || null,
+    parameter:parameter.id,
+    state:canonical,
+    dependencies:Object.keys(parameter.options?.depends_on || {}),
+    lookup:{
+      status:lookup.status || null,
+      search:lookup.search || '',
+      request_generation:Number.isFinite(Number(lookup.requestGeneration))
+        ? Number(lookup.requestGeneration) : null,
+      generation:lookup.generation || null,
+      total:Number.isFinite(Number(lookup.total)) ? Number(lookup.total) : null,
+      unavailable_count:Number.isFinite(Number(lookup.unavailableCount))
+        ? Number(lookup.unavailableCount) : null,
+      freshness:lookup.freshness || null,
+      timings:structuredClone(lookup.timings || {}),
+      error:lookup.error || null,
+    },
+    transition:structuredClone(runtime?.queryTransitionEvidence?.[parameter.id] || null),
+  };
 }
 
 function renderQueryAuthorEvidence() {
@@ -1595,8 +1631,12 @@ function renderQueryAuthorEvidence() {
     const output = document.querySelector(
       `[data-query-parameter-evidence="${CSS.escape(parameter.id)}"]`
     );
+    const copy = document.querySelector(
+      `[data-query-parameter-evidence-copy="${CSS.escape(parameter.id)}"]`
+    );
     if (!output) continue;
     output.hidden = !enabled;
+    if (copy) copy.hidden = !enabled;
     if (!enabled) continue;
     const canonical = runtime.queryParameterState?.[parameter.id] || {};
     const lookup = runtime.queryLookup?.[parameter.id] || {};
@@ -3036,6 +3076,15 @@ async function copyEvidence(text, button) {
   window.setTimeout(() => { button.textContent = original; }, 1400);
 }
 
+function setInspectorDiagnosis(payload) {
+  const button = $('#node-inspector-copy-diagnosis');
+  if (!button) return;
+  button.hidden = !payload;
+  button.onclick = payload
+    ? () => copyEvidence(JSON.stringify(payload, null, 2), button)
+    : null;
+}
+
 function inspectorCodeSection({eyebrow, title, note, code, copyLabel = 'Copy'}) {
   const section = inspectorElement('section', 'node-inspector__section node-inspector__section--code');
   const heading = inspectorElement('header', 'node-inspector__section-heading');
@@ -3068,6 +3117,15 @@ function renderViewInspector(view, evidence = {}) {
   const profiles = Object.values(renderer.inputs || {});
   const rows = profiles.reduce((total, item) => total + Number(item.rows || 0), 0);
   const bytes = profiles.reduce((total, item) => total + Number(item.bytes || 0), 0);
+  setInspectorDiagnosis({
+    kind:'view',
+    dashboard:state.dashboard?.id || null,
+    view:{id:view.id, title:view.title || null, renderer:renderer.renderer || view.subtype || null},
+    status:'ready',
+    refresh:structuredClone(evidence.refresh || null),
+    renderer:structuredClone(renderer),
+    lifecycle:structuredClone(lifecycle),
+  });
   body.replaceChildren();
   $('#node-inspector-title').textContent = view.title || view.id;
   $('#node-inspector-subtitle').textContent = view.description || `view · ${view.subtype}`;
@@ -3114,11 +3172,68 @@ function showViewInspector(view, evidence) {
   if (!dialog.open) dialog.showModal();
 }
 
+function boundedDiagnosisList(value, limit = 50) {
+  const items = Array.isArray(value) ? value : [];
+  return {
+    items:items.slice(0, limit),
+    total:items.length,
+    truncated:items.length > limit,
+  };
+}
+
+function boundedDiagnosisError(error, fallback = null) {
+  if (!error && !fallback) return null;
+  const value = error || {message:fallback};
+  return {
+    code:value.code || value.details?.code || null,
+    message:String(value.message || fallback || value).slice(0, 1000),
+  };
+}
+
+function pipelineNodeDiagnosis(node, record, runNode, trace, failure) {
+  return {
+    kind:'pipeline_node',
+    dashboard:state.dashboard?.id || null,
+    node:{id:node.id, type:node.type, subtype:node.subtype},
+    run:record ? {id:record.run_id, status:record.status} : null,
+    execution:{
+      status:runNode?.status || null,
+      result_origin:runNode?.result_origin || null,
+      duration_ms:Number.isFinite(Number(runNode?.duration_ms))
+        ? Number(runNode.duration_ms) : null,
+    },
+    refresh:trace ? {
+      changed_controls:boundedDiagnosisList(trace.changed_controls),
+      changed_inputs:boundedDiagnosisList(trace.changed_inputs),
+      missing_outputs:boundedDiagnosisList(trace.missing_outputs),
+      changed_outputs:boundedDiagnosisList(trace.changed_outputs),
+      affected_views:boundedDiagnosisList(trace.affected_views),
+      manual:Boolean(trace.manual),
+      query_executed:Boolean(trace.query_executed),
+      duration_ms:Number.isFinite(Number(trace.duration_ms)) ? Number(trace.duration_ms) : null,
+      cache:trace.cache ? {
+        status:trace.cache.status || null,
+        entries:Number.isFinite(Number(trace.cache.entries)) ? Number(trace.cache.entries) : null,
+        evictions:Number.isFinite(Number(trace.cache.evictions))
+          ? Number(trace.cache.evictions) : null,
+      } : null,
+    } : null,
+    error:boundedDiagnosisError(
+      runNode?.error || state.nodeErrors[node.id],
+      failure,
+    ),
+  };
+}
+
 function renderNodeInspector(node, record, runNode, failure = null) {
   const body = $('#node-inspector-body');
   body.replaceChildren();
   $('#node-inspector-title').textContent = node.title;
   $('#node-inspector-subtitle').textContent = node.description || `${node.type.replace('_', ' ')} · ${node.subtype}`;
+
+  const runtime = activeRuntime();
+  const trace = runtime?.interactiveTraces?.[node.id];
+  setInspectorDiagnosis(pipelineNodeDiagnosis(node, record, runNode, trace, failure));
 
   const summary = inspectorElement('section', 'node-inspector__summary');
   const status = runNode?.status || (record ? record.status : 'not run');
@@ -3134,8 +3249,6 @@ function renderNodeInspector(node, record, runNode, failure = null) {
   summary.append(stamp, facts);
   body.append(summary);
 
-  const runtime = activeRuntime();
-  const trace = runtime?.interactiveTraces?.[node.id];
   if (runtime?.queryAuthorMode && node.type === 'interactive_transform' && trace) {
     body.append(inspectorCodeSection({
       eyebrow: 'REFRESH CAUSE',

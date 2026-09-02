@@ -46,7 +46,7 @@ python scripts/build_release_zip.py
 python scripts/build_release_zip.py --output-dir /tmp/dataviz-release
 ```
 
-源码 CLI 使用 `uv sync --extra dev --no-editable --reinstall-package ai-dataviz`，规避部分 macOS/Python 组合忽略带 `UF_HIDDEN` 标记 editable `.pth` 的问题。修改 `src/` 后必须重新安装，再运行 CLI smoke；pytest 通过项目 `pythonpath=src` 读取当前源码。发布门禁另外使用干净 venv 验证安装产物，不能把源码测试混作发行包证据。
+维护源码时继续显式使用 `PYTHONPATH=src`。`.venv/bin/python scripts/check_version_drift.py` 只比较项目声明、源码版本与当前 Python 实际导入的版本/路径，明确暴露旧安装，但不包装 CLI、测试、构建或发布。需要刷新普通安装命令时使用 `uv sync --extra dev --no-editable --reinstall-package ai-dataviz`。发行门禁仍按上面的独立步骤执行，不能把源码测试混作发行包证据。
 
 建议把产物写入临时目录先做安装 smoke，确认后再生成正式 `dist/`。
 

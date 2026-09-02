@@ -62,6 +62,14 @@ dataviz version
 
 源码环境运行下文命令时，可将 `dataviz` 替换为 `uv run --no-editable dataviz`。
 
+维护 Dataviz 本身时，可以快速检查项目声明、源码和当前 Python 实际导入的版本是否一致：
+
+```bash
+.venv/bin/python scripts/check_version_drift.py
+```
+
+开发命令继续显式使用 `PYTHONPATH=src`；检查脚本不包装 CLI、测试、构建或发布。
+
 需要真实浏览器视觉检查时，安装可选依赖：
 
 ```bash

@@ -1249,6 +1249,18 @@ def test_query_parameter_author_mode_is_a_read_only_canonical_projection():
     assert "fetch(" not in projection
     assert "request(" not in projection
     assert ".query-parameter-evidence[hidden]{display:none}" in style
+    assert "data-query-parameter-evidence-copy" in script
+    assert "queryParameterDiagnosis(parameter, activeRuntime())" in script
+    assert 'id="node-inspector-copy-diagnosis"' in template
+    pipeline_diagnosis = script[
+        script.index("function pipelineNodeDiagnosis"):
+        script.index("function renderNodeInspector")
+    ]
+    assert "structuredClone(runNode" not in pipeline_diagnosis
+    assert "runNode?.diagnostics" not in pipeline_diagnosis
+    assert "runNode?.log" not in pipeline_diagnosis
+    assert "boundedDiagnosisList(trace.changed_outputs)" in pipeline_diagnosis
+    assert "boundedDiagnosisError(" in pipeline_diagnosis
 
 
 def test_parameter_lookup_success_syncs_only_the_changed_select():

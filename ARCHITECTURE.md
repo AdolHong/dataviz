@@ -726,7 +726,7 @@ Lookup 成功后的 Browser 提交边界是当前 Picker，而不是整个 Query
 
 Picker 的数量摘要从同一 pinned generation 的 `total` 与紧凑 state 推导：`all → total`、`include → operands count`、`exclude → total - valid exception count`、`none → 0`。UI 对 all 只显示“全部”，对 exclude 显示“全部，排除 N 项”，绝不渲染前几个 Tag 再加 `+99998`。
 
-显式作者模式只能投影现有 reducer 的 canonical state、Lookup lifecycle 与 transition evidence。普通用户继续看到业务文案；作者模式显示 `selection / operands / available / unavailable / parent dependency / request generation / request+commit+visible-refresh timing / transition result`，并在父级变化时解释子参数是保持、求有效交集、恢复 default、转为 all，还是被 Revert 作为 unavailable 保留。该解释不能另存一份选择历史、把 unavailable 混入 available candidates，或为了展示诊断重新执行 Domain SQL。
+显式作者模式只能投影现有 reducer 的 canonical state、Lookup lifecycle 与 transition evidence。普通用户继续看到业务文案；作者模式显示 `selection / operands / available / unavailable / parent dependency / request generation / request+commit+visible-refresh timing / transition result`，并在父级变化时解释子参数是保持、求有效交集、恢复 default、转为 all，还是被 Revert 作为 unavailable 保留。`Copy diagnosis` 只把这份有界投影组织为一个 JSON 对象，不复制候选表、不建立诊断 Store。该解释不能另存一份选择历史、把 unavailable 混入 available candidates，或为了展示诊断重新执行 Domain SQL。
 
 Lookup 可以有短期 process-local page cache，但它不是第二个事实源，也不改变 materialization freshness。验收基准至少覆盖 10K、100K、250K rows 的首次本地查询、连续搜索、三级父过滤、并发 tab 和 generation 切换；性能优化可以采用 DuckDB/Parquet 扫描、内部索引或预计算 normalized search column，但不得泄露成多套作者 DSL。
 
@@ -1364,7 +1364,7 @@ Workspace Python 工具库暂不进入当前设计。它不是单纯“共享一
 
 Interactive Transform 的执行边界仍是整个 Transform，而 View 更新边界是实际发生变化的 Named Output。Runtime 在 generation 启动时捕获输入与 Control state，完成后比较每个 Output 的稳定 value signature；只有 signature 改变的 Output 才进入影响闭包并重绘下游 View。已经挂载且仍有可读内容的 View 在等待新 generation 时保留旧画面并显示轻量 `updating`，首次没有内容时才进入完整 Loading。旧内容只是视觉连续性，不会被标记为新 generation 的 applied evidence。
 
-作者模式可以从当前 Dependency Contract 与 Runtime 调度事实解释一次交互刷新：触发它的 Control、变化的上游/缺失 Output、manual 标记、实际变化的 Output、受影响 View，以及 `query_executed`。Interactive 节点展示 producer trace 和本次 session cache hit/miss/stored 状态；每个 View renderer signal 再投影“该 View 为什么更新”、多输入 alias 到 canonical reference 的映射、变化/等待/失败的具体 alias、实际输入 rows/bytes、最近一次 mount/update 耗时和 Custom Renderer lifecycle warning。rows/bytes 来自浏览器实际消费值的 Arrow 或 canonical JSON 表示，timing 只代表当前会话最近一次成功 generation。这些都是只读诊断，不是第二套状态 Store，也不进入 State Snapshot、Result 或 Evidence；不可变审计仍以 consumer applied state 和执行证据为准。
+作者模式可以从当前 Dependency Contract 与 Runtime 调度事实解释一次交互刷新：触发它的 Control、变化的上游/缺失 Output、manual 标记、实际变化的 Output、受影响 View，以及 `query_executed`。Interactive 节点展示 producer trace 和本次 session cache hit/miss/stored 状态；每个 View renderer signal 再投影“该 View 为什么更新”、多输入 alias 到 canonical reference 的映射、变化/等待/失败的具体 alias、实际输入 rows/bytes、最近一次 mount/update 耗时和 Custom Renderer lifecycle warning。`Copy diagnosis` 聚合当前 Inspector 已显示的同一事实，不能成为新的 wire 或持久化协议。rows/bytes 来自浏览器实际消费值的 Arrow 或 canonical JSON 表示，timing 只代表当前会话最近一次成功 generation。这些都是只读诊断，不是第二套状态 Store，也不进入 State Snapshot、Result 或 Evidence；不可变审计仍以 consumer applied state 和执行证据为准。
 
 browser-js 的 session cache 只缓存完整 Transform 输出。其 key 使用 Output value signature、Transform code/dependency、Runtime version、Query inputs 及 Control 的 canonical value/intent；revision 是审计顺序而非输入语义，不单独制造 cache miss。缓存是有界的进程内 LRU，实现上限不是 Dashboard 作者配置，也不形成新的持久化层；命中、未命中和淘汰只进入当前会话 metrics/trace。
 

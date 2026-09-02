@@ -350,6 +350,11 @@ P6 明确暂缓 Workspace 级 Python 工具库。它会同时引入 import names
 - [x] browser-js session cache 去除仅用于审计的 Control revision 噪声，增加内部有界 LRU、hit/miss/eviction metrics，并把本次 cache 状态投影到既有 Interactive trace；没有新增 cache DSL 或持久化协议。
 - [x] 多输入 View 的既有刷新证据增加 alias 投影；等待、失败和实际变化均指出 input alias 与 canonical Output reference，不增加 Renderer 输入协议。
 
+### P8：开发反馈入口收敛（已完成）
+
+- [x] 提供职责单一的 `scripts/check_version_drift.py`，比较项目声明、源码版本与当前 Python 实际导入的版本/路径；不新增开发命令包装器，测试和发行继续使用现有直接命令。
+- [x] Query Parameter 作者投影与 View/Node Inspector 可以一次复制聚合诊断；内容只投影现有 canonical state、Lookup timing、refresh、Renderer 与生命周期证据，不新增协议或第二证据 Store。
+
 默认价值顺序如下；顺序不等于人为串联的技术依赖：
 
 | 顺序 | 工作 | 真正前置条件 |

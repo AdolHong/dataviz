@@ -119,7 +119,10 @@
         <h3 id="node-inspector-title">Source evidence</h3>
         <p id="node-inspector-subtitle">Inspect what this node executed for the current run.</p>
       </div>
-      <button class="dialog-close" type="button" aria-label="Close source evidence" onclick="this.closest('dialog').close()">×</button>
+      <div class="node-inspector__actions">
+        <button id="node-inspector-copy-diagnosis" class="node-inspector__copy" type="button" hidden>Copy diagnosis</button>
+        <button class="dialog-close" type="button" aria-label="Close source evidence" onclick="this.closest('dialog').close()">×</button>
+      </div>
     </header>
     <div id="node-inspector-body" class="node-inspector__body" aria-live="polite"></div>
   </dialog>

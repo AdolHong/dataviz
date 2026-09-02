@@ -191,9 +191,12 @@ function dashboardLocation(dashboardId, parameterState = {}) {
   return `/dashboards/${encodeURIComponent(dashboardId)}${query ? `?${query}` : ''}`;
 }
 
-function syncDashboardLocation(mode = 'replace') {
+function syncDashboardLocation(mode = 'replace', parameterState = null) {
   if (!state.dashboard || mode === 'none') return;
-  const url = dashboardLocation(state.dashboard.id, queryParameterStates());
+  const url = dashboardLocation(
+    state.dashboard.id,
+    parameterState || queryParameterStates(),
+  );
   const activeLink = document.querySelector(
     `.nav-button[data-id="${CSS.escape(state.dashboard.id)}"]`,
   );
@@ -1980,6 +1983,10 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
   setRunButtonLabel(runtime.pendingRunId ? '取消' : '查询');
   setShareEnabled(Boolean(runtime.runId) && runtime.controlConnected);
   saveTabUiState();
+  // Dashboard navigation owns the route and must commit immediately. Dynamic
+  // Parameter Domain hydration may refine defaults later, but it must never
+  // delay or prevent the selected Dashboard path from reaching the address bar.
+  syncDashboardLocation(historyMode, runtime.queryParameterState || {});
   if (dynamicQueryParameters().length) {
     runtime.queryDomainReady = true;
     updateParameterDomainUi();
@@ -1992,7 +1999,6 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
   } else {
     runtime.queryDomainReady = true;
     updateParameterDomainUi();
-    syncDashboardLocation(historyMode);
   }
 }
 
@@ -2092,6 +2098,11 @@ function updateParameterDomainUi() {
   }
 }
 
+function queryParameterStateValues(entry) {
+  const value = entry?.value;
+  return Array.isArray(value) ? value : value == null ? [] : [value];
+}
+
 function replaceParameterDomainOptions(parameter, choices, {
   sync = true,
   append = false,
@@ -2142,7 +2153,7 @@ function replaceParameterDomainOptions(parameter, choices, {
   }
   input.replaceChildren(...nodes);
   input.dataset.querySelection = currentState.selection || input.dataset.querySelection || 'all';
-  const operands = new Set((currentState.value || []).map(value => (
+  const operands = new Set(queryParameterStateValues(currentState).map(value => (
     typed ? JSON.stringify(value) : String(value)
   )));
   for (const option of input.options) option.selected = operands.has(option.value);
@@ -2188,9 +2199,9 @@ function reconcileLookupState(parameter, response, {preserve = false} = {}) {
 function selectedLookupItemsForState(parameter, selectedItems, {preserve = false} = {}) {
   if (preserve) return selectedItems || [];
   const stateEntry = activeRuntime()?.queryParameterState?.[parameter.id];
-  const rawValue = stateEntry?.value;
-  const values = Array.isArray(rawValue) ? rawValue : rawValue == null ? [] : [rawValue];
-  const operands = new Set(values.map(value => JSON.stringify(value)));
+  const operands = new Set(
+    queryParameterStateValues(stateEntry).map(value => JSON.stringify(value))
+  );
   return (selectedItems || []).filter(item => operands.has(JSON.stringify(item.value)));
 }
 
@@ -2231,7 +2242,7 @@ async function lookupQueryParameter(parameter, {
           search,
           limit:500,
           cursor,
-          selected:Array.isArray(stateEntry.value) ? stateEntry.value : [],
+          selected:queryParameterStateValues(stateEntry),
           refresh,
         }),
       },
@@ -2972,6 +2983,67 @@ function inspectorCodeSection({eyebrow, title, note, code, copyLabel = 'Copy'}) 
   pre.append(inspectorElement('code', '', code || '—'));
   section.append(pre);
   return section;
+}
+
+function formatEvidenceBytes(value) {
+  const bytes = Number(value || 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function renderViewInspector(view, evidence = {}) {
+  const body = $('#node-inspector-body');
+  const renderer = evidence.renderer || {};
+  const lifecycle = evidence.lifecycle || renderer.lifecycle || {};
+  const profiles = Object.values(renderer.inputs || {});
+  const rows = profiles.reduce((total, item) => total + Number(item.rows || 0), 0);
+  const bytes = profiles.reduce((total, item) => total + Number(item.bytes || 0), 0);
+  body.replaceChildren();
+  $('#node-inspector-title').textContent = view.title || view.id;
+  $('#node-inspector-subtitle').textContent = view.description || `view · ${view.subtype}`;
+  const summary = inspectorElement('section', 'node-inspector__summary');
+  const stamp = inspectorElement('div', 'node-inspector__status', 'view evidence');
+  stamp.dataset.status = 'ready';
+  const facts = inspectorElement('div', 'node-inspector__facts');
+  facts.append(
+    inspectorFact('View', view.id),
+    inspectorFact('Renderer', renderer.renderer || view.subtype || '—'),
+    inspectorFact('Render', renderer.duration_ms == null ? '—' : `${renderer.duration_ms} ms`),
+    inspectorFact('Inputs', `${rows.toLocaleString()} rows · ${formatEvidenceBytes(bytes)}`),
+  );
+  summary.append(stamp, facts);
+  body.append(summary);
+  body.append(inspectorCodeSection({
+    eyebrow:'REFRESH CAUSE',
+    title:'Why this View updated',
+    note:'Projected from the current Control delta and existing Interactive Transform traces; it is not a second execution record.',
+    code:JSON.stringify(evidence.refresh || {message:'No refresh evidence captured yet.'}, null, 2),
+    copyLabel:'Copy refresh cause',
+  }));
+  body.append(inspectorCodeSection({
+    eyebrow:'BROWSER COST',
+    title:'Renderer input and timing',
+    note:'Rows and serialized bytes describe the values consumed by this browser View. Timing is the most recent mount or update.',
+    code:JSON.stringify(renderer || {message:'No renderer evidence captured yet.'}, null, 2),
+    copyLabel:'Copy browser cost',
+  }));
+  if (lifecycle.custom || lifecycle.diagnostics?.length) {
+    body.append(inspectorCodeSection({
+      eyebrow:'LIFECYCLE',
+      title:'Custom Renderer checks',
+      note:'Development evidence for mount, update and dispose ownership. Warnings stay scoped to this View.',
+      code:JSON.stringify(lifecycle, null, 2),
+      copyLabel:'Copy lifecycle evidence',
+    }));
+  }
+}
+
+function showViewInspector(view, evidence) {
+  const dialog = $('#node-inspector');
+  renderViewInspector(view, evidence);
+  if (!dialog.open) dialog.showModal();
 }
 
 function renderNodeInspector(node, record, runNode, failure = null) {
@@ -3799,6 +3871,7 @@ $('#query-parameter-author-mode').addEventListener('click', () => {
   if (!runtime) return;
   runtime.queryAuthorMode = !runtime.queryAuthorMode;
   renderQueryAuthorEvidence();
+  postCanvasMessage({type:'dataviz:set-author-mode', enabled:runtime.queryAuthorMode});
 });
 $('#query-parameters-revert').addEventListener('click', () => {
   void revertQueryParameters();
@@ -3903,6 +3976,7 @@ window.addEventListener('message', (event) => {
     frame.dataset.runtimeReady = 'true';
     syncCanvasInteraction();
     syncCanvasQueryDraft();
+    postCanvasMessage({type:'dataviz:set-author-mode', enabled:runtime.queryAuthorMode});
     return;
   }
   if (event.data?.type === 'dataviz:control-snapshot') {
@@ -3951,6 +4025,12 @@ window.addEventListener('message', (event) => {
     const nodeId = String(event.data.node_id || '');
     const node = (state.dashboard?.nodes || []).find(item => item.id === nodeId);
     if (node) showNodeInspector(node);
+    return;
+  }
+  if (event.data?.type === 'dataviz:view-evidence-inspect') {
+    const viewId = String(event.data.view_id || '');
+    const view = (state.dashboard?.views || []).find(item => item.id === viewId);
+    if (view) showViewInspector(view, event.data.evidence || {});
     return;
   }
   if (event.data?.type === 'dataviz:interactive-status') {

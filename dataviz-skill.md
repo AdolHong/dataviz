@@ -57,8 +57,9 @@ dataviz docs --task entity-select --format json
 ```
 
 - Use `interactive` only when a post-query Control must filter inputs, provide a calculation value, or produce a Derived Output.
+- The `interactive` task also states the current incremental boundary: one Transform function executes as a generation, while only Views downstream of actually changed Named Outputs redraw. In Server author mode, click the Interactive node to inspect the cause and confirm that no Query ran.
 - Use `dataviz docs query-parameters --format json` for query-time SQL-backed choices or Parameter Domain cascades. The `cascading-selection` task is specifically for post-query Control candidate cascades over an already loaded Base Output.
-- Use `custom-renderer` only when built-in Views plus Plotly trace/layout/config overrides cannot express the required behavior.
+- Use `custom-renderer` only when built-in Views plus Plotly trace/layout/config overrides cannot express the required behavior. If it needs multiple relations, declare `input` plus named `inputs` and read `descriptor.inputs`; never concatenate unrelated rows merely to fit a presumed one-table Renderer API.
 - Use `map-view` for native longitude/latitude points or values joined to an allowlisted local GeoJSON Asset; do not begin with Custom Renderer code.
 - Use `entity-select` for a searchable large Query Parameter catalog; it scaffolds existing Domain/select/filter contracts and does not create an Entity Runtime.
 - When a component is already known, route directly with `dataviz docs --component <component-id> --format json`.

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.20.9 — 2026-09-02
+
+- `dataviz docs --task custom-renderer` 的最小渐进闭包直接展示 `input` + named `inputs` 与 `descriptor.inputs.<alias>`，明确禁止为了绕过假想的单表限制而拼接 `row_kind` 混合表；同时提供进入完整 Renderer 文档的命令。
+- `dataviz docs --task interactive` 与 `interactive-transforms` 明确当前增量边界：Transform 以整个函数/generation 执行，Runtime 按每个 Named Output 的稳定 value signature 只重绘实际受影响 View；作者模式说明如何查看触发 Control/Input、变化 Output、受影响 View及 `query_executed=false`。
+- Skill 将多命名输入和刷新因果前置到渐进文档路由；输出级 `depends_on_controls` 继续保持性能证据触发，不扩充 DSL。
+
+## 0.20.8 — 2026-09-02
+
+- Sidebar 切换 Dashboard 时立即以 canonical Query Parameter state 提交新路由，不再等待动态 Parameter Domain Lookup/物化完成；异步水合只可用 `replaceState` 补充解析后的默认参数，Domain 延迟或失败不会阻止地址栏更新。
+- 新增 Chromium 回归：人为挂起动态 Domain Lookup 后，目标 Dashboard、Sidebar active state 与 URL 仍同步切换；既有 Domain failure 导航恢复场景继续通过。
+
+## 0.20.7 — 2026-09-02
+
+- 远程 `single_select` 的 canonical scalar value 在候选替换、选中项投影和 Lookup `selected` 请求中统一规范为单元素数组；Lookup 返回后不再因调用标量 `.map()` 中断，打开的下拉框可立即显示搜索结果并保留既有选择标签。
+- 新增与远程 `multiple_select` 成对的 Chromium 回归，覆盖 scalar default、服务端搜索、已打开 Overlay 即时更新、焦点保持和 selected operand 传递。
+- 本补丁沿用针对性非浏览器与 Chromium 回归结果；按要求不追加完整测试套件或独立安装冒烟。
+
 ## 0.20.6 — 2026-09-02
 
 - 远程 Parameter Domain Lookup 更新已打开的 Select 时，由 Overlay 原子刷新 Chromium Top Layer，不再依赖重复 animation frame；搜索词、输入焦点和光标位置保持不变。Chromium 回归覆盖 135 条中文宽泛搜索结果，并校验可见 rows 与原生 options 属于同一结果页。

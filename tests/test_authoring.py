@@ -689,6 +689,7 @@ def test_browser_transform_docs_and_scaffold_show_the_declared_context_contract(
     worker = scaffold["sample.js"]
     docs = DOC_TOPICS["interactive-transforms"]
     browser_task = AUTHORING_DOCUMENTS["browser-compute"]
+    interactive_task = AUTHORING_DOCUMENTS["interactive-dashboard"]
 
     assert "context.inputs.data" in worker
     assert "context.control_inputs.factor" in worker
@@ -701,6 +702,21 @@ def test_browser_transform_docs_and_scaffold_show_the_declared_context_contract(
     }
     assert "context.control_inputs.factor" in browser_task["worker_example"]
     assert "context.selections" in docs["runtime_context"]["control_inputs"]
+    assert "value signature" in docs["rules"][-2]
+    assert docs["author_diagnostics"]["where"].startswith("Server Query Card")
+    assert "query_executed=false" in docs["author_diagnostics"]["shows"]
+    assert "outputs.<name>.depends_on_controls" in interactive_task["incremental_boundary"]["authoring"]
+
+
+def test_custom_renderer_task_exposes_multiple_named_inputs_progressively():
+    document = AUTHORING_DOCUMENTS["custom-renderer"]
+    route = AUTHORING_ROUTES["custom-renderer"]
+
+    assert "descriptor.inputs.main" in document["steps"][1]
+    assert "inputs:" in document["named_inputs_example"]["yaml"]
+    assert "descriptor.inputs.geography" in document["named_inputs_example"]["javascript"]
+    assert "row_kind" in document["steps"][1]
+    assert "dataviz docs renderers --format json" in route["commands"]
 
 
 def test_selection_gallery_scaffold_composes_into_a_valid_dashboard(tmp_path: Path):
@@ -1170,6 +1186,40 @@ def test_initial_runtime_render_includes_input_free_content_views():
     assert "type:view.renderer" in declarative
     assert "controlBinding:binding" in declarative
     assert "const traces = groups.flatMap" in declarative
+
+
+def test_author_runtime_projects_view_cost_and_custom_renderer_lifecycle_evidence():
+    runtime = (
+        ROOT / "src" / "dataviz" / "server" / "static" / "canvas-runtime.js"
+    ).read_text(encoding="utf-8")
+    adapter = (
+        ROOT
+        / "src"
+        / "dataviz"
+        / "components"
+        / "packages"
+        / "view.declarative"
+        / "adapter.js"
+    ).read_text(encoding="utf-8")
+    renderer_contract = (
+        ROOT
+        / "src"
+        / "dataviz"
+        / "components"
+        / "packages"
+        / "renderer.custom"
+        / "controller.js"
+    ).read_text(encoding="utf-8")
+
+    assert "const datavizValueProfile" in runtime
+    assert "viewRefreshEvidence: new Map()" in runtime
+    assert "changedOutputReferences" in runtime
+    assert "duration_ms:Number(durationMs.toFixed(2))" in runtime
+    assert "runtime.viewRenderEvidence.set(key" in adapter
+    assert "runtime.rendererLifecycleEvidence.get(key)" in adapter
+    assert "custom_renderer_dispose_missing" in adapter
+    assert "custom_renderer_dom_not_released" in adapter
+    assert "dispose() left ${body.childElementCount} DOM root(s) mounted" in renderer_contract
 
 
 def test_runtime_v2_has_one_owner_for_each_migrated_behavior():

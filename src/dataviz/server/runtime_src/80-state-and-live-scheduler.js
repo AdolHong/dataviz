@@ -351,11 +351,12 @@ window.dataviz.connectLive = () => {
       .then(payload => {
         if (payload.transport) {
           datavizRuntime.registerOutputTransport(payload.reference, payload.transport);
-          return datavizRuntime.hydrateOutput(payload.reference);
+          return datavizRuntime.hydrateOutput(payload.reference, {queryExecuted:true});
         }
         return datavizRuntime.publishOutputs({
           outputs: {[payload.reference]: payload.value ?? (payload.artifact_url ? {url: payload.artifact_url} : null)},
           output_kinds: {[payload.reference]: payload.kind},
+          query_executed:true,
           output_schemas: {
             [payload.reference]: payload.transport?.schema || payload.artifact?.schema || [],
           },
@@ -776,6 +777,10 @@ window.addEventListener('message', event => {
       event.data.query_definition_stale
     );
     renderDatavizStateSummaries();
+  }
+  if (event.data?.type === 'dataviz:set-author-mode') {
+    datavizRuntime.authorMode = Boolean(event.data.enabled);
+    datavizRuntime.viewAdapter?.setAuthorMode(datavizRuntime.authorMode);
   }
   if (event.data?.type === 'dataviz:set-interaction') {
     const previous = window.dataviz.interaction;

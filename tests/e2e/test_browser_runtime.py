@@ -862,6 +862,68 @@ def test_parameter_domain_lookup_search_and_cursor_pagination(page: Page, tmp_pa
 
 
 @pytest.mark.e2e
+def test_remote_single_select_search_repaints_with_scalar_state(page: Page, tmp_path: Path):
+    workspace = _copy_workspace(SHOWCASE, tmp_path / "parameter-domain-single-search")
+    dashboard_root = workspace / "dashboards" / "功能示例##parameter-domain-lab"
+    dashboard_path = dashboard_root / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    city = next(item for item in definition["query_parameters"] if item["id"] == "cities")
+    city["type"] = "single_select"
+    city["default"] = {"mode": "value", "value": "C001"}
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    domain_path = dashboard_root / "parameter_domains" / "locations.yaml"
+    domain_path.write_text(
+        domain_path.read_text(encoding="utf-8").replace("max_rows: 100", "max_rows: 700"),
+        encoding="utf-8",
+    )
+    rows = ",\n".join(
+        f"  ('GD', '广东', 1, 'C{index:03d}', '城市 {index:03d}', {index})"
+        for index in range(1, 621)
+    )
+    (dashboard_root / "parameter_domains" / "locations.sql").write_text(
+        "select * from (values\n"
+        + rows
+        + "\n) as locations("
+        "province_code, province_name, province_order, city_code, city_name, city_order)\n",
+        encoding="utf-8",
+    )
+
+    with _running_server(workspace) as base_url:
+        requests = []
+        page_errors = []
+        page.on(
+            "request",
+            lambda request: requests.append(request)
+            if "/parameter-domains/lookup" in request.url
+            else None,
+        )
+        page.on("pageerror", lambda error: page_errors.append(error))
+        _open_dashboard(page, base_url, "parameter-domain-lab")
+        select = page.locator('select[name="cities"]')
+        expect(select).to_have_value("C001", timeout=20_000)
+        control = page.locator("#parameter-form .dv-control").filter(has=select)
+        control.locator("[data-control-trigger]").click()
+        search = control.locator(".dv-choice-search")
+
+        search.fill("城市 619")
+        expect(control.locator(".dv-choice-option", has_text="城市 619")).to_have_count(
+            1, timeout=10_000
+        )
+        expect(control.locator("[data-control-trigger]")).to_have_attribute(
+            "aria-expanded", "true"
+        )
+        expect(search).to_be_focused()
+        assert not page_errors
+
+        payloads = [request.post_data_json for request in requests if request.post_data]
+        searched = next(payload for payload in payloads if payload.get("search") == "城市 619")
+        assert searched["selected"] == ["C001"]
+
+
+@pytest.mark.e2e
 def test_parameter_domain_failure_does_not_trap_dashboard_navigation(page: Page, tmp_path: Path):
     workspace = _copy_workspace(SHOWCASE, tmp_path / "parameter-domain-failure")
     domain_sql = (
@@ -891,6 +953,34 @@ def test_parameter_domain_failure_does_not_trap_dashboard_navigation(page: Page,
         expect(target).to_have_class(re.compile(r"\bactive\b"))
         expect(page.locator("#run-button")).to_be_enabled(timeout=10_000)
         expect(page).to_have_url(re.compile(r"/dashboards/chart-gallery"))
+
+
+@pytest.mark.e2e
+def test_sidebar_updates_dashboard_url_before_dynamic_domain_hydration(
+    page: Page, tmp_path: Path
+):
+    workspace = _copy_workspace(SHOWCASE, tmp_path / "dashboard-route-before-domain")
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "chart-gallery")
+        page.evaluate(
+            """() => {
+              const originalFetch = window.fetch.bind(window);
+              window.fetch = (input, init) => (
+                String(input).includes('/parameter-domains/lookup')
+                  ? new Promise(() => {})
+                  : originalFetch(input, init)
+              );
+            }"""
+        )
+
+        target = page.locator(
+            '[data-nav-type="dashboard"][data-id="parameter-domain-lab"]'
+        )
+        target.click()
+        expect(target).to_have_class(re.compile(r"\bactive\b"))
+        expect(page).to_have_url(
+            re.compile(r"/dashboards/parameter-domain-lab(?:\?|$)"), timeout=1_000
+        )
 
 
 @pytest.mark.e2e
@@ -2231,6 +2321,39 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
             ])"""
         )
         assert contract["valid"] is True
+        assert contract["lifecycle"] == {"mounts": 2, "updates": 2, "disposes": 2}
+        assert contract["warnings"] == []
+        lifecycle = frame.locator("body").evaluate(
+            """() => ({
+              lifecycle:window.datavizRuntime.rendererLifecycleEvidence.get('custom-specimen'),
+              renderer:window.datavizRuntime.viewRenderEvidence.get('custom-specimen'),
+            })"""
+        )
+        assert lifecycle["lifecycle"]["custom"] is True
+        assert lifecycle["lifecycle"]["mounts"] >= 1
+        assert lifecycle["lifecycle"]["active"] is True
+        assert lifecycle["lifecycle"]["diagnostics"] == []
+        assert lifecycle["renderer"]["inputs"]["main"]["rows"] > 0
+        assert lifecycle["renderer"]["inputs"]["main"]["bytes"] > 0
+        leaky = frame.locator("body").evaluate(
+            """async () => {
+              window.datavizRuntime.registerRenderer('test.leaky', {
+                mount(context) {
+                  const node = document.createElement('div');
+                  context.body.append(node);
+                  return {node};
+                },
+                update(_context, _descriptor, state) { return state; },
+                dispose() {},
+              });
+              return window.datavizRuntime.testRenderer('test.leaky', [
+                {type:'test.leaky', rows:[{value:1}]},
+              ]);
+            }"""
+        )
+        assert leaky["valid"] is False
+        assert leaky["failures"][0]["phase"] == "dispose"
+        assert "left 1 DOM root" in leaky["failures"][0]["message"]
 
         # A lifecycle failure stays in its View and exposes a structured boundary.
         frame.locator("body").evaluate(
@@ -2779,6 +2902,30 @@ def test_unified_dashboard_controls_drive_browser_named_output(page: Page, tmp_p
             timeout=15_000,
         )
         expect(radial).to_have_attribute("data-view-status", "ready")
+
+        evidence = frame.locator("body").evaluate(
+            """() => ({
+              refresh:window.datavizRuntime.viewRefreshEvidence.get('radial'),
+              renderer:window.datavizRuntime.viewRenderEvidence.get('radial'),
+            })"""
+        )
+        assert evidence["refresh"]["query_executed"] is False
+        assert "latest-metrics" in evidence["refresh"]["interactive_transforms"]
+        assert evidence["renderer"]["duration_ms"] >= 0
+        assert evidence["renderer"]["inputs"]["main"]["rows"] == 1
+        assert evidence["renderer"]["inputs"]["main"]["bytes"] > 0
+
+        page.locator("#query-parameter-author-mode").evaluate("button => button.click()")
+        signal = radial.locator("[data-view-evidence-signal]")
+        expect(signal).to_be_visible()
+        signal.click()
+        inspector = page.locator("#node-inspector")
+        expect(inspector).to_be_visible()
+        expect(inspector).to_contain_text("Why this View updated")
+        expect(inspector).to_contain_text("Renderer input and timing")
+        expect(inspector).to_contain_text("latest-metrics")
+        inspector.locator(".dialog-close").click()
+
         page.locator("#sidebar-toggle").click()
         expect(control).not_to_have_attribute("open", "")
 

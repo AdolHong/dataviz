@@ -48,7 +48,7 @@
   border-radius: 999px;
   cursor: pointer;
 }
-.dv-view-renderer-signal { cursor: default; }
+.dv-view-renderer-signal { cursor: pointer; }
 .dv-view-pipeline-signal:focus { outline: 0; }
 .dv-view-pipeline-signal:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--dv-accent, #3949ab) 30%, transparent);

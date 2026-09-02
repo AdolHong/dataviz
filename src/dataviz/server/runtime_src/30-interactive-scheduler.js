@@ -301,6 +301,9 @@ Object.assign(datavizRuntime, {
     });
   },
   publishTransformStatus(id, status, details = {}) {
+    if (details.trace && typeof details.trace === 'object') {
+      this.interactiveTraces.set(id, structuredClone(details.trace));
+    }
     datavizSetViewPipelineNodeStatus(`interactive:${id}`, status);
     datavizPostToParent({
       type:'dataviz:interactive-status',
@@ -344,7 +347,12 @@ Object.assign(datavizRuntime, {
       if (!references.size) return;
       const affectedViewIds = this.affectedViews([], references);
       if (affectedViewIds?.length) {
-        this.renderViews({initial:false, changedControlKeys:[], affectedViewIds});
+        this.renderViews({
+          initial:false,
+          changedControlKeys:[],
+          changedOutputReferences:[...references],
+          affectedViewIds,
+        });
       }
     };
     for (const id of order) {
@@ -474,6 +482,12 @@ Object.assign(datavizRuntime, {
           const inputValues = Object.fromEntries(
             Object.entries(references).map(([name, reference]) => [name, outputs[reference]])
           );
+          const inputProfiles = Object.fromEntries(
+            Object.entries(inputValues).map(([name, value]) => [name, {
+              reference:references[name],
+              ...datavizValueProfile(value),
+            }])
+          );
           Object.entries(spec.input_schemas || {}).forEach(([name, schema]) => {
             if (!(name in inputValues)) {
               throw datavizContractError(
@@ -491,6 +505,7 @@ Object.assign(datavizRuntime, {
               'interactive_input_kind_mismatch',
             );
           });
+          const executionStarted = performance.now();
           const bundle = await this.executeTransform(
             id,
             item,
@@ -498,6 +513,7 @@ Object.assign(datavizRuntime, {
             request,
             executionControlState,
           );
+          const durationMs = performance.now() - executionStarted;
           if (this.transformRequests.get(id) !== request) return;
           if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) {
             throw new Error(`Interactive Transform ${id} must return a Named Output object`);
@@ -512,6 +528,7 @@ Object.assign(datavizRuntime, {
             );
           }
           const localChanged = new Set();
+          const outputProfiles = {};
           declared.filter(name => spec.outputs?.[name]?.required === false && !(name in bundle)).forEach(name => {
             const reference = `interactive:${id}/${name}`;
             if (!Object.prototype.hasOwnProperty.call(outputs, reference)) return;
@@ -525,6 +542,7 @@ Object.assign(datavizRuntime, {
             validateInteractiveOutput(id, name, output, spec.outputs?.[name]);
             const reference = `interactive:${id}/${name}`;
             const signature = datavizValueSignature(output);
+            outputProfiles[reference] = datavizValueProfile(output, signature);
             if (this.outputSignatures.get(reference) !== signature) {
               outputs[reference] = output;
               this.outputErrors.delete(reference);
@@ -542,6 +560,9 @@ Object.assign(datavizRuntime, {
           );
           this.markTransformReady(id, {
             ...triggerTrace,
+            duration_ms:Number(durationMs.toFixed(2)),
+            inputs:inputProfiles,
+            outputs:outputProfiles,
             changed_outputs:[...localChanged],
             affected_views:this.affectedViews([], localChanged),
           });

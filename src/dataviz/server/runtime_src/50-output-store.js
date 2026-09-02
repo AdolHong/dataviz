@@ -9,7 +9,7 @@ Object.assign(datavizRuntime, {
     }
     return canonical;
   },
-  hydrateOutput(reference) {
+  hydrateOutput(reference, options = {}) {
     const canonical = canonicalOutputReference(reference);
     if (Object.prototype.hasOwnProperty.call(window.dataviz.portable.outputs, canonical)) {
       return Promise.resolve(window.dataviz.portable.outputs[canonical]);
@@ -28,6 +28,7 @@ Object.assign(datavizRuntime, {
         await this.publishOutputs({
           outputs:{[canonical]:value},
           output_kinds:{[canonical]:'table'},
+          query_executed:Boolean(options.queryExecuted),
         });
         return value;
       })

@@ -729,12 +729,12 @@ class CanvasRenderer:
             )
         renderer_title = f"{renderer} renderer"
         signals.append(
-            '<span class="dv-view-pipeline-signal dv-view-renderer-signal" '
-            f'data-view-renderer-signal data-status="not_run" hidden aria-hidden="true" '
+            '<button type="button" class="dv-view-pipeline-signal dv-view-renderer-signal" '
+            f'data-view-renderer-signal data-status="not_run" hidden aria-hidden="true" data-view-evidence-signal '
             f'title="{html.escape(renderer_title, quote=True)}">'
             '<span class="dv-view-pipeline-light" aria-hidden="true"></span>'
             '<span class="dv-view-pipeline-tooltip" role="tooltip">'
-            f'<strong>{html.escape(renderer_title)}</strong></span></span>'
+            f'<strong>{html.escape(renderer_title)}</strong></span></button>'
         )
         return (
             '<span class="dv-view-pipeline" data-view-pipeline '

@@ -8,6 +8,10 @@ const datavizRuntime = window.datavizRuntime = {
   outputErrors: new Map(),
   transformErrors: new Map(),
   rendererErrors: new Map(),
+  interactiveTraces: new Map(),
+  viewRefreshEvidence: new Map(),
+  viewRenderEvidence: new Map(),
+  rendererLifecycleEvidence: new Map(),
   activeTransforms: new Map(),
   inflightTransforms: new Map(),
   transformRequests: new Map(),
@@ -18,6 +22,7 @@ const datavizRuntime = window.datavizRuntime = {
   controlImpactSignatures: new Map(),
   initializing: false,
   initializationPromise: null,
+  authorMode: false,
   interactiveAdapters: Object.create(null),
   metrics: {
     interactiveTransforms: {started:0, completed:0, cancelled:0, timedOut:0, failed:0, cacheHits:0},

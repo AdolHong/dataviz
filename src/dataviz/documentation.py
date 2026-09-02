@@ -56,8 +56,14 @@ AUTHORING_DOCUMENTS: dict[str, dict[str, Any]] = {
             "Declare each consumer as mode: filter or mode: value; do not infer behavior from the Control component.",
             "Declare only the inputs consumed by the Interactive Transform.",
             "Inspect the compiled dependency closure before debugging Runtime behavior.",
+            "In Server author mode, click the Interactive node to inspect the triggering Control/Input, changed Named Outputs, affected Views, and query_executed=false.",
             "Run validate, report, then visual-check.",
         ],
+        "incremental_boundary": {
+            "execution": "One Control change executes the affected Transform as one function and one generation.",
+            "rendering": "Runtime compares each Named Output by stable value signature and redraws only Views reached from Outputs that actually changed.",
+            "authoring": "Split genuinely independent expensive computations into separate Transforms; outputs.<name>.depends_on_controls is not a supported field.",
+        },
     },
     "custom-renderer": {
         "requires": [
@@ -68,10 +74,22 @@ AUTHORING_DOCUMENTS: dict[str, dict[str, Any]] = {
         "path": "Named Output → Renderer Contract → validate/mount/update/dispose",
         "steps": [
             "Start from a working declarative Source and Named Output.",
+            "Keep unrelated relations as separate View input/inputs aliases; read descriptor.inputs.main and descriptor.inputs.<alias> instead of joining them with a synthetic row_kind.",
             "Register one Renderer with validate, mount, update and dispose hooks.",
             "Let the platform own empty, restore, interaction, resize and export behavior.",
             "Run validate, report, then visual-check.",
         ],
+        "named_inputs_example": {
+            "yaml": """- id: geography-and-stores
+  template: custom
+  renderer: geography-and-stores
+  input: interactive:geo-scope/stores
+  inputs:
+    geography: dataset:map-geography/main
+""",
+            "javascript": "const stores = descriptor.inputs.main;\nconst geography = descriptor.inputs.geography;",
+            "rule": "input is the primary alias main; inputs adds named relations. descriptor.rows is only the primary-input shortcut.",
+        },
     },
     "map-view": {
         "requires": ["adapter", "source", "view", "layout", "workspace-asset"],
@@ -294,12 +312,13 @@ AUTHORING_ROUTES: dict[str, dict[str, Any]] = {
         "excludes": ["renderer-contract"],
     },
     "custom-renderer": {
-        "summary": "Use only when no built-in View can express the required visual.",
+        "summary": "Use only when no built-in View can express the required visual; one Custom View may consume multiple Named Outputs through input/inputs aliases.",
         "inherits": ["minimal"],
         "documents": ["custom-renderer"],
         "scaffolds": ["custom-renderer", "renderer.custom", "view.custom"],
         "commands": [
             "dataviz scaffold custom-renderer --id <dashboard> --output <workspace>",
+            "dataviz docs renderers --format json",
             "dataviz components show renderer.custom --format json",
             "dataviz components gallery --output component-gallery.html",
         ],
@@ -1324,9 +1343,20 @@ timeout_seconds: 120
             "输入只能是已声明 Base/Derived Output；没有 Adapter，也没有 Source API。",
             "server-python 输入来自同一 tab、Dashboard 和 Query Run 的不可变 Artifact；交互阶段禁止重查 Source。",
             "generation 采用最后写入获胜，旧任务不能覆盖新结果。",
+            "Transform 仍按函数整体执行；Runtime 按每个 Named Output 的稳定 value signature 收窄 View 更新，不支持 outputs.<name>.depends_on_controls。",
             "server-python 可调用 context.progress 与 context.log；日志保存为结构化 Artifact。",
         ],
-        "related": ["html-export", "controls", "outputs"],
+        "author_diagnostics": {
+            "where": "Server Query Card author mode → click one Interactive node",
+            "shows": [
+                "triggering Controls and input Outputs",
+                "missing and actually changed Named Outputs",
+                "affected Views",
+                "query_executed=false",
+            ],
+            "boundary": "This is session-local scheduling evidence; immutable audit remains in Result consumer applied state.",
+        },
+        "related": ["html-export", "controls", "outputs", "dependencies"],
     },
     "html-export": {
         "summary": (

@@ -181,6 +181,22 @@ document.addEventListener('pointerdown', () => {
   }
 }, {capture: true});
 document.addEventListener('click', event => {
+  const viewSignal = event.target.closest('[data-view-evidence-signal]');
+  if (viewSignal) {
+    viewSignal.blur();
+    const viewId = viewSignal.closest('.dv-view')?.dataset.viewId;
+    if (!viewId) return;
+    datavizPostToParent({
+      type:'dataviz:view-evidence-inspect',
+      view_id:viewId,
+      evidence:{
+        refresh:structuredClone(datavizRuntime.viewRefreshEvidence.get(viewId) || null),
+        renderer:structuredClone(datavizRuntime.viewRenderEvidence.get(viewId) || null),
+        lifecycle:structuredClone(datavizRuntime.rendererLifecycleEvidence.get(viewId) || null),
+      },
+    });
+    return;
+  }
   const signal = event.target.closest('[data-view-pipeline-signal]');
   if (!signal) return;
   signal.blur();
@@ -287,6 +303,7 @@ window.datavizRuntimeServices = Object.freeze({
   tableRows:datavizTableRows,
   numericAggregate:datavizNumericAggregate,
   workerValue:datavizWorkerValue,
+  valueProfile:datavizValueProfile,
   controlCanApply:datavizControlCanApply,
   controlMatches:datavizControlMatches,
   runtimeError:datavizRuntimeError,

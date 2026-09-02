@@ -198,6 +198,25 @@ const datavizValueSignature = value => {
   if (value?.__datavizArrowOutput) return `arrow:${value.descriptor?.content_hash || value.descriptor?.row_count || 'table'}`;
   return JSON.stringify(datavizCanonicalJsonValue(value));
 };
+const datavizValueProfile = (value, signature = null) => {
+  if (value?.__datavizArrowOutput) {
+    const descriptor = value.descriptor || {};
+    return {
+      rows:Number(descriptor.row_count || 0),
+      bytes:Number(value?.bytes?.byteLength || descriptor.byte_count || 0),
+      transport:'arrow-ipc',
+    };
+  }
+  const serialized = signature ?? datavizValueSignature(value);
+  const rows = Array.isArray(value)
+    ? value.length
+    : Array.isArray(value?.rows) ? value.rows.length : null;
+  return {
+    rows,
+    bytes:new TextEncoder().encode(serialized).byteLength,
+    transport:'json',
+  };
+};
 const datavizOrderedControlOperators = new Set(['between', 'gte', 'lte', 'gt', 'lt']);
 const datavizControlOperatorsByType = {
   text:new Set(['equals', 'in', 'contains']),
@@ -748,6 +767,10 @@ const datavizRuntime = window.datavizRuntime = {
   outputErrors: new Map(),
   transformErrors: new Map(),
   rendererErrors: new Map(),
+  interactiveTraces: new Map(),
+  viewRefreshEvidence: new Map(),
+  viewRenderEvidence: new Map(),
+  rendererLifecycleEvidence: new Map(),
   activeTransforms: new Map(),
   inflightTransforms: new Map(),
   transformRequests: new Map(),
@@ -758,6 +781,7 @@ const datavizRuntime = window.datavizRuntime = {
   controlImpactSignatures: new Map(),
   initializing: false,
   initializationPromise: null,
+  authorMode: false,
   interactiveAdapters: Object.create(null),
   metrics: {
     interactiveTransforms: {started:0, completed:0, cancelled:0, timedOut:0, failed:0, cacheHits:0},
@@ -1176,6 +1200,9 @@ Object.assign(datavizRuntime, {
     });
   },
   publishTransformStatus(id, status, details = {}) {
+    if (details.trace && typeof details.trace === 'object') {
+      this.interactiveTraces.set(id, structuredClone(details.trace));
+    }
     datavizSetViewPipelineNodeStatus(`interactive:${id}`, status);
     datavizPostToParent({
       type:'dataviz:interactive-status',
@@ -1219,7 +1246,12 @@ Object.assign(datavizRuntime, {
       if (!references.size) return;
       const affectedViewIds = this.affectedViews([], references);
       if (affectedViewIds?.length) {
-        this.renderViews({initial:false, changedControlKeys:[], affectedViewIds});
+        this.renderViews({
+          initial:false,
+          changedControlKeys:[],
+          changedOutputReferences:[...references],
+          affectedViewIds,
+        });
       }
     };
     for (const id of order) {
@@ -1349,6 +1381,12 @@ Object.assign(datavizRuntime, {
           const inputValues = Object.fromEntries(
             Object.entries(references).map(([name, reference]) => [name, outputs[reference]])
           );
+          const inputProfiles = Object.fromEntries(
+            Object.entries(inputValues).map(([name, value]) => [name, {
+              reference:references[name],
+              ...datavizValueProfile(value),
+            }])
+          );
           Object.entries(spec.input_schemas || {}).forEach(([name, schema]) => {
             if (!(name in inputValues)) {
               throw datavizContractError(
@@ -1366,6 +1404,7 @@ Object.assign(datavizRuntime, {
               'interactive_input_kind_mismatch',
             );
           });
+          const executionStarted = performance.now();
           const bundle = await this.executeTransform(
             id,
             item,
@@ -1373,6 +1412,7 @@ Object.assign(datavizRuntime, {
             request,
             executionControlState,
           );
+          const durationMs = performance.now() - executionStarted;
           if (this.transformRequests.get(id) !== request) return;
           if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) {
             throw new Error(`Interactive Transform ${id} must return a Named Output object`);
@@ -1387,6 +1427,7 @@ Object.assign(datavizRuntime, {
             );
           }
           const localChanged = new Set();
+          const outputProfiles = {};
           declared.filter(name => spec.outputs?.[name]?.required === false && !(name in bundle)).forEach(name => {
             const reference = `interactive:${id}/${name}`;
             if (!Object.prototype.hasOwnProperty.call(outputs, reference)) return;
@@ -1400,6 +1441,7 @@ Object.assign(datavizRuntime, {
             validateInteractiveOutput(id, name, output, spec.outputs?.[name]);
             const reference = `interactive:${id}/${name}`;
             const signature = datavizValueSignature(output);
+            outputProfiles[reference] = datavizValueProfile(output, signature);
             if (this.outputSignatures.get(reference) !== signature) {
               outputs[reference] = output;
               this.outputErrors.delete(reference);
@@ -1417,6 +1459,9 @@ Object.assign(datavizRuntime, {
           );
           this.markTransformReady(id, {
             ...triggerTrace,
+            duration_ms:Number(durationMs.toFixed(2)),
+            inputs:inputProfiles,
+            outputs:outputProfiles,
             changed_outputs:[...localChanged],
             affected_views:this.affectedViews([], localChanged),
           });
@@ -1478,6 +1523,7 @@ Object.assign(datavizRuntime, {
   },
   renderViews(context) {
     const affected = context.affectedViewIds == null ? null : new Set(context.affectedViewIds);
+    const changedOutputReferences = new Set(context.changedOutputReferences || []);
     const completions = [];
     this.views.forEach((definition, id) => {
       if (affected && !affected.has(id)) return;
@@ -1531,6 +1577,34 @@ Object.assign(datavizRuntime, {
         capturedControlState,
       );
       const root = this.viewAdapter?.node(id);
+      const transformTraces = Object.fromEntries(references.flatMap(reference => {
+        const canonical = canonicalOutputReference(reference);
+        if (!canonical.startsWith('interactive:')) return [];
+        const transformId = canonical.slice('interactive:'.length).split('/')[0];
+        const trace = this.interactiveTraces.get(transformId);
+        return trace ? [[transformId, structuredClone(trace)]] : [];
+      }));
+      this.viewRefreshEvidence.set(id, {
+        initial:Boolean(context.initial),
+        changed_controls:[...(context.changedControlKeys || [])],
+        changed_inputs:references.filter(reference => (
+          changedOutputReferences.has(canonicalOutputReference(reference))
+        )),
+        interactive_transforms:transformTraces,
+        query_executed:Boolean(context.queryExecuted),
+      });
+      if (root) {
+        root._datavizInputProfiles = Object.fromEntries(
+          Object.entries(definition.inputs).map(([name, reference]) => {
+            const canonical = canonicalOutputReference(reference);
+            const value = window.dataviz.portable?.outputs?.[canonical];
+            return [name, {
+              reference:canonical,
+              ...datavizValueProfile(value),
+            }];
+          })
+        );
+      }
       try {
         definition.render(window.dataviz, context);
       } catch (error) {
@@ -1574,7 +1648,13 @@ Object.assign(datavizRuntime, {
     if (!changed.size || this.initializing) return changed;
     refreshControlOptionDomains();
     const affectedViewIds = this.affectedViews([], changed);
-    this.renderViews({initial:false, changedControlKeys:[], affectedViewIds});
+    this.renderViews({
+      initial:false,
+      changedControlKeys:[],
+      changedOutputReferences:[...changed],
+      queryExecuted:Boolean(bundle.query_executed),
+      affectedViewIds,
+    });
     const changedOutputs = await this.runTransforms([], changed);
     window.dispatchEvent(new CustomEvent('dataviz:outputschange', {
       detail:{changed:[...changedOutputs], failed:[]},
@@ -1612,7 +1692,12 @@ Object.assign(datavizRuntime, {
     });
     if (this.initializing) return changed;
     const affectedViewIds = this.affectedViews([], changed);
-    this.renderViews({initial:false, changedControlKeys:[], affectedViewIds});
+    this.renderViews({
+      initial:false,
+      changedControlKeys:[],
+      changedOutputReferences:[...changed],
+      affectedViewIds,
+    });
     const changedOutputs = await this.runTransforms([], changed);
     window.dispatchEvent(new CustomEvent('dataviz:outputschange', {
       detail:{changed:[...changedOutputs], failed:[...changed]},
@@ -1633,7 +1718,7 @@ Object.assign(datavizRuntime, {
     }
     return canonical;
   },
-  hydrateOutput(reference) {
+  hydrateOutput(reference, options = {}) {
     const canonical = canonicalOutputReference(reference);
     if (Object.prototype.hasOwnProperty.call(window.dataviz.portable.outputs, canonical)) {
       return Promise.resolve(window.dataviz.portable.outputs[canonical]);
@@ -1652,6 +1737,7 @@ Object.assign(datavizRuntime, {
         await this.publishOutputs({
           outputs:{[canonical]:value},
           output_kinds:{[canonical]:'table'},
+          query_executed:Boolean(options.queryExecuted),
         });
         return value;
       })
@@ -3117,11 +3203,12 @@ window.dataviz.connectLive = () => {
       .then(payload => {
         if (payload.transport) {
           datavizRuntime.registerOutputTransport(payload.reference, payload.transport);
-          return datavizRuntime.hydrateOutput(payload.reference);
+          return datavizRuntime.hydrateOutput(payload.reference, {queryExecuted:true});
         }
         return datavizRuntime.publishOutputs({
           outputs: {[payload.reference]: payload.value ?? (payload.artifact_url ? {url: payload.artifact_url} : null)},
           output_kinds: {[payload.reference]: payload.kind},
+          query_executed:true,
           output_schemas: {
             [payload.reference]: payload.transport?.schema || payload.artifact?.schema || [],
           },
@@ -3543,6 +3630,10 @@ window.addEventListener('message', event => {
     );
     renderDatavizStateSummaries();
   }
+  if (event.data?.type === 'dataviz:set-author-mode') {
+    datavizRuntime.authorMode = Boolean(event.data.enabled);
+    datavizRuntime.viewAdapter?.setAuthorMode(datavizRuntime.authorMode);
+  }
   if (event.data?.type === 'dataviz:set-interaction') {
     const previous = window.dataviz.interaction;
     const next = event.data.interaction || null;
@@ -3766,6 +3857,22 @@ document.addEventListener('pointerdown', () => {
   }
 }, {capture: true});
 document.addEventListener('click', event => {
+  const viewSignal = event.target.closest('[data-view-evidence-signal]');
+  if (viewSignal) {
+    viewSignal.blur();
+    const viewId = viewSignal.closest('.dv-view')?.dataset.viewId;
+    if (!viewId) return;
+    datavizPostToParent({
+      type:'dataviz:view-evidence-inspect',
+      view_id:viewId,
+      evidence:{
+        refresh:structuredClone(datavizRuntime.viewRefreshEvidence.get(viewId) || null),
+        renderer:structuredClone(datavizRuntime.viewRenderEvidence.get(viewId) || null),
+        lifecycle:structuredClone(datavizRuntime.rendererLifecycleEvidence.get(viewId) || null),
+      },
+    });
+    return;
+  }
   const signal = event.target.closest('[data-view-pipeline-signal]');
   if (!signal) return;
   signal.blur();
@@ -3872,6 +3979,7 @@ window.datavizRuntimeServices = Object.freeze({
   tableRows:datavizTableRows,
   numericAggregate:datavizNumericAggregate,
   workerValue:datavizWorkerValue,
+  valueProfile:datavizValueProfile,
   controlCanApply:datavizControlCanApply,
   controlMatches:datavizControlMatches,
   runtimeError:datavizRuntimeError,

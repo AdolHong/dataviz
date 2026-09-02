@@ -198,6 +198,25 @@ const datavizValueSignature = value => {
   if (value?.__datavizArrowOutput) return `arrow:${value.descriptor?.content_hash || value.descriptor?.row_count || 'table'}`;
   return JSON.stringify(datavizCanonicalJsonValue(value));
 };
+const datavizValueProfile = (value, signature = null) => {
+  if (value?.__datavizArrowOutput) {
+    const descriptor = value.descriptor || {};
+    return {
+      rows:Number(descriptor.row_count || 0),
+      bytes:Number(value?.bytes?.byteLength || descriptor.byte_count || 0),
+      transport:'arrow-ipc',
+    };
+  }
+  const serialized = signature ?? datavizValueSignature(value);
+  const rows = Array.isArray(value)
+    ? value.length
+    : Array.isArray(value?.rows) ? value.rows.length : null;
+  return {
+    rows,
+    bytes:new TextEncoder().encode(serialized).byteLength,
+    transport:'json',
+  };
+};
 const datavizOrderedControlOperators = new Set(['between', 'gte', 'lte', 'gt', 'lt']);
 const datavizControlOperatorsByType = {
   text:new Set(['equals', 'in', 'contains']),

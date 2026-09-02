@@ -1064,6 +1064,14 @@ def test_server_shell_owns_dashboard_and_query_parameter_url_state():
     assert "window.history[method]" in script
     assert "window.addEventListener('popstate'" in script
     assert "const button = document.createElement('a')" in script
+    select_block = script[
+        script.index("function selectDashboard"):
+        script.index("function setFormValues")
+    ]
+    assert "syncDashboardLocation(historyMode, runtime.queryParameterState || {});" in select_block
+    assert select_block.index("syncDashboardLocation(historyMode") < select_block.index(
+        "resolveQueryParameterDomains"
+    )
 
 
 def test_server_shell_exposes_source_evidence_inspector():
@@ -1249,6 +1257,21 @@ def test_parameter_lookup_success_syncs_only_the_changed_select():
     assert "syncRemoteParameterOptions(input);" in lookup
     assert "controls?.sync($('#parameter-form'))" not in lookup
     assert "setQueryParameterStates(runtime.queryParameterState" not in lookup
+    assert "selected:queryParameterStateValues(stateEntry)" in lookup
+
+    state_values = script[
+        script.index("function queryParameterStateValues"):
+        script.index("function replaceParameterDomainOptions")
+    ]
+    assert "Array.isArray(value)" in state_values
+    assert "value == null ? [] : [value]" in state_values
+
+    replace = script[
+        script.index("function replaceParameterDomainOptions"):
+        script.index("function reconcileLookupState")
+    ]
+    assert "queryParameterStateValues(currentState).map" in replace
+    assert "(currentState.value || []).map" not in replace
 
     fallback = script[
         script.index("function syncRemoteParameterOptions"):

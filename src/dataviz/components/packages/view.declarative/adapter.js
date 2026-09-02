@@ -11,6 +11,7 @@
     let perspectiveSerial = 0;
     let tableSearchSerial = 0;
     let disposed = false;
+    const managedRendererTypes = new Set(['table', 'plotly', 'perspective', 'html', 'text']);
     const perspectiveOperationTimeoutMs = Math.max(
       100,
       Number(global.__datavizRendererOperationTimeoutMs || 15_000),
@@ -18,6 +19,34 @@
     const node = id => document.querySelector(
       `.dv-view[data-view-id="${CSS.escape(id)}"]`
     );
+    const lifecycleEvidence = (key, type) => {
+      const existing = runtime.rendererLifecycleEvidence.get(key);
+      if (existing?.renderer === type) return existing;
+      const record = {
+        renderer:type,
+        custom:!managedRendererTypes.has(type),
+        mounts:0,
+        updates:0,
+        disposes:0,
+        active:false,
+        diagnostics:[],
+      };
+      runtime.rendererLifecycleEvidence.set(key, record);
+      return record;
+    };
+    const lifecycleDiagnostic = (record, code, message, phase) => {
+      if (record.diagnostics.some(item => item.code === code && item.phase === phase)) return;
+      record.diagnostics.push({level:'warning', code, phase, message});
+    };
+    const descriptorProfiles = descriptor => {
+      const values = descriptor?.inputs && Object.keys(descriptor.inputs).length
+        ? descriptor.inputs
+        : {main:descriptor?.rows || []};
+      return Object.fromEntries(Object.entries(values).map(([name, value]) => [
+        name,
+        services.valueProfile(value),
+      ]));
+    };
     const hasControlBinding = descriptor => Boolean(
       descriptor?.controlBinding
       || Object.keys(descriptor?.controlBindings || {}).length
@@ -85,6 +114,7 @@
       signal.hidden = ![
         'queued', 'loading', 'stale', 'error', 'cancelled', 'unavailable',
       ].includes(normalized);
+      if (runtime.authorMode) signal.hidden = false;
       signal.setAttribute('aria-hidden', String(signal.hidden));
       if (active === true) root.dataset.rendererSignalActive = 'true';
       else if (active === false) delete root.dataset.rendererSignalActive;
@@ -1271,11 +1301,50 @@
       if (!mounted) return;
       states.delete(key);
       runtime.metrics.renderers.disposes += 1;
+      const evidence = lifecycleEvidence(key, mounted.type);
+      evidence.disposes += 1;
+      evidence.active = false;
+      if (evidence.custom && typeof mounted.renderer.dispose !== 'function') {
+        lifecycleDiagnostic(
+          evidence,
+          'custom_renderer_dispose_missing',
+          'Custom Renderer must release DOM nodes, listeners and managed resources in dispose().',
+          'dispose',
+        );
+      }
       try {
         Promise.resolve(
           mounted.renderer.dispose?.(context(root, mounted.body, key), mounted.state)
-        ).catch(error => console.error(`[dataviz:${key}] Renderer dispose failed`, error));
+        ).then(() => {
+          if (
+            evidence.custom
+            && !states.has(key)
+            && mounted.body?.isConnected
+            && mounted.body.childElementCount > 0
+          ) {
+            lifecycleDiagnostic(
+              evidence,
+              'custom_renderer_dom_not_released',
+              'Custom Renderer left DOM children behind after dispose().',
+              'dispose',
+            );
+          }
+        }).catch(error => {
+          lifecycleDiagnostic(
+            evidence,
+            'custom_renderer_dispose_failed',
+            error?.message || String(error),
+            'dispose',
+          );
+          console.error(`[dataviz:${key}] Renderer dispose failed`, error);
+        });
       } catch (error) {
+        lifecycleDiagnostic(
+          evidence,
+          'custom_renderer_dispose_failed',
+          error?.message || String(error),
+          'dispose',
+        );
         console.error(`[dataviz:${key}] Renderer dispose failed`, error);
       }
     };
@@ -1404,12 +1473,16 @@
         return null;
       }
       const previous = root?._datavizRendererPending || Promise.resolve();
+      const inputProfiles = structuredClone(
+        root?._datavizInputProfiles || descriptorProfiles(descriptor)
+      );
       const pending = Promise.resolve(previous).catch(() => {}).then(async () => {
         if (root?._datavizRenderGeneration !== generation) {
           return {status:'superseded', generation};
         }
         const started = performance.now();
         let phase = 'validate';
+        const lifecycle = lifecycleEvidence(key, type);
         try {
           await renderer.validate?.(descriptor);
           if (root?._datavizRenderGeneration !== generation) {
@@ -1428,6 +1501,7 @@
               return {status:'superseded', generation};
             }
             runtime.metrics.renderers.updates += 1;
+            lifecycle.updates += 1;
           } else {
             if (mounted) disposeRenderer(mounted.root, key);
             const {body} = clearRoot(root, key);
@@ -1444,11 +1518,38 @@
             }
             states.set(key, {type, renderer, state, root, body});
             runtime.metrics.renderers.mounts += 1;
+            lifecycle.mounts += 1;
+            lifecycle.active = true;
+            if (lifecycle.custom && body.childElementCount === 0) {
+              lifecycleDiagnostic(
+                lifecycle,
+                'custom_renderer_empty_mount',
+                'Custom Renderer mount() completed without adding visible DOM content.',
+                'mount',
+              );
+            }
+            if (lifecycle.custom && state == null) {
+              lifecycleDiagnostic(
+                lifecycle,
+                'custom_renderer_state_missing',
+                'Custom Renderer mount() returned no view-scoped state for later update/dispose.',
+                'mount',
+              );
+            }
             if (previousStatus === 'empty') runtime.metrics.renderers.restores += 1;
           }
           runtime.rendererErrors.delete(key);
           if (type !== 'perspective') applyStatus(root, 'ready', type);
-          return {status:'ready', generation};
+          const durationMs = performance.now() - started;
+          runtime.viewRenderEvidence.set(key, {
+            generation,
+            renderer:type,
+            phase,
+            duration_ms:Number(durationMs.toFixed(2)),
+            inputs:inputProfiles,
+            lifecycle:structuredClone(lifecycle),
+          });
+          return {status:'ready', generation, duration_ms:Number(durationMs.toFixed(2))};
         } catch (error) {
           if (root?._datavizRenderGeneration === generation) {
             showError(root, key, type, phase, error);
@@ -1750,6 +1851,13 @@
           'interaction', 'resize', 'dispose', 'export',
         ]),
       }),
+      setAuthorMode(active) {
+        runtime.authorMode = Boolean(active);
+        document.querySelectorAll('.dv-view').forEach(root => {
+          const status = root.dataset.viewStatus || 'not_run';
+          setRendererSignal(root, status, {active:false});
+        });
+      },
       states,
       node,
       setStatus:applyStatus,

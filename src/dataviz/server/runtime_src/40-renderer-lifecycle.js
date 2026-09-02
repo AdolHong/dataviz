@@ -24,6 +24,7 @@ Object.assign(datavizRuntime, {
   },
   renderViews(context) {
     const affected = context.affectedViewIds == null ? null : new Set(context.affectedViewIds);
+    const changedOutputReferences = new Set(context.changedOutputReferences || []);
     const completions = [];
     this.views.forEach((definition, id) => {
       if (affected && !affected.has(id)) return;
@@ -77,6 +78,34 @@ Object.assign(datavizRuntime, {
         capturedControlState,
       );
       const root = this.viewAdapter?.node(id);
+      const transformTraces = Object.fromEntries(references.flatMap(reference => {
+        const canonical = canonicalOutputReference(reference);
+        if (!canonical.startsWith('interactive:')) return [];
+        const transformId = canonical.slice('interactive:'.length).split('/')[0];
+        const trace = this.interactiveTraces.get(transformId);
+        return trace ? [[transformId, structuredClone(trace)]] : [];
+      }));
+      this.viewRefreshEvidence.set(id, {
+        initial:Boolean(context.initial),
+        changed_controls:[...(context.changedControlKeys || [])],
+        changed_inputs:references.filter(reference => (
+          changedOutputReferences.has(canonicalOutputReference(reference))
+        )),
+        interactive_transforms:transformTraces,
+        query_executed:Boolean(context.queryExecuted),
+      });
+      if (root) {
+        root._datavizInputProfiles = Object.fromEntries(
+          Object.entries(definition.inputs).map(([name, reference]) => {
+            const canonical = canonicalOutputReference(reference);
+            const value = window.dataviz.portable?.outputs?.[canonical];
+            return [name, {
+              reference:canonical,
+              ...datavizValueProfile(value),
+            }];
+          })
+        );
+      }
       try {
         definition.render(window.dataviz, context);
       } catch (error) {
@@ -120,7 +149,13 @@ Object.assign(datavizRuntime, {
     if (!changed.size || this.initializing) return changed;
     refreshControlOptionDomains();
     const affectedViewIds = this.affectedViews([], changed);
-    this.renderViews({initial:false, changedControlKeys:[], affectedViewIds});
+    this.renderViews({
+      initial:false,
+      changedControlKeys:[],
+      changedOutputReferences:[...changed],
+      queryExecuted:Boolean(bundle.query_executed),
+      affectedViewIds,
+    });
     const changedOutputs = await this.runTransforms([], changed);
     window.dispatchEvent(new CustomEvent('dataviz:outputschange', {
       detail:{changed:[...changedOutputs], failed:[]},
@@ -158,7 +193,12 @@ Object.assign(datavizRuntime, {
     });
     if (this.initializing) return changed;
     const affectedViewIds = this.affectedViews([], changed);
-    this.renderViews({initial:false, changedControlKeys:[], affectedViewIds});
+    this.renderViews({
+      initial:false,
+      changedControlKeys:[],
+      changedOutputReferences:[...changed],
+      affectedViewIds,
+    });
     const changedOutputs = await this.runTransforms([], changed);
     window.dispatchEvent(new CustomEvent('dataviz:outputschange', {
       detail:{changed:[...changedOutputs], failed:[...changed]},

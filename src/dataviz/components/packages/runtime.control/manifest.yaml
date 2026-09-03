@@ -15,7 +15,8 @@ components:
       enhancement: progressive
       overlay_surface: opaque_by_default
       ownership: value and scope semantics remain outside the component
-      dynamic_domain_intent: normal reconciliation expands all_available and intersects explicit; committed-snapshot restoration preserves missing values as unavailable and renders all_available as one semantic 全部 summary
+      dynamic_domain_intent: normal reconciliation expands all_available and intersects explicit; committed-snapshot restoration preserves missing values as unavailable
+      multiple_summary: describe the effective selection rather than compact storage; show up to max_tag_count labels, then selected count through 20, then the shorter selected/excluded side
     semantic_dom: [.dv-control, '[data-control-component]', '[data-control-input]', '[data-control-mount]', .dv-control-panel]
     tokens: [--dv-accent, --dv-green, --dv-ink, --dv-line, --dv-panel, --dv-overlay-surface]
 runtime:

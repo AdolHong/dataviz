@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.21.7 — 2026-09-03
+
+- Query Parameter Multiple Select 的关闭态摘要改为面向有效选择而非 compact storage：少量值直接显示标签，中等集合显示“已选 N 项”，大集合只在排除侧更短时显示“全部，排除 N 项”；`1/19` 不再荒谬地显示为“排除 18 项”。
+- 摘要沿用 `max_tag_count` 作为具体标签阈值，并采用统一的 20 项计数阈值，不新增 Dashboard DSL；CLI 文档、Skill、Component Manifest 与设计规范同步更新。
+- Chromium 覆盖 `1/19`、`4/19`、`98/100` 三种比例，并回归 Parameter Domain 级联与 Revert。
+
 ## 0.21.6 — 2026-09-03
 
 - Server Sidebar 的 Dashboard 改为整行 Pointer 拖放，移除六点句柄与浏览器原生链接拖动冲突；拖动超过阈值才启动，单击切换、修饰键打开链接和右键改名保持不变。

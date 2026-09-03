@@ -132,14 +132,57 @@
     nativeOptions(input).forEach(option => { option.selected = option === empty; });
     if (!empty && !input.multiple) input.selectedIndex = -1;
   };
+  const querySummaryState = (input, maxVisible = 2) => {
+    const mode = input.dataset.querySelection || 'all';
+    const operands = selectedOptions(input);
+    const available = availableOptions(input);
+    const declaredTotal = Number(
+      input.dataset.queryUniverseTotal || input.dataset.queryTotal || available.length,
+    );
+    const total = Number.isFinite(declaredTotal) ? Math.max(0, declaredTotal) : available.length;
+    const operandCount = operands.length;
+    const selectedCount = mode === 'all'
+      ? total
+      : mode === 'none'
+      ? 0
+      : mode === 'exclude'
+      ? Math.max(0, total - operandCount)
+      : operandCount;
+    const excludedCount = Math.max(0, total - selectedCount);
+    const effectiveOptions = mode === 'exclude'
+      ? available.filter(option => !option.selected)
+      : mode === 'include'
+      ? operands
+      : [];
+    const labels = effectiveOptions.map(option => option.textContent);
+    const labelsComplete = labels.length === selectedCount;
+    if (mode === 'all') return {kind:'all', selectedCount, excludedCount, labels:[]};
+    if (mode === 'none') return {kind:'none', selectedCount, excludedCount, labels:[]};
+    if (selectedCount > 0 && selectedCount <= maxVisible && labelsComplete) {
+      return {kind:'labels', selectedCount, excludedCount, labels};
+    }
+    if (selectedCount <= 20) {
+      return {kind:'count', selectedCount, excludedCount, labels:[]};
+    }
+    if (mode === 'exclude' && excludedCount < selectedCount) {
+      return {kind:'excluded', selectedCount, excludedCount, labels:[]};
+    }
+    return {kind:'count', selectedCount, excludedCount, labels:[]};
+  };
   const summary = (input, placeholder = 'Choose…') => {
     const selected = selectedOptions(input);
     if (!input.multiple) return selected[0]?.textContent || placeholder;
     if (input.dataset.queryParameter === 'true') {
-      const mode = input.dataset.querySelection || 'all';
-      if (mode === 'all') return '全部';
-      if (mode === 'none') return '无';
-      if (mode === 'exclude') return `全部，排除 ${selected.length} 项`;
+      const maxVisible = Math.max(
+        0,
+        Number(input.closest('.dv-control')?.dataset.maxTagCount || 2),
+      );
+      const state = querySummaryState(input, maxVisible);
+      if (state.kind === 'all') return '全部';
+      if (state.kind === 'none') return '无';
+      if (state.kind === 'labels') return state.labels.join('、');
+      if (state.kind === 'excluded') return `全部，排除 ${state.excludedCount} 项`;
+      return `已选 ${state.selectedCount} 项`;
     }
     if (inferSelectionIntent(input) === 'all_available') return '全部';
     return selected.length ? `${selected.length} selected` : placeholder;
@@ -170,19 +213,23 @@
       host.textContent = selected[0]?.textContent || placeholder;
       return;
     }
+    let labels = Array.isArray(summaryLabels) ? summaryLabels : selected.map(option => option.textContent);
     if (input.dataset.queryParameter === 'true') {
-      const mode = input.dataset.querySelection || 'all';
-      if (mode === 'all' || mode === 'none' || mode === 'exclude') {
+      const state = querySummaryState(input, maxVisible);
+      if (state.kind === 'all' || state.kind === 'none' || state.kind === 'count' || state.kind === 'excluded') {
         const label = document.createElement('span');
         label.className = 'dv-choice-summary__all';
-        label.textContent = mode === 'all'
+        label.textContent = state.kind === 'all'
           ? control.dataset.allLabel || '全部'
-          : mode === 'none'
+          : state.kind === 'none'
           ? control.dataset.noneLabel || '无'
-          : `全部，排除 ${selected.length} 项`;
+          : state.kind === 'excluded'
+          ? `全部，排除 ${state.excludedCount} 项`
+          : `已选 ${state.selectedCount} 项`;
         host.append(label);
         return;
       }
+      labels = state.labels;
     }
     if (input.multiple && selectionIntent === 'all_available') {
       const label = document.createElement('span');
@@ -196,7 +243,6 @@
       host.textContent = placeholder;
       return;
     }
-    const labels = Array.isArray(summaryLabels) ? summaryLabels : selected.map(option => option.textContent);
     if (labels.length === 1) {
       host.textContent = labels[0];
       host.title = labels[0];

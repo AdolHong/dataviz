@@ -1467,7 +1467,7 @@ timeout_seconds: 120
         ],
         "behavior": [
             "Single Select 不出现 All、Select all 或 Invert；optional + clearable 的单选允许 Clear，required single 始终恰好一个值且拒绝 clearable。",
-            "Multi Select 的关闭态摘要用‘全部’表示 all/all_available，单个显式值直接显示文本；菜单中 Select all 是动作，Revert 只撤销本次打开后的编辑。Query Card 全局 Revert 仍恢复上次 committed Query snapshot。",
+            "Multi Select 的关闭态摘要按有效选择规模表达，而不机械暴露 compact state：all/all_available 显示‘全部’；不超过 max_tag_count（默认 2）时显示具体值；不超过 20 项时显示‘已选 N 项’；更大集合仅在 exclude 一侧更短时显示‘全部，排除 N 项’，否则显示已选数量。菜单中 Select all 是动作，Revert 只撤销本次打开后的编辑；Query Card 全局 Revert 仍恢复上次 committed Query snapshot。",
             "Control canonical state 是 {value, revision, intent?}；候选型多选可带 all_available/explicit intent，自由集合只保存 list value。",
             "Multi Select 和 Date Range 用 required 控制是否允许空值；clearable 可显式关闭清空操作，required: true 与 clearable: true 会被 validate 拒绝。",
             "候选依赖用 depends_on 声明直接 Control 父节点；Compiler 计算传递闭包和拓扑顺序。",

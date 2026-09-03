@@ -612,6 +612,45 @@ def _export_html(page: Page) -> None:
 
 
 @pytest.mark.e2e
+def test_query_multiple_select_summary_prefers_the_human_scale(page: Page, tmp_path: Path):
+    workspace = _copy_workspace(SHOWCASE, tmp_path / "parameter-summary")
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "parameter-domain-lab")
+        city = page.locator('select[name="cities"]')
+        control = page.locator("#parameter-form .dv-control").filter(has=city)
+        summary = control.locator("[data-control-summary]")
+
+        def set_state(mode: str, total: int, operands: list[int]) -> None:
+            page.evaluate(
+                """({mode, total, operands}) => {
+                  const input = document.querySelector('select[name="cities"]');
+                  const selected = new Set(operands);
+                  const options = Array.from({length: total}, (_, index) => {
+                    const option = document.createElement('option');
+                    option.value = String(index);
+                    option.textContent = index === total - 1 ? 'final' : `model-${index + 1}`;
+                    option.selected = selected.has(index);
+                    return option;
+                  });
+                  input.replaceChildren(...options);
+                  input.dataset.querySelection = mode;
+                  input.dataset.queryUniverseTotal = String(total);
+                  input._syncChoiceControl();
+                }""",
+                {"mode": mode, "total": total, "operands": operands},
+            )
+
+        set_state("exclude", 19, list(range(18)))
+        expect(summary).to_have_text("final")
+
+        set_state("include", 19, list(range(4)))
+        expect(summary).to_have_text("已选 4 项")
+
+        set_state("exclude", 100, [0, 1])
+        expect(summary).to_have_text("全部，排除 2 项")
+
+
+@pytest.mark.e2e
 def test_parameter_domain_cascade_reload_and_tab_restore(page: Page, tmp_path: Path):
     workspace = _copy_workspace(SHOWCASE, tmp_path / "parameter-domain")
     with _running_server(workspace) as base_url:
@@ -664,7 +703,7 @@ def test_parameter_domain_cascade_reload_and_tab_restore(page: Page, tmp_path: P
         city_trigger = city_control.locator("[data-control-trigger]")
         city_trigger.click()
         city_control.locator(".dv-choice-option", has_text="广州").click()
-        expect(city_control.locator("[data-control-summary]")).to_contain_text("排除 1 项")
+        expect(city_control.locator("[data-control-summary]")).to_have_text("深圳")
         revert = page.locator("#query-parameters-revert")
         expect(page.locator("#query-control-meta")).to_have_text("Unsaved changes")
         expect(revert).to_be_visible()

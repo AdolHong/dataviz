@@ -736,6 +736,15 @@
       if (state.disposed) return;
       const {host, table, preparation} = state;
       const {options} = preparation;
+      const previousWrap = host.querySelector('.dv-table-wrap');
+      const previousScroll = previousWrap
+        ? {left:previousWrap.scrollLeft, top:previousWrap.scrollTop}
+        : null;
+      const activeSortButton = document.activeElement?.classList?.contains('dv-table-sort')
+        && host.contains(document.activeElement)
+        ? document.activeElement
+        : null;
+      const activeSortColumn = activeSortButton?.closest('th')?.dataset.column || null;
       const activeSearch = document.activeElement?.classList?.contains('dv-table-search');
       const searchSelection = activeSearch
         ? [document.activeElement.selectionStart, document.activeElement.selectionEnd]
@@ -922,6 +931,17 @@
         fragment.append(pagination);
       }
       host.replaceChildren(fragment);
+      const nextWrap = host.querySelector('.dv-table-wrap');
+      if (nextWrap && previousScroll) {
+        nextWrap.scrollLeft = previousScroll.left;
+        nextWrap.scrollTop = previousScroll.top;
+      }
+      if (activeSortColumn) {
+        const nextSortButton = [...host.querySelectorAll('.dv-table-sort')].find(
+          button => button.closest('th')?.dataset.column === activeSortColumn
+        );
+        nextSortButton?.focus({preventScroll:true});
+      }
       if (activeSearch) {
         const search = host.querySelector('.dv-table-search');
         search?.focus({preventScroll:true});
@@ -1843,7 +1863,7 @@
     });
 
     const adapter = {
-      protocol:'dataviz/runtime/v14',
+      protocol:'dataviz/runtime/v15',
       lifecycle:Object.freeze({
         hooks:Object.freeze(['validate', 'mount', 'update', 'dispose']),
         phases:Object.freeze([

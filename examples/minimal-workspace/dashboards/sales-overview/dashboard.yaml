@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v19
+schema: dataviz/dashboard/v20
 kind: dashboard
 id: sales-overview
 title: 销售概览
@@ -57,8 +57,10 @@ views:
     input: source:sales/main
     template: metric
     value: revenue
+    unit: 元
     label: 当前选择范围
     aggregate: sum
+    secondary: {value: orders, aggregate: sum, label: 订单, format: number}
     span: 6
     control_inputs:
       region: {mode: filter, control: dashboard.region, field: region, inputs: [main], empty: match_none}
@@ -83,6 +85,16 @@ views:
     series: region
     aggregate: sum
     span: 8
+    options:
+      layout:
+        shapes:
+          - type: line
+            x0: 0
+            x1: 1
+            xref: paper
+            y0: "{{ parameters.min_query_revenue }}"
+            y1: "{{ parameters.min_query_revenue }}"
+            line: {dash: dash, width: 1}
     control_inputs:
       region: {mode: filter, control: dashboard.region, field: region, inputs: [main], empty: match_none}
 

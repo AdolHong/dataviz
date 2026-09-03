@@ -24,6 +24,52 @@
     if (operation === 'max') return maximum;
     return sum;
   };
+  const metricAggregate = (items, operation = 'sum', select = value => value) => {
+    if (operation === 'count') return items.length;
+    const values = items
+      .map(select)
+      .filter(value => value !== null && value !== undefined && value !== '')
+      .map(Number)
+      .filter(Number.isFinite);
+    if (!values.length) return null;
+    if (operation === 'mean') {
+      return values.reduce((sum, value) => sum + value, 0) / values.length;
+    }
+    if (operation === 'min') {
+      return values.reduce((minimum, value) => value < minimum ? value : minimum, Infinity);
+    }
+    if (operation === 'max') {
+      return values.reduce((maximum, value) => value > maximum ? value : maximum, -Infinity);
+    }
+    return values.reduce((sum, value) => sum + value, 0);
+  };
+  const formatMetricValue = (value, format = 'number', numberOptions = null) => {
+    if (value === null || value === undefined || value === '') return '—';
+    if (typeof value !== 'number') return String(value);
+    if (!Number.isFinite(value)) return '—';
+    if (format === 'percent') {
+      return new Intl.NumberFormat(undefined, {
+        style:'percent',
+        maximumFractionDigits:2,
+      }).format(value);
+    }
+    const options = numberOptions && typeof numberOptions === 'object'
+      ? numberOptions
+      : {maximumFractionDigits:2};
+    return new Intl.NumberFormat(undefined, options).format(value);
+  };
+  const metricMarkup = ({value, unit = '', caption = '', secondary = null}) => `
+    <div class="dv-metric">
+      <div class="dv-metric__primary">
+        <strong class="dv-metric__value">${escape(value)}</strong>
+        ${unit ? `<span class="dv-metric__unit">${escape(unit)}</span>` : ''}
+      </div>
+      ${caption ? `<span class="dv-metric__caption">${escape(caption)}</span>` : ''}
+      ${secondary ? `<div class="dv-metric__secondary">
+        ${secondary.label ? `<span class="dv-metric__secondary-label">${escape(secondary.label)}</span>` : ''}
+        <strong class="dv-metric__secondary-value">${escape(secondary.value)}</strong>
+      </div>` : ''}
+    </div>`;
   const inputReferences = (view, state) => (
     state.dependency_contract?.views?.[view.id]?.inputs || {}
   );
@@ -78,6 +124,42 @@
       hash = Math.imul(hash, 16777619);
     }
     return `dataviz-map-${values.length}-${(hash >>> 0).toString(16)}`;
+  };
+  const plotlyParameterToken = /^{{\s*parameters\.([A-Za-z_][A-Za-z0-9_.-]*)\s*}}$/;
+  const resolvePlotlyLayout = (
+    value,
+    parameterState = global.dataviz?.query_parameter_state || {},
+    path = 'options.layout',
+  ) => {
+    if (Array.isArray(value)) {
+      return value.map((item, index) => (
+        resolvePlotlyLayout(item, parameterState, `${path}[${index}]`)
+      ));
+    }
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+        key,
+        resolvePlotlyLayout(item, parameterState, `${path}.${key}`),
+      ]));
+    }
+    if (typeof value !== 'string' || (!value.includes('{{') && !value.includes('}}'))) {
+      return value;
+    }
+    const match = value.match(plotlyParameterToken);
+    if (!match) {
+      const error = new Error(
+        `${path} contains an unresolved Plotly layout template; use one complete {{ parameters.<id> }} value`,
+      );
+      error.code = 'plotly_layout_template_invalid';
+      throw error;
+    }
+    const parameter = match[1];
+    if (!Object.prototype.hasOwnProperty.call(parameterState, parameter)) {
+      const error = new Error(`${path} references unknown Query Parameter ${parameter}`);
+      error.code = 'plotly_layout_parameter_unknown';
+      throw error;
+    }
+    return structuredClone(parameterState[parameter]?.value ?? null);
   };
   const selectRows = (view, state) => {
     const contract = state.dependency_contract?.views?.[view.id]?.filter_contract || [];
@@ -149,7 +231,7 @@
     return view.limit ? rows.slice(0, view.limit) : rows;
   };
   const mapPlotlyDescriptor = (view, rows, binding, traceOptions) => {
-    const layoutOptions = view.options?.layout || {};
+    const layoutOptions = resolvePlotlyLayout(view.options?.layout || {});
     const {geo: geoOptions = {}, ...layoutRest} = layoutOptions;
     const selectedpoints = binding ? rows.map((row, index) => (
       bindingSelected(binding, bindingValue(binding, row)) ? index : null
@@ -271,7 +353,7 @@
         geojsonAssets.push({trace:layerIndex, asset:layer.geojson});
       }
     });
-    const layoutOptions = view.options?.layout || {};
+    const layoutOptions = resolvePlotlyLayout(view.options?.layout || {});
     const {geo: geoOptions = {}, ...layoutRest} = layoutOptions;
     const stableViewport = viewportValues
       .map(value => JSON.stringify(value))
@@ -399,7 +481,7 @@
         ...(view.template === 'radar' ? {
           polar:{radialaxis:{visible:true, rangemode:'tozero'}},
         } : {}),
-        ...view.options?.layout,
+        ...resolvePlotlyLayout(view.options?.layout || {}),
       },
       config:view.config,
       controlBinding:binding,
@@ -426,12 +508,13 @@
       && !rawInput?.__datavizArrowOutput
       && rawInput != null
     ) {
-      const formatted = typeof rawInput === 'number'
-        ? new Intl.NumberFormat(undefined, view.options?.format || {maximumFractionDigits:2}).format(rawInput)
-        : String(rawInput);
       return {
         type:'html',
-        html:`<div class="dv-metric"><strong>${escape(formatted)}</strong><span>${escape(view.label || view.title || '')}</span></div>`,
+        html:metricMarkup({
+          value:formatMetricValue(rawInput, 'number', view.options?.format),
+          unit:view.unit,
+          caption:view.label,
+        }),
       };
     }
     if (view.template === 'map' && (view.layers || []).length) {
@@ -499,13 +582,26 @@
     if (view.template === 'metric') {
       const field = view.value || view.y;
       const operation = view.aggregate || 'sum';
-      const value = numericAggregate(rows, operation, row => row[field]);
-      const formatted = Number.isFinite(value)
-        ? new Intl.NumberFormat(undefined, view.options?.format || {maximumFractionDigits:2}).format(value)
-        : '—';
+      const value = metricAggregate(rows, operation, row => row[field]);
+      const secondary = view.secondary ? {
+        label:view.secondary.label || '',
+        value:formatMetricValue(
+          metricAggregate(
+            rows,
+            view.secondary.aggregate || 'sum',
+            row => row[view.secondary.value],
+          ),
+          view.secondary.format || 'number',
+        ),
+      } : null;
       return {
         type:'html',
-        html:`<div class="dv-metric"><strong>${escape(formatted)}</strong><span>${escape(view.label || field || '')}</span></div>`,
+        html:metricMarkup({
+          value:formatMetricValue(value, 'number', view.options?.format),
+          unit:view.unit,
+          caption:view.label,
+          secondary,
+        }),
       };
     }
     const descriptor = plotlyDescriptor(view, rows, binding);
@@ -528,7 +624,7 @@
   }
 
   root.viewDeclarative = {
-    protocol:'dataviz/runtime/v14',
+    protocol:'dataviz/runtime/v15',
     escape,
     numericAggregate,
     inputReferences,
@@ -538,6 +634,7 @@
     bindingValue,
     bindingDatum,
     prepareRows,
+    resolvePlotlyLayout,
     mapPlotlyDescriptor,
     layeredMapPlotlyDescriptor,
     build,
@@ -545,7 +642,7 @@
   };
   root.descriptors = root.descriptors || new Map();
   root.descriptors.set('view.declarative', {
-    protocol:'dataviz/runtime/v14',
+    protocol:'dataviz/runtime/v15',
     owns:['descriptor-builders', 'renderer-lifecycle'],
   });
 })(window);

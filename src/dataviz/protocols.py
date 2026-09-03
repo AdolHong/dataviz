@@ -4,7 +4,7 @@ from typing import Any
 
 
 WORKSPACE_SCHEMA = "dataviz/workspace/v2"
-DASHBOARD_SCHEMA = "dataviz/dashboard/v19"
+DASHBOARD_SCHEMA = "dataviz/dashboard/v20"
 PARAMETER_DOMAIN_SCHEMA = "dataviz/parameter-domain/v2"
 PARAMETER_DOMAIN_CONTRACT_SCHEMA = "dataviz/parameter-domain-contract/v3"
 PARAMETER_LOOKUP_SCHEMA = "dataviz/parameter-lookup/v1"
@@ -17,7 +17,7 @@ INTERACTIVE_TRANSFORM_SCHEMA = "dataviz/interactive-transform/v4"
 DEPENDENCY_CONTRACT_SCHEMA = "dataviz/dependency-contract/v13"
 LAYOUT_CONTRACT_SCHEMA = "dataviz/layout-contract/v1"
 STATE_SNAPSHOT_SCHEMA = "dataviz/state-snapshot/v6"
-RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v14"
+RUNTIME_PROTOCOL_SCHEMA = "dataviz/runtime/v15"
 TARGET_REFERENCE_SCHEMA = "dataviz/target-reference/v1"
 ANALYSIS_ENTRY_SCHEMA = "dataviz/analysis-entry/v1"
 ANALYSIS_CATALOG_SCHEMA = "dataviz/analysis-catalog/v1"
@@ -235,6 +235,32 @@ PROTOCOL_BOUNDARIES: tuple[dict[str, Any], ...] = (
 
 
 PROTOCOL_CHANGE_RECORDS: tuple[dict[str, str], ...] = (
+    {
+        "change": "typed-query-parameter-plotly-layout-binding",
+        "classification": "component behavior additive within existing authoring shape",
+        "decision": (
+            "component registry 6.2.0 and view.declarative 3.2.0; dashboard and "
+            "runtime wire revisions unchanged"
+        ),
+        "reason": (
+            "options.layout already carries arbitrary Plotly layout values; one complete "
+            "Query Parameter token now resolves to its committed typed value, while strict "
+            "validation rejects unknown, mixed-text or otherwise unresolved templates"
+        ),
+    },
+    {
+        "change": "metric-secondary-and-inline-unit",
+        "classification": "authoring and private lockstep additive",
+        "decision": (
+            "dashboard v20, runtime v15 and component registry 6.1.0; "
+            "dependency/state/result/evidence revisions unchanged"
+        ),
+        "reason": (
+            "Metric may render one precomputed supporting field and an inline primary unit; "
+            "the supporting field remains part of the same table input and does not add a "
+            "formula language, execution node or persisted state"
+        ),
+    },
     {
         "change": "dashboard-owned-parameter-domain",
         "classification": "authoring semantic breaking",

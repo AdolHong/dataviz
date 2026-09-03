@@ -9,7 +9,8 @@
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) 2.65rem;
   align-items: center;
   width: 100%;
-  min-height: 2.65rem;
+  height: var(--dv-control-height, 2.5rem);
+  min-height: var(--dv-control-height, 2.5rem);
   color: var(--dv-ink, #202536);
   background: var(--dv-panel, #fff);
   border: 1px solid var(--dv-line, #d9e0ec);
@@ -36,13 +37,15 @@
 .dv-control[data-control-component="range-picker"] .dv-date-range__endpoint {
   box-sizing: border-box;
   width: 100%;
-  height: auto;
+  height: 100%;
   min-width: 0;
-  min-height: 2.55rem;
-  padding: .5rem .7rem;
+  min-height: 0;
+  padding: .5rem 0;
   color: inherit;
   font: inherit;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -.02em;
+  text-align: center;
   background: transparent;
   border: 0;
   outline: 0;

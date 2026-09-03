@@ -331,8 +331,8 @@ function applySidebarState({persist = false} = {}) {
   document.body.classList.toggle('sidebar-collapsed', state.sidebarCollapsed);
   const toggle = $('#sidebar-toggle');
   toggle.setAttribute('aria-expanded', String(!state.sidebarCollapsed));
-  toggle.setAttribute('aria-label', state.sidebarCollapsed ? '展开导航栏' : '收起导航栏');
-  toggle.title = `${state.sidebarCollapsed ? '展开导航栏' : '收起导航栏'} (B)`;
+  toggle.setAttribute('aria-label', state.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
+  toggle.title = `${state.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} (B)`;
   const resizer = $('#sidebar-resizer');
   resizer.setAttribute('aria-valuemin', String(bounds.min));
   resizer.setAttribute('aria-valuemax', String(bounds.max));
@@ -396,7 +396,7 @@ function showShortcutToast(message) {
 function executeKeyboardShortcut(command) {
   if (command === 'toggle-query-parameters') {
     if (Number($('#query-parameters-control').dataset.controlCount || 0) <= 0) {
-      showShortcutToast('当前看板没有查询参数');
+      showShortcutToast('This Dashboard has no query parameters.');
       return true;
     }
     closeHeaderPopovers();
@@ -492,33 +492,33 @@ function editorValueSignature(value) {
   return JSON.stringify(value);
 }
 
-function editorTypedValue(item, raw, label = '值') {
+function editorTypedValue(item, raw, label = 'Value') {
   if (item.value_type === 'text') return String(raw);
   if (item.value_type === 'date') {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(raw))) throw new Error(`${label}必须是 YYYY-MM-DD 日期`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(raw))) throw new Error(`${label} must use YYYY-MM-DD.`);
     const date = new Date(`${raw}T00:00:00Z`);
     if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== raw) {
-      throw new Error(`${label}不是有效日期`);
+      throw new Error(`${label} is not a valid date.`);
     }
     return raw;
   }
   if (item.value_type === 'boolean') {
     if (raw === true || raw === 'true') return true;
     if (raw === false || raw === 'false') return false;
-    throw new Error(`${label}必须是 true 或 false`);
+    throw new Error(`${label} must be true or false.`);
   }
   if (['integer', 'number'].includes(item.value_type)) {
-    if (raw === '') throw new Error(`${label}不能为空`);
+    if (raw === '') throw new Error(`${label} cannot be empty.`);
     const value = Number(raw);
     if (!Number.isFinite(value) || (item.value_type === 'integer' && !Number.isInteger(value))) {
-      throw new Error(`${label}必须是${item.value_type === 'integer' ? '整数' : '数字'}`);
+      throw new Error(`${label} must be ${item.value_type === 'integer' ? 'an integer' : 'a number'}.`);
     }
     return value;
   }
   return raw;
 }
 
-function editorTypedInput(item, value = '', {label = '值'} = {}) {
+function editorTypedInput(item, value = '', {label = 'Value'} = {}) {
   if ((item.path_fields || []).length) {
     const input = document.createElement('input');
     input.type = 'text';
@@ -554,9 +554,9 @@ function editorChoiceValue(row, item) {
   const raw = input.value;
   if (input.dataset.editorJsonValue != null) {
     try { return JSON.parse(raw); }
-    catch (_) { throw new Error(`候选值“${raw}”不是有效 JSON`); }
+    catch (_) { throw new Error(`Choice “${raw}” is not valid JSON.`); }
   }
-  return editorTypedValue(item, raw, `候选值“${raw}”`);
+  return editorTypedValue(item, raw, `Choice “${raw}”`);
 }
 
 function moveEditorNode(node, direction) {
@@ -564,7 +564,6 @@ function moveEditorNode(node, direction) {
   if (!sibling) return;
   if (direction < 0) node.parentElement.insertBefore(node, sibling);
   else node.parentElement.insertBefore(sibling, node);
-  syncEditorMoveButtons(node.parentElement);
   notifyEditorChanged(node);
 }
 
@@ -572,39 +571,27 @@ function notifyEditorChanged(node) {
   node.dispatchEvent(new CustomEvent('dataviz:editor-change', {bubbles:true}));
 }
 
-function syncEditorMoveButtons(container) {
-  const rows = [...container.children].filter(node => node.matches('[data-editor-item], [data-editor-choice]'));
-  rows.forEach((row, index) => {
-    const up = row.querySelector('[data-move="up"]');
-    const down = row.querySelector('[data-move="down"]');
-    if (up) up.disabled = index === 0;
-    if (down) down.disabled = index === rows.length - 1;
-  });
+function editorChoiceActions() {
+  const actions = document.createElement('div');
+  actions.className = 'parameter-editor__choice-actions';
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.dataset.remove = '';
+  remove.setAttribute('aria-label', 'Remove choice');
+  remove.textContent = '×';
+  actions.append(remove);
+  return actions;
 }
 
-function editorMoveActions(kind, removable = false) {
-  const actions = document.createElement('div');
-  actions.className = `parameter-editor__${kind}-actions`;
-  const up = document.createElement('button');
-  up.type = 'button';
-  up.dataset.move = 'up';
-  up.setAttribute('aria-label', '向前移动');
-  up.textContent = '↑';
-  const down = document.createElement('button');
-  down.type = 'button';
-  down.dataset.move = 'down';
-  down.setAttribute('aria-label', '向后移动');
-  down.textContent = '↓';
-  actions.append(up, down);
-  if (removable) {
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.dataset.remove = '';
-    remove.setAttribute('aria-label', '删除候选项');
-    remove.textContent = '×';
-    actions.append(remove);
-  }
-  return actions;
+function editorDragHandle(label, className = 'parameter-editor__drag-handle') {
+  const handle = document.createElement('button');
+  handle.type = 'button';
+  handle.className = className;
+  handle.draggable = true;
+  handle.setAttribute('aria-label', label);
+  handle.title = label;
+  handle.innerHTML = '<span></span><span></span><span></span><span></span><span></span><span></span>';
+  return handle;
 }
 
 function editorDateDefault(item) {
@@ -614,8 +601,8 @@ function editorDateDefault(item) {
     ? (Array.isArray(item.default) ? item.default : ['', ''])
     : [item.default ?? ''];
   const parts = item.type === 'range_input'
-    ? [['start', '开始日期'], ['end', '结束日期']]
-    : [['value', '日期']];
+    ? [['start', 'Start date'], ['end', 'End date']]
+    : [['value', 'Date']];
 
   for (const [index, [part, label]] of parts.entries()) {
     const atom = values[index];
@@ -629,8 +616,8 @@ function editorDateDefault(item) {
     controls.className = 'parameter-editor__date-atom-controls';
     const mode = document.createElement('select');
     mode.dataset.editorDateMode = part;
-    mode.setAttribute('aria-label', `${label}默认值类型`);
-    mode.innerHTML = '<option value="fixed">固定日期</option><option value="relative">相对今天</option>';
+    mode.setAttribute('aria-label', `${label} default type`);
+    mode.innerHTML = '<option value="fixed">Fixed date</option><option value="relative">Relative to today</option>';
     mode.value = relative ? 'relative' : 'fixed';
     const valueHost = document.createElement('div');
     valueHost.className = 'parameter-editor__date-value-host';
@@ -641,7 +628,7 @@ function editorDateDefault(item) {
     fixedControl.dataset.clearable = 'true';
     fixedControl.dataset.minDate = item.min_date || '';
     fixedControl.dataset.maxDate = item.max_date || '';
-    fixedControl.dataset.clearLabel = '清空';
+    fixedControl.dataset.clearLabel = 'Clear';
     const fixedInput = document.createElement('input');
     fixedInput.type = 'text';
     fixedInput.value = relative ? '' : String(atom || '');
@@ -674,7 +661,7 @@ function editorDateDefault(item) {
     relativeInput.value = relative
       ? String(Number.parseInt(String(atom.offset || '0d').slice(0, -1), 10) || 0)
       : (part === 'start' ? '-7' : '-1');
-    relativeInput.setAttribute('aria-label', `${label}相对今天的天数`);
+    relativeInput.setAttribute('aria-label', `${label} days relative to today`);
     valueHost.append(fixedControl, relativeInput);
     const sync = () => {
       const relativeMode = mode.value === 'relative';
@@ -695,7 +682,7 @@ function editorDateDefault(item) {
     sync();
   }
   const hint = document.createElement('p');
-  hint.textContent = '以 Workspace 时区的今天为基准；-1 表示昨天，0 表示今天。';
+  hint.textContent = 'Uses today in the Workspace timezone; -1 is yesterday and 0 is today.';
   root.append(hint);
   return root;
 }
@@ -704,7 +691,7 @@ function editorDefaultField(item) {
   const field = document.createElement('label');
   field.className = 'parameter-editor__default';
   const caption = document.createElement('span');
-  caption.textContent = '默认值';
+  caption.textContent = 'Default value';
   field.append(caption);
   if (
     item.kind === 'query'
@@ -722,7 +709,7 @@ function editorDefaultField(item) {
     const values = Array.isArray(item.default) ? item.default : ['', ''];
     for (const [index, part] of ['start', 'end'].entries()) {
       const input = editorTypedInput(item, values[index] ?? '', {
-        label:part === 'start' ? '开始值' : '结束值',
+        label:part === 'start' ? 'Start value' : 'End value',
       });
       input.dataset.editorDefaultPart = part;
       range.append(input);
@@ -737,12 +724,12 @@ function editorDefaultField(item) {
     const append = value => {
       const row = document.createElement('div');
       row.className = 'parameter-editor__multiple-row';
-      const input = editorTypedInput(item, value, {label:'列表值'});
+      const input = editorTypedInput(item, value, {label:'List value'});
       input.dataset.editorMultipleValue = '';
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.textContent = '×';
-      remove.setAttribute('aria-label', '删除该值');
+      remove.setAttribute('aria-label', 'Remove value');
       remove.addEventListener('click', () => {
         row.remove();
         notifyEditorChanged(list);
@@ -754,7 +741,7 @@ function editorDefaultField(item) {
     const add = document.createElement('button');
     add.type = 'button';
     add.className = 'parameter-editor__add-choice';
-    add.textContent = '＋ 添加值';
+    add.textContent = '＋ Add value';
     add.addEventListener('click', () => {
       append('');
       notifyEditorChanged(list);
@@ -763,9 +750,9 @@ function editorDefaultField(item) {
     field.append(list, add);
     return field;
   }
-  let input = editorTypedInput(item, item.default ?? '', {label:'默认值'});
+  let input = editorTypedInput(item, item.default ?? '', {label:'Default value'});
   if (item.value_type === 'boolean') {
-    input.insertAdjacentHTML('afterbegin', '<option value="">未设置</option>');
+    input.insertAdjacentHTML('afterbegin', '<option value="">Not set</option>');
     input.value = item.default == null ? '' : String(Boolean(item.default));
   }
   input.dataset.editorDefault = '';
@@ -787,40 +774,64 @@ function editorChoiceRow(item, choice = {label:'', value:''}, selected = false) 
   marker.name = `default-${item.id}`;
   marker.dataset.choiceDefault = '';
   marker.checked = selected;
-  marker.setAttribute('aria-label', '设为默认选项');
+  marker.setAttribute('aria-label', 'Set as default');
+  const markerHost = document.createElement('div');
+  markerHost.className = 'parameter-editor__choice-marker';
+  const drag = editorDragHandle(
+    `Drag ${choice.label || 'choice'} to reorder`,
+    'parameter-editor__drag-handle parameter-editor__choice-drag-handle',
+  );
+  drag.addEventListener('keydown', event => {
+    if (!['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+    event.preventDefault();
+    moveEditorNode(row, event.key === 'ArrowUp' ? -1 : 1);
+    drag.focus();
+  });
+  drag.addEventListener('dragstart', event => {
+    row.classList.add('is-dragging');
+    row.parentElement._draggedEditorItem = row;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', choice.label || String(choice.value || 'choice'));
+  });
+  drag.addEventListener('dragend', () => {
+    const container = row.parentElement;
+    row.classList.remove('is-dragging');
+    container?.querySelectorAll('.is-drop-target').forEach(node => node.classList.remove('is-drop-target'));
+    if (container) {
+      container._draggedEditorItem = null;
+    }
+  });
+  markerHost.append(drag, marker);
   const label = document.createElement('input');
   label.type = 'text';
   label.required = true;
-  label.placeholder = '显示名称';
+  label.placeholder = 'Display label';
   label.value = choice.label || '';
   label.dataset.choiceLabel = '';
-  const value = editorTypedInput(item, choice.value ?? '', {label:'参数值'});
+  const value = editorTypedInput(item, choice.value ?? '', {label:'Parameter value'});
   value.required = true;
-  value.placeholder = '参数值';
+  value.placeholder = 'Parameter value';
   value.dataset.choiceValue = '';
-  const actions = editorMoveActions('choice', true);
-  actions.querySelector('[data-move="up"]').addEventListener('click', () => moveEditorNode(row, -1));
-  actions.querySelector('[data-move="down"]').addEventListener('click', () => moveEditorNode(row, 1));
+  const actions = editorChoiceActions();
   actions.querySelector('[data-remove]').addEventListener('click', () => {
     const container = row.parentElement;
     row.remove();
-    syncEditorMoveButtons(container);
     notifyEditorChanged(container);
   });
-  row.append(marker, label, value, actions);
+  row.append(markerHost, label, value, actions);
   return row;
 }
 
 function editorSelectInitialField(item, card, {staticChoices = false} = {}) {
   const field = document.createElement('label');
-  field.className = 'parameter-editor__default';
+  field.className = 'parameter-editor__default parameter-editor__default--selection';
   const caption = document.createElement('span');
-  caption.textContent = '初始选择';
+  caption.textContent = 'Default selection';
   const mode = document.createElement('select');
   mode.dataset.editorInitialMode = '';
   const modes = item.type === 'multiple_select'
-    ? [['all', '全部候选'], ['empty', '空集'], ['values', '指定值']]
-    : [['first', '第一个候选'], ['empty', '空值'], ['value', '指定值']];
+    ? [['all', 'All choices'], ['empty', 'Empty set'], ['values', 'Specific values']]
+    : [['first', 'First choice'], ['empty', 'Empty value'], ['value', 'Specific value']];
   modes.forEach(([value, label]) => mode.append(new Option(label, value)));
   mode.value = item.initial?.mode || (item.type === 'multiple_select' ? 'all' : 'first');
   field.append(caption, mode);
@@ -828,7 +839,7 @@ function editorSelectInitialField(item, card, {staticChoices = false} = {}) {
     const value = document.createElement('input');
     value.type = 'text';
     value.dataset.editorInitialValue = '';
-    value.placeholder = item.type === 'multiple_select' ? '使用逗号分隔多个值' : '参数值';
+    value.placeholder = item.type === 'multiple_select' ? 'Separate values with commas' : 'Parameter value';
     value.value = item.type === 'multiple_select'
       ? (item.initial?.values || []).join(', ')
       : (item.initial?.value ?? '');
@@ -865,8 +876,8 @@ function editorItemCard(item) {
   drag.type = 'button';
   drag.className = 'parameter-editor__drag-handle';
   drag.draggable = true;
-  drag.setAttribute('aria-label', `拖动调整 ${item.label} 的顺序`);
-  drag.title = '拖动排序';
+  drag.setAttribute('aria-label', `Reorder ${item.label}`);
+  drag.title = 'Drag to reorder';
   drag.innerHTML = '<span></span><span></span><span></span><span></span><span></span><span></span>';
   const title = document.createElement('div');
   title.className = 'parameter-editor__item-title';
@@ -876,7 +887,7 @@ function editorItemCard(item) {
   disclosure.className = 'parameter-editor__disclosure';
   disclosure.dataset.editorDisclosure = '';
   disclosure.setAttribute('aria-expanded', 'false');
-  disclosure.setAttribute('aria-label', `展开 ${item.label} 的参数细节`);
+  disclosure.setAttribute('aria-label', `Expand ${item.label} parameter details`);
   disclosure.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>';
   const detail = document.createElement('div');
   detail.className = 'parameter-editor__item-detail';
@@ -884,7 +895,7 @@ function editorItemCard(item) {
   disclosure.addEventListener('click', () => {
     const expanded = disclosure.getAttribute('aria-expanded') !== 'true';
     disclosure.setAttribute('aria-expanded', String(expanded));
-    disclosure.setAttribute('aria-label', `${expanded ? '折叠' : '展开'} ${item.label} 的参数细节`);
+    disclosure.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} ${item.label} parameter details`);
     detail.hidden = !expanded;
     card.classList.toggle('is-expanded', expanded);
   });
@@ -923,12 +934,15 @@ function editorItemCard(item) {
       : [item.initial?.value];
     const choiceSection = document.createElement('div');
     choiceSection.className = 'parameter-editor__choices';
+    const toolbar = document.createElement('div');
+    toolbar.className = 'parameter-editor__choice-toolbar';
     const legend = document.createElement('div');
     legend.className = 'parameter-editor__choices-heading';
-    legend.innerHTML = '<span>默认</span><span>显示名称</span><span>参数值</span><span></span>';
+    legend.innerHTML = '<span>Default</span><span>Display label</span><span>Parameter value</span><span></span>';
     const rows = document.createElement('div');
     rows.className = 'parameter-editor__choice-list';
     rows.dataset.editorChoices = '';
+    initializeEditorItemDrag(rows, '[data-editor-choice]');
     for (const choice of item.choices) {
       rows.append(editorChoiceRow(
         item,
@@ -936,23 +950,19 @@ function editorItemCard(item) {
         selected.some(value => editorValueSignature(value) === editorValueSignature(choice.value)),
       ));
     }
-    const footer = document.createElement('div');
-    footer.className = 'parameter-editor__choice-footer';
     const add = document.createElement('button');
     add.type = 'button';
     add.className = 'parameter-editor__add-choice';
-    add.textContent = '＋ 添加候选项';
+    add.textContent = '＋ Add choice';
     add.addEventListener('click', () => {
       const row = editorChoiceRow(item);
       rows.append(row);
-      syncEditorMoveButtons(rows);
       notifyEditorChanged(rows);
       row.querySelector('[data-choice-label]').focus();
     });
-    footer.append(add);
-    choiceSection.append(editorSelectInitialField(item, card, {staticChoices:true}), legend, rows, footer);
+    toolbar.append(editorSelectInitialField(item, card, {staticChoices:true}), add);
+    choiceSection.append(toolbar, legend, rows);
     detail.append(choiceSection);
-    syncEditorMoveButtons(rows);
   } else if (item.initial_editable) {
     detail.append(editorSelectInitialField(item, card));
   } else if (item.default_editable) {
@@ -960,19 +970,19 @@ function editorItemCard(item) {
   } else {
     const note = document.createElement('p');
     note.className = 'parameter-editor__readonly';
-    note.textContent = '候选项由数据自动推断；这里只能调整它在当前面板中的顺序。';
+    note.textContent = 'Choices are inferred from data; only their order in this panel can be changed here.';
     detail.append(note);
   }
   return card;
 }
 
-function initializeEditorItemDrag(container) {
+function initializeEditorItemDrag(container, selector = '[data-editor-item]') {
   container.addEventListener('dragover', event => {
     const dragged = container._draggedEditorItem;
     if (!dragged) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
-    const target = event.target.closest('[data-editor-item]');
+    const target = event.target.closest(selector);
     container.querySelectorAll('.is-drop-target').forEach(node => node.classList.remove('is-drop-target'));
     if (!target || target === dragged || target.parentElement !== container) return;
     target.classList.add('is-drop-target');
@@ -999,11 +1009,11 @@ function serializeEditorDefault(card) {
       const input = row.querySelector('[data-editor-date-value]');
       if (mode === 'relative') {
         if (input.value.trim() === '') {
-          throw new Error(`${card.dataset.editorItem} 的相对日期不能为空`);
+          throw new Error(`${card.dataset.editorItem} requires a relative date.`);
         }
         const offset = Number(input.value);
         if (!Number.isInteger(offset)) {
-          throw new Error(`${card.dataset.editorItem} 的相对日期必须是整数天`);
+          throw new Error(`${card.dataset.editorItem} relative date must use whole days.`);
         }
         return {
           mode:'relative',
@@ -1011,7 +1021,7 @@ function serializeEditorDefault(card) {
           offset:`${offset > 0 ? '+' : ''}${offset}d`,
         };
       }
-      return input.value ? editorTypedValue(item, input.value, '固定日期') : '';
+      return input.value ? editorTypedValue(item, input.value, 'Fixed date') : '';
     });
     if (type === 'single_input') return values[0] || null;
     return values.every(value => value === '') ? [] : values;
@@ -1019,20 +1029,20 @@ function serializeEditorDefault(card) {
   const range = [...card.querySelectorAll('[data-editor-default-part]:not(:disabled)')];
   if (range.length) {
     const values = range.map((input, index) => (
-      input.value === '' ? '' : editorTypedValue(item, input.value, index ? '结束值' : '开始值')
+      input.value === '' ? '' : editorTypedValue(item, input.value, index ? 'End value' : 'Start value')
     ));
     return type === 'single_input' ? (values[0] || null) : values;
   }
   const multiple = [...card.querySelectorAll('[data-editor-multiple-value]')];
   if (multiple.length || card.querySelector('[data-editor-multiple-values]')) {
     return multiple.filter(input => input.value !== '').map((input, index) => (
-      editorTypedValue(item, input.value, `第 ${index + 1} 个值`)
+      editorTypedValue(item, input.value, `Value ${index + 1}`)
     ));
   }
   const input = card.querySelector('[data-editor-default]');
   if (!input) return null;
   if (input.value === '') return null;
-  return editorTypedValue(item, input.value, `${card.dataset.editorItem} 的默认值`);
+  return editorTypedValue(item, input.value, `${card.dataset.editorItem} default value`);
 }
 
 function serializeEditorGroup(group, container) {
@@ -1050,10 +1060,10 @@ function serializeEditorGroup(group, container) {
           if (initialMode === 'values') {
             const raw = card.querySelector('[data-editor-initial-value]').value;
             initial.values = raw.split(',').map(value => value.trim()).filter(Boolean)
-              .map(value => editorTypedValue(item, value, '初始值'));
+              .map(value => editorTypedValue(item, value, 'Default value'));
           } else if (initialMode === 'value') {
             const raw = card.querySelector('[data-editor-initial-value]').value.trim();
-            initial.value = editorTypedValue(item, raw, '初始值');
+            initial.value = editorTypedValue(item, raw, 'Default value');
           }
         }
         return {
@@ -1097,22 +1107,22 @@ async function openParameterEditor(owner) {
     `/api/dashboards/${encodeURIComponent(state.dashboard.id)}/parameter-editor`,
   );
   const group = contract.groups.find(candidate => candidate.owner === owner);
-  if (!group) throw new Error(`当前看板没有 ${owner} 作用域`);
+  if (!group) throw new Error(`This Dashboard has no ${owner} scope.`);
   dialog.innerHTML = `
     <form method="dialog" class="parameter-editor__form">
       <header class="parameter-editor__header">
-        <div><h2 id="parameter-editor-title">${escapeHtml(group.title)}</h2><p>${group.items.length} 个参数</p></div>
-        <button type="button" data-close aria-label="关闭">×</button>
+        <div><h2 id="parameter-editor-title">${escapeHtml(group.title)}</h2><p>${group.items.length} parameters</p></div>
+        <button type="button" data-close aria-label="Close">×</button>
       </header>
       <div class="parameter-editor__items" data-editor-items></div>
       <footer class="parameter-editor__footer">
         <p class="parameter-editor__error" role="alert"></p>
-        <div><button type="button" class="button button--ghost" data-close>取消</button><button type="submit" class="button button--run" disabled>保存</button></div>
+        <div><button type="button" class="button button--ghost" data-close>Cancel</button><button type="submit" class="button button--run" disabled>Save</button></div>
       </footer>
     </form>`;
   const items = dialog.querySelector('[data-editor-items]');
   if (group.items.length) items.replaceChildren(...group.items.map(editorItemCard));
-  else items.innerHTML = '<p class="parameter-editor__empty">无参数</p>';
+  else items.innerHTML = '<p class="parameter-editor__empty">No parameters</p>';
   initializeEditorItemDrag(items);
   dialog.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => dialog.close()));
   const form = dialog.querySelector('form');
@@ -1270,7 +1280,7 @@ function setShareEnabled(enabled) {
   $('#share-button').setAttribute('aria-disabled', String(!active));
   $('#download-button').disabled = !active || hasServerInteractive;
   $('#download-button').title = hasServerInteractive
-    ? '包含 Server Python 交互计算，请使用分享链接'
+    ? 'Includes Server Python interactions; use a share link instead.'
     : '';
   $('#copy-share-link').disabled = !active;
   if (!active) $('#share-control').open = false;
@@ -1281,7 +1291,7 @@ async function downloadReport() {
   const button = $('#download-button');
   button.disabled = true;
   const previous = button.textContent;
-  button.textContent = '正在导出…';
+  button.textContent = 'Exporting…';
   $('#share-control').open = false;
   let runtime = activeRuntime();
   let dashboardId = state.dashboard.id;
@@ -1333,7 +1343,7 @@ async function createSharedLink() {
   const button = $('#copy-share-link');
   const previous = button.textContent;
   button.disabled = true;
-  button.textContent = '正在创建…';
+  button.textContent = 'Creating…';
   try {
     const context = await reportRequestContext();
     const response = await fetch(
@@ -1359,11 +1369,11 @@ async function createSharedLink() {
     const url = new URL(shared.url, window.location.origin).href;
     await copyPlainText(url);
     $('#share-control').open = false;
-    showShortcutToast('分享链接已复制');
+    showShortcutToast('Share link copied.');
   } catch (error) {
     const runtime = activeRuntime();
     if (runtime) runtime.message = error.message;
-    showShortcutToast(`创建分享失败：${error.message}`);
+    showShortcutToast(`Could not create share link: ${error.message}`);
   } finally {
     button.textContent = previous;
     setShareEnabled(Boolean(state.runId));
@@ -1549,7 +1559,7 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
   control.dataset.multiline = String(Boolean(presentation.multiline));
   control.dataset.minRows = String(presentation.min_rows || 2);
   control.dataset.maxRows = String(presentation.max_rows || 6);
-  control.dataset.showCount = String(Boolean(presentation.show_count));
+  control.dataset.showCount = String(Boolean(presentation.show_count && parameter.max_length));
   control.dataset.prefix = presentation.prefix || '';
   control.dataset.suffix = presentation.suffix || '';
   control.dataset.numberControls = String(presentation.number_controls !== false);
@@ -1582,7 +1592,7 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
     copy.type = 'button';
     copy.className = 'query-parameter-evidence-copy';
     copy.dataset.queryParameterEvidenceCopy = parameter.id;
-    copy.textContent = '复制诊断';
+    copy.textContent = 'Copy diagnosis';
     copy.hidden = true;
     copy.addEventListener('click', () => {
       const diagnosis = queryParameterDiagnosis(parameter, activeRuntime());
@@ -1973,7 +1983,9 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
   $('#query-run-control').dataset.empty = String(!hasQueryParameters);
   $('#query-parameters-control').dataset.empty = String(!hasQueryParameters);
   if (runtime.queryParametersOpen == null && hasQueryParameters) {
-    runtime.queryParametersOpen = true;
+    // First arrival keeps parameters in the workbench. A remembered committed
+    // Result starts with the tray collapsed, preserving room for analysis.
+    runtime.queryParametersOpen = !runtime.runId;
   }
   setQueryParametersOpen(runtime.queryParametersOpen);
   window.datavizComponents?.hydrate(document);
@@ -2030,7 +2042,7 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
   loadCanvasFrame(id, runtime.pendingRunId || runtime.runId);
   $('#run-button').disabled = !runnable;
   $('#run-button').classList.toggle('is-cancelling', Boolean(runtime.pendingRunId));
-  setRunButtonLabel(runtime.pendingRunId ? '取消' : '查询');
+  setRunButtonLabel(runtime.pendingRunId ? 'CANCEL' : 'RUN');
   setShareEnabled(Boolean(runtime.runId) && runtime.controlConnected);
   saveTabUiState();
   // Dashboard navigation owns the route and must commit immediately. Dynamic
@@ -2485,7 +2497,7 @@ async function resolveQueryParameterDomains({
   syncDashboardLocation('replace');
   setQueryState();
   syncCanvasQueryDraft();
-  if (announce) showShortcutToast(targetSnapshot ? '已恢复已应用参数' : refresh ? '参数选项已更新' : '参数选项已加载');
+  if (announce) showShortcutToast(targetSnapshot ? 'Applied parameters restored.' : refresh ? 'Parameter options refreshed.' : 'Parameter options loaded.');
   return true;
 }
 
@@ -2506,7 +2518,7 @@ async function revertQueryParameters() {
   syncDashboardLocation('replace');
   setQueryState();
   syncCanvasQueryDraft();
-  showShortcutToast('已恢复已应用参数');
+  showShortcutToast('Applied parameters restored.');
 }
 
 function formInputDefinition(input) {
@@ -2539,22 +2551,22 @@ function setFormInputError(input, message = '') {
   }
 }
 
-function normalizeFormScalar(definition, raw, label = '值') {
+function normalizeFormScalar(definition, raw, label = 'Value') {
   const value = editorTypedValue(definition, raw, label);
   if (['integer', 'number'].includes(definition.value_type)) {
-    if (definition.min != null && value < definition.min) throw new Error(`${label}不能小于 ${definition.min}`);
-    if (definition.max != null && value > definition.max) throw new Error(`${label}不能大于 ${definition.max}`);
+    if (definition.min != null && value < definition.min) throw new Error(`${label} cannot be less than ${definition.min}.`);
+    if (definition.max != null && value > definition.max) throw new Error(`${label} cannot be greater than ${definition.max}.`);
     if (definition.step != null) {
       const base = definition.min || 0;
       const quotient = (value - base) / definition.step;
       if (Math.abs(quotient - Math.round(quotient)) > 1e-9) {
-        throw new Error(`${label}必须按步长 ${definition.step} 递增`);
+        throw new Error(`${label} must follow a step of ${definition.step}.`);
       }
     }
   }
   if (definition.value_type === 'date') {
-    if (definition.min_date && value < definition.min_date) throw new Error(`${label}不能早于 ${definition.min_date}`);
-    if (definition.max_date && value > definition.max_date) throw new Error(`${label}不能晚于 ${definition.max_date}`);
+    if (definition.min_date && value < definition.min_date) throw new Error(`${label} cannot be earlier than ${definition.min_date}.`);
+    if (definition.max_date && value > definition.max_date) throw new Error(`${label} cannot be later than ${definition.max_date}.`);
   }
   return value;
 }
@@ -2572,31 +2584,31 @@ function normalizeFormInput(input) {
     let values;
     try { values = input.value ? JSON.parse(input.value) : []; }
     catch (_error) { values = input.value.split(',').map(item => item.trim()).filter(Boolean); }
-    if (!Array.isArray(values)) throw new Error('请输入多个值');
-    const normalized = values.map((item, index) => normalizeFormScalar(definition, item, `第 ${index + 1} 个值`));
-    if (definition.required && !normalized.length) throw new Error('至少输入一个值');
+    if (!Array.isArray(values)) throw new Error('Enter multiple values.');
+    const normalized = values.map((item, index) => normalizeFormScalar(definition, item, `Value ${index + 1}`));
+    if (definition.required && !normalized.length) throw new Error('Enter at least one value.');
     if (definition.max_items != null && normalized.length > definition.max_items) {
-      throw new Error(`最多输入 ${definition.max_items} 个值`);
+      throw new Error(`Enter no more than ${definition.max_items} values.`);
     }
     if (new Set(normalized.map(editorValueSignature)).size !== normalized.length) {
-      throw new Error('不能输入重复值');
+      throw new Error('Duplicate values are not allowed.');
     }
     return normalized;
   }
   if (type === 'range_input') {
     const values = input.value ? input.value.split(',', 2).map(item => item.trim()) : [];
     if (!values.length) {
-      if (definition.required) throw new Error('范围不能为空');
+      if (definition.required) throw new Error('Range cannot be empty.');
       return [];
     }
-    if (values.length !== 2) throw new Error('范围必须包含开始值和结束值');
+    if (values.length !== 2) throw new Error('Range must include a start and end value.');
     const normalized = values.map((raw, index) => raw === '' ? '' : normalizeFormScalar(
-      definition, raw, index ? '结束值' : '开始值',
+      definition, raw, index ? 'End value' : 'Start value',
     ));
-    if (normalized[0] === '' && !definition.allow_empty[0]) throw new Error('开始值不能为空');
-    if (normalized[1] === '' && !definition.allow_empty[1]) throw new Error('结束值不能为空');
+    if (normalized[0] === '' && !definition.allow_empty[0]) throw new Error('Start value cannot be empty.');
+    if (normalized[1] === '' && !definition.allow_empty[1]) throw new Error('End value cannot be empty.');
     if (normalized[0] !== '' && normalized[1] !== '' && normalized[0] > normalized[1]) {
-      throw new Error('开始值不能大于结束值');
+      throw new Error('Start value cannot be greater than end value.');
     }
     return normalized;
   }
@@ -2631,14 +2643,14 @@ async function runDashboard() {
   if (runtime.pendingRunId) {
     const runId = runtime.pendingRunId;
     $('#run-button').disabled = true;
-    setRunButtonLabel('取消中…');
+    setRunButtonLabel('CANCELLING…');
     try {
       await request(`/api/runs/${encodeURIComponent(runId)}?${sessionQuery()}`, {method:'DELETE'});
       runtime.message = 'Cancelling this Dashboard query…';
       $('#run-message').textContent = runtime.message;
     } catch (error) {
       $('#run-button').disabled = false;
-      setRunButtonLabel('取消');
+      setRunButtonLabel('CANCEL');
       runtime.message = error.message;
       $('#run-message').textContent = error.message;
     }
@@ -2646,7 +2658,7 @@ async function runDashboard() {
   }
   if (dynamicQueryParameters().length && !runtime.queryDomainReady) {
     setQueryParametersOpen(true, {persist:true});
-    showShortcutToast(runtime.queryDomainPending ? '正在加载参数选项' : '请先刷新参数选项');
+    showShortcutToast(runtime.queryDomainPending ? 'Parameter options are loading.' : 'Refresh parameter options before running.');
     return;
   }
   if (!$('#parameter-form').checkValidity()) {
@@ -2701,7 +2713,7 @@ async function runDashboard() {
     runtime.message = 'Querying a new dataset…';
     $('#run-button').disabled = false;
     $('#run-button').classList.add('is-cancelling');
-    setRunButtonLabel('取消');
+    setRunButtonLabel('CANCEL');
     if (state.dashboard?.id === dashboardId) {
       loadCanvasFrame(dashboardId, response.run_id);
     }
@@ -2718,7 +2730,7 @@ async function runDashboard() {
       $('#query-diagnostics-label').textContent = 'Failed';
       $('#run-button').disabled = false;
       $('#run-button').classList.remove('is-cancelling');
-      setRunButtonLabel('查询');
+      setRunButtonLabel('RUN');
     }
   }
 }
@@ -2799,13 +2811,14 @@ async function finishRun(runId, dashboardId) {
     $('#run-message').textContent = runtime.message;
     $('#run-button').disabled = false;
     $('#run-button').classList.remove('is-cancelling');
-    setRunButtonLabel('查询');
+    setRunButtonLabel('RUN');
     setShareEnabled(Boolean(runtime.runId));
     $('#query-diagnostics').dataset.status = runtime.queryStatus;
     $('#query-diagnostics-label').textContent = runtime.queryLabel;
     setControlsEnabled(Boolean(runtime.runId));
     setComputeState();
     setQueryState(committed ? null : runtime.message);
+    if (committed) setQueryParametersOpen(false, {persist:true});
     if (committed && $('#workspace-update').dataset.impact === 'query') {
       hideWorkspaceUpdate();
     }
@@ -2996,34 +3009,49 @@ function setQueryState(message = null) {
   let stale = false;
   let detail = '';
   let label = 'Not applied';
+  let visualState = 'not-applied';
   if (state.dashboard && !state.dashboard.runnable) {
     stale = true;
     detail = state.dashboard.message || 'Dashboard unavailable.';
     label = state.dashboard.status;
+    visualState = 'error';
   } else if (runtime?.queryDefinitionStale) {
     stale = true;
     detail = message || 'Dashboard query definition changed. Run query again to apply it.';
     label = 'Outdated';
+    visualState = 'changed';
   } else if (message) {
     stale = Boolean(state.runId);
     detail = message;
     label = 'Check values';
+    visualState = 'error';
   } else if (!hasQueryParameters) {
     detail = state.runId ? 'Dataset loaded.' : 'This dashboard has no query parameters.';
     label = 'No parameters';
+    visualState = state.runId ? 'applied' : 'not-applied';
   } else if (!state.runId) {
     detail = 'No dataset loaded. Query parameters are pending.';
   } else if (pendingParametersMatchDataset()) {
     detail = 'Dataset loaded with these values.';
     label = 'Applied';
+    visualState = 'applied';
   } else {
     stale = true;
     detail = 'Pending query values differ from the loaded dataset. Query again to apply.';
-    label = 'Changed';
+    label = 'Unsaved changes';
+    visualState = 'changed';
   }
   owner.dataset.stale = String(stale);
+  owner.dataset.queryState = visualState;
   owner.title = detail;
   $('#query-control-meta').textContent = label;
+  const status = $('#query-parameters-status');
+  if (status) {
+    status.dataset.state = visualState;
+    status.title = detail;
+    const statusLabel = status.querySelector('[data-query-status-label]');
+    if (statusLabel) statusLabel.textContent = label;
+  }
   updateParameterDomainUi();
 }
 
@@ -3438,19 +3466,22 @@ function dashboardButton(dashboard) {
     button.dataset.navType = 'dashboard';
     button.dataset.status = dashboard.status;
     button.dataset.parentId = dashboard.parent_id || '';
-    button.draggable = true;
+    button.draggable = false;
     const status = dashboard.status === 'ready' ? '' : `<small>${escapeHtml(dashboard.status)}</small>`;
-    button.innerHTML = `<strong>${escapeHtml(dashboard.canvas_name)}</strong>${status}`;
+    button.innerHTML = `<span class="nav-button__copy"><strong>${escapeHtml(dashboard.canvas_name)}</strong>${status}</span>`;
     bindOverflowTitle(button, button.querySelector('strong'), dashboard.canvas_name);
     button.addEventListener('click', (event) => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (performance.now() - (state.navigationDragEndedAt || 0) < 250) {
+        event.preventDefault();
+        return;
+      }
       event.preventDefault();
       selectDashboard(dashboard.id, {historyMode:'push'});
     });
-    button.addEventListener('dragstart', (event) => beginNavigationDrag(event, {
+    installDashboardRowDrag(button, {
       type: 'dashboard', id: dashboard.id, parentId: dashboard.parent_id, path: dashboard.path,
-    }));
-    button.addEventListener('dragend', endNavigationDrag);
+    });
     return button;
 }
 
@@ -3516,12 +3547,104 @@ function beginNavigationDrag(event, payload) {
   $('#nav-root-drop').setAttribute('aria-hidden', 'false');
 }
 
+function installDashboardRowDrag(row, payload) {
+  let pointer = null;
+  const positionPreview = (preview, event, offsetX, offsetY) => {
+    preview.style.transform = `translate3d(${event.clientX - offsetX}px,${event.clientY - offsetY}px,0)`;
+  };
+  const createPreview = (event) => {
+    const box = row.getBoundingClientRect();
+    const preview = row.cloneNode(true);
+    preview.classList.remove('active', 'is-dragging');
+    preview.classList.add('nav-drag-preview');
+    preview.removeAttribute('href');
+    preview.removeAttribute('aria-current');
+    preview.removeAttribute('data-id');
+    preview.removeAttribute('data-nav-type');
+    preview.setAttribute('aria-hidden', 'true');
+    preview.style.width = `${box.width}px`;
+    pointer.offsetX = event.clientX - box.left;
+    pointer.offsetY = event.clientY - box.top;
+    positionPreview(preview, event, pointer.offsetX, pointer.offsetY);
+    document.body.append(preview);
+    pointer.preview = preview;
+  };
+  const clearDropTargets = () => {
+    document.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
+  };
+  const finish = (dragged) => {
+    row.classList.remove('is-dragging');
+    clearDropTargets();
+    delete document.body.dataset.navDragging;
+    $('#nav-root-drop').setAttribute('aria-hidden', 'true');
+    pointer?.preview?.remove();
+    state.draggedNavigation = null;
+    pointer = null;
+    if (dragged) state.navigationDragEndedAt = performance.now();
+  };
+  row.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    pointer = {id:event.pointerId, x:event.clientX, y:event.clientY, dragging:false, parentId:undefined, target:null};
+    row.setPointerCapture(event.pointerId);
+  });
+  row.addEventListener('pointermove', (event) => {
+    if (!pointer || pointer.id !== event.pointerId) return;
+    if (!pointer.dragging && Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) < 6) return;
+    if (!pointer.dragging) {
+      pointer.dragging = true;
+      payload.parentId = row.closest('.nav-folder')?.dataset.folderId || null;
+      state.draggedNavigation = payload;
+      row.classList.add('is-dragging');
+      document.body.dataset.navDragging = payload.type;
+      $('#nav-root-drop').setAttribute('aria-hidden', 'false');
+      createPreview(event);
+    }
+    event.preventDefault();
+    positionPreview(pointer.preview, event, pointer.offsetX, pointer.offsetY);
+    clearDropTargets();
+    const containsPoint = (node) => {
+      const box = node.getBoundingClientRect();
+      return event.clientX >= box.left && event.clientX <= box.right
+        && event.clientY >= box.top && event.clientY <= box.bottom;
+    };
+    const folderToggle = [...document.querySelectorAll('.nav-folder__toggle')].find(containsPoint);
+    const rootCandidate = $('#nav-root-drop');
+    const navigation = $('#dashboard-nav');
+    const overNavigationWhitespace = navigation && containsPoint(navigation)
+      && ![...document.querySelectorAll('.nav-button:not(.nav-drag-preview)')].some(containsPoint);
+    const rootDrop = rootCandidate && (containsPoint(rootCandidate) || overNavigationWhitespace)
+      ? rootCandidate
+      : null;
+    const parentId = folderToggle?.dataset.folderId || (rootDrop ? null : undefined);
+    const target = folderToggle?.closest('.nav-folder') || rootDrop || null;
+    pointer.parentId = undefined;
+    pointer.target = null;
+    if (target && canDropNavigation(parentId)) {
+      pointer.parentId = parentId;
+      pointer.target = target;
+      target.classList.add('is-drop-target');
+    }
+  });
+  row.addEventListener('pointerup', (event) => {
+    if (!pointer || pointer.id !== event.pointerId) return;
+    const {dragging, parentId, target} = pointer;
+    if (row.hasPointerCapture(event.pointerId)) row.releasePointerCapture(event.pointerId);
+    if (dragging) {
+      event.preventDefault();
+      if (target && parentId !== undefined) void commitNavigationDrop(parentId, target);
+    }
+    finish(dragging);
+  });
+  row.addEventListener('pointercancel', () => finish(Boolean(pointer?.dragging)));
+}
+
 function endNavigationDrag(event) {
   event.currentTarget.classList.remove('is-dragging');
   document.querySelectorAll('.is-drop-target').forEach((item) => item.classList.remove('is-drop-target'));
   delete document.body.dataset.navDragging;
   $('#nav-root-drop').setAttribute('aria-hidden', 'true');
   state.draggedNavigation = null;
+  state.navigationDragEndedAt = performance.now();
 }
 
 function folderIsInside(folderId, possibleAncestorId) {
@@ -3553,6 +3676,10 @@ function navigationDragOver(event, parentId, target) {
 async function navigationDrop(event, parentId, target) {
   event.preventDefault();
   event.stopPropagation();
+  await commitNavigationDrop(parentId, target);
+}
+
+async function commitNavigationDrop(parentId, target) {
   target?.classList.remove('is-drop-target');
   if (!canDropNavigation(parentId)) return;
   const dragged = state.draggedNavigation;
@@ -3563,14 +3690,15 @@ async function navigationDrop(event, parentId, target) {
       await request(`/api/navigation/folders/${encodeURIComponent(dragged.id)}/placement`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({parent_id:parentId})});
     }
     await refreshNavigation(dragged.path);
+    showShortcutToast(dragged.type === 'dashboard' ? 'Dashboard moved.' : 'Folder moved.');
   } catch (error) {
-    showNavigationError('移动失败', error.message);
+    showNavigationError('Move failed', error.message);
   }
 }
 
 function showNavigationError(title, message) {
   showNavDialog({
-    eyebrow: 'NAVIGATION / MOVE FAILED', title, submitLabel: '知道了',
+    eyebrow: 'NAVIGATION / MOVE FAILED', title, submitLabel: 'Dismiss',
     body: `<p class="nav-dialog__note">${escapeHtml(message)}</p>`, onSubmit: async () => {},
   });
 }
@@ -3606,7 +3734,7 @@ function renderTrash() {
     wrapper.className = 'nav-trash-record';
     wrapper.dataset.navType = 'trash';
     wrapper.dataset.trashId = record.trash_id;
-    wrapper.title = '右键恢复到原逻辑位置';
+    wrapper.title = 'Right-click to restore the original location';
     wrapper.append(trashNode(record.item));
     return wrapper;
   });
@@ -3851,19 +3979,20 @@ function showNavMenu(event, target) {
   const folderId = target?.dataset.folderId;
   const dashboardId = target?.dataset.id;
   const trashId = target?.dataset.trashId;
-  if (!target) actions.push(['＋', '新建目录', () => openFolderDialog(null)]);
+  if (!target) actions.push(['＋', 'New folder', () => openFolderDialog(null)]);
   if (trashId) {
-    actions.push(['↟', '恢复到原位置', () => restoreTrashItem(trashId)]);
-    actions.push(['×', '永久删除…', () => openPurgeTrashDialog(trashId)]);
+    actions.push(['↟', 'Restore location', () => restoreTrashItem(trashId)]);
+    actions.push(['×', 'Delete permanently…', () => openPurgeTrashDialog(trashId)]);
   }
   if (folderId) {
-    actions.push(['＋', '新建子目录', () => openFolderDialog(folderId)]);
-    actions.push(['✎', '重命名', () => openRenameDialog(folderId)]);
-    actions.push(['⌫', '移到回收站', () => openDeleteDialog(folderId)]);
+    actions.push(['＋', 'New subfolder', () => openFolderDialog(folderId)]);
+    actions.push(['✎', 'Rename', () => openRenameDialog(folderId)]);
+    actions.push(['⌫', 'Move to Trash', () => openDeleteDialog(folderId)]);
   }
   if (dashboardId) {
-    actions.push(['↳', '移动看板…', () => openMoveDialog(dashboardId)]);
-    actions.push(['⌫', '移到回收站', () => openTrashDashboardDialog(dashboardId)]);
+    actions.push(['✎', 'Rename', () => openDashboardRenameDialog(dashboardId)]);
+    actions.push(['↳', 'Move Dashboard…', () => openMoveDialog(dashboardId)]);
+    actions.push(['⌫', 'Move to Trash', () => openTrashDashboardDialog(dashboardId)]);
   }
   menu.replaceChildren(...actions.map(([icon, label, action]) => {
     const button = document.createElement('button');
@@ -3880,13 +4009,13 @@ function showNavMenu(event, target) {
 }
 
 function folderOptions(selected = null, excluded = null) {
-  const options = [{id: '', title: '根目录'}, ...(state.payload.folders || []).filter((item) => item.id !== excluded)];
+  const options = [{id: '', title: 'Root'}, ...(state.payload.folders || []).filter((item) => item.id !== excluded)];
   return options.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === (selected || '') ? 'selected' : ''}>${escapeHtml(item.logical_path || item.title)}</option>`).join('');
 }
 
 function showNavDialog({eyebrow, title, body, submitLabel, onSubmit, danger = false}) {
   const dialog = $('#nav-dialog');
-  dialog.innerHTML = `<form method="dialog"><header><span>${escapeHtml(eyebrow)}</span><button type="button" data-close aria-label="关闭">×</button></header><h2>${escapeHtml(title)}</h2>${body}<footer><button type="button" class="button button--ghost" data-close>取消</button><button type="submit" class="button ${danger ? 'button--danger' : 'button--run'}">${escapeHtml(submitLabel)}</button></footer><p class="nav-dialog__error" role="alert"></p></form>`;
+  dialog.innerHTML = `<form method="dialog"><header><span>${escapeHtml(eyebrow)}</span><button type="button" data-close aria-label="Close">×</button></header><h2>${escapeHtml(title)}</h2>${body}<footer><button type="button" class="button button--ghost" data-close>Cancel</button><button type="submit" class="button ${danger ? 'button--danger' : 'button--run'}">${escapeHtml(submitLabel)}</button></footer><p class="nav-dialog__error" role="alert"></p></form>`;
   dialog.querySelectorAll('[data-close]').forEach((button) => button.addEventListener('click', () => dialog.close()));
   dialog.querySelector('form').addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -3906,8 +4035,8 @@ function showNavDialog({eyebrow, title, body, submitLabel, onSubmit, danger = fa
 
 function openFolderDialog(parentId) {
   showNavDialog({
-    eyebrow: 'NAVIGATION / NEW', title: '新建目录', submitLabel: '创建目录',
-    body: `<label class="nav-dialog__field"><span>目录名称</span><input name="title" required maxlength="80" autocomplete="off"></label><label class="nav-dialog__field"><span>所在位置</span><select name="parent_id">${folderOptions(parentId)}</select></label>`,
+    eyebrow: 'NAVIGATION / NEW', title: 'New folder', submitLabel: 'Create folder',
+    body: `<label class="nav-dialog__field"><span>Folder name</span><input name="title" required maxlength="80" autocomplete="off"></label><label class="nav-dialog__field"><span>Location</span><select name="parent_id">${folderOptions(parentId)}</select></label>`,
     onSubmit: async (data) => {
       await request('/api/navigation/folders', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({title:data.get('title'), parent_id:data.get('parent_id') || null})});
       await refreshNavigation();
@@ -3918,8 +4047,8 @@ function openFolderDialog(parentId) {
 function openRenameDialog(folderId) {
   const folder = state.payload.folders.find((item) => item.id === folderId);
   showNavDialog({
-    eyebrow: 'NAVIGATION / RENAME', title: '重命名目录', submitLabel: '保存名称',
-    body: `<label class="nav-dialog__field"><span>目录名称</span><input name="title" required maxlength="80" value="${escapeHtml(folder.title)}"></label>`,
+    eyebrow: 'NAVIGATION / RENAME', title: 'Rename folder', submitLabel: 'Save name',
+    body: `<label class="nav-dialog__field"><span>Folder name</span><input name="title" required maxlength="80" value="${escapeHtml(folder.title)}"></label>`,
     onSubmit: async (data) => {
       await request(`/api/navigation/folders/${encodeURIComponent(folderId)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({title:data.get('title')})});
       await refreshNavigation();
@@ -3927,11 +4056,23 @@ function openRenameDialog(folderId) {
   });
 }
 
+function openDashboardRenameDialog(dashboardId) {
+  const dashboard = state.payload.dashboards.find((item) => item.id === dashboardId);
+  showNavDialog({
+    eyebrow: 'NAVIGATION / RENAME', title: 'Rename Dashboard', submitLabel: 'Save name',
+    body: `<label class="nav-dialog__field"><span>Dashboard name</span><input name="title" required maxlength="80" value="${escapeHtml(dashboard.canvas_name)}"></label><p class="nav-dialog__note">This changes the Sidebar name and Dashboard directory. The stable Dashboard id and its content stay unchanged.</p>`,
+    onSubmit: async (data) => {
+      await request(`/api/navigation/dashboards/${encodeURIComponent(dashboardId)}/name`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({title:data.get('title')})});
+      await refreshNavigation(null, {requestedDashboardId:dashboardId});
+    },
+  });
+}
+
 function openMoveDialog(dashboardId) {
   const dashboard = state.payload.dashboards.find((item) => item.id === dashboardId);
   showNavDialog({
-    eyebrow: 'NAVIGATION / MOVE', title: `移动「${dashboard.canvas_name}」`, submitLabel: '移动看板',
-    body: `<label class="nav-dialog__field"><span>目标目录</span><select name="parent_id">${folderOptions(dashboard.parent_id)}</select></label><p class="nav-dialog__note">移动会把目录重命名为“目录##看板”；看板内容不会改变。</p>`,
+    eyebrow: 'NAVIGATION / MOVE', title: `Move “${dashboard.canvas_name}”`, submitLabel: 'Move Dashboard',
+    body: `<label class="nav-dialog__field"><span>Destination</span><select name="parent_id">${folderOptions(dashboard.parent_id)}</select></label><p class="nav-dialog__note">Moving renames the directory to “folder##dashboard”; Dashboard content is unchanged.</p>`,
     onSubmit: async (data) => {
       await request(`/api/navigation/dashboards/${encodeURIComponent(dashboardId)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({parent_id:data.get('parent_id') || null})});
       await refreshNavigation(dashboard.path);
@@ -3942,8 +4083,8 @@ function openMoveDialog(dashboardId) {
 function openDeleteDialog(folderId) {
   const folder = state.payload.folders.find((item) => item.id === folderId);
   showNavDialog({
-    eyebrow: 'NAVIGATION / REMOVE', title: `删除「${folder.title}」？`, submitLabel: '继续', danger: true,
-    body: '<p class="nav-dialog__note">若该目录树没有看板，将直接删除；否则所属看板会移入回收站，文件仍可恢复。</p>',
+    eyebrow: 'NAVIGATION / REMOVE', title: `Remove “${folder.title}”?`, submitLabel: 'Continue', danger: true,
+    body: '<p class="nav-dialog__note">An empty folder tree is removed immediately. Otherwise its Dashboards move to Trash and remain recoverable.</p>',
     onSubmit: async () => {
       await request(`/api/navigation/folders/${encodeURIComponent(folderId)}`, {method:'DELETE'});
       await refreshNavigation();
@@ -3954,8 +4095,8 @@ function openDeleteDialog(folderId) {
 function openTrashDashboardDialog(dashboardId) {
   const dashboard = state.payload.dashboards.find((item) => item.id === dashboardId);
   showNavDialog({
-    eyebrow: 'NAVIGATION / TRASH', title: `把「${dashboard.canvas_name}」移到回收站？`, submitLabel: '移到回收站', danger: true,
-    body: '<p class="nav-dialog__note">目录会加上 __TRASH__## 前缀并隐藏；看板文件和数据不会删除。</p>',
+    eyebrow: 'NAVIGATION / TRASH', title: `Move “${dashboard.canvas_name}” to Trash?`, submitLabel: 'Move to Trash', danger: true,
+    body: '<p class="nav-dialog__note">The directory receives a __TRASH__## prefix and is hidden; Dashboard files and data are not deleted.</p>',
     onSubmit: async () => {
       await request(`/api/navigation/dashboards/${encodeURIComponent(dashboardId)}`, {method:'DELETE'});
       await refreshNavigation(null);
@@ -3969,7 +4110,7 @@ async function restoreTrashItem(trashId) {
     await refreshNavigation(null);
   } catch (error) {
     showNavDialog({
-      eyebrow: 'TRASH / RESTORE FAILED', title: '无法恢复', submitLabel: '知道了',
+      eyebrow: 'TRASH / RESTORE FAILED', title: 'Could not restore', submitLabel: 'Dismiss',
       body: `<p class="nav-dialog__note">${escapeHtml(error.message)}</p>`, onSubmit: async () => {},
     });
   }
@@ -3977,13 +4118,13 @@ async function restoreTrashItem(trashId) {
 
 function openPurgeTrashDialog(trashId) {
   const record = (state.payload.trash || []).find(item => item.trash_id === trashId);
-  const title = record?.item?.title || '该项目';
+  const title = record?.item?.title || 'this item';
   showNavDialog({
     eyebrow: 'TRASH / DELETE FOREVER',
-    title: `永久删除「${title}」？`,
-    submitLabel: '永久删除',
+    title: `Delete “${title}” permanently?`,
+    submitLabel: 'Delete permanently',
     danger: true,
-    body: '<p class="nav-dialog__note">这会删除磁盘中的看板目录及其文件，操作无法恢复。</p>',
+    body: '<p class="nav-dialog__note">This deletes the Dashboard directory and its files from disk. It cannot be undone.</p>',
     onSubmit: async () => {
       await request(`/api/navigation/trash/${encodeURIComponent(trashId)}`, {method:'DELETE'});
       await refreshNavigation(null);

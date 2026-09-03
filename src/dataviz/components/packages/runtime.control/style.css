@@ -18,12 +18,14 @@
   justify-content: space-between;
   gap: .75rem;
   width: 100%;
-  min-height: 2.5rem;
+  height: var(--dv-control-height, 2.5rem);
+  min-height: var(--dv-control-height, 2.5rem);
   padding: .55rem .75rem;
   color: var(--dv-ink, #202536);
   background: var(--dv-panel, #fff);
   border: 1px solid var(--dv-line, #d9e0ec);
   border-radius: 7px;
+  overflow: hidden;
   cursor: pointer;
   text-align: left;
 }
@@ -33,10 +35,10 @@
 .dv-choice-option:focus-visible,
 .dv-cascader-option:focus-visible,
 .dv-tree-option:focus-visible { outline: 2px solid var(--dv-accent, #3949ab); outline-offset: 2px; }
-.dv-choice-trigger > i { font-style: normal; transition: transform 140ms ease; }
-.dv-choice-trigger [data-control-summary] { display: flex; align-items: center; flex-wrap: wrap; gap: .3rem; min-width: 0; overflow: hidden; }
-.dv-choice-summary__tag { max-width: 11rem; padding: .18rem .38rem; overflow: hidden; color: var(--dv-accent-strong, #1a237e); background: color-mix(in srgb, var(--dv-soft, #e8eaf6) 72%, var(--dv-panel, #fff)); border: 1px solid color-mix(in srgb, var(--dv-accent, #3949ab) 28%, var(--dv-line, #d9e0ec)); border-radius: 4px; text-overflow: ellipsis; white-space: nowrap; font-size: .78rem; }
-.dv-choice-summary__rest { color: var(--dv-muted, #667085); font-size: .78rem; white-space: nowrap; }
+.dv-choice-trigger > i { flex: 0 0 auto; font-style: normal; transition: transform 140ms ease; }
+.dv-choice-trigger [data-control-summary] { display: flex; flex: 1 1 auto; align-items: center; flex-wrap: nowrap; gap: .3rem; min-width: 0; overflow: hidden; }
+.dv-choice-summary__tag { flex: 1 1 0; min-width: 0; max-width: 11rem; padding: .18rem .38rem; overflow: hidden; color: var(--dv-accent-strong, #1a237e); background: color-mix(in srgb, var(--dv-soft, #e8eaf6) 72%, var(--dv-panel, #fff)); border: 1px solid color-mix(in srgb, var(--dv-accent, #3949ab) 28%, var(--dv-line, #d9e0ec)); border-radius: 4px; text-overflow: ellipsis; white-space: nowrap; font-size: .78rem; }
+.dv-choice-summary__rest { flex: 0 0 auto; color: var(--dv-muted, #667085); font-size: .78rem; white-space: nowrap; }
 .dv-choice-summary__all { color: var(--dv-ink, #202536); }
 .dv-control-panel {
   z-index: 1000;

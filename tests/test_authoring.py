@@ -29,6 +29,7 @@ from dataviz.documentation import (
     AUTHORING_ROUTES,
     DOC_CATALOG_SCHEMA,
     DOC_PATHS,
+    DOC_SEARCH_SCHEMA,
     DOC_TOPICS,
     authoring_route_catalog,
     resolve_authoring_route,
@@ -153,7 +154,7 @@ def test_machine_readable_component_examples_use_canonical_output_references():
 def test_machine_readable_documentation_examples_match_current_schemas():
     providers = {
         "dataviz/workspace/v2": WorkspaceDefinition,
-        "dataviz/dashboard/v19": DashboardDefinition,
+        "dataviz/dashboard/v20": DashboardDefinition,
         "dataviz/source/v6": SOURCE_DEFINITION_ADAPTER,
         "dataviz/dataset-transform/v3": DatasetTransformDefinition,
         "dataviz/interactive-transform/v4": InteractiveTransformDefinition,
@@ -465,7 +466,7 @@ def test_component_registry_reports_package_owned_implementations():
     catalog = component_catalog()
     report = validate_component_packages(catalog)
 
-    assert COMPONENT_REGISTRY_VERSION == "6.0.0"
+    assert COMPONENT_REGISTRY_VERSION == "6.2.0"
     assert set(component_packages()) == {
         "control.auto-complete",
         "control.cascader",
@@ -884,6 +885,61 @@ def test_cli_docs_routes_tasks_and_components_without_loading_every_topic():
     assert control["component_definition"]["id"] == "control.select"
 
 
+def test_cli_docs_resolves_unambiguous_component_short_names():
+    result = CliRunner().invoke(
+        app, ["docs", "--component", "select", "--format", "json"]
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["component"] == "control.select"
+    assert payload["component_definition"]["id"] == "control.select"
+
+
+def test_cli_docs_rejects_ambiguous_component_short_names_with_commands():
+    result = CliRunner().invoke(
+        app, ["docs", "--component", "custom", "--format", "json"]
+    )
+
+    assert result.exit_code != 0
+    output = " ".join(result.output.split())
+    assert "Ambiguous Component short name" in output
+    assert "view.custom" in output
+    assert "renderer.custom" in output
+    with pytest.raises(ValueError) as failure:
+        resolve_authoring_route(component="custom")
+    message = str(failure.value)
+    assert "dataviz docs --component view.custom --format json" in message
+    assert "dataviz docs --component renderer.custom --format json" in message
+
+
+def test_cli_docs_search_returns_ranked_bounded_body_snippets():
+    result = CliRunner().invoke(
+        app, ["docs", "--search", "Perspective", "--format", "json"]
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["schema"] == DOC_SEARCH_SCHEMA
+    assert payload["query"] == "Perspective"
+    assert payload["returned"] <= 20
+    assert payload["results"]
+    assert any("Perspective" in item["snippet"] for item in payload["results"])
+    assert all(
+        set(item) == {"topic", "path", "snippet", "summary", "command"}
+        for item in payload["results"]
+    )
+    assert "topics" not in payload
+
+    multi_term = CliRunner().invoke(
+        app, ["docs", "--search", "remote select", "--format", "json"]
+    )
+    assert multi_term.exit_code == 0, multi_term.stdout
+    multi_term_payload = json.loads(multi_term.stdout)
+    assert multi_term_payload["results"]
+    assert multi_term_payload["results"][0]["topic"] == "query-parameters"
+
+
 @pytest.mark.parametrize(
     ("task", "document", "required_concept"),
     [
@@ -1056,7 +1112,7 @@ def test_coordinate_layout_fields_are_strictly_rejected(layout):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v19",
+                "schema": "dataviz/dashboard/v20",
                 "kind": "dashboard",
                 "id": "strict",
                 "layout": layout,

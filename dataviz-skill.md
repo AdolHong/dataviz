@@ -36,6 +36,17 @@ Do not load the entire Runtime architecture by default. Do not create a new Sour
 
 Use the smallest route that can answer the current question.
 
+When the exact topic or component id is unknown, use the installed CLI as the discovery boundary before reading Dataviz source code:
+
+```bash
+dataviz docs --search '<business term, field, symptom, or capability>' --format json
+dataviz docs <matched-topic> --format json
+dataviz docs --component <component-id-or-unambiguous-short-name> --format json
+dataviz schemas <model> --full --format json
+```
+
+Search results contain bounded documentation snippets with their topic/path and a direct follow-up command. A short component name such as `select` resolves to `control.select` only when unique; ambiguous names return canonical candidates. Inspect package source only when these installed contracts cannot answer the question or when locating a framework defect, and report the missing documentation as part of the diagnosis.
+
 ### New Dashboard
 
 Start with the minimal closure:
@@ -148,6 +159,7 @@ Infer obvious facts from existing contracts. Ask the user only when a missing an
 ### Choose the analytical medium
 
 - Use **Metric** for one current value when status, target delta, or change is the main message.
+- A Metric may show one supporting field with `secondary`; keep `unit` inline with the primary value and reserve `label` for explanatory copy. Compute rates or deltas in SQL/Transform, then use `format: percent` for fractional values such as `0.2447`. Do not create a Custom Renderer merely to show “quantity + rate”.
 - Use **Table** for exact lookup, ranking, audit, reconciliation, many dimensions, or when users need sorting, search, pagination, and row-level detail.
 - Use **Perspective** only when the end user needs to change grouping, aggregation, pivot, or analytical dimensions at runtime.
 - Use **Chart** when position, shape, trend, distribution, relationship, flow, or uncertainty makes the pattern materially easier to understand.
@@ -175,7 +187,7 @@ Use pie/donut only for a small, stable set of categories where rough part-to-who
 After the analytical choice:
 
 1. Start with a built-in declarative Plotly View when it represents the question.
-2. Use declarative Plotly `options.trace`, `options.layout`, and View `config` for richer encodings and interactions.
+2. Use declarative Plotly `options.trace`, `options.layout`, and View `config` for richer encodings and interactions. A dynamic Plotly layout value may be one complete typed Query binding such as `x0: "{{ parameters.holiday_date }}"`; do not concatenate it with text or use it in `options.trace`/`config`. Run strict validation so unresolved or unknown bindings fail at their exact nested path.
 3. Use `context.charts.plotly` in a Custom Renderer only for functions, imperative events, or lifecycle behavior that cannot remain declarative.
 4. Use the official Plotly Gallery and source examples as implementation references, not as the ontology for choosing a chart.
 
@@ -192,6 +204,8 @@ When a national GeoJSON is too large but the result covers only a few regions, c
 ## Reuse existing Dashboard knowledge
 
 Use the physical tree for project navigation and Catalog for semantic discovery:
+
+In Server author mode, drag a Dashboard by its visible grip to move it into another Sidebar folder. Right-click a Dashboard to rename it, choose an explicit destination, or move it to Trash. These operations rename the physical `dashboards/<folder>##<dashboard>` directory while preserving the stable Dashboard `id`; do not edit `id` merely to change the Sidebar label.
 
 ```bash
 dataviz tree <workspace>
@@ -280,6 +294,7 @@ Use an Analysis Overlay only for an explicitly temporary experiment that substit
 - Query Parameters change query identity; Controls own post-query typed state. Each View or Interactive Transform declares whether it consumes that state as a filter or a value. Do not substitute one lifecycle for the other merely for UI convenience.
 - SQL-backed Query Parameter choices belong to Dashboard-local Parameter Domains, not Sources or Interactive Transforms. Candidate discovery is optional for AI: known values may be passed directly as canonical Query Parameter state without loading the UI catalog.
 - Candidate-backed `multiple_select` uses `all/include/exclude/none`; compact states never expand the full candidate relation. Prefer Source `query_filters` and explicitly choose whether an empty selection passes through or matches no rows. Read `dataviz docs query-parameters --format json` before implementing SQL-backed choices, cascades, Revert, or large entity lookup.
+- Multi-select menus provide `Select all` and a local `Revert` by default. The closed all/all-available state is summarized as one semantic “全部”; local Revert restores the state captured when that menu opened, while Query Card Revert restores the last committed Query snapshot.
 - Treat page reload and initial Dashboard hydration as compact-state restoration, not as a new parent edit. URL/tab/committed `include` or `exclude` operands must survive while Lookup restores labels; values absent from the latest generation remain unavailable instead of being silently removed.
 - When debugging Query Parameters in Server, enable the Query Card `{ }` author projection to see selection mode, operand counts, available/unavailable counts, dependencies, Lookup request generation/timing, and the latest deterministic reconciliation. Its Copy diagnosis action exports the canonical state and bounded Lookup evidence, not candidate rows. It is read-only and does not replace `inspect query` or Result evidence.
 - Keep Source SQL and Parameter Domain SQL Dashboard-local. Duplicate and independently evolve small SQL definitions when multiple Dashboards need similar candidates; never use `workspace:/...` for executable query logic. Share stable files through Workspace Assets. Read `dataviz docs workspace-assets --format json` before registering shared files or creating a Bundle; never use parent traversal or absolute local paths as a portability shortcut.

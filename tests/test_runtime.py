@@ -367,7 +367,7 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert "data-dv-control-panel" in report
     assert 'data-control-role="dashboard"' in report
     assert 'data-control-role="dashboard" data-control-count="1" data-control-template="stack"' in report
-    assert 'data-control-column-width="240"' in report
+    assert 'data-control-column-width="280"' in report
     assert "Section controls" in report
     assert "View controls" in report
     assert "Section controls</strong><small>" not in report

@@ -9,7 +9,7 @@ const fixture = name => JSON.parse(
 
 const runtimeWindow = {
   dataviz:{
-    protocol:{schema:'dataviz/runtime/v14'},
+    protocol:{schema:'dataviz/runtime/v15'},
     dependency_contract:{schema:'dataviz/dependency-contract/v13'},
     query_parameter_state:{},
   },
@@ -32,6 +32,53 @@ const runtime = new Function('window', 'document', 'CSS', `${runtimeSource}
     output:datavizValidateOutputDestination,
   };
 `)(runtimeWindow, {querySelectorAll:() => []}, {escape:String});
+
+const viewWindow = {
+  dataviz:{
+    query_parameter_state:{
+      holiday_date:{value:'2026-10-01'},
+      visible_range:{value:['2026-09-01', '2026-10-07']},
+    },
+  },
+  datavizComponents:{},
+};
+const viewControllerSource = fs.readFileSync(
+  path.join(
+    root,
+    'src',
+    'dataviz',
+    'components',
+    'packages',
+    'view.declarative',
+    'controller.js',
+  ),
+  'utf8',
+);
+const viewRuntime = new Function(
+  'window',
+  `${viewControllerSource}\nreturn window.datavizComponents.viewDeclarative;`,
+)(viewWindow);
+assert.deepEqual(
+  viewRuntime.resolvePlotlyLayout({
+    shapes:[{
+      x0:'{{ parameters.holiday_date }}',
+      x1:'{{parameters.holiday_date}}',
+    }],
+    xaxis:{range:'{{ parameters.visible_range }}'},
+  }),
+  {
+    shapes:[{x0:'2026-10-01', x1:'2026-10-01'}],
+    xaxis:{range:['2026-09-01', '2026-10-07']},
+  },
+);
+assert.throws(
+  () => viewRuntime.resolvePlotlyLayout({title:'Holiday {{ parameters.holiday_date }}'}),
+  error => error.code === 'plotly_layout_template_invalid',
+);
+assert.throws(
+  () => viewRuntime.resolvePlotlyLayout({shapes:[{x0:'{{ parameters.missing }}'}]}),
+  error => error.code === 'plotly_layout_parameter_unknown',
+);
 
 const decode = value => {
   if (Array.isArray(value)) return value.map(decode);
@@ -84,7 +131,7 @@ for (const item of fixture('output-capability')) {
 }
 
 const adapterWindow = {
-  dataviz:{protocol:{schema:'dataviz/runtime/v14'}},
+  dataviz:{protocol:{schema:'dataviz/runtime/v15'}},
   customElements:{get:() => null, define:() => {}},
   addEventListener:() => {},
 };
@@ -116,7 +163,7 @@ const runWebFilter = item => {
     operator:isPath ? 'auto' : payload.operator,
   };
   const manifest = {
-    protocol:{schema:'dataviz/runtime/v14'},
+    protocol:{schema:'dataviz/runtime/v15'},
     portable:{outputs:{'source:rows/main':rows}},
     dependency_contract:{
       views:{sample:{

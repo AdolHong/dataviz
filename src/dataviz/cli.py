@@ -67,6 +67,7 @@ from dataviz.documentation import (
     docs_catalog,
     resolve_authoring_route,
     resolve_doc_topic,
+    search_documentation,
 )
 from dataviz.execution import Executor, InteractionExecutor
 from dataviz.execution.dependencies import (
@@ -802,7 +803,7 @@ dataviz catalog describe . 'hello::source:data/main'
 dataviz run . 'hello::source:data/main'
 ```
 """,
-        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v19
+        "dashboards/hello/dashboard.yaml": """schema: dataviz/dashboard/v20
 kind: dashboard
 id: hello
 title: Hello dashboard
@@ -1081,7 +1082,11 @@ def documentation(
         None,
         help="Topic, for example quickstart, design-language, charts, or troubleshooting",
     ),
-    search: str | None = typer.Option(None, "--search", help="Search all built-in documentation"),
+    search: str | None = typer.Option(
+        None,
+        "--search",
+        help="Search ranked snippets from all built-in documentation",
+    ),
     task: str | None = typer.Option(
         None,
         "--task",
@@ -1125,7 +1130,30 @@ def documentation(
             _print_doc_topic(resolved, definition)
         return
 
-    catalog = docs_catalog(search)
+    if search is not None:
+        try:
+            payload = search_documentation(search)
+        except ValueError as error:
+            raise typer.BadParameter(str(error)) from error
+        if output_format == "json":
+            print_json(payload)
+            return
+        typer.echo(f"# Documentation search: {payload['query']}\n")
+        for result in payload["results"]:
+            typer.echo(f"## {result['topic']} · {result['path']}\n")
+            typer.echo(f"{result['snippet']}\n")
+            typer.echo(f"Read: `{result['command']}`\n")
+        if not payload["results"]:
+            typer.echo("No matching documentation snippets.")
+            if payload["suggestions"]:
+                typer.echo(f" Try: {', '.join(payload['suggestions'])}")
+        elif payload["truncated"]:
+            typer.echo(
+                f"Showing {payload['returned']} of {payload['total']} matching snippets."
+            )
+        return
+
+    catalog = docs_catalog()
     if output_format == "json":
         print_json({
             "schema": DOC_CATALOG_SCHEMA,
@@ -1470,7 +1498,7 @@ def frontend_adapters(
     ),
     output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
 ) -> None:
-    """Inspect frontend implementations that consume dataviz/runtime/v14."""
+    """Inspect frontend implementations that consume dataviz/runtime/v15."""
     if output_format not in {"markdown", "json"}:
         raise typer.BadParameter("--format must be markdown or json")
     catalog = frontend_adapter_catalog()

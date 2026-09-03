@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from difflib import get_close_matches
 from typing import Any
 
 from dataviz.protocols import (
@@ -18,6 +19,7 @@ from dataviz.view_contracts import VIEW_TEMPLATE_CONTRACTS
 
 
 DOC_CATALOG_SCHEMA = "dataviz/docs-catalog/v2"
+DOC_SEARCH_SCHEMA = "dataviz/docs-search/v1"
 
 
 AUTHORING_ROUTE_ALIASES = {
@@ -416,10 +418,10 @@ def resolve_authoring_route(
     if component:
         from dataviz.templates import component_catalog
 
-        selected_component = component.strip()
-        selected_definition = component_catalog().get(selected_component)
-        if selected_definition is None:
-            raise ValueError(f"Unknown Component: {selected_component}")
+        requested_component = component.strip()
+        catalog = component_catalog()
+        selected_component = _resolve_component_identifier(requested_component, catalog)
+        selected_definition = catalog[selected_component]
         if selected_component in {
             "view.custom", "renderer.custom", "service.charts", "service.tables",
             "view.renderer-lifecycle"
@@ -830,6 +832,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
         "default": "minimal",
         "routes": authoring_route_catalog(),
         "commands": [
+            "dataviz docs --search '<keywords>' --format json",
             "dataviz docs --task minimal --format json",
             "dataviz docs --task interactive --format json",
             "dataviz docs --task custom-renderer --format json",
@@ -837,6 +840,8 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "dataviz scaffold --list --format json",
         ],
         "rules": [
+            "未知字段或能力先用 --search 读取带 topic/path 的正文片段，再打开命中 topic；不要先搜索安装包源码。",
+            "--component 接受 control.select 等 canonical id，也接受可唯一解析的 select 短名；歧义或拼写错误返回可直接复制的候选命令。",
             "minimal 只披露 Adapter → Source → View → Layout。",
             "只有任务需要查询后交互状态或计算时才进入 interactive。",
             "只有内置 View 无法表达视觉时才进入 custom-renderer。",
@@ -866,7 +871,7 @@ assets:
     path: assets/data/store_dictionary.csv
     media_type: text/csv""",
         "dashboard_example": """# dashboard.yaml
-schema: dataviz/dashboard/v19
+schema: dataviz/dashboard/v20
 kind: dashboard
 id: city-map
 assets: [china-city]  # Browser allowlist and portable-report dependency
@@ -1047,11 +1052,11 @@ sources:
             "presentation": "仅在确有分析价值时设置 presentation.state_summary.enabled: true；items 可按 canonical Control key 调整 label/order/hidden/formatter，且不允许改写状态值。",
         },
         "identity": {
-            "folder": "导航显示名及 ## 目录位置；复制、重命名和打包时所见即所得。",
+            "folder": "Sidebar 的文件夹与 Dashboard 名称对应 ## 编码的物理目录位置；Dashboard 可拖到其他文件夹，右键可重命名或使用 Move Dashboard，复制和打包时所见即所得。重命名和移动不改变稳定 id。",
             "id": "CLI、DAG、API 与 Presentation 使用的稳定程序身份。",
             "title": "页面内容，可与文件夹名不同；为空时回退到文件夹末级名称。",
         },
-        "minimal_example": """schema: dataviz/dashboard/v19
+        "minimal_example": """schema: dataviz/dashboard/v20
 kind: dashboard
 id: sales-overview
 title: 销售概览
@@ -1113,6 +1118,7 @@ sections:
     },
     "query-parameters": {
         "summary": "Query Parameter 创建不可变 Query Run；每个参数只保存一份 canonical state，Dashboard-owned SQL 候选由 Server 物化并通过 Lookup 搜索或分页。",
+        "remote_select": "Remote Select 的输入、搜索和翻页只触发 Parameter Lookup；选择提交后才改变 canonical Query Parameter state。打开的下拉框必须立即投影最新 request generation 的候选，迟到响应不得覆盖新搜索。",
         "dynamic_domains": {
             "purpose": "一个 SQL Domain 物化一张完整候选关系；多个 Query Parameter 可从不同字段去重投影，父级变化只在该 generation 上过滤，不重跑 SQL。",
             "example": """parameter_domains: [parameter_domains/locations/domain.yaml]
@@ -1446,7 +1452,7 @@ timeout_seconds: 120
             "checkbox": "随所在 Query/Control 工作流提交的 boolean。",
             "switch": "立即发出 input/change 的 boolean；执行策略仍由外层工作流决定。",
             "radio-group": "少量可见单选；不合成 All/Clear。",
-            "select": "平面单选或多选；下拉在视口内提供更宽阅读面，分页/非虚拟候选自动换行显示全文，本地大列表使用固定行高虚拟化并以 Tooltip 提供全文。search/virtual 支持 auto/always/never；单选不提供批量操作。",
+            "select": "平面单选或多选；下拉在视口内提供更宽阅读面，分页/非虚拟候选自动换行显示全文，本地大列表使用固定行高虚拟化并以 Tooltip 提供全文。search/virtual 支持 auto/always/never；单选不提供批量操作，多选默认提供 Select all 与本次打开期间的 Revert。",
             "checkbox-group": "2–5 个并列选项的直接多选；不显示全选、反选或清空工具栏。",
             "cascader": "用 path_fields 逐级浏览并选择完整路径。",
             "tree-select": "在窄弹层中搜索、展开和选择层级路径。",
@@ -1461,6 +1467,7 @@ timeout_seconds: 120
         ],
         "behavior": [
             "Single Select 不出现 All、Select all 或 Invert；optional + clearable 的单选允许 Clear，required single 始终恰好一个值且拒绝 clearable。",
+            "Multi Select 的关闭态摘要用‘全部’表示 all/all_available，单个显式值直接显示文本；菜单中 Select all 是动作，Revert 只撤销本次打开后的编辑。Query Card 全局 Revert 仍恢复上次 committed Query snapshot。",
             "Control canonical state 是 {value, revision, intent?}；候选型多选可带 all_available/explicit intent，自由集合只保存 list value。",
             "Multi Select 和 Date Range 用 required 控制是否允许空值；clearable 可显式关闭清空操作，required: true 与 clearable: true 会被 validate 拒绝。",
             "候选依赖用 depends_on 声明直接 Control 父节点；Compiler 计算传递闭包和拓扑顺序。",
@@ -1658,6 +1665,22 @@ control_components:
     },
     "charts": {
         "summary": "Plotly 是 Dataviz 唯一的作者图表接口；声明式模板与 Custom Renderer 逐层开放完整分析能力。",
+        "metric": {
+            "example": """- id: net-uplift
+  title: 品类净增量
+  template: metric
+  input: interactive:uplift/summary
+  value: net_uplift_qty
+  aggregate: sum
+  unit: 件
+  secondary:
+    value: uplift_ratio
+    aggregate: max
+    label: 增量率
+    format: percent""",
+            "semantics": "unit 与主值同一基线；label 是可选说明文字。secondary 只接受一个已计算字段，独立聚合；percent 输入使用 0.2447 这类比例值并显示为 24.47%。",
+            "limits": "Metric 不计算公式，不提供趋势箭头或 Sparkline；先在 SQL/Transform 中生成辅助指标。空值显示为 —。Band Section 自动使用紧凑 Metric 几何，不需要尺寸 DSL。",
+        },
         "field_matrix": _CHART_FIELD_MATRIX,
         "rule": "先验证数据口径、字段、聚合和 Named Output，再用 Plotly trace/layout/config 调整视觉细节。",
         "plotly_runtime": {
@@ -1667,9 +1690,26 @@ control_components:
             "interaction": "图例、点击、框选、套索与缩放使用 Plotly 事件和 config；矩形/套索手势提交后自动隐藏临时轮廓并保留 Control 选择，再次点击当前激活的工具可退出选择模式；页面滚动仍由 Dashboard 优先处理。",
             "offline": "Plotly.js 4.0.0 作为固定浏览器资产随 Dataviz 提供；Server 与 portable HTML 使用同一份 JS，不依赖 Python plotly 包。",
         },
+        "layout_parameter_binding": {
+            "purpose": "让参考线、参考区间、轴范围等 Plotly layout 值读取最近一次 RUN 已提交的 Query Parameter，同时保留 date/number/list 的真实类型。",
+            "syntax": "{{ parameters.<id> }}",
+            "example": """options:
+  layout:
+    shapes:
+      - type: line
+        x0: "{{ parameters.holiday_date }}"
+        x1: "{{ parameters.holiday_date }}"
+        y0: 0
+        y1: 1
+        yref: paper
+        line: {dash: dash}
+""",
+            "boundary": "只有 options.layout 中由完整 token 构成的值会进行 typed binding；不支持字符串拼接、表达式、Control 引用，也不处理 options.trace 或 config。validate 会以具体嵌套路径拒绝残留或未知模板。",
+            "lifecycle": "绑定读取最近一次 RUN 的 committed Query Parameter；草稿参数不会移动当前 Result 的参考线。结果字段驱动的复杂标注继续在 SQL/Transform 中生成，不新增计算 DSL。",
+        },
         "ownership": {
             "data": "Server/Transform 生成 canonical Named Output；Browser Adapter 只把已计算字段投影为 Plotly traces，不重新解释业务口径。",
-            "layout": "Dashboard options.layout 保存稳定作者意图；Browser Runtime 再合并 Theme、容器尺寸和响应式边距。",
+            "layout": "Dashboard options.layout 保存稳定作者意图；其中完整 {{ parameters.<id> }} 值在 Browser Runtime 中按 committed Query state 进行 typed binding，再合并 Theme、容器尺寸和响应式边距。",
             "config": "Browser Runtime 提供 page-first 滚轮、Modebar、框选交互、Resize 与离线安全默认，并关闭 Plotly 云端分享入口；View config 只覆盖明确的局部需求。",
             "render": "浏览器直接调用内置 Plotly.js 4.0.0 的 newPlot/react/resize/purge，不经过 Python Figure。",
         },
@@ -1802,7 +1842,7 @@ views:
         "options": {
             "presentation": ["labels", "formats", "align", "widths", "wrap", "emphasis.columns", "striped", "compact", "layout", "show_count"],
             "behavior": ["sortable", "initial_sort", "sort_desc_first", "searchable", "initial_search", "page_size", "hidden_columns", "column_order", "pinned_columns"],
-            "rule": "默认只显示表头和数据；show_count、搜索框和分页都必须由作者显式启用。emphasis.columns 只静态强调少量关键列，不表达条件样式或业务计算。",
+            "rule": "默认只显示表头和数据；Table 的 show_count、搜索框和分页都必须由作者显式启用。Input 的 show_count 仅与 max_length 一起显示 current / maximum，不展示没有上限语境的裸长度。emphasis.columns 只静态强调少量关键列，不表达条件样式或业务计算。",
         },
         "declarative_example": """- id: revenue-detail
   template: table
@@ -1865,8 +1905,8 @@ views:
             "options": {
                 "template": ["auto", "stack", "grid"],
                 "width": ["auto", "compact", "regular", "wide"],
-                "columns": "1–6，表示最大列数；Query 的实际列数由 Panel 自身宽度动态计算",
-                "column_width": "160–600 px；Query 每轨目标宽度，默认 280；稀疏表单不拉满整行",
+                "columns": "1–6，表示最大列数；Query 的实际列数由 Panel 自身宽度动态计算；Dashboard auto 在多个控件时最多使用 3 列",
+                "column_width": "160–600 px，默认 280；Dashboard Panel 按有效列数和舒适列宽收口，稀疏表单与单个控件不拉满整行",
                 "density": ["compact", "comfortable"],
             },
             "control_span": "control_components.<canonical-key>.span 可显式设为 1 或 2；默认 1，RangePicker 等组件不会自动跨列，窄容器会安全退化为单列。",
@@ -2279,6 +2319,168 @@ assets:
 def resolve_doc_topic(topic: str) -> str:
     normalized = topic.strip().lower()
     return DOC_TOPIC_REDIRECTS.get(normalized, normalized)
+
+
+def _resolve_component_identifier(
+    requested: str,
+    catalog: dict[str, dict[str, Any]],
+) -> str:
+    normalized = requested.casefold()
+    exact = [identifier for identifier in catalog if identifier.casefold() == normalized]
+    if exact:
+        return exact[0]
+
+    suffix_matches = [
+        identifier
+        for identifier in catalog
+        if "." not in requested and identifier.rsplit(".", 1)[-1].casefold() == normalized
+    ]
+    if len(suffix_matches) == 1:
+        return suffix_matches[0]
+    if suffix_matches:
+        commands = "; ".join(
+            f"dataviz docs --component {identifier} --format json"
+            for identifier in suffix_matches
+        )
+        raise ValueError(
+            f"Ambiguous Component short name {requested!r}. Use one of: "
+            f"{', '.join(suffix_matches)}. Commands: {commands}"
+        )
+
+    aliases: dict[str, list[str]] = {}
+    for identifier in catalog:
+        aliases.setdefault(identifier.casefold(), []).append(identifier)
+        aliases.setdefault(identifier.rsplit(".", 1)[-1].casefold(), []).append(identifier)
+    close_aliases = get_close_matches(normalized, aliases, n=5, cutoff=0.45)
+    suggestions = list(dict.fromkeys(
+        identifier
+        for alias in close_aliases
+        for identifier in aliases[alias]
+    ))[:5]
+    if suggestions:
+        commands = "; ".join(
+            f"dataviz docs --component {identifier} --format json"
+            for identifier in suggestions
+        )
+        raise ValueError(
+            f"Unknown Component: {requested}. Did you mean: "
+            f"{', '.join(suggestions)}? Commands: {commands}"
+        )
+    raise ValueError(
+        f"Unknown Component: {requested}. List available ids with: "
+        "dataviz components list --format json"
+    )
+
+
+def _documentation_fragments(value: Any, path: tuple[str, ...] = ()):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            yield from _documentation_fragments(child, (*path, str(key)))
+        return
+    if isinstance(value, list):
+        for index, child in enumerate(value):
+            yield from _documentation_fragments(child, (*path, f"[{index}]"))
+        return
+    if isinstance(value, str) and value.strip():
+        yield path, " ".join(value.split())
+
+
+def _documentation_snippet(text: str, terms: tuple[str, ...], limit: int = 240) -> str:
+    folded = text.casefold()
+    positions = [folded.find(term) for term in terms if folded.find(term) >= 0]
+    if len(text) <= limit:
+        return text
+    center = min(positions) if positions else 0
+    start = max(0, center - limit // 3)
+    end = min(len(text), start + limit)
+    start = max(0, end - limit)
+    return f"{'…' if start else ''}{text[start:end]}{'…' if end < len(text) else ''}"
+
+
+def _documentation_path(path: tuple[str, ...]) -> str:
+    result = ""
+    for segment in path:
+        if segment.startswith("["):
+            result += segment
+        else:
+            result += f"{'.' if result else ''}{segment}"
+    return result
+
+
+def search_documentation(search: str, *, limit: int = 20) -> dict[str, Any]:
+    """Return ranked, bounded leaf snippets instead of complete matching topics."""
+    query = " ".join(search.split())
+    if not query:
+        raise ValueError("Documentation search requires a non-empty query")
+    terms = tuple(part.casefold() for part in query.split())
+    redirected_topic = resolve_doc_topic(query.casefold().replace(" ", "-"))
+    matches: list[dict[str, Any]] = []
+    for topic, definition in DOC_TOPICS.items():
+        summary = str(definition.get("summary", ""))
+        for path, text in _documentation_fragments(definition):
+            path_text = _documentation_path(path)
+            searchable = f"{topic} {path_text} {text}".casefold()
+            matched_terms = sum(term in searchable for term in terms)
+            if not matched_terms:
+                continue
+            score = matched_terms * 20
+            topic_folded = topic.casefold()
+            path_folded = path_text.casefold()
+            text_folded = text.casefold()
+            if matched_terms == len(terms):
+                score += 45
+            if topic == redirected_topic:
+                score += 35
+            if query.casefold() in text_folded:
+                score += 70
+            if query.casefold() == topic_folded:
+                score += 120
+            elif query.casefold() in topic_folded:
+                score += 80
+            if path_text == "summary":
+                score += 45
+            if all(term in path_folded for term in terms):
+                score += 30
+            if all(term in text_folded for term in terms):
+                score += 20
+            matches.append(
+                {
+                    "topic": topic,
+                    "path": path_text,
+                    "snippet": _documentation_snippet(text, terms),
+                    "summary": summary,
+                    "command": f"dataviz docs {topic} --format json",
+                    "score": score,
+                }
+            )
+    matches.sort(key=lambda item: (-item["score"], item["topic"], item["path"]))
+    total = len(matches)
+    selected: list[dict[str, Any]] = []
+    per_topic: dict[str, int] = {}
+    for item in matches:
+        if per_topic.get(item["topic"], 0) >= 5:
+            continue
+        selected.append(item)
+        per_topic[item["topic"]] = per_topic.get(item["topic"], 0) + 1
+        if len(selected) == limit:
+            break
+    results = [
+        {key: value for key, value in item.items() if key != "score"}
+        for item in selected
+    ]
+    suggestions = []
+    if not results:
+        vocabulary = list(DOC_TOPICS) + list(DOC_TOPIC_REDIRECTS)
+        suggestions = get_close_matches(query.casefold(), vocabulary, n=5, cutoff=0.4)
+    return {
+        "schema": DOC_SEARCH_SCHEMA,
+        "query": query,
+        "results": results,
+        "returned": len(results),
+        "total": total,
+        "truncated": total > len(results),
+        "suggestions": suggestions,
+    }
 
 
 def docs_catalog(search: str | None = None) -> dict[str, dict[str, Any]]:

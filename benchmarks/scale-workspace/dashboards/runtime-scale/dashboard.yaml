@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v19
+schema: dataviz/dashboard/v20
 kind: dashboard
 id: runtime-scale
 title: "Runtime scale · {{ parameters.row_count }} rows"

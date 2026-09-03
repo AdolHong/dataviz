@@ -1,5 +1,5 @@
 // Owner: Runtime protocol, manifest normalization, and shared constants.
-const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v14';
+const DATAVIZ_RUNTIME_PROTOCOL = 'dataviz/runtime/v15';
 const DATAVIZ_INTERACTIVE_WORKER_PROTOCOL = 'dataviz/interactive-worker/v1';
 const DATAVIZ_DEPENDENCY_CONTRACT = 'dataviz/dependency-contract/v13';
 if (window.dataviz.protocol?.schema !== DATAVIZ_RUNTIME_PROTOCOL) {
@@ -759,7 +759,7 @@ const validateInteractiveOutput = (transformId, name, value, definition = {}) =>
 };
 // Owner: shared Runtime host state and public registration surface.
 const datavizRuntime = window.datavizRuntime = {
-  protocol: 'dataviz/runtime/v14',
+  protocol: 'dataviz/runtime/v15',
   transforms: new Map(),
   views: new Map(),
   renderers: new Map(),

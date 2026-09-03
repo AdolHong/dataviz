@@ -1,6 +1,6 @@
 schema: dataviz/component-package/v1
 package: section.declarative
-version: 1.0.0
+version: 1.1.0
 category: section
 purpose: Document-flow Section composition, state propagation and repeated View orchestration.
 implementation:
@@ -15,7 +15,7 @@ components:
   - {id: section.hero-metrics, purpose: Hero chart followed by KPI cards, status: stable}
   - {id: section.chart-and-table, purpose: Chart beside an analysis table, status: stable}
   - {id: section.comparison, purpose: Two equal Views, status: stable}
-  - {id: section.band, purpose: Compact KPI strip, status: stable}
+  - {id: section.band, purpose: Compact KPI strip with automatic Metric geometry, status: stable}
   - {id: section.small-multiples, purpose: Repeat one View blueprint for every data group, status: stable}
   - {id: section.selection-gallery, purpose: Repeat only selected data groups, status: stable}
   - {id: section.state, purpose: Semantic aggregate lifecycle state for a Section and its Views, status: stable}

@@ -21,6 +21,7 @@
     let virtual = false;
     let searchTimer = null;
     let searchComposing = false;
+    let openSnapshot = null;
 
     const querySelection = () => input.dataset.querySelection || 'all';
     const querySelected = option => {
@@ -82,9 +83,13 @@
     const clear = document.createElement('button');
     clear.type = 'button';
     clear.textContent = control.dataset.clearLabel || 'Clear';
+    const revert = document.createElement('button');
+    revert.type = 'button';
+    revert.textContent = 'Revert';
+    revert.title = 'Revert changes made while this menu is open';
     const count = document.createElement('small');
     count.setAttribute('aria-live', 'polite');
-    footerActions.append(all, clear);
+    footerActions.append(all, clear, revert);
     footer.append(footerActions, count);
     panel.append(search, viewport, empty, footer);
     picker.append(trigger, panel);
@@ -93,7 +98,14 @@
     const overlay = api.floating(picker, trigger, panel, {
       width: Number(control.dataset.overlayWidth || 680),
       focus: search,
-      onOpen: () => sync(),
+      onOpen: () => {
+        openSnapshot = {
+          selection:queryParameter && input.multiple ? querySelection() : null,
+          intent:input.multiple ? api.inferSelectionIntent(input) : null,
+          values:api.selectedOptions(input).map(option => option.value),
+        };
+        sync();
+      },
     });
 
     const choose = index => {
@@ -213,6 +225,14 @@
       clear.hidden = !allowEmpty;
       clear.disabled = input.disabled || selectedCount === 0;
       all.hidden = !input.multiple;
+      revert.hidden = !input.multiple;
+      const currentValues = api.selectedOptions(input).map(option => option.value);
+      revert.disabled = input.disabled || !openSnapshot || (
+        openSnapshot.selection === (queryParameter ? querySelection() : null)
+        && openSnapshot.intent === api.inferSelectionIntent(input)
+        && openSnapshot.values.length === currentValues.length
+        && openSnapshot.values.every(value => currentValues.includes(value))
+      );
       if (queryParameter && input.multiple) {
         all.textContent = control.dataset.selectAllLabel || 'Select all';
         all.dataset.action = 'select-all';
@@ -374,6 +394,15 @@
       sync();
       api.emitChange(input);
       if (!input.multiple) overlay.close({returnFocus: true});
+    });
+    revert.addEventListener('click', () => {
+      if (input.disabled || !input.multiple || !openSnapshot) return;
+      const values = new Set(openSnapshot.values);
+      api.options(input).forEach(option => { option.selected = values.has(option.value); });
+      if (queryParameter) setQuerySelection(openSnapshot.selection || 'all');
+      else api.setSelectionIntent(input, openSnapshot.intent || 'explicit');
+      sync();
+      api.emitChange(input);
     });
 
     return {

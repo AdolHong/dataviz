@@ -352,6 +352,21 @@ class NavigationEditor:
             self._rename_dashboards({entry.path: target})
             return {"path": target.relative_to(self.root).as_posix()}
 
+    def rename_dashboard(
+        self, entry: DashboardCatalogEntry, title: str
+    ) -> dict[str, str]:
+        """Rename the Dashboard's navigation leaf without changing its stable id."""
+        with _LOCK:
+            if not entry.path.exists():
+                raise WorkspaceError("Dashboard directory no longer exists", file=entry.path)
+            location = decode_dashboard_path(self.dashboards_root.resolve(), entry.path.resolve())
+            if location.trashed:
+                raise WorkspaceError("A trashed dashboard must be restored before renaming it")
+            target_segments = (*location.folder_segments, validate_segment(title))
+            target = self.dashboards_root / encode_dashboard_name(target_segments)
+            self._rename_dashboards({entry.path: target})
+            return {"path": target.relative_to(self.root).as_posix()}
+
     def trash_dashboard(self, entry: DashboardCatalogEntry) -> str:
         with _LOCK:
             location = decode_dashboard_path(self.dashboards_root.resolve(), entry.path.resolve())

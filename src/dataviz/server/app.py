@@ -997,6 +997,16 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             raise HTTPException(404, error.message) from error
         return apply_navigation_change(lambda: navigation_editor.place_dashboard(entry, request.parent_id))
 
+    @app.patch("/api/navigation/dashboards/{dashboard_id}/name")
+    def rename_navigation_dashboard(dashboard_id: str, request: FolderRenameRequest):
+        try:
+            entry = refresh_workspace().catalog_entry(dashboard_id)
+        except WorkspaceError as error:
+            raise HTTPException(404, error.message) from error
+        return apply_navigation_change(
+            lambda: navigation_editor.rename_dashboard(entry, request.title)
+        )
+
     @app.delete("/api/navigation/dashboards/{dashboard_id}")
     def trash_navigation_dashboard(dashboard_id: str):
         try:

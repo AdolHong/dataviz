@@ -28,7 +28,7 @@ def _dashboard(root: Path, dashboard_id: str) -> None:
     sources.mkdir(parents=True)
     domains.mkdir()
     (dashboard / "dashboard.yaml").write_text(
-        f"""schema: dataviz/dashboard/v19
+        f"""schema: dataviz/dashboard/v20
 kind: dashboard
 id: {dashboard_id}
 title: Domain lab

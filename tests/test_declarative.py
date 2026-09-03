@@ -27,6 +27,10 @@ from dataviz.workspace.models import (
 )
 from dataviz.workspace.controls import compile_control_contract
 from dataviz.workspace.control_components import resolve_control_component
+from dataviz.view_contracts import (
+    plotly_layout_parameter_bindings,
+    resolve_plotly_layout_parameters,
+)
 from typer.testing import CliRunner
 
 
@@ -54,6 +58,111 @@ def test_template_registry_is_ai_discoverable():
     result = CliRunner().invoke(app, ["components", "list", "--format", "json"])
     assert result.exit_code == 0
     assert "view.stacked-bar" in json.loads(result.stdout)
+
+
+def test_metric_supports_inline_unit_and_one_typed_secondary_value():
+    definition = DashboardDefinition.model_validate(
+        {
+            "schema": "dataviz/dashboard/v20",
+            "kind": "dashboard",
+            "id": "metric-secondary",
+            "views": [
+                {
+                    "id": "uplift",
+                    "title": "Net uplift",
+                    "template": "metric",
+                    "input": "source:metrics/main",
+                    "value": "net_uplift_qty",
+                    "aggregate": "sum",
+                    "unit": "件",
+                    "secondary": {
+                        "value": "uplift_ratio",
+                        "aggregate": "max",
+                        "label": "增量率",
+                        "format": "percent",
+                    },
+                }
+            ],
+        }
+    )
+
+    metric = definition.views[0]
+    assert metric.unit == "件"
+    assert metric.secondary is not None
+    assert metric.secondary.value == "uplift_ratio"
+    assert metric.secondary.format == "percent"
+
+
+def test_metric_only_fields_are_rejected_by_other_view_templates():
+    with pytest.raises(ValidationError) as failure:
+        DashboardDefinition.model_validate(
+            {
+                "schema": "dataviz/dashboard/v20",
+                "kind": "dashboard",
+                "id": "strict-metric-fields",
+                "views": [
+                    {
+                        "id": "trend",
+                        "template": "line",
+                        "input": "source:data/main",
+                        "x": "date",
+                        "y": "value",
+                        "unit": "件",
+                    }
+                ],
+            }
+        )
+    assert "does not use fields: unit" in str(failure.value)
+
+
+def test_plotly_layout_accepts_only_exact_typed_parameter_bindings():
+    definition = DashboardDefinition.model_validate(
+        {
+            "schema": "dataviz/dashboard/v20",
+            "kind": "dashboard",
+            "id": "dynamic-reference-line",
+            "query_parameters": [
+                {
+                    "id": "holiday_date",
+                    "type": "single_input",
+                    "value_type": "date",
+                    "default": "2026-10-01",
+                }
+            ],
+            "views": [
+                {
+                    "id": "trend",
+                    "template": "line",
+                    "input": "source:sales/main",
+                    "x": "day",
+                    "y": "revenue",
+                    "options": {
+                        "layout": {
+                            "shapes": [
+                                {
+                                    "type": "line",
+                                    "x0": "{{ parameters.holiday_date }}",
+                                    "x1": "{{parameters.holiday_date}}",
+                                }
+                            ]
+                        }
+                    },
+                }
+            ],
+        }
+    )
+
+    bindings = plotly_layout_parameter_bindings(definition.views[0])
+    assert [binding.parameter for binding in bindings] == [
+        "holiday_date",
+        "holiday_date",
+    ]
+    assert all(binding.error is None for binding in bindings)
+    resolved = resolve_plotly_layout_parameters(
+        definition.views[0].options["layout"],
+        {"holiday_date": "2026-10-01"},
+    )
+    assert resolved["shapes"][0]["x0"] == "2026-10-01"
 
 
 def test_repeat_section_components_are_ai_discoverable():
@@ -926,7 +1035,7 @@ def test_removed_schema_fields_are_rejected(removed_fragment):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v19",
+                "schema": "dataviz/dashboard/v20",
                 "kind": "dashboard",
                 "id": "strict",
                 **removed_fragment,
@@ -987,7 +1096,7 @@ def test_layout_and_view_bounds_are_enforced(fragment, location):
     with pytest.raises(ValidationError) as failure:
         DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v19",
+                "schema": "dataviz/dashboard/v20",
                 "kind": "dashboard",
                 "id": "strict",
                 **fragment,
@@ -1033,7 +1142,7 @@ def test_default_renderer_builds_templates_and_portable_report(tmp_path: Path):
     assert "Optional presentation-only polish" in report
     assert "min-height:420px" in report
     assert "global.dataviz?.view_specs" in report
-    assert '"schema": "dataviz/runtime/v14"' in report
+    assert '"schema": "dataviz/runtime/v15"' in report
     assert '"schema": "dataviz/dependency-contract/v13"' in report
     assert 'data-view-pipeline-node="source:sales"' in report
     assert 'data-view-renderer-signal data-status="not_run" hidden' in report

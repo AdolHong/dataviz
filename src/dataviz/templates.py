@@ -303,7 +303,7 @@ COMPONENT_TEMPLATES: dict[str, dict[str, Any]] = {
 }
 
 
-COMPONENT_REGISTRY_VERSION = "6.0.0"
+COMPONENT_REGISTRY_VERSION = "6.2.0"
 
 
 def _generated_component_templates() -> dict[str, dict[str, Any]]:

@@ -18,6 +18,7 @@
     input.classList.add('dv-input__control');
     input.dataset.controlNative = 'visible';
     if (input.tagName === 'TEXTAREA') {
+      shell.classList.add('is-multiline');
       input.rows = Math.max(1, Number(control.dataset.minRows || 2));
       input.style.setProperty('--dv-input-max-rows', String(Math.max(input.rows, Number(control.dataset.maxRows || 6))));
     }
@@ -25,12 +26,17 @@
     const count = document.createElement('small');
     count.className = 'dv-input__count';
     count.setAttribute('aria-live', 'polite');
-    count.hidden = control.dataset.showCount !== 'true';
+    const showsBoundedCount = () => (
+      control.dataset.showCount === 'true'
+      && input.hasAttribute('maxlength')
+      && Number(input.maxLength || 0) > 0
+    );
+    count.hidden = !showsBoundedCount();
     mount.replaceChildren(shell, count);
     const sync = () => {
       const maximum = Number(input.maxLength || 0);
       count.textContent = maximum > 0 ? `${input.value.length} / ${maximum}` : String(input.value.length);
-      count.hidden = control.dataset.showCount !== 'true';
+      count.hidden = !showsBoundedCount();
     };
     input.addEventListener('input', sync);
     return {sync};

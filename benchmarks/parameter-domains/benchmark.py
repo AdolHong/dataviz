@@ -75,7 +75,7 @@ from range({rows}) values(i)
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v19
+        """schema: dataviz/dashboard/v20
 kind: dashboard
 id: parameter-scale
 title: Parameter scale

@@ -33,6 +33,10 @@ from dataviz.state_snapshot import build_state_snapshot, normalize_consumer_revi
 from dataviz.templates import COMPONENT_REGISTRY_VERSION, RUNTIME_PROTOCOL_SCHEMA
 from dataviz.protocols import REPORT_MANIFEST_SCHEMA
 from dataviz.value_contract import initial_control_value, static_control_choices
+from dataviz.view_contracts import (
+    PLOTLY_VIEW_TEMPLATES,
+    resolve_plotly_layout_parameters,
+)
 from dataviz.workspace.models import DashboardDefinition, DeclarativeViewDefinition
 from dataviz.workspace.controls import (
     resolve_control_states,
@@ -491,7 +495,9 @@ class CanvasRenderer:
             snapshot_interactions=frozen_interactions,
         )
         view_specs, repeat_specs = self._declarative_manifest(
-            dashboard, content_definition
+            dashboard,
+            content_definition,
+            query_values,
         )
         document_title = title or content_definition.title
         portable = (
@@ -875,9 +881,23 @@ class CanvasRenderer:
         self,
         dashboard: LoadedDashboard,
         definition: DashboardDefinition,
+        query_values: dict[str, Any] | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if query_values is None:
+            query_values = {
+                item.id: initial_control_value(item)
+                for item in definition.query_parameters
+            }
         view_specs = [item.model_dump(mode="json") for item in definition.views]
         for view in view_specs:
+            if view["template"] in PLOTLY_VIEW_TEMPLATES:
+                options = view.get("options") or {}
+                options["layout"] = resolve_plotly_layout_parameters(
+                    options.get("layout") or {},
+                    query_values,
+                    path=f"views.{view['id']}.options.layout",
+                )
+                view["options"] = options
             if view["template"] != "image" or not view.get("url"):
                 continue
             parsed = urlparse(view["url"])
@@ -1166,32 +1186,35 @@ class CanvasRenderer:
         requested_template = config.template if config is not None else "auto"
         template = (
             ("stack" if count <= 1 else "grid")
-            if requested_template == "auto" and role == "query"
-            else "stack"
             if requested_template == "auto"
             else requested_template
         )
         width_name = config.width if config is not None else "auto"
         widths = {"compact": 460, "regular": 680, "wide": 880}
+        columns = (
+            1
+            if template == "stack"
+            else (config.columns if config else None) or (6 if role == "query" else 3)
+        )
+        column_width = (
+            (config.column_width if config is not None else None)
+            or 280
+        )
+        effective_columns = 1 if template == "stack" else max(1, min(count or 1, columns))
+        content_width = (
+            effective_columns * column_width + max(0, effective_columns - 1) * 10
+        )
         if width_name in widths:
             width = widths[width_name]
+        elif role == "dashboard":
+            width = min(880, max(320, content_width + 40))
         elif template == "stack" or count <= 1:
-            width = 560 if role == "dashboard" else 480
+            width = 480
         elif count <= 4:
             width = 680
         else:
             width = 880
-        columns = (
-            1
-            if template == "stack"
-            else (config.columns if config else None) or (6 if role == "query" else 1)
-        )
-        column_width = (
-            (config.column_width if config is not None else None)
-            or (280 if role == "query" else 240)
-        )
         density = config.density if config is not None else "comfortable"
-        effective_columns = 1 if template == "stack" else max(1, min(count or 1, columns))
         return (
             'data-dv-control-panel '
             f'data-control-role="{html.escape(role, quote=True)}" '
@@ -1204,7 +1227,9 @@ class CanvasRenderer:
             f'data-control-width="{html.escape(width_name, quote=True)}" '
             f'data-overlay-width="{width}" '
             f'style="--dv-control-column-width:{column_width}px;'
-            f'--dv-control-columns:{effective_columns}"'
+            f'--dv-control-columns:{effective_columns};'
+            f'--dv-control-content-width:{content_width}px;'
+            f'--dv-control-overlay-width:{width}px"'
         )
 
     def _portable_controls(
@@ -1663,7 +1688,7 @@ class CanvasRenderer:
             f'data-unchecked-label="{html.escape(presentation.get("unchecked_label", ""), quote=True)}" '
             f'data-min-rows="{int(presentation.get("min_rows", 2))}" '
             f'data-max-rows="{int(presentation.get("max_rows", 6))}" '
-            f'data-show-count="{str(bool(presentation.get("show_count", False))).lower()}" '
+            f'data-show-count="{str(bool(presentation.get("show_count", False) and definition.max_length)).lower()}" '
             f'data-prefix="{html.escape(presentation.get("prefix", ""), quote=True)}" '
             f'data-suffix="{html.escape(presentation.get("suffix", ""), quote=True)}" '
             f'data-number-controls="{str(bool(presentation.get("number_controls", True))).lower()}" '

@@ -3,6 +3,8 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) 2.65rem;
   align-items: stretch;
+  width: 100%;
+  height: var(--dv-control-height, 2.5rem);
   min-width: 0;
   color: var(--dv-ink, #202536);
   background: var(--dv-panel, #fff);
@@ -24,9 +26,9 @@
 .dv-control[data-control-component="date-picker"] .dv-date-picker__control {
   box-sizing: border-box;
   width: 100%;
-  height: auto;
+  height: 100%;
   min-width: 0;
-  min-height: 2.55rem;
+  min-height: 0;
   padding: .5rem .7rem;
   color: inherit;
   font: inherit;

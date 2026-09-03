@@ -26,7 +26,11 @@
   min-width: 0;
   min-height: 320px;
 }
-.dv-section--band .dv-view { min-height: 180px; }
+.dv-section--band {
+  --dv-metric-value-size: clamp(34px, 4vw, 58px);
+}
+.dv-section--band .dv-view { min-height: 160px; }
+.dv-section--band .dv-metric { min-height: 112px; }
 .dv-section--small-multiples .dv-section__body,
 .dv-section--selection-gallery .dv-section__body { display: block; }
 .dv-repeat {

@@ -30,8 +30,20 @@
     }));
     return status;
   };
-  const resolvedPanelWidth = (role, width, count, template) => {
+  const controlContentWidth = (count, template, columns, columnWidth) => {
+    const effective = template === 'stack'
+      ? 1
+      : Math.max(1, Math.min(count || 1, columns));
+    return effective * columnWidth + Math.max(0, effective - 1) * 10;
+  };
+  const resolvedPanelWidth = (role, width, count, template, columns, columnWidth) => {
     if (panelWidths[width]) return panelWidths[width];
+    if (role === 'dashboard') {
+      return Math.min(880, Math.max(
+        320,
+        controlContentWidth(count, template, columns, columnWidth) + 40,
+      ));
+    }
     if (template === 'stack' || count <= 1) return role === 'dashboard' ? 560 : 480;
     if (count <= 4) return 680;
     return 880;
@@ -42,19 +54,20 @@
     const count = Math.max(0, Number(options.count ?? owner.dataset.controlCount ?? 0));
     const requestedTemplate = config.template || owner.dataset.controlTemplate || 'auto';
     const template = requestedTemplate === 'auto'
-      ? (role === 'query' && count > 1 ? 'grid' : 'stack')
+      ? (count > 1 ? 'grid' : 'stack')
       : requestedTemplate;
     const configuredColumns = Object.prototype.hasOwnProperty.call(config, 'columns')
       ? config.columns
       : owner.dataset.controlColumns;
-    const columns = Number(configuredColumns || (role === 'query' ? 6 : 1));
+    const columns = Number(configuredColumns || (role === 'query' ? 6 : 3));
     const configuredColumnWidth = Object.prototype.hasOwnProperty.call(config, 'column_width')
       ? config.column_width
       : owner.dataset.controlColumnWidth;
-    const columnWidth = Number(configuredColumnWidth || (role === 'query' ? 280 : 240));
+    const columnWidth = Number(configuredColumnWidth || 280);
     const density = config.density || owner.dataset.controlDensity || 'comfortable';
     const widthName = config.width || owner.dataset.controlWidth || 'auto';
-    const width = resolvedPanelWidth(role, widthName, count, template);
+    const width = resolvedPanelWidth(role, widthName, count, template, columns, columnWidth);
+    const contentWidth = controlContentWidth(count, template, columns, columnWidth);
     owner.dataset.dvControlPanel = '';
     owner.dataset.controlRole = role;
     owner.dataset.controlCount = String(count);
@@ -62,6 +75,8 @@
     owner.dataset.controlColumns = String(template === 'stack' ? 1 : columns);
     owner.dataset.controlColumnWidth = String(columnWidth);
     owner.style.setProperty('--dv-control-column-width', `${columnWidth}px`);
+    owner.style.setProperty('--dv-control-content-width', `${contentWidth}px`);
+    owner.style.setProperty('--dv-control-overlay-width', `${width}px`);
     owner.dataset.controlDensity = density;
     owner.dataset.controlWidth = widthName;
     owner.dataset.overlayWidth = String(width);
@@ -109,8 +124,11 @@
         if (grid) owner._datavizControlPanelResizeObserver.observe(grid);
       }
     } else {
-      owner.style.setProperty('--dv-control-columns', String(template === 'stack' ? 1 : columns));
-      owner.dataset.controlEffectiveColumns = String(template === 'stack' ? 1 : columns);
+      const effective = template === 'stack'
+        ? 1
+        : Math.max(1, Math.min(count || 1, columns));
+      owner.style.setProperty('--dv-control-columns', String(effective));
+      owner.dataset.controlEffectiveColumns = String(effective);
     }
     return {
       role, count, template, columns, columnWidth, density, width:widthName,
@@ -130,7 +148,7 @@
   };
   root.state = {statuses, apply, hydrate};
   root.presentationShell = {
-    protocol:'dataviz/runtime/v14',
+    protocol:'dataviz/runtime/v15',
     coordinates:false,
     customCanvas:true,
     applyControlPanel,

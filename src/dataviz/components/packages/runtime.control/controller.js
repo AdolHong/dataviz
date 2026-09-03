@@ -137,11 +137,11 @@
     if (!input.multiple) return selected[0]?.textContent || placeholder;
     if (input.dataset.queryParameter === 'true') {
       const mode = input.dataset.querySelection || 'all';
-      if (mode === 'all') return '全选';
+      if (mode === 'all') return '全部';
       if (mode === 'none') return '无';
       if (mode === 'exclude') return `全部，排除 ${selected.length} 项`;
     }
-    if (inferSelectionIntent(input) === 'all_available') return '全选';
+    if (inferSelectionIntent(input) === 'all_available') return '全部';
     return selected.length ? `${selected.length} selected` : placeholder;
   };
   const optionGroup = option => option.dataset.group || (
@@ -165,6 +165,7 @@
     ) || inferSelectionIntent(input);
     const maxVisible = Math.max(0, Number(control.dataset.maxTagCount || 2));
     host.replaceChildren();
+    host.removeAttribute('title');
     if (!input.multiple) {
       host.textContent = selected[0]?.textContent || placeholder;
       return;
@@ -175,7 +176,7 @@
         const label = document.createElement('span');
         label.className = 'dv-choice-summary__all';
         label.textContent = mode === 'all'
-          ? control.dataset.allLabel || '全选'
+          ? control.dataset.allLabel || '全部'
           : mode === 'none'
           ? control.dataset.noneLabel || '无'
           : `全部，排除 ${selected.length} 项`;
@@ -186,8 +187,8 @@
     if (input.multiple && selectionIntent === 'all_available') {
       const label = document.createElement('span');
       label.className = 'dv-choice-summary__all';
-      label.textContent = control.dataset.allLabel || '全选';
-      if (available.length) label.setAttribute('aria-label', `全选，共 ${available.length} 项`);
+      label.textContent = control.dataset.allLabel || '全部';
+      if (available.length) label.setAttribute('aria-label', `全部，共 ${available.length} 项`);
       host.append(label);
       return;
     }
@@ -196,10 +197,16 @@
       return;
     }
     const labels = Array.isArray(summaryLabels) ? summaryLabels : selected.map(option => option.textContent);
+    if (labels.length === 1) {
+      host.textContent = labels[0];
+      host.title = labels[0];
+      return;
+    }
     labels.slice(0, maxVisible).forEach(value => {
       const tag = document.createElement('span');
       tag.className = 'dv-choice-summary__tag';
       tag.textContent = value;
+      tag.title = value;
       host.append(tag);
     });
     const hidden = labels.length - maxVisible;

@@ -54,7 +54,7 @@ def resolve_control_values(definition, provided=None):
 def test_relative_date_defaults_resolve_once_in_workspace_timezone_and_project_parts():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v19",
+            "schema": "dataviz/dashboard/v20",
             "id": "relative-dates",
             "query_parameters": [
                 {
@@ -206,7 +206,7 @@ def test_date_range_default_allows_fixed_and_relative_endpoints():
     dashboard = SimpleNamespace(
         definition=DashboardDefinition.model_validate(
             {
-                "schema": "dataviz/dashboard/v19",
+                "schema": "dataviz/dashboard/v20",
                 "id": "mixed-date-range",
                 "query_parameters": [definition.model_dump(mode="json")],
             }
@@ -284,7 +284,7 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
 
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v19",
+            "schema": "dataviz/dashboard/v20",
             "id": "option-intents",
             "controls": [
                 {
@@ -337,7 +337,7 @@ def test_select_option_domains_separate_static_values_from_inferred_intent():
 
     required_inferred = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v19",
+            "schema": "dataviz/dashboard/v20",
             "id": "required-inferred",
             "controls": [
                 {
@@ -372,7 +372,7 @@ def test_query_defaults_and_control_initial_policies_are_explicitly_separate():
     ]
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v19",
+            "schema": "dataviz/dashboard/v20",
             "id": "select-initials",
             "query_parameters": [
                 {
@@ -432,7 +432,7 @@ def test_query_defaults_and_control_initial_policies_are_explicitly_separate():
 def test_non_select_inputs_share_typed_defaults_without_select_reconciliation():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v19",
+            "schema": "dataviz/dashboard/v20",
             "id": "typed-input-defaults",
             "query_parameters": [
                 {
@@ -828,7 +828,7 @@ def test_portable_numbers_and_dates_reject_cross_runtime_ambiguities():
 def test_query_and_control_resolvers_share_strict_contracts():
     definition = DashboardDefinition.model_validate(
         {
-            "schema": "dataviz/dashboard/v19",
+            "schema": "dataviz/dashboard/v20",
             "id": "contract",
             "query_parameters": [{"id": "batch", "type": "single_input", "value_type": "integer", "default": 7}],
             "controls": [

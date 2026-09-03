@@ -223,7 +223,7 @@ folders: []
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v19
+        """schema: dataviz/dashboard/v20
 kind: dashboard
 id: same-view-controls
 title: Same View Controls
@@ -318,7 +318,7 @@ runtime:
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v19
+        """schema: dataviz/dashboard/v20
 kind: dashboard
 id: scale
 title: Scale Runtime
@@ -418,7 +418,7 @@ title: Interactive Runtime E2E
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v19
+        """schema: dataviz/dashboard/v20
 kind: dashboard
 id: runtime-matrix
 title: Interactive Runtime Matrix
@@ -635,9 +635,13 @@ def test_parameter_domain_cascade_reload_and_tab_restore(page: Page, tmp_path: P
         expect(city).to_have_values([])
         assert len(domain_requests) >= 2
         city_control = page.locator("#parameter-form .dv-control").filter(has=city)
-        expect(city_control.locator("[data-control-summary]")).to_have_text("全选")
+        expect(city_control.locator("[data-control-summary]")).to_have_text("全部")
 
         _run_and_wait(page)
+        expect(page.locator("#query-parameters-panel")).to_be_hidden()
+        page.locator("#query-parameters-toggle").click()
+        expect(page.locator("#query-parameters-panel")).to_be_visible()
+        expect(page.locator("#query-parameters-status")).to_have_text("Applied")
         remembered = page.evaluate(
             """async () => {
               const sessionId = sessionStorage.getItem('dataviz.tab-session.v2');
@@ -662,12 +666,12 @@ def test_parameter_domain_cascade_reload_and_tab_restore(page: Page, tmp_path: P
         city_control.locator(".dv-choice-option", has_text="广州").click()
         expect(city_control.locator("[data-control-summary]")).to_contain_text("排除 1 项")
         revert = page.locator("#query-parameters-revert")
-        expect(page.locator("#query-control-meta")).to_have_text("Changed")
+        expect(page.locator("#query-control-meta")).to_have_text("Unsaved changes")
         expect(revert).to_be_visible()
         revert.click()
         expect(page.locator("#query-control-meta")).to_have_text("Applied")
         expect(revert).to_be_hidden()
-        expect(city_control.locator("[data-control-summary]")).to_have_text("全选")
+        expect(city_control.locator("[data-control-summary]")).to_have_text("全部")
         assert page.locator("#canvas-frame").get_attribute("data-run-id") == committed_run_id
 
         # A normal parent edit coordinates the child draft. An old operand
@@ -1152,11 +1156,33 @@ def test_date_parameter_inputs_share_iso_text_and_calendar_contract(
         range_control = form.locator('[data-control-component="range-picker"]')
         endpoints = range_control.locator('.dv-date-range__endpoint[type="text"]')
         expect(endpoints).to_have_count(2)
+        control_heights = {
+            "date": date_control.locator(".dv-date-picker").evaluate(
+                "node => node.getBoundingClientRect().height"
+            ),
+            "range": range_control.locator(".dv-date-range__field").evaluate(
+                "node => node.getBoundingClientRect().height"
+            ),
+        }
+        assert control_heights == {"date": 42, "range": 42}
         expect(endpoints.nth(0)).to_have_value(re.compile(r"^\d{4}-\d{2}-\d{2}$"))
         expect(endpoints.nth(1)).to_have_value(re.compile(r"^\d{4}-\d{2}-\d{2}$"))
         assert endpoints.evaluate_all(
             "items => items.map(item => getComputedStyle(item).borderWidth)"
         ) == ["0px", "0px"]
+        range_control.locator(".dv-date-range__field").evaluate(
+            "field => { field.style.width = '224px'; }"
+        )
+        endpoint_widths = endpoints.evaluate_all(
+            """items => items.map(item => ({
+              clientWidth:item.clientWidth,
+              scrollWidth:item.scrollWidth,
+            }))"""
+        )
+        assert all(
+            endpoint["scrollWidth"] <= endpoint["clientWidth"] + 1
+            for endpoint in endpoint_widths
+        ), endpoint_widths
 
         range_control.locator("[data-control-trigger]").click()
         panel = range_control.locator("[data-control-panel]")
@@ -1419,6 +1445,10 @@ def test_committed_parameter_content_and_stale_selection_export(page: Page, tmp_
             "区域"
         )
 
+        page.locator("#query-parameters-toggle").click()
+        expect(page.locator("#query-parameters-toggle")).to_have_attribute(
+            "aria-expanded", "true"
+        )
         parameter = page.locator('#parameter-form input[name="min_query_revenue"]')
         parameter.fill("150000")
         expect(frame.locator(".dv-subtitle")).to_have_text("当前取数下限：0")
@@ -1950,7 +1980,7 @@ def test_web_component_reference_adapter_consumes_runtime_v2_without_canvas_runt
     page: Page,
 ):
     manifest = {
-        "protocol": {"schema": "dataviz/runtime/v14", "component_registry_version": "3.0.0"},
+        "protocol": {"schema": "dataviz/runtime/v15", "component_registry_version": "3.0.0"},
         "control_state": {
             "dashboard:probe/region": {
                 "intent": "explicit",
@@ -2024,6 +2054,31 @@ def test_web_component_reference_adapter_consumes_runtime_v2_without_canvas_runt
 @pytest.mark.e2e
 def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Page, tmp_path: Path):
     workspace = _copy_gallery_workspace(tmp_path)
+    dashboard_path = workspace / "dashboards" / "component-gallery" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    definition["controls"].append(
+        {
+            "id": "unbounded-note",
+            "type": "single_input",
+            "value_type": "text",
+            "label": "Unbounded note",
+            "default": "No bare count",
+        }
+    )
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    presentation_path = workspace / "dashboards" / "component-gallery" / "presentation.yaml"
+    presentation = yaml.safe_load(presentation_path.read_text(encoding="utf-8"))
+    presentation["control_components"]["dashboard:component-gallery/unbounded-note"] = {
+        "component": "input",
+        "show_count": True,
+    }
+    presentation_path.write_text(
+        yaml.safe_dump(presentation, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
     with _running_server(workspace) as base_url:
         _open_dashboard(page, base_url, "component-gallery")
         _run_and_wait(page)
@@ -2043,7 +2098,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
         )
         assert {
             owner_contract[key] for key in ("runtime", "data", "view", "section", "presentation")
-        } == {"dataviz/runtime/v14"}
+        } == {"dataviz/runtime/v15"}
         assert {
             "data.pipeline",
             "view.declarative",
@@ -2054,10 +2109,25 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
         header = page.locator("#dashboard-controls-control")
         header.locator("summary").click()
 
-        text_control = header.locator('[data-control-component="input"]')
+        text_control = header.locator(
+            '[data-control-component="input"]',
+            has=page.locator('input[name="dashboard:component-gallery/analyst-note"]'),
+        )
         expect(text_control.locator("input")).to_have_value("Review the selected cohort")
         text_control.locator("input").fill("Review East cohort")
         expect(text_control.locator(".dv-input__count")).to_contain_text("18 / 120")
+        text_input_visuals = text_control.locator(".dv-input__control").evaluate(
+            """input => {
+              const style = getComputedStyle(input);
+              return {borderStyle:style.borderStyle, borderRadius:style.borderRadius};
+            }"""
+        )
+        assert text_input_visuals == {"borderStyle": "none", "borderRadius": "0px"}
+        unbounded_text = header.locator(
+            '[data-control-component="input"]',
+            has=page.locator('input[name="dashboard:component-gallery/unbounded-note"]'),
+        )
+        expect(unbounded_text.locator(".dv-input__count")).to_be_hidden()
 
         auto_complete = header.locator('[data-control-component="auto-complete"]')
         auto_input = auto_complete.locator("input")
@@ -2068,6 +2138,23 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
         expect(auto_input).to_have_value("Upside")
 
         input_number = header.locator('[data-control-component="input-number"]')
+        number_input_visuals = input_number.evaluate(
+            """control => {
+              const input = control.querySelector('.dv-input-number__control');
+              const style = getComputedStyle(input);
+              return {
+                borderStyle:style.borderStyle,
+                borderRadius:style.borderRadius,
+                hiddenAffixes:[...control.querySelectorAll('.dv-input-number__affix[hidden]')]
+                  .map(node => getComputedStyle(node).display),
+              };
+            }"""
+        )
+        assert number_input_visuals == {
+            "borderStyle": "none",
+            "borderRadius": "0px",
+            "hiddenAffixes": ["none", "none"],
+        }
         input_number.get_by_role("button", name="Increase value").click()
         expect(input_number.locator('input[type="number"]')).to_have_value("60")
 
@@ -2245,12 +2332,17 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
             == 2
         )
         expect(grouped_action).to_have_text("Invert")
-        grouped_action.click()
+        grouped_select.get_by_role("button", name="Revert").click()
         assert (
             grouped_select.locator("select").evaluate("select => select.selectedOptions.length")
             == 0
         )
         grouped_select.locator(".dv-choice-search").fill("")
+        grouped_select.locator(".dv-choice-option").first.click()
+        expect(grouped_select.locator("[data-control-summary]")).to_have_text("Atlas")
+        expect(grouped_select.locator(".dv-choice-summary__tag")).to_have_count(0)
+        grouped_select.get_by_role("button", name="Revert").click()
+        expect(grouped_select.locator("select")).to_have_values([])
         long_label = "这是一个需要完整阅读的超长商品名称" * 12
         grouped_select.locator("select option").first.evaluate(
             "(option, label) => { option.textContent = label; }",
@@ -2277,6 +2369,43 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
         assert long_label_layout["rowHeight"] > 38
         assert long_label_layout["panelWidth"] >= 600
         assert long_label_layout["panelRight"] <= long_label_layout["viewportWidth"] - 8
+        grouped_select.locator("select").evaluate(
+            """(select, label) => {
+              [...select.options].slice(0, 3).forEach((option, index) => {
+                option.selected = true;
+                option.textContent = `${label} ${index + 1}`;
+              });
+            }""",
+            long_label,
+        )
+        grouped_select.evaluate("control => control._syncControl?.()")
+        summary_geometry = grouped_select.locator("[data-control-trigger]").evaluate(
+            """trigger => {
+              const bounds = trigger.getBoundingClientRect();
+              const tags = [...trigger.querySelectorAll('.dv-choice-summary__tag')];
+              const rest = trigger.querySelector('.dv-choice-summary__rest');
+              return {
+                height:bounds.height,
+                overflow:getComputedStyle(trigger).overflow,
+                wrap:getComputedStyle(trigger.querySelector('[data-control-summary]')).flexWrap,
+                tags:tags.map(tag => {
+                  const rect = tag.getBoundingClientRect();
+                  return {top:rect.top, bottom:rect.bottom, title:tag.title};
+                }),
+                restVisible:Boolean(rest && rest.getBoundingClientRect().width > 0),
+                contained:tags.every(tag => {
+                  const rect = tag.getBoundingClientRect();
+                  return rect.top >= bounds.top && rect.bottom <= bounds.bottom;
+                }),
+              };
+            }"""
+        )
+        assert 40 <= summary_geometry["height"] <= 42
+        assert summary_geometry["overflow"] == "hidden"
+        assert summary_geometry["wrap"] == "nowrap"
+        assert summary_geometry["contained"] is True
+        assert summary_geometry["restVisible"] is True
+        assert all(item["title"].startswith(long_label) for item in summary_geometry["tags"])
         grouped_select.locator(".dv-choice-search").press("Escape")
 
         cascader = selections.locator('[data-control-component="cascader"]')
@@ -2501,6 +2630,15 @@ def test_default_query_grid_uses_up_to_six_bounded_tracks_without_oversizing_ran
         assert range_box is not None and wide_box is not None
         assert range_box["width"] < 500, range_box
         assert wide_box["width"] > range_box["width"] * 1.8, (range_box, wide_box)
+        entry_heights = {
+            "range": range_field.locator(".dv-date-range__field").evaluate(
+                "node => node.getBoundingClientRect().height"
+            ),
+            "number": wide_field.locator(".dv-input-number").evaluate(
+                "node => node.getBoundingClientRect().height"
+            ),
+        }
+        assert entry_heights == {"range": 42, "number": 42}
         assert range_field.locator(".dv-date-range__field").evaluate(
             """field => {
               const owner = field.closest('.field').getBoundingClientRect();
@@ -2905,7 +3043,7 @@ def test_server_header_hydrates_dataset_driven_dashboard_selection_options(
             "select => [...select.selectedOptions].map(option => option.value)"
         ) == ["华东", "华北", "华南"]
         selector_summary = header.locator("[data-control-summary]")
-        expect(selector_summary).to_have_text("全选")
+        expect(selector_summary).to_have_text("全部")
         expect(selector).to_have_attribute("data-selection-intent", "all_available")
 
         selector.select_option(["华南"], force=True)
@@ -2915,6 +3053,12 @@ def test_server_header_hydrates_dataset_driven_dashboard_selection_options(
         expect(frame.locator('[data-view-id="total-revenue"]')).to_contain_text(
             "449,000", timeout=10_000
         )
+        expect(frame.locator('[data-view-id="total-revenue"] .dv-metric__unit')).to_have_text(
+            "元"
+        )
+        expect(
+            frame.locator('[data-view-id="total-revenue"] .dv-metric__secondary')
+        ).to_contain_text("订单")
 
 
 @pytest.mark.e2e
@@ -2927,6 +3071,27 @@ def test_unified_dashboard_controls_drive_browser_named_output(page: Page, tmp_p
         control.locator("summary").click()
         expect(control.locator("#dashboard-control-group")).to_be_visible()
         expect(control.locator("#dashboard-control-form .control-scope")).to_have_count(2)
+        control_geometry = control.evaluate(
+            """owner => {
+              const panel = owner.querySelector('.header-control__popover--controls');
+              const form = owner.querySelector('#dashboard-control-form');
+              const fields = [...form.querySelectorAll('.control-scope')];
+              return {
+                template:owner.dataset.controlTemplate,
+                effectiveColumns:owner.dataset.controlEffectiveColumns,
+                panelWidth:panel.getBoundingClientRect().width,
+                formWidth:form.getBoundingClientRect().width,
+                columns:getComputedStyle(form).gridTemplateColumns.split(' ').length,
+                fieldWidths:fields.map(field => field.getBoundingClientRect().width),
+              };
+            }"""
+        )
+        assert control_geometry["template"] == "grid"
+        assert control_geometry["effectiveColumns"] == "2"
+        assert control_geometry["columns"] == 2
+        assert control_geometry["panelWidth"] <= 610
+        assert control_geometry["formWidth"] <= 570
+        assert all(width <= 280 for width in control_geometry["fieldWidths"])
 
         _run_and_wait(page)
         frame = page.frame_locator("#canvas-frame")
@@ -2986,6 +3151,96 @@ def test_unified_dashboard_controls_drive_browser_named_output(page: Page, tmp_p
 
         page.locator("#sidebar-toggle").click()
         expect(control).not_to_have_attribute("open", "")
+
+
+@pytest.mark.e2e
+def test_sidebar_dashboard_can_be_dragged_and_renamed_from_context_menu(
+    page: Page, tmp_path: Path
+):
+    page.set_default_timeout(5_000)
+    workspace = _copy_workspace(MINIMAL, tmp_path / "navigation-editor")
+    workspace_path = workspace / "workspace.yaml"
+    definition = yaml.safe_load(workspace_path.read_text(encoding="utf-8"))
+    definition["folders"] = [{"path": "Archive", "order": 10}]
+    workspace_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        dashboard = page.locator('.nav-button[data-id="sales-overview"]')
+        folder = page.locator('.nav-folder__toggle', has_text="Archive")
+        expect(dashboard).to_have_attribute("draggable", "false")
+        expect(dashboard.locator(".nav-button__drag-handle")).to_have_count(0)
+
+        source_box = dashboard.bounding_box()
+        target_box = folder.bounding_box()
+        assert source_box is not None and target_box is not None
+        page.mouse.move(
+            source_box["x"] + source_box["width"] / 2,
+            source_box["y"] + source_box["height"] / 2,
+        )
+        page.mouse.down()
+        page.mouse.move(
+            target_box["x"] + target_box["width"] / 2,
+            target_box["y"] + target_box["height"] / 2,
+            steps=12,
+        )
+        expect(page.locator("body")).to_have_attribute("data-nav-dragging", "dashboard")
+        preview = page.locator(".nav-drag-preview")
+        expect(preview).to_be_visible()
+        expect(dashboard).to_have_class(re.compile(r"\bis-dragging\b"))
+        expect(folder.locator("xpath=..")).to_have_class(re.compile(r"\bis-drop-target\b"))
+        preview_box = preview.bounding_box()
+        assert preview_box is not None
+        assert preview_box["y"] < source_box["y"] - 5
+        page.mouse.up()
+        expect(page.locator(".nav-drag-preview")).to_have_count(0)
+        moved = workspace / "dashboards" / "Archive##sales-overview"
+        expect(page.locator('.nav-folder .nav-button[data-id="sales-overview"]')).to_be_visible()
+        assert (moved / "dashboard.yaml").is_file()
+
+        dashboard = page.locator('.nav-button[data-id="sales-overview"]')
+        dashboard.click(button="right")
+        context_menu = page.locator("#nav-context-menu")
+        expect(context_menu.get_by_role("menuitem", name="Rename")).to_be_visible()
+        context_menu.get_by_role("menuitem", name="Rename").click()
+        dialog = page.locator("#nav-dialog")
+        expect(dialog.get_by_role("heading", name="Rename Dashboard")).to_be_visible()
+        dialog.locator('input[name="title"]').fill("Sales review")
+        dialog.get_by_role("button", name="Save name").click()
+
+        renamed = workspace / "dashboards" / "Archive##Sales review"
+        expect(page.locator('.nav-button[data-id="sales-overview"] strong')).to_have_text(
+            "Sales review"
+        )
+        assert (renamed / "dashboard.yaml").is_file()
+        assert not moved.exists()
+        assert "/dashboards/sales-overview" in page.url
+
+        dashboard = page.locator('.nav-button[data-id="sales-overview"]')
+        source_box = dashboard.bounding_box()
+        assert source_box is not None
+        source_x = source_box["x"] + source_box["width"] / 2
+        source_y = source_box["y"] + source_box["height"] / 2
+        page.mouse.move(source_x, source_y)
+        page.mouse.down()
+        page.mouse.move(source_x + 10, source_y + 10, steps=4)
+        root_drop = page.locator("#nav-root-drop")
+        expect(root_drop).to_be_visible()
+        root_box = root_drop.bounding_box()
+        assert root_box is not None
+        page.mouse.move(
+            root_box["x"] + root_box["width"] / 2,
+            root_box["y"] + root_box["height"] / 2,
+            steps=12,
+        )
+        expect(root_drop).to_have_class(re.compile(r"\bis-drop-target\b"))
+        page.mouse.up()
+        expect(
+            page.locator('#dashboard-nav > .nav-tree > .nav-level > .nav-button[data-id="sales-overview"]')
+        ).to_be_visible()
+        assert (workspace / "dashboards" / "Sales review" / "dashboard.yaml").is_file()
 
 
 @pytest.mark.e2e
@@ -3903,6 +4158,53 @@ def test_required_dynamic_view_selection_bootstraps_from_base_output_and_exports
 
 
 @pytest.mark.e2e
+def test_parameter_editor_choice_rows_share_the_drag_sorting_model(page: Page, tmp_path: Path):
+    workspace = _copy_workspace(SHOWCASE, tmp_path / "choice-editor")
+    dashboard_path = workspace / "dashboards" / "功能示例##chart-gallery" / "dashboard.yaml"
+
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "chart-gallery")
+        page.locator("#dashboard-controls-control > summary").click(button="right")
+        dialog = page.locator("#parameter-editor-dialog")
+        expect(dialog).to_be_visible()
+
+        province = dialog.locator('[data-editor-item="province"]')
+        province.locator("[data-editor-disclosure]").click()
+        selection_policy = province.locator(".parameter-editor__default--selection")
+        expect(selection_policy.get_by_text("Default selection", exact=True)).to_be_visible()
+        assert selection_policy.evaluate("node => node.getBoundingClientRect().width") <= 321
+        toolbar_geometry = province.locator(".parameter-editor__choice-toolbar").evaluate(
+            """node => {
+              const policy = node.querySelector('.parameter-editor__default--selection').getBoundingClientRect();
+              const add = node.querySelector('.parameter-editor__add-choice').getBoundingClientRect();
+              return {policyRight:policy.right, addLeft:add.left};
+            }"""
+        )
+        assert toolbar_geometry["addLeft"] > toolbar_geometry["policyRight"]
+        rows = province.locator("[data-editor-choice]")
+        expect(rows).to_have_count(4)
+        handles = province.locator(".parameter-editor__choice-drag-handle")
+        expect(handles).to_have_count(4)
+        expect(handles.first).to_have_attribute("draggable", "true")
+        expect(province.locator('[data-move="up"], [data-move="down"]')).to_have_count(0)
+
+        handles.first.press("ArrowDown")
+        expect(rows.nth(0).locator("[data-choice-label]")).to_have_value("湖南")
+        expect(rows.nth(1).locator("[data-choice-label]")).to_have_value("广东")
+
+        dialog.locator('button[type="submit"]').click()
+        expect(dialog).not_to_be_visible(timeout=10_000)
+
+    saved = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    assert [choice["label"] for choice in saved["controls"][0]["options"]["choices"]] == [
+        "湖南",
+        "广东",
+        "福建",
+        "浙江",
+    ]
+
+
+@pytest.mark.e2e
 def test_date_default_editor_uses_one_mode_and_one_value_per_endpoint(page: Page, tmp_path: Path):
     workspace = _copy_workspace(SHOWCASE, tmp_path / "date-editor")
     dashboard_path = workspace / "dashboards" / "功能示例##date-parameter-lab" / "dashboard.yaml"
@@ -4071,7 +4373,7 @@ def test_share_link_keeps_browser_interactions_and_uses_workspace_cache(page: Pa
         assert cache.parent == workspace / "shared_caches"
         assert (cache / "manifest.json").is_file()
         assert (cache / "query-result.json").is_file()
-        expect(page.locator("#shortcut-toast")).to_have_text("分享链接已复制", timeout=10_000)
+        expect(page.locator("#shortcut-toast")).to_have_text("Share link copied.", timeout=10_000)
 
         page.goto(f"{base_url}{shared['url']}", wait_until="domcontentloaded")
         shared_table = page.locator('[data-view-id="scaled-table"]')
@@ -4397,7 +4699,7 @@ def test_selection_gallery_canonical_empty_all_and_clear(page: Page):
             }"""
         )
         expect(host).to_have_attribute("data-repeat-count", "100", timeout=20_000)
-        expect(summary).to_have_text("全选")
+        expect(summary).to_have_text("全部")
         assert (
             frame.locator("body").evaluate(
                 """() => window.dataviz.control.state(
@@ -5663,6 +5965,30 @@ def test_table_row_count_is_opt_in_instead_of_a_default_metadata_row(page: Page,
         expect(counted_table.locator("tbody tr")).to_have_count(4)
         expect(counted_table.locator(".dv-table-page-status")).to_have_text("1 / 3")
 
+        # Sorting a wide table keeps the operated column in view and restores focus.
+        sort_scroll = counted_table.evaluate(
+            """async host => {
+              const style = document.createElement('style');
+              style.textContent = '[data-view-id="sales-detail-counted"] .dv-table { min-width: 1200px; }';
+              document.head.append(style);
+              const wrap = host.querySelector('.dv-table-wrap');
+              wrap.scrollLeft = 220;
+              const target = [...host.querySelectorAll('.dv-table-sort')].at(-1);
+              const column = target.closest('th').dataset.column;
+              target.focus({preventScroll:true});
+              target.click();
+              await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+              const nextWrap = host.querySelector('.dv-table-wrap');
+              return {
+                column,
+                scrollLeft:nextWrap.scrollLeft,
+                focusedColumn:document.activeElement?.closest('th')?.dataset.column || null,
+              };
+            }"""
+        )
+        assert sort_scroll["scrollLeft"] == 220
+        assert sort_scroll["focusedColumn"] == sort_scroll["column"]
+
         search = counted_table.locator(".dv-table-search")
         composition_probe = search.evaluate(
             """node => {
@@ -5923,7 +6249,7 @@ def test_cancelled_query_branch_reaches_a_terminal_view_state(page: Page, tmp_pa
         cancelled_run_id = page.locator("#canvas-frame").get_attribute("data-run-id")
         session_id = page.evaluate("() => sessionStorage.getItem('dataviz.tab-session.v2')")
         assert cancelled_run_id and session_id
-        expect(page.locator("#run-button")).to_contain_text("取消")
+        expect(page.locator("#run-button")).to_contain_text("CANCEL")
         page.locator("#run-button").click()
         expect(page.locator("#run-message")).to_contain_text("Query cancelled", timeout=20_000)
         # The shell restores the previously committed Dataset (none in this

@@ -1,6 +1,6 @@
 schema: dataviz/component-package/v1
 package: view.declarative
-version: 3.0.0
+version: 3.2.0
 category: view
 purpose: Declarative View descriptors, Renderer adapters and lifecycle state boundaries.
 implementation:
@@ -8,7 +8,7 @@ implementation:
   sources: []
 dependencies: [data.pipeline, runtime.overlay]
 components:
-  - {id: view.metric, purpose: Single scalar or aggregated KPI, status: stable}
+  - {id: view.metric, purpose: Single scalar or aggregated KPI with inline unit and one supporting value, status: stable}
   - {id: view.line, purpose: Trend or ordered series with page-first wheel interaction, status: stable}
   - {id: view.bar, purpose: Category comparison, status: stable}
   - {id: view.stacked-bar, purpose: Part-to-whole category comparison, status: stable}
@@ -22,7 +22,7 @@ components:
   - {id: view.markdown, purpose: Narrative text, status: stable}
   - {id: view.image, purpose: Image or generated visual, status: stable}
   - {id: view.custom, purpose: Registered custom Renderer host, status: stable}
-  - {id: service.charts, purpose: Managed Plotly mount update resize theme interaction and dispose lifecycle, status: stable}
+  - {id: service.charts, purpose: Managed Plotly mount update resize theme typed Query layout binding interaction and dispose lifecycle, status: stable}
   - {id: service.tables, purpose: Managed TanStack Table Core with default Dataviz DOM CSS and full custom access, status: stable}
   - {id: view.plotly-category, purpose: Plotly category legend and analysis interaction contract, status: stable}
   - {id: view.state, purpose: Semantic View lifecycle states and scoped failure boundaries, status: stable}

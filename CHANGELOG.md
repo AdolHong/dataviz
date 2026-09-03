@@ -1,5 +1,44 @@
 # Changelog
 
+## Unreleased
+
+## 0.21.6 — 2026-09-03
+
+- Server Sidebar 的 Dashboard 改为整行 Pointer 拖放，移除六点句柄与浏览器原生链接拖动冲突；拖动超过阈值才启动，单击切换、修饰键打开链接和右键改名保持不变。
+- 拖动过程新增零延迟跟手预览、源位置虚线占位、文件夹命中反馈与移动成功提示；Root 投放区不再推动导航布局，并支持底部目标及 Sidebar 导航空白区域投放。
+- Chromium 回归改用真实鼠标事件，覆盖拖入文件夹、重命名及拖回根目录，避免合成 `dragstart/drop` 掩盖真实交互故障。
+
+## 0.21.5 — 2026-09-03
+
+- Plotly `options.layout` 的任意嵌套值支持一个完整 `{{ parameters.<id> }}` typed binding；参考线、参考区间和轴范围读取最近一次 RUN 的 committed Query Parameter，date/number/list 不再退化成模板字符串。
+- 严格校验以精确 `shapes` / `annotations` / axis 路径拒绝未知参数、混合文本、Control 引用和其他残留模板；Browser Runtime 保留同样的防御性错误，不再让 Plotly 静默误解释。
+- 沿用现有 `options.layout` 逃生口，没有新增参考线、公式或插值 DSL，也不改变 Dashboard v20、Runtime v15 或 Result/Evidence；Component Registry 升为 6.2.0。
+
+## 0.21.4 — 2026-09-03
+
+- Metric 的 `min/max` 聚合恢复为线性迭代，不再把整列展开为 JavaScript 函数参数；15 万行及以上输入不会触发参数数量上限。
+- Multiple Select 的关闭态摘要固定为单行：长 Tag 在 Trigger 内弹性收缩并省略，`+N` 与展开箭头保持可见，完整标签可通过原生 Tooltip 阅读，不再从 42px Query Control 上下溢出。
+- Server Sidebar 恢复可发现的 Dashboard 拖放：每项显示拖动把手，可投放到其他文件夹或 Root；右键菜单新增 Dashboard Rename，移动和重命名只改变 `##` 物理目录位置/导航名称，稳定 Dashboard id 与内容不变。
+- `dataviz docs --search` 返回排序、限量的正文片段及 topic/path/后续命令，不再把所有命中主题的完整对象倾倒给 AI；无结果时提供相近主题建议。
+- `dataviz docs --component` 接受可唯一解析的短名（如 `select → control.select`）；歧义和拼写错误列出 canonical id 与可直接复制的命令。Skill 明确把 CLI docs/schema 置于框架源码检查之前。
+
+## 0.21.3 — 2026-09-03
+
+- Metric 原生支持与主值同基线的 `unit` 和一个严格 `secondary` 字段；副指标独立选择聚合与 number/percent 格式，空值显示 `—`，复杂计算仍由 SQL/Transform 完成。
+- Metric 的单位不再脱离主值落在卡片左下角；`label` 保留为可选说明，Band Section 自动使用紧凑 KPI 几何，不增加尺寸、趋势或公式 DSL。Component Gallery、Scaffold、内置文档与 Skill 同步展示公共路径。
+- Input 只由外层 component shell 绘制边框，Query Panel 不再出现重复内框。Select 关闭态将 `all/all_available` 统一显示为“全部”，单个显式值使用普通文字而非孤立 Tag。
+- Multi Select 默认提供 `Select all` 与局部 `Revert`；局部 Revert 恢复本次打开菜单时的 canonical state，不替代 Query Card 恢复 committed snapshot 的全局 Revert。
+- Query Panel 的单行 Input、Input Number、Select、Date Picker 与 Date Range 共用 `42px` control-height；复合日期控件改为外框决定高度、内部输入填满外框，不再被子 input 的 min-height 额外撑高。
+
+## 0.21.2 — 2026-09-03
+
+- Server 作者工作台完成低噪声视觉收口：Header、Sidebar 与内容区使用更清楚的层级分隔；Run split control 保持稳定主按钮宽度；Dashboard Control 面板根据子控件约束内容宽度，数字输入不再出现重复内框。
+- TanStack Table 排序更新保留横向滚动位置与表头焦点，宽表点击后仍停留在被排序列；Query Parameter 首次展开、查询后折叠及 Server/portable Shell 的控件语言保持一致。
+- Parameter Editor 将作者可见文案统一为 `Default selection`，策略 Select 收为紧凑宽度，并与 `Add choice` 组成顶部工具栏；静态候选行使用统一拖拽句柄排序，句柄支持方向键，删除重复的上下移动按钮。
+- Date Range 在约 224px 的紧凑 Query track 中重新分配端点留白并使用居中的 tabular 日期显示，两个 ISO 日期在不同 Mac 字体度量下不再裁切末位。
+- Input 字符计数只在作者同时声明 `show_count` 与 `max_length` 时显示 `current / maximum`；数字输入和无上限文本不再出现缺少语境的裸长度。
+- DESIGN 恢复当前协议基线、AI Target 发现路径和 Dashboard-owned Parameter Domain 物化边界，继续以 `protocols.py` 作为版本权威。
+
 ## 0.21.1 — 2026-09-02
 
 - Remote Parameter Lookup 的成功、失败、分页与父级变化统一经过 Dashboard identity、request generation 和 parent-state signature 门禁；迟到失败不再覆盖较新的成功结果，当前 Picker 独立暴露 busy 状态。
@@ -12,7 +51,7 @@
 
 - Parameter Domain 的 definition/SQL 改为 Dashboard-owned；删除 `workspace:/parameter_domains/...` 引用和跨 Dashboard generation 共享。相似看板允许复制并独立演进候选 SQL，同一 Dashboard 的用户与 tab 仍可复用 immutable materialization。
 - Workspace 共享面只保留稳定静态 Asset。Bundle 复制完整 Dashboard 目录与实际引用的 Asset 闭包，不再解析、复制或合并 Workspace SQL；旧引用以 `parameter_domain_workspace_reference_removed` 明确拒绝并给出迁移动作。
-- Dashboard 严格契约升为 `dataviz/dashboard/v19`，Scaffold、示例、fixture、benchmark、内置文档、Skill、DESIGN 与 plan 同步断代，不保留旧语法兼容分支。
+- Dashboard 严格契约升为 `dataviz/dashboard/v20`，Scaffold、示例、fixture、benchmark、内置文档、Skill、DESIGN 与 plan 同步断代，不保留旧语法兼容分支。
 - Server 作者模式的 View renderer signal 说明刷新因果、Query 是否执行、浏览器输入 rows/bytes、mount/update timing 与 Custom Renderer lifecycle warning；`dataviz renderer test` 明确验证空 mount、hook failure 和 dispose 后遗留 DOM 的边界。会话诊断不进入 immutable Result/Evidence，也不宣称检测任意第三方监听器泄漏。
 - Query Panel 的响应式列数在 `ResizeObserver` 下一帧幂等提交，避免 WebKit 在远程候选下拉重绘时产生 undelivered notification loop；Chromium、Firefox 与 WebKit 完整 E2E 均通过。
 - 发布门禁完成：完整非浏览器 pytest、Ruff、Runtime/Component 一致性、四个代表性 Workspace 严格校验、源码 Query/Report，以及 wheel、sdist、ZIP 三个干净环境的安装与 Report 冒烟均通过。

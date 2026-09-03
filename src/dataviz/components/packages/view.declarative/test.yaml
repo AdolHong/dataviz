@@ -14,7 +14,7 @@ tests:
   - {id: view.markdown.lifecycle, component: view.markdown, kind: renderer, assertions: [mount, update, dispose]}
   - {id: view.image.lifecycle, component: view.image, kind: renderer, assertions: [mount, update, dispose]}
   - {id: view.custom.lifecycle, component: view.custom, kind: renderer, assertions: [mount, update, dispose, view-scoped-error]}
-  - {id: service.charts.lifecycle, component: service.charts, kind: renderer, assertions: [plotly, theme, page-wheel-default, resize, update, dispose]}
+  - {id: service.charts.lifecycle, component: service.charts, kind: renderer, assertions: [plotly, theme, typed-query-layout-binding, unresolved-template-diagnostic, page-wheel-default, resize, update, dispose]}
   - {id: service.tables.lifecycle, component: service.tables, kind: renderer, assertions: [tanstack-core, managed-default, raw-core, custom-column-def, mount, update, resize, dispose]}
   - {id: view.renderer-lifecycle.matrix, component: view.renderer-lifecycle, kind: browser, assertions: [mount, update, empty, restore, interaction, resize, dispose, export, plotly, perspective, server, portable-html]}
   - {id: view.plotly-category.legend, component: view.plotly-category, kind: interaction, assertions: [visibility, isolate, restore]}

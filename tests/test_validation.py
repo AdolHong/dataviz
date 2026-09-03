@@ -506,6 +506,33 @@ def test_validate_view_fields_against_declared_output_schema(tmp_path: Path):
     assert diagnostic["details"]["unknown"] == ["missing_day"]
 
 
+def test_validate_rejects_unresolved_plotly_layout_templates(tmp_path: Path):
+    workspace = _copy_workspace(tmp_path)
+    dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
+    definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
+    trend = next(view for view in definition["views"] if view["id"] == "revenue-trend")
+    trend["options"] = {
+        "layout": {
+            "shapes": [{"x0": "before {{ parameters.min_query_revenue }}"}],
+            "annotations": [{"x": "{{ parameters.missing_date }}"}],
+        }
+    }
+    dashboard_path.write_text(
+        yaml.safe_dump(definition, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    report = validate_preflight(workspace, dashboard_id="sales-overview")
+    diagnostics = {item["code"]: item for item in report["diagnostics"]}
+
+    assert diagnostics["plotly_layout_template_invalid"]["field"].endswith(
+        "options.layout.shapes[0].x0"
+    )
+    assert diagnostics["plotly_layout_parameter_unknown"]["field"].endswith(
+        "options.layout.annotations[0].x"
+    )
+
+
 def test_validate_rejects_python_attribute_names_as_dsl_aliases(tmp_path: Path):
     workspace = _copy_workspace(tmp_path)
     dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
@@ -603,7 +630,7 @@ def test_validate_focus_excludes_another_broken_dashboard(tmp_path: Path):
     broken = workspace / "dashboards" / "broken"
     broken.mkdir()
     (broken / "dashboard.yaml").write_text(
-        "schema: dataviz/dashboard/v19\nkind: dashboard\nid: broken\nretired_field: true\n",
+        "schema: dataviz/dashboard/v20\nkind: dashboard\nid: broken\nretired_field: true\n",
         encoding="utf-8",
     )
 

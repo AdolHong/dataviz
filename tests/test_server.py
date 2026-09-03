@@ -103,7 +103,10 @@ def test_parameter_editor_updates_only_defaults_static_choices_and_sibling_order
     assert 'id="parameter-editor-dialog"' in shell.text
     assert 'id="run-button"' in shell.text
     assert 'id="dashboard-controls-control"' in shell.text
-    assert "右键编辑" in shell.text
+    assert "right-click to edit" in shell.text
+    editor_script = client.get("/static/app.js").text
+    assert "caption.textContent = 'Default selection';" in editor_script
+    assert "caption.textContent = 'Initial selection';" not in editor_script
 
     contract = client.get(
         "/api/dashboards/parameter-playground/parameter-editor"
@@ -376,7 +379,7 @@ def test_nested_parameter_editor_actions_are_server_context_menus_only():
     assert "dataset.editorDateAtom" in server_app
     assert "dataset.editorDisclosure" in server_app
     assert "dataviz:editor-change" in server_app
-    assert '<button type="submit" class="button button--run" disabled>保存</button>' in server_app
+    assert '<button type="submit" class="button button--run" disabled>Save</button>' in server_app
     assert "if (!dashboardControls().length) return" not in server_app
 
 
@@ -1213,7 +1216,8 @@ def test_query_parameters_are_an_inline_query_card_toggled_by_the_header_run_con
     assert "data-overlay-floating" not in query_owner_tag
     assert "data-control-panel-body" in query_owner
     assert 'class="dv-query-card"' in query_owner
-    assert '<h2>查询参数</h2>' in query_owner
+    assert '<h2>Query Parameters</h2>' in query_owner
+    assert 'id="query-parameters-status"' in query_owner
     assert 'id="dashboard-controls-control"' not in query_owner
     assert 'id="query-run-control"' not in query_owner
     assert 'id="run-button"' not in query_owner
@@ -1413,14 +1417,15 @@ def test_header_uses_node_signal_lights_and_ends_with_share_controls_then_run():
     query_card = template.index('id="query-parameters-control"')
     assert brand_end < signals < actions < share < controls < run < query_card
     assert '<strong>SHARE</strong>' in template
-    assert 'id="copy-share-link" type="button">分享链接</button>' in template
-    assert 'id="download-button" type="button" disabled>导出 HTML</button>' in template
+    assert 'id="copy-share-link" type="button">Copy share link</button>' in template
+    assert 'id="download-button" type="button" disabled>Export HTML</button>' in template
     assert "shared_caches" not in template
-    assert '<strong data-run-label>查询</strong>' in template
+    assert '<strong data-run-label>RUN</strong>' in template
     assert 'class="button-light"' not in template
     assert ".query-parameters-control{" in style
     assert ".topbar-actions>.button{width:84px;height:40px;padding:0 14px}" in style
-    assert "min-width:84px;\n  min-height:40px;" in style
+    assert ".query-run-control{position:relative;display:flex;flex:0 0 122px;width:122px" in style
+    assert "width:100%;\n  min-width:122px;\n  min-height:40px;" in style
     assert ".query-run-control__copy{display:grid;gap:1px;min-width:0;text-align:center}" in style
     assert 'class="pipeline-signal-list"' in template
     assert 'id="query-diagnostics-label" aria-live="polite" hidden' in template
@@ -1473,7 +1478,7 @@ def test_keyboard_shortcuts_are_cross_platform_guarded_and_cross_frame():
     assert "event.key.toLowerCase() === 'b'" in script
     assert "event.key.toLowerCase() === 'r'" not in script
     assert "keyboardTargetIsEditable(event.target)" in script
-    assert "showShortcutToast('当前看板没有查询参数')" in script
+    assert "showShortcutToast('This Dashboard has no query parameters.')" in script
     assert "dataviz:keyboard-shortcut" in script
     assert "dataviz:keyboard-shortcut" in runtime
     assert "window.parent !== window" in runtime
@@ -1514,9 +1519,17 @@ def test_server_sidebar_is_resizable_collapsible_and_tab_local():
     assert "--sidebar-width" in style
     assert "--sidebar-width:250px" in style
     assert "text-overflow:ellipsis;white-space:nowrap" in style
+    assert 'class="nav-button__drag-handle"' not in script
+    assert "button.draggable = false" in script
+    assert "installDashboardRowDrag(button" in script
+    assert "Math.hypot(event.clientX - pointer.x" in script
+    assert "-webkit-user-drag:none" in style
+    assert "transition:none!important" in style
+    assert ".nav-root-drop{position:absolute" in style
+    assert "openDashboardRenameDialog(dashboardId)" in script
     assert ".nav-button:visited,.nav-button:hover,.nav-button:focus,.nav-button:active{text-decoration:none}" in style
-    assert ".rail{padding:0 14px 18px;color:var(--ink);background:#fff" in style
-    assert "border-right:1px solid #eceeea;box-shadow:none" in style
+    assert ".rail{padding:0 14px 18px;color:var(--ink);background:#fafbf9;border-right:0" in style
+    assert "box-shadow:inset -1px 0 rgba(32,36,43,.035)" in style
     assert "--shell-header-height:58px" in style
     assert "grid-template-rows:var(--shell-header-height) minmax(0,1fr)" in style
     assert "grid-column:1 / -1" in style
@@ -1671,6 +1684,16 @@ def test_navigation_folders_can_be_created_nested_and_removed_safely(tmp_path: P
     assert (root / "dashboards" / "经营分析##周报##sales" / "dashboard.yaml").exists()
     assert {parent_id, child_id} <= {item["id"] for item in summary["folders"]}
 
+    dashboard_renamed = client.patch(
+        "/api/navigation/dashboards/sales/name", json={"title": "月度销售"}
+    )
+    assert dashboard_renamed.status_code == 200
+    summary = client.get("/api/workspace").json()
+    dashboard = next(item for item in summary["dashboards"] if item["id"] == "sales")
+    assert dashboard["canvas_name"] == "月度销售"
+    assert dashboard["path"] == "dashboards/经营分析##周报##月度销售"
+    assert (root / dashboard["path"] / "dashboard.yaml").exists()
+
     renamed = client.patch(
         f"/api/navigation/folders/{child_id}", json={"title": "月度复盘"}
     )
@@ -1678,7 +1701,7 @@ def test_navigation_folders_can_be_created_nested_and_removed_safely(tmp_path: P
     child_id = renamed.json()["result"]["folder_id"]
     folders = client.get("/api/workspace").json()["folders"]
     assert next(item for item in folders if item["id"] == child_id)["title"] == "月度复盘"
-    active_path = root / "dashboards" / "经营分析##月度复盘##sales"
+    active_path = root / "dashboards" / "经营分析##月度复盘##月度销售"
     assert (active_path / "dashboard.yaml").exists()
 
     removed = client.delete(f"/api/navigation/folders/{child_id}")
@@ -1687,7 +1710,7 @@ def test_navigation_folders_can_be_created_nested_and_removed_safely(tmp_path: P
     summary = client.get("/api/workspace").json()
     assert not [item for item in summary["dashboards"] if item["id"] == "sales"]
     assert next(item for item in summary["trash"] if item["trash_id"] == trash_id)["item"]["id"] == child_id
-    trashed_path = root / "dashboards" / "__TRASH__##经营分析##月度复盘##sales"
+    trashed_path = root / "dashboards" / "__TRASH__##经营分析##月度复盘##月度销售"
     assert (trashed_path / "dashboard.yaml").exists()
 
     restored = client.post(f"/api/navigation/trash/{trash_id}/restore")
@@ -1791,7 +1814,7 @@ def test_fast_dag_branch_publishes_output_before_slow_branch_finishes(
         encoding="utf-8",
     )
     (dashboard_root / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v19
+        """schema: dataviz/dashboard/v20
 kind: dashboard
 id: progressive
 title: Progressive branches
@@ -2198,7 +2221,7 @@ def test_query_cancel_is_tab_scoped_and_same_dashboard_run_supersedes(tmp_path: 
         encoding="utf-8",
     )
     (dashboard / "dashboard.yaml").write_text(
-        """schema: dataviz/dashboard/v19
+        """schema: dataviz/dashboard/v20
 kind: dashboard
 id: slow
 title: Slow

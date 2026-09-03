@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+import re
 from typing import Any
 
 
@@ -10,7 +12,10 @@ VIEW_TEMPLATE_CONTRACTS: dict[str, dict[str, Any]] = {
     "metric": {
         "purpose": "Single scalar or aggregated table KPI",
         "required": ["input"],
-        "optional": ["value", "aggregate", "label", "sort", "limit", "options"],
+        "optional": [
+            "value", "aggregate", "label", "unit", "secondary", "sort", "limit",
+            "options",
+        ],
         "aggregate": ["sum", "mean", "min", "max", "count"],
         "field_references": ["value", "sort"],
     },
@@ -114,6 +119,100 @@ VIEW_COMMON_FIELDS = {
     "control_inputs",
     "control_binding",
 }
+
+
+PLOTLY_VIEW_TEMPLATES = {
+    "line", "bar", "stacked-bar", "pie", "scatter", "heatmap", "radar", "map",
+}
+_PLOTLY_PARAMETER_TOKEN = re.compile(
+    r"^{{\s*parameters\.([A-Za-z_][A-Za-z0-9_.-]*)\s*}}$"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class PlotlyLayoutParameterBinding:
+    path: str
+    parameter: str | None
+    error: str | None = None
+
+
+def plotly_layout_parameter_bindings(
+    view: Any,
+) -> tuple[PlotlyLayoutParameterBinding, ...]:
+    """Inspect exact typed Query Parameter bindings inside Plotly layout values."""
+    if view.template not in PLOTLY_VIEW_TEMPLATES:
+        return ()
+    layout = view.options.get("layout") if isinstance(view.options, dict) else None
+    if not isinstance(layout, dict):
+        return ()
+    bindings: list[PlotlyLayoutParameterBinding] = []
+
+    def visit(value: Any, path: str) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                visit(child, f"{path}.{key}")
+            return
+        if isinstance(value, list):
+            for index, child in enumerate(value):
+                visit(child, f"{path}[{index}]")
+            return
+        if not isinstance(value, str) or ("{{" not in value and "}}" not in value):
+            return
+        match = _PLOTLY_PARAMETER_TOKEN.fullmatch(value)
+        if match:
+            bindings.append(PlotlyLayoutParameterBinding(path, match.group(1)))
+            return
+        bindings.append(
+            PlotlyLayoutParameterBinding(
+                path,
+                None,
+                "Plotly layout interpolation must be one complete "
+                "{{ parameters.<id> }} value; expressions, Control references, "
+                "and surrounding text are not supported",
+            )
+        )
+
+    visit(layout, f"views.{view.id}.options.layout")
+    return tuple(bindings)
+
+
+def resolve_plotly_layout_parameters(
+    value: Any,
+    parameter_values: dict[str, Any],
+    *,
+    path: str = "options.layout",
+) -> Any:
+    """Replace exact layout tokens with committed typed Query Parameter values."""
+    if isinstance(value, dict):
+        return {
+            key: resolve_plotly_layout_parameters(
+                child,
+                parameter_values,
+                path=f"{path}.{key}",
+            )
+            for key, child in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            resolve_plotly_layout_parameters(
+                child,
+                parameter_values,
+                path=f"{path}[{index}]",
+            )
+            for index, child in enumerate(value)
+        ]
+    if not isinstance(value, str) or ("{{" not in value and "}}" not in value):
+        return value
+    match = _PLOTLY_PARAMETER_TOKEN.fullmatch(value)
+    if not match:
+        raise ValueError(
+            f"{path} contains an unresolved Plotly layout template; "
+            "use one complete {{ parameters.<id> }} value"
+        )
+    parameter = match.group(1)
+    if parameter not in parameter_values:
+        raise ValueError(f"{path} references unknown Query Parameter {parameter}")
+    return parameter_values[parameter]
 
 
 def _is_missing(value: Any) -> bool:
@@ -230,4 +329,6 @@ def referenced_view_fields(view: Any, input_alias: str | None = None) -> set[str
             if not isinstance(item, str) or not item:
                 continue
             fields.add(item[1:] if property_name == "sort" and item.startswith("-") else item)
+    if view.template == "metric" and view.secondary is not None:
+        fields.add(view.secondary.value)
     return fields

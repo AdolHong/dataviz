@@ -697,6 +697,15 @@ class MapLayerDefinition(Model):
     control_binding: ControlDependencyReference | ViewControlBindingDefinition | None = None
 
 
+class MetricSecondaryDefinition(Model):
+    """One supporting value rendered below a Metric primary value."""
+
+    value: str
+    label: str = ""
+    aggregate: Literal["sum", "mean", "min", "max", "count"] = "sum"
+    format: Literal["number", "percent"] = "number"
+
+
 class DeclarativeViewDefinition(Model):
     id: StableId
     title: str | None = None
@@ -726,6 +735,8 @@ class DeclarativeViewDefinition(Model):
     z: str | None = None
     value: str | None = None
     label: str | None = None
+    unit: str | None = None
+    secondary: MetricSecondaryDefinition | None = None
     series: str | None = None
     color: str | None = None
     size: str | None = None

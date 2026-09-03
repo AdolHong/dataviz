@@ -23,9 +23,9 @@
 | Compiler 与应用边界 | P1-B/P1-C 已完成 | `LoadedDashboard` 继续分别持有和缓存三份 canonical lazy Contract；Contract 间已有 derivation dependency 保持显式、单向。`dependencies.py` 已按语义提取私有 derivation 函数，没有增加 owner/wrapper/phase class；`RunRequest → run_analysis() → canonical AnalysisResult` 复用现有 Catalog resolver 与 `AnalysisResultStore`，没有增加 Runner class。 |
 | 作者可观察性与开发反馈 | P6 已完成 | 已交付只读 Query explanation、Dataset Transform 的 Result 输入复用、原生 Map 多 Layer、参数作者模式和 Table 静态列强调；全部复用现有执行、状态与 Plotly/TanStack owner。 |
 | Runtime 增量反馈与既有能力闭环 | P7 已完成 | Interactive Transform 更新保留旧画面，作者检查器解释本次刷新原因；Custom Renderer 多命名输入完成文档/Scaffold 闭环；Workspace Asset File Source 在执行与 Result 封存中使用同一解析规则。 |
-| 当前发行基线 | 0.21.1 已封版 | Lookup 竞态、参数分段诊断、有界 Interactive cache 与多输入 alias 证据已进入公共实现；完整非浏览器、Chromium/Firefox/WebKit 完整 E2E 与 wheel/sdist/ZIP 独立安装冒烟均通过。 |
+| 当前发行基线 | 0.21.5 | Plotly `options.layout` 支持完整 token 的 typed committed Query Parameter binding，并提前拒绝未知或未解析模板；Dashboard v20、Runtime v15 保持不变，Component Registry 升为 6.2.0。 |
 
-当前开发基线：Package `0.21.1`、Python 3.11–3.14、`dataviz/workspace/v2`、`dataviz/dashboard/v19`、`dataviz/parameter-domain/v2`、`dataviz/parameter-domain-contract/v3`、`dataviz/parameter-lookup/v1`、`dataviz/parameter-materialization/v1`、`dataviz/dashboard-bundle/v2`、`dataviz/report-manifest/v3`、`dataviz/presentation/v2`、`dataviz/source/v6`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v13`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v6`、`dataviz/runtime/v14`、`dataviz/analysis-result/v5`、`dataviz/analysis-evidence/v5`、Component Registry `6.0.0`。当前 0.x Runtime 是 exact-current、同 package lockstep，没有 capability negotiation。P3/P4 已按 P0.0 决策迁移各自 authoring、private wire 与 portable/persisted 边界；以后缩小合法 Output 声明、改变持久化 shape 或 public wire 仍必须分别判断版本，不能被“bugfix 不升版”笼统覆盖。
+当前开发基线：Package `0.21.5`、Python 3.11–3.14、`dataviz/workspace/v2`、`dataviz/dashboard/v20`、`dataviz/parameter-domain/v2`、`dataviz/parameter-domain-contract/v3`、`dataviz/parameter-lookup/v1`、`dataviz/parameter-materialization/v1`、`dataviz/dashboard-bundle/v2`、`dataviz/report-manifest/v3`、`dataviz/presentation/v2`、`dataviz/source/v6`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v13`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v6`、`dataviz/runtime/v15`、`dataviz/analysis-result/v5`、`dataviz/analysis-evidence/v5`、Component Registry `6.2.0`。当前 0.x Runtime 是 exact-current、同 package lockstep，没有 capability negotiation。P3/P4 已按 P0.0 决策迁移各自 authoring、private wire 与 portable/persisted 边界；以后缩小合法 Output 声明、改变持久化 shape 或 public wire 仍必须分别判断版本，不能被“bugfix 不升版”笼统覆盖。
 
 ## 当前优先级
 
@@ -354,6 +354,25 @@ P6 明确暂缓 Workspace 级 Python 工具库。它会同时引入 import names
 
 - [x] 提供职责单一的 `scripts/check_version_drift.py`，比较项目声明、源码版本与当前 Python 实际导入的版本/路径；不新增开发命令包装器，测试和发行继续使用现有直接命令。
 - [x] Query Parameter 作者投影与 View/Node Inspector 可以一次复制聚合诊断；内容只投影现有 canonical state、Lookup timing、refresh、Renderer 与生命周期证据，不新增协议或第二证据 Store。
+
+### P9：Metric 常用信息层级闭环（已完成）
+
+- [x] Metric 增加一个严格 `secondary`：只消费同一 table Named Output 中已计算字段，拥有独立 aggregate 与 number/percent 格式，不增加公式、趋势或迷你图 DSL。
+- [x] `unit` 与主值同基线；`label` 继续是可选说明。空值稳定显示 `—`，百分比输入使用比例值，Band Section 由平台自动采用紧凑几何。
+- [x] Dashboard v20、Runtime v15、Component Registry 6.1.0、View/Section Package、Gallery、Scaffold、docs、Skill 与 Server/portable 公共 Runtime 同步升级；Dependency、State、Result/Evidence shape 不变。
+
+### P10：Plotly 动态 Layout 的最小安全边界（已完成）
+
+- [x] `options.layout` 的任意嵌套值可使用一个完整 `{{ parameters.<id> }}` token，并以最近一次 RUN 的 committed typed value 替换；date、number 和 list 不经过字符串 coercion。
+- [x] 不支持混合文本、表达式、Control、trace/config 插值或新的 reference-line DSL；结果字段驱动的复杂标注仍由 SQL/Transform 负责。
+- [x] strict validate 以 shapes/annotations/axis 的具体嵌套路径拒绝未知参数和未解析模板；Runtime 保留相同防御性错误，Server 与 portable 共用同一 View Controller。
+- [x] Dashboard v20、Runtime v15 与持久化协议不变；Component Registry 6.2.0、view.declarative 3.2.0、CLI docs、Skill、示例和跨 Runtime JavaScript 回归同步更新。
+
+### P10：CLI 文档发现闭环（已完成）
+
+- [x] `docs --search` 递归检索内置文档正文，返回排序且有界的 topic/path/snippet/command；不建立外部索引、向量库或第二份文档源。
+- [x] `docs --component` 对无歧义短名解析 canonical Component id；歧义和相近拼写只给候选命令，不猜测作者意图。
+- [x] Skill 的默认排障顺序固定为 docs search → topic/component → generated schema/scaffold/inspect → 必要时源码定位；源码暴露的文档缺口应反馈给作者。
 
 默认价值顺序如下；顺序不等于人为串联的技术依赖：
 

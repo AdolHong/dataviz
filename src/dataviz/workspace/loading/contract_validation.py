@@ -29,7 +29,10 @@ from dataviz.workspace.controls import (
     resolve_dashboard_control_reference,
     scoped_control_registry,
 )
-from dataviz.view_contracts import referenced_view_fields
+from dataviz.view_contracts import (
+    plotly_layout_parameter_bindings,
+    referenced_view_fields,
+)
 
 from dataviz.workspace.loading.asset_validation import (
     _code_path,
@@ -681,6 +684,32 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         "content_control_out_of_scope",
                     )
                 )
+
+        for view in dashboard.definition.views:
+            for binding in plotly_layout_parameter_bindings(view):
+                if binding.error:
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            binding.error,
+                            definition_path,
+                            binding.path,
+                            "plotly_layout_template_invalid",
+                            {"view": view.id},
+                        )
+                    )
+                elif binding.parameter not in parameter_ids:
+                    diagnostics.append(
+                        Diagnostic(
+                            "error",
+                            f"Plotly layout references unknown Query Parameter: "
+                            f"{binding.parameter}",
+                            definition_path,
+                            binding.path,
+                            "plotly_layout_parameter_unknown",
+                            {"view": view.id, "parameter": binding.parameter},
+                        )
+                    )
 
         for domain_id, (domain_path, domain) in dashboard.parameter_domains.items():
             if not _is_within(domain_path, dashboard.root):
@@ -1501,6 +1530,22 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                                 f"View {view.id} metric requires value for a table input",
                                 definition_path,
                                 "views.value",
+                            )
+                        )
+                    if (
+                        name == "main"
+                        and view.template == "metric"
+                        and output_kind != "table"
+                        and view.secondary is not None
+                    ):
+                        diagnostics.append(
+                            Diagnostic(
+                                "error",
+                                f"View {view.id} metric secondary requires a table input",
+                                definition_path,
+                                "views.secondary",
+                                "metric_secondary_requires_table_input",
+                                {"view": view.id, "output_kind": output_kind},
                             )
                         )
                     if (

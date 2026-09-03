@@ -1,4 +1,4 @@
-schema: dataviz/dashboard/v19
+schema: dataviz/dashboard/v20
 kind: dashboard
 id: component-gallery
 title: Component Gallery
@@ -95,7 +95,15 @@ controls:
     step: 0.05
 
 views:
-  - {id: total-revenue, title: Revenue, template: metric, input: source:gallery-data/main, value: revenue, aggregate: sum, label: selected revenue}
+  - id: total-revenue
+    title: Revenue
+    template: metric
+    input: source:gallery-data/main
+    value: revenue
+    aggregate: sum
+    unit: USD
+    label: selected revenue
+    secondary: {value: orders, aggregate: sum, label: Orders, format: number}
   - {id: total-orders, title: Orders, template: metric, input: source:gallery-data/main, value: orders, aggregate: sum, label: selected orders}
   - {id: revenue-line, title: Line · Plotly, template: line, input: source:gallery-data/main, x: month, y: revenue, series: region, aggregate: sum, span: 7}
   - {id: category-bars, title: Bar · Plotly, template: bar, input: source:gallery-data/main, x: category, y: revenue, series: region, aggregate: sum, span: 5}

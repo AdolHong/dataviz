@@ -132,7 +132,9 @@
   padding: 0 0 18px;
 }
 .dv-theme--business .dv-view-header { background: var(--dv-panel); }
-.dv-theme--business .dv-metric strong { font-size: clamp(38px, 5vw, 64px); }
+.dv-theme--business .dv-metric__value {
+  font-size: var(--dv-metric-value-size, clamp(38px, 5vw, 64px));
+}
 .dv-theme--terminal {
   --dv-paper: #0b100e;
   --dv-panel: #111a16;
@@ -178,12 +180,6 @@
   --dv-chart-3: #c79543;
   --dv-chart-4: #6f779f;
   font-family: "Newsreader", Georgia, serif;
-}
-.dv-theme--editorial {
-  background-image:
-    linear-gradient(rgba(34, 29, 24, .035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(34, 29, 24, .035) 1px, transparent 1px);
-  background-size: 24px 24px;
 }
 .dv-theme--editorial .dv-report-header {
   color: var(--dv-ink);
@@ -255,6 +251,14 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
   gap: 10px;
+}
+[data-dv-control-panel][data-control-role="dashboard"] .dashboard-control-group > .parameter-form,
+[data-dv-control-panel][data-control-role="dashboard"] .dashboard-control-group > .selection-form,
+[data-dv-control-panel][data-control-role="dashboard"] .dv-runtime-control-group > .dv-report-selection-group__fields,
+[data-dv-control-panel][data-control-role="dashboard"] .dv-runtime-control-group > .dv-compute-fields {
+  width: 100%;
+  max-width: var(--dv-control-content-width, 280px);
+  justify-self: start;
 }
 [data-dv-control-panel][data-control-template="stack"] .dashboard-control-group > .parameter-form,
 [data-dv-control-panel][data-control-template="stack"] .dashboard-control-group > .selection-form,
@@ -532,6 +536,7 @@ body {
 }
 .dv-runtime-query-tray > .dv-runtime-query-panel,
 .query-parameters-control .query-parameters-panel {
+  --dv-control-height: 42px;
   width: 100%;
   margin: 0;
   padding: 12px 20px 16px;
@@ -805,27 +810,30 @@ button.dv-shell-brand:focus-visible {
 }
 .query-parameters-control .field :is(input, select, textarea),
 .query-parameters-control .field .dv-control > [data-control-mount] > button {
-  min-height: 42px;
+  min-height: var(--dv-control-height, 42px);
   border-color: #dde1e8;
   border-radius: 9px;
   font-size: 13px;
 }
 .dv-shell-header-actions .query-run-control {
+  position: relative;
   display: flex;
-  flex: 0 0 auto;
+  flex: 0 0 122px;
+  width: 122px;
   align-items: stretch;
 }
 .dv-shell-header-actions .query-run-control__primary {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 88px;
+  width: 100%;
+  min-width: 122px;
   min-height: 40px;
   padding: 6px 16px;
   color: #fff;
   background: #303a78;
   border: 1px solid #303a78;
-  border-radius: 9px 0 0 9px;
+  border-radius: 9px;
   cursor: pointer;
 }
 .dv-shell-header-actions .query-run-control__primary:hover:not(:disabled) {
@@ -843,6 +851,11 @@ button.dv-shell-brand:focus-visible {
   letter-spacing: .02em;
 }
 .dv-shell-header-actions .query-run-control__toggle {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  bottom: 0;
   display: grid;
   place-items: center;
   width: 34px;
@@ -872,7 +885,6 @@ button.dv-shell-brand:focus-visible {
 .dv-shell-header-actions .query-run-control__toggle[aria-expanded="true"] .query-run-control__chevron {
   transform: rotate(225deg) translate(-1px, -1px);
 }
-.query-run-control[data-empty="true"] .query-run-control__primary { border-radius: 9px; }
 @media (max-width: 720px) {
   .dv-query-card-host,
   .query-parameters-control.dv-query-card-host,

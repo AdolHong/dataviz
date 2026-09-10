@@ -2116,22 +2116,26 @@ views:
             "boundary": "Dashboard Theme 只拥有 Canvas、Section、View 与 Renderer；Dashboard CSS 不应重写 Shell token。",
         },
         "control_panels": {
-            "default": "Query Parameters 是正常文档流中的 Query Card；Header 最右侧的 RUN split control 负责执行与开合，Card 内不重复运行按钮。Dashboard/Section/View Controls 使用临时托盘，默认只展示业务字段与组件；consumer mode 与影响范围保留在 Runtime 契约中。",
-            "path": "control_panels.<query|dashboard>；Section/View 可在各自 presentation 条目中设置 controls",
+            "default": "Server 的 Query Parameters / Dashboard Controls 使用 Q/C 右侧面板；Section/View 默认使用 sidebar，仅需弹窗时显式设置 placement: popover。Sidebar 按 Dashboard → 当前 Section → 当前 View 展示祖先链，不展示兄弟 View；无控件的组省略。C 直接收起已打开的任意 Controls 上下文。",
+            "path": "control_panels.<query|dashboard|section|view>；sections.<id>.controls / views.<id>.controls 覆盖本对象，不向子 View 继承",
             "options": {
                 "template": ["auto", "stack", "grid"],
                 "width": ["auto", "compact", "regular", "wide"],
-                "columns": "1–6，表示最大列数；Query 的实际列数由 Panel 自身宽度动态计算；Dashboard auto 在多个控件时最多使用 3 列",
+                "columns": "1–6，表示 popover 网格的最大列数；右侧 sidebar 始终单列，避免将输入压窄",
                 "column_width": "160–600 px，默认 280；Dashboard Panel 按有效列数和舒适列宽收口，稀疏表单与单个控件不拉满整行",
                 "density": ["compact", "comfortable"],
+                "placement": "仅 Section/View 支持 popover 或 sidebar。优先级：本对象 controls.placement → control_panels 对应类型 placement → sidebar；query/dashboard 不接受该字段。",
             },
             "control_span": "control_components.<canonical-key>.span 可显式设为 1 或 2；默认 1，RangePicker 等组件不会自动跨列，窄容器会安全退化为单列。",
-            "boundary": "这些字段只调整排版；值、校验、级联、tab 状态和执行仍由共享 Runtime 管理。导出 HTML 中 Query 为只读快照，Controls 保持交互。",
+            "boundary": "展示位置不提交 Control 或 Query；值、校验、级联与执行仍由共享 Runtime 管理。Sidebar 使用祖先上下文，Popover 仅展示本对象；同时可见时共享 canonical 状态并双向同步。不同入口更新上下文（Query 切换为 Controls），同一 sidebar 入口再次点击收起；popover 入口只开关弹窗，不收起侧栏。右侧隐藏时，仅 sidebar 入口展开右侧。导出 HTML 中 Query 为只读快照，Controls 保持交互与 placement。",
             "example": {
                 "control_panels": {
                     "query": {"columns": 6, "column_width": 280, "density": "compact"},
                     "dashboard": {"template": "stack"},
-                }
+                    "section": {"placement": "sidebar"},
+                    "view": {"placement": "sidebar"},
+                },
+                "views": {"detail": {"controls": {"placement": "popover"}}},
             },
         },
         "extension_path": ["默认模板", "模板参数", "Theme token", "局部 CSS class/options", "自定义 Renderer", "自定义 Canvas"],

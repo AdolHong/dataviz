@@ -858,8 +858,19 @@ class CanvasRenderer:
             owner_id,
         )
         editor_owner = f"{origin}:{owner_id}"
+        defaults = getattr(dashboard.presentation.control_panels, origin) if dashboard.presentation else None
+        visual = (getattr(dashboard.presentation, f"{origin}s").get(owner_id)
+                  if dashboard.presentation else None)
+        override = visual.controls if visual else None
+        placement = (override.placement if override else None) or (defaults.placement if defaults else None) or "sidebar"
+        parent = next((section.id for section in dashboard.definition.sections if owner_id in section.views), "") if origin == "view" else ""
+        owner = next((item for item in getattr(dashboard.definition, f"{origin}s") if item.id == owner_id), None)
+        owner_title = owner.title if owner else owner_id
         return (
             f'<details class="dv-context-controls" data-control-origin="{html.escape(origin)}" '
+            f'data-controls-placement="{placement}" '
+            f'data-control-parent-section="{html.escape(parent, quote=True)}" '
+            f'data-control-owner-title="{html.escape(owner_title or owner_id, quote=True)}" '
             f'data-editor-owner="{html.escape(editor_owner, quote=True)}" '
             f'data-overlay-floating="true" {panel_attributes}>'
             '<summary title="左键打开控件，右键编辑默认配置">'
@@ -1213,6 +1224,9 @@ class CanvasRenderer:
             elif role == "view" and owner_id is not None:
                 view = presentation.views.get(owner_id)
                 config = view.controls if view is not None else None
+            if role in {"section", "view"}:
+                defaults = getattr(presentation.control_panels, role)
+                config = defaults.model_copy(update=config.model_dump(exclude_unset=True) if config else {})
         requested_template = config.template if config is not None else "auto"
         template = (
             ("stack" if count <= 1 else "grid")
@@ -1388,7 +1402,7 @@ class CanvasRenderer:
                 f'<button type="button" data-control-apply data-control-keys="{encoded_keys}" '
                 f'data-analysis-always="{str(bool(actionable)).lower()}" '
                 f'data-manual-targets="{encoded_targets}">RUN</button></footer>'
-                if control_items or actionable
+                if actionable
                 else ""
             )
             control_block = (
@@ -1439,6 +1453,7 @@ class CanvasRenderer:
             '<header><h2 id="dv-runtime-shortcuts-title">快捷键</h2>'
             '<button type="submit" aria-label="关闭">×</button></header><dl>'
             '<div><dt><kbd>Q</kbd></dt><dd>查询参数</dd></div>'
+            '<div><dt><kbd>C</kbd></dt><dd>Dashboard controls</dd></div>'
             '<div><dt><kbd>Esc</kbd></dt><dd>关闭临时面板</dd></div>'
             '<div><dt><kbd>?</kbd></dt><dd>快捷键帮助</dd></div>'
             '</dl><footer><button type="submit">关闭</button></footer></form></dialog>'

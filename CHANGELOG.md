@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.24.3 — 2026-09-11
+
+- Unify Query Parameters and Controls sidebar width at 360px, sharing the layout token with standalone Controls and the surrounding content offset.
+- Remove the sidebar's nested 280px field cap so boxed controls align with scope rules and use the available content width. Preserve natural checkbox/radio sizing, scope colors, 56px group spacing and existing interaction semantics.
+- Keep narrow drawers viewport-bounded and full-width on phones; retain explicit popover sizing and read-only exported query evidence.
+- Add regression assertions for stable panel width and field alignment, with a real date-range query fixture. Complete test results and the intermittent WebKit initial-Canvas timeout are recorded in plan.md.
+
+## 0.24.2 — 2026-09-11
+
+- Move Controls group separators into the heading row, extending after the scope/name to the sidebar content edge instead of drawing a separate line between groups.
+- Distinguish Dashboard, Section and View with subtle indigo, green and sand labels; match each group's title and rule to its scope text color without recoloring parameter fields.
+- Increase spacing between scope groups from 28px to 56px while preserving internal field spacing and existing sidebar/popover behavior. Apply the same styling to standalone HTML.
+- Make C close any open Controls sidebar directly, including Section/View context, rather than first returning to Dashboard scope. Repeated clicks on the active sidebar entry close it; different entries replace the context, while popover entry clicks toggle only their popup.
+- Default Section/View Controls to sidebar placement. Authors wanting the previous popup behavior must explicitly set `control_panels.section/view.placement: popover` or the corresponding per-object override.
+
+## 0.24.1 — 2026-09-11
+
+- Extend the existing Controls sidebar to the current Dashboard → Section → View context. Presentation defaults and per-object overrides choose `popover` or `sidebar`; existing configurations retain popovers.
+- Keep an open sidebar in place when local Controls are clicked, including repeated clicks; switch Query to the relevant Controls context without losing its draft. When hidden, only a sidebar-placement entry opens it.
+- Synchronize simultaneous popover/sidebar editors through canonical Control state, without extra queries. Preserve scoped host-write authorization, queued edits and independent Page state.
+- Unify the Controls title and Dashboard group across contexts. Separate lightweight scope labels from actual Section/View titles and tighten spacing; retain responsive focus handling and standalone HTML interaction.
+- Add regressions for placement inheritance, absent Dashboard Controls, sibling switching, Query drafts, mirrored selections, rapid close/edit, standalone reports and stable heading positions.
+
 ## 0.24.0 — 2026-09-10
 
 - Remove the disabled query action from standalone reports; retain a query-parameter evidence toggle, without Run, Share or workbench-only shortcut listings.

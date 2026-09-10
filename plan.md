@@ -1,10 +1,35 @@
 # Dataviz 实施计划
 
-更新时间：2026-09-10
+更新时间：2026-09-11
 
 当前协议基线（由 `protocols.py` 与回归检查约束）：`dataviz/workspace/v2`、`dataviz/dashboard/v20`、`dataviz/parameter-domain/v2`、`dataviz/parameter-domain-contract/v3`、`dataviz/parameter-lookup/v1`、`dataviz/parameter-materialization/v1`、`dataviz/dashboard-bundle/v2`、`dataviz/report-manifest/v3`、`dataviz/presentation/v2`、`dataviz/source/v6`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v13`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v6`、`dataviz/runtime/v15`、`dataviz/analysis-result/v5`、`dataviz/analysis-evidence/v5`。Component Registry 以 `dataviz components` 为准，不在阶段清单重复登记。
 
-当前包版本：`0.24.0`。本文件区分本地发行构建、工作树变更与待验证事项，不以完成过的历史阶段作为未来计划。架构理由见 [ARCHITECTURE](ARCHITECTURE.md)，视觉规范见 [DESIGN](DESIGN.md)，代码见 [实现索引](docs/product-architecture.md)，发行历史见 [CHANGELOG](CHANGELOG.md)。
+当前包版本：`0.24.3`。本文件区分本地发行构建、工作树变更与待验证事项，不以完成过的历史阶段作为未来计划。架构理由见 [ARCHITECTURE](ARCHITECTURE.md)，视觉规范见 [DESIGN](DESIGN.md)，代码见 [实现索引](docs/product-architecture.md)，发行历史见 [CHANGELOG](CHANGELOG.md)。
+
+## 0.24.3 统一 Q/C 面板宽度
+
+- 面板统一 360px，解除侧栏内部重复 280px 字段上限，输入框与标题线对齐；保留日期完整显示、自然选项排列、现有颜色/间距/交互。独立 HTML Controls 同步。
+- 全套非浏览器 **731 passed，123.47 秒**；完整 Chromium **96 passed，1092.57 秒**；完整 Firefox **96 passed，1136.24 秒**；完整 WebKit **95 passed、1 failed，1131.22 秒**。
+- WebKit 首次失败为 `test_server_compute_waits_for_required_control_domain[error]`：20 秒内初始 Canvas 未出现，停留在运行前页面，尚未验证到错误域状态。单独复跑 **1 passed，15.15 秒**，不改超时或放宽断言；目前原因未确认，保留为间歇性初始化超时，不声称已修复或三浏览器一次全绿。
+- 三套均执行全部 E2E；Runtime 用例使用相应浏览器，Analysis/visual-check CLI 中指定 Chromium 的用例仍使用 Chromium。浏览器测试复用摘要校验的本地上游资源缓存，不测试 CDN 可用性。组件元数据检查 21 包通过。
+- WebKit 完整就绪/空域/错误域分组复验 **3 passed，37.38 秒**；升版后的发行/版本检查 **23 passed，1.37 秒**。复验通过不替代首次失败记录。
+- 本地构建 wheel、sdist、ZIP/SHA256，检查包内版本与前端资源；不上传远端包仓库。本轮未做安装冒烟、多 Python 版本或完整浏览器缩放矩阵。
+
+## 0.24.2 Controls 视觉打磨
+
+- 标题后的细线延伸至内容区右侧，移除组间横线；三个作用域的标识、名称与细线统一使用对应层级色。层级间距 56px，组内间距不变，工作台与导出 HTML 同步。
+- 默认 Section/View 使用 sidebar，popover 必须显式配置；C 直接收起任何 Controls 上下文，同一 Sidebar 入口再次点击收起，不同入口切换，Popover 只开关弹窗。
+- 标题线调整后 Chromium 专项 **3 passed，38.82 秒**；同色调整后专项 **1 passed，14.20 秒**，包含桌面/窄屏截图及独立 HTML。随后间距翻倍经用户确认，仅做静态检查；不将先前浏览器成绩描述为最终间距版本的复验。
+- 本轮按要求升版并本地打包；检查版本与归档完整性，不重跑完整测试或安装冒烟，不上传远端包仓库。
+- 最终交互追加回归：Chromium 上下文与快捷键 **5 passed，60.89 秒**，显式 Popover/同 View 依赖专项 **3 passed，39.53 秒**；相关非浏览器与发行检查 **80 passed，11.40 秒**。最终上下文回归包含 56px 间距版本的桌面、窄屏与导出流程；不宣称重新跑过完整浏览器套件。
+
+## 0.24.1 上下文 Controls 面板
+
+- 复用右侧面板显示 Dashboard → 当前 Section → 当前 View；Presentation 默认与单对象覆盖选择 popover/sidebar，未配置保持原行为。已展开时局部入口只更新上下文，不收起；隐藏时只有 sidebar 入口展开。
+- 弹窗与侧栏同步 canonical 状态，保留 Query 草稿、层级选择与排队中的提交；统一标题与轻量作用域标识，不改变数据协议。
+- 完整非浏览器 **731 passed，112.85 秒**；完整 Chromium **96 passed，1080.37 秒**。本地校验过的上游资源缓存用于浏览器测试，生产加载策略不变。
+- 用户在整套浏览器运行期间追加了纯视觉层级调整；调整后另跑上下文面板专项 **3 passed，38.73 秒**，并核对桌面/窄屏截图。全套成绩与追加专项分别记录，不混作最终视觉版本从头跑完的全套。
+- 本轮构建本地 wheel、sdist、ZIP/SHA256；未运行 Firefox/WebKit、安装冒烟或多 Python 版本矩阵，不上传远端仓库。
 
 ## 0.24.0 右侧操作面板
 

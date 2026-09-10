@@ -239,10 +239,74 @@ Dataviz 使用温和但精确的圆角：微元素 5px，输入与按钮 7px，�
 - 打开、关闭、切换面板不提交查询、不重置控件、不取消正在执行的 Run。保留草稿、已提交参数、Control canonical state；重开可查看查询使用的参数及与当前草稿的区别。
 - 首次无已应用结果且存在 Query Parameters 时自动展开 Q；查询完成后不强制关闭，由用户决定是否继续调参。此条取代旧布局的“成功后自动折叠”。
 - 切换 Dashboard / Page 时展示当前目标的字段与状态；旧请求不得覆盖新面板，不混用各页 Draft / Applied。没有对应面板内容时关闭，不显示上一页字段；导航不能等待候选初始化才能响应。
-- Section / View Controls 仍留在对应内容附近。独立报告、打印与导出不因此强制加入工作台侧栏。
+- 0.24.0 的 Section / View Controls 仍留在对应内容附近；下一阶段的可选上下文侧栏见下节。已实现行为与待实现设计不得混写。
 - 视觉沿用白底、克制的结构分隔、42px 控件几何和既有焦点样式；宽屏停靠面板不使用浮层重阴影。布局改变后通知图表 resize，避免逐帧驱动昂贵重绘；尊重 reduced-motion。
 
 **验收：** Q/Q、C/C、Q/C/Esc；输入与中文组合输入不误触；面板关开不丢草稿、不新增 Query；查询中关闭再打开；Dashboard / Page 快速切换；下拉框内 Esc 只关闭一层；窄屏焦点与关闭入口；Date Range 全日期、长多选摘要及最后一项字段不裁切。首次展开与查询后保留必须分别验证。
+
+#### Unified panel width
+
+**状态：2026-09-11，0.24.3 本地发行。** 同时覆盖 Query Parameters 与 Dashboard / Section / View Controls 的右侧面板，不重新设计已确认的交互或视觉语言。桌面、窄屏与日期范围已核对；三浏览器完整测试及 WebKit 间歇性初始化超时见 plan.md，完整缩放矩阵尚未执行。
+
+**调整依据：** 原面板固定 390px，左右内距各 20px；Controls 字段另受默认约 280px 内容宽度限制，Query 表单也保留组件列宽约束。标题线已延伸至面板内容区右缘，但输入框仍提前结束，留下额外空白。因此协调面板与字段两层宽度，而不是只缩小外壳或只拉长分割线。Checkbox / Radio 选项很少时自然留下空白，不属于必须填满的缺陷。
+
+**统一宽度方案：**
+
+- 以 **360px 外宽、左右各 20px 内距、约 320px 可用内容宽度**作为实现起点，最终需用真实日期范围、长选项和缩放验收。按 CSS 像素定义，不根据截图的物理像素推算；边框与滚动条计入实际可用宽度。
+- Q/C 及各层 Controls 共用同一宽度来源；标题、字段区域、分割线与 Query 底部操作区对齐。切换面板、切换 Section/View、候选加载或选中项变化均不改变外宽，不以测量当前文字来自动伸缩面板。
+- 右侧面板里的 Input、Input Number、Select、Multiple Select、Date Picker、Date Range 使用整行可用宽度。解除面板内部重复的 280px 字段上限与旧固定列宽；不全局改动原位表单或 Popover 的宽度规则。
+- Checkbox / Radio 选项自然排列并按可用宽度换行，不均分拉伸、不扩大点击项之间的空隙。长标签可换行；Select 摘要保留既有省略与查看全文机制，不以标签长度撑宽侧栏。
+- 日期范围必须显示两端完整日期及日历入口，不能以缩小字号或隐藏字符换取紧凑。若真实字体、缩放和控件尾部占位证明 320px 内容区不足，应统一修订 Q/C 基准宽度，不给 Query 再造一个独立宽度。
+- 宽屏继续停靠；窄屏沿用覆盖抽屉，宽度不超过可用视口，手机可全宽。此轮不新增拖动调宽、按控件自动扩宽、双列表单或 DSL 字段。独立 HTML 已有的右侧 Controls 使用相同规则；不因此将只读 Query 证据改造成另一套编辑面板。
+- 保留 42px 输入框高度、层级间 56px 留白、现有层级颜色与标题线，以及 C/同入口收起、不同入口切换、显式 Popover 等已确认行为。
+
+**实施验收：** 同时检查 Q/C、单层与三层 Controls、桌面/窄屏/手机、浏览器 100%/125%/200% 缩放；覆盖长中英文标题、少量 Checkbox、长多选摘要、日期范围、滚动条与最后一个字段。断言输入外框右缘与标题线右缘对齐，内容不横向溢出、日期不裁切，Q/C 切换宽度稳定；正文图表正确 resize，焦点、草稿和 canonical 状态不变，打开或调整展示不新增 Query。此处为待执行验收，不是测试通过记录。
+
+### Contextual Controls
+
+**状态：2026-09-11，0.24.1 本地发行。** 延续现有右侧操作面板；不改变颜色、字体、控件几何、Control 作用域或计算契约。本文使用现有术语 Section（用户描述中的 sector）。Presentation 默认入口为 `control_panels.section/view.placement`，单对象覆盖为 `sections/views.<id>.controls.placement`。
+
+**The Context Path Rule.** 面板只展示当前入口的祖先链，不展示整个 Dashboard 的控件目录；展示在一起不意味着新增依赖、继承值或扩大过滤范围。
+
+| 打开入口 | Sidebar 中从上到下的内容 |
+| --- | --- |
+| Dashboard Controls | 当前 Page 上下文中的 Dashboard Controls |
+| Section A 的 Controls | Dashboard → Section A |
+| Section A / View X 的 Controls | Dashboard → Section A → View X |
+| Section A / View Y 的 Controls | Dashboard → Section A → View Y；不保留 X 的表单 |
+
+这里 View 入口包含两级局部上下文（Section、View）及公共 Dashboard 层，最多三组。无控件的组不渲染，也不留下空分隔线；当前对象归属仍由标题说明。View 没有所属 Section 时不虚构一层。
+
+#### Visual hierarchy and access
+
+- 面板标题始终使用 `Controls`，包括只显示 Dashboard 的状态；Dashboard 使用与局部层级相同的真实分组标题与间距，不随上下文切换改变位置。Dashboard / Section / View 是同一行上的轻量作用域标识，Section / View 的实际名称使用 14px 正文级标题，避免将技术前缀与名称拼成一整段粗体。业务名称保留作者语言，长名称可换行。
+- 2026-09-11 用户追加确认（0.24.1 打包后的工作树调整）：移除组间横线，改为标题后紧接一条 1px 细线，延伸至面板内容区右侧；组内 12px、组间 56px 留白（按用户要求由 28px 翻倍）。三个作用域标识分别使用浅靛蓝、浅绿、浅沙色，深色文字；颜色仅辅助区分作用域，不表示状态，也不铺满整组。各组单列、同一背景，不嵌套卡片、树形缩进或三级 Tab，也不默认增加折叠操作。
+- 每层标识文字、后面的实际名称及标题细线使用相同层级前景色：Dashboard `#3f4983`、Section `#365e4a`、View `#77572c`。参数名称、输入值和控件不继承该颜色。
+- Section / View 原位保留 Controls 按钮，作为发现入口与关闭后的焦点返回位置。只点击 Controls 入口才切换面板上下文；点击图表、选择数据点、滚动页面不自动抢占面板。
+- 切换目标后让被点击的组标题及第一个字段进入面板可视区，必要时只滚动面板，不移动正文；父级组仍可向上滚动查看。数据更新不得反复抢焦点或滚回顶部。
+
+#### Presentation defaults and overrides
+
+- Dashboard 的 Presentation 可分别设置 Section Controls、View Controls 的默认展示方式：`popover` 或 `sidebar`。0.24.2 起未配置默认 sidebar；popover 保留为偶尔需要弹窗时的显式选择。
+- 单个 Section / View 可以覆盖自身展示方式；省略即继承对应类型的 Dashboard 默认。解析顺序为「本对象覆盖 → Dashboard 对应类型默认 → sidebar」。不再增加含义重叠的“是否弹窗”布尔字段。
+- Section 的展示覆盖不传播给子 View；子 View 仍使用自己的覆盖或 Dashboard 的 View 默认。这样“某个 Section 用弹窗”不会悄悄改变它下面全部 View 的入口。
+- 展示方式只作用于被点击入口。View 选择 sidebar 时，其祖先 Controls 一起进入面板，即使祖先自身入口配置为 popover；popover 则只展示被点击对象自身的 Controls，不塞入完整祖先链。
+- 控件只有一份 canonical 状态，但允许 Popover 与 Sidebar 同时展示并双向同步；不能把两份表单当成独立状态。用户明确确认：打开局部 Popover 不关闭右侧面板。
+
+#### Switching, focus, and lifecycle
+
+- 右侧已展开时，点击不同 Section/View Controls 更新祖先上下文；若原来显示 Query Parameters，则切换到 Controls 并保留 Query 草稿。同一 Sidebar 入口再次点击收起；“同一”按当前目标对象判断，不按面板内是否包含祖先组判断。
+- 右侧隐藏时，Popover 入口只开弹窗，不展开侧栏；Sidebar 入口展开侧栏。Popover 自身仍可再次点击关闭，但这不改变侧栏展开状态。关闭侧栏使用 X/Esc，不逐级“返回”，不新增返回栈。
+- C 或 Header Dashboard Controls 在右侧已显示任何 Controls 上下文时直接收起，不先返回 Dashboard 层；从 Query 切换保留其草稿。没有 Dashboard Controls 时，C 仍可收起已打开的局部 Controls；侧栏隐藏时则提示无参数，不猜测打开哪个 Section/View。Popover 入口重复点击只开关弹窗，不收起侧栏。
+- Esc 先关闭 Select/日历等内层浮层，再关闭侧栏。宽屏不自动聚焦关闭按钮；键盘打开时将焦点置于目标组标题或首个可操作字段，窄屏沿用模态抽屉的焦点约束。关闭返回当前入口，入口被移除时退回最近有效位置。
+- 控件变更按已有依赖图传播；打开、关掉、切换展示位置不提交 Control、不查库、不重置选择，也不重挂载无关 View。共享祖先组更新时不得丢失正在编辑的焦点、搜索文本或未提交输入。
+- 切换 Dashboard/Page、目标 View 被移除或不可见时清除失效的局部上下文，不留旧页面字段。异步初始化只更新当前目标，不阻塞其他入口；无候选、加载中、失败分别按既有控件状态呈现。
+
+#### Standalone reports and verification
+
+- 独立 HTML 应复用同一展示方式与上下文规则，但不引入工作台导航 Rail、Run 或 Share；Query Parameters 仍是只读证据。仅导出当前报告实际包含的 Section/View，不引用其他 Page。
+- 打印时去掉侧栏、浮层和操作入口，不打印空白占位；沿用报告已有参数证据，不把全部控件表单摊进正文。
+- 实施验收：同 Section 两个 View 来回切换、跨 Section 切换、空祖先组、没有 Dashboard Controls、混合 popover/sidebar 默认与覆盖、Q/C/Esc、快速点击与迟到响应、控件更新后状态一致、跨 Page 清理、长表单目标组可见、宽窄屏焦点及图表 resize、独立 HTML 同行为。断言无额外 Query、无重复 Control commit、无兄弟 View 表单泄漏。
 
 ### Navigation and Direct Manipulation
 

@@ -634,6 +634,7 @@ class PresentationControlPanelDefinition(Model):
     Selection, cascade, validation or execution state.
     """
 
+    placement: Literal["popover", "sidebar"] | None = None
     template: Literal["auto", "stack", "grid"] = "auto"
     width: Literal["auto", "compact", "regular", "wide"] = "auto"
     columns: int | None = Field(None, ge=1, le=6)
@@ -650,6 +651,14 @@ class PresentationControlPanelDefinition(Model):
 class PresentationControlPanelsDefinition(Model):
     query: PresentationControlPanelDefinition = Field(default_factory=PresentationControlPanelDefinition)
     dashboard: PresentationControlPanelDefinition = Field(default_factory=PresentationControlPanelDefinition)
+    section: PresentationControlPanelDefinition = Field(default_factory=PresentationControlPanelDefinition)
+    view: PresentationControlPanelDefinition = Field(default_factory=PresentationControlPanelDefinition)
+
+    @model_validator(mode="after")
+    def validate_scoped_placement(self):
+        if self.query.placement is not None or self.dashboard.placement is not None:
+            raise ValueError("placement is only configurable for Section/View control panels")
+        return self
 
 
 class PresentationStateSummaryItemDefinition(Model):

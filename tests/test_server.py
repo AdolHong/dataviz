@@ -65,6 +65,7 @@ def test_server_exposes_active_presentation_contract():
     assert dashboard["presentation"]["file"].endswith("presentation.yaml")
     assert dashboard["presentation"]["diagnostics"] == []
     assert dashboard["presentation"]["control_panels"]["query"] == {
+        "placement": None,
         "template": "auto",
         "width": "auto",
         "columns": None,

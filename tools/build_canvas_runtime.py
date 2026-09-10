@@ -18,6 +18,7 @@ PARTS = (
     "50-output-store.js",
     "60-renderer-disposal.js",
     "70-control-binding.js",
+    "75-context-controls.js",
     "80-state-and-live-scheduler.js",
     "85-server-actions.js",
     "90-bootstrap.js",

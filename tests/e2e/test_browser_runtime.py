@@ -43,6 +43,185 @@ SHOWCASE = ROOT / "examples" / "feature-showcase"
 
 
 @pytest.mark.e2e
+def test_contextual_controls_sidebar_and_portable_state(page: Page, tmp_path: Path):
+    workspace = _copy_workspace(SHOWCASE, tmp_path / "context-controls")
+    visual_path = workspace / "dashboards" / "功能示例##cascade-explorer" / "presentation.yaml"
+    visual = yaml.safe_load(visual_path.read_text())
+    # No placement declaration: sidebar is the product default.
+    visual.setdefault("control_panels", {}).pop("view", None)
+    visual["control_panels"].pop("section", None)
+    visual['sections'] = {'geography': {'controls': {'placement': 'popover'}}}
+    visual_path.write_text(yaml.safe_dump(visual, allow_unicode=True))
+    report_path = tmp_path / "context-report.html"
+    with _running_server(workspace) as url:
+        _open_dashboard(page, url, "cascade-explorer")
+        _run_and_wait(page)
+        frame = page.frame_locator('#canvas-frame')
+        entry = frame.locator('[data-editor-owner="view:city-detail"] > summary')
+        page.locator('#dashboard-controls-toggle').click()
+        dashboard_heading = page.locator('[data-dashboard-group] > h3')
+        expect(dashboard_heading).to_be_visible()
+        before = dashboard_heading.bounding_box()
+        page.screenshot(path='/tmp/dataviz-context-dashboard-only.png')
+        entry.click()
+        panel = page.locator('#operation-panel')
+        expect(panel).to_be_visible()
+        expect(panel.locator('[data-context-group]')).to_have_count(2)
+        assert panel.bounding_box()['width'] == 360
+        assert panel.locator('[data-context-group="view:city-detail"] .control-scope').first.bounding_box()['width'] == pytest.approx(panel.locator('[data-context-group="view:city-detail"] h3').bounding_box()['width'], abs=1)
+        expect(panel.locator('[data-context-group="section:geography"]')).to_be_visible()
+        after = dashboard_heading.bounding_box()
+        assert abs(before['x'] - after['x']) < 1 and abs(before['y'] - after['y']) < 1
+        value = panel.locator('input[name="view:city-detail/min_value"]')
+        value.fill('100')
+        value.dispatch_event('change')
+        page.wait_for_function("document.querySelector('#canvas-frame').contentWindow.dataviz.control_state['view:city-detail/min_value']?.value === 100")
+        page.screenshot(path='/tmp/dataviz-context-desktop.png')
+        value.evaluate('(node) => node.blur()')
+        page.keyboard.press('c')
+        expect(panel.locator('[data-context-group]')).to_have_count(0)
+        expect(panel).to_be_hidden()
+        entry.click()
+        expect(panel.locator('input[name="view:city-detail/min_value"]')).to_have_value('100')
+        panel.locator('input[name="view:city-detail/min_value"]').fill('90')
+        page.keyboard.press('Escape')
+        page.wait_for_function("document.querySelector('#canvas-frame').contentWindow.dataviz.control_state['view:city-detail/min_value']?.value === 90")
+        entry.click()
+        expect(panel.locator('input[name="view:city-detail/min_value"]')).to_have_value('90')
+        page.set_viewport_size({'width': 760, 'height': 700})
+        expect(panel).to_have_attribute('aria-modal', 'true')
+        page.screenshot(path='/tmp/dataviz-context-mobile.png')
+        page.keyboard.press('Escape')
+        expect(panel).to_be_hidden()
+        page.set_viewport_size({'width': 1800, 'height': 1000})
+        with page.expect_download() as download:
+            _export_html(page)
+        download.value.save_as(report_path)
+    with _running_static_server(tmp_path) as url:
+        page.goto(f'{url}/{report_path.name}')
+        entry = page.locator('[data-editor-owner="view:city-detail"] > summary')
+        entry.click()
+        panel = page.locator('.dv-context-sidebar')
+        expect(panel).to_be_visible()
+        expect(panel.locator('.dv-context-sidebar__body > section')).to_have_count(3)
+        page.keyboard.press('c')
+        expect(panel).to_have_count(0)
+        entry.click()
+        expect(panel).to_be_visible()
+        assert panel.evaluate("node => [...node.querySelectorAll('[id]')].every(item => document.querySelectorAll(`[id=\"${CSS.escape(item.id)}\"]`).length === 1)")
+        entry.click()
+        expect(panel).to_have_count(0)
+        entry.click()
+        expect(panel).to_be_visible()
+        native = panel.locator('[data-control-state-input="view:city-detail/min_value"]')
+        expect(native).to_have_value('90')
+        native.fill('50')
+        native.dispatch_event('change')
+        page.keyboard.press('Escape')
+        expect(panel).to_have_count(0)
+        entry.click()
+        expect(page.locator('.dv-context-sidebar [data-control-state-input="view:city-detail/min_value"]')).to_have_value('50')
+        page.screenshot(path='/tmp/dataviz-context-report.png')
+        section = page.locator('[data-editor-owner="section:geography"]')
+        section.locator('summary').click()
+        expect(section).to_have_attribute('open', '')
+        expect(page.locator('.dv-context-sidebar')).to_be_visible()
+        expect(page.locator('.dv-context-sidebar__body > section')).to_have_count(2)
+        popup_select = section.locator('select[data-control-state-input="section:geography/city"]')
+        sidebar_select = page.locator('.dv-context-sidebar select[data-control-state-input="section:geography/city"]')
+        popup_select.select_option(['佛山'], force=True)
+        expect(sidebar_select).to_have_values(['佛山'])
+        sidebar_select.select_option(['深圳'], force=True)
+        expect(popup_select).to_have_values(['深圳'])
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize('with_dashboard', [True, False])
+def test_contextual_controls_sibling_switch_and_popover_override(page: Page, tmp_path: Path, with_dashboard: bool):
+    workspace = _copy_workspace(SHOWCASE, tmp_path / 'context-siblings')
+    root = workspace / 'dashboards' / '功能示例##cascade-explorer'
+    definition = yaml.safe_load((root / 'dashboard.yaml').read_text())
+    definition.pop('canvas', None)
+    definition['query_parameters'] = [{'id': 'sample', 'type': 'single_input', 'value_type': 'number', 'default': 2}]
+    if not with_dashboard:
+        definition.pop('controls', None)
+        for view in definition['views']:
+            view['control_inputs'] = {key: item for key, item in view.get('control_inputs', {}).items()
+                                      if not item['control'].startswith('dashboard.')}
+        for section in definition['sections']:
+            for control in section.get('controls', []):
+                control['depends_on'] = [key for key in control.get('depends_on', []) if not key.startswith('dashboard.')]
+    sibling = json.loads(json.dumps(next(view for view in definition['views'] if view['id'] == 'city-detail')))
+    sibling['id'] = 'other-detail'
+    sibling['title'] = '另一张明细'
+    definition['views'].append(sibling)
+    definition['sections'][0]['views'].append('other-detail')
+    (root / 'dashboard.yaml').write_text(yaml.safe_dump(definition, allow_unicode=True))
+    visual = yaml.safe_load((root / 'presentation.yaml').read_text())
+    visual['control_panels'] = {'section': {'placement': 'sidebar'}, 'view': {'placement': 'sidebar'}}
+    visual['sections'] = {'geography': {'controls': {'placement': 'popover'}}}
+    if not with_dashboard:
+        visual['control_components'].pop('dashboard:cascade-explorer/province', None)
+    (root / 'presentation.yaml').write_text(yaml.safe_dump(visual, allow_unicode=True))
+    with _running_server(workspace) as url:
+        _open_dashboard(page, url, 'cascade-explorer')
+        _run_and_wait(page)
+        frame = page.frame_locator('#canvas-frame')
+        first = frame.locator('[data-editor-owner="view:city-detail"] > summary')
+        second = frame.locator('[data-editor-owner="view:other-detail"] > summary')
+        panel = page.locator('#operation-panel')
+        section = frame.locator('[data-editor-owner="section:geography"]')
+        # A popover cannot open a hidden sidebar.
+        if panel.is_visible():
+            page.locator('#operation-panel-close').click()
+        section.locator('summary').click()
+        expect(section).to_have_attribute('open', '')
+        expect(panel).to_be_hidden()
+        section.locator('summary').click()
+        # Any local entry replaces an open Query panel without losing its draft.
+        page.locator('#query-parameters-toggle').click()
+        page.locator('#parameter-form input[name="sample"]').fill('7')
+        section.locator('summary').click()
+        expect(panel).to_be_visible()
+        expect(page.locator('#operation-panel-title')).to_have_text('Controls')
+        expect(panel.locator('[data-context-group="section:geography"]')).to_be_visible()
+        section.locator('summary').click()
+        expect(panel).to_be_visible()
+        page.locator('#query-parameters-toggle').click()
+        expect(page.locator('#parameter-form input[name="sample"]')).to_have_value('7')
+        page.locator('#operation-panel-close').click()
+        first.click()
+        expect(panel.locator('[data-context-group="section:geography"]')).to_be_visible()
+        if not with_dashboard:
+            expect(page.locator('#dashboard-controls-toggle')).to_be_disabled()
+            page.locator('#operation-panel-title').click()
+            page.keyboard.press('c')
+            expect(panel).to_be_hidden()
+            page.keyboard.press('c')
+            expect(page.locator('#shortcut-toast')).to_contain_text('no dashboard controls')
+            first.click()
+        second.click()
+        expect(panel.locator('[data-context-group="view:city-detail"]')).to_have_count(0)
+        expect(panel.locator('[data-context-group="view:other-detail"]')).to_be_visible()
+        expect(panel.locator('[data-context-group]')).to_have_count(2)
+        second.click()
+        expect(panel).to_be_hidden()
+        first.click()
+        section = frame.locator('[data-editor-owner="section:geography"]')
+        section.locator('summary').click()
+        expect(panel).to_be_visible()
+        expect(panel.locator('[data-context-group]')).to_have_count(1)
+        expect(section).to_have_attribute('open', '')
+        expect(section.locator('[data-control-key="section:geography/city"]')).to_be_visible()
+        popup_select = section.locator('select[data-control-state-input="section:geography/city"]')
+        sidebar_select = panel.locator('select[name="section:geography/city"]')
+        popup_select.select_option(['佛山'], force=True)
+        expect(sidebar_select).to_have_values(['佛山'])
+        sidebar_select.select_option(['深圳'], force=True)
+        expect(popup_select).to_have_values(['深圳'])
+
+
+@pytest.mark.e2e
 def test_pages_preserve_independent_queries_and_history(page: Page, tmp_path: Path):
     root = tmp_path / "workspace"
     dashboard = root / "dashboards" / "holiday"
@@ -1696,7 +1875,10 @@ def test_operation_panel_shortcuts_and_responsive_state(page: Page, tmp_path: Pa
     source = tmp_path / "panel.yaml"
     source.write_text(yaml.safe_dump({
         "schema": DASHBOARD_SCHEMA, "id": "panel", "title": "Panel analysis",
-        "query_parameters": [{"id": "label", "label": "Analysis label", "type": "single_input", "value_type": "text", "default": "applied"}] if has_fields else [],
+        "query_parameters": [
+            {"id": "label", "label": "Analysis label", "type": "single_input", "value_type": "text", "default": "applied"},
+            {"id": "period", "label": "日期范围", "type": "range_input", "value_type": "date", "default": ["2026-09-01", "2026-09-11"]},
+        ] if has_fields else [],
         "controls": [{"id": "factor", "label": "Factor", "type": "single_input", "value_type": "number", "default": 2}] if has_fields else [],
         "sources": [{"id": "rows", "type": "python", "code": {"inline": "def load(context):\n    return [{'value': 42}]\n"}, "outputs": {"main": {"kind": "table"}}}],
         "views": [{"id": "rows", "template": "table", "input": "source:rows/main"}],
@@ -1720,6 +1902,9 @@ def test_operation_panel_shortcuts_and_responsive_state(page: Page, tmp_path: Pa
             return
         expect(panel).to_be_visible()
         field = page.locator('#parameter-form input[name="label"]')
+        assert panel.bounding_box()['width'] == 360
+        page.screenshot(path='/tmp/dataviz-query-width.png')
+        assert page.locator('#parameter-form').evaluate('node => node.scrollWidth <= node.clientWidth')
         field.fill('draft qc')
         field.press('q')
         expect(panel).to_be_visible()
@@ -1730,7 +1915,7 @@ def test_operation_panel_shortcuts_and_responsive_state(page: Page, tmp_path: Pa
         page.keyboard.press('q')
         expect(field).to_have_value('draft')
         page.keyboard.press('c')
-        expect(page.locator('#operation-panel-title')).to_have_text('Dashboard Controls')
+        expect(page.locator('#operation-panel-title')).to_have_text('Controls')
         expect(page.locator('#operation-panel-close')).not_to_be_focused()
         expect(page.locator('#panel-run-button')).to_be_hidden()
         page.keyboard.press('c')
@@ -3127,6 +3312,10 @@ def test_web_component_reference_adapter_consumes_runtime_v2_without_canvas_runt
 @pytest.mark.e2e
 def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Page, tmp_path: Path):
     workspace = _copy_gallery_workspace(tmp_path)
+    visual_path = workspace / 'dashboards/component-gallery/presentation.yaml'
+    visual = yaml.safe_load(visual_path.read_text())
+    visual.setdefault('control_panels', {}).update({'section': {'placement': 'popover'}, 'view': {'placement': 'popover'}})
+    visual_path.write_text(yaml.safe_dump(visual, allow_unicode=True))
     dashboard_path = workspace / "dashboards" / "component-gallery" / "dashboard.yaml"
     definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
     definition["controls"].append(
@@ -4247,6 +4436,10 @@ def test_sidebar_dashboard_can_be_dragged_and_renamed_from_context_menu(
 @pytest.mark.e2e
 def test_selection_cascade_popovers_view_isolation_and_table_wheel(page: Page, tmp_path: Path):
     workspace = _copy_workspace(SHOWCASE, tmp_path / "showcase")
+    visual_path = workspace / 'dashboards/功能示例##cascade-explorer/presentation.yaml'
+    visual = yaml.safe_load(visual_path.read_text())
+    visual.setdefault('control_panels', {}).update({'section': {'placement': 'popover'}, 'view': {'placement': 'popover'}})
+    visual_path.write_text(yaml.safe_dump(visual, allow_unicode=True))
     with _running_server(workspace) as base_url:
         _open_dashboard(page, base_url, "cascade-explorer")
         _run_and_wait(page)

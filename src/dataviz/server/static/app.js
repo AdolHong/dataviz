@@ -259,6 +259,10 @@ function sameCanvasIdentity(left, right) {
 }
 
 function loadCanvasFrame(dashboardId, runId = null) {
+  if (operationControlGroups.length) {
+    clearContextControlGroups();
+    setOperationPanel(null);
+  }
   const frame = $('#canvas-frame');
   const runtime = runtimeFor(dashboardId);
   disconnectControlChannel(runtime, 'control_frame_replaced');
@@ -576,11 +580,16 @@ function executeKeyboardShortcut(command) {
     return true;
   }
   if (command === 'toggle-dashboard-controls') {
+    if (operationPanelMode === 'controls') {
+      setOperationPanel(null);
+      return true;
+    }
     if (!dashboardControls().length) {
       showShortcutToast('This Dashboard has no dashboard controls.');
       return true;
     }
-    setOperationPanel(operationPanelMode === 'controls' ? null : 'controls', {focus:true});
+    clearContextControlGroups();
+    setOperationPanel('controls', {focus:true});
     return true;
   }
   if (command === 'toggle-query-parameters') {
@@ -1955,6 +1964,65 @@ function setQueryParametersOpen(open, {persist = false} = {}) {
 
 let operationPanelMode = null;
 let operationPanelOpener = null;
+let operationControlGroups = [];
+function controlGroupHeading(scope, name = '') {
+  const heading = document.createElement('h3');
+  const label = document.createElement('span');
+  label.className = 'control-group-scope';
+  label.dataset.scope = scope.toLowerCase();
+  label.textContent = scope;
+  heading.append(label);
+  if (name) {
+    const title = document.createElement('span');
+    title.textContent = name;
+    heading.append(title);
+  }
+  return heading;
+}
+function panelControls() {
+  const keys = new Set(operationControlGroups.flatMap(group => group.keys));
+  return (state.dashboard?.controls || []).filter(control => control.origin === 'dashboard' || keys.has(control.key));
+}
+function clearContextControlGroups({notify = true} = {}) {
+  if (!operationControlGroups.length) return;
+  operationControlGroups = [];
+  $('#dashboard-control-form').querySelectorAll('[data-context-group]').forEach(node => node.remove());
+  if (notify) postCanvasMessage({type:'dataviz:context-controls-close'});
+}
+function openContextControlGroups(groups, snapshot, focus = false) {
+  // Frame identity is checked by the message dispatcher. Still validate keys
+  // against this Page's contract before constructing an editable host.
+  if (!Array.isArray(groups) || groups.length > 2 || groups.some(group =>
+    !Array.isArray(group.keys) || group.keys.some(key => {
+      const item = dashboardControl(key);
+      return !item || `${item.origin}:${item.owner_id}` !== group.id;
+    }))) return;
+  if (!groups.length) { clearContextControlGroups({notify:false}); setOperationPanel(null); return; }
+  const form = $('#dashboard-control-form');
+  const retained = new Set(groups.map(group => group.id));
+  form.querySelectorAll('[data-context-group]').forEach(node => { if (!retained.has(node.dataset.contextGroup)) node.remove(); });
+  operationControlGroups = groups;
+  for (const group of groups) {
+    let section = [...form.querySelectorAll('[data-context-group]')].find(node => node.dataset.contextGroup === group.id);
+    if (!section) {
+      section = document.createElement('section');
+      section.dataset.contextGroup = group.id;
+      const scope = group.id.startsWith('view:') ? 'View' : 'Section';
+      const title = controlGroupHeading(scope, group.title.replace(`${scope} · `, ''));
+      title.tabIndex = -1;
+      section.append(title, ...group.keys.map(key => controlField(dashboardControl(key))));
+      form.append(section);
+    }
+  }
+  $('#dashboard-control-group').hidden = false;
+  window.datavizComponents?.hydrate(form);
+  applyControlOperationalSnapshot(snapshot);
+  setOperationPanel('controls');
+  const heading = form.querySelector('[data-context-group]:last-child h3');
+  if (focus || operationPanelNarrow.matches) heading?.focus({preventScroll:true});
+  const body = $('#operation-panel-body');
+  if (heading) body.scrollTop += heading.getBoundingClientRect().top - body.getBoundingClientRect().top;
+}
 const operationPanelNarrow = window.matchMedia('(max-width: 1279px)');
 
 function syncOperationPanelLayout() {
@@ -1970,8 +2038,9 @@ function syncOperationPanelLayout() {
 }
 
 function setOperationPanel(mode, {focus = false, persist = true} = {}) {
+  if (mode !== 'controls') clearContextControlGroups();
   if (mode === 'query' && !state.dashboard?.query_parameters?.length) mode = null;
-  if (mode === 'controls' && !dashboardControls().length) mode = null;
+  if (mode === 'controls' && !panelControls().length) mode = null;
   const panel = $('#operation-panel');
   const changed = operationPanelMode !== mode;
   if (mode && !operationPanelMode) operationPanelOpener = document.activeElement;
@@ -1983,6 +2052,7 @@ function setOperationPanel(mode, {focus = false, persist = true} = {}) {
   $('#query-parameters-panel').hidden = mode !== 'query';
   $('#query-parameters-control').dataset.open = String(mode === 'query');
   $('#dashboard-controls-control').hidden = mode !== 'controls';
+  $('#dashboard-controls-control').dataset.empty = String(!panelControls().length);
   const hasControls = dashboardControls().length > 0;
   const hasParameters = Boolean(state.dashboard?.query_parameters?.length);
   $('#dashboard-controls-toggle').disabled = !hasControls;
@@ -1997,7 +2067,7 @@ function setOperationPanel(mode, {focus = false, persist = true} = {}) {
     ? `${mode === 'controls' ? 'Close' : 'Open'} dashboard controls (C)`
     : 'This Dashboard has no dashboard controls.';
   $('#query-run-control').classList.toggle('is-parameters-open', mode === 'query');
-  $('#operation-panel-title').textContent = mode === 'controls' ? 'Dashboard Controls' : 'Query Parameters';
+  $('#operation-panel-title').textContent = mode === 'controls' ? 'Controls' : 'Query Parameters';
   $('#operation-panel-footer').hidden = mode !== 'query';
   $('#operation-panel-query-tools').hidden = mode !== 'query';
   $('#query-parameters-status').hidden = mode !== 'query';
@@ -2161,7 +2231,7 @@ function syncDashboardControlForm(runtime = activeRuntime()) {
   const controls = runtime.controlCheckpoint?.controls || {};
   setFormValues(
     $('#dashboard-control-form'),
-    Object.fromEntries(dashboardControls()
+    Object.fromEntries(panelControls()
       .filter(control => !runtime.controlDraftActions.has(control.key))
       .map(control => [
         control.key,
@@ -2201,7 +2271,7 @@ function applyControlOperationalSnapshot(snapshot, {ready = false} = {}) {
     control_contract_hash:contractHash,
     controls:structuredClone(snapshot.current_controls),
   };
-  runtime.controlProjection = structuredClone(snapshot.dashboard_controls || []);
+  runtime.controlProjection = structuredClone([...(snapshot.dashboard_controls || []), ...(snapshot.contextual_controls || [])]);
   if (ready) runtime.controlConnected = true;
   setControlsEnabled(Boolean(runtime.runId) && runtime.controlConnected);
   syncDashboardControlOptions(runtime.controlProjection);
@@ -2317,6 +2387,7 @@ async function selectDashboard(id, {historyMode = 'push', locationSearch = null,
     saveTabUiState();
   }
   closeHeaderPopovers();
+  clearContextControlGroups();
   state.dashboard = selected;
   state.navigationPending = false;
   state.selectedPages[id] = selected.page_id || null;
@@ -2340,7 +2411,11 @@ async function selectDashboard(id, {historyMode = 'push', locationSearch = null,
     controls.length === 0 && !hasAnalysisActions,
   );
   $('#dashboard-control-group').hidden = controls.length === 0;
-  $('#dashboard-control-form').replaceChildren(...controls.map(controlField));
+  const dashboardGroup = document.createElement('section');
+  dashboardGroup.dataset.dashboardGroup = '';
+  const dashboardHeading = controlGroupHeading('Dashboard');
+  dashboardGroup.append(dashboardHeading, ...controls.map(controlField));
+  $('#dashboard-control-form').replaceChildren(...(controls.length ? [dashboardGroup] : []));
   applyDashboardControlPresentation(state.dashboard);
   const queryParameterCount = state.dashboard.query_parameters.length;
   const hasQueryParameters = queryParameterCount > 0;
@@ -3368,7 +3443,7 @@ async function applyDashboardControls() {
   if (!runtime?.runId || !runtime.controlConnected) return;
   await flushDashboardControlDrafts();
   await sendHostControlCommand('dataviz:control-apply', {
-    keys:dashboardControls().map(control => control.key),
+    keys:panelControls().map(control => control.key),
   });
 }
 
@@ -4729,6 +4804,14 @@ document.addEventListener('click', (event) => {
 });
 window.addEventListener('message', (event) => {
   if (!isCurrentCanvasMessage(event)) return;
+  if (event.data?.type === 'dataviz:context-controls') {
+    if (event.data.follow && !operationPanelMode) {
+      postCanvasMessage({type:'dataviz:context-controls-close', focus:false, context_id:event.data.context_id});
+      return;
+    }
+    openContextControlGroups(event.data.groups, event.data.snapshot, event.data.focus === true);
+    return;
+  }
   if (event.data?.type === 'dataviz:server-action') {
     handleServerActionMessage(event.data, event.source);
     return;

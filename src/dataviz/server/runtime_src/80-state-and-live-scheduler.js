@@ -467,6 +467,7 @@ const setControlInputs = states => {
     }
     const definition = datavizControlDefinition(key);
     const value = datavizControlValue(key);
+    if (input.multiple) window.datavizComponents?.controls?.setSelectionIntent?.(input, datavizControlEntry(key).intent);
     const encode = item => datavizEncodeControlValue(input, item, {
       path:control.dataset.controlPath === 'true',
     });
@@ -518,7 +519,7 @@ const datavizControlOperationalSnapshot = (
   const occurrences = datavizControlOccurrences();
   const dashboardControls = [];
   occurrences.forEach((targets, key) => {
-    if (targets[0]?.item?.origin !== 'dashboard') return;
+    if (targets[0]?.item?.origin !== 'dashboard' && !datavizContextControlKeys.has(key)) return;
     const availability = datavizAvailableControlOptions(targets);
     const dependency = window.dataviz.dependency_contract?.controls?.[key] || {};
     const domainPending = Boolean(
@@ -545,7 +546,8 @@ const datavizControlOperationalSnapshot = (
   return {
     control_version:datavizControlChannel.controlVersion,
     current_controls:datavizControlStateSnapshot(),
-    dashboard_controls:dashboardControls,
+    dashboard_controls:dashboardControls.filter(item => window.dataviz.dependency_contract?.controls?.[item.key]?.origin === 'dashboard'),
+    contextual_controls:dashboardControls.filter(item => datavizContextControlKeys.has(item.key)),
     ...(causedByActionId ? {caused_by_action_id:causedByActionId} : {}),
     ...(causedByActionId ? {caused_by_source_view:causedBySourceView} : {}),
   };
@@ -691,7 +693,7 @@ const datavizHandleHostControlCommand = data => {
           );
         }
         const dependency = window.dataviz.dependency_contract?.controls?.[action.control];
-        if (!dependency || dependency.origin !== 'dashboard') {
+        if (!dependency || (dependency.origin !== 'dashboard' && !datavizHostControlKeys.has(action.control))) {
           throw datavizContractError(
             'control_action_scope_invalid',
             `Host cannot write Control ${action.control}`,
@@ -718,7 +720,7 @@ const datavizHandleHostControlCommand = data => {
       } else if (data.type === 'dataviz:control-apply') {
         if (!Array.isArray(data.keys) || data.keys.some(key => {
           const dependency = window.dataviz.dependency_contract?.controls?.[key];
-          return !dependency || dependency.origin !== 'dashboard';
+          return !dependency || (dependency.origin !== 'dashboard' && !datavizHostControlKeys.has(key));
         })) {
           throw datavizContractError(
             'control_apply_scope_invalid',

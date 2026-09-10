@@ -896,12 +896,13 @@ const refreshControlOptionDomains = ({canonicalKeys = null} = {}) => {
   });
   publishDashboardControlOptions(occurrences);
 };
-const readControlInputs = ({keys = null} = {}) => {
+const readControlInputs = ({keys = null, sourceInput = null} = {}) => {
   document.querySelectorAll('[data-control-key]').forEach(control => {
     const key = control.dataset.controlKey;
     if (keys && !keys.has(key)) return;
     const input = control.querySelector('[data-control-state-input]');
     if (!input) return;
+    if (sourceInput && input !== sourceInput) return;
     const definition = datavizControlDefinition(key);
     if (
       input.tagName === 'SELECT'

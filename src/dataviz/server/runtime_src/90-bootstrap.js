@@ -6,7 +6,12 @@ const scheduleDatavizControl = event => {
   // or option-domain reconciliation can rebuild the underlying <select>.
   try {
     datavizCaptureControlIntent(event?.currentTarget || event?.target);
-    readControlInputs();
+    const sourceInput = event?.currentTarget || event?.target;
+    readControlInputs({sourceInput});
+    const key = sourceInput?.dataset.controlStateInput;
+    if (key && document.querySelectorAll(`[data-control-state-input="${CSS.escape(key)}"]`).length > 1) {
+      setControlInputs({[key]:structuredClone(datavizControlEntry(key))});
+    }
   } catch (error) {
     console.error('[dataviz:controls]', error);
     return;
@@ -92,6 +97,7 @@ const showDatavizRuntimeShortcutToast = message => {
   }, 1800);
 };
 const setDatavizRuntimeQueryOpen = open => {
+  if (open && datavizContextOwner) datavizCloseContextControls({focus:false});
   if (!datavizRuntimeQueryToggle || !datavizRuntimeQueryPanel) return false;
   const expanded = Boolean(open);
   const tray = datavizRuntimeQueryPanel.closest('.dv-runtime-query-tray');
@@ -120,7 +126,7 @@ const datavizKeyboardShortcutCommand = event => {
   if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'Enter') return 'run-query';
   if (event.ctrlKey || event.metaKey || event.altKey || datavizKeyboardTargetIsEditable(event.target)) return null;
   if (event.key.toLowerCase() === 'q') return 'toggle-query-parameters';
-  if (window.parent !== window && event.key.toLowerCase() === 'c') return 'toggle-dashboard-controls';
+  if (event.key.toLowerCase() === 'c') return 'toggle-dashboard-controls';
   if (event.key.toLowerCase() === 'b') return 'toggle-sidebar';
   if (event.key === '?') return 'show-shortcuts';
   return null;
@@ -135,6 +141,7 @@ document.addEventListener('keydown', event => {
     return;
   }
   if (command === 'toggle-query-parameters' && datavizRuntimeQueryToggle) {
+    if (datavizContextOwner) datavizCloseContextControls({focus:false});
     event.preventDefault();
     window.datavizComponents?.overlay.closeAll({group:'popover'});
     const tray = datavizRuntimeQueryPanel?.closest('.dv-runtime-query-tray');
@@ -145,6 +152,12 @@ document.addEventListener('keydown', event => {
     setDatavizRuntimeQueryOpen(
       datavizRuntimeQueryToggle.getAttribute('aria-expanded') !== 'true',
     );
+  } else if (command === 'toggle-dashboard-controls') {
+    event.preventDefault();
+    const owner = document.querySelector('.dv-runtime-control[data-control-origin="dashboard"]');
+    if (datavizContextPanel) datavizCloseContextControls();
+    else if (owner) datavizOpenContextControls(owner);
+    else showDatavizRuntimeShortcutToast('This report has no dashboard controls.');
   } else if (command === 'show-shortcuts' && datavizRuntimeShortcutHelp) {
     event.preventDefault();
     window.datavizComponents?.overlay.closeAll({group:'popover'});

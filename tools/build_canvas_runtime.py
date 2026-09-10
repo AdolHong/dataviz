@@ -19,6 +19,7 @@ PARTS = (
     "60-renderer-disposal.js",
     "70-control-binding.js",
     "80-state-and-live-scheduler.js",
+    "85-server-actions.js",
     "90-bootstrap.js",
 )
 

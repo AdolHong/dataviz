@@ -1,6 +1,8 @@
 ---
 name: Dataviz
 description: A quiet analytical workbench for building, operating, and reviewing reliable dashboards.
+currentProtocolBaseline: "dataviz/dashboard/v20; dataviz/parameter-domain/v2; dataviz/parameter-domain-contract/v3; dataviz/parameter-lookup/v1; dataviz/parameter-materialization/v1; dataviz/presentation/v2; dataviz/source/v6; dataviz/dataset-transform/v3; dataviz/interactive-transform/v4; dataviz/dependency-contract/v13; dataviz/layout-contract/v1; dataviz/state-snapshot/v6; dataviz/runtime/v15; dataviz/analysis-result/v5; dataviz/analysis-evidence/v5; dataviz/dashboard-bundle/v2"
+currentCliContract: "catalog search → catalog describe → run → run_succeeded → result/evidence"
 colors:
   paper: "#ffffff"
   ink: "#1f2521"
@@ -111,6 +113,8 @@ Dataviz 应该像一张经过整理的专业分析桌面：工具随手可取，
 
 视觉工作台必须忠实反映 canonical 分析路径。Draft、运行中状态和预览不得伪装成 immutable Result；Server 与导出 HTML 可以拥有不同外层操作，但同一 Dashboard 的字体、Controls、View 和状态语义必须一致。作者工作台固定文案使用英文，Dashboard 内容语言由作者决定。
 
+2026-09-10 局部记录：多 Page 的截图暴露了导航名、Dashboard 标题、Page 名与 Page 大标题重复竞争的问题。下文将现状与待实现方向分开记录；这次文档合并不代表界面已修复，也不改变现有颜色、字体和组件 token。
+
 **Key Characteristics:**
 
 - 安静、精确、内容优先；
@@ -173,6 +177,8 @@ Server 使用可调整并可折叠的导航 Rail、58px 粘性 Topbar 和可伸�
 
 页面层级从 Shell 到 Dashboard 再到 Section/View 逐级收敛。Shell 导航保持紧凑，Dashboard 标题和分析叙事拥有更宽松的呼吸空间，View 内部恢复高密度读取。不要用额外嵌套卡片表达本可由间距或 Hairline 说明的关系。
 
+多 Page 是 Dashboard 内可选的分析入口，不要求把内部数据结构的每一层都变成可见标题。当前重复层级与拟议的收敛方式见 Components 下的「Multi-Page Navigation and Titles」；不要据此为普通单页看板增加 Page 包装或导航。
+
 Query Parameters 在首次运行前作为正文中的全宽卡片展开；成功运行后折叠，由 Header 的 Run/Query 组合重新打开。Controls 布局必须尊重每个子组件的最小可用宽度，并在可用空间内形成有界网格；不能为了填满容器而把每个字段无限拉长。
 
 宽 Table 的横向位置是用户上下文。排序或局部刷新必须保留 `scrollLeft`、焦点和当前排序列，不能在数据更新后跳回第一列。长明细默认留在正常文档流；当产品提供折叠或临时查看入口时，关闭后必须释放占位，并保留清楚、可恢复的标题入口。
@@ -224,6 +230,38 @@ Dataviz 使用温和但精确的圆角：微元素 5px，输入与按钮 7px，�
 - 拖动中使用紧跟指针、零过渡的浮动预览；源行变为虚线占位。Folder 目标显示 `DROP HERE`，底部根目录目标显示 `MOVE TO TOP LEVEL`；导航空白区域也可作为根目录投放区。
 - 参数编辑器属于高密度排序界面，Parameter Card 和 Choice Row 保留显式六点句柄。拖动与上下箭头是互补的鼠标/键盘路径；默认项复选框不兼任拖动入口。
 - Active Navigation 使用 Indigo Mist、深靛蓝文字和 3px 窄指示线，不使用强阴影。
+
+### Multi-Page Navigation and Titles
+
+**状态：基础层级收敛已在工作树实现，未重新打包。** 原问题依据 0.23.0 多 Page 示例
+截图记录。当前已修复被未闭合注释吞掉的页签 CSS；Server 多页保留一个 Dashboard
+主标题，隐藏嵌入 Canvas 的重复标题与标识，保留说明；独立报告不受影响。运行前仅保留
+操作提示。切入窄屏默认收起 Sidebar，页签更新保留键盘焦点。Chrome 两项专项及相关
+非浏览器检查通过；以下方向未被本轮覆盖的长文案、跨引擎等场景仍需后续验收。
+
+**修复前观察：** Sidebar 显示 `holiday`，正文另显示 Dashboard 标题；其下两个 Page 按钮
+与 Canvas 内的大号 Page 标题重复。运行前的空状态再次占用大标题区域，导致分析内容
+被推远。截图中的 Page 按钮呈浏览器原生外观；虽然源码有导航样式，仍不能仅凭 CSS
+存在就视为视觉验收通过。窄屏还观察到 Sidebar 遮挡内容，属于另一个待修复边界。
+
+**设计方向与验收约束：**
+
+- Sidebar 名称用于定位 Dashboard，不必与正文标题使用同等字号，也不自动改写作者命名。
+- 多页正文保留一次 Dashboard 主标题；紧接一行轻量 Page 页签，以当前页样式与键盘焦点
+  区分选择。示例可用「品类对比」「跨年对比」，这是作者命名建议，不是运行时自动截短规则。
+- 页签承担 Page 名称，不在其下方或 Canvas 内再重复一个大号 Page 标题。需要解释分析
+  范围时保留一处简短 Page 说明；阅读顺序为标题 → 页签/说明 → 参数 → 图表。
+- 首次未运行只显示一条简短操作提示，不为提示重新建一块标题区或大卡片。运行成功后
+  仍可展开参数面板查看 applied 参数；不能为了减少重复而删掉参数证据或状态反馈。
+- 收敛仅作用于有完整导航上下文的 Server 多页工作台。独立导出的单页报告仍保留 Page
+  标题、必要的 Dashboard 归属和说明；不能全局删除 Canvas 标题，导致报告失去身份。
+- 普通单页继续只有自己的标题与参数，不显示页签；显式仅一个 Page 也不增加无用导航。
+- 长页名应有可访问的完整名称，窄屏允许页签横向浏览；Sidebar 不应遮挡主内容。页签
+  重绘或后台状态更新不得吞掉焦点，也不能只靠颜色表达当前页。
+
+**后续验收：** 同时检查运行前/后、两页切换、普通单页、独立报告和窄屏；不仅断言点击
+可用，还要检查可见标题是否重复、内容对齐、页签实际样式及键盘焦点。切页不自动查询、
+draft/applied 独立、历史恢复等既有行为不能因层级收敛而改变。实施状态以上方记录为准。
 
 ### View, Table, and Metric
 

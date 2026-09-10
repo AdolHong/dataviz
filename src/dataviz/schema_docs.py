@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import BaseModel, TypeAdapter
 
 from dataviz import __version__
+from dataviz.actions import ServerActionDefinition
 from dataviz.protocols import (
     CURRENT_PROTOCOL_SCHEMAS,
     protocol_registry,
@@ -61,6 +62,7 @@ SCHEMA_MODELS: OrderedDict[str, SchemaProvider] = OrderedDict(
         ("dashboard", DashboardDefinition),
         ("presentation", PresentationDefinition),
         ("source", SOURCE_DEFINITION_ADAPTER),
+        ("server-action", ServerActionDefinition),
         ("dataset-transform", DatasetTransformDefinition),
         ("interactive-transform", InteractiveTransformDefinition),
         ("interactive-export", InteractiveExportDefinition),
@@ -99,6 +101,7 @@ CURRENT_SCHEMAS = {
         "parameter_domain",
         "presentation",
         "source",
+        "server_action",
         "dataset_transform",
         "interactive_transform",
         "runtime",

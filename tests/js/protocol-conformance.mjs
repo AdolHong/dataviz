@@ -154,6 +154,7 @@ const runWebFilter = item => {
         type:payload.control_type || (payload.operator === 'between' ? 'range_input'
           : payload.operator === 'in' ? 'multiple_select' : 'single_input'),
         value_type:payload.value_type,
+        options:payload.options,
       };
   const consumerBinding = {
     mode:'filter',
@@ -175,36 +176,83 @@ const runWebFilter = item => {
         }],
       }},
     },
-    control_state:{'dashboard:sample/filter':{value:payload.value, revision:0}},
+    control_state:{'dashboard:sample/filter':{
+      value:payload.value,
+      revision:0,
+      ...(payload.intent ? {intent:payload.intent} : {}),
+    }},
   };
   const result = new adapterWindow.DatavizRuntimeV3Client(manifest).viewRows('sample');
   return isPath ? result.map(row => [row.level, row.value]) : result.map(row => row.value);
 };
 
+// Exercise the production matcher, not a second implementation of its policy.
+const controlSource = fs.readFileSync(
+  path.join(root, 'src/dataviz/server/runtime_src/70-control-binding.js'), 'utf8',
+);
+const controlMatch = new Function('datavizTypedControlMatch', 'datavizPathControlMatch', `
+  ${controlSource.slice(controlSource.indexOf('const datavizControlFields ='), controlSource.indexOf('const datavizViewControlContract ='))}
+  const datavizControlValueFromState = (_definition, state) => state?.value;
+  ${controlSource.slice(controlSource.indexOf('const datavizControlMatches ='), controlSource.indexOf('const datavizControlIntentKey ='))}
+  return datavizControlMatches;
+`)(runtime.match, runtime.pathMatch);
+
 for (const item of fixture('control-filter')) {
   verify(item, () => {
     const payload = item.input;
-    if (item.operation === 'path_filter') {
-      return payload.rows.filter(([level, value]) => runtime.pathMatch({
-        row:{level, value}, fields:['level', 'value'], value:payload.value,
-      }));
-    }
-    if (payload.value == null || payload.value === ''
-        || (Array.isArray(payload.value) && payload.value.length === 0)) {
-      return payload.empty === 'passthrough' ? payload.rows : [];
-    }
-    const operator = payload.operator === 'auto'
-      ? (['multiple_input', 'multiple_select'].includes(payload.control_type) ? 'in'
-        : payload.control_type === 'range_input' ? 'between' : 'equals')
-      : payload.operator;
-    return payload.rows.filter(actual => runtime.match({
-      actual,
-      value:payload.value,
-      operator,
-      valueType:payload.value_type,
-    }));
+    const isPath = item.operation === 'path_filter';
+    return payload.rows.filter(actual => controlMatch(
+      isPath ? {level:actual[0], value:actual[1]} : {value:actual},
+      {
+        definition:{type:payload.control_type || 'multiple_select', value_type:payload.value_type, options:payload.options},
+        consumer_binding:{field:isPath ? ['level', 'value'] : 'value', operator:isPath ? 'auto' : payload.operator, empty:payload.empty || 'match_none'},
+      },
+      {value:payload.value, intent:payload.intent},
+    ));
   });
   verify({...item, id:`web-component/${item.id}`}, () => runWebFilter(item));
 }
+
+// Named inputs apply only their own bindings; the main alias equals legacy rows.
+const inputRows = [{region:'north'}, {region:'south'}];
+const namedState = {
+  dependency_contract:{views:{sample:{
+    inputs:{main:'source:stores/main', geography:'source:geography/main', metadata:'source:metadata/main'},
+    filter_contract:[{
+      key:'region', definition:{type:'multiple_select'},
+      consumer_binding:{field:'region', operator:'in', inputs:['main'], empty:'match_none'},
+    }],
+  }}},
+  data:{output:ref => ref === 'source:metadata/main' ? {title:'Map'} : inputRows, table:() => ({rows:() => inputRows})},
+  control:{state:() => ({value:['north'], intent:'explicit'}), canApply:() => true, matches:controlMatch},
+};
+const customView = {id:'sample', template:'custom', renderer:'sample'};
+const mainFiltered = viewRuntime.build(customView, namedState);
+assert.deepEqual(mainFiltered.rows, [{region:'north'}]);
+assert.deepEqual(mainFiltered.inputs.main, mainFiltered.rows);
+assert.equal(mainFiltered.inputs.geography, inputRows);
+assert.deepEqual(mainFiltered.inputs.metadata, {title:'Map'});
+namedState.dependency_contract.views.sample.filter_contract[0].consumer_binding.inputs = ['geography'];
+const geographyFiltered = viewRuntime.build(customView, namedState);
+assert.deepEqual(geographyFiltered.rows, inputRows);
+assert.deepEqual(geographyFiltered.inputs.main, inputRows);
+assert.deepEqual(geographyFiltered.inputs.geography, [{region:'north'}]);
+assert.deepEqual(inputRows, [{region:'north'}, {region:'south'}]);
+const namedClient = new adapterWindow.DatavizRuntimeV3Client({
+  protocol:{schema:'dataviz/runtime/v15'},
+  portable:{outputs:{'source:stores/main':inputRows, 'source:geography/main':inputRows}},
+  dependency_contract:namedState.dependency_contract,
+  control_state:{region:{value:['north'], intent:'explicit'}},
+});
+assert.deepEqual(namedClient.viewRows('sample', 'main'), inputRows);
+assert.deepEqual(namedClient.viewRows('sample', 'geography'), [{region:'north'}]);
+namedState.control.state = () => ({value:[], intent:'explicit'});
+const emptyGeography = viewRuntime.build(customView, namedState);
+assert.deepEqual(emptyGeography.inputs.geography, []);
+assert.deepEqual(emptyGeography.inputs.main, inputRows);
+namedState.data.output = () => 42;
+namedState.data.table = () => ({rows:() => []});
+namedState.dependency_contract.views.sample.filter_contract = [];
+assert.equal(viewRuntime.build(customView, namedState).inputs.main, 42);
 
 process.stdout.write('protocol conformance passed\n');

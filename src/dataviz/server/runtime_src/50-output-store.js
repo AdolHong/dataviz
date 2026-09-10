@@ -1,5 +1,31 @@
 // Owner: Named Output transport registration, hydration, and publication.
 Object.assign(datavizRuntime, {
+  commitOutput(rawReference, value, {kind, schema, signature = datavizValueSignature(value)} = {}) {
+    const reference = canonicalOutputReference(rawReference);
+    const portable = window.dataviz.portable;
+    portable.output_kinds ||= {};
+    portable.output_schemas ||= {};
+    const changed = this.outputSignatures.get(reference) !== signature
+      || this.outputErrors.has(reference)
+      || (kind !== undefined && portable.output_kinds[reference] !== kind)
+      || (schema !== undefined && JSON.stringify(portable.output_schemas[reference]) !== JSON.stringify(schema));
+    portable.outputs[reference] = value;
+    if (kind !== undefined) portable.output_kinds[reference] = kind;
+    if (schema !== undefined) portable.output_schemas[reference] = schema;
+    this.outputSignatures.set(reference, signature);
+    this.outputErrors.delete(reference);
+    return changed;
+  },
+  removeOutput(rawReference) {
+    const reference = canonicalOutputReference(rawReference);
+    const portable = window.dataviz.portable;
+    for (const key of ['outputs', 'output_kinds', 'output_schemas', 'output_transports', 'server_outputs']) {
+      if (portable[key]) delete portable[key][reference];
+    }
+    this.outputSignatures.delete(reference);
+    this.outputErrors.delete(reference);
+    this.transportPromises.delete(reference);
+  },
   registerOutputTransport(reference, descriptor) {
     const canonical = canonicalOutputReference(reference);
     window.dataviz.portable.output_schemas ||= {};

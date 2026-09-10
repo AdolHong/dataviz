@@ -45,6 +45,7 @@ class RunResult(BaseModel):
     status: Literal["loading", "ready", "partial", "error", "cancelled"]
     workspace: StableId
     dashboard: StableId
+    page_id: StableId | None = None
     query_scope: Literal["dashboard", "targets"]
     query_targets: list[str]
     query_nodes: list[str]
@@ -70,6 +71,7 @@ class InteractionResult(BaseModel):
     run_id: StableId
     workspace: StableId
     dashboard: StableId
+    page_id: StableId | None = None
     target: StableId
     status: Literal["loading", "ready", "partial", "error", "cancelled", "unavailable"]
     started_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())

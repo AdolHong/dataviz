@@ -1,6 +1,64 @@
 # Changelog
 
-## Unreleased
+## 0.23.1 — 2026-09-10
+
+- Fix Page navigation CSS swallowed by an unterminated comment. Use one Dashboard heading and styled Page navigation in the Server workbench; suppress duplicate embedded Page headings while preserving standalone report titles and page descriptions.
+- Preserve navigation focus during state updates and collapse the Sidebar on entry to narrow layouts.
+- Add a deterministic synthetic-data multi-Page example with independent annual/category analysis parameters, shared Dashboard-local Python and regression coverage.
+
+## 0.23.0 — 2026-09-10
+
+- Introduce optional Dashboard Pages with independent query contracts, Page-scoped execution/cache identity, navigation and session/history restoration. Single-page YAML remains a first-class path; `--page` is optional and sealed Results retain their selected Page.
+- Bundle dependencies across all Pages while keeping individual runs Page-scoped. Include second-page Workspace Assets and Action resource binding declarations without copying credentials or mutable stores.
+- Simplify Quickstart and document progressive CLI discovery. Fix numeric multiple-input backing fields losing serialized array values in browsers.
+- Multi-Page remains in development: cross-page shared-data invalidation notifications and hot-reload isolation are not yet fully implemented or certified. Do not assume automatic sibling-page refresh after an Action.
+
+## 0.22.4 — 2026-09-09
+
+- Server Actions now queue rapid submissions serially per Canvas, preserving payloads and request IDs. Queued/submitting progress, explicit not-submitted errors, bounded waiting, and cancellation on uncertain writes or failed page sync prevent misleading save feedback. No DSL changes or automatic write retries.
+
+- Synchronize Interactive Output values, kinds and schemas, including recovery and removal; resolve cascade parents without requiring redundant View filters and diagnose invalid candidate fields separately from empty data.
+- Seed reloaded canvases from server interaction generation watermarks without weakening stale-request rejection. Add an integrated analysis/annotation regression and bounded browser initialization/slow-request diagnostics.
+
+## 0.22.3 — 2026-09-08
+
+- Keep server-only Interactive Transform inputs in Run Artifacts rather than browser payloads. Apply the same transport boundary to live output events and schedule Server Python from artifact readiness without downloading its inputs.
+
+## 0.22.2 — 2026-09-08
+
+- Fix selection-only View invalidation: refresh Control writer views and explicit value consumers even when their rows are unchanged, preserving unrelated Views and Query Runs. Add binding revision evidence and snapshot-safe Renderer scaffolds/documentation.
+
+## 0.22.1 — 2026-09-08
+
+- Publish confirmed Action success through progress before browser synchronization, including fast refreshes. Preserve saved outcomes when page synchronization fails.
+- Add optional Action preparation/startup/import/Python timing, refresh scheduling and node reuse evidence, and transient browser confirmation/data/update timings with explicit measurement boundaries.
+- Add `docs action-save`: a runnable isolated SQLite annotation recipe with external auth, revision checks, clearing, a reading Source, and save/refresh feedback. Scenario searches find the complete chain without requiring the term Server Action.
+- Expose the running package version in `/api/workspace`, document applied-Run/resource readiness, and update AI Skill routing. No new DSL or automatic write retries.
+
+## 0.22.0 — 2026-09-08
+
+- Added explicit Dashboard-local Server Actions for trusted Python computation and writes, with externally bound resources, JSON payloads/results, bounded execution, durable request receipts and no automatic write replay.
+- Actions can invalidate selected Sources and their downstream closure or redraw selected Views without querying. Refresh preserves applied query state, drafts, unaffected views and prior Run artifacts; write and refresh outcomes remain separate.
+- Added Renderer `context.actions`, Server endpoints, `actions invoke/status/refresh`, Action Schema discovery, authoring/scaffold/context routes and current AI guidance. Portable HTML remains read-only.
+- Included Action code/helper changes in hot reload and resource binding names in Bundle manifests, without copying external credentials or mutable stores.
+- Fixed omitted File Adapter roots: server Python receives the resolved configuration base, including standalone external auth, rather than a worker-relative `None/` path.
+- Added bounded browser failure diagnostics and an optional hash-checked local cache of real Arrow/Plotly map resources for interaction tests; cached downloads are excluded from Git and release artifacts. Production CDN defaults are unchanged.
+
+## 0.21.9 — 2026-09-05
+
+- Post-build review: aligned relative Adapter paths across standalone auth references, added field-level errors for malformed dependency/Presentation structures, synchronized release status, and included ARCHITECTURE.md in source archives.
+
+- Added a standalone YAML authoring path that lowers inline SQL/Python/Browser JS, local dependencies, presentation assets, and small custom Renderers into the existing Workspace execution model.
+- Added explicit external Adapter environment support for standalone `validate`, `run`, `serve`, and `report`; credentials are not copied into generated snapshots or reports.
+- Standalone Server snapshots hide the Sidebar, protect generated files from page editing, and preserve old Result snapshots when source content changes.
+- Added progressive `docs standalone` guidance and regression coverage for standalone execution, external auth forms, dependency isolation, report reuse, and browser rendering.
+
+## 0.21.8 — 2026-09-04
+
+- Control filter consumers now preserve the canonical distinction between `all_available` and an explicit empty set: compact `value: []` with `intent: all_available` passes the current domain even when the binding declares `empty: match_none`; only `intent: explicit` invokes the empty policy. Browser Runtime, Server Python Interactive Transform and Portable/Web Component paths share the same conformance cases.
+- Native View author evidence records each applicable Control's intent, operands, empty policy and rows before/after filtering; empty Views distinguish an upstream zero-row Output from a local selection that removed all rows.
+- Sidebar navigation no longer mistakes the initial timestamp for a just-finished drag: clicking another Dashboard immediately after page load is honored, while the real post-drag click suppression remains bounded to 250ms.
+- DESIGN and plan restore the current protocol/package baseline used by release conformance checks; data-entry docs explicitly describe the `intent`/`empty` precedence without introducing DSL or protocol revisions.
 
 ## 0.21.7 — 2026-09-03
 

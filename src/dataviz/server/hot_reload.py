@@ -161,7 +161,7 @@ def _canvas_signature(
     workspace: LoadedWorkspace,
     dashboard: LoadedDashboard,
 ) -> str:
-    """Fingerprint only files and declarations that can alter the rendered Canvas."""
+    """Fingerprint presentation and explicit Actions without invalidating read data."""
     definition = dashboard.definition
     asset_paths: set[Path] = set()
     for value in [
@@ -182,9 +182,16 @@ def _canvas_signature(
         asset_paths.add(readme_path.resolve())
     for asset_id in definition.assets:
         asset_paths.add(workspace.asset(asset_id).path)
+    action_contracts = {}
+    for action_id, (definition_path, action) in dashboard.server_actions.items():
+        action_contracts[action_id] = {
+            "definition": action.model_dump(mode="json", by_alias=True),
+            "code": _definition_assets(definition_path, action),
+        }
     return _digest(
         {
             "definition": definition.model_dump(mode="json", by_alias=True),
+            "server_actions": action_contracts,
             "assets": {
                 str(path): _safe_hash(path)
                 for path in sorted(asset_paths, key=str)

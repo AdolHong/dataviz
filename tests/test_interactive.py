@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import yaml
@@ -12,6 +13,7 @@ from dataviz.artifacts import ArtifactStore
 from dataviz.execution import Executor, InteractionExecutor
 from dataviz.execution.interactive import load_run_result
 from dataviz.errors import ExecutionFailure
+from dataviz.rendering import CanvasRenderer
 from dataviz.server.manager import RunManager
 from dataviz.server import create_app
 from dataviz.sources import SOURCE_RUNNERS
@@ -22,6 +24,39 @@ from fastapi.testclient import TestClient
 
 SESSION_A = "interactive-tab-a"
 SESSION_B = "interactive-tab-b"
+
+
+def test_server_only_base_outputs_are_not_browser_payload(tmp_path: Path):
+    root = build_interactive_workspace(tmp_path / "transport")
+    workspace = load_workspace(root)
+    workspace.definition.runtime.max_embedded_rows = 1
+    run = Executor(workspace).run("interactive", query_parameter_state=query_state())
+    dashboard = workspace.dashboards["interactive"]
+    store = ArtifactStore(root, run.run_id)
+    renderer = CanvasRenderer(workspace)
+    bundle = renderer._portable_bundle(dashboard, run, store, asset_mode="server")
+    assert bundle["outputs"] == {}
+    assert bundle["output_transports"] == {}
+    assert bundle["server_outputs"]["source:raw/main"]["row_count"] == 2
+    assert bundle["pending_outputs"] == []
+    assert renderer.render(dashboard, run, asset_mode="server", interaction={"url": "/test"})
+    derived = InteractionExecutor(workspace).execute(
+        run, "summary", control_state=interaction_state(),
+    )
+    assert derived.status == "ready"
+    assert len(store.read_table(derived.outputs["interactive:summary/main"])) == 1
+    assert len(store.read_table(run.outputs["source:raw/main"])) == 2
+    # A direct browser consumer still needs the same Base Output and remains
+    # subject to the original limit; server use must not hide that dependency.
+    contract = replace(dashboard.dependency_contract, presentation_roots=("source:raw/main",))
+    with pytest.raises(ExecutionFailure, match="Browser payload has 2 rows"):
+        renderer._portable_bundle(dashboard, run, store, asset_mode="server", dependency_contract=contract)
+    # Browser computation needs its Base inputs even without a direct View.
+    path, definition = dashboard.interactive_transforms["summary"]
+    dashboard.interactive_transforms["summary"] = (path, definition.model_copy(update={"runtime": "browser-js"}))
+    for mode in ("server", "inline"):
+        with pytest.raises(ExecutionFailure, match="Browser payload has 2 rows"):
+            renderer._portable_bundle(dashboard, run, store, asset_mode=mode)
 
 
 def query_state(*, batch: int = 7) -> dict[str, dict[str, object]]:

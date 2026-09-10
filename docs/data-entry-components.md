@@ -71,7 +71,9 @@ Server 默认值编辑器也按 Atom 呈现。单日期只有“类型 + 值”�
 
 运行界面的 DatePicker 与 RangePicker 始终展示 `YYYY-MM-DD`，不采用浏览器原生 `date` 控件的本地化格式。键入或粘贴连续八位数字会自动跨过年/月/日分隔符：`20260809` → `2026-08-09`。这只是输入辅助，不放宽日期契约；`20260231` 仍会被真实日期校验拒绝。Range 的两个端点可以分别文本编辑，也可以在同一双月弹层中依次选择；两个端点共用一个外框，不各自绘制输入边框。单日期、Range 和默认值编辑器的日历都可直接下拉选择年与月；没有声明 preset 时不渲染空工具条，没有 Clear/Apply 时不再用 footer 重复已选日期范围。
 
-## 动态选项域与多选意图
+## Control 动态选项域与多选意图
+
+本节描述查询后的 Control。Query Parameter 使用 `default` 和独立的 `all/include/exclude/none` 状态；SQL 候选与查询参数默认值见 `dataviz docs query-parameters --format json`，不要套用本节的 `initial`。
 
 级联多选不能只保存当前可见的 value，还必须保存用户的选择意图：
 
@@ -80,12 +82,14 @@ Server 默认值编辑器也按 Atom 呈现。单日期只有“类型 + 值”�
 
 这项规则由 `runtime.control` 统一实现，适用于 Checkbox Group、Select、Cascader 和 Tree Select。意图会随同一 tab 状态和导出的 HTML 保存，因此父级范围临时缩小后，不会把“显式子集”误判成“全部可用”。Presentation 只能改变组件外观，不能改写这项协调语义。
 
+消费端必须同时读取 `value` 与 `intent`。`all_available` 按已解析的候选值过滤，不等于无条件放行整个 Output。例如当前候选只有 `north`，全选不能让 `south` 通过。对于 compact `value: []`，静态候选仍按 `choices` 白名单过滤（空白名单匹配零行），非静态 compact 全选保持通过。`empty` 解释 `explicit` 意图下的空值：`passthrough` 表示不筛选，`match_none` 表示匹配零行。这条规则对原生 View、Interactive Transform 和 Portable/Web Component Runtime 一致。
+
 Select 必须明确候选域由谁拥有：
 
 - `options.mode: static`：Dashboard 维护封闭 `choices`；Source 中未列出的值不会进入控件。
 - `options.mode: infer`：Runtime 从 `options.source` 或消费该 Control 的 Base Output 推导完整选项域。
 
-Select 不使用 `default`，而是统一使用 `initial`。多选支持 `all/empty/values`，单选支持 `first/empty/value`；未声明时分别默认 `all` 和 `first`。`all` 编译为 `all_available` 意图，因此 Source 从 4 个城市增加到 10 个时无需修改 Dashboard。
+Control Select 使用 `initial`，不使用 `default`。多选支持 `all/empty/values`，单选支持 `first/empty/value`；未声明时分别默认 `all` 和 `first`。`all` 编译为 `all_available` 意图；当 infer 候选从 4 个城市增加到 10 个时无需修改 Dashboard，static 候选仍以声明的 `choices` 为准。
 
 其他输入组件不具有候选池，因此不套用 Select 的恢复策略：
 

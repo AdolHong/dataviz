@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -39,6 +40,106 @@ from dataviz.workspace import load_workspace
 
 ROOT = Path(__file__).resolve().parents[2]
 SHOWCASE = ROOT / "examples" / "feature-showcase"
+
+
+@pytest.mark.e2e
+def test_pages_preserve_independent_queries_and_history(page: Page, tmp_path: Path):
+    root = tmp_path / "workspace"
+    dashboard = root / "dashboards" / "holiday"
+    dashboard.mkdir(parents=True)
+    (root / "workspace.yaml").write_text(yaml.safe_dump({"schema": WORKSPACE_SCHEMA, "id": "pages", "title": "Pages"}))
+    (dashboard / "rules.py").write_text(
+        "import time\ndef load(context):\n    time.sleep(.3)\n"
+        "    return {'main': [{'period': str(context.query_inputs['period'])}]}\n"
+    )
+    (dashboard / "dashboard.yaml").write_text(yaml.safe_dump({
+        "schema": DASHBOARD_SCHEMA, "id": "holiday", "title": "Holiday analysis",
+        "sources": [
+            {"id": name, "type": "python", "code": "rules.py", "query_inputs": {"period": "year"},
+             "outputs": {"main": {"kind": "table"}}} for name in ("annual", "history")],
+        "pages": [
+            {"id": "annual", "title": "One year", "query_parameters": [
+                {"id": "year", "label": "Year", "type": "single_input", "value_type": "integer", "default": 2025}],
+             "views": [{"id": "table", "template": "table", "input": "source:annual/main"}]},
+            {"id": "history", "title": "Across years", "query_parameters": [
+                {"id": "year", "label": "Years", "type": "multiple_input", "value_type": "integer", "default": [2023, 2024]}],
+             "views": [{"id": "table", "template": "table", "input": "source:history/main"}]},
+        ],
+    }))
+    runs = []
+    page.on("request", lambda request: runs.append(request.post_data_json)
+            if request.method == "POST" and request.url.endswith("/runs") else None)
+    with _running_server(root) as url:
+        page.goto(url)
+        annual = page.locator('#page-navigation-list button[data-page-id="annual"]')
+        history = page.locator('#page-navigation-list button[data-page-id="history"]')
+        expect(annual).to_have_attribute("aria-current", "page")
+        expect(page.locator('#parameter-form input[name="year"]')).to_have_value("2025")
+        assert runs == []
+        page.locator("#run-button").click()
+        expect(page.locator("#run-button strong")).to_have_text("CANCEL")
+        history.click()
+        expect(history).to_have_attribute("aria-current", "page")
+        expect(page.locator('#parameter-form input[name="year"]')).to_have_value("[2023,2024]")
+        page.locator("#run-button").click()
+        frame = page.frame_locator("#canvas-frame")
+        expect(frame.locator('[data-view-id="table"]')).to_contain_text("2023", timeout=30_000)
+        expect(page.locator("#run-button strong")).to_have_text("RUN", timeout=30_000)
+        history_run = page.locator("#canvas-frame").get_attribute("data-run-id")
+        annual.click()
+        expect(annual).to_have_attribute("aria-current", "page")
+        expect(frame.locator('[data-view-id="table"]')).to_contain_text("2025", timeout=30_000)
+        expect(page.locator("#run-button strong")).to_have_text("RUN")
+        assert len(runs) == 2
+        assert {request["page_id"] for request in runs} == {"annual", "history"}
+        history.click()
+        expect(history).to_have_attribute("aria-current", "page")
+        expect(page.locator("#canvas-frame")).to_have_attribute("data-run-id", history_run)
+        assert "#page=history" in page.url
+        page.reload()
+        expect(history).to_have_attribute("aria-current", "page")
+        expect(frame.locator('[data-view-id="table"]')).to_contain_text("2023", timeout=30_000)
+        assert len(runs) == 2
+        page.go_back()
+        expect(annual).to_have_attribute("aria-current", "page")
+        expect(frame.locator('[data-view-id="table"]')).to_contain_text("2025", timeout=30_000)
+        assert len(runs) == 2
+
+
+@pytest.mark.e2e
+def test_multi_page_example_renders_both_analysis_paths(page: Page, tmp_path: Path):
+    root = tmp_path / "workspace"
+    shutil.copytree(ROOT / "examples/multi-page-workspace", root,
+                    ignore=shutil.ignore_patterns(".dataviz", "__pycache__"))
+    with _running_server(root) as url:
+        page.set_viewport_size({"width": 1440, "height": 1050})
+        page.goto(url)
+        frame = page.frame_locator("#canvas-frame")
+        for page_id in ("annual", "history"):
+            tab = page.locator(f'#page-navigation-list button[data-page-id="{page_id}"]')
+            tab.click()
+            expect(tab).to_have_attribute("aria-current", "page")
+            expect(tab).to_have_css("border-top-width", "0px")
+            expect(tab).to_have_css("background-color", "rgb(238, 240, 248)")
+            expect(frame.locator("h1")).to_have_count(0)
+            if page_id == "annual":
+                page.screenshot(path=str(tmp_path / "before-run.png"), full_page=True)
+            page.locator("#run-button").click()
+            expect(frame.locator('[data-view-id="details"]')).to_contain_text("水果", timeout=30_000)
+            expect(frame.locator('[data-view-id="trend"] .js-plotly-plot')).to_be_visible()
+            expect(page.locator("#run-button strong")).to_have_text("RUN", timeout=30_000)
+            expect(frame.locator(".dv-report-header h1")).to_be_hidden()
+            for width, height in ((1440, 1050), (390, 844)):
+                page.set_viewport_size({"width": width, "height": height})
+                if width == 390:
+                    expect(page.locator("body")).to_have_class(re.compile("sidebar-collapsed"))
+                    expect(page.locator("#dashboard-sidebar")).not_to_be_in_viewport()
+                image = tmp_path / f"{page_id}-{width}.png"
+                page.screenshot(path=str(image), full_page=True)
+                print(f"Example screenshot: {image}")
+            page.set_viewport_size({"width": 1440, "height": 1050})
+
+
 MINIMAL = ROOT / "examples" / "minimal-workspace"
 SALES = ROOT / "examples" / "sales-workspace"
 PROGRESSIVE = ROOT / "tests" / "fixtures" / "progressive-workspace"
@@ -95,9 +196,531 @@ def browser() -> Browser:
 @pytest.fixture
 def page(browser: Browser) -> Page:
     context = browser.new_context(viewport={"width": 1440, "height": 900})
+    # Optional real-resource cache: do not make repeated CDN availability a
+    # prerequisite for every interaction assertion. No decoder/renderer mocks.
+    asset_dir = os.environ.get("DATAVIZ_E2E_ASSET_DIR")
+    if asset_dir is None and (ROOT / ".browser-test-assets").is_dir():
+        asset_dir = str(ROOT / ".browser-test-assets")
+    if asset_dir:
+        for url, filename, content_type, checksum in [
+            ("https://cdn.jsdelivr.net/npm/apache-arrow@21.1.0/Arrow.es2015.min.js",
+             "Arrow.es2015.min.js", "application/javascript",
+             "d3f0ded2a2bdd1208232b942f8e4810f7a402564fac3c78b4574158cd542acb9"),
+            ("https://cdn.plot.ly/un/world_110m.json", "world_110m.json", "application/json",
+             "e1bf51740ad28396265e52123ea7315d692f112664ab2cb0f1ea76a96fe1bb0a"),
+        ]:
+            asset = Path(asset_dir) / filename
+            if not asset.is_file():
+                raise RuntimeError(f"Missing real browser test asset: {asset}")
+            if hashlib.sha256(asset.read_bytes()).hexdigest() != checksum:
+                raise RuntimeError(f"Browser test asset checksum mismatch: {asset}")
+            context.route(url, lambda route, *, asset=asset, content_type=content_type: route.fulfill(
+                path=str(asset), content_type=content_type,
+                headers={"Access-Control-Allow-Origin": "*"},
+            ))
     page = context.new_page()
+    diagnostics = []
+    pending_requests = {}
+    page.on("request", lambda request: pending_requests.__setitem__(request, time.monotonic()))
+
+    def finished(request):
+        started = pending_requests.pop(request, None)
+        if started is not None and time.monotonic() - started > 1:
+            diagnostics.append({"url": request.url, "resource_type": request.resource_type,
+                                "elapsed_ms": round((time.monotonic() - started) * 1000)})
+
+    page.on("requestfinished", finished)
+    page.on("requestfailed", finished)
+    page.on("console", lambda message: diagnostics.append({"console_error": message.text}) if message.type == "error" else None)
+    page.on("pageerror", lambda error: diagnostics.append({"error": str(error)}))
+    page.on("requestfailed", lambda request: diagnostics.append({
+        "url": request.url, "failure": request.failure,
+    }))
+    page.on("response", lambda response: diagnostics.append({
+        "url": response.url, "status": response.status,
+    }) if response.status >= 400 else None)
     yield page
+    # Pytest displays captured teardown output on failure. Keep evidence bounded
+    # and avoid serializing table data or the complete HTML document.
+    frames = []
+    for frame in page.frames:
+        try:
+            frames.append({
+                "url": frame.url,
+                "state": frame.locator("body").evaluate("""body => ({
+                  title: document.title,
+                  readyState:document.readyState,
+                  controlPhase:typeof datavizControlChannel === 'undefined' ? null : datavizControlChannel.phase,
+                  canvas: !!document.querySelector('.dv-canvas'),
+                  errors: [...body.querySelectorAll('.dv-view-error')].map(n => n.textContent),
+                  views: [...body.querySelectorAll('[data-view-id]')].map(n => ({
+                    id:n.dataset.viewId, status:n.dataset.viewStatus,
+                  })),
+                  text: document.querySelector('.dv-canvas') ? null : body.innerText.slice(0, 1000),
+                })""", timeout=2000),
+            })
+        except Exception as error:
+            frames.append({"url": frame.url, "inspection_error": str(error)})
+    print("Browser evidence:", json.dumps({"events": diagnostics[-30:], "frames": frames,
+        "pending_requests": [{"url": request.url, "resource_type": request.resource_type,
+                              "elapsed_ms": round((time.monotonic() - started) * 1000)}
+                             for request, started in list(pending_requests.items())[-15:]],
+    }, ensure_ascii=False))
     context.close()
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize('round_index', range(3))
+def test_analysis_stability_workflow(page: Page, stable_analysis, round_index):
+    root, database = stable_analysis
+    requests = []
+    page.on('request', lambda request: requests.append((request.method, request.url)))
+    with _running_server(root) as url:
+        page.goto(url)
+        _run_and_wait(page)
+        frame = page.frame_locator('#canvas-frame')
+        table = frame.locator('[data-view-id="items"]')
+        chart = frame.locator('[data-view-id="detail"] .dv-plotly')
+
+        def category(value):
+            frame.locator('body').evaluate("""async (_body, value) => {
+              window.dataviz.control.set('dashboard:stability/category', value);
+              await window.dataviz.applyControls({keys:['dashboard:stability/category']});
+            }""", value)
+
+        for c in ['A', 'B', 'A']:
+            category(c)
+            expect(table.locator('tbody tr')).to_have_count(3, timeout=30_000)
+            for item in [f'{c}{n}' for n in range(1, 4)]:
+                row = table.locator('tbody tr').filter(has_text=item)
+                row.click()
+                expect(row).to_have_attribute('aria-selected', 'true')
+                expect(chart).to_be_visible()
+                next(item for item in page.frames if '/canvas?' in item.url).wait_for_function(
+                    "item => JSON.stringify(document.querySelector('[data-view-id=\"detail\"] .dv-plotly')?.data?.[0]?.x) === JSON.stringify([item])",
+                    arg=item,
+                )
+                assert chart.evaluate('node => node.data[0].x') == [item]
+                assert frame.locator('body').evaluate("() => window.dataviz.control.state('dashboard:stability/item').value") == item
+
+        editor = frame.locator('[data-view-id="editor"]')
+        editor.get_by_label('Manual label').select_option('sensitive')
+        editor.get_by_role('button', name='Save', exact=True).click()
+        expect(editor).to_contain_text('Saved; page synced', timeout=30_000)
+        with sqlite3.connect(database) as db:
+            assert db.execute("select label, revision from annotations where id='A3'").fetchone() == ('sensitive', 1)
+        # No new Query request for any of the local selection commits or writeback.
+        assert len([url for method, url in requests if method == 'POST' and '/dashboards/stability/runs' in url]) == 1
+        assert not any('/outputs/source%3Afacts' in url for _, url in requests)
+        category('EMPTY')
+        expect(table.locator('tbody tr')).to_have_count(0)
+        assert frame.locator('body').evaluate("() => window.dataviz.control.state('dashboard:stability/item').value") is None
+        category('FAIL')
+        expect(table).to_have_attribute('data-view-status', 'error', timeout=30_000)
+        category('B')
+        expect(table.locator('tbody tr')).to_have_count(3, timeout=30_000)
+        frame.locator('body').evaluate("""async () => {
+          window.dataviz.control.set('dashboard:stability/item', null);
+          await window.dataviz.applyControls({keys:['dashboard:stability/item']});
+        }""")
+        assert frame.locator('body').evaluate("() => window.dataviz.control.state('dashboard:stability/item').value") is None
+        assert table.locator('tbody tr[aria-selected="true"]').count() == 0
+        # Rapid commits: only the final canonical state may reach the views.
+        frame.locator('body').evaluate("""async () => {
+          const key = 'dashboard:stability/category';
+          const jobs = ['A','B','A'].map(value => {
+            window.dataviz.control.set(key, value);
+            return window.dataviz.applyControls({keys:[key]});
+          });
+          await Promise.all(jobs);
+        }""")
+        expect(table.locator('tbody tr').first).to_contain_text('A1', timeout=30_000)
+        # Reload exactly the same Run, retaining server-side generation guards.
+        canvas = next(item for item in page.frames if '/canvas?' in item.url)
+        canvas.goto(canvas.url)
+        expect(table).to_have_attribute('data-view-status', 'ready', timeout=30_000)
+        assert not any('/outputs/source%3Afacts' in url for _, url in requests)
+
+
+@pytest.mark.e2e
+def test_server_only_large_input_stays_out_of_browser(page: Page, tmp_path: Path):
+    from dataviz.standalone import prepare_input
+
+    path = tmp_path / "slice.yaml"
+    path.write_text(yaml.safe_dump({
+        "schema": DASHBOARD_SCHEMA, "id": "slice",
+        "sources": [{"id": "full", "type": "python", "code": {"inline":
+            "def load(context):\n    return [{'value': i} for i in range(100001)]\n"},
+            "outputs": {"main": {"kind": "table"}}}],
+        "interactive_transforms": [{"id": "small", "runtime": "server-python",
+            "code": {"inline": "def transform(context):\n    return {'main': context.table('rows').head(2)}\n"},
+            "inputs": {"rows": "source:full/main"},
+            "outputs": {"main": {"kind": "table"}}, "export": {"mode": "snapshot"}}],
+        "views": [{"id": "result", "template": "table", "input": "interactive:small/main"}],
+    }))
+    root, _ = prepare_input(path)
+    requests = []
+    page.on('request', lambda request: requests.append(request.url))
+    with _running_server(root) as url:
+        page.goto(url)
+        _run_and_wait(page)
+        frame = page.frame_locator('#canvas-frame')
+        expect(frame.locator('[data-view-id="result"] tbody tr')).to_have_count(2, timeout=30_000)
+        payload = frame.locator('body').evaluate("""() => ({
+          outputs:Object.keys(window.dataviz.portable.outputs),
+          transports:Object.keys(window.dataviz.portable.output_transports),
+          server:window.dataviz.portable.server_outputs,
+        })""")
+        assert 'source:full/main' not in payload['outputs']
+        assert 'source:full/main' not in payload['transports']
+        assert payload['server']['source:full/main']['row_count'] == 100001
+        assert not any('/outputs/source' in url for url in requests)
+        # Exercise the normal Shell reload / Run path with cached Source data.
+        page.reload()
+        _run_and_wait(page)
+        expect(frame.locator('[data-view-id="result"] tbody tr')).to_have_count(2, timeout=30_000)
+        assert frame.locator('body').evaluate("() => 'source:full/main' in window.dataviz.portable.outputs") is False
+        assert not any('/outputs/source' in url for url in requests)
+
+
+@pytest.mark.e2e
+def test_custom_selection_feedback_updates_without_data_change(page: Page, tmp_path: Path):
+    from dataviz.standalone import prepare_input
+    script = """window.datavizRuntime.registerRenderer('selection.example', {
+      mount(context, descriptor) {
+        const node = document.createElement('div'); context.body.append(node);
+        const state = {node, context, updates:0};
+        for (const row of descriptor.rows) {
+          const button = document.createElement('button'); button.textContent = row.id;
+          button.dataset.item = row.id;
+          button.onclick = () => state.context.controlBinding?.emit('select', row);
+          node.append(button);
+        }
+        this.update(context, descriptor, state); return state;
+      },
+      update(context, descriptor, state) {
+        state.context = context; state.updates++;
+        const selection = context.controlBinding?.state || window.dataviz.control.state('dashboard:selection/item');
+        state.node.dataset.selection = selection.value || '';
+        state.node.dataset.revision = selection.revision;
+        state.node.dataset.updates = state.updates;
+        state.node.querySelectorAll('button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.item === selection.value)));
+        return state;
+      },
+      dispose(context, state) { state.node.remove(); }
+    });"""
+    path = tmp_path / "selection.yaml"
+    path.write_text(yaml.safe_dump({
+        "schema": DASHBOARD_SCHEMA, "id": "selection",
+        "controls": [{"id": "item", "type": "single_select", "value_type": "text",
+                      "initial": {"mode": "value", "value": "A"}, "clearable": True,
+                      "options": {"mode": "static", "choices": [{"label": x, "value": x} for x in ['A', 'B']]}}],
+        "sources": [{"id": "rows", "type": "python", "code": {"inline": "def load(context):\n    return [{'id': 'A'}, {'id': 'B'}]\n"},
+                     "outputs": {"main": {"kind": "table"}}}],
+        "canvas": {"scripts": [{"inline": script}]},
+        "views": [
+            {"id": "writer", "template": "custom", "renderer": "selection.example", "input": "source:rows/main",
+             "control_binding": {"control": "dashboard.item", "field": "id"}},
+            {"id": "observer", "template": "custom", "renderer": "selection.example", "input": "source:rows/main",
+             "control_inputs": {"selection": {"mode": "value", "control": "dashboard.item"}}},
+            {"id": "unrelated", "template": "table", "input": "source:rows/main"},
+        ],
+    }))
+    root, _ = prepare_input(path)
+    with _running_server(root) as url:
+        page.goto(url)
+        _run_and_wait(page)
+        frame = page.frame_locator('#canvas-frame')
+        writer = frame.locator('[data-view-id="writer"]')
+        observer = frame.locator('[data-view-id="observer"] [data-selection]')
+        expect(writer.get_by_role('button', name='A', exact=True)).to_have_attribute('aria-pressed', 'true', timeout=20_000)
+        run_id = page.locator('#canvas-frame').get_attribute('data-run-id')
+        generation = frame.locator('[data-view-id="unrelated"]').evaluate('node => node._datavizRenderGeneration')
+        writer.get_by_role('button', name='B', exact=True).click()
+        expect(writer.get_by_role('button', name='B', exact=True)).to_have_attribute('aria-pressed', 'true')
+        expect(observer).to_have_attribute('data-selection', 'B')
+        # Same public state/apply path used by external controls and restoration;
+        # a local click-only paint patch cannot make these assertions pass.
+        for value in ['A', None, 'B']:
+            frame.locator('body').evaluate("""async (_, value) => {
+              window.dataviz.control.set('dashboard:selection/item', value);
+              await window.dataviz.applyControls({keys:['dashboard:selection/item']});
+            }""", value)
+            expect(observer).to_have_attribute('data-selection', value or '')
+            expect(writer.locator('[data-selection]')).to_have_attribute('data-selection', value or '')
+        assert page.locator('#canvas-frame').get_attribute('data-run-id') == run_id
+        assert frame.locator('[data-view-id="unrelated"]').evaluate('node => node._datavizRenderGeneration') == generation
+        frame.locator('body').evaluate("""async () => {
+          const key = 'dashboard:selection/item';
+          window.dataviz.control.set(key, 'A');
+          const first = window.dataviz.applyControls({keys:[key]});
+          window.dataviz.control.set(key, 'B');
+          await Promise.all([first, window.dataviz.applyControls({keys:[key]})]);
+        }""")
+        expect(writer.locator('[data-selection]')).to_have_attribute('data-selection', 'B')
+        expect(observer).to_have_attribute('data-selection', 'B')
+        evidence = frame.locator('body').evaluate("""() => ({
+          current:window.dataviz.control.state('dashboard:selection/item').revision,
+          rendered:window.datavizRuntime.viewRenderEvidence.get('writer'),
+          requested:window.datavizRuntime.viewRefreshEvidence.get('observer'),
+        })""")
+        assert evidence['rendered']['phase'] == 'update'
+        assert evidence['rendered']['binding_revisions']['dashboard:selection/item'] == evidence['current']
+        assert evidence['requested']['control_revisions']['dashboard:selection/item'] == evidence['current']
+        assert evidence['requested']['query_executed'] is False
+        page.reload()
+        expect(page.locator('#run-button')).to_be_enabled(timeout=10_000)
+        _run_and_wait(page)
+        expect(frame.locator('[data-view-id="writer"] [data-selection]')).to_have_attribute('data-selection', 'B', timeout=20_000)
+
+
+@pytest.mark.e2e
+def test_standalone_inline_python_renders_without_sidebar(page: Page, tmp_path: Path):
+    from dataviz.standalone import prepare_input
+
+    source = tmp_path / "sales.yaml"
+    source.write_text(yaml.safe_dump({
+        "schema": DASHBOARD_SCHEMA, "id": "standalone-sales", "title": "Standalone Sales",
+        "sources": [{"id": "sales", "type": "python",
+                     "code": {"inline": "import pandas as pd\ndef load(context):\n    return pd.DataFrame([{'revenue': 42}])\n"},
+                     "outputs": {"main": {"kind": "table"}}}],
+        "interactive_transforms": [{"id": "double", "runtime": "browser-js",
+                                    "code": {"inline": "function transform(context) { return {main: context.inputs.rows.map(row => ({revenue: row.revenue * 2}))}; }"},
+                                    "inputs": {"rows": "source:sales/main"},
+                                    "outputs": {"main": {"kind": "table"}}, "export": {"mode": "interactive"}}],
+        "canvas": {"scripts": [{"inline": """
+window.datavizRuntime.registerRenderer('standalone.detail', {
+  mount(context, descriptor) {
+    const root = document.createElement('p');
+    root.textContent = 'Inline detail: ' + descriptor.rows[0].revenue;
+    context.body.append(root);
+    return {root};
+  },
+  update(context, descriptor, state) {
+    state.root.textContent = 'Inline detail: ' + descriptor.rows[0].revenue;
+    return state;
+  },
+  dispose(context, state) { state.root.remove(); }
+});
+"""}]},
+        "views": [{"id": "total", "template": "metric", "input": "interactive:double/main", "value": "revenue"},
+                  {"id": "detail", "template": "custom", "renderer": "standalone.detail", "input": "source:sales/main"}],
+    }))
+    root, _ = prepare_input(source)
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    with _running_server(root) as url:
+        page.goto(url)
+        expect(page.locator("#dashboard-sidebar")).to_be_hidden()
+        expect(page.locator("#run-button")).to_be_enabled(timeout=10_000)
+        page.locator("#run-button").click()
+        expect(page.frame_locator("#canvas-frame").locator("body")).to_contain_text("84", timeout=30_000)
+        expect(page.frame_locator("#canvas-frame").locator("body")).to_contain_text("Inline detail: 42", timeout=30_000)
+        bounds = page.locator(".workbench").bounding_box()
+        assert bounds is not None and bounds["x"] < 40 and bounds["width"] > 1300
+        page.screenshot(path=str(tmp_path / "standalone.png"))
+        assert errors == []
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("transport", ["json", "arrow"])
+def test_server_action_updates_canvas_in_place_and_preserves_query_draft(page: Page, tmp_path: Path, transport):
+    from dataviz.standalone import prepare_input
+
+    database = tmp_path / "facts.sqlite"
+    with sqlite3.connect(database) as connection:
+        connection.execute("create table facts (value integer)")
+        connection.execute("insert into facts values (1)")
+    auth = tmp_path / "connections.yaml"
+    auth.write_text(yaml.safe_dump({"adapters": {"db": {
+        "type": "sqlalchemy", "url": f"sqlite:///{database}",
+    }}}))
+    source = tmp_path / "actions.yaml"
+    source.write_text(yaml.safe_dump({
+        "schema": DASHBOARD_SCHEMA, "id": "action-demo",
+        "query_parameters": [{"id": "label", "type": "single_input", "value_type": "text", "default": "applied"}],
+        "sources": [
+            {"id": "labels", "type": "sql", "adapter": "db",
+             "code": {"inline": "select value from facts where :label = 'applied'"},
+             "query_inputs": {"label": "label"}, "outputs": {"main": {"kind": "table"}}},
+            {"id": "sales", "type": "sql", "adapter": "db", "code": {"inline": "select 42 as value"},
+             "outputs": {"main": {"kind": "table"}}},
+        ],
+        "interactive_transforms": [{"id": "double", "runtime": "browser-js",
+            "code": {"inline": "function transform(context) { return {main: context.inputs.rows.map(row => ({value: row.value * 10}))}; }"},
+            "inputs": {"rows": "source:labels/main"}, "outputs": {"main": {"kind": "table"}},
+            "export": {"mode": "interactive"}}],
+        "server_actions": [{"id": "save", "resources": {"db": "db"},
+            "invalidates": ["source:labels", "view:sales"], "code": {"inline": '''
+from sqlalchemy import create_engine, text
+def execute(context):
+    if context.payload.get("view_only"):
+        context.invalidate("view:sales")
+        return {"saved": False}
+    engine = create_engine(context.resources.config("db")["url"])
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("update facts set value=value+1"))
+    finally:
+        engine.dispose()
+    context.invalidate("source:labels")
+    return {"saved": True}
+'''}}],
+        "views": [{"id": name, "template": "custom", "renderer": "action.demo", "input": f"source:{name}/main"}
+                  for name in ["labels", "sales"]] + [{"id": "summary", "template": "metric", "value": "value", "input": "interactive:double/main"}],
+        "canvas": {"scripts": [{"inline": '''
+window.actionMounts = {};
+window.actionUpdates = {};
+window.datavizRuntime.registerRenderer('action.demo', {
+  mount(context, descriptor) {
+    window.actionMounts[context.key] = (window.actionMounts[context.key] || 0) + 1;
+    const value = document.createElement('span');
+    value.className = 'action-value';
+    value.textContent = String(descriptor.rows[0]?.value ?? 'empty');
+    const feedback = document.createElement('output');
+    feedback.className = 'action-feedback';
+    context.body.append(value, feedback);
+    if (context.key === 'labels') {
+      const save = document.createElement('button');
+      save.textContent = 'Save annotation';
+      save.disabled = !context.actions.available;
+      const retry = document.createElement('button');
+      retry.textContent = 'Retry refresh';
+      retry.hidden = true;
+      let failedRequestId = null;
+      retry.onclick = async () => {
+        retry.disabled = true;
+        try {
+          window.lastActionReceipt = await context.actions.refresh('save', failedRequestId);
+          feedback.textContent = 'Saved';
+          retry.hidden = true;
+        } catch (error) { feedback.textContent = 'Saved; refresh failed'; }
+        finally { retry.disabled = false; }
+      };
+      save.onclick = async () => {
+        save.disabled = true;
+        feedback.textContent = 'Saving';
+        try {
+          window.lastActionReceipt = await context.actions.invoke('save', {});
+          feedback.textContent = 'Saved';
+        } catch (error) {
+          window.lastActionError = {message:error.message, code:error.code, receipt:error.receipt};
+          if (error.receipt?.status === 'succeeded') {
+            feedback.textContent = 'Saved; refresh failed';
+            failedRequestId = error.requestId;
+            retry.hidden = false;
+          } else feedback.textContent = 'Failed: ' + error.message;
+        } finally { save.disabled = !context.actions.available; }
+      };
+      context.body.append(save, retry);
+    }
+    return {value, feedback};
+  },
+  update(context, descriptor, state) {
+    window.actionUpdates[context.key] = (window.actionUpdates[context.key] || 0) + 1;
+    state.value.textContent = String(descriptor.rows[0]?.value ?? 'empty');
+    return state;
+  },
+  dispose() {},
+});
+'''}]},
+    }))
+    root, _ = prepare_input(source, auth=auth)
+    workspace_path = root / "workspace.yaml"
+    workspace = yaml.safe_load(workspace_path.read_text())
+    workspace["runtime"] = {"browser_table_transport": transport}
+    workspace_path.write_text(yaml.safe_dump(workspace))
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    with _running_server(root) as url:
+        page.goto(url)
+        expect(page.locator("#run-button")).to_be_enabled(timeout=10_000)
+        page.locator("#run-button").click()
+        frame = page.frame_locator("#canvas-frame")
+        expect(frame.locator('[data-view-id="labels"] .action-value')).to_have_text("1", timeout=30_000)
+        expect(frame.locator('[data-view-id="summary"]')).to_contain_text("10", timeout=30_000)
+        expect(page.locator("#query-parameters-toggle")).to_have_attribute("aria-expanded", "false", timeout=10_000)
+        original_run = page.locator("#canvas-frame").get_attribute("data-run-id")
+        original_frame = page.locator("#canvas-frame").get_attribute("data-frame-id")
+        before = frame.locator("body").evaluate("""() => {
+          window.actionSentinel = 'same-document';
+          return {mounts:{...window.actionMounts}, updates:{...window.actionUpdates}};
+        }""")
+        page.locator("#query-parameters-toggle").click()
+        page.locator('#parameter-form input[name="label"]').fill("draft-not-applied")
+        interrupted = []
+        if transport == "json":
+            def fail_first_refresh_transport(route):
+                if "labels/main" in route.request.url and not interrupted:
+                    interrupted.append(route.request.url)
+                    route.fulfill(status=503, content_type="application/json", body='{"detail":"deliberate transport interruption"}')
+                else:
+                    route.continue_()
+            page.route("**/api/runs/*/outputs/**", fail_first_refresh_transport)
+        frame.get_by_role("button", name="Save annotation").click()
+        if transport == "json":
+            expect(frame.locator('[data-view-id="labels"] .action-feedback')).to_have_text("Saved; refresh failed", timeout=30_000)
+            assert interrupted
+            expect(frame.locator('[data-view-id="labels"] .action-value')).to_have_text("1")
+            assert page.locator("#canvas-frame").get_attribute("data-run-id") == original_run
+            with sqlite3.connect(database) as connection:
+                assert connection.execute("select value from facts").fetchone()[0] == 2
+            frame.get_by_role("button", name="Retry refresh").click()
+        expect(frame.locator('[data-view-id="labels"] .action-feedback')).to_have_text("Saved", timeout=30_000)
+        expect(frame.locator('[data-view-id="labels"] .action-value')).to_have_text("2")
+        expect(frame.locator('[data-view-id="summary"]')).to_contain_text("20", timeout=15_000)
+        expect(frame.locator('[data-view-id="sales"] .action-value')).to_have_text("42")
+        assert page.locator("#canvas-frame").get_attribute("data-frame-id") == original_frame
+        assert page.locator("#canvas-frame").get_attribute("data-run-id") != original_run
+        expect(page.locator('#parameter-form input[name="label"]')).to_have_value("draft-not-applied")
+        after = frame.locator("body").evaluate("""() => ({
+          sentinel:window.actionSentinel, mounts:window.actionMounts, updates:window.actionUpdates,
+          run:window.dataviz.run_id, receipt:window.lastActionReceipt,
+          draft:window.dataviz.draft_query_parameter_state.label,
+          applied:window.dataviz.query_parameter_state.label,
+        })""")
+        assert after["sentinel"] == "same-document"
+        assert after["mounts"] == before["mounts"]
+        assert after["updates"].get("sales", 0) == before["updates"].get("sales", 0)
+        assert after["applied"]["value"] == "applied"
+        assert after["draft"]["value"] == "draft-not-applied"
+        assert after["run"] == page.locator("#canvas-frame").get_attribute("data-run-id")
+        view_result = frame.locator("body").evaluate("""async () => (
+          window.dataviz.serverActions.invoke('save', {view_only:true})
+        )""")
+        assert view_result["refresh"]["query_executed"] is False
+        assert frame.locator("body").evaluate("window.actionUpdates.sales") == before["updates"].get("sales", 0) + 1
+        # Repeated clicks use the new Run without a frame reload.
+        frame.get_by_role("button", name="Save annotation").click()
+        expect(frame.locator('[data-view-id="labels"] .action-value')).to_have_text("3", timeout=30_000)
+        expect(frame.locator('[data-view-id="labels"] .action-feedback')).to_have_text("Saved", timeout=30_000)
+        queued = frame.locator("body").evaluate("""async () => {
+          const progress = [];
+          const receipts = await Promise.all([1, 2, 3].map(row =>
+            window.dataviz.serverActions.invoke('save', {row}, {
+              onProgress:r => progress.push({row, status:r.status}),
+            })));
+          return {statuses:receipts.map(r => r.status), progress};
+        }""")
+        assert queued["statuses"] == ["succeeded"] * 3
+        assert sum(item["status"] == "queued" for item in queued["progress"]) == 3
+        expect(frame.locator('[data-view-id="labels"] .action-value')).to_have_text("6", timeout=30_000)
+        assert errors == []
+
+    loaded = load_workspace(root)
+    result = Executor(loaded).run("action-demo")
+    report_path = CanvasRenderer(loaded).write_report(loaded.dashboard("action-demo"), result, tmp_path / "action-report.html")
+    with _running_static_server(report_path.parent) as report_url:
+        page.goto(f"{report_url}/{report_path.name}")
+        expect(page.get_by_role("button", name="Save annotation")).to_be_disabled(timeout=15_000)
+        assert page.evaluate("window.dataviz.serverActions.available") is False
+        outcome = page.evaluate("""async () => {
+          try { await window.dataviz.serverActions.invoke('save', {}); return 'unexpected'; }
+          catch (error) { return error.code; }
+        }""")
+        assert outcome == "server_action_unavailable"
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("select value from facts").fetchone()[0] == 6
 
 
 def _route_perspective_contract_runtime(page: Page) -> None:
@@ -591,8 +1214,14 @@ def _open_dashboard(page: Page, base_url: str, dashboard_id: str) -> None:
     page.goto(base_url, wait_until="domcontentloaded")
     dashboard = page.locator(f'[data-nav-type="dashboard"][data-id="{dashboard_id}"]')
     expect(dashboard).to_be_visible(timeout=10_000)
-    if "active" not in (dashboard.get_attribute("class") or "").split():
+    switched = "active" not in (dashboard.get_attribute("class") or "").split()
+    if switched:
         dashboard.click()
+        expect(dashboard).to_have_class(re.compile(r"\bactive\b"), timeout=10_000)
+        expect(page.locator("#canvas-frame")).to_have_attribute(
+            "data-dashboard-id", dashboard_id, timeout=10_000
+        )
+        page.wait_for_url(re.compile(rf"/dashboards/{re.escape(dashboard_id)}(?:[?]|$)"))
     expect(page.locator("#run-button")).to_be_enabled(timeout=10_000)
 
 
@@ -4766,6 +5395,64 @@ def test_selection_gallery_canonical_empty_all_and_clear(page: Page):
         )
         assert cleared_state["intent"] == "explicit"
         assert cleared_state["value"] == []
+
+
+@pytest.mark.e2e
+def test_native_table_distinguishes_all_available_from_explicit_empty(page: Page):
+    with _running_server(MINIMAL) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        _run_and_wait(page)
+        frame = page.frame_locator("#canvas-frame")
+        table = frame.locator('[data-view-id="sales-detail"]')
+        expect(table.locator("tbody tr")).to_have_count(12, timeout=20_000)
+
+        all_evidence = frame.locator("body").evaluate(
+            """async () => {
+              const key = 'dashboard:sales-overview/region';
+              window.dataviz.control.set(key, [], {intent:'all_available'});
+              await window.datavizRuntime.renderViews({
+                initial:false,
+                changedControlKeys:[key],
+                changedOutputReferences:[],
+                queryExecuted:false,
+                affectedViewIds:['sales-detail'],
+              });
+              return window.datavizRuntime.viewRenderEvidence.get('sales-detail').filtering;
+            }"""
+        )
+        expect(table.locator("tbody tr")).to_have_count(12)
+        assert all_evidence["rows_before"] == 12
+        assert all_evidence["rows_after"] == 12
+        assert all_evidence["controls"][0] == {
+            "control": "dashboard:sales-overview/region",
+            "intent": "all_available",
+            "operands": [],
+            "empty": "match_none",
+            "applicable": True,
+            "rows_before": 12,
+            "rows_after": 12,
+        }
+
+        empty_evidence = frame.locator("body").evaluate(
+            """async () => {
+              const key = 'dashboard:sales-overview/region';
+              window.dataviz.control.set(key, [], {intent:'explicit'});
+              await window.datavizRuntime.renderViews({
+                initial:false,
+                changedControlKeys:[key],
+                changedOutputReferences:[],
+                queryExecuted:false,
+                affectedViewIds:['sales-detail'],
+              });
+              return window.datavizRuntime.viewRenderEvidence.get('sales-detail').filtering;
+            }"""
+        )
+        expect(table).to_have_attribute("data-view-status", "empty")
+        expect(table).to_contain_text("No rows match the current selections.")
+        assert empty_evidence["rows_before"] == 12
+        assert empty_evidence["rows_after"] == 0
+        assert empty_evidence["controls"][0]["intent"] == "explicit"
+        assert empty_evidence["controls"][0]["operands"] == []
 
 
 @pytest.mark.e2e

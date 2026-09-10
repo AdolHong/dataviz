@@ -785,6 +785,14 @@ class AnalysisCatalog:
         self.diagnostics = list(diagnostics or [])
         self._by_reference = {entry["reference"]: entry for entry in entries}
 
+    def for_page(self, workspace: LoadedWorkspace, dashboard: LoadedDashboard) -> AnalysisCatalog:
+        """Resolve references in an explicit Page without rewriting the shared catalog."""
+        fingerprint = _dashboard_fingerprint(workspace, dashboard)
+        entries = _dashboard_entries(workspace, dashboard.definition.id, dashboard, fingerprint)
+        return AnalysisCatalog(workspace=self.workspace,
+                               generation=f"{self.generation}:page:{dashboard.page_id}:{fingerprint[:12]}",
+                               entries=entries, diagnostics=self.diagnostics)
+
     def resolve(self, reference: str) -> dict[str, Any]:
         raw = reference.strip()
         entry = self._by_reference.get(raw)

@@ -161,15 +161,41 @@
     }
     return structuredClone(parameterState[parameter]?.value ?? null);
   };
-  const selectRows = (view, state) => {
+  const selectRowsWithEvidence = (view, state, alias = 'main') => {
     const contract = state.dependency_contract?.views?.[view.id]?.filter_contract || [];
     const boundControl = controlBinding(view, state)?.control;
-    const reference = mainInputReference(view, state);
-    return state.data.table(reference).rows().filter(row => contract.every(item => (
-      item.key === boundControl
-      || state.control.matches(row, item, state.control.state(item.key))
-    )));
+    const reference = inputReferences(view, state)[alias] || mainInputReference(view, state);
+    const sourceRows = state.data.table(reference).rows();
+    let rows = sourceRows;
+    const controls = [];
+    contract.forEach(item => {
+      if (item.key === boundControl) return;
+      if (!(item.consumer_binding?.inputs || ['main']).includes(alias)) return;
+      const controlState = structuredClone(state.control.state(item.key));
+      const before = rows.length;
+      const applicable = rows.some(row => state.control.canApply(row, item));
+      rows = rows.filter(row => state.control.matches(row, item, controlState));
+      controls.push({
+        control:item.key,
+        intent:controlState?.intent || null,
+        operands:structuredClone(controlState?.value ?? null),
+        empty:item.consumer_binding?.empty || null,
+        applicable,
+        rows_before:before,
+        rows_after:rows.length,
+      });
+    });
+    return {
+      rows,
+      evidence:{
+        input:reference,
+        rows_before:sourceRows.length,
+        rows_after:rows.length,
+        controls,
+      },
+    };
   };
+  const selectRows = (view, state) => selectRowsWithEvidence(view, state).rows;
   const selectLayerRows = (view, layer, state) => {
     const contract = state.dependency_contract?.views?.[view.id]?.filter_contract || [];
     const boundControl = controlBinding(view, state, layer.id)?.control;
@@ -205,8 +231,8 @@
       return output;
     });
   };
-  const prepareRows = (view, state) => {
-    let rows = selectRows(view, state);
+  const prepareRows = (view, state, selectedRows = null) => {
+    let rows = selectedRows == null ? selectRows(view, state) : [...selectedRows];
     const valueFields = view.template === 'heatmap'
       ? [view.z]
       : (Array.isArray(view.y) ? view.y : [view.y || view.value || view.z]).filter(Boolean);
@@ -529,7 +555,11 @@
         emptyMessage:view.options?.empty_text || 'No rows match the current selections.',
       };
     }
-    let rows = preparedRows == null ? prepareRows(view, state) : [...preparedRows];
+    const selection = preparedRows == null ? selectRowsWithEvidence(view, state) : null;
+    const filtering = selection?.evidence || null;
+    let rows = preparedRows == null
+      ? prepareRows(view, state, selection.rows)
+      : [...preparedRows];
     if (preparedRows != null) {
       const valueFields = view.template === 'heatmap'
         ? [view.z]
@@ -558,25 +588,35 @@
     if (view.template === 'table') return {
       type:'table', rows,
       empty:rows.length === 0,
-      emptyMessage:view.options?.empty_text || 'No rows match the current selections.',
+      emptyMessage:view.options?.empty_text || (filtering?.rows_before === 0
+        ? 'The upstream output contains no rows.'
+        : 'No rows match the current selections.'),
       columns:view.columns?.length ? view.columns : Object.keys(rows[0] || {}),
       limit:view.limit, options:view.options, config:view.config,
-      controlBinding:binding,
+      controlBinding:binding, filtering,
     };
     if (view.template === 'perspective') return {
       type:'perspective', rows,
       empty:rows.length === 0,
       emptyMessage:view.options?.empty_text || 'No rows match the current selections.',
       columns:view.columns?.length ? view.columns : Object.keys(rows[0] || {}),
-      config:view.config, limit:view.limit,
+      config:view.config, limit:view.limit, filtering,
     };
     if (view.template === 'custom') {
       const inputs = Object.fromEntries(
-        Object.entries(references).map(([name, reference]) => [name, state.data.output(reference)])
+        Object.entries(references).map(([name, reference]) => {
+          const raw = state.data.output(reference);
+          if (name === 'main') return [name,
+            Array.isArray(raw) || raw?.__datavizArrowOutput ? rows : raw];
+          const filters = state.dependency_contract?.views?.[view.id]?.filter_contract || [];
+          return [name, filters.some(item => item.consumer_binding?.inputs?.includes(name))
+            ? selectRowsWithEvidence(view, state, name).rows
+            : raw];
+        })
       );
       return {
         type:view.renderer, rows, inputs, view, options:view.options, config:view.config,
-        controlBinding:binding,
+        controlBinding:binding, filtering,
       };
     }
     if (view.template === 'metric') {
@@ -602,6 +642,7 @@
           caption:view.label,
           secondary,
         }),
+        filtering,
       };
     }
     const descriptor = plotlyDescriptor(view, rows, binding);
@@ -609,6 +650,7 @@
       ...descriptor,
       empty:rows.length === 0,
       emptyMessage:view.options?.empty_text || 'No rows match the current selections.',
+      filtering,
     };
   };
 
@@ -630,6 +672,7 @@
     inputReferences,
     mainInputReference,
     selectRows,
+    selectRowsWithEvidence,
     controlBinding,
     bindingValue,
     bindingDatum,

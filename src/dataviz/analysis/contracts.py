@@ -202,6 +202,7 @@ class AnalysisConsumerRevisions(AnalysisContract):
 
 class AnalysisResult(AnalysisContract):
     schema_: Literal[ANALYSIS_RESULT_SCHEMA] = Field(alias="schema")
+    page_id: str | None = None
     status: Literal["ready", "partial", "failed", "cancelled"]
     generation: str | None = None
     target: AnalysisEntry | dict[str, Any] | None = None

@@ -104,6 +104,15 @@
       tables:tableService,
       assets:services.assets,
       controlBinding:bindingContext(root, key, descriptor, generation),
+      actions:{
+        get available() { return Boolean(body.isConnected && global.dataviz?.serverActions?.available); },
+        invoke:(action, payload = {}, options = {}) => body.isConnected
+          ? (global.dataviz?.serverActions?.invoke(action, payload, options)
+            || Promise.reject(new Error('Server Actions are unavailable')))
+          : Promise.reject(new Error('Renderer is no longer mounted')),
+        status:(action, requestId) => global.dataviz.serverActions.status(action, requestId),
+        refresh:(action, requestId, options = {}) => global.dataviz.serverActions.refresh(action, requestId, options),
+      },
     });
     const setRendererSignal = (root, status, {active = null} = {}) => {
       if (!root) return;
@@ -1474,6 +1483,16 @@
         }
         if (descriptor.empty === true) {
           empty(root, key, descriptor.emptyMessage);
+          runtime.viewRenderEvidence.set(key, {
+            generation,
+            renderer:descriptor.type || 'text',
+            phase:'empty',
+            duration_ms:0,
+            inputs:structuredClone(
+              root?._datavizInputProfiles || descriptorProfiles(descriptor)
+            ),
+            filtering:structuredClone(descriptor.filtering || null),
+          });
           recordRendererOutcome(root, generation, {
             status:'ready', terminal:'empty', generation,
           });
@@ -1567,7 +1586,12 @@
             phase,
             duration_ms:Number(durationMs.toFixed(2)),
             inputs:inputProfiles,
+            filtering:structuredClone(descriptor.filtering || null),
             lifecycle:structuredClone(lifecycle),
+            binding_revisions:Object.fromEntries([
+              descriptor.controlBinding,
+              ...Object.values(descriptor.controlBindings || {}),
+            ].filter(Boolean).map(binding => [binding.control, binding.state?.revision])),
           });
           return {status:'ready', generation, duration_ms:Number(durationMs.toFixed(2))};
         } catch (error) {

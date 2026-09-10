@@ -2,6 +2,24 @@
   "family": "control-filter",
   "cases": [
     {
+      "id": "all-available-resolved-domain",
+      "operation": "filter",
+      "input": {"control_type": "multiple_select", "intent": "all_available", "value_type": "text", "operator": "in", "value": ["north"], "rows": ["north", "south"]},
+      "expected": ["north"]
+    },
+    {
+      "id": "all-available-compact-static-whitelist",
+      "operation": "filter",
+      "input": {"control_type": "multiple_select", "intent": "all_available", "options": {"mode": "static", "choices": [{"value": "north"}]}, "value_type": "text", "operator": "in", "value": [], "rows": ["north", "south"]},
+      "expected": ["north"]
+    },
+    {
+      "id": "all-available-empty-static-domain",
+      "operation": "filter",
+      "input": {"control_type": "multiple_select", "intent": "all_available", "options": {"mode": "static", "choices": []}, "empty": "passthrough", "value_type": "text", "operator": "in", "value": [], "rows": ["north", "south"]},
+      "expected": []
+    },
+    {
       "id": "between-zero-bound",
       "operation": "filter",
       "input": {"value_type": "integer", "operator": "between", "value": [0, 8], "rows": [-1, 0, 5, 9]},
@@ -102,6 +120,18 @@
       "operation": "filter",
       "input": {"value_type": "text", "operator": "equals", "empty": "passthrough", "value": [], "rows": ["a", "b"]},
       "expected": ["a", "b"]
+    },
+    {
+      "id": "all-available-bypasses-match-none",
+      "operation": "filter",
+      "input": {"value_type": "text", "control_type": "multiple_select", "operator": "auto", "empty": "match_none", "intent": "all_available", "value": [], "rows": ["a", "b"]},
+      "expected": ["a", "b"]
+    },
+    {
+      "id": "explicit-empty-still-matches-none",
+      "operation": "filter",
+      "input": {"value_type": "text", "control_type": "multiple_select", "operator": "auto", "empty": "match_none", "intent": "explicit", "value": [], "rows": ["a", "b"]},
+      "expected": []
     },
     {
       "id": "path-fields",

@@ -319,6 +319,18 @@ def test_docs_catalog_exposes_both_progressive_product_paths():
     assert resolve_doc_topic("parameter-domain") == "query-parameters"
 
 
+def test_quickstart_defers_optional_structure_and_analysis_flags():
+    quickstart = DOC_TOPICS["quickstart"]
+    commands = quickstart["commands"]
+    assert len(commands) == 4
+    assert all("--page" not in command and "--overlay" not in command for command in commands)
+    assert any("run sales.yaml" in command for command in commands)
+    assert quickstart["next_steps"]["second_analysis_page"] == "dataviz docs pages --format json"
+    analysis = " ".join(DOC_TOPICS["analysis-quickstart"]["workflow"])
+    assert "单页无需 --page" in analysis
+    assert "不必先学习 Catalog" in analysis
+
+
 def test_docs_do_not_restore_removed_chart_cli_or_shell_contracts():
     corpus = json.dumps(DOC_TOPICS, ensure_ascii=False)
 
@@ -645,6 +657,14 @@ def test_every_scaffold_recipe_matches_the_current_strict_models():
             SOURCE_DEFINITION_ADAPTER.validate_python(
                 yaml.safe_load(files["sample.yaml"])
             )
+        elif recipe == "server-action.python":
+            from dataviz.actions import ServerActionDefinition
+            ServerActionDefinition.model_validate(yaml.safe_load(files["sample.yaml"]))
+            scope = {}
+            exec(compile(files["sample.py"], "sample.py", "exec"), scope)
+            with pytest.raises(NotImplementedError, match="before invoking"):
+                scope["execute"](object())
+            assert not any("dataviz report" in command for command in payload["verify"])
         elif recipe.startswith("dataset-transform."):
             DatasetTransformDefinition.model_validate(yaml.safe_load(files["sample.yaml"]))
         elif recipe.startswith("interactive-transform."):
@@ -836,6 +856,7 @@ def test_authoring_routes_expose_only_the_required_document_closure():
     assert lookup["task"] == "entity-select"
     assert "scaffold" not in catalog["routes"]["map-view"]
     assert set(catalog["routes"]) == {
+        "server-actions",
         "minimal",
         "interactive",
         "custom-renderer",

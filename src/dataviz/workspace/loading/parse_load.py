@@ -10,6 +10,7 @@ import yaml
 from pydantic import ValidationError
 
 from dataviz.errors import Diagnostic, WorkspaceError
+from dataviz.actions import ServerActionDefinition
 from dataviz.protocols import PARAMETER_DOMAIN_SCHEMA, SOURCE_SCHEMA
 from dataviz.workspace.models import (
     DashboardDefinition,
@@ -23,6 +24,7 @@ from dataviz.workspace.models import (
     WorkspaceAssetDefinition,
 )
 from dataviz.workspace.assets import resolve_workspace_asset, workspace_asset_id
+from dataviz.workspace.pages import page_definition, page_nodes
 from dataviz.workspace.controls import compile_control_contract
 from dataviz.workspace.control_components import resolve_control_component
 from dataviz.view_contracts import validate_view_contract
@@ -125,12 +127,17 @@ def load_dashboard(
     *,
     workspace_root: Path | None = None,
     workspace_assets: dict[str, WorkspaceAssetDefinition] | None = None,
+    page_id: str | None = None,
 ) -> LoadedDashboard:
     root = path.resolve()
     workspace_root = (workspace_root or _workspace_root_for_dashboard(root)).resolve()
     workspace_assets = workspace_assets or {}
     definition_path = root / "dashboard.yaml"
-    logic_definition = parse_model(DashboardDefinition, definition_path)
+    project_definition = parse_model(DashboardDefinition, definition_path)
+    logic_definition = page_definition(project_definition, page_id)
+    selected_page = next((page for page in project_definition.pages
+                          if page.id == (page_id or project_definition.pages[0].id)), None)
+    page_id = selected_page.id if selected_page else None
     definition = logic_definition.model_copy(deep=True)
     for asset_id in definition.assets:
         resolve_workspace_asset(
@@ -317,6 +324,55 @@ def load_dashboard(
             )
         interactive_transforms[transform.id] = (transform_path, transform)
 
+    server_actions: dict[str, tuple[Path, ServerActionDefinition]] = {}
+    for action_entry in definition.server_actions:
+        if isinstance(action_entry, str):
+            action_path = _require_dashboard_asset(root, root, action_entry, "Server Action definition")
+            action = parse_model(ServerActionDefinition, action_path)
+        else:
+            action_path = definition_path
+            try:
+                action = ServerActionDefinition.model_validate(
+                    {"schema": "dataviz/server-action/v1", **action_entry}
+                )
+            except ValidationError as exc:
+                raise WorkspaceError(
+                    "Inline Server Action schema validation failed",
+                    file=action_path,
+                    details=_validation_errors(exc),
+                ) from exc
+        if action.id in server_actions:
+            raise WorkspaceError(f"Duplicate Server Action id: {action.id}", file=action_path)
+        if selected_page and action.id not in selected_page.server_actions:
+            continue
+        _require_dashboard_asset(root, action_path.parent, action.code, "Server Action code")
+        for dependency in action.code_dependencies:
+            _require_dashboard_asset(
+                root, action_path.parent, dependency, "Server Action code dependency"
+            )
+        view_ids = {view.id for view in definition.views}
+        for reference in action.invalidates:
+            kind, target = reference.split(":", 1)
+            if target not in (sources if kind == "source" else view_ids):
+                raise WorkspaceError(
+                    f"Server Action {action.id} invalidates unknown target: {reference}",
+                    file=action_path,
+                )
+        server_actions[action.id] = (action_path, action)
+
+    if selected_page:
+        missing = set(selected_page.server_actions) - set(server_actions)
+        if missing:
+            raise WorkspaceError(f"Page references unknown Server Actions: {sorted(missing)}", file=definition_path)
+        selected = page_nodes(definition, {"source": sources, "dataset": dataset_transforms,
+                                           "interactive": interactive_transforms})
+        sources = selected["source"]
+        dataset_transforms = selected["dataset"]
+        interactive_transforms = selected["interactive"]
+        domain_ids = {parameter.options.source for parameter in definition.query_parameters
+                      if getattr(parameter.options, "mode", None) == "domain"}
+        parameter_domains = {key: value for key, value in parameter_domains.items() if key in domain_ids}
+
     canvas = logic_definition.canvas
     for value in [canvas.template, *canvas.styles, *canvas.scripts]:
         if value:
@@ -367,7 +423,10 @@ def load_dashboard(
         parameter_domains=parameter_domains,
         dataset_transforms=dataset_transforms,
         interactive_transforms=interactive_transforms,
+        server_actions=server_actions,
         views=views,
+        page_id=page_id,
+        project_definition=project_definition,
         presentation_path=presentation_path if presentation_path.exists() else None,
         presentation=presentation,
         presentation_diagnostics=presentation_diagnostics,

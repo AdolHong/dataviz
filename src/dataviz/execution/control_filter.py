@@ -194,6 +194,19 @@ def _mask(
     if not _can_apply(frame, item):
         return pd.Series(True, index=frame.index, dtype=bool)
     binding = item.get("consumer_binding") or item
+    definition = item.get("definition") or {}
+    state = item.get("state") or {}
+    if (
+        definition.get("type") == "multiple_select"
+        and state.get("intent") == "all_available"
+        and not value
+    ):
+        options = definition.get("options") or {}
+        if options.get("mode") != "static":
+            return pd.Series(True, index=frame.index, dtype=bool)
+        value = [choice["value"] for choice in options.get("choices", [])]
+        if not value:
+            return pd.Series(False, index=frame.index, dtype=bool)
     if value is None or value == "" or (
         isinstance(value, (list, tuple)) and len(value) == 0
     ):
@@ -203,7 +216,6 @@ def _mask(
             dtype=bool,
         )
 
-    definition = item.get("definition") or {}
     fields = _fields(item)
     path_fields = fields if len(fields) > 1 else []
     if path_fields:

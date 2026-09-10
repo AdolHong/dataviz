@@ -422,7 +422,8 @@ Object.assign(datavizRuntime, {
           && (window.dataviz.snapshot_interactions || []).includes(id)
           && !missingOutput;
         if (snapshotted) return;
-        const request = (this.transformRequests.get(id) || 0) + 1;
+        const floor = spec.runtime === 'server-python' ? Number(window.dataviz.interaction?.generations?.[id] || 0) : 0;
+        const request = Math.max(this.transformRequests.get(id) || 0, floor) + 1;
         this.transformRequests.set(id, request);
         if (window.dataviz.asset_mode === 'inline' && spec.export?.mode === 'unavailable') {
           this.interactiveAdapters[spec.runtime]?.cancel(id);
@@ -476,6 +477,8 @@ Object.assign(datavizRuntime, {
           }
           const missingInput = Object.values(references).find(reference =>
             !Object.prototype.hasOwnProperty.call(outputs, reference)
+            && !(spec.runtime === 'server-python'
+              && Object.prototype.hasOwnProperty.call(window.dataviz.portable?.server_outputs || {}, reference))
           );
           if (missingInput) {
             this.publishTransformStatus(id, 'queued', {message:`Waiting for ${missingInput}`});
@@ -516,10 +519,14 @@ Object.assign(datavizRuntime, {
           const inputProfiles = Object.fromEntries(
             Object.entries(inputValues).map(([name, value]) => [name, {
               reference:references[name],
-              ...datavizValueProfile(value),
+              ...(value === undefined && spec.runtime === 'server-python'
+                ? {...window.dataviz.portable?.server_outputs?.[references[name]], location:'server'}
+                : datavizValueProfile(value)),
             }])
           );
-          Object.entries(spec.input_schemas || {}).forEach(([name, schema]) => {
+          // Server inputs stay in the Run Artifact; their schemas are checked
+          // by InteractionExecutor against the actual table, not an absent JS value.
+          Object.entries(spec.runtime === 'server-python' ? {} : (spec.input_schemas || {})).forEach(([name, schema]) => {
             if (!(name in inputValues)) {
               throw datavizContractError(
                 'interactive_input_schema_unknown',
@@ -563,9 +570,7 @@ Object.assign(datavizRuntime, {
           declared.filter(name => spec.outputs?.[name]?.required === false && !(name in bundle)).forEach(name => {
             const reference = `interactive:${id}/${name}`;
             if (!Object.prototype.hasOwnProperty.call(outputs, reference)) return;
-            delete outputs[reference];
-            this.outputSignatures.delete(reference);
-            this.outputErrors.delete(reference);
+            this.removeOutput(reference);
             changedOutputs.add(reference);
             localChanged.add(reference);
           });
@@ -574,10 +579,9 @@ Object.assign(datavizRuntime, {
             const reference = `interactive:${id}/${name}`;
             const signature = datavizValueSignature(output);
             outputProfiles[reference] = datavizValueProfile(output, signature);
-            if (this.outputSignatures.get(reference) !== signature) {
-              outputs[reference] = output;
-              this.outputErrors.delete(reference);
-              this.outputSignatures.set(reference, signature);
+            if (this.commitOutput(reference, output, {
+              kind:spec.outputs[name].kind, schema:spec.outputs[name].schema || [], signature,
+            })) {
               changedOutputs.add(reference);
               localChanged.add(reference);
             }

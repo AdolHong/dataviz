@@ -782,6 +782,21 @@ class DeclarativeViewDefinition(Model):
         return validate_view_contract(self)
 
 
+class DashboardPageDefinition(Model):
+    """An independent analysis entry inside one code/publication boundary."""
+
+    id: StableId
+    title: str = ""
+    subtitle: str = ""
+    description: str = ""
+    query_parameters: list[QueryParameterDefinition] = Field(default_factory=list)
+    controls: list[ScopedControlDefinition] = Field(default_factory=list)
+    sections: list[SectionDefinition] = Field(default_factory=list)
+    views: list[DeclarativeViewDefinition] = Field(default_factory=list)
+    server_actions: list[StableId] = Field(default_factory=list)
+    layout: LayoutDefinition = Field(default_factory=LayoutDefinition)
+
+
 class DashboardDefinition(Model):
     schema_: Literal[DASHBOARD_SCHEMA] = Field(alias="schema")
     kind: Literal["dashboard"] = "dashboard"
@@ -800,10 +815,23 @@ class DashboardDefinition(Model):
     sources: list[str | dict[str, Any]] = Field(default_factory=list)
     dataset_transforms: list[str | dict[str, Any]] = Field(default_factory=list)
     interactive_transforms: list[str | dict[str, Any]] = Field(default_factory=list)
+    server_actions: list[str | dict[str, Any]] = Field(default_factory=list)
     views: list[DeclarativeViewDefinition] = Field(default_factory=list)
     layout: LayoutDefinition = Field(default_factory=LayoutDefinition)
     theme: ThemeDefinition = Field(default_factory=ThemeDefinition)
     canvas: CanvasDefinition = Field(default_factory=CanvasDefinition)
+    pages: list[DashboardPageDefinition] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_page_ownership(self):
+        if len({page.id for page in self.pages}) != len(self.pages):
+            raise ValueError("Dashboard Page ids must be unique")
+        if self.pages and any((self.query_parameters, self.controls, self.sections, self.views)):
+            raise ValueError(
+                "Multi-page Dashboard query_parameters, controls, sections and views belong "
+                "to each Page; shared parameter state is not supported"
+            )
+        return self
 
 class ColumnDefinition(Model):
     """A lightweight table schema contract used at node boundaries."""

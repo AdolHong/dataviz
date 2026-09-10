@@ -104,9 +104,13 @@ const datavizControlImpactSnapshot = () => Object.entries(
     status:pending ? 'pending' : 'resolved',
     affected_views:[...affected].sort(),
     potential_views:[...(dependency.affected_views || [])].sort(),
+    option_domain:datavizRuntime.controlDomainEvidence?.get(key) || null,
   };
 });
 const datavizControlImpactLabel = impact => {
+  if (['field_mismatch', 'error'].includes(impact.option_domain?.status)) {
+    return `Options: ${impact.option_domain.status === 'error' ? 'upstream failed' : 'field mismatch'}`;
+  }
   const views = impact.status === 'pending' ? impact.potential_views : impact.affected_views;
   const count = views.length;
   return `${impact.status === 'pending' ? 'Up to ' : ''}${count} view${count === 1 ? '' : 's'}`;
@@ -284,7 +288,16 @@ const datavizControlMatches = (row, item, state) => {
   // it must remain visible instead of being reduced to an accidental empty set.
   if (!datavizControlCanApply(row, item)) return true;
   const binding = item.consumer_binding || {};
-  const value = datavizControlValueFromState(item.definition || {}, state || {value:null});
+  let value = datavizControlValueFromState(item.definition || {}, state || {value:null});
+  if (
+    item.definition?.type === 'multiple_select'
+    && state?.intent === 'all_available'
+    && (value == null || (Array.isArray(value) && value.length === 0))
+  ) {
+    if (item.definition?.options?.mode !== 'static') return true;
+    value = (item.definition.options.choices || []).map(choice => choice.value);
+    if (!value.length) return false;
+  }
   if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) {
     return binding.empty === 'passthrough';
   }
@@ -630,6 +643,7 @@ const datavizAvailableControlOptions = targets => {
   const dependency = window.dataviz.dependency_contract?.controls?.[item?.key] || {};
   const hasDependencies = (dependency.depends_on || []).length > 0;
   const values = new Map();
+  const sources = [];
   let observedSource = false;
   let observedDependencyRelation = !hasDependencies;
   targets.forEach(({viewId, item: target}) => {
@@ -637,11 +651,26 @@ const datavizAvailableControlOptions = targets => {
     const upstreamKeys = new Set(
       window.dataviz.dependency_contract?.controls?.[target.key]?.dependency_ancestors || []
     );
-    const upstream = datavizViewControlContract(viewId)
-      .filter(candidate => upstreamKeys.has(candidate.key));
+    const filters = datavizViewControlContract(viewId);
+    const upstream = [...upstreamKeys].map(key => (
+      filters.find(candidate => candidate.key === key) || datavizControlContractItem(key)
+    ));
     outputRefs.forEach(reference => {
       const canonical = canonicalOutputReference(reference);
+      const present = Object.prototype.hasOwnProperty.call(window.dataviz.portable?.outputs || {}, canonical);
       const rows = datavizTableRows(window.dataviz.portable?.outputs?.[canonical]);
+      const fields = [...new Set([target, ...upstream].flatMap(datavizControlFields))];
+      const names = datavizOutputFieldNames(canonical);
+      const missing = names ? fields.filter(field => !names.has(field)) : [];
+      const failed = datavizRuntime.outputErrors.has(canonical);
+      sources.push({reference:canonical, rows:present ? rows.length : null, missing_fields:missing,
+        status:failed ? 'error' : !present ? 'pending' : missing.length ? 'field_mismatch' : 'ready'});
+      if (failed || !present || missing.length) return;
+      if (!rows.length) {
+        // A published empty table is a valid empty domain, not a loading state.
+        observedSource = true;
+        observedDependencyRelation = true;
+      }
       // Progressive query branches may publish in any order. An unrelated
       // table being present does not mean it can define this Control's
       // option domain; otherwise a fast sibling branch can clear valid choices
@@ -687,6 +716,15 @@ const datavizAvailableControlOptions = targets => {
   return {
     observed:observedSource,
     dependencyRelationReady:observedDependencyRelation,
+    diagnostic:{
+      status:observedSource && observedDependencyRelation
+        ? (options.some(option => option.available !== false) ? 'ready' : 'empty')
+        : sources.some(source => source.status === 'error') ? 'error'
+        : sources.some(source => source.status === 'field_mismatch') ? 'field_mismatch'
+        : staticChoices.length && !hasDependencies ? 'static' : 'pending',
+      sources,
+      available_count:options.filter(option => option.available !== false).length,
+    },
     options,
   };
 };
@@ -760,6 +798,8 @@ const refreshControlOptionDomains = ({canonicalKeys = null} = {}) => {
     if (!targets.length) return;
     const scopedControls = controls.filter(control => control.dataset.controlKey === key);
     const availability = datavizAvailableControlOptions(targets);
+    datavizRuntime.controlDomainEvidence ||= new Map();
+    datavizRuntime.controlDomainEvidence.set(key, availability.diagnostic);
     if (!scopedControls.some(control => control.querySelector('select'))) {
       datavizReconcileHeadlessControlDomain(key, availability);
     }
@@ -796,7 +836,7 @@ const refreshControlOptionDomains = ({canonicalKeys = null} = {}) => {
         return;
       }
       if (!availability.observed) {
-        control.dataset.optionDomainState = 'pending';
+        control.dataset.optionDomainState = availability.diagnostic.status;
         syncPortableChoices(control);
         return;
       }

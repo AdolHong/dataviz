@@ -1326,7 +1326,8 @@ Object.assign(datavizRuntime, {
           && (window.dataviz.snapshot_interactions || []).includes(id)
           && !missingOutput;
         if (snapshotted) return;
-        const request = (this.transformRequests.get(id) || 0) + 1;
+        const floor = spec.runtime === 'server-python' ? Number(window.dataviz.interaction?.generations?.[id] || 0) : 0;
+        const request = Math.max(this.transformRequests.get(id) || 0, floor) + 1;
         this.transformRequests.set(id, request);
         if (window.dataviz.asset_mode === 'inline' && spec.export?.mode === 'unavailable') {
           this.interactiveAdapters[spec.runtime]?.cancel(id);
@@ -1380,6 +1381,8 @@ Object.assign(datavizRuntime, {
           }
           const missingInput = Object.values(references).find(reference =>
             !Object.prototype.hasOwnProperty.call(outputs, reference)
+            && !(spec.runtime === 'server-python'
+              && Object.prototype.hasOwnProperty.call(window.dataviz.portable?.server_outputs || {}, reference))
           );
           if (missingInput) {
             this.publishTransformStatus(id, 'queued', {message:`Waiting for ${missingInput}`});
@@ -1420,10 +1423,14 @@ Object.assign(datavizRuntime, {
           const inputProfiles = Object.fromEntries(
             Object.entries(inputValues).map(([name, value]) => [name, {
               reference:references[name],
-              ...datavizValueProfile(value),
+              ...(value === undefined && spec.runtime === 'server-python'
+                ? {...window.dataviz.portable?.server_outputs?.[references[name]], location:'server'}
+                : datavizValueProfile(value)),
             }])
           );
-          Object.entries(spec.input_schemas || {}).forEach(([name, schema]) => {
+          // Server inputs stay in the Run Artifact; their schemas are checked
+          // by InteractionExecutor against the actual table, not an absent JS value.
+          Object.entries(spec.runtime === 'server-python' ? {} : (spec.input_schemas || {})).forEach(([name, schema]) => {
             if (!(name in inputValues)) {
               throw datavizContractError(
                 'interactive_input_schema_unknown',
@@ -1467,9 +1474,7 @@ Object.assign(datavizRuntime, {
           declared.filter(name => spec.outputs?.[name]?.required === false && !(name in bundle)).forEach(name => {
             const reference = `interactive:${id}/${name}`;
             if (!Object.prototype.hasOwnProperty.call(outputs, reference)) return;
-            delete outputs[reference];
-            this.outputSignatures.delete(reference);
-            this.outputErrors.delete(reference);
+            this.removeOutput(reference);
             changedOutputs.add(reference);
             localChanged.add(reference);
           });
@@ -1478,10 +1483,9 @@ Object.assign(datavizRuntime, {
             const reference = `interactive:${id}/${name}`;
             const signature = datavizValueSignature(output);
             outputProfiles[reference] = datavizValueProfile(output, signature);
-            if (this.outputSignatures.get(reference) !== signature) {
-              outputs[reference] = output;
-              this.outputErrors.delete(reference);
-              this.outputSignatures.set(reference, signature);
+            if (this.commitOutput(reference, output, {
+              kind:spec.outputs[name].kind, schema:spec.outputs[name].schema || [], signature,
+            })) {
               changedOutputs.add(reference);
               localChanged.add(reference);
             }
@@ -1546,6 +1550,9 @@ Object.assign(datavizRuntime, {
     const affected = new Set();
     changedControls.forEach(key => {
       const dependency = window.dataviz.dependency_contract?.controls?.[key];
+      // Writers consume their canonical binding state for selection feedback,
+      // even though they do not filter their own candidate rows.
+      (dependency?.writer_edges || []).forEach(edge => affected.add(edge.source_view));
       (dependency?.direct_views || []).forEach(viewId => {
         const item = datavizViewControlContract(viewId)
           .find(candidate => candidate.key === key);
@@ -1554,6 +1561,11 @@ Object.assign(datavizRuntime, {
         }
       });
       (dependency?.repeat_views || []).forEach(viewId => affected.add(viewId));
+    });
+    Object.entries(window.dataviz.dependency_contract?.views || {}).forEach(([id, view]) => {
+      if (Object.values(view.control_inputs || {}).some(binding => (
+        binding.mode === 'value' && changedControls.has(binding.control)
+      ))) affected.add(id);
     });
     outputs.forEach(reference => this.outputViews(reference).forEach(viewId => affected.add(viewId)));
     return [...affected];
@@ -1660,6 +1672,7 @@ Object.assign(datavizRuntime, {
         ),
         interactive_transforms:transformTraces,
         query_executed:Boolean(context.queryExecuted),
+        control_revisions:Object.fromEntries(Object.entries(capturedControlState).map(([key, entry]) => [key, entry.revision])),
       });
       if (root) {
         root._datavizInputProfiles = Object.fromEntries(
@@ -1699,20 +1712,13 @@ Object.assign(datavizRuntime, {
     return Promise.allSettled(completions);
   },
   async publishOutputs(bundle) {
-    const outputs = window.dataviz.portable?.outputs || {};
-    window.dataviz.portable.output_schemas ||= {};
     const changed = new Set();
     Object.entries(bundle.outputs || {}).forEach(([rawReference, value]) => {
       const reference = canonicalOutputReference(rawReference);
-      const signature = datavizValueSignature(value);
-      if (this.outputSignatures.get(reference) === signature) return;
-      outputs[reference] = value;
-      this.outputSignatures.set(reference, signature);
-      this.outputErrors.delete(reference);
-      changed.add(reference);
+      if (this.commitOutput(reference, value, {
+        kind:bundle.output_kinds?.[reference], schema:bundle.output_schemas?.[reference],
+      })) changed.add(reference);
     });
-    Object.assign(window.dataviz.portable.output_kinds, bundle.output_kinds || {});
-    Object.assign(window.dataviz.portable.output_schemas, bundle.output_schemas || {});
     if (!changed.size || this.initializing) return changed;
     refreshControlOptionDomains();
     const affectedViewIds = this.affectedViews([], changed);
@@ -1749,12 +1755,10 @@ Object.assign(datavizRuntime, {
     return {outputs:values, missing};
   },
   async failOutputs(references, error) {
-    const outputs = window.dataviz.portable?.outputs || {};
     const changed = new Set();
     (references || []).forEach(rawReference => {
       const reference = canonicalOutputReference(rawReference);
-      delete outputs[reference];
-      this.outputSignatures.delete(reference);
+      this.removeOutput(reference);
       this.outputErrors.set(reference, error || new Error(`Output failed: ${reference}`));
       changed.add(reference);
     });
@@ -1777,6 +1781,32 @@ Object.assign(datavizRuntime, {
 });
 // Owner: Named Output transport registration, hydration, and publication.
 Object.assign(datavizRuntime, {
+  commitOutput(rawReference, value, {kind, schema, signature = datavizValueSignature(value)} = {}) {
+    const reference = canonicalOutputReference(rawReference);
+    const portable = window.dataviz.portable;
+    portable.output_kinds ||= {};
+    portable.output_schemas ||= {};
+    const changed = this.outputSignatures.get(reference) !== signature
+      || this.outputErrors.has(reference)
+      || (kind !== undefined && portable.output_kinds[reference] !== kind)
+      || (schema !== undefined && JSON.stringify(portable.output_schemas[reference]) !== JSON.stringify(schema));
+    portable.outputs[reference] = value;
+    if (kind !== undefined) portable.output_kinds[reference] = kind;
+    if (schema !== undefined) portable.output_schemas[reference] = schema;
+    this.outputSignatures.set(reference, signature);
+    this.outputErrors.delete(reference);
+    return changed;
+  },
+  removeOutput(rawReference) {
+    const reference = canonicalOutputReference(rawReference);
+    const portable = window.dataviz.portable;
+    for (const key of ['outputs', 'output_kinds', 'output_schemas', 'output_transports', 'server_outputs']) {
+      if (portable[key]) delete portable[key][reference];
+    }
+    this.outputSignatures.delete(reference);
+    this.outputErrors.delete(reference);
+    this.transportPromises.delete(reference);
+  },
   registerOutputTransport(reference, descriptor) {
     const canonical = canonicalOutputReference(reference);
     window.dataviz.portable.output_schemas ||= {};
@@ -1879,6 +1909,7 @@ Object.assign(datavizRuntime, {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    window.dataviz.serverActions?.dispose();
     this.cancelTransforms('Runtime disposed');
     this.inflightTransforms.clear();
     this.sectionAdapter?.dispose();
@@ -1998,9 +2029,13 @@ const datavizControlImpactSnapshot = () => Object.entries(
     status:pending ? 'pending' : 'resolved',
     affected_views:[...affected].sort(),
     potential_views:[...(dependency.affected_views || [])].sort(),
+    option_domain:datavizRuntime.controlDomainEvidence?.get(key) || null,
   };
 });
 const datavizControlImpactLabel = impact => {
+  if (['field_mismatch', 'error'].includes(impact.option_domain?.status)) {
+    return `Options: ${impact.option_domain.status === 'error' ? 'upstream failed' : 'field mismatch'}`;
+  }
   const views = impact.status === 'pending' ? impact.potential_views : impact.affected_views;
   const count = views.length;
   return `${impact.status === 'pending' ? 'Up to ' : ''}${count} view${count === 1 ? '' : 's'}`;
@@ -2178,7 +2213,16 @@ const datavizControlMatches = (row, item, state) => {
   // it must remain visible instead of being reduced to an accidental empty set.
   if (!datavizControlCanApply(row, item)) return true;
   const binding = item.consumer_binding || {};
-  const value = datavizControlValueFromState(item.definition || {}, state || {value:null});
+  let value = datavizControlValueFromState(item.definition || {}, state || {value:null});
+  if (
+    item.definition?.type === 'multiple_select'
+    && state?.intent === 'all_available'
+    && (value == null || (Array.isArray(value) && value.length === 0))
+  ) {
+    if (item.definition?.options?.mode !== 'static') return true;
+    value = (item.definition.options.choices || []).map(choice => choice.value);
+    if (!value.length) return false;
+  }
   if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) {
     return binding.empty === 'passthrough';
   }
@@ -2524,6 +2568,7 @@ const datavizAvailableControlOptions = targets => {
   const dependency = window.dataviz.dependency_contract?.controls?.[item?.key] || {};
   const hasDependencies = (dependency.depends_on || []).length > 0;
   const values = new Map();
+  const sources = [];
   let observedSource = false;
   let observedDependencyRelation = !hasDependencies;
   targets.forEach(({viewId, item: target}) => {
@@ -2531,11 +2576,26 @@ const datavizAvailableControlOptions = targets => {
     const upstreamKeys = new Set(
       window.dataviz.dependency_contract?.controls?.[target.key]?.dependency_ancestors || []
     );
-    const upstream = datavizViewControlContract(viewId)
-      .filter(candidate => upstreamKeys.has(candidate.key));
+    const filters = datavizViewControlContract(viewId);
+    const upstream = [...upstreamKeys].map(key => (
+      filters.find(candidate => candidate.key === key) || datavizControlContractItem(key)
+    ));
     outputRefs.forEach(reference => {
       const canonical = canonicalOutputReference(reference);
+      const present = Object.prototype.hasOwnProperty.call(window.dataviz.portable?.outputs || {}, canonical);
       const rows = datavizTableRows(window.dataviz.portable?.outputs?.[canonical]);
+      const fields = [...new Set([target, ...upstream].flatMap(datavizControlFields))];
+      const names = datavizOutputFieldNames(canonical);
+      const missing = names ? fields.filter(field => !names.has(field)) : [];
+      const failed = datavizRuntime.outputErrors.has(canonical);
+      sources.push({reference:canonical, rows:present ? rows.length : null, missing_fields:missing,
+        status:failed ? 'error' : !present ? 'pending' : missing.length ? 'field_mismatch' : 'ready'});
+      if (failed || !present || missing.length) return;
+      if (!rows.length) {
+        // A published empty table is a valid empty domain, not a loading state.
+        observedSource = true;
+        observedDependencyRelation = true;
+      }
       // Progressive query branches may publish in any order. An unrelated
       // table being present does not mean it can define this Control's
       // option domain; otherwise a fast sibling branch can clear valid choices
@@ -2581,6 +2641,15 @@ const datavizAvailableControlOptions = targets => {
   return {
     observed:observedSource,
     dependencyRelationReady:observedDependencyRelation,
+    diagnostic:{
+      status:observedSource && observedDependencyRelation
+        ? (options.some(option => option.available !== false) ? 'ready' : 'empty')
+        : sources.some(source => source.status === 'error') ? 'error'
+        : sources.some(source => source.status === 'field_mismatch') ? 'field_mismatch'
+        : staticChoices.length && !hasDependencies ? 'static' : 'pending',
+      sources,
+      available_count:options.filter(option => option.available !== false).length,
+    },
     options,
   };
 };
@@ -2654,6 +2723,8 @@ const refreshControlOptionDomains = ({canonicalKeys = null} = {}) => {
     if (!targets.length) return;
     const scopedControls = controls.filter(control => control.dataset.controlKey === key);
     const availability = datavizAvailableControlOptions(targets);
+    datavizRuntime.controlDomainEvidence ||= new Map();
+    datavizRuntime.controlDomainEvidence.set(key, availability.diagnostic);
     if (!scopedControls.some(control => control.querySelector('select'))) {
       datavizReconcileHeadlessControlDomain(key, availability);
     }
@@ -2690,7 +2761,7 @@ const refreshControlOptionDomains = ({canonicalKeys = null} = {}) => {
         return;
       }
       if (!availability.observed) {
-        control.dataset.optionDomainState = 'pending';
+        control.dataset.optionDomainState = availability.diagnostic.status;
         syncPortableChoices(control);
         return;
       }
@@ -3260,7 +3331,27 @@ window.dataviz.connectLive = () => {
   if (!live || window.dataviz.liveSource) return;
   const source = new EventSource(live.events_url);
   const fetched = new Map();
-  const fetchOutput = async reference => {
+  const fetchOutput = async (reference, artifact) => {
+    const required = window.dataviz.portable?.browser_output_references;
+    if (Array.isArray(required) && !required.includes(reference)) {
+      // Live events advertise artifact readiness. They are not instructions to
+      // download every Query Output, including server-only or unused tables.
+      window.dataviz.portable.server_outputs ||= {};
+      const alreadyReady = Object.prototype.hasOwnProperty.call(window.dataviz.portable.server_outputs, reference);
+      window.dataviz.portable.server_outputs[reference] = {
+        kind:artifact?.kind, row_count:artifact?.metadata?.row_count,
+      };
+      if (!alreadyReady) {
+        // A ready event can arrive while Control restoration is awaiting work.
+        // Resume missing branches after initialization without superseding an
+        // initial execution that already observed this immutable artifact.
+        await datavizRuntime.initializationPromise;
+        if (datavizControlChannel.phase === 'ready') {
+          await datavizRuntime.runTransforms([], new Set());
+        }
+      }
+      return;
+    }
     const previous = fetched.get(reference);
     if (previous) return previous;
     const encoded = reference.split('/').map(encodeURIComponent).join('/');
@@ -3300,7 +3391,7 @@ window.dataviz.connectLive = () => {
     if (window.dataviz.interaction) {
       window.dataviz.interaction.query_snapshot_available = true;
     }
-    fetchOutput(event.data.reference);
+    fetchOutput(event.data.reference, event.data.artifact).catch(error => console.error('[dataviz:live]', error));
   });
   const queryNodeStatuses = {
     node_queued:'queued',
@@ -3742,6 +3833,216 @@ window.addEventListener('message', event => {
       }, event.origin);
     }
   }
+});
+// Owner: explicit Server Action bridge and atomic adoption of refreshed Base Outputs.
+const datavizServerActionRequests = new Map();
+// In-memory FIFO, not a durable job queue. Only dispatch starts the RPC timeout.
+const datavizServerActionQueue = [];
+let datavizServerActionActive = false;
+const datavizCancelQueuedActions = message => {
+  datavizServerActionQueue.splice(0).forEach(item => item.reject(
+    datavizServerActionError(message, {code:'action_not_submitted', requestId:item.requestId})
+  ));
+};
+const datavizDrainActions = async () => {
+  if (datavizServerActionActive) return;
+  datavizServerActionActive = true;
+  try {
+    while (datavizServerActionQueue.length) {
+      const item = datavizServerActionQueue.shift();
+      if (datavizRuntime.disposed || item.runId !== window.dataviz.run_id) {
+        item.reject(datavizServerActionError('Query context changed; Action was not submitted.', {
+          code:'action_not_submitted', requestId:item.requestId,
+        }));
+        continue;
+      }
+      try {
+        const receipt = await item.dispatch();
+        item.resolve(receipt);
+        if (['failed', 'superseded'].includes(receipt?.refresh?.status)
+            || receipt?.client_refresh?.status === 'failed') {
+          datavizCancelQueuedActions('Page sync needs recovery; queued Action was not submitted.');
+        }
+      } catch (error) {
+        item.reject(error);
+        if (error.receipt?.status === 'succeeded' || error.code === 'action_response_unknown'
+            || (!error.receipt && error.code !== 'action_not_submitted')) {
+          datavizCancelQueuedActions('Previous Action needs receipt verification; queued Action was not submitted.');
+        }
+      }
+    }
+  } finally { datavizServerActionActive = false; }
+};
+window.addEventListener('beforeunload', event => {
+  if (datavizServerActionActive || datavizServerActionQueue.length) {
+    event.preventDefault();
+    event.returnValue = '';
+  }
+});
+const datavizServerActionError = (message, properties = {}) => Object.assign(new Error(message), properties);
+const datavizServerActionCall = (operation, action, payload, options = {}) => {
+  if ((operation !== 'invoke' && !options.requestId)
+      || (options.requestId !== undefined && (typeof options.requestId !== 'string'
+        || !options.requestId || options.requestId.length > 128))) {
+    return Promise.reject(new TypeError('A valid Action requestId is required'));
+  }
+  const requestId = options.requestId || crypto.randomUUID();
+  if (!window.dataviz.serverActions.available || !(window.dataviz.server_actions || []).includes(action)) {
+    return Promise.reject(datavizServerActionError('Server Action is unavailable in this report.', {
+      code:'server_action_unavailable', requestId,
+    }));
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return Promise.reject(new TypeError('Server Action payload must be an object'));
+  }
+  let copied;
+  try {
+    const encoded = JSON.stringify(payload, (_key, value) => {
+      if (typeof value === 'undefined' || typeof value === 'function'
+          || typeof value === 'symbol' || (typeof value === 'number' && !Number.isFinite(value))) {
+        throw new TypeError('Server Action payload must contain only JSON values');
+      }
+      return value;
+    });
+    if (new TextEncoder().encode(encoded).length > 1_048_576) throw new RangeError('Server Action payload is too large');
+    copied = JSON.parse(encoded);
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  const dispatch = () => new Promise((resolve, reject) => {
+    const bridgeId = crypto.randomUUID();
+    if (operation !== 'status') {
+      try { options.onProgress?.({status:'submitting', request_id:requestId}); }
+      catch (error) { console.error('[dataviz:action:progress]', error); }
+    }
+    const timer = setTimeout(() => {
+      datavizServerActionRequests.delete(bridgeId);
+      reject(datavizServerActionError('Action response timed out. Check its receipt; do not submit a new write.', {
+        code:'action_response_unknown', requestId,
+      }));
+    }, 300_000);
+    datavizServerActionRequests.set(bridgeId, {resolve, reject, timer, requestId, onProgress:options.onProgress});
+    datavizPostToParent({type:'dataviz:server-action', operation, action,
+      request_id:requestId, bridge_id:bridgeId, payload:copied});
+  });
+  if (operation === 'status') return dispatch();
+  if (datavizServerActionQueue.length >= 50) {
+    return Promise.reject(datavizServerActionError('Action queue is full; request was not submitted.', {
+      code:'action_not_submitted', requestId,
+    }));
+  }
+  return new Promise((resolve, reject) => {
+    datavizServerActionQueue.push({dispatch, resolve, reject, requestId, runId:window.dataviz.run_id});
+    try { options.onProgress?.({status:'queued', request_id:requestId,
+      position:datavizServerActionQueue.length, submitted:false}); }
+    catch (error) { console.error('[dataviz:action:progress]', error); }
+    void datavizDrainActions();
+  });
+};
+window.dataviz.serverActions = {
+  get available() {
+    return !datavizRuntime.disposed && window.parent !== window
+      && window.dataviz.asset_mode !== 'inline' && Boolean(window.dataviz.run_id)
+      && (window.dataviz.server_actions || []).length > 0;
+  },
+  invoke:(action, payload = {}, options = {}) => datavizServerActionCall('invoke', action, payload, options),
+  status:(action, requestId) => datavizServerActionCall('status', action, {}, {requestId}),
+  refresh:(action, requestId, options = {}) => datavizServerActionCall('refresh', action, {}, {...options, requestId}),
+  dispose() {
+    datavizCancelQueuedActions('Canvas closed; queued Action was not submitted.');
+    datavizServerActionRequests.forEach(item => {
+      clearTimeout(item.timer);
+      item.reject(datavizServerActionError('Canvas closed. The Action may still complete; check its receipt.', {
+        code:'action_response_unknown', requestId:item.requestId,
+      }));
+    });
+    datavizServerActionRequests.clear();
+  },
+};
+window.addEventListener('message', event => {
+  if (event.origin !== window.location.origin || event.source !== window.parent
+      || window.parent === window || !datavizSameFrameIdentity(event.data)) return;
+  const data = event.data;
+  if (!['dataviz:server-action-result', 'dataviz:server-action-progress'].includes(data?.type)) return;
+  const pending = datavizServerActionRequests.get(data.bridge_id);
+  if (!pending) return;
+  if (data.type === 'dataviz:server-action-progress') {
+    try { pending.onProgress?.(data.receipt); } catch (error) { console.error('[dataviz:action:progress]', error); }
+    return;
+  }
+  clearTimeout(pending.timer);
+  datavizServerActionRequests.delete(data.bridge_id);
+  if (data.error) pending.reject(datavizServerActionError(data.error.message, {
+    code:data.error.code, receipt:data.receipt, requestId:pending.requestId,
+  }));
+  else pending.resolve(data.receipt);
+});
+
+Object.assign(datavizRuntime, {
+  async applyActionRefresh({result, payloads = [], views = [], interaction}, {isCurrent, commit}) {
+    const prepareStarted = performance.now();
+    // Prepare all changed data before touching visible state. A failed transport
+    // leaves the old Canvas intact and can be retried without repeating Python.
+    const prepared = await Promise.all(payloads.map(async payload => ({
+      payload,
+      value:payload.transport ? await datavizLoadTransport(payload.transport)
+        : (payload.value == null && ['image', 'file'].includes(payload.kind) && payload.artifact_url
+          ? {url:payload.artifact_url} : payload.value),
+    })));
+    const timings = {data_prepare_ms:performance.now() - prepareStarted};
+    if (this.disposed || !isCurrent()) return {applied:false, timings};
+    const updateStarted = performance.now();
+    const previousRunId = window.dataviz.run_id;
+    if (result && result.run_id !== previousRunId) {
+      // publishOutputs uses the existing dependency scheduler to supersede only
+      // affected transforms. Unrelated in-flight work still has valid inputs.
+      window.dataviz.liveSource?.close();
+      window.dataviz.liveSource = null;
+      window.dataviz.live = null;
+      window.dataviz.run_id = result.run_id;
+      // Only Action refresh adoption may advance a queued request's snapshot.
+      // An unrelated Query Run must never silently retarget queued writes.
+      datavizServerActionQueue.forEach(item => {
+        if (item.runId === previousRunId) item.runId = result.run_id;
+      });
+      window.dataviz.status = result.status;
+      window.dataviz.interaction = interaction;
+      // Unchanged data remains hydrated, but its transport must refer to the new
+      // owned artifact copy rather than a Run that retention may later remove.
+      Object.entries(window.dataviz.portable.output_transports || {}).forEach(([reference, transport]) => {
+        if (!result.outputs?.[reference]) return;
+        const encoded = reference.split('/').map(encodeURIComponent).join('/');
+        transport.url = `/api/runs/${encodeURIComponent(result.run_id)}/outputs/${encoded}`
+          + `?session_id=${encodeURIComponent(interaction.session_id)}&format=arrow`;
+      });
+      Object.values(window.dataviz.portable.outputs || {}).forEach(value => {
+        const prefix = `/api/runs/${previousRunId}/artifacts/`;
+        if (value && typeof value.url === 'string' && value.url.startsWith(prefix)) {
+          value.url = value.url.replace(prefix, `/api/runs/${result.run_id}/artifacts/`);
+        }
+      });
+      // No await between the freshness check, Canvas identity and Shell identity.
+      // Subsequent messages and server-python transforms now address the same Run.
+      commit(result);
+    }
+    const bundle = {outputs:{}, output_kinds:{}, output_schemas:{}, query_executed:Boolean(result)};
+    prepared.forEach(({payload, value}) => {
+      const reference = canonicalOutputReference(payload.reference);
+      this.transportPromises.delete(reference);
+      if (payload.transport) this.registerOutputTransport(reference, payload.transport);
+      bundle.outputs[reference] = value;
+      bundle.output_kinds[reference] = payload.kind;
+      bundle.output_schemas[reference] = payload.transport?.schema || payload.artifact?.schema || [];
+    });
+    const changed = await this.publishOutputs(bundle);
+    if (!this.disposed && isCurrent()) {
+      const alreadyAffected = new Set(this.affectedViews([], new Set(changed || [])) || []);
+      await this.renderViews({initial:false, changedControlKeys:[], changedOutputReferences:[],
+        queryExecuted:false, affectedViewIds:views.filter(id => !alreadyAffected.has(id))});
+    }
+    timings.runtime_update_ms = performance.now() - updateStarted;
+    return {applied:true, timings};
+  },
 });
 // Owner: DOM/bootstrap event wiring after every Runtime owner is registered.
 let datavizControlScheduled = false;

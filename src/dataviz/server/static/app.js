@@ -3,6 +3,8 @@ const state = {
   dashboard: null,
   sessionId: null,
   dashboardStates: new Map(),
+  selectedPages: {},
+  navigationGeneration: 0,
   preferredDashboardId: null,
   controlTimer: null,
   draggedNavigation: null,
@@ -17,9 +19,13 @@ const state = {
 };
 const $ = (selector) => document.querySelector(selector);
 
-function runtimeFor(dashboardId) {
-  if (!state.dashboardStates.has(dashboardId)) {
-    state.dashboardStates.set(dashboardId, {
+function runtimeFor(dashboardId, pageId = undefined) {
+  if (pageId === undefined) pageId = state.dashboard?.id === dashboardId
+    ? state.dashboard.page_id : state.selectedPages[dashboardId];
+  const key = pageId ? `${dashboardId}::page:${pageId}` : dashboardId;
+  if (!state.dashboardStates.has(key)) {
+    state.dashboardStates.set(key, {
+      dashboardId, pageId:pageId || null,
       runId: null,
       pendingRunId: null,
       committedQuerySnapshot: null,
@@ -58,7 +64,7 @@ function runtimeFor(dashboardId) {
       queryTransitionEvidence: {},
     });
   }
-  return state.dashboardStates.get(dashboardId);
+  return state.dashboardStates.get(key);
 }
 
 function activeRuntime() {
@@ -171,8 +177,13 @@ function queryParameterStateFromLocation(dashboard, search = window.location.sea
   return states;
 }
 
+function pageIdFromLocation() {
+  return new URLSearchParams(window.location.hash.slice(1)).get('page');
+}
+
 function dashboardLocation(dashboardId, parameterState = {}) {
-  const dashboard = state.payload?.dashboards?.find(item => item.id === dashboardId);
+  const dashboard = state.dashboard?.id === dashboardId ? state.dashboard
+    : state.payload?.dashboards?.find(item => item.id === dashboardId);
   const search = new URLSearchParams();
   for (const definition of dashboard?.query_parameters || []) {
     const entry = parameterState[definition.id] || {};
@@ -188,7 +199,8 @@ function dashboardLocation(dashboardId, parameterState = {}) {
     }
   }
   const query = search.toString();
-  return `/dashboards/${encodeURIComponent(dashboardId)}${query ? `?${query}` : ''}`;
+  const page = dashboard?.page_id ? `#page=${encodeURIComponent(dashboard.page_id)}` : '';
+  return `/dashboards/${encodeURIComponent(dashboardId)}${query ? `?${query}` : ''}${page}`;
 }
 
 function syncDashboardLocation(mode = 'replace', parameterState = null) {
@@ -201,7 +213,7 @@ function syncDashboardLocation(mode = 'replace', parameterState = null) {
     `.nav-button[data-id="${CSS.escape(state.dashboard.id)}"]`,
   );
   if (activeLink instanceof HTMLAnchorElement) activeLink.href = url;
-  if (`${window.location.pathname}${window.location.search}` === url) return;
+  if (`${window.location.pathname}${window.location.search}${window.location.hash}` === url) return;
   const method = mode === 'push' ? 'pushState' : 'replaceState';
   window.history[method]({dashboardId:state.dashboard.id}, '', url);
 }
@@ -229,13 +241,15 @@ function loadCanvasFrame(dashboardId, runId = null) {
   const restoreScrollY = Number(runtime.canvasScrollY || 0);
   const frameId = `frame_${crypto.randomUUID().replaceAll('-', '')}`;
   frame.dataset.dashboardId = dashboardId;
+  frame.dataset.pageId = runtime.pageId || '';
   frame.dataset.runId = runId || '';
   frame.dataset.frameId = frameId;
   frame.dataset.runtimeReady = 'false';
   const run = runId ? `&run_id=${encodeURIComponent(runId)}` : '';
-  frame.src = `/api/dashboards/${encodeURIComponent(dashboardId)}/canvas?${sessionQuery()}${run}&frame_id=${encodeURIComponent(frameId)}`;
+  const page = runtime.pageId ? `&page_id=${encodeURIComponent(runtime.pageId)}` : '';
+  frame.src = `/api/dashboards/${encodeURIComponent(dashboardId)}/canvas?${sessionQuery()}${run}${page}&frame_id=${encodeURIComponent(frameId)}`;
   frame.addEventListener('load', () => {
-    if (!restoreScrollY || frame.dataset.dashboardId !== dashboardId) return;
+    if (!restoreScrollY || frame.dataset.frameId !== frameId) return;
     const restore = () => {
       try { frame.contentWindow.scrollTo({top:restoreScrollY, behavior:'instant'}); } catch (_) { /* same-origin frame may still be initializing */ }
     };
@@ -294,11 +308,141 @@ function isCurrentCanvasMessage(event) {
     && sameCanvasIdentity(event.data, identity);
 }
 
+async function handleServerActionMessage(data, sourceWindow) {
+  const clientStarted = performance.now();
+  const clientTimings = {};
+  const runtime = activeRuntime();
+  let identity = canvasIdentity();
+  const dashboardId = identity.dashboard_id;
+  const reply = payload => {
+    if (payload.receipt?.status === 'succeeded' && clientTimings.write_confirmed_ms === undefined) {
+      clientTimings.write_confirmed_ms = performance.now() - clientStarted;
+    }
+    sourceWindow.postMessage({...payload, ...identity,
+      bridge_id:data.bridge_id}, window.location.origin);
+  };
+  const isCurrent = () => state.dashboard?.id === dashboardId
+    && sameCanvasIdentity(canvasIdentity(), identity)
+    && runtime.runId === identity.run_id && !runtime.pendingRunId
+    && !runtime.queryRequestInFlight && !runtime.queryDefinitionStale;
+  let receipt = null;
+  let ownsSlot = false;
+  try {
+    if (!['invoke', 'status', 'refresh'].includes(data.operation)
+        || !(state.dashboard.server_actions || []).includes(data.action)) {
+      throw new Error('Unknown Server Action');
+    }
+    const base = `/api/dashboards/${encodeURIComponent(dashboardId)}/actions/${encodeURIComponent(data.action)}`;
+    const receiptUrl = `${base}/${encodeURIComponent(data.request_id)}`;
+    if (data.operation === 'status') {
+      receipt = await request(`${receiptUrl}?${sessionQuery()}`);
+      reply({type:'dataviz:server-action-result', receipt});
+      return;
+    }
+    if (!isCurrent()) throw Object.assign(new Error('Run the current query before invoking this Action.'), {code:'action_not_submitted'});
+    if (runtime.pendingServerAction) throw Object.assign(new Error('Another Server Action is still in progress; this request was not submitted.'), {code:'action_not_submitted'});
+    runtime.pendingServerAction = data.bridge_id;
+    ownsSlot = true;
+    const oldRecord = await request(`/api/runs/${encodeURIComponent(identity.run_id)}?${sessionQuery()}`);
+    if (!isCurrent()) throw Object.assign(new Error('The query changed before the Action was submitted.'), {code:'action_not_submitted'});
+    receipt = await request(data.operation === 'invoke' ? base : `${receiptUrl}/refresh`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(data.operation === 'invoke' ? {
+        session_id:state.sessionId, run_id:identity.run_id,
+        request_id:data.request_id, payload:data.payload,
+      } : {session_id:state.sessionId}),
+    });
+    const deadline = Date.now() + 290_000;
+    while (receipt.status === 'running' || ['pending', 'scheduling', 'running'].includes(receipt.refresh?.status)) {
+      reply({type:'dataviz:server-action-progress', receipt});
+      if (!isCurrent() || Date.now() >= deadline) {
+        throw Object.assign(new Error('The Action may still complete. Check its receipt before another write.'),
+          {code:'action_response_unknown'});
+      }
+      await new Promise(resolve => setTimeout(resolve, 250));
+      receipt = await request(`${receiptUrl}?${sessionQuery()}`);
+    }
+    if (receipt.status !== 'succeeded') {
+      throw Object.assign(new Error(receipt.error?.message || 'Server Action did not complete successfully.'),
+        {code:receipt.error?.code || 'action_failed'});
+    }
+    // Even a refresh that finished before the first poll must publish the saved
+    // receipt before downloading outputs or awaiting renderer work.
+    reply({type:'dataviz:server-action-progress', receipt});
+    if (receipt.refresh?.status === 'ready' && isCurrent()) {
+      const refreshStarted = performance.now();
+      const nextRunId = receipt.refresh.run_id;
+      const nextRecord = nextRunId && nextRunId !== identity.run_id
+        ? await request(`/api/runs/${encodeURIComponent(nextRunId)}?${sessionQuery()}`) : null;
+      const result = nextRecord?.result || null;
+      const changedReferences = Object.entries(result?.outputs || {}).filter(([reference, artifact]) => (
+        oldRecord.result?.outputs?.[reference]?.content_hash !== artifact.content_hash
+      )).map(([reference]) => reference);
+      const payloads = await Promise.all(changedReferences.map(reference => {
+        const encoded = reference.split('/').map(encodeURIComponent).join('/');
+        return request(`/api/runs/${encodeURIComponent(nextRunId)}/outputs/${encoded}?${sessionQuery()}`);
+      }));
+      if (!isCurrent()) {
+        receipt = {...receipt, refresh:{...receipt.refresh, status:'superseded'}};
+      } else {
+        const frame = $('#canvas-frame');
+        const outcome = await frame.contentWindow.datavizRuntime.applyActionRefresh({
+          result, payloads, views:receipt.refresh.views || [],
+          interaction:result ? {
+            run_id:result.run_id, session_id:state.sessionId,
+            start_url:`/api/runs/${encodeURIComponent(result.run_id)}/interactions`,
+            status_url:'/api/interactions/{interaction_id}',
+            outputs_url:'/api/interactions/{interaction_id}/outputs',
+            query_snapshot_available:true, query_complete:true,
+          } : null,
+        }, {
+          isCurrent,
+          commit:adopted => {
+            identity = {...identity, run_id:adopted.run_id};
+            frame.dataset.runId = adopted.run_id;
+            runtime.runId = adopted.run_id;
+            sealCommittedQuerySnapshot(runtime, adopted.query_parameter_state);
+            // The draft stays untouched: saving a row is not submitting the
+            // user's edited Query Parameter panel.
+            runtime.queryStatus = adopted.status;
+            runtime.queryLabel = adopted.status === 'ready' ? 'Ready' : 'Partial';
+            runtime.message = 'Action saved; affected data refreshed.';
+            runtime.nodeStatuses = Object.fromEntries(Object.entries(adopted.nodes || {}).map(([key, node]) => [key, node.status]));
+            $('#run-message').textContent = runtime.message;
+            $('#query-diagnostics').dataset.status = runtime.queryStatus;
+            $('#query-diagnostics-label').textContent = runtime.queryLabel;
+            setQueryState();
+            saveTabUiState();
+          },
+        });
+        Object.assign(clientTimings, outcome.timings || {});
+        if (!outcome.applied) receipt = {...receipt, refresh:{...receipt.refresh, status:'superseded'}};
+      }
+      clientTimings.refresh_roundtrip_ms = performance.now() - refreshStarted;
+    }
+    receipt = {...receipt, client_timings:{...clientTimings, total_ms:performance.now() - clientStarted}};
+    reply({type:'dataviz:server-action-result', receipt});
+  } catch (error) {
+    if (receipt) receipt = {...receipt, client_timings:{...clientTimings, total_ms:performance.now() - clientStarted}};
+    if (receipt?.status === 'succeeded') {
+      // The durable server receipt remains authoritative; this extra field
+      // reports a client-side transport/render problem without changing writes.
+      receipt = {...receipt, client_refresh:{status:'failed', message:error.message}};
+    }
+    reply({type:'dataviz:server-action-result', receipt,
+      error:{message:error.message || String(error), code:error.code || 'server_action_error'}});
+  } finally {
+    if (ownsSlot && runtime.pendingServerAction === data.bridge_id) runtime.pendingServerAction = null;
+  }
+}
+
 function saveTabUiState() {
   if (!state.sessionId) return;
   const dashboards = {};
   for (const [dashboardId, runtime] of state.dashboardStates) {
     dashboards[dashboardId] = {
+      dashboardId:runtime.dashboardId, pageId:runtime.pageId,
+      canvasScrollY:runtime.canvasScrollY,
       queryParameterState: runtime.queryParameterState,
       committedQuerySnapshot: runtime.committedQuerySnapshot,
       queryParametersOpen: runtime.queryParametersOpen,
@@ -310,6 +454,7 @@ function saveTabUiState() {
     `dataviz.tab-ui.v4.${state.sessionId}`,
     JSON.stringify({
       activeDashboardId: state.dashboard?.id || state.preferredDashboardId,
+      selectedPages:state.selectedPages,
       sidebar: {
         width: state.sidebarWidth,
         customized: state.sidebarWidthCustomized,
@@ -345,15 +490,16 @@ function restoreTabUiState() {
   try {
     const saved = JSON.parse(sessionStorage.getItem(`dataviz.tab-ui.v4.${state.sessionId}`) || '{}');
     state.preferredDashboardId = saved.activeDashboardId || null;
+    state.selectedPages = saved.selectedPages || {};
     state.sidebarWidthCustomized = Boolean(saved.sidebar?.customized);
     state.sidebarWidth = state.sidebarWidthCustomized
       ? Number(saved.sidebar?.width) || 250
       : 250;
-    state.sidebarCollapsed = typeof saved.sidebar?.collapsed === 'boolean'
+    state.sidebarCollapsed = window.innerWidth <= 980 ? true : typeof saved.sidebar?.collapsed === 'boolean'
       ? saved.sidebar.collapsed
       : window.innerWidth <= 980;
     for (const [dashboardId, values] of Object.entries(saved.dashboards || {})) {
-      Object.assign(runtimeFor(dashboardId), values);
+      Object.assign(runtimeFor(values.dashboardId || dashboardId, values.pageId || null), values);
     }
   } catch (_) {}
   applySidebarState();
@@ -1462,7 +1608,11 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
       ? document.createElement('textarea')
       : document.createElement('input');
     if (input instanceof HTMLInputElement) {
-      input.type = parameter.value_type === 'boolean'
+      // The backing input holds a JSON array; numeric/date constraints belong
+      // to the component's individual value inputs, not this serialized value.
+      input.type = parameter.type === 'multiple_input'
+        ? 'text'
+        : parameter.value_type === 'boolean'
         ? 'checkbox'
         : ['number', 'integer'].includes(parameter.value_type)
         ? component === 'slider' && parameter.type === 'single_input' ? 'range' : 'number'
@@ -1470,8 +1620,8 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
         ? 'date'
         : 'text';
     }
-    if (parameter.value_type === 'boolean') input.checked = Boolean(defaultValue);
-    else if (parameter.type === 'multiple_input' && Array.isArray(defaultValue)) input.value = JSON.stringify(defaultValue);
+    if (parameter.type === 'multiple_input' && Array.isArray(defaultValue)) input.value = JSON.stringify(defaultValue);
+    else if (parameter.value_type === 'boolean') input.checked = Boolean(defaultValue);
     else if (Array.isArray(defaultValue)) input.value = defaultValue.join(',');
     else input.value = defaultValue ?? '';
   }
@@ -1938,7 +2088,42 @@ function setNodeStatus(node, status) {
   node.setAttribute('aria-label', `${title}: ${label}`);
 }
 
-function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {}) {
+function renderPageNavigation() {
+  const host = $('#page-navigation');
+  const pages = state.dashboard?.pages || [];
+  host.hidden = pages.length < 2;
+  $('#page-project-title').textContent = state.dashboard?.project_title || state.dashboard?.title || state.dashboard?.canvas_name || '';
+  const focusedPage = host.contains(document.activeElement) ? document.activeElement?.dataset.pageId : null;
+  $('#page-navigation-list').replaceChildren(...pages.map(page => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.pageId = page.id;
+    const runtime = runtimeFor(state.dashboard.id, page.id);
+    const suffix = runtime.pendingRunId || runtime.queryRequestInFlight ? ' · Running'
+      : runtime.queryDefinitionStale ? ' · Outdated' : runtime.queryStatus === 'error' ? ' · Failed' : '';
+    button.textContent = `${page.title}${suffix}`;
+    if (state.dashboard.page_id === page.id) button.setAttribute('aria-current', 'page');
+    button.addEventListener('click', () => { void selectDashboard(state.dashboard.id, {pageId:page.id}); });
+    return button;
+  }));
+  if (focusedPage) [...$('#page-navigation-list').children].find(button => button.dataset.pageId === focusedPage)?.focus({preventScroll:true});
+}
+
+async function selectDashboard(id, {historyMode = 'push', locationSearch = null, pageId = undefined} = {}) {
+  const generation = ++state.navigationGeneration;
+  let selected = state.payload.dashboards.find(item => item.id === id);
+  if (!selected) return;
+  const requestedPage = pageId ?? (locationSearch !== null ? pageIdFromLocation() : null)
+    ?? state.selectedPages[id] ?? selected.page_id;
+  if (requestedPage) {
+    try {
+      selected = await request(`/api/dashboards/${encodeURIComponent(id)}/pages/${encodeURIComponent(requestedPage)}`);
+    } catch (error) {
+      if (generation === state.navigationGeneration) showShortcutToast(error.message);
+      return;
+    }
+    if (generation !== state.navigationGeneration) return;
+  }
   window.clearTimeout(state.parameterDomainTimer);
   state.parameterDomainTimer = null;
   if (state.dashboard) {
@@ -1953,10 +2138,13 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
     });
     try { previous.queryParameterState = queryParameterStates(); } catch (_) {}
     try { previous.canvasScrollY = $('#canvas-frame').contentWindow.scrollY || 0; } catch (_) { previous.canvasScrollY = 0; }
+    disconnectControlChannel(previous, 'control_page_changed');
     saveTabUiState();
   }
   closeHeaderPopovers();
-  state.dashboard = state.payload.dashboards.find((item) => item.id === id);
+  state.dashboard = selected;
+  state.selectedPages[id] = selected.page_id || null;
+  renderPageNavigation();
   state.preferredDashboardId = id;
   const runtime = activeRuntime();
   runtime.queryLookup = {};
@@ -2040,7 +2228,7 @@ function selectDashboard(id, {historyMode = 'push', locationSearch = null} = {})
   setControlsEnabled(Boolean(runtime.runId) && runtime.controlConnected);
   setComputeState();
   loadCanvasFrame(id, runtime.pendingRunId || runtime.runId);
-  $('#run-button').disabled = !runnable;
+  $('#run-button').disabled = !runnable || runtime.queryRequestInFlight;
   $('#run-button').classList.toggle('is-cancelling', Boolean(runtime.pendingRunId));
   setRunButtonLabel(runtime.pendingRunId ? 'CANCEL' : 'RUN');
   setShareEnabled(Boolean(runtime.runId) && runtime.controlConnected);
@@ -2329,6 +2517,7 @@ async function lookupQueryParameter(parameter, {
         method:'POST', headers:{'Content-Type':'application/json'}, signal:controller.signal,
         body:JSON.stringify({
           session_id:state.sessionId,
+          page_id:dashboard.page_id || null,
           parameter:parameter.id,
           parent_states:parentStates,
           search,
@@ -2640,6 +2829,7 @@ async function runDashboard() {
   if (!state.dashboard) return;
   const dashboardId = state.dashboard.id;
   const runtime = runtimeFor(dashboardId);
+  const pageId = runtime.pageId;
   if (runtime.pendingRunId) {
     const runId = runtime.pendingRunId;
     $('#run-button').disabled = true;
@@ -2692,6 +2882,7 @@ async function runDashboard() {
     const response = await request(`/api/dashboards/${encodeURIComponent(dashboardId)}/runs`, {
       method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({
         session_id: state.sessionId,
+        page_id:pageId,
         query_parameter_state: runtime.queryParameterState,
       })
     });
@@ -2711,20 +2902,21 @@ async function runDashboard() {
     runtime.queryStatus = 'loading';
     runtime.queryLabel = 'Loading';
     runtime.message = 'Querying a new dataset…';
-    $('#run-button').disabled = false;
-    $('#run-button').classList.add('is-cancelling');
-    setRunButtonLabel('CANCEL');
-    if (state.dashboard?.id === dashboardId) {
+    if (activeRuntime() === runtime) {
+      $('#run-button').disabled = false;
+      $('#run-button').classList.add('is-cancelling');
+      setRunButtonLabel('CANCEL');
       loadCanvasFrame(dashboardId, response.run_id);
     }
-    listen(response.run_id, dashboardId);
+    renderPageNavigation();
+    listen(response.run_id, dashboardId, pageId);
   } catch (error) {
     runtime.queryRequestInFlight = false;
     runtime.pendingQueryChangeRevision = 0;
     runtime.queryStatus = 'error';
     runtime.queryLabel = 'Failed';
     runtime.message = error.message;
-    if (state.dashboard?.id === dashboardId) {
+    if (activeRuntime() === runtime) {
       $('#run-message').textContent = error.message;
       $('#query-diagnostics').dataset.status = 'error';
       $('#query-diagnostics-label').textContent = 'Failed';
@@ -2735,22 +2927,23 @@ async function runDashboard() {
   }
 }
 
-function listen(runId, dashboardId) {
-  const runtime = runtimeFor(dashboardId);
+function listen(runId, dashboardId, pageId = null) {
+  const runtime = runtimeFor(dashboardId, pageId);
   runtime.eventSource?.close();
   const source = new EventSource(`/api/runs/${runId}/events?${sessionQuery()}`);
   runtime.eventSource = source;
   const names = ['node_queued','node_started','node_progress','node_retrying','node_ready','node_error','node_cancelled','node_unavailable'];
-  for (const name of names) source.addEventListener(name, (message) => updateEvent(JSON.parse(message.data), dashboardId));
-  source.addEventListener('run_ready', () => finishRun(runId, dashboardId));
-  source.addEventListener('run_error', () => finishRun(runId, dashboardId));
-  source.addEventListener('run_cancelled', () => finishRun(runId, dashboardId));
+  for (const name of names) source.addEventListener(name, (message) => updateEvent(JSON.parse(message.data), dashboardId, pageId));
+  source.addEventListener('run_ready', () => finishRun(runId, dashboardId, pageId));
+  source.addEventListener('run_error', () => finishRun(runId, dashboardId, pageId));
+  source.addEventListener('run_cancelled', () => finishRun(runId, dashboardId, pageId));
   source.addEventListener('stream_end', () => source.close());
   source.onerror = () => { if (source.readyState === EventSource.CLOSED) return; };
 }
 
-function updateEvent(event, dashboardId) {
-  const runtime = runtimeFor(dashboardId);
+function updateEvent(event, dashboardId, pageId = null) {
+  const runtime = runtimeFor(dashboardId, pageId);
+  if (event.run_id !== runtime.pendingRunId) return;
   const statusMap = {
     node_queued: 'queued',
     node_started: 'loading',
@@ -2768,17 +2961,18 @@ function updateEvent(event, dashboardId) {
     ? ` · ${Math.round(Number(event.data.value) * 100)}%`
     : '';
   runtime.message = `${event.message || `${label} — ${statusMap[event.event] || event.event}`}${progress}${event.duration_ms ? ` · ${event.duration_ms}ms` : ''}`;
-  if (state.dashboard?.id === dashboardId) {
+  if (activeRuntime() === runtime) {
     const node = document.querySelector(`[data-node-id="${CSS.escape(event.node_id)}"]`);
     setNodeStatus(node, runtime.nodeStatuses[event.node_id]);
     $('#run-message').textContent = runtime.message;
   }
 }
 
-async function finishRun(runId, dashboardId) {
-  const runtime = runtimeFor(dashboardId);
+async function finishRun(runId, dashboardId, pageId = null) {
+  const runtime = runtimeFor(dashboardId, pageId);
   if (runId !== runtime.pendingRunId) return;
   const record = await request(`/api/runs/${runId}?${sessionQuery()}`);
+  if (runId !== runtime.pendingRunId) return;
   const status = record.result?.status || record.status;
   runtime.message = status === 'ready' ? 'Dataset query completed.' : `Query finished with status: ${status}`;
   runtime.pendingRunId = null;
@@ -2789,7 +2983,8 @@ async function finishRun(runId, dashboardId) {
   if (committed) {
     runtime.runId = runId;
     sealCommittedQuerySnapshot(runtime, record.result.query_parameter_state);
-    runtime.queryParameterState = structuredClone(record.result.query_parameter_state || {});
+    runtime.queryParameterState ||= structuredClone(record.result.query_parameter_state || {});
+    runtime.queryParametersOpen = false;
     runtime.queryStatus = ['ready', 'partial'].includes(status) ? status : 'error';
     runtime.queryLabel = status === 'ready' ? 'Ready' : status === 'partial' ? 'Partial' : 'Failed';
     runtime.queryDefinitionStale = false;
@@ -2807,7 +3002,8 @@ async function finishRun(runId, dashboardId) {
       : 'Query failed. The previously loaded dataset is unchanged.';
   }
   runtime.previousQueryState = null;
-  if (state.dashboard?.id === dashboardId) {
+  renderPageNavigation();
+  if (activeRuntime() === runtime) {
     $('#run-message').textContent = runtime.message;
     $('#run-button').disabled = false;
     $('#run-button').classList.remove('is-cancelling');
@@ -3176,6 +3372,15 @@ function renderViewInspector(view, evidence = {}) {
     code:JSON.stringify(evidence.refresh || {message:'No refresh evidence captured yet.'}, null, 2),
     copyLabel:'Copy refresh cause',
   }));
+  if (renderer.filtering) {
+    body.append(inspectorCodeSection({
+      eyebrow:'CONTROL FILTERS',
+      title:'Rows before and after local filtering',
+      note:'Canonical intent and operands are shown together; all_available is never inferred from an empty operand list.',
+      code:JSON.stringify(renderer.filtering, null, 2),
+      copyLabel:'Copy filter evidence',
+    }));
+  }
   body.append(inspectorCodeSection({
     eyebrow:'BROWSER COST',
     title:'Renderer input and timing',
@@ -3472,7 +3677,8 @@ function dashboardButton(dashboard) {
     bindOverflowTitle(button, button.querySelector('strong'), dashboard.canvas_name);
     button.addEventListener('click', (event) => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-      if (performance.now() - (state.navigationDragEndedAt || 0) < 250) {
+      const dragEndedAt = Number(state.navigationDragEndedAt || 0);
+      if (dragEndedAt > 0 && performance.now() - dragEndedAt < 250) {
         event.preventDefault();
         return;
       }
@@ -3776,7 +3982,7 @@ async function refreshNavigation(
     return selected;
   }
   renderNavigation();
-  selectDashboard(selected.id, {
+  await selectDashboard(selected.id, {
     historyMode,
     locationSearch: routed ? locationSearch : null,
   });
@@ -4137,7 +4343,7 @@ async function boot() {
   restoreTabUiState();
   const remembered = await request(`/api/session/runs?${sessionQuery()}`);
   for (const record of remembered.runs || []) {
-    const runtime = runtimeFor(record.dashboard_id);
+    const runtime = runtimeFor(record.dashboard_id, record.page_id || null);
     if (record.ready && ['ready', 'partial'].includes(record.status)) {
       sealCommittedQuerySnapshot(runtime, record.query_parameter_state);
     }
@@ -4163,7 +4369,7 @@ async function boot() {
       runtime.queryStatus = 'loading';
       runtime.queryLabel = 'Loading';
       runtime.message = 'Querying a new dataset…';
-      listen(record.run_id, record.dashboard_id);
+      listen(record.run_id, record.dashboard_id, record.page_id || null);
     }
   }
   const requestedDashboardId = dashboardIdFromLocation();
@@ -4274,6 +4480,10 @@ document.addEventListener('click', (event) => {
 });
 window.addEventListener('message', (event) => {
   if (!isCurrentCanvasMessage(event)) return;
+  if (event.data?.type === 'dataviz:server-action') {
+    handleServerActionMessage(event.data, event.source);
+    return;
+  }
   if (event.data?.type === 'dataviz:control-hello') {
     const runtime = activeRuntime();
     if (!runtime) return;
@@ -4388,6 +4598,11 @@ $('#dashboard-controls-control > summary').addEventListener('contextmenu', event
   openParameterEditor('dashboard').catch(error => console.error('[dataviz:parameter-editor]', error));
 });
 initializeSidebarResize();
+const sidebarMobile = window.matchMedia('(max-width: 980px)');
+sidebarMobile.addEventListener('change', event => {
+  if (event.matches) state.sidebarCollapsed = true;
+  applySidebarState();
+});
 window.addEventListener('resize', () => applySidebarState());
 window.addEventListener('popstate', () => {
   if (!state.payload) return;

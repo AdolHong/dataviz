@@ -4,6 +4,18 @@
 
 Dataviz 是一个 workspace-first、AI-friendly 的本地数据看板工具。Dashboard 以普通文件保存，可以进入 Git、复制和审查；人类在浏览器中查询、交互和阅读，AI 通过 CLI 获取当前版本的最小开发契约、复用已有数据口径并继续分析。
 
+## 从一个 YAML 开始
+
+只做一个小看板时，无需先创建 Workspace。`dataviz docs standalone --format json` 提供可运行的单 YAML 示例（含内嵌 SQL）和独立 Adapter 配置：
+
+```bash
+dataviz validate sales.yaml --auth connections.yaml --strict
+dataviz run sales.yaml --auth connections.yaml
+dataviz serve sales.yaml --auth connections.yaml
+```
+
+`--auth` 也可指向认证目录或已有 Workspace；凭据不进入看板。代码可内嵌，也可引用同目录文件。单文件入口复用现有执行器，结果保存在 `.dataviz/standalone` 的独立快照中；`run` 返回后续检查命令。首版编辑后需重启 `serve`，需要热更新或共享 Asset 时使用完整 Workspace。
+
 ## 它解决什么问题
 
 传统的 AI Dashboard 工作通常止于页面：
@@ -99,6 +111,11 @@ dataviz visual-check sales-workspace sales-overview --target both
 ```
 
 只有任务确实需要 Query 后交互或自定义渲染时，才改用 `interactive` 或 `custom-renderer` 文档与 Scaffold。
+
+需要显式服务端计算或写入时，从 `dataviz docs server-actions --format json` 开始。
+Server Action 由普通 Python 实现业务校验与 CRUD，通过外部 Adapter/auth 绑定资源，
+保存后可局部刷新指定 Source 或 View。它不属于自动执行的只读 DAG；静态 HTML
+不能写入，超时也不会自动重放。完整边界见 [Server Actions](docs/server-actions.md)。
 
 ## Quickstart：让 AI 查数和分析
 

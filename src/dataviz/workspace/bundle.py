@@ -67,10 +67,12 @@ def _workspace_payload(
 
 def _workspace_asset_files(
     workspace: LoadedWorkspace,
-    dashboard: LoadedDashboard,
+    dashboards: Iterable[LoadedDashboard],
 ) -> list[tuple[str, Path, Path]]:
     files = []
-    for identifier in dashboard_workspace_asset_ids(dashboard):
+    identifiers = {identifier for dashboard in dashboards
+                   for identifier in dashboard_workspace_asset_ids(dashboard)}
+    for identifier in sorted(identifiers):
         asset = workspace.asset(identifier)
         files.append((identifier, asset.path, asset.path.relative_to(workspace.root)))
     return files
@@ -78,12 +80,18 @@ def _workspace_asset_files(
 
 def _binding_manifest(
     workspace: LoadedWorkspace,
-    dashboard: LoadedDashboard,
+    dashboards: Iterable[LoadedDashboard],
 ) -> list[dict[str, Any]]:
     resolver = AdapterResolver(workspace.root)
+    dashboards = list(dashboards)
+    adapter_mapping = dashboards[0].definition.adapters
     bindings = []
-    for logical in sorted(dashboard.definition.adapters):
-        actual_name, definition = resolver.resolve(logical, dashboard.definition.adapters)
+    logical_names = set(adapter_mapping)
+    for dashboard in dashboards:
+        for _path, action in dashboard.server_actions.values():
+            logical_names.update(action.resources.values())
+    for logical in sorted(logical_names):
+        actual_name, definition = resolver.resolve(logical, adapter_mapping)
         bindings.append(
             {
                 "logical": logical,
@@ -200,6 +208,11 @@ def bundle_dashboard(
     """Publish one Dashboard closure as a new, standalone Workspace snapshot."""
 
     dashboard = workspace.dashboard(dashboard_id)
+    # Execution is Page-scoped, publication is Dashboard-scoped. Collect every
+    # entry's dependencies without broadening any individual execution closure.
+    project = dashboard.project_definition
+    dashboards = ([workspace.dashboard(dashboard_id, page.id) for page in project.pages]
+                  if project is not None and project.pages else [dashboard])
     destination = destination.resolve()
     if destination == workspace.root or destination.is_relative_to(dashboard.root):
         raise WorkspaceError(
@@ -218,11 +231,11 @@ def bundle_dashboard(
         )
         for path in _portable_files(dashboard.root)
     ]
-    asset_files = _workspace_asset_files(workspace, dashboard)
+    asset_files = _workspace_asset_files(workspace, dashboards)
     asset_pairs = [(source, relative) for _identifier, source, relative in asset_files]
     source_pairs = [*dashboard_pairs, *asset_pairs]
     workspace_content = yaml.safe_dump(
-        _workspace_payload(workspace, dashboard_workspace_asset_ids(dashboard)),
+        _workspace_payload(workspace, (identifier for identifier, _, _ in asset_files)),
         allow_unicode=True,
         sort_keys=False,
     )
@@ -251,7 +264,7 @@ def bundle_dashboard(
                 {"id": identifier, **_snapshot_record(records, relative)}
                 for identifier, _source, relative in asset_files
             ],
-            "adapter_bindings": _binding_manifest(workspace, dashboard),
+            "adapter_bindings": _binding_manifest(workspace, dashboards),
         }
         manifest = {
             "schema": DASHBOARD_BUNDLE_SCHEMA,

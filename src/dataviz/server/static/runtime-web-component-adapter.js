@@ -101,7 +101,16 @@
   };
   const matches = (row, item, state) => {
     if (!canApply(row, item)) return true;
-    const value = projectedValue(item, state);
+    let value = projectedValue(item, state);
+    if (
+      item.definition?.type === 'multiple_select'
+      && state?.intent === 'all_available'
+      && (value == null || (Array.isArray(value) && value.length === 0))
+    ) {
+      if (item.definition?.options?.mode !== 'static') return true;
+      value = (item.definition.options.choices || []).map(choice => choice.value);
+      if (!value.length) return false;
+    }
     if (value == null || value === '' || (Array.isArray(value) && value.length === 0)) {
       return item.consumer_binding?.empty === 'passthrough';
     }
@@ -147,8 +156,9 @@
       const reference = references[input] || Object.values(references)[0];
       const source = rows(this.output(reference));
       const contract = this.manifest.dependency_contract?.views?.[id]?.filter_contract || [];
-      return source.filter(row => contract.every(item => matches(
-        row, item, this.manifest.control_state?.[item.key],
+      return source.filter(row => contract.every(item => (
+        !(item.consumer_binding?.inputs || ['main']).includes(input)
+        || matches(row, item, this.manifest.control_state?.[item.key])
       )));
     }
   }

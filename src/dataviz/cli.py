@@ -23,6 +23,7 @@ import yaml
 import click
 
 from dataviz import __version__
+from dataviz.cli_actions import actions_app
 from dataviz.analysis import (
     build_promotion_preview,
     create_analysis_evidence,
@@ -160,6 +161,7 @@ app.add_typer(components_app, name="components")
 app.add_typer(renderer_app, name="renderer")
 app.add_typer(benchmark_app, name="benchmark")
 app.add_typer(parameters_app, name="parameters")
+app.add_typer(actions_app, name="actions")
 GALLERY_WORKSPACE = Path(__file__).resolve().parent / "gallery"
 
 
@@ -949,7 +951,8 @@ def bundle_portable_dashboard(
 
 @app.command()
 def validate(
-    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    workspace: Path = typer.Argument(..., exists=True),
+    auth: Path | None = typer.Option(None, "--auth", exists=True, help="Explicit Adapter file, auth directory or Workspace for a standalone Dashboard"),
     dashboard: str | None = typer.Option(
         None,
         "--dashboard",
@@ -971,6 +974,10 @@ def validate(
     if output_format not in {"text", "json"}:
         raise typer.BadParameter("--format must be text or json")
     try:
+        from dataviz.standalone import prepare_input
+
+        workspace, standalone_id = prepare_input(workspace, auth=auth)
+        dashboard = dashboard or standalone_id
         report = validate_preflight(
             workspace,
             dashboard_id=dashboard,
@@ -1085,7 +1092,7 @@ def documentation(
     search: str | None = typer.Option(
         None,
         "--search",
-        help="Search ranked snippets from all built-in documentation",
+        help="Search ranked keyword snippets from built-in topics and authoring tasks",
     ),
     task: str | None = typer.Option(
         None,
@@ -1713,7 +1720,7 @@ def context(
     focus: str | None = typer.Option(
         None,
         "--focus",
-        help="Dependency slice such as view:<id>, section:<id>, source:<id>, or component:<id>",
+        help="Focused context such as view:<id>, section:<id>, source:<id>, action:<id>, or component:<id>",
     ),
     output_format: str = typer.Option("markdown", "--format", help="markdown or json"),
 ) -> None:
@@ -3037,8 +3044,10 @@ def result_export(
 
 @app.command()
 def run(
-    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
-    target: str = typer.Argument(..., help="Dashboard id or canonical Target Reference"),
+    workspace: Path = typer.Argument(..., exists=True),
+    target: str | None = typer.Argument(None, help="Dashboard id or canonical Target Reference; optional for a standalone YAML"),
+    page: str | None = typer.Option(None, "--page", help="Optional analysis Page; defaults to the first declared Page, or the top-level Dashboard"),
+    auth: Path | None = typer.Option(None, "--auth", exists=True, help="Explicit Adapter file, auth directory or Workspace for a standalone Dashboard"),
     also: list[str] | None = typer.Option(
         None, "--also", help="Repeat compatible canonical Output targets in one execution"
     ),
@@ -3064,6 +3073,12 @@ def run(
 ) -> None:
     """Execute a Dashboard or canonical data Target and seal one immutable Result."""
     try:
+        from dataviz.standalone import prepare_input
+
+        workspace, standalone_id = prepare_input(workspace, auth=auth)
+        target = target or standalone_id
+        if target is None:
+            raise typer.BadParameter("A Workspace requires an explicit Target")
         parsed = parse_target_reference(target)
         if output_format not in {"json", "text"}:
             raise typer.BadParameter("--format must be text or json")
@@ -3071,6 +3086,7 @@ def run(
             RunRequest(
                 workspace=workspace,
                 target=parsed.canonical,
+                page_id=page,
                 also=tuple(also or ()),
                 query_parameter_state=parse_params(query_param),
                 controls=parse_params(control),
@@ -3107,8 +3123,10 @@ def run(
 
 @app.command()
 def report(
-    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
-    target: str = typer.Argument(..., help="Result id or Dashboard id convenience target"),
+    workspace: Path = typer.Argument(..., exists=True),
+    target: str | None = typer.Argument(None, help="Result id or Dashboard id; optional for standalone YAML"),
+    page: str | None = typer.Option(None, "--page", help="Page to run; a sealed Result already owns its Page"),
+    auth: Path | None = typer.Option(None, "--auth", exists=True, help="External Adapter environment for standalone YAML"),
     output: Path = typer.Option(..., "--output"),
     query_param: list[str] | None = typer.Option(None, "--query-param"),
     control: list[str] | None = typer.Option(None, "--control"),
@@ -3117,7 +3135,15 @@ def report(
 ) -> None:
     """Write a report from an immutable Result, or run a Dashboard as a convenience."""
     try:
+        from dataviz.standalone import prepare_input
+
+        workspace, standalone_id = prepare_input(workspace, auth=auth)
+        target = target or standalone_id
+        if target is None:
+            raise typer.BadParameter("A Workspace requires a Result or Dashboard target")
         if target.startswith("result_"):
+            if page is not None:
+                raise typer.BadParameter("A sealed Result already owns its Page; omit --page")
             store = AnalysisResultStore(workspace)
             with store.lease(target):
                 manifest = store.load(target)
@@ -3144,13 +3170,14 @@ def report(
         loaded = load_workspace(workspace)
         result = Executor(loaded).run(
             dashboard,
+            page_id=page,
             query_parameter_state=parse_params(query_param),
             refresh=refresh,
         )
         if result.status != "ready" and not (allow_partial and result.status == "partial"):
             print_json(result)
             raise typer.Exit(1)
-        loaded_dashboard = loaded.dashboard(dashboard)
+        loaded_dashboard = loaded.dashboard(dashboard, result.page_id)
         resolved_control_state = state_from_values(
             loaded_dashboard.definition,
             parse_params(control),
@@ -3256,6 +3283,7 @@ def report(
             {
                     "schema": ANALYSIS_RESULT_SCHEMA,
                     "status": result.status,
+                    "page_id": result.page_id,
                     "generation": catalog.generation,
                     "target": {
                         "reference": dashboard,
@@ -3447,7 +3475,8 @@ def prune_workspace(
 
 @app.command()
 def serve(
-    workspace: Path = typer.Argument(..., exists=True, file_okay=False),
+    workspace: Path = typer.Argument(..., exists=True),
+    auth: Path | None = typer.Option(None, "--auth", exists=True, help="Explicit Adapter file, auth directory or Workspace for a standalone Dashboard"),
     host: str = typer.Option("127.0.0.1", "--host"),
     port: int = typer.Option(8080, "--port"),
     allow_remote: bool = typer.Option(
@@ -3465,6 +3494,12 @@ def serve(
     _require_remote_bind_opt_in(host, allow_remote=allow_remote)
     import uvicorn
 
+    from dataviz.standalone import prepare_input
+
+    workspace, standalone_id = prepare_input(workspace, auth=auth)
+    if standalone_id:
+        typer.echo("Serving a standalone snapshot; restart serve after editing its YAML or dependencies.")
+        watch = False
     application = create_app(workspace, watch=watch)
     uvicorn.run(application, host=host, port=port)
 

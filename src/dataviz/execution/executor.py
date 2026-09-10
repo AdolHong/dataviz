@@ -13,9 +13,10 @@ from dataviz.artifacts import ArtifactDescriptor, ArtifactStore
 from dataviz.auth import AdapterResolver
 from dataviz.errors import DatavizError, ExecutionFailure, ValidationFailure
 from dataviz.execution.cache import NodeCache
+from dataviz.execution.action_journal import source_mutation_epoch
 from dataviz.execution.context import ExecutionContext
 from dataviz.execution.events import EventObserver, ExecutionEvent
-from dataviz.execution.fingerprint import query_contract_fingerprint
+from dataviz.execution.fingerprint import query_contract_fingerprint, ensure_query_run_compatible
 from dataviz.execution.node_support import hash_path, output_status, package_fingerprint
 from dataviz.execution.outputs import normalize_outputs, validate_table_schema
 from dataviz.execution.parameters import (
@@ -107,8 +108,8 @@ class Executor:
         )
         self._event_lock = threading.Lock()
 
-    def ensure_valid(self, dashboard_id: str) -> LoadedDashboard:
-        dashboard = self.workspace.dashboard(dashboard_id)
+    def ensure_valid(self, dashboard_id: str, page_id: str | None = None) -> LoadedDashboard:
+        dashboard = self.workspace.dashboard(dashboard_id, page_id)
         errors = [
             item
             for item in dashboard_validation_diagnostics(self.workspace, dashboard)
@@ -130,6 +131,7 @@ class Executor:
         self,
         dashboard_id: str,
         *,
+        page_id: str | None = None,
         query_parameter_state: dict[str, Any] | None = None,
         targets: list[str] | None = None,
         refresh: bool = False,
@@ -139,10 +141,14 @@ class Executor:
         cancel_event: threading.Event | None = None,
         seeded_outputs: dict[str, dict[str, Any]] | None = None,
         _dashboard: LoadedDashboard | None = None,
+        _reuse_run: RunResult | None = None,
+        _refresh_sources: set[str] | None = None,
     ) -> RunResult:
-        dashboard = _dashboard or self.ensure_valid(dashboard_id)
+        dashboard = _dashboard or self.ensure_valid(dashboard_id, page_id)
         if dashboard.definition.id != dashboard_id:
             raise ValueError("Prevalidated Dashboard does not match the requested id")
+        if page_id is not None and dashboard.page_id != page_id:
+            raise ValueError("Prevalidated Page does not match the requested id")
         workspace_definition = self.workspace.definition.model_copy(deep=True)
         parameters = resolve_dashboard_query_parameter_state(
             dashboard,
@@ -160,6 +166,31 @@ class Executor:
             targets=targets,
             provided_outputs=set(seeded_outputs),
         )
+        affected: set[str] = set()
+        if _reuse_run is not None:
+            if targets is not None or seeded_outputs:
+                raise ValueError("Selective refresh cannot be combined with targets or Result seeds")
+            ensure_query_run_compatible(dashboard, _reuse_run)
+            if _reuse_run.status not in {"ready", "partial"} or _reuse_run.query_scope != "dashboard":
+                raise ValueError("Selective refresh requires a completed Dashboard Run")
+            if parameters != _reuse_run.query_parameter_state:
+                raise ValueError("Selective refresh must use the applied query parameter state")
+            if set(plan.nodes) != set(_reuse_run.nodes):
+                raise ValueError("Selective refresh requires the same execution plan")
+            requested = set(_refresh_sources or ())
+            if not requested or requested - {f"source:{name}" for name in dashboard.sources}:
+                raise ValueError("Selective refresh requires known Source references")
+            affected = requested & set(plan.nodes)
+            while True:
+                downstream = {name for name, node in plan.nodes.items()
+                              if node.dependencies & affected}
+                expanded = affected | downstream
+                if expanded == affected:
+                    break
+                affected = expanded
+            refresh = True
+        elif _refresh_sources:
+            raise ValueError("Source refresh requires an applied Run to reuse")
         run_id = run_id or f"run_{uuid.uuid4().hex[:16]}"
         store = ArtifactStore(self.workspace.root, run_id)
         result = RunResult(
@@ -167,6 +198,7 @@ class Executor:
             status="loading",
             workspace=workspace_definition.id,
             dashboard=dashboard.definition.id,
+            page_id=dashboard.page_id,
             query_scope="dashboard" if targets is None else "targets",
             query_targets=sorted(plan.targets),
             query_nodes=sorted(plan.nodes),
@@ -213,6 +245,28 @@ class Executor:
             data={"targets": sorted(plan.targets), "query_parameter_state": parameters},
         )
         pending = set(plan.nodes)
+        if _reuse_run is not None:
+            for node_id in sorted(set(plan.nodes) - affected):
+                previous = _reuse_run.nodes[node_id]
+                if previous.status not in {"ready", "empty", "error", "unavailable"}:
+                    raise ValueError(f"Cannot reuse unfinished node: {node_id}")
+                reused = previous.model_copy(deep=True)
+                reused.outputs = {name: store.materialize(descriptor)
+                                  for name, descriptor in previous.outputs.items()}
+                reused.log = store.materialize(previous.log) if previous.log is not None else None
+                reused.result_origin = "result"
+                reused.duration_ms = 0
+                reused.diagnostics = {**reused.diagnostics, "reused_from_run": _reuse_run.run_id,
+                                      "reason": "unaffected_by_action", "query_executed": False}
+                result.nodes[node_id] = reused
+                pending.discard(node_id)
+                for name, descriptor in reused.outputs.items():
+                    result.outputs[f"{node_id}/{name}"] = descriptor
+                emit("node_ready" if reused.status in {"ready", "empty"} else "node_unavailable",
+                     plan.nodes[node_id], duration_ms=0,
+                     data={"origin": "result", "reused_from_run": _reuse_run.run_id,
+                           "outputs": sorted(f"{node_id}/{name}" for name in reused.outputs)})
+            publish_snapshot()
         required_outputs = {
             reference.canonical
             for node in plan.nodes.values()
@@ -889,6 +943,11 @@ class Executor:
         }
         payload = {
             "dashboard": dashboard.definition.id,
+            "page_id": dashboard.page_id,
+            "source_mutation_epoch": (
+                source_mutation_epoch(self.workspace.root, dashboard.definition.id, node.id)
+                if node.kind == "source" else None
+            ),
             "node": node.id,
             "definition": definition.model_dump(mode="json", by_alias=True),
             "query_inputs": project_query_inputs(node.parameter_inputs, parameters),

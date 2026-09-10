@@ -16,6 +16,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
+    JSONResponse,
     RedirectResponse,
     Response,
     StreamingResponse,
@@ -56,6 +57,8 @@ from dataviz.server.hot_reload import (
 )
 from dataviz.state_snapshot import normalize_consumer_revisions
 from dataviz.server.manager import RunManager
+from dataviz.server.actions import ActionService, ActionBusy
+from dataviz.execution.action_journal import ActionConflict
 from dataviz.workspace import load_workspace, validate_workspace
 from dataviz.input_state import initial_input_state
 from dataviz.workspace.controls import (
@@ -103,12 +106,25 @@ class ApiRequest(BaseModel):
 
 class RunRequest(ApiRequest):
     session_id: str = Field(min_length=8, max_length=128)
+    page_id: str | None = None
     query_parameter_state: dict[str, dict[str, Any]] = Field(default_factory=dict)
     refresh: bool = False
 
 
+class ServerActionRequest(ApiRequest):
+    session_id: str = Field(min_length=8, max_length=128)
+    run_id: str = Field(min_length=1, max_length=128)
+    request_id: str = Field(min_length=1, max_length=128)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class ServerActionRefreshRequest(ApiRequest):
+    session_id: str = Field(min_length=8, max_length=128)
+
+
 class ParameterLookupRequest(ApiRequest):
     session_id: str = Field(min_length=8, max_length=128)
+    page_id: str | None = None
     parameter: str = Field(min_length=1)
     parent_states: dict[str, dict[str, Any]] = Field(default_factory=dict)
     search: str = ""
@@ -203,6 +219,7 @@ class ParameterEditorUpdateRequest(ApiRequest):
 def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
     workspace = load_workspace(workspace_path)
     workspace_root = workspace.root
+    standalone = (workspace_root / ".dataviz" / "standalone.json").is_file()
     manager = RunManager(workspace)
     navigation_editor = NavigationEditor(workspace_root)
     parameter_editor = ParameterEditor()
@@ -211,6 +228,15 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
     app.add_middleware(RuntimeAssetNoStoreMiddleware)
     app.state.workspace = workspace
     app.state.manager = manager
+    app.state.action_service = None
+    if standalone:
+        @app.middleware("http")
+        async def protect_standalone_snapshot(request, call_next):
+            if request.url.path.startswith("/api/navigation/") or request.url.path.endswith("/parameter-editor"):
+                return JSONResponse(status_code=409, content={
+                    "error": "Edit the original standalone YAML and restart serve; generated snapshots are read-only.",
+                })
+            return await call_next(request)
     workspace_refresh_lock = threading.RLock()
     change_journal = WorkspaceChangeJournal()
     reload_semantics = WorkspaceSemanticSnapshot.from_workspace(workspace)
@@ -362,10 +388,11 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         dashboard_id: str,
         *,
         preserve_on_error: bool = False,
+        page_id: str | None = None,
     ):
         """Resolve the latest on-disk Dashboard definition for development."""
         snapshot = refresh_workspace(preserve_on_error=preserve_on_error)
-        return snapshot, snapshot.dashboard(dashboard_id)
+        return snapshot, snapshot.dashboard(dashboard_id, page_id)
 
     def checked_session(value: str) -> str:
         if not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", value or ""):
@@ -426,7 +453,11 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         )
 
     def shell_page() -> str:
-        return (PACKAGE_ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+        html = (PACKAGE_ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+        if standalone:
+            html = html.replace('<body>', '<body class="standalone-dashboard">')
+            html = html.replace('id="sidebar-toggle"', 'id="sidebar-toggle" disabled')
+        return html
 
     def shared_cache_path(share_id: str) -> Path:
         if not re.fullmatch(r"[A-Za-z0-9_-]{8,255}", share_id or ""):
@@ -553,6 +584,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             snapshot, dashboard = dashboard_from_disk(
                 dashboard_id,
                 preserve_on_error=True,
+                page_id=manifest.get("page_id"),
             )
         except WorkspaceError as error:
             raise HTTPException(409, "Shared Dashboard is unavailable") from error
@@ -576,6 +608,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 "status_url": "/api/interactions/{interaction_id}",
                 "outputs_url": "/api/interactions/{interaction_id}/outputs",
                 "query_snapshot_available": True,
+                "generations": manager.interaction_generations(checked, dashboard_id, result.run_id),
                 "query_complete": True,
             }
             content = CanvasRenderer(snapshot).render(
@@ -669,8 +702,8 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             headers={"Cache-Control": "no-store"},
         )
 
-    @app.get("/api/workspace")
-    def workspace_summary():
+    def workspace_summary_payload(page_selection: tuple[str, str] | None = None):
+        from dataviz import __version__
         # Dashboard directory names are the navigation labels. Users and AI may
         # copy, rename or remove them without going through this server, so the
         # filesystem must be rescanned before publishing the tree.
@@ -679,6 +712,8 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         dashboards = []
         for entry in snapshot.catalog:
             dashboard = entry.dashboard
+            if page_selection is not None and entry.id == page_selection[0] and dashboard is not None:
+                dashboard = snapshot.dashboard(entry.id, page_selection[1])
             base = {
                 "id": entry.id,
                 "canvas_name": entry.canvas_name,
@@ -690,6 +725,14 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 "message": entry.message,
                 "parent_id": entry.parent_id,
                 "logical_path": entry.logical_path,
+                "page_id": dashboard.page_id if dashboard else None,
+                "page_title": dashboard.title if dashboard else "",
+                "project_title": dashboard.project_definition.title if dashboard and dashboard.project_definition else entry.title,
+                "pages": [
+                    {"id": page.id, "title": page.title or page.id}
+                    for page in (dashboard.project_definition.pages
+                                 if dashboard and dashboard.project_definition else [])
+                ],
             }
             if dashboard is None:
                 dashboards.append(
@@ -806,6 +849,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                         ],
                         "control_panels": _control_panels_presentation(dashboard),
                     },
+                    "server_actions": sorted(dashboard.server_actions),
                     "query_parameters": [
                         {
                             **item.model_dump(mode="json"),
@@ -898,6 +942,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 }
             )
         return {
+            "server": {"package_version": __version__},
             "workspace": snapshot.definition.model_dump(mode="json", by_alias=True),
             "folders": _folder_summary(snapshot.navigation),
             "trash": [item.model_dump(mode="json") for item in snapshot.trash],
@@ -968,6 +1013,19 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             return {"status": "success", "result": result}
         except WorkspaceError as error:
             raise HTTPException(409, error.as_dict()) from error
+
+    @app.get("/api/workspace")
+    def workspace_summary():
+        return workspace_summary_payload()
+
+    @app.get("/api/dashboards/{dashboard_id}/pages/{page_id}")
+    def page_summary(dashboard_id: str, page_id: str):
+        try:
+            _, dashboard = dashboard_from_disk(dashboard_id, page_id=page_id)
+            payload = workspace_summary_payload((dashboard_id, dashboard.page_id))
+            return next(item for item in payload["dashboards"] if item["id"] == dashboard_id)
+        except WorkspaceError as error:
+            raise HTTPException(404, error.as_dict()) from error
 
     @app.post("/api/navigation/folders")
     def create_navigation_folder(request: FolderRequest):
@@ -1073,6 +1131,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 request.query_parameter_state,
                 session_id=checked_session(request.session_id),
                 refresh=request.refresh,
+                page_id=request.page_id,
                 _workspace=snapshot,
             )
         except DatavizError as error:
@@ -1082,6 +1141,64 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             "status": record.status,
             "workspace_revision": change_journal.revision,
         }
+
+    def server_actions() -> ActionService:
+        with workspace_refresh_lock:
+            if app.state.action_service is None:
+                app.state.action_service = ActionService(manager, refresh_workspace)
+            return app.state.action_service
+
+    def require_action_origin(http: Request) -> None:
+        # Session IDs partition browser-tab state; they are not user identity or
+        # authorization. Keep this local/trusted Server API same-origin and never
+        # allow a static file or another website to initiate a write by default.
+        origin = http.headers.get("origin")
+        expected = f"{http.url.scheme}://{http.url.netloc}"
+        if (origin is not None and origin != expected) or http.headers.get("sec-fetch-site") == "cross-site":
+            raise HTTPException(403, "Server Actions require the same Server origin")
+        if http.headers.get("content-type", "").split(";", 1)[0].strip() != "application/json":
+            raise HTTPException(415, "Server Actions require application/json")
+
+    @app.post("/api/dashboards/{dashboard_id}/actions/{action_id}")
+    def invoke_server_action(dashboard_id: str, action_id: str, body: ServerActionRequest, request: Request):
+        require_action_origin(request)
+        try:
+            receipt = server_actions().invoke(
+                dashboard_id=dashboard_id, action_id=action_id,
+                session_id=checked_session(body.session_id), run_id=body.run_id,
+                request_id=body.request_id, payload=body.payload,
+            )
+        except KeyError as error:
+            raise HTTPException(404, "Server Action not found") from error
+        except ActionBusy as error:
+            raise HTTPException(503, error.message) from error
+        except ActionConflict as error:
+            raise HTTPException(409, str(error)) from error
+        except DatavizError as error:
+            raise HTTPException(409, error.as_dict()) from error
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        return JSONResponse(receipt, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/dashboards/{dashboard_id}/actions/{action_id}/{request_id}")
+    def server_action_receipt(dashboard_id: str, action_id: str, request_id: str, session_id: str):
+        try:
+            receipt = server_actions().poll(dashboard_id, action_id, checked_session(session_id), request_id)
+        except KeyError as error:
+            raise HTTPException(404, "Server Action receipt not found") from error
+        return JSONResponse(receipt, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/dashboards/{dashboard_id}/actions/{action_id}/{request_id}/refresh")
+    def retry_server_action_refresh(dashboard_id: str, action_id: str, request_id: str,
+                                    body: ServerActionRefreshRequest, request: Request):
+        require_action_origin(request)
+        try:
+            receipt = server_actions().refresh(
+                dashboard_id, action_id, checked_session(body.session_id), request_id, retry=True,
+            )
+        except KeyError as error:
+            raise HTTPException(404, "Server Action receipt not found") from error
+        return JSONResponse(receipt, headers={"Cache-Control": "no-store"})
 
     @app.post("/api/dashboards/{dashboard_id}/parameter-domains/lookup")
     def lookup_parameter_domain_options(
@@ -1093,7 +1210,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             workspace_watcher.flush()
         checked_session(request.session_id)
         try:
-            snapshot, dashboard = dashboard_from_disk(dashboard_id)
+            snapshot, dashboard = dashboard_from_disk(dashboard_id, page_id=request.page_id)
         except WorkspaceError as error:
             raise HTTPException(409, error.message) from error
         try:
@@ -1133,6 +1250,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         return {
             "run_id": run_id,
             "dashboard_id": record.dashboard_id,
+            "page_id": record.page_id,
             "status": record.status,
             "server_interactive_inputs": record.server_interactive_inputs,
             "snapshot": record.snapshot.model_dump(mode="json", by_alias=True) if record.snapshot else None,
@@ -1163,7 +1281,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             if query_run is not None:
                 try:
                     ensure_query_run_compatible(
-                        snapshot.dashboard(record.dashboard_id),
+                        snapshot.dashboard(record.dashboard_id, record.page_id),
                         query_run,
                     )
                 except (DatavizError, WorkspaceError):
@@ -1172,6 +1290,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 {
                     "run_id": record.run_id,
                     "dashboard_id": record.dashboard_id,
+                    "page_id": record.page_id,
                     "status": record.status,
                     "server_interactive_inputs": record.server_interactive_inputs,
                     "query_parameter_state": (
@@ -1229,7 +1348,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                     "Query Run is unavailable in this browser-tab session",
                     details={"code": "query_run_unavailable"},
                 )
-            dashboard = snapshot.dashboard(query_record.dashboard_id)
+            dashboard = snapshot.dashboard(query_record.dashboard_id, query_record.page_id)
             canonical_control_state = require_canonical_control_state(
                 dashboard.definition,
                 request.control_state,
@@ -1524,11 +1643,13 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         session_id: str,
         run_id: str | None = None,
         frame_id: str | None = None,
+        page_id: str | None = None,
     ):
         try:
             snapshot, dashboard = dashboard_from_disk(
                 dashboard_id,
                 preserve_on_error=True,
+                page_id=page_id,
             )
         except WorkspaceError:
             try:
@@ -1547,11 +1668,13 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 )
             )
         checked = checked_session(session_id)
-        record = manager.get(run_id, checked) if run_id else manager.latest_for(checked, dashboard_id)
+        record = manager.get(run_id, checked) if run_id else manager.latest_for(checked, dashboard_id, dashboard.page_id)
         if run_id and not record:
             raise HTTPException(404, "Run not found in this browser-tab session")
         if record and record.dashboard_id != dashboard_id:
             raise HTTPException(409, "Run belongs to another dashboard")
+        if record and record.page_id != dashboard.page_id:
+            raise HTTPException(409, "Run belongs to another Page")
         if record:
             with record.condition:
                 result = record.snapshot
@@ -1583,6 +1706,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                     title=waiting_title,
                     message="设置参数后，点击 Run。",
                     tone="quiet",
+                    show_title=not bool(dashboard.project_definition and len(dashboard.project_definition.pages) > 1),
                     bridge=_canvas_interaction_bridge(dashboard_id, run_id, frame_id),
                 )
             )
@@ -1592,6 +1716,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 status="loading",
                 workspace=snapshot.definition.id,
                 dashboard=dashboard_id,
+                page_id=dashboard.page_id,
                 query_scope=record.query_scope,
                 query_targets=list(record.query_targets),
                 query_nodes=list(record.query_nodes),
@@ -1614,6 +1739,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 "status_url": "/api/interactions/{interaction_id}",
                 "outputs_url": "/api/interactions/{interaction_id}/outputs",
                 "query_snapshot_available": query_snapshot_available,
+                "generations": manager.interaction_generations(checked, dashboard_id, record.run_id),
                 "query_complete": query_complete,
             }
             if record
@@ -1628,6 +1754,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 interaction=interaction,
                 session_id=checked,
                 frame_id=frame_id,
+                embedded_page=bool(dashboard.project_definition and len(dashboard.project_definition.pages) > 1),
             )
         except DatavizError as error:
             payload = error.as_dict()
@@ -1659,6 +1786,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         if not result:
             raise HTTPException(409, "Dashboard has no completed run")
         try:
+            dashboard = snapshot.dashboard(dashboard_id, result.page_id)
             ensure_query_run_compatible(dashboard, result)
         except DatavizError as error:
             raise HTTPException(409, error.as_dict()) from error
@@ -1904,6 +2032,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                     "schema": "dataviz/shared-cache/v1",
                     "share_id": share_id,
                     "dashboard_id": dashboard_id,
+                    "page_id": result.page_id,
                     "run_id": result.run_id,
                     "created_at": datetime.now(timezone.utc).isoformat(),
                     "url": f"/shared/{share_id}",
@@ -1954,6 +2083,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                         {
                             "schema": ANALYSIS_RESULT_SCHEMA,
                             "status": result.status,
+                            "page_id": result.page_id,
                             "generation": catalog.generation,
                             "target": {
                                 "reference": dashboard_id,
@@ -2064,17 +2194,22 @@ def _canvas_state_page(
     note: str | None = None,
     tone: str = "indigo",
     bridge: str = "",
+    show_title: bool = True,
 ) -> str:
     if tone == "quiet":
+        heading = (
+            "<h1 style='margin:0;font-size:clamp(24px,3vw,34px);font-weight:650;"
+            "letter-spacing:-.025em;line-height:1.2'>"
+            f"{_escape_html(title)}</h1>" if show_title else ""
+        )
+        padding = "clamp(32px,5vw,72px)" if show_title else "clamp(22px,3vw,48px)"
         return (
             "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' "
             "content='width=device-width,initial-scale=1'></head>"
-            "<body style='margin:0;padding:clamp(32px,5vw,72px);color:#18211d;background:#fff;"
+            f"<body style='margin:0;padding:{padding};color:#18211d;background:#fff;"
             "font-family:-apple-system,BlinkMacSystemFont,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,sans-serif'>"
             "<main aria-live='polite' style='max-width:640px'>"
-            "<h1 style='margin:0;font-size:clamp(24px,3vw,34px);font-weight:650;"
-            "letter-spacing:-.025em;line-height:1.2'>"
-            f"{_escape_html(title)}</h1>"
+            f"{heading}"
             "<p style='margin:10px 0 0;color:#69736e;font-size:14px;line-height:1.6'>"
             f"{_escape_html(message)}</p></main>{bridge}</body></html>"
         )

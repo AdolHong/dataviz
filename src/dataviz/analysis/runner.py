@@ -57,6 +57,7 @@ class RunRequest:
 
     workspace: Path
     target: str
+    page_id: str | None = None
     also: tuple[str, ...] = ()
     query_parameter_state: dict[str, Any] = field(default_factory=dict)
     controls: dict[str, Any] = field(default_factory=dict)
@@ -339,6 +340,7 @@ def _seal_failure(
         {
             "schema": ANALYSIS_RESULT_SCHEMA,
             "status": status,
+            "page_id": request.page_id,
             "generation": generation,
             "target": analysis_entry_summary(target),
             "query_parameter_state": query_parameter_state,
@@ -404,6 +406,12 @@ def _result_seed_inputs(request: RunRequest, dashboard, entry) -> tuple[
     with store.lease(result_id):
         manifest = store.load(result_id)
         previous = manifest.get("result") or {}
+        if previous.get("page_id") != dashboard.page_id:
+            raise ValidationFailure(
+                "Input Result belongs to another Page",
+                details={"code": "analysis_from_result_page_mismatch", "result_id": result_id,
+                         "result_page": previous.get("page_id"), "page": dashboard.page_id},
+            )
         if previous.get("status") not in {"ready", "partial"}:
             raise ValidationFailure(
                 "Only a ready/partial Result can provide Transform inputs",
@@ -515,7 +523,7 @@ def _run_dashboard(
             "Dashboard targets do not accept --also, --control, --output, --overlay, or --from-result"
         )
     executor = Executor(loaded)
-    dashboard = executor.ensure_valid(dashboard_id)
+    dashboard = executor.ensure_valid(dashboard_id, request.page_id)
     query_state = _resolve_parameters(loaded, dashboard, request.query_parameter_state)
     compile_plan(dashboard, targets=None)
     target = {
@@ -593,6 +601,7 @@ def _run_dashboard(
     payload: dict[str, Any] = {
         "schema": ANALYSIS_RESULT_SCHEMA,
         "status": execution.status,
+        "page_id": dashboard.page_id,
         "generation": catalog.generation,
         "target": target,
         "query_parameter_state": execution.query_parameter_state,
@@ -684,7 +693,7 @@ def _run_data_target(
 ) -> dict[str, Any]:
     dashboard_id = entry["dashboard"]["id"]
     executor = Executor(loaded)
-    dashboard = loaded.dashboard(dashboard_id)
+    dashboard = loaded.dashboard(dashboard_id, request.page_id)
     variant = None
     if request.overlay is not None:
         reachable_nodes = set().union(
@@ -763,7 +772,7 @@ def _run_data_target(
                 _local_reference(item) for item in [entry, *additional_entries]
             ]
         if variant is None:
-            dashboard = executor.ensure_valid(dashboard_id)
+            dashboard = executor.ensure_valid(dashboard_id, request.page_id)
         compile_plan(dashboard, targets=target_references)
         control_state = None
         declared_runtime = None
@@ -799,7 +808,7 @@ def _run_data_target(
             ),
         )
         if variant is None:
-            dashboard = executor.ensure_valid(dashboard_id)
+            dashboard = executor.ensure_valid(dashboard_id, request.page_id)
         target_references = list(
             dict.fromkeys(
                 value.split("::", 1)[1]
@@ -959,6 +968,7 @@ def _finish_base(
     payload: dict[str, Any] = {
         "schema": ANALYSIS_RESULT_SCHEMA,
         "status": result.status,
+        "page_id": dashboard.page_id,
         "generation": catalog.generation,
         **_target_payload(requested_entry, entry),
         "query_parameter_state": result.query_parameter_state,
@@ -1063,6 +1073,7 @@ def _finish_derived(
         payload: dict[str, Any] = {
             "schema": ANALYSIS_RESULT_SCHEMA,
             "status": "ready",
+            "page_id": dashboard.page_id,
             "generation": catalog.generation,
             **_target_payload(requested_entry, entry),
             "query_parameter_state": run_result.query_parameter_state,
@@ -1198,6 +1209,7 @@ def _finish_derived(
     payload = {
         "schema": ANALYSIS_RESULT_SCHEMA,
         "status": "ready",
+        "page_id": dashboard.page_id,
         "generation": catalog.generation,
         **_target_payload(requested_entry, entry),
         "query_parameter_state": run_result.query_parameter_state,
@@ -1292,6 +1304,13 @@ def run_analysis(
             details={"code": "analysis_run_workspace_mismatch"},
         )
     catalog = ensure_analysis_catalog(workspace, refresh=request.refresh_catalog)
+    requested_dashboard = parse_target_reference(request.target).dashboard
+    selected_page = loaded.dashboard(requested_dashboard, request.page_id)
+    if selected_page.page_id is not None:
+        from dataclasses import replace
+
+        request = replace(request, page_id=selected_page.page_id)
+        catalog = catalog.for_page(loaded, selected_page)
     parsed, requested, entry, additional = _resolve_target_entries(request, catalog)
     if parsed.kind == "dashboard":
         return _run_dashboard(request, loaded, catalog, parsed.dashboard)

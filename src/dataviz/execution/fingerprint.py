@@ -112,6 +112,7 @@ def query_contract_fingerprint(
     payload = {
         "schema": QUERY_CONTRACT_VERSION,
         "dashboard": dashboard.definition.id,
+        "page_id": dashboard.page_id,
         "adapters": dashboard.definition.adapters,
         "query_parameters": [
             item.model_dump(mode="json", by_alias=True)
@@ -141,6 +142,12 @@ def ensure_query_run_compatible(
                 "run_dashboard": result.dashboard,
                 "dashboard": dashboard.definition.id,
             },
+        )
+    if result.page_id != dashboard.page_id:
+        raise ExecutionFailure(
+            "Query Run belongs to another Page",
+            details={"code": "query_run_page_mismatch", "run_page": result.page_id,
+                     "page": dashboard.page_id},
         )
     current_plan = compile_plan(
         dashboard,

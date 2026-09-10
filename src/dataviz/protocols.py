@@ -12,6 +12,7 @@ PARAMETER_MATERIALIZATION_SCHEMA = "dataviz/parameter-materialization/v1"
 QUERY_INSPECTION_SCHEMA = "dataviz/query-inspection/v1"
 PRESENTATION_SCHEMA = "dataviz/presentation/v2"
 SOURCE_SCHEMA = "dataviz/source/v6"
+SERVER_ACTION_SCHEMA = "dataviz/server-action/v1"
 DATASET_TRANSFORM_SCHEMA = "dataviz/dataset-transform/v3"
 INTERACTIVE_TRANSFORM_SCHEMA = "dataviz/interactive-transform/v4"
 DEPENDENCY_CONTRACT_SCHEMA = "dataviz/dependency-contract/v13"
@@ -39,6 +40,7 @@ CURRENT_PROTOCOL_SCHEMAS: dict[str, str] = {
     "query_inspection": QUERY_INSPECTION_SCHEMA,
     "presentation": PRESENTATION_SCHEMA,
     "source": SOURCE_SCHEMA,
+    "server_action": SERVER_ACTION_SCHEMA,
     "dataset_transform": DATASET_TRANSFORM_SCHEMA,
     "interactive_transform": INTERACTIVE_TRANSFORM_SCHEMA,
     "dependency_contract": DEPENDENCY_CONTRACT_SCHEMA,
@@ -58,6 +60,17 @@ CURRENT_PROTOCOL_SCHEMAS: dict[str, str] = {
 
 
 PROTOCOL_BOUNDARIES: tuple[dict[str, Any], ...] = (
+    {
+        "boundary": "authoring-server-action",
+        "schema": SERVER_ACTION_SCHEMA,
+        "owner": "actions/execution.action_process/server.actions",
+        "producer": "Dashboard author",
+        "consumer": "Explicit Server invocation; never the automatic read DAG",
+        "persisted": True,
+        "strictness": "exact-current",
+        "compatibility": "package-lockstep",
+        "conformance_suite": "server-actions,server-action-api",
+    },
     {
         "boundary": "query-inspection",
         "schema": QUERY_INSPECTION_SCHEMA,

@@ -1550,6 +1550,7 @@ def _compile_presentation_roots(
 
 def _complete_option_domains(
     *,
+    registry: dict[str, EffectiveControl],
     option_domains: dict[str, set[str]],
     view_control_contract: dict[str, tuple[EffectiveControl, ...]],
     view_inputs: dict[str, dict[str, str]],
@@ -1613,7 +1614,7 @@ def _complete_option_domains(
                 continue
             required = set(_control_value_fields(target))
             for dependency_key in control_ancestors[key]:
-                ancestor = effective_by_view_and_key.get((view_id, dependency_key))
+                ancestor = effective_by_view_and_key.get((view_id, dependency_key)) or registry.get(dependency_key)
                 if ancestor is not None:
                     required.update(_control_value_fields(ancestor))
             required_field_sets.append(required)
@@ -2234,6 +2235,7 @@ def compile_dashboard_dependencies(
     for control, edges in layer_writers_by_control.items():
         writers_by_control[control].extend(edges)
     option_domains = _complete_option_domains(
+        registry=registry,
         option_domains=option_domains,
         view_control_contract=view_control_contract,
         view_inputs=view_inputs,

@@ -26,6 +26,26 @@ class AdapterResolver:
             self.workspace_root / "auth" / "adapters.yaml",
             self.workspace_root / "auth" / "adapters.local.yaml",
         )
+        standalone = self.workspace_root / ".dataviz" / "standalone.json"
+        if standalone.is_file():
+            environment = json.loads(standalone.read_text(encoding="utf-8")).get("auth")
+            if environment:
+                selected = Path(environment)
+                if selected.is_file() and selected.name == "workspace.yaml":
+                    selected = selected.parent
+                if selected.is_dir():
+                    config_root = selected / "auth" if (selected / "workspace.yaml").is_file() else selected
+                    adapter_paths = (config_root / "adapters.yaml", config_root / "adapters.local.yaml")
+                    self.workspace_root = (
+                        config_root.parent if config_root.name == "auth" else config_root
+                    )
+                else:
+                    adapter_paths = (selected,)
+                    self.workspace_root = (
+                        selected.parent.parent if selected.parent.name == "auth" else selected.parent
+                    )
+                if not any(item.is_file() for item in adapter_paths):
+                    raise SourceFailure("Explicit Adapter environment has no configuration files")
         for path in adapter_paths:
             if not path.exists():
                 continue
@@ -306,7 +326,7 @@ class AdapterResolver:
     def runtime_config(
         self, name: str, bindings: dict[str, str] | None = None
     ) -> dict[str, object]:
-        """Resolve one Adapter for a trusted Python Source without persisting secrets."""
+        """Resolve one Adapter for trusted server Python without persisting secrets."""
         actual_name, adapter = self.resolve(name, bindings)
         username = (
             self._environment_value(
@@ -333,7 +353,11 @@ class AdapterResolver:
             secrets[key] = value
 
         root: str | None = None
-        if adapter.root:
+        if adapter.type == "file":
+            # Snapshot the same default/auth-relative base used by resolve_path;
+            # a worker must never reconstruct it from its own working directory.
+            root = str(self.resolve_path(name, ".", bindings))
+        elif adapter.root:
             root_path = Path(adapter.root)
             if not root_path.is_absolute():
                 root_path = self.workspace_root / root_path

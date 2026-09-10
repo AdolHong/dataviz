@@ -3,6 +3,8 @@ from __future__ import annotations
 from difflib import get_close_matches
 from typing import Any
 
+from dataviz.action_examples import annotation_recipe
+
 from dataviz.protocols import (
     CURRENT_PROTOCOL_SCHEMAS,
     DASHBOARD_SCHEMA,
@@ -38,6 +40,18 @@ AUTHORING_ROUTE_ALIASES = {
 }
 
 AUTHORING_DOCUMENTS: dict[str, dict[str, Any]] = {
+    "server-action-authoring": {
+        "requires": ["server-action", "adapter"],
+        "purpose": "Implement explicit server Python commands without adding writes to the read DAG.",
+        "path": "Explicit invocation → Python + external bindings → receipt → selected Source/View refresh",
+        "steps": [
+            "Read dataviz docs server-actions for the Python context, resource, receipt and refresh contracts.",
+            "Generate server-action.python; implement business validation, transactions and JSON return values.",
+            "Declare aliases and allowed invalidations, then add the Action YAML to Dashboard server_actions.",
+            "Validate without writes; test against isolated external databases/files before authorizing real mutations.",
+            "Use the existing Server applied Run and one request ID. Query status or retry refresh without repeating Python.",
+        ],
+    },
     "minimal-dashboard": {
         "requires": ["adapter", "source", "view", "layout"],
         "purpose": "Build a declarative Dashboard without browser-side state or custom code.",
@@ -96,7 +110,7 @@ AUTHORING_DOCUMENTS: dict[str, dict[str, Any]] = {
     geography: dataset:map-geography/main
 """,
             "javascript": "const stores = descriptor.inputs.main;\nconst geography = descriptor.inputs.geography;",
-            "rule": "input is the primary alias main; inputs adds named relations. descriptor.rows is only the primary-input shortcut.",
+            "rule": "input is the primary alias main; inputs adds named relations. For a table, descriptor.inputs.main and descriptor.rows share the processed rows. Additional aliases receive only filters explicitly bound to them; original Outputs are unchanged.",
         },
     },
     "map-view": {
@@ -138,7 +152,7 @@ AUTHORING_DOCUMENTS: dict[str, dict[str, Any]] = {
         "steps": [
             "Put every candidate and parent field in one immutable Base table output.",
             "Declare only the child's direct parent in depends_on.",
-            "Use initial for Select startup behavior; do not use default.",
+            "Use initial for post-query Control Select startup behavior; Query Parameters use default instead.",
             "Inspect the compiled control order before opening a browser.",
         ],
         "minimal_example": """controls:
@@ -214,7 +228,7 @@ sections:
         "common_errors": [
             "Adding an Interactive Transform for a direct include filter.",
             "Filtering on a field absent from the View's table input.",
-            "Using default on a Select instead of initial.",
+            "Using default on a post-query Control Select instead of initial; Query Parameters do use default.",
             "Omitting empty policy; passthrough and match_none are intentionally different.",
         ],
         "validation_commands": [
@@ -289,6 +303,18 @@ export: {mode: interactive}""",
 }
 
 AUTHORING_ROUTES: dict[str, dict[str, Any]] = {
+    "server-actions": {
+        "summary": "Explicit trusted server Python computation or writeback; UI-independent and separate from automatic reads.",
+        "inherits": [], "documents": ["server-action-authoring"],
+        "scaffolds": ["server-action.python"],
+        "commands": [
+            "dataviz docs server-actions --format json",
+            "dataviz schemas server-action --full --format json",
+            "dataviz scaffold server-action.python --id <action> --format json",
+            "dataviz actions invoke --help",
+        ],
+        "excludes": ["automatic-write-retry", "annotation-specific-dsl"],
+    },
     "minimal": {
         "summary": "Default path for a simple declarative Dashboard.",
         "inherits": [],
@@ -660,33 +686,211 @@ DOC_PATHS: dict[str, dict[str, Any]] = {
 
 
 DOC_TOPICS: dict[str, dict[str, Any]] = {
+    "interaction-stability": {
+        "summary": "品类切片、商品选择变 null、级联候选为空、右图漏刷、刷新后 409：联动稳定性诊断。",
+        "checks": [
+            "先看 canonical Control state，不用手动高亮推断选择成功。点击被接受后，原生高亮与消费 View 应使用同一份选择。",
+            "depends_on 声明父 Control；级联字段优先使用该 View 已有 filter 绑定，否则使用父 Control 的 field/path_fields（未指定时为 id）。不需要为了候选级联而给所有 View 补父过滤。字段应显式映射，平台不猜业务关系。",
+            "声明过的候选 schema 缺少父字段时 validate 报 control_dependency_field_unknown；没有静态 schema 时查看运行时 option_domain，不能把 field_mismatch 当成合法空选。",
+            "Interactive 输出同步登记 value/kind/schema；值未变但错误恢复或元信息变化，也必须更新相关消费者。可选输出消失时一起清理；不使用多余 mode:value 绑定绕过漏刷。",
+            "同 Run 的 Canvas 重载从服务端 generation 水位接续，仍拒绝旧 generation。不自动重试过期写入，不重跑 Query 来修正本地选择。",
+        ],
+        "diagnostics": {
+            "selection": "window.dataviz.control.state(canonicalKey)",
+            "domain": "window.datavizRuntime.controlDomainEvidence.get(canonicalKey)",
+            "domain_states": "pending=输入未到；field_mismatch=字段映射失败；error=上游失败；empty=合法候选为空；ready/static=可用。sources 带 reference、rows、missing_fields。关系无法解析时保留原选择，不伪装成空候选。",
+            "updates": "viewRefreshEvidence / viewRenderEvidence：核对 affected views、query_executed、control_revisions、binding_revisions；刷新失败与保存失败分开处理。",
+        },
+        "commands": ["dataviz docs controls --format json", "dataviz docs renderer-selection --format json", "dataviz docs action-save --format json"],
+    },
+    "renderer-selection": {
+        "summary": "Custom Renderer 行高亮不更新、选错行、刷新后才正确：controlBinding.state 快照、选择订阅和 update 生命周期。",
+        "rules": [
+            "controlBinding.state 是本次 descriptor 的 canonical state 快照，不是实时 getter。update(context, descriptor, state) 会收到新的 context。",
+            "长期事件处理器通过 state.context.controlBinding.emit 使用最新 context；update 开头替换 state.context。不要一直读取 mount 时闭包里的 context。",
+            "control_binding 的发起视图需要随 canonical 选择刷新反馈，不过滤自己的候选行；额外只读订阅用 control_inputs: {selected: {mode: value, control: dashboard.item}}。数据行不变也应收到 update。",
+            "mode:value 是依赖声明，不会自动往 context 增加 control_inputs 字段。绑定发起视图读 context.controlBinding.state；其他订阅者可通过公开 window.dataviz.control.state(canonicalKey) 读取当前状态。",
+            "高亮依据已提交状态而非刚点击的原始值；处理 clear/reset、类型差异、多选 intent、拒绝和 superseded。优先用稳定业务 ID，不用展示 label 或行号作为身份。",
+            "只更新现有行的高亮和 aria-selected，不必重建整表；Control 更新不应触发 Query，无关视图不重绘。",
+        ],
+        "diagnostics": {
+            "current": "window.dataviz.control.state(canonicalKey).revision",
+            "scheduled": "datavizRuntime.viewRefreshEvidence.get(viewId).control_revisions：显式消费状态的调度快照；query_executed 说明是否查库。",
+            "rendered": "datavizRuntime.viewRenderEvidence.get(viewId)：phase/generation/binding_revisions 记录最近完成的渲染与 binding revision。未被调度时保留上次证据，不伪造一次 update。",
+            "interpretation": "当前 revision 新于 rendered 时检查是否订阅/是否等待或 superseded；revision 一致但 DOM 高亮错误时检查 Renderer 的旧闭包或行 ID 比较。不要只凭现象认定是 Plotly 或浏览器 repaint。",
+        },
+        "javascript_example": """mount(context, descriptor) {
+  const state = {context, rows:[]};
+  // Create row DOM once. A handler uses state.context, not captured context:
+  // button.onclick = () => state.context.controlBinding.emit('select', row);
+  this.update(context, descriptor, state);
+  return state;
+},
+update(context, descriptor, state) {
+  state.context = context;
+  const selected = context.controlBinding.state.value; // single-select example
+  for (const {node, id} of state.rows) {
+    node.setAttribute('aria-selected', String(Object.is(id, selected)));
+  }
+  return state;
+}""",
+        "commands": ["dataviz docs controls --format json", "dataviz docs --task custom-renderer --format json"],
+    },
+    "action-save": {
+        "summary": "保存慢、人工标注、checkbox 保存 SQLite、保存后局部刷新：完整示例、onProgress 保存确认与耗时诊断。",
+        "recipe": annotation_recipe(),
+        "progress_contract": {
+            "onProgress(receipt)": "先收到本地 queued（含 request_id、初始 position、submitted:false）和 submitting 状态，再接收服务端完整回执，可重复。queued 不代表已保存。status=succeeded 才确认成功；refresh.status=ready 只表示服务端完成。快速刷新也会在浏览器更新前发送成功 progress。",
+            "连续保存": "invoke/refresh 共用每个 Canvas 的内存串行队列，最多等待 50 条；payload 入队时复制，请求 ID 独立，status 查回执不排队。执行超时从发送开始。不会合并写入、自动重试或改写版本号。Action 刷新的新 Run 可以接续；切换查询或关闭 Canvas 时未发送请求取消。action_not_submitted 表示未提交，不是保存结果未知。前一条结果不确定时先查回执，剩余排队请求取消。",
+            "invoke_resolves": "invoke 继续等待浏览器同步；检查 refresh.status，failed/superseded 不等于页面已同步。",
+            "error.receipt": "status=succeeded 时显示已保存／同步失败，使用同一 request ID 调 actions.refresh；failed/unknown 不保证回滚，不能自动换 ID 再保存。",
+            "superseded": "新 Query 已接管；写入仍可成功，但不要用旧响应覆盖新页面。",
+        },
+        "timings": {
+            "receipt.timings": "毫秒：preparation_ms=资源/代码快照和回执声明；worker_startup_ms=派发到 worker 入口（含 spawn/import）；code_load_ms=恢复快照及导入；python_execute_ms=全部 execute 业务代码；dispatch_to_outcome_ms 包含启动/执行/结果处理/IPC，不与子阶段相加。缺失阶段不当作 0。",
+            "receipt.refresh.timings": "scheduling_ms=解析/计划及启动；nodes 提供 duration_ms/status/result_origin，含 Source 和 Transform。result 表示复用，其历史耗时不算本次执行；并行节点耗时不能简单相加。",
+            "receipt.client_timings": "浏览器响应附加，不持久化：write_confirmed_ms=首次观察成功；refresh_roundtrip_ms=刷新数据传输及更新；data_prepare_ms=解码准备；runtime_update_ms=输出传播及渲染 Promise；total_ms=调用总时间。不是精确网络或屏幕 paint 时间。",
+            "limits": "ActionService 容量满直接拒绝，不排队；未单独测量 HTTP/Run 队列或数据库事务。不能把 Python 约 1 秒解释为 SQLite 写入约 1 秒。",
+        },
+        "readiness": [
+            "GET /api/workspace 的 server.package_version 是运行中服务版本；dataviz version 只证明 CLI 环境。升级后重启旧服务并刷新页面。",
+            "确认页面 Run 成功、context.actions.available=true，且 /api/workspace 的 Dashboard server_actions 包含动作 ID。",
+            "inspect context --focus action:<id> 检查资源别名、代码和刷新目标；validate 不证明实际数据库可连接或可写。",
+            "相对 SQLite/文件路径基准见 docs standalone 和 server-actions；不要向前端输出凭据或任意服务器路径。",
+            "保存慢保留 request ID，actions status 查看回执与 refresh.run_id 对应节点耗时；不要重新 invoke 测速。",
+        ],
+        "commands": ["dataviz docs server-actions --format json", "dataviz docs standalone --format json"],
+    },
+    "server-actions": {
+        "summary": "Server Action：显式调用服务端 Python，完成 writeback、标注、数据库或文件 CRUD 与业务计算；保存后局部刷新，独立于只读 Source/Transform。",
+        "commands": [
+            "dataviz docs action-save --format json",
+            "dataviz schemas server-action --full --format json",
+            "dataviz scaffold server-action.python --id save-record --format json",
+            "dataviz inspect context <workspace> <dashboard> --focus action:<action> --format json",
+            "dataviz validate <workspace> --dashboard <dashboard-id> --strict",
+            "dataviz actions invoke <dashboard> <action> --server http://127.0.0.1:8080 --session-id <session> --run-id <run> --request-id <request> --payload-file payload.json",
+            "dataviz actions status <dashboard> <action> --server http://127.0.0.1:8080 --session-id <session> --request-id <request>",
+            "dataviz actions refresh <dashboard> <action> --server http://127.0.0.1:8080 --session-id <session> --request-id <request>",
+        ],
+        "example": {"server_actions": [{
+            "id": "save_annotation", "code": "actions/annotations.py",
+            "entrypoint": "execute",
+            "resources": {"annotations": "annotations_database"},
+            "invalidates": ["source:annotations", "view:details"],
+        }]},
+        "python_context": {
+            "request_id": "本次显式调用的请求 ID；重查回执和刷新重试使用同一个 ID。",
+            "payload": "JSON 对象；Python 必须校验业务主键、允许操作、值域和并发版本。",
+            "resources.config(alias)": "返回外部 Adapter 绑定的配置，仅可信服务端 Python 使用；不得返回凭据。",
+            "resources.path(alias, relative_path)": "解析声明的文件资源根目录内路径；不要从 payload 接受任意服务器路径或 Adapter 名。",
+            "invalidate(reference)": "成功后请求刷新已声明的 source:<id> 或 view:<id>；允许集合不会自动全部执行。",
+            "return": "execute(context) 返回 JSON 对象；SQL 参数绑定、事务、CRUD 和业务计算由 Python 负责。",
+        },
+        "renderer_api": {
+            "context.actions.available": "仅连接可用 Server 且有已应用 Run 时调用；portable HTML 不提供写入。",
+            "context.actions.invoke(action, payload, options)": "options 可含 requestId 和 onProgress；返回包含写入结果及独立刷新状态的回执。",
+            "context.actions.status(action, requestId)": "查询回执，不重跑 Python。",
+            "context.actions.refresh(action, requestId)": "仅重试刷新，不重复已保存的业务写入。",
+        },
+        "http_api": [
+            "POST /api/dashboards/{dashboard}/actions/{action}: session_id, run_id, request_id, payload。run_id 必须是当前已完成的 applied Run。",
+            "GET /api/dashboards/{dashboard}/actions/{action}/{request_id}?session_id=...：查询回执与刷新进度。",
+            "POST /api/dashboards/{dashboard}/actions/{action}/{request_id}/refresh: session_id。",
+        ],
+        "rules": [
+            "CLI 是同一 Server API 的显式客户端，不另起本地执行引擎。run-id 是 Server 当前已完成的 Run，不是磁盘 Result ID；没有可用 Run 时不会为了调用 Action 自动查询数据库。",
+            "CLI 输出 JSON 回执；running 表示继续查询 status，而非已完成。--timeout 仅控制等待，不取消服务端写入。CLI 不自动重试、不跟随重定向，也不使用环境代理。",
+            "Scaffold 是默认拒绝执行的 Python 起点；需实现业务逻辑并绑定资源。校验成功不代表已实现写入。",
+            "这是通用显式命令，不是 checkbox 专用协议；新增、修改、删除、计算都由 Dashboard-local Python 实现。",
+            "Action 开发和静态校验不授权执行真实写入；必须先确认用户授权的目标与操作范围。",
+            "resources 将代码别名映射到外部 Adapter/auth；数据库和可变文件不放入 standalone 内容快照，也不嵌入 Dashboard 凭据。",
+            "同一请求 ID 与相同调用返回已有回执；不同 payload 或 applied Run 复用 ID 会冲突。不同请求 ID 不保证业务去重。",
+            "超时、断线或 Python 失败不代表事务已回滚。结果 unknown 时核对回执与业务数据，不得自动换 ID 重试写入。",
+            "source 失效只重算该 Source 及下游，复用未受影响分支，生成新 Run；view 失效仅重绘当前输入，不隐式查库。",
+            "刷新使用已提交查询状态，不使用未提交草稿；旧 Run 的 Action 不覆盖新查询。",
+            "保存成功但刷新失败必须分别展示；error.receipt 可证明保存结果，刷新重试不重跑 Python。",
+            "可信 Python 不是安全沙箱；资源声明不是用户认证。当前 Server 仍是可信本地服务，不应无认证暴露写入端点。",
+            "浏览器修改请求要求同源和 JSON；没有 Origin 的非浏览器客户端允许调用，这不是认证机制。",
+        ],
+    },
+    "pages": {
+        "summary": "多个分析页面、第二条分析路径、不同参数：Dashboard 内统一代码，Page 独立 Query 参数、运行结果和 Control；简单看板无需 pages。",
+        "status": "实施中：模型、CLI、Server 按页执行、报告、整项目 Bundle 与浏览器 Page 导航已接入；基础切页/恢复 Chromium 专项通过，跨页失效与热更新隔离仍待完成和验收。",
+        "rules": [
+            "没有 pages 时继续在顶层声明 query_parameters、controls、sections、views；不需要默认 Page 包装层。",
+            "需要第二条分析路径时，将参数与展示移入 pages，每页声明 id/title/query_parameters/controls/sections/views/layout。",
+            "sources/dataset_transforms/interactive_transforms/parameter_domains/server_actions 的实现仍由 Dashboard 统一管理。Page.server_actions 是本页可调用的 Action ID 列表。",
+            "每页依赖从 View 与候选入口推导，不维护另一份 Source 执行白名单。同名参数没有共享状态。",
+            "run --page 选择分析入口；Result 封存 Page 身份，report Result 不重新查询，也不允许改投其他页。",
+            "--page 始终可省略：没有 pages 时直接运行顶层看板；只有一页时选中该页；多页时默认第一条声明的 Page，不运行所有页。返回的 page_id 记录实际选择；自动化需要固定入口时显式传 --page。",
+            "一个 YAML 仍可完成单页或多页看板；共享代码只在本 Dashboard 内，不引入软链接或跨 Dashboard Source 依赖。",
+        ],
+        "commands": [
+            "dataviz run <workspace-or-yaml> <dashboard> --page history --format json",
+            "dataviz run <workspace> <dashboard>::view:details --page history --format json",
+            "dataviz report <workspace> <result-id> --output history.html",
+        ],
+        "related": ["standalone", "dataset-transforms", "controls"],
+    },
+    "standalone": {
+        "summary": "单文件 standalone YAML 看板：内嵌 SQL/Python/JS、小型 Renderer，显式外部 auth；无需维护 Workspace 目录。",
+        "commands": [
+            "dataviz validate sales.yaml --auth connections.yaml --strict",
+            "dataviz run sales.yaml --auth connections.yaml --format json",
+            "dataviz serve sales.yaml --auth connections.yaml",
+            "dataviz report sales.yaml <result-id> --auth connections.yaml --output report.html",
+        ],
+        "example": {
+            "schema": DASHBOARD_SCHEMA, "id": "sales", "title": "Sales",
+            "sources": [{"id": "sales", "type": "sql", "adapter": "local",
+                         "code": {"inline": "select 42 as revenue"},
+                         "outputs": {"main": {"kind": "table"}}}],
+            "views": [{"id": "total", "template": "metric", "input": "source:sales/main", "value": "revenue"}],
+        },
+        "adapter_example": {"adapters": {"local": {"type": "sqlalchemy", "url": "sqlite:///:memory:"}}},
+        "rules": [
+            "validate/run/serve/report 接受 YAML 文件或含 dashboard.yaml 的目录；已有 Workspace 用法不变。",
+            "--auth 显式选择 Adapter YAML、auth 目录或已有 Workspace（也可指定 workspace.yaml）；不自动搜索上级目录，不在看板内放凭据。",
+            "auth 目录读取 adapters.yaml 与 adapters.local.yaml；外部 Workspace 只提供 Adapter 环境，不导入其 Source、Asset 或其他 Dashboard。",
+            "Adapter 中相对 SQLite/文件路径以配置目录为基准；标准 auth 目录中的配置以 auth 的父目录为基准。指定同一环境的 Workspace、auth 目录或配置文件时路径一致；仅指定文件不会额外加载 local overlay。",
+            "独立输入中 code 可为路径或严格的 {inline: text}；canvas.scripts/styles 可混用路径与 inline。SQL、Python 与 browser-js 仍由原有 Runtime 执行；只运行可信代码。",
+            "这是独立输入的编译便利语法：先转为普通 Workspace，再执行现有 Schema 校验；Workspace 文件模式和 schemas 输出仍使用 code 文件路径。",
+            "引用文件必须位于 YAML 所在目录内；仅携带已声明文件。相邻 presentation.yaml 和其声明资源会一并加载；未声明的动态文件读取不保证可用。",
+            "快照与 Result 位于 YAML 同目录的 .dataviz/standalone/<hash>；不要手改生成目录。run 的 next_actions 提供 Result 检查命令。",
+            "源文件或声明依赖变化产生新快照；导出旧 Result 时使用其 next_actions 中的原快照路径，不重新编译改过的 YAML。",
+            "report 提供 result-id 时不重新查询；省略 target 时会运行该 Dashboard 再导出。",
+            "serve 为单看板快照，不显示 Sidebar；编辑原 YAML 或依赖后重启。生成快照不支持页面编辑写回。",
+            "凭据文件不复制到快照或报告；私有元数据仅保存外部路径。运行时继续读取外部配置并复用既有脱敏边界。",
+            "共享 Workspace Asset、Catalog 管理或常规热更新使用完整 Workspace；可迁入生成的标准 Dashboard 文件，不迁移私有元数据。",
+        ],
+    },
     "quickstart": {
         "summary": "从空环境到可验证 Dashboard、不可变 Result 和 HTML 报告的最短当前路径。",
         "workspace_start": {
+            "single_file": "dataviz docs standalone --format json — 单看板可从一个 YAML 开始，无需先 init Workspace。",
             "starter_workspace": "dataviz init <workspace>",
             "focused_scaffold": "dataviz scaffold minimal --id <dashboard-id> --output <workspace>",
             "rule": "init 直接生成可运行的 hello Dashboard；需要特定结构或能力时，再选择对应 Scaffold recipe。",
         },
         "commands": [
-            "dataviz version",
-            "dataviz docs --task minimal --format json",
-            "dataviz scaffold minimal --id <dashboard-id> --output <workspace>",
-            "dataviz tree <workspace>",
-            "dataviz inspect context <workspace> <dashboard-id> --focus view:<view-id> --format json",
-            "dataviz inspect dependencies <workspace> <dashboard-id> --format json",
-            "dataviz inspect query <workspace> <dashboard-id> --source <source-id> --query-param key=value --format json",
-            "dataviz validate <workspace> --dashboard <dashboard-id> --format json",
-            "dataviz run <workspace> <dashboard-id> --query-param key=value",
-            "dataviz result inspect <workspace> <result-id>",
-            "dataviz result show <workspace> <result-id> '<dashboard-id>::source:<id>/<output>'",
-            "dataviz report <workspace> <result-id> --output report.html",
-            "dataviz run <workspace> '<dataset-output>' --from-result <result-id>",
-            "dataviz visual-check <workspace> <dashboard-id> --target both",
-            "dataviz serve <workspace> --port 8080",
+            "dataviz docs standalone --format json",
+            "dataviz validate sales.yaml --auth connections.yaml --strict",
+            "dataviz run sales.yaml --auth connections.yaml --format json",
+            "dataviz serve sales.yaml --auth connections.yaml",
         ],
+        "next_steps": {
+            "query_parameters": "dataviz docs query-parameters --format json",
+            "local_interaction": "dataviz docs --task interactive --format json",
+            "second_analysis_page": "dataviz docs pages --format json",
+            "inspect_or_export_result": "dataviz docs results --format json",
+            "debug_or_verify": "dataviz docs workflow --format json",
+        },
         "rules": [
+            "先复制 standalone 的最小 YAML 与外部连接配置；不要求 pages、sections、空 controls 或手工创建 Workspace。没有外部连接需求时可省略 --auth。",
+            "serve 用于打开交互页面，不代表已应用前一步 CLI Run；在页面点击 Run 执行查询。查看已有 Result 而不重查时，按 results 文档导出报告。",
             "不要从自定义 HTML/CSS/JS 开始；先用默认 Renderer 证明数据契约。",
-            "Adapter 只在 Workspace 定义；Dashboard 只写逻辑别名，不保存账号密码。",
+            "Adapter 由 Workspace 或 standalone --auth 显式提供；Dashboard 只写逻辑别名，不保存账号密码。",
             "简单看板不要提前加载 Control、Interactive Transform 或 Custom Renderer 契约。",
             "所有 Output 引用必须写完整，例如 source:sales/main、dataset:model/trend、interactive:simulation/result。",
             "每次修改后运行 validate；未知字段、旧 schema 和不完整引用直接失败。",
@@ -713,11 +917,13 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "dataviz result export <workspace> <result-id> '<dashboard-id>::source:<source-id>/<output>' --to <destination>",
         ],
         "workflow": [
+            "已知道看板时直接 run <workspace> <dashboard>，或 run sales.yaml --auth connections.yaml；不必先学习 Catalog 或 Target Reference。",
             "不知道物理引用时先 catalog search；需要全局概览时使用 catalog list。",
             "执行前用 catalog describe 查看参数闭包、默认值、lineage、语义和可复制的 run 命令。",
             "run 只执行一次并原子封存 Result；预览行数不限制已保存的完整 Artifact。",
             "后续分页、检查、导出和 Evidence 都消费 result_id，不重新查询。",
             "只有需要临时替换 SQL、代码或 File 输入时才增加 --overlay。",
+            "单页无需 --page；显式多页省略时只运行第一条声明的 Page，返回 page_id。需要其他分析入口时才加 --page <id>；Result 的查看和导出沿用已封存 Page，不重复指定。",
         ],
         "do_not": [
             "不要猜测已移除的短 alias；复制 Catalog 返回的 canonical Target Reference。",
@@ -840,7 +1046,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "dataviz scaffold --list --format json",
         ],
         "rules": [
-            "未知字段或能力先用 --search 读取带 topic/path 的正文片段，再打开命中 topic；不要先搜索安装包源码。",
+            "未知字段或能力先用 --search 读取专题与 --task 文档中带 topic/path 的正文片段，再执行结果的 command（可能是专题或任务入口）；不要先搜索安装包源码。多关键词有完整命中时优先返回完整匹配，否则保留部分匹配；它是关键词搜索，不是语义问答。",
             "--component 接受 control.select 等 canonical id，也接受可唯一解析的 select 短名；歧义或拼写错误返回可直接复制的候选命令。",
             "minimal 只披露 Adapter → Source → View → Layout。",
             "只有任务需要查询后交互状态或计算时才进入 interactive。",
@@ -1320,6 +1526,7 @@ timeout_seconds: 120
         ],
     },
     "interactive-transforms": {
+        "browser_payload": "浏览器只传输 View（含命名输入、Map Layer、repeat）、Canvas、候选域和活动 browser-js 真正需要的 Base Outputs。仅供 server-python 消费的全量输入留在 Run Artifact，初始页面与实时 Output 事件仅传就绪信息；服务端仍读取并校验完整输入。相同 Output 同时被浏览器消费时仍须传输并受 max_embedded_rows/bytes 限制，不要通过提高上限掩盖错误的消费边界。此优化不改变 HTML 对 server-python 的执行限制。",
         "summary": "Interactive Transform 在不可变 Query Run 上按编译后的 Control consumer bindings 重算 Derived Output。",
         "schema": INTERACTIVE_TRANSFORM_SCHEMA,
         "common_fields": ["runtime", "inputs", "query_inputs", "control_inputs", "trigger", "export", "outputs"],
@@ -1469,8 +1676,10 @@ timeout_seconds: 120
             "Single Select 不出现 All、Select all 或 Invert；optional + clearable 的单选允许 Clear，required single 始终恰好一个值且拒绝 clearable。",
             "Multi Select 的关闭态摘要按有效选择规模表达，而不机械暴露 compact state：all/all_available 显示‘全部’；不超过 max_tag_count（默认 2）时显示具体值；不超过 20 项时显示‘已选 N 项’；更大集合仅在 exclude 一侧更短时显示‘全部，排除 N 项’，否则显示已选数量。菜单中 Select all 是动作，Revert 只撤销本次打开后的编辑；Query Card 全局 Revert 仍恢复上次 committed Query snapshot。",
             "Control canonical state 是 {value, revision, intent?}；候选型多选可带 all_available/explicit intent，自由集合只保存 list value。",
+            "mode: filter 必须同时解释 value 与 intent：multiple_select 的 all_available 按已解析的候选值过滤，不等于无条件放行整个 Output；compact value=[] 的静态候选仍受 choices 白名单约束，非静态 compact 全选保持通过。empty: passthrough|match_none 解释 explicit 空集。原生 View、Interactive Transform 与 Portable/Web Component Runtime 遵守同一规则。",
             "Multi Select 和 Date Range 用 required 控制是否允许空值；clearable 可显式关闭清空操作，required: true 与 clearable: true 会被 validate 拒绝。",
             "候选依赖用 depends_on 声明直接 Control 父节点；Compiler 计算传递闭包和拓扑顺序。",
+            "父字段可从 Control.field/path_fields 解析，不要求每个消费 View 重复声明父 filter。候选异常与空域诊断见 dataviz docs interaction-stability。",
             "Dashboard Control 只可依赖 dashboard.*；Section 可再依赖本 section.*；View 可再依赖自身 view.*。",
             "上游域改变时，下游 all_available 跟随全部新候选；explicit 优先保留有效交集，原非空选择完全失效才恢复 initial，用户主动空集保留。",
             "Select 必须显式声明 options.mode；static 表示封闭业务枚举，infer 表示从数据推导候选域。",
@@ -1504,6 +1713,7 @@ timeout_seconds: 120
                 "主 control/field 决定该 View 的 selected projection；writes 只携带同一手势的上下文，不改变主高亮语义。",
                 "The bound View receives candidate rows after ancestor Controls but before the primary target Control filters itself.",
                 "A View event can only dispatch select, select_many, clear or reset through context.controlBinding.emit; clear is explicit empty while reset restores the declared initial policy.",
+                "For controlBinding.state snapshots, current-context handlers and row highlighting read: dataviz docs renderer-selection --format json.",
                 "Runtime 先验证全部 target 再一次提交；任一字段、类型、scope、generation 或 single-value cardinality 无效都会拒绝整次 action，不产生 partial state。",
                 "select_many 对每个目标稳定去重；single-value Control 获得多个不同值时拒绝，不能猜 first/last。clear/reset 原子作用于主目标和全部 writes。",
                 "Unknown targets, duplicate targets from one View, narrower reverse-scope candidate dependencies, ambiguous aggregate mappings, unsupported Renderers and missing fields fail validation; multiple valid Views may write the same Control.",
@@ -1649,7 +1859,7 @@ control_components:
     geography: dataset:map-geography/main
 """,
             "javascript": "const stores = descriptor.inputs.main;\nconst geography = descriptor.inputs.geography;",
-            "rule": "input 是主 Named Output，inputs 中每个 alias 是额外 Named Output；不要为了让 Renderer 接收多张表而拼接 row_kind 混合表。descriptor.rows 只保留主输入捷径。",
+            "rule": "input 是主 Named Output，inputs 中每个 alias 是额外 Named Output；不要为了让 Renderer 接收多张表而拼接 row_kind 混合表。表格主输入的 descriptor.inputs.main 与 descriptor.rows 使用同一份处理后数据；额外输入只应用 control_inputs 中明确绑定给该 alias 的过滤，不修改原始 Output。",
         },
         "chart_service": {
             "api": "Custom Renderer 使用 context.charts.plotly 的 mount/update/resize/dispose，输入是 Plotly data/layout/config。",
@@ -2409,19 +2619,36 @@ def _documentation_path(path: tuple[str, ...]) -> str:
 
 def search_documentation(search: str, *, limit: int = 20) -> dict[str, Any]:
     """Return ranked, bounded leaf snippets instead of complete matching topics."""
+    if limit < 1:
+        raise ValueError("Documentation search limit must be positive")
     query = " ".join(search.split())
     if not query:
         raise ValueError("Documentation search requires a non-empty query")
-    terms = tuple(part.casefold() for part in query.split())
+    terms = tuple(dict.fromkeys(part.casefold() for part in query.split()))
     redirected_topic = resolve_doc_topic(query.casefold().replace(" ", "-"))
     matches: list[dict[str, Any]] = []
-    for topic, definition in DOC_TOPICS.items():
-        summary = str(definition.get("summary", ""))
+    documents = [
+        (topic, definition, f"dataviz docs {topic} --format json")
+        for topic, definition in DOC_TOPICS.items()
+    ]
+    # Index each task-owned document once, without duplicating inherited closures.
+    for identifier, definition in AUTHORING_DOCUMENTS.items():
+        owner = next((
+            task for task, route in AUTHORING_ROUTES.items()
+            if identifier in route["documents"]
+        ), None)
+        if owner is not None:
+            documents.append((
+                f"task:{identifier}", definition,
+                f"dataviz docs --task {owner} --format json",
+            ))
+    for topic, definition, command in documents:
+        summary = str(definition.get("summary", definition.get("purpose", "")))
         for path, text in _documentation_fragments(definition):
             path_text = _documentation_path(path)
             searchable = f"{topic} {path_text} {text}".casefold()
             matched_terms = sum(term in searchable for term in terms)
-            if not matched_terms:
+            if not matched_terms and not (topic == redirected_topic and path_text == "summary"):
                 continue
             score = matched_terms * 20
             topic_folded = topic.casefold()
@@ -2449,10 +2676,16 @@ def search_documentation(search: str, *, limit: int = 20) -> dict[str, Any]:
                     "path": path_text,
                     "snippet": _documentation_snippet(text, terms),
                     "summary": summary,
-                    "command": f"dataviz docs {topic} --format json",
+                    "command": command,
                     "score": score,
+                    "complete": matched_terms == len(terms) or (
+                        topic == redirected_topic and path_text == "summary"
+                    ),
                 }
             )
+    # Prefer complete matches; partial matching remains a fallback for sparse docs.
+    if any(item["complete"] for item in matches):
+        matches = [item for item in matches if item["complete"]]
     matches.sort(key=lambda item: (-item["score"], item["topic"], item["path"]))
     total = len(matches)
     selected: list[dict[str, Any]] = []
@@ -2465,7 +2698,7 @@ def search_documentation(search: str, *, limit: int = 20) -> dict[str, Any]:
         if len(selected) == limit:
             break
     results = [
-        {key: value for key, value in item.items() if key != "score"}
+        {key: value for key, value in item.items() if key not in {"score", "complete"}}
         for item in selected
     ]
     suggestions = []

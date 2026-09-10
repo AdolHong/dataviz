@@ -283,6 +283,7 @@ def test_release_inputs_exclude_local_credentials_and_reject_symlinks(
         "pyproject.toml",
         "setup.py",
         "README.md",
+        "ARCHITECTURE.md",
         "dataviz-skill.md",
         "DESIGN.md",
         "plan.md",
@@ -313,6 +314,7 @@ def test_release_version_sources_match():
 def test_release_source_archives_include_the_skill_and_browser_runtimes():
     included = {path.relative_to(ROOT).as_posix() for path in release_zip.included_files()}
     assert "dataviz-skill.md" in included
+    assert "ARCHITECTURE.md" in included
     assert "src/dataviz/vendor/plotly/plotly-4.0.0.min.js" in included
     assert "src/dataviz/vendor/plotly/LICENSE" in included
 

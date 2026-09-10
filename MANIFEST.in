@@ -1,4 +1,5 @@
 include README.md
+include ARCHITECTURE.md
 include dataviz-skill.md
 include DESIGN.md
 include plan.md

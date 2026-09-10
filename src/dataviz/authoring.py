@@ -59,6 +59,7 @@ def parse_context_focus(value: str | None) -> ContextFocus | None:
                     "source:sales",
                     "dataset:sales-model",
                     "interactive:visible-sales",
+                    "action:save-record",
                     "component:control.cascader",
                 ]
             },
@@ -70,6 +71,7 @@ def parse_context_focus(value: str | None) -> ContextFocus | None:
         "dataset",
         "interactive",
         "component",
+        "action",
     }:
         raise ValidationFailure(f"Unsupported context focus kind: {kind}")
     return ContextFocus(kind, identifier)
@@ -498,6 +500,23 @@ def build_context_payload(
 ) -> dict[str, Any]:
     """Build a complete or dependency-sliced, secret-free authoring context."""
     parsed_focus = parse_context_focus(focus)
+    if parsed_focus and parsed_focus.kind == "action":
+        item = dashboard.server_actions.get(parsed_focus.identifier)
+        if item is None:
+            raise ValidationFailure(f"Unknown Server Action: {parsed_focus.identifier}")
+        path, definition = item
+        return {
+            "schema": "dataviz/context/v1", "mode": "focused",
+            "focus": parsed_focus.canonical,
+            "dashboard": {"id": dashboard.definition.id},
+            "server_actions": {parsed_focus.identifier: _dataset_transform_payload(workspace, path, definition)},
+            "resource_bindings": {
+                alias: {"logical": name, "actual": dashboard.definition.adapters.get(name, name)}
+                for alias, name in definition.resources.items()
+            },
+            "execution": "explicit-only; inspection never invokes Python or resolves credentials",
+            "next": ["dataviz docs server-actions --format json", "dataviz schemas server-action --full --format json"],
+        }
     if parsed_focus and parsed_focus.kind == "component":
         definition = component_catalog().get(parsed_focus.identifier)
         if definition is None:
@@ -701,6 +720,10 @@ def build_context_payload(
             )
             for key in sorted(interactive_ids)
         },
+        "server_actions": {
+            key: _dataset_transform_payload(workspace, *item)
+            for key, item in sorted(dashboard.server_actions.items())
+        } if parsed_focus is None else {},
         "views": {
             key: dashboard.views[key].model_dump(mode="json") for key in sorted(view_ids)
         },
@@ -741,6 +764,7 @@ def scaffold_recipes() -> tuple[str, ...]:
         "source.file",
         "source.sql",
         "source.python",
+        "server-action.python",
         "dataset-transform.server-python",
         "interactive-transform.browser-js",
         "interactive-transform.server-python",
@@ -752,6 +776,8 @@ def scaffold_recipes() -> tuple[str, ...]:
 
 
 def _scaffold_route(recipe: str) -> str:
+    if recipe == "server-action.python":
+        return "server-actions"
     if recipe in SCAFFOLD_PROFILES:
         return recipe
     if recipe.startswith("control.") or recipe.startswith("interactive-transform."):
@@ -924,10 +950,13 @@ def _profile_files(profile: str, item_id: str) -> dict[str, str]:
             "    const node = document.createElement('pre');\n"
             "    node.className = 'profile-custom-renderer';\n"
             "    context.body.append(node);\n"
-            "    this.update(context, descriptor, {node});\n"
-            "    return {node};\n"
+            "    const state = {node, context};\n"
+            "    this.update(context, descriptor, state);\n"
+            "    return state;\n"
             "  },\n"
-            "  update(_context, descriptor, state) {\n"
+            "  update(context, descriptor, state) {\n"
+            "    state.context = context; // Binding state is a render snapshot, not a live getter.\n"
+            "    // Long-lived handlers use state.context.controlBinding.emit, never the mount closure.\n"
             "    // descriptor.inputs.main is the primary input; additional View inputs\n"
             "    // are available under their declared aliases.\n"
             "    const rows = descriptor.inputs.main || descriptor.rows || [];\n"
@@ -1112,6 +1141,29 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                 "    return [{\"category\": \"A\", \"value\": 1}]\n"
             )
         files = {f"{item_id}.yaml": _yaml(definition), **files}
+    elif recipe == "server-action.python":
+        files = {
+            f"{item_id}.yaml": _yaml({
+                "schema": "dataviz/server-action/v1", "kind": "server_action", "id": item_id,
+                "description": "Explicit server-side business command; implement before invoking.",
+                "code": f"{item_id}.py", "entrypoint": "execute",
+                "resources": {}, "invalidates": [],
+            }),
+            f"{item_id}.py": (
+                "def execute(context):\n"
+                "    # context.payload is a JSON object, not trusted business input.\n"
+                "    # Validate operation, business keys, values and expected revision first.\n"
+                "    # Bind resource aliases in this Action YAML through external Adapter/auth.\n"
+                "    # Database config: context.resources.config('store')\n"
+                "    # Bound file path: context.resources.path('files', 'records.json')\n"
+                "    # Use bound SQL parameters and an explicit transaction / atomic file write.\n"
+                "    # After committing, request only declared refresh effects, e.g.:\n"
+                "    # context.invalidate('source:records')\n"
+                "    # Return a JSON object without credentials, e.g. {'saved': True}.\n"
+                "    # This starter deliberately performs no writes until implemented.\n"
+                "    raise NotImplementedError('Implement and test this business command before invoking it')\n"
+            ),
+        }
     elif recipe == "dataset-transform.server-python":
         files = {
             f"{item_id}.yaml": _yaml(
@@ -1391,10 +1443,13 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                 "    const node = document.createElement('div');\n"
                 f"    node.className = {class_literal};\n"
                 "    context.body.append(node);\n"
-                "    this.update(context, descriptor, {node});\n"
-                "    return {node};\n"
+                "    const state = {node, context};\n"
+                "    this.update(context, descriptor, state);\n"
+                "    return state;\n"
                 "  },\n"
-                "  update(_context, descriptor, state) {\n"
+                "  update(context, descriptor, state) {\n"
+                "    state.context = context; // Binding state is a render snapshot, not a live getter.\n"
+                "    // Long-lived handlers use state.context.controlBinding.emit, never the mount closure.\n"
                 "    // Add View inputs aliases when this renderer consumes more outputs.\n"
                 "    const rows = descriptor.inputs.main || descriptor.rows || [];\n"
                 "    state.node.textContent = JSON.stringify(rows);\n"
@@ -1446,13 +1501,21 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         "route": route,
         "scope": scope,
         "files": files,
-        "verify": [
+        "verify": ([
+            "dataviz docs server-actions --format json",
+            "dataviz validate <workspace> --dashboard <dashboard> --strict --format json",
+        ] if recipe == "server-action.python" else [
             f"dataviz validate <workspace> --dashboard {item_id} --format json",
             f"dataviz report <workspace> {item_id} --output report.html",
             f"dataviz visual-check <workspace> {item_id} --target both",
-        ],
+        ]),
         "notes": [
             "Snippets are strict current-schema examples; no legacy aliases are emitted.",
             "Run dataviz validate after placing or merging the files.",
+            *([
+                f"Add '{item_id}.yaml' to the owning Dashboard server_actions list; paths are relative to the Action definition.",
+                "This is a fail-closed Python starter, not a preconfigured CRUD service. Implement and test it using isolated resources.",
+                "Authoring/validation does not authorize real writes. Invoke only with explicit scope and a caller-owned request ID.",
+            ] if recipe == "server-action.python" else []),
         ],
     }

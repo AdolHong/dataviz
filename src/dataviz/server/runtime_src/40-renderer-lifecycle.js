@@ -10,6 +10,9 @@ Object.assign(datavizRuntime, {
     const affected = new Set();
     changedControls.forEach(key => {
       const dependency = window.dataviz.dependency_contract?.controls?.[key];
+      // Writers consume their canonical binding state for selection feedback,
+      // even though they do not filter their own candidate rows.
+      (dependency?.writer_edges || []).forEach(edge => affected.add(edge.source_view));
       (dependency?.direct_views || []).forEach(viewId => {
         const item = datavizViewControlContract(viewId)
           .find(candidate => candidate.key === key);
@@ -18,6 +21,11 @@ Object.assign(datavizRuntime, {
         }
       });
       (dependency?.repeat_views || []).forEach(viewId => affected.add(viewId));
+    });
+    Object.entries(window.dataviz.dependency_contract?.views || {}).forEach(([id, view]) => {
+      if (Object.values(view.control_inputs || {}).some(binding => (
+        binding.mode === 'value' && changedControls.has(binding.control)
+      ))) affected.add(id);
     });
     outputs.forEach(reference => this.outputViews(reference).forEach(viewId => affected.add(viewId)));
     return [...affected];
@@ -124,6 +132,7 @@ Object.assign(datavizRuntime, {
         ),
         interactive_transforms:transformTraces,
         query_executed:Boolean(context.queryExecuted),
+        control_revisions:Object.fromEntries(Object.entries(capturedControlState).map(([key, entry]) => [key, entry.revision])),
       });
       if (root) {
         root._datavizInputProfiles = Object.fromEntries(
@@ -163,20 +172,13 @@ Object.assign(datavizRuntime, {
     return Promise.allSettled(completions);
   },
   async publishOutputs(bundle) {
-    const outputs = window.dataviz.portable?.outputs || {};
-    window.dataviz.portable.output_schemas ||= {};
     const changed = new Set();
     Object.entries(bundle.outputs || {}).forEach(([rawReference, value]) => {
       const reference = canonicalOutputReference(rawReference);
-      const signature = datavizValueSignature(value);
-      if (this.outputSignatures.get(reference) === signature) return;
-      outputs[reference] = value;
-      this.outputSignatures.set(reference, signature);
-      this.outputErrors.delete(reference);
-      changed.add(reference);
+      if (this.commitOutput(reference, value, {
+        kind:bundle.output_kinds?.[reference], schema:bundle.output_schemas?.[reference],
+      })) changed.add(reference);
     });
-    Object.assign(window.dataviz.portable.output_kinds, bundle.output_kinds || {});
-    Object.assign(window.dataviz.portable.output_schemas, bundle.output_schemas || {});
     if (!changed.size || this.initializing) return changed;
     refreshControlOptionDomains();
     const affectedViewIds = this.affectedViews([], changed);
@@ -213,12 +215,10 @@ Object.assign(datavizRuntime, {
     return {outputs:values, missing};
   },
   async failOutputs(references, error) {
-    const outputs = window.dataviz.portable?.outputs || {};
     const changed = new Set();
     (references || []).forEach(rawReference => {
       const reference = canonicalOutputReference(rawReference);
-      delete outputs[reference];
-      this.outputSignatures.delete(reference);
+      this.removeOutput(reference);
       this.outputErrors.set(reference, error || new Error(`Output failed: ${reference}`));
       changed.add(reference);
     });

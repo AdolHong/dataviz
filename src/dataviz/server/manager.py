@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -29,6 +30,8 @@ class RunRecord:
     run_id: str
     session_id: str
     dashboard_id: str
+    page_id: str | None = None
+    reused_run_id: str | None = None
     requested_parameter_state: dict[str, dict[str, Any]] = field(default_factory=dict)
     query_scope: str = "dashboard"
     query_targets: list[str] = field(default_factory=list)
@@ -73,11 +76,12 @@ class RunManager:
         self.executors: dict[str, Executor] = {}
         self.records: dict[str, RunRecord] = {}
         self.interactions: dict[str, InteractionRecord] = {}
-        self.latest: dict[tuple[str, str], str] = {}
+        self.latest: dict[tuple[str, str, str | None], str] = {}
         self.latest_interactions: dict[tuple[str, str, str, str], str] = {}
         self.generations: dict[tuple[str, str, str, str], int] = {}
         self.latest_interactive_nodes: dict[tuple[str, str, str], Any] = {}
         self.lock = threading.Lock()
+        self.action_run_pins: dict[str, int] = {}
         self.maintenance_lock = threading.Lock()
         self.run_slots = threading.BoundedSemaphore(
             workspace.definition.runtime.max_concurrent_runs
@@ -134,6 +138,11 @@ class RunManager:
                     for interaction in self.interactions.values()
                     if interaction.status in {"queued", "loading"}
                 }
+                active_interaction_run_ids.update(self.action_run_pins)
+                active_interaction_run_ids.update(
+                    record.reused_run_id for record in self.records.values()
+                    if record.reused_run_id and record.status in {"queued", "loading"}
+                )
                 expired: set[str] = set()
                 completed_by_session: dict[str, list[RunRecord]] = {}
                 for record in self.records.values():
@@ -249,20 +258,32 @@ class RunManager:
         session_id: str,
         refresh: bool = False,
         *,
+        page_id: str | None = None,
         _workspace: LoadedWorkspace | None = None,
+        _reuse_run: RunResult | None = None,
+        _refresh_sources: set[str] | None = None,
+        _expected_run_id: str | None = None,
     ) -> RunRecord:
         self.cleanup()
         workspace = _workspace or self.workspace_snapshot()
         runtime = workspace.definition.runtime.model_copy(deep=True)
         event_limit = runtime.max_retained_run_events
         executor = self.executor_for(session_id, workspace=workspace)
-        dashboard = executor.ensure_valid(dashboard_id)
+        dashboard = executor.ensure_valid(dashboard_id, page_id)
+        page_id = dashboard.page_id
+        page_key = (session_id, dashboard_id, page_id)
+        if _reuse_run is not None:
+            ensure_query_run_compatible(dashboard, _reuse_run)
+            if _expected_run_id is None:
+                raise ValueError("Action refresh requires an expected current Run")
         plan = compile_plan(dashboard)
         run_id = f"run_{uuid.uuid4().hex[:16]}"
         record = RunRecord(
             run_id=run_id,
             session_id=session_id,
             dashboard_id=dashboard_id,
+            page_id=page_id,
+            reused_run_id=_reuse_run.run_id if _reuse_run else None,
             requested_parameter_state={
                 key: dict(value) for key, value in query_parameter_state.items()
             },
@@ -275,17 +296,24 @@ class RunManager:
             query_contract_hash=query_contract_fingerprint(dashboard, plan.nodes),
         )
         with self.lock:
-            previous_id = self.latest.get((session_id, dashboard_id))
+            previous_id = self.latest.get(page_key)
+            if _expected_run_id is not None and previous_id != _expected_run_id:
+                raise ExecutionFailure(
+                    "A newer Query Run superseded this Action refresh",
+                    details={"code": "action_refresh_superseded"},
+                )
             previous = self.records.get(previous_id) if previous_id else None
             if previous and previous.status in {"queued", "loading"}:
                 previous.cancel_event.set()
             for key, interaction_id in list(self.latest_interactions.items()):
-                if key[:2] == (session_id, dashboard_id):
+                owner_run = self.records.get(key[2])
+                if (_reuse_run is None and key[:2] == (session_id, dashboard_id)
+                        and owner_run is not None and owner_run.page_id == page_id):
                     interaction = self.interactions.get(interaction_id)
                     if interaction and interaction.status in {"queued", "loading"}:
                         interaction.cancel_event.set()
             self.records[run_id] = record
-            self.latest[(session_id, dashboard_id)] = run_id
+            self.latest[page_key] = run_id
         terminal_event: ExecutionEvent | None = None
 
         def observer(event: ExecutionEvent) -> None:
@@ -340,6 +368,8 @@ class RunManager:
                     run_id=run_id,
                     cancel_event=record.cancel_event,
                     _dashboard=dashboard,
+                    _reuse_run=_reuse_run,
+                    _refresh_sources=_refresh_sources,
                 )
                 with record.condition:
                     record.snapshot = result
@@ -404,22 +434,42 @@ class RunManager:
             record.cancel_event.set()
         return record
 
+    @contextmanager
+    def pin_action_run(self, run_id: str, session_id: str):
+        """Prevent retention cleanup while an Action uses an applied snapshot."""
+        with self.lock:
+            record = self.records.get(run_id)
+            if record is None or record.session_id != session_id:
+                raise ExecutionFailure("Action Query Run is unavailable")
+            self.action_run_pins[run_id] = self.action_run_pins.get(run_id, 0) + 1
+        try:
+            yield record
+        finally:
+            with self.lock:
+                count = self.action_run_pins[run_id] - 1
+                if count:
+                    self.action_run_pins[run_id] = count
+                else:
+                    self.action_run_pins.pop(run_id, None)
+
     def get(self, run_id: str, session_id: str) -> RunRecord | None:
         with self.lock:
             record = self.records.get(run_id)
         return record if record and record.session_id == session_id else None
 
-    def latest_for(self, session_id: str, dashboard_id: str) -> RunRecord | None:
+    def latest_for(self, session_id: str, dashboard_id: str, page_id: str | None = None) -> RunRecord | None:
+        if page_id is None:
+            page_id = self.workspace.dashboard(dashboard_id).page_id
         with self.lock:
-            run_id = self.latest.get((session_id, dashboard_id))
+            run_id = self.latest.get((session_id, dashboard_id, page_id))
             return self.records.get(run_id) if run_id else None
 
     def latest_for_session(self, session_id: str) -> list[RunRecord]:
         with self.lock:
             run_ids = [
                 run_id
-                for (owner_session, _), run_id in self.latest.items()
-                if owner_session == session_id
+                for key, run_id in self.latest.items()
+                if key[0] == session_id
             ]
             return [self.records[run_id] for run_id in run_ids if run_id in self.records]
 
@@ -444,11 +494,12 @@ class RunManager:
                 if existing.session_id != session_id:
                     raise ValueError("Shared Query Run id belongs to another session")
                 return existing
-            dashboard = self.workspace.dashboard(dashboard_id)
+            dashboard = self.workspace.dashboard(dashboard_id, result.page_id)
             record = RunRecord(
                 run_id=result.run_id,
                 session_id=session_id,
                 dashboard_id=dashboard_id,
+                page_id=result.page_id,
                 requested_parameter_state={
                     key: dict(value) for key, value in result.query_parameter_state.items()
                 },
@@ -465,8 +516,14 @@ class RunManager:
                 finished_at=time.time(),
             )
             self.records[result.run_id] = record
-            self.latest[(session_id, dashboard_id)] = result.run_id
+            self.latest[(session_id, dashboard_id, result.page_id)] = result.run_id
             return record
+
+    def interaction_generations(self, session_id: str, dashboard_id: str, run_id: str) -> dict[str, int]:
+        """Seed a reloaded canvas from the server watermark; stale writes stay rejected."""
+        with self.lock:
+            return {key[3]: value for key, value in self.generations.items()
+                    if key[:3] == (session_id, dashboard_id, run_id)}
 
     def start_interaction(
         self,
@@ -496,7 +553,7 @@ class RunManager:
         )
         runtime = workspace.definition.runtime.model_copy(deep=True)
         event_limit = runtime.max_retained_interaction_events
-        dashboard = executor.ensure_valid(query_run.dashboard)
+        dashboard = executor.ensure_valid(query_run.dashboard, query_run.page_id)
         ensure_query_run_compatible(dashboard, query_run)
         compile_interactive_plan(dashboard, target_id)
         resolved_control_state = resolve_control_states(

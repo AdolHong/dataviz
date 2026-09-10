@@ -9,6 +9,7 @@ from typing import Any
 
 
 from dataviz.errors import Diagnostic, WorkspaceError
+from dataviz.actions import ServerActionDefinition
 from dataviz.execution.dependencies import (
     DashboardDependencyContract,
     compile_dashboard_dependencies,
@@ -47,6 +48,11 @@ class LoadedDashboard:
     dataset_transforms: dict[str, tuple[Path, DatasetTransformDefinition]]
     interactive_transforms: dict[str, tuple[Path, InteractiveTransformDefinition]]
     views: dict[str, DeclarativeViewDefinition]
+    page_id: str | None = None
+    project_definition: DashboardDefinition | None = None
+    server_actions: dict[str, tuple[Path, ServerActionDefinition]] = dataclass_field(
+        default_factory=dict
+    )
     presentation_path: Path | None = None
     presentation: PresentationDefinition | None = None
     presentation_diagnostics: list[Diagnostic] | None = None
@@ -170,9 +176,15 @@ class LoadedWorkspace:
     def state_dir(self) -> Path:
         return self.root / ".dataviz"
 
-    def dashboard(self, identifier: str) -> LoadedDashboard:
+    def dashboard(self, identifier: str, page_id: str | None = None) -> LoadedDashboard:
         if identifier in self.dashboards:
-            return self.dashboards[identifier]
+            dashboard = self.dashboards[identifier]
+            if page_id is None or page_id == dashboard.page_id:
+                return dashboard
+            from dataviz.workspace.loading.parse_load import load_dashboard
+
+            return load_dashboard(dashboard.root, workspace_root=self.root,
+                                  workspace_assets=self.definition.assets, page_id=page_id)
         raise WorkspaceError(f"Unknown dashboard: {identifier}")
 
     def asset(self, identifier: str) -> ResolvedWorkspaceAsset:

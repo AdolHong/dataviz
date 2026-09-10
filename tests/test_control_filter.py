@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from dataviz.execution.control_filter import apply_control_filters
+from dataviz.input_state import initial_input_state
+from dataviz.workspace.models import ControlDefinition
 
 
 def _filter(
@@ -74,6 +77,41 @@ def test_match_none_empty_filter_means_zero_rows_not_all_rows():
 
     assert selected.empty
     assert list(selected.columns) == ["region", "value"]
+
+
+def test_all_available_intent_is_not_reinterpreted_as_an_explicit_empty_set():
+    frame = pd.DataFrame(
+        [
+            {"region": "north", "value": 1},
+            {"region": "south", "value": 2},
+        ]
+    )
+    control_filter = _filter(control_id="region", value=[], field="region")
+    control_filter["state"] = {
+        "value": [],
+        "revision": 0,
+        "intent": "all_available",
+    }
+
+    selected = apply_control_filters(frame, [control_filter])
+
+    assert selected.equals(frame)
+
+
+@pytest.mark.parametrize("empty", ["match_none", "passthrough"])
+def test_static_all_available_keeps_the_resolved_whitelist(empty):
+    definition = ControlDefinition.model_validate({
+        "id": "region", "type": "multiple_select", "value_type": "text",
+        "initial": {"mode": "all"},
+        "options": {"mode": "static", "choices": [{"value": "north", "label": "North"}]},
+    })
+    state = initial_input_state(definition).as_dict()
+    item = _filter(control_id="region", value=state["value"], field="region")
+    item["definition"] = definition.model_dump(mode="json")
+    item["state"] = state
+    item["consumer_binding"]["empty"] = empty
+    frame = pd.DataFrame({"region": ["north", "south"]})
+    assert apply_control_filters(frame, [item]).to_dict("records") == [{"region": "north"}]
 
 
 def test_control_filters_support_path_date_and_numeric_contracts():

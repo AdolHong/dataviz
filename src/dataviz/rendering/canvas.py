@@ -321,6 +321,7 @@ class CanvasRenderer:
         snapshot_interactions: set[str] | None = None,
         frame_id: str | None = None,
         dependency_contract: DashboardDependencyContract | None = None,
+        embedded_page: bool = False,
     ) -> str:
         ensure_query_run_compatible(dashboard, result)
         dependency_contract = dependency_contract or dashboard.dependency_contract
@@ -557,6 +558,7 @@ class CanvasRenderer:
             },
             "run_id": result.run_id,
             "dashboard_id": dashboard.definition.id,
+            "page_id": dashboard.page_id,
             "frame_id": frame_id,
             "status": result.status,
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -583,6 +585,7 @@ class CanvasRenderer:
             "live": live,
             "interaction": interaction,
             "asset_mode": asset_mode,
+            "server_actions": sorted(dashboard.server_actions) if asset_mode != "inline" else [],
             "assets": dashboard_assets,
             "snapshot_interactions": sorted(snapshot_interactions or set()),
             "view_specs": view_specs,
@@ -598,6 +601,10 @@ class CanvasRenderer:
             },
             "network_dependencies": asset_usage["network_dependencies"],
         }
+        if embedded_page:
+            # Only the Server's multi-Page host already supplies a title and
+            # page navigation. Standalone/portable reports keep their identity.
+            custom_style += "\n.dv-default-shell > .dv-report-header h1,.dv-default-shell > .dv-report-header .dv-eyebrow{display:none}\n.dv-default-shell > .dv-report-header{padding:0;margin:0 0 20px;border:0}\n.dv-default-shell > .dv-report-header .dv-deck{margin-top:0}"
         meta_json = json.dumps(meta, ensure_ascii=False, default=str).replace("</", "<\\/")
         return f"""<!doctype html>
 <html lang="{html.escape(self.workspace.definition.context.language)}">
@@ -1050,7 +1057,28 @@ class CanvasRenderer:
         output_kinds: dict[str, str] = {}
         output_schemas: dict[str, list[dict[str, Any]]] = {}
         output_errors: dict[str, Any] = {}
-        reachable = set(dependency_contract.base_output_roots)
+        # Query dependency closure is not the browser transport closure. Server
+        # Python reads its inputs from Run Artifacts, not from the page.
+        browser_roots = set(dependency_contract.presentation_roots)
+        for transform_id in self._active_browser_interactions(
+            dashboard,
+            dependency_contract=dependency_contract,
+            asset_mode=asset_mode,
+            snapshot_interactions=snapshot_interactions or set(),
+        ):
+            browser_roots.update(dependency_contract.interactive_inputs[transform_id].values())
+        reachable = {ref for ref in browser_roots if not ref.startswith("interactive:")}
+        server_outputs: dict[str, Any] = {}
+        for reference in set(dependency_contract.base_output_roots) - reachable:
+            artifact = result.outputs.get(reference)
+            if artifact is not None:
+                server_outputs[reference] = {"kind": artifact.kind, "row_count": artifact.metadata.get("row_count")}
+            elif allow_missing:
+                node = result.nodes.get(reference.rsplit("/", 1)[0])
+                if node and node.status in {"error", "cancelled", "unavailable"}:
+                    failure = dict(node.error or {})
+                    failure.setdefault("code", node.status)
+                    output_errors[reference] = _portable_failure(failure, self.workspace.root)
         for transform_id in snapshot_interactions or set():
             definition = dashboard.interactive_transforms[transform_id][1]
             reachable.update(
@@ -1158,6 +1186,8 @@ class CanvasRenderer:
             )
         return {
             "outputs": outputs,
+            "server_outputs": server_outputs,
+            "browser_output_references": sorted(reachable),
             "output_transports": output_transports,
             "output_kinds": output_kinds,
             "output_schemas": output_schemas,

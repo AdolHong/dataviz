@@ -3,6 +3,7 @@ Object.assign(datavizRuntime, {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    window.dataviz.serverActions?.dispose();
     this.cancelTransforms('Runtime disposed');
     this.inflightTransforms.clear();
     this.sectionAdapter?.dispose();

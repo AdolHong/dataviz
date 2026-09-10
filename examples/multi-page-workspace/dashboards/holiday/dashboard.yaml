@@ -1,0 +1,97 @@
+schema: dataviz/dashboard/v20
+id: holiday
+title: 节日销售 · 两种分析路径
+
+# 两个入口共用同一份 Python，但参数绑定和执行闭包各自独立。
+sources:
+  - id: annual
+    type: python
+    code: sales.py
+    query_inputs: {year: year}
+    outputs:
+      main: {kind: table}
+      daily: {kind: table}
+  - id: history
+    type: python
+    code: sales.py
+    query_inputs: {years: years, category: category}
+    outputs:
+      main: {kind: table}
+      daily: {kind: table}
+
+pages:
+  - id: annual
+    title: 同年 · 品类对比
+    description: 模拟数据，无真实业务含义。比较一个年份中，各品类在 T−7 至 T+7 的销量；T=0 是虚构活动日。
+    query_parameters:
+      - id: year
+        label: 分析年份
+        type: single_input
+        value_type: integer
+        default: 2025
+        min: 2023
+        max: 2026
+    views:
+      - id: comparison
+        title: 哪个品类销量更高？
+        template: bar
+        input: source:annual/main
+        x: category
+        y: actual_qty
+        span: 6
+      - id: trend
+        title: 各品类在活动前后如何变化？
+        template: line
+        input: source:annual/daily
+        x: relative_day
+        y: actual_qty
+        series: category
+        span: 6
+      - id: details
+        title: 品类汇总 · 件 / %
+        template: table
+        input: source:annual/main
+        columns: [category, actual_qty, baseline_qty, net_uplift_qty, uplift_pct]
+        span: 12
+        options:
+          labels: {category: 品类, actual_qty: 实际销量（件）, baseline_qty: 模拟基线（件）, net_uplift_qty: 净增量（件）, uplift_pct: 增量率（%）}
+
+  - id: history
+    title: 同品类 · 跨年对比
+    description: 模拟数据，无真实业务含义。选择一个品类和多个年份；按相对活动日对齐，不代表真实节假日可比口径。
+    query_parameters:
+      - id: category
+        label: 分析品类
+        type: single_select
+        value_type: text
+        default: {mode: value, value: 水果}
+        options:
+          mode: static
+          choices:
+            - {label: 水果, value: 水果}
+            - {label: 烘焙, value: 烘焙}
+            - {label: 饮料, value: 饮料}
+      - id: years
+        label: 对比年份
+        type: multiple_input
+        value_type: integer
+        default: [2023, 2024, 2025]
+        min: 2023
+        max: 2026
+    views:
+      - id: trend
+        title: 不同年份的活动曲线
+        template: line
+        input: source:history/daily
+        x: relative_day
+        y: actual_qty
+        series: year_label
+        span: 12
+      - id: details
+        title: 跨年汇总 · 件 / %
+        template: table
+        input: source:history/main
+        columns: [year, category, actual_qty, baseline_qty, net_uplift_qty, uplift_pct]
+        span: 12
+        options:
+          labels: {year: 年份, category: 品类, actual_qty: 实际销量（件）, baseline_qty: 模拟基线（件）, net_uplift_qty: 净增量（件）, uplift_pct: 增量率（%）}

@@ -339,7 +339,27 @@ window.dataviz.connectLive = () => {
   if (!live || window.dataviz.liveSource) return;
   const source = new EventSource(live.events_url);
   const fetched = new Map();
-  const fetchOutput = async reference => {
+  const fetchOutput = async (reference, artifact) => {
+    const required = window.dataviz.portable?.browser_output_references;
+    if (Array.isArray(required) && !required.includes(reference)) {
+      // Live events advertise artifact readiness. They are not instructions to
+      // download every Query Output, including server-only or unused tables.
+      window.dataviz.portable.server_outputs ||= {};
+      const alreadyReady = Object.prototype.hasOwnProperty.call(window.dataviz.portable.server_outputs, reference);
+      window.dataviz.portable.server_outputs[reference] = {
+        kind:artifact?.kind, row_count:artifact?.metadata?.row_count,
+      };
+      if (!alreadyReady) {
+        // A ready event can arrive while Control restoration is awaiting work.
+        // Resume missing branches after initialization without superseding an
+        // initial execution that already observed this immutable artifact.
+        await datavizRuntime.initializationPromise;
+        if (datavizControlChannel.phase === 'ready') {
+          await datavizRuntime.runTransforms([], new Set());
+        }
+      }
+      return;
+    }
     const previous = fetched.get(reference);
     if (previous) return previous;
     const encoded = reference.split('/').map(encodeURIComponent).join('/');
@@ -379,7 +399,7 @@ window.dataviz.connectLive = () => {
     if (window.dataviz.interaction) {
       window.dataviz.interaction.query_snapshot_available = true;
     }
-    fetchOutput(event.data.reference);
+    fetchOutput(event.data.reference, event.data.artifact).catch(error => console.error('[dataviz:live]', error));
   });
   const queryNodeStatuses = {
     node_queued:'queued',

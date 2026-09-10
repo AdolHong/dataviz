@@ -304,7 +304,7 @@ def _validate_query_inputs(
             )
 
 
-def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
+def validate_workspace(workspace: LoadedWorkspace, *, selected_dashboard: LoadedDashboard | None = None) -> list[Diagnostic]:
     """Validate the strict v2 contract and every cross-file/runtime reference."""
     diagnostics: list[Diagnostic] = list(workspace.load_diagnostics)
     if not workspace.dashboards:
@@ -372,7 +372,21 @@ def validate_workspace(workspace: LoadedWorkspace) -> list[Diagnostic]:
                         {"asset": configured, "error_type": type(error).__name__},
                     )
                 )
-    for dashboard in workspace.dashboards.values():
+    dashboards = [selected_dashboard] if selected_dashboard is not None else []
+    if selected_dashboard is None:
+        for project in workspace.dashboards.values():
+            dashboards.append(project)
+            for page in (project.project_definition.pages if project.project_definition else []):
+                if page.id == project.page_id:
+                    continue
+                try:
+                    dashboards.append(workspace.dashboard(project.definition.id, page.id))
+                except WorkspaceError as error:
+                    diagnostics.append(Diagnostic(
+                        "error", f"Page {page.id}: {error.message}", str(project.definition_path),
+                        f"pages.{page.id}", "page_load_failed", error.details,
+                    ))
+    for dashboard in dashboards:
         diagnostics.extend(dashboard.presentation_diagnostics or [])
         definition_path = str(dashboard.definition_path)
         parameter_definitions = {item.id: item for item in dashboard.definition.query_parameters}
@@ -1792,7 +1806,7 @@ def dashboard_validation_diagnostics(
         if entry.path.resolve() != dashboard.root.resolve()
     ]
     selected: list[Diagnostic] = []
-    for diagnostic in validate_workspace(workspace):
+    for diagnostic in validate_workspace(workspace, selected_dashboard=dashboard):
         if not diagnostic.file:
             selected.append(diagnostic)
             continue

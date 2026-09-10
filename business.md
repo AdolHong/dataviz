@@ -1,6 +1,6 @@
 # Dataviz 商业方向参考
 
-更新时间：2026-08-29
+更新时间：2026-09-04
 
 > 本文记录 Dataviz Local 与未来商业版 Enterprise Server 的产品边界、商业假设和协议对齐方向。它不是当前 CLI 的实现计划，不构成版本承诺，也不要求 `plan.md` 按本文开发 Enterprise 功能。商业版 Server 大概率属于另一个 Git 仓库；当前仓库只需保持核心协议可被未来 Server 安全复用。
 
@@ -367,3 +367,173 @@ dataviz-executor                 独立包或商业仓库子项目
 - 哪些组织协作状态应 Promote 回 Workspace，哪些只保留在 Server。
 
 这些问题暂时保持开放。本文首先固定产品边界：Local 完整，Enterprise 协作；Workspace 保存正式分析资产，Server 提供组织治理与网络效应。
+
+## 13. 战略探索：从 Dashboard-first 到 Capability-first
+
+ChatBI 不应被理解为“给 Dashboard 加一个聊天框”。它真正可能改变的是 Dataviz 的核心组织单位：系统不再首先要求作者制作一份完整 Dashboard，而是先沉淀可发现、可执行、可验证的分析能力，再由 AI 或人将这些能力编排成临时报告或稳定 Dashboard。
+
+这不是一个容易追加的小功能。当前 Dataviz 的许多边界都以 Dashboard 为中心：
+
+- Dashboard 是文件所有权和路径边界；
+- Dashboard 是参数、Control 和依赖图的作用域；
+- Dashboard 是 Compiler、Runtime 和 Server 的主要装载单位；
+- Dashboard 是 Catalog 的主要发现入口；
+- Dashboard 是 Bundle、portable HTML 和发布的主要单位；
+- Section 与 View 共同组成一条预先固化的分析 Story。
+
+如果探索式分析的核心单位变成独立能力，上述假设可能需要拆开。Dataviz 甚至可能从“可靠 Dashboard Runtime”重构为“可靠分析能力 Runtime”，而 Dashboard 只是其中一种发布组合。这一方向可能构成架构分叉乃至未来大版本重置，不能按普通增量需求估算。
+
+### 13.1 为什么值得探索
+
+Dashboard 适合反复使用、口径稳定、布局固定且需要审阅的分析故事；ChatBI 更适合问题尚未收敛、需要快速发现和组合已有口径的探索过程。两者不应互相替代：
+
+```text
+探索：搜索能力 → 组合 → 执行 → 解释 → 继续追问
+发布：确认口径 → 固定参数与布局 → 校验 → 审阅 → 分享
+晋升：探索报告 → 补齐契约和证据 → 稳定 Dashboard
+```
+
+对探索而言，最重要的并不是更多 DSL，而是：
+
+1. 快速发现 Workspace 中已有的取数口径、可信 Output、View 和业务知识；
+2. 用很少的上下文和 Token 判断哪些能力可以组合；
+3. 复用经过验证的执行与可视化颗粒，而不是每次重新生成 SQL 和图表；
+4. 保留参数、Result、来源和限制，使 AI 的解释可以被复查；
+5. 将真正有长期价值的探索结果晋升为可靠 Dashboard。
+
+### 13.2 待验证的最小分析颗粒
+
+`Source → View` 是一个有价值的直觉，但 Source 或 View 单独都不足以成为可靠复用单位：Source 缺少完整业务语义，View 又可能依赖参数、Transform、Named Output、Asset 和交互状态。
+
+更合适的候选概念是 **Analysis Capability**：
+
+```text
+Verified Named Output / Target
++ 参数与语义契约
++ 可选的 View Recipe
++ 可计算的依赖闭包
++ 可靠性、成本和 Evidence
+```
+
+一个紧凑的 Capability Card 至少应回答：
+
+- `ref`、title、purpose 和它能回答的问题；
+- grain、measures、dimensions 和时间语义；
+- 参数契约、默认行为与适用约束；
+- 输出 Schema 与建议的可视化意图；
+- owner、可靠性级别、最近验证时间、新鲜度和预估成本；
+- 完整定义、依赖与 Evidence 的按需展开入口。
+
+Capability Card 应由 Workspace 中的正式定义确定性生成，是可重建索引，不成为第二份事实来源。第一阶段也不必把文件物理拆散：现有 Dashboard 可以继续拥有实现，Catalog 先在逻辑上投影出 Dashboard、Named Output、View 和 Knowledge 等细颗粒入口。
+
+### 13.3 发现、编排与解释
+
+ChatBI 的核心产品价值应集中在三个动作，而不是自由生成一切：
+
+#### 发现
+
+搜索同时覆盖四类对象：
+
+- Dashboard：完整且稳定的已有 Story；
+- Named Output / Target：经过验证的数据颗粒；
+- View / Recipe：经过验证的呈现方法；
+- Knowledge：指标定义、时间语义、排除规则和业务术语。
+
+检索不能只依赖向量相似度。候选排序还应考虑精确术语、grain 兼容性、参数可满足性、可靠性、新鲜度、执行成本和历史复用证据。
+
+为了减少 AI 上下文，信息应渐进暴露：
+
+```text
+search    → 返回极短候选卡片
+describe  → 返回所选能力的组合契约
+evidence  → 仅在需要时展开 SQL、Transform、依赖和 Result
+```
+
+#### 编排
+
+AI 优先组合已有 Capability，而不是直接生成未验证代码。临时报告可以排列、替换和追问多个分析块；每个块保留自己的 Target、参数、Output Schema、Result ID 和 provenance。
+
+可视化应优先使用少量按分析意图组织的模板，例如 metric、metric-secondary、trend、ranking、composition、distribution、relationship、map 和 detail-table。AI 描述字段角色和表达意图，模板负责默认样式、字段校验、空态和交互约束。不要让 AI 每次生成任意 Plotly JSON，也不要因此扩张 Dashboard DSL。
+
+#### 解释
+
+解释必须绑定实际 Result 和 Evidence，明确区分：
+
+- 复述已执行结果；
+- 基于数据做出的推断；
+- 尚未执行的建议；
+- AI 临时生成且未认证的口径。
+
+Chat transcript 不能成为分析事实来源；可复查的 Result、参数、定义版本和 provenance 才是。
+
+### 13.4 两条可能的架构路径
+
+目前不预先决定最终采用哪条路径。
+
+#### 路径 A：渐进投影
+
+```text
+Dashboard 继续拥有文件与执行定义
+→ Catalog 提取细颗粒 Capability
+→ ChatBI 搜索并复用这些逻辑颗粒
+→ 成熟结果仍发布为 Dashboard
+```
+
+优点是能复用当前 Compiler、Runtime、Result 和 Bundle，迁移风险较低。缺点是颗粒仍受 Dashboard 参数作用域和物理所有权约束，跨 Dashboard 组合可能笨重。
+
+#### 路径 B：Capability-first 重构
+
+```text
+Workspace 独立拥有 Capability
+→ Runtime 执行和组合 Capability
+→ Report 是临时组合
+→ Dashboard 是稳定发布组合
+```
+
+这一路径会把能力所有权、执行单位、报告组合和发布单位彻底分离。它可能要求重做 Loader、Compiler、Catalog、参数作用域、依赖图、Result identity、Bundle 和文档模型，但更符合 ChatBI 的长期形态。
+
+路径 B 不能仅凭概念先进而启动。只有当真实原型证明 Dashboard 所有权持续阻碍能力发现、组合和复用时，才值得承担整体重构成本。
+
+### 13.5 原型与决策门槛
+
+在决定是否拆掉现有架构前，应先做少量纵向原型，而不是建立完整 Chat 产品：
+
+1. 从现有 Workspace 确定性提取 Capability Card；
+2. 用短查询检索到正确的口径、Output 和 View；
+3. 不读取整份 Dashboard 上下文即可执行一个能力；
+4. 将两个兼容能力组合成带证据的临时报告；
+5. 将报告中的有效分析块晋升为稳定 Dashboard；
+6. 测量检索准确率、上下文 Token、组合失败类型和人工修正成本。
+
+若出现以下任一情况，应把它视为核心架构信号，而不是继续堆兼容层：
+
+- 一个 Capability 必须读取大部分 Dashboard 才能理解或执行；
+- 参数、grain 或 Schema 兼容性无法在执行前判断；
+- 跨能力组合频繁依赖隐式状态或共享可变对象；
+- Result 和 Evidence 无法稳定追溯到单个能力及其版本；
+- 为维持 Dashboard 所有权而产生大量复制、适配和特殊规则。
+
+反过来，如果逻辑投影已经能满足发现、编排和可靠执行，就没有必要为了架构纯度物理拆分所有文件。
+
+### 13.6 可靠性分级与边界
+
+探索结果必须显式区分可靠性：
+
+1. **Verified**：直接复用已有可信 Target / View；
+2. **Derived**：基于可信 Output 做新的受约束变换或可视化；
+3. **Exploratory**：AI 新生成 SQL、Python 或 JavaScript，尚未审阅。
+
+当前不应急于开发：
+
+- 庞大的聊天界面；
+- 自动生成任意 SQL 和图表后假装可信；
+- 新的共享 SQL 层或隐式跨 Dashboard Source 依赖；
+- 为 ChatBI 预先增加大量公共 DSL 和协议；
+- 以聊天记录替代 Workspace、Result 或 Evidence；
+- 在 Capability 原子和检索效果尚未验证前一次性重写 Runtime。
+
+这一战略探索的 North Star 是：
+
+> 用户用几句话发现并组合已有分析能力，快速得到带来源、可复查的报告；当答案值得长期复用时，可以无损晋升为可靠 Dashboard。
+
+因此，Dataviz 的潜在长期定位不是“更会聊天的 Dashboard 工具”，而是 **Verified Analytical Capability Runtime**：既支持低背景、低 Token 的快速探索，也保留稳定 Dashboard 所需要的确定性、审计和发布能力。

@@ -162,8 +162,8 @@ class InteractionExecutor:
             # may still inspect an existing Run that does not consume that Adapter.
             self.redaction_values = ()
 
-    def ensure_valid(self, dashboard_id: str) -> LoadedDashboard:
-        dashboard = self.workspace.dashboard(dashboard_id)
+    def ensure_valid(self, dashboard_id: str, page_id: str | None = None) -> LoadedDashboard:
+        dashboard = self.workspace.dashboard(dashboard_id, page_id)
         errors = [
             item
             for item in dashboard_validation_diagnostics(self.workspace, dashboard)
@@ -195,7 +195,7 @@ class InteractionExecutor:
         reusable_nodes: dict[str, NodeResult] | None = None,
         _dashboard: LoadedDashboard | None = None,
     ) -> InteractionResult:
-        dashboard = _dashboard or self.ensure_valid(run.dashboard)
+        dashboard = _dashboard or self.ensure_valid(run.dashboard, run.page_id)
         if dashboard.definition.id != run.dashboard:
             raise ValueError("Prevalidated Dashboard does not match the Query Run")
         runtime = self.workspace.definition.runtime.model_copy(deep=True)
@@ -255,6 +255,7 @@ class InteractionExecutor:
             run_id=run.run_id,
             workspace=run.workspace,
             dashboard=run.dashboard,
+            page_id=run.page_id,
             target=target_id,
             status="loading",
             query_parameter_state={

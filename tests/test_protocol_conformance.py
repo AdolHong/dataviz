@@ -101,6 +101,10 @@ def test_python_control_filter_conformance(case: dict[str, Any]):
                 "operator": "auto",
             },
             "value": payload["value"],
+            "state": {
+                "value": payload["value"],
+                "intent": payload.get("intent", "explicit"),
+            },
         }
         expected = case["expected"]
     else:
@@ -116,6 +120,7 @@ def test_python_control_filter_conformance(case: dict[str, Any]):
             "definition": {
                 "type": control_type,
                 "value_type": payload["value_type"],
+                "options": payload.get("options"),
             },
             "consumer_binding": {
                 "mode": "filter",
@@ -125,6 +130,10 @@ def test_python_control_filter_conformance(case: dict[str, Any]):
                 "operator": payload["operator"],
             },
             "value": payload["value"],
+            "state": {
+                "value": payload["value"],
+                "intent": payload.get("intent", "explicit"),
+            },
         }
         expected = [{"value": value} for value in case.get("expected", [])]
     try:

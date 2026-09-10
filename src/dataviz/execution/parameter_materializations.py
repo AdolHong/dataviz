@@ -230,6 +230,7 @@ class ParameterMaterializationStore:
         ).hexdigest()
         payload = {
             "workspace": self.workspace.definition.id,
+            "page_id": dashboard.page_id,
             "definition_hash": definition_hash,
             "adapter": actual_name,
             "adapter_fingerprint": resolver.fingerprint(

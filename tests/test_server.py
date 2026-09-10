@@ -380,7 +380,9 @@ def test_nested_parameter_editor_actions_are_server_context_menus_only():
     assert "dataset.editorDisclosure" in server_app
     assert "dataviz:editor-change" in server_app
     assert '<button type="submit" class="button button--run" disabled>Save</button>' in server_app
-    assert "if (!dashboardControls().length) return" not in server_app
+    editor = server_app[server_app.index("async function openParameterEditor"):]
+    editor = editor[:editor.index("\n}")]
+    assert "if (!dashboardControls().length) return" not in editor
 
 
 def test_workspace_api_resolves_relative_query_defaults_to_concrete_tab_values(
@@ -1001,7 +1003,8 @@ def test_shared_result_adds_server_python_interaction_but_html_export_rejects_it
         page = restarted.get(shared_payload["url"])
         assert page.status_code == 200
         assert "server-python" in page.text
-        assert 'title="导出报告已固化查询结果"' in page.text
+        assert 'title="导出报告已固化查询结果"' not in page.text
+        assert 'data-runtime-query-toggle' in page.text
         assert '<output>3</output>' in page.text
         run_match = re.search(r'"run_id": "(run_shared_[^"]+)"', page.text)
         session_match = re.search(r'"session_id": "(shared_[^"]+)"', page.text)
@@ -1194,7 +1197,7 @@ def test_server_app_controls_are_browser_only():
     assert "eventSource.close()" not in select_block
 
 
-def test_query_parameters_are_an_inline_query_card_toggled_by_the_header_run_control():
+def test_query_parameters_reuse_the_form_in_the_operation_panel():
     template = (ROOT / "src" / "dataviz" / "server" / "templates" / "index.html").read_text()
     script = (ROOT / "src" / "dataviz" / "server" / "static" / "app.js").read_text()
 
@@ -1227,10 +1230,13 @@ def test_query_parameters_are_an_inline_query_card_toggled_by_the_header_run_con
     assert "queryParametersOpen" in script
     assert "toggleQueryParameters" in script
     assert "setQueryParametersOpen(true, {persist: true})" in script
-    assert "Escape" not in script[
+    assert "Escape" in script[
         script.index("function setQueryParametersOpen"):
         script.index("function dashboardControl(")
     ]
+    assert 'id="operation-panel"' in template
+    assert 'id="dashboard-controls-toggle"' in template
+    assert "runtime.queryParametersOpen = false;" not in script
 
 
 def test_query_parameter_author_mode_is_a_read_only_canonical_projection():
@@ -1531,7 +1537,8 @@ def test_server_sidebar_is_resizable_collapsible_and_tab_local():
     assert ".nav-root-drop{position:absolute" in style
     assert "openDashboardRenameDialog(dashboardId)" in script
     assert ".nav-button:visited,.nav-button:hover,.nav-button:focus,.nav-button:active{text-decoration:none}" in style
-    assert ".rail{padding:0 14px 18px;color:var(--ink);background:#fafbf9;border-right:0" in style
+    assert ".rail{padding:0 14px 18px;color:var(--ink);background:var(--shell-sidebar-bg);border-right:0" in style
+    assert "--shell-sidebar-bg:#fafbf9" in style
     assert "box-shadow:inset -1px 0 rgba(32,36,43,.035)" in style
     assert "--shell-header-height:58px" in style
     assert "grid-template-rows:var(--shell-header-height) minmax(0,1fr)" in style

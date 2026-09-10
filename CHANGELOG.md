@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.24.0 — 2026-09-10
+
+- Remove the disabled query action from standalone reports; retain a query-parameter evidence toggle, without Run, Share or workbench-only shortcut listings.
+- Move Query Parameters and Dashboard Controls into one switchable right-side panel without changing DSL or query/control state contracts. Q/C toggle panels; closing preserves drafts and running queries, and successful queries no longer auto-collapse parameters.
+- Keep both Header entries visible and disabled when empty, with consistent shortcut feedback. Group query status beside the title and diagnostics/refresh on the right; match both Sidebar backgrounds.
+- Dock the panel on wide screens and use a focus-managed drawer on narrow screens. Retain explicit buttons, configurable single-key shortcuts, and keyboard focus cues without automatically focusing the desktop close button.
+- Restrict candidate-readiness scheduling to selection Controls; ordinary text/number inputs must not wait for a nonexistent option domain or block browser-derived analysis outputs.
+
 ## 0.23.3 — 2026-09-10
 
 - Keep Dashboard/Page navigation independent of slow parameter Lookup: abort superseded browser requests immediately and stop obsolete initialization/cascade chains after navigation.

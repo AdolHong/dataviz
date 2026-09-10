@@ -625,6 +625,7 @@ button.dv-shell-brand:focus-visible {
   outline: 2px solid rgba(68, 81, 163, .38);
   outline-offset: 2px;
 }
+.dv-shell-header-actions > [data-runtime-query-toggle],
 .dv-shell-control[data-control-origin="dashboard"] > .dv-shell-control__trigger {
   display: flex;
   align-items: center;
@@ -645,6 +646,8 @@ button.dv-shell-brand:focus-visible {
 .dv-shell-control[data-control-origin="dashboard"] > .dv-shell-control__trigger::-webkit-details-marker {
   display: none;
 }
+.dv-shell-header-actions > [data-runtime-query-toggle]:hover,
+.dv-shell-header-actions > [data-runtime-query-toggle][aria-expanded="true"],
 .dv-shell-control[data-control-origin="dashboard"] > .dv-shell-control__trigger:hover,
 .dv-shell-control[data-control-origin="dashboard"][open] > .dv-shell-control__trigger {
   color: var(--dv-shell-accent-strong);

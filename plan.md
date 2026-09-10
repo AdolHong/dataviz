@@ -4,7 +4,17 @@
 
 当前协议基线（由 `protocols.py` 与回归检查约束）：`dataviz/workspace/v2`、`dataviz/dashboard/v20`、`dataviz/parameter-domain/v2`、`dataviz/parameter-domain-contract/v3`、`dataviz/parameter-lookup/v1`、`dataviz/parameter-materialization/v1`、`dataviz/dashboard-bundle/v2`、`dataviz/report-manifest/v3`、`dataviz/presentation/v2`、`dataviz/source/v6`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v13`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v6`、`dataviz/runtime/v15`、`dataviz/analysis-result/v5`、`dataviz/analysis-evidence/v5`。Component Registry 以 `dataviz components` 为准，不在阶段清单重复登记。
 
-当前包版本：`0.23.3`。本文件区分本地发行构建、工作树变更与待验证事项，不以完成过的历史阶段作为未来计划。架构理由见 [ARCHITECTURE](ARCHITECTURE.md)，视觉规范见 [DESIGN](DESIGN.md)，代码见 [实现索引](docs/product-architecture.md)，发行历史见 [CHANGELOG](CHANGELOG.md)。
+当前包版本：`0.24.0`。本文件区分本地发行构建、工作树变更与待验证事项，不以完成过的历史阶段作为未来计划。架构理由见 [ARCHITECTURE](ARCHITECTURE.md)，视觉规范见 [DESIGN](DESIGN.md)，代码见 [实现索引](docs/product-architecture.md)，发行历史见 [CHANGELOG](CHANGELOG.md)。
+
+## 0.24.0 右侧操作面板
+
+- Query Parameters 与 Dashboard Controls 共用可切换右侧面板，Q/C 开关，保留草稿与运行状态；查询成功不自动收起。宽屏停靠、窄屏覆盖，保留焦点与快捷键禁用入口。
+- 无参数的 Header 入口置灰但不隐藏，Q/C 提示一致；状态紧跟标题靠左，诊断与刷新靠右；左右 Sidebar 共用背景色，不显示冗余操作提示。
+- 独立 HTML 移除禁用的查询按钮，仅保留查询参数证据入口；不提供 Run、Share 或工作台专属快捷键提示。
+- 最终完整非浏览器 **727 passed，93 deselected，119.05 秒**；发行一致性检查 **23 passed，1.40 秒**。
+- Chromium 完整首轮 **81 passed、12 failed，1079.96 秒**。修复普通 Input 被误判为等待候选域的调度问题，并更新右侧面板取代旧浮层/正文网格后的断言；全部 12 个失败项在最终代码上统一复验 **12 passed，97.63 秒**。不声明完整套件一次全绿。
+- 追加导出与面板相关分组 **12 passed，175.91 秒**，侧栏输入等高专项 **1 passed，11.88 秒**；导出报告检查包含 Run/Share 缺席、快捷键帮助不含运行查询或 Sidebar、Q 查看参数证据。
+- 浏览器测试使用校验摘要匹配的本地上游资源缓存，生产网络策略不变。本轮不运行 Firefox/WebKit 或安装冒烟；本地构建 wheel、sdist 与 ZIP/SHA256，不上传远端包仓库。
 
 ## 0.23.3 导航与参数初始化解耦
 

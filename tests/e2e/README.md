@@ -19,8 +19,10 @@ Plotly's map URL is not versioned: review changes before updating its checksum.
 
 This isolates repeated CDN latency from interaction tests. It does not make the
 whole suite offline, validate CDN availability, or change production defaults.
-CLI-owned browsers and separately created browser contexts retain their normal
-resource loading behavior. Report cached-resource usage with test results.
+The shared fixture also injects these exact resources into in-process CLI-owned
+browser pages, including offline analysis runs. Other URLs retain their network
+policy; this does not test CDN availability. Subprocess-owned browsers retain
+their normal resource loading behavior. Report cached-resource usage with results.
 
 ## Analysis interaction stability
 

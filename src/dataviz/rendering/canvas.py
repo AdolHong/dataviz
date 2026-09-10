@@ -1409,16 +1409,12 @@ class CanvasRenderer:
         query_control = ""
         if card_is_present:
             query_control = (
-                '<div class="query-run-control dv-runtime-query-run-control">'
-                '<button class="query-run-control__primary" type="button" disabled '
-                'aria-disabled="true" title="导出报告已固化查询结果">'
-                '<span class="query-run-control__copy"><strong>查询</strong></span></button>'
-                '<button class="query-run-control__toggle" type="button" '
+                '<button class="dv-shell-control__trigger" type="button" '
                 'data-runtime-query-toggle aria-controls="dv-runtime-query-panel" '
                 'aria-expanded="false" aria-keyshortcuts="Q" title="展开查询参数 (Q)" '
                 'aria-label="展开查询参数">'
-                '<span class="query-run-control__chevron" aria-hidden="true"></span>'
-                '</button></div>'
+                '<strong class="dv-shell-control__label">查询参数</strong>'
+                '<kbd>Q</kbd></button>'
             )
         return (
             '<header class="dv-runtime-header dv-shell-header" aria-label="Report controls">'

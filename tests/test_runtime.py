@@ -349,13 +349,18 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert "PORTABLE ANALYSIS" not in report
     assert ">Query snapshot<" not in report
     assert 'data-runtime-query-toggle' in report
+    assert '<button class="query-run-control__primary"' not in report
+    assert 'id="run-button"' not in report
+    assert 'id="share-control"' not in report
+    assert '<dd>Run query</dd>' not in report
+    assert '<dd>Sidebar</dd>' not in report
     assert 'id="dv-runtime-query-panel"' in report
     assert 'class="dv-runtime-query-tray dv-query-card-host"' in report
     assert 'aria-expanded="false"' in report
     assert 'data-control-panel-body hidden' in report
     assert '<div class="dv-runtime-brand dv-shell-brand" aria-label="Dataviz">' in report
     assert '</nav></header><section class="dv-runtime-query-tray dv-query-card-host"' in report
-    assert 'class="query-run-control dv-runtime-query-run-control"' in report
+    assert 'class="query-run-control dv-runtime-query-run-control"' not in report
     assert "PARAMETERS" not in report
     assert 'class="dv-runtime-shell"' not in report
     assert report.count('name="dv-runtime-header-control"') == 1

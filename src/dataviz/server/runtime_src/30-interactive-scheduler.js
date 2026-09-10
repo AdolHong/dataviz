@@ -497,6 +497,8 @@ Object.assign(datavizRuntime, {
           for (const key of new Set(Object.values(this.transformControlInputs(id)).map(binding => binding.control))) {
             const domain = this.controlDomainEvidence?.get(key);
             const definition = datavizControlDefinition(key);
+            // Free-form inputs have no candidate domain to wait for.
+            if (!['single_select', 'multiple_select'].includes(definition.type)) continue;
             const label = definition.label || key;
             if (domain?.status === 'error' || domain?.status === 'field_mismatch') {
               throw datavizRuntimeError({code:'control_domain_unavailable',

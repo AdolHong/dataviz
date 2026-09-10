@@ -179,7 +179,9 @@ Server 使用可调整并可折叠的导航 Rail、58px 粘性 Topbar 和可伸�
 
 多 Page 是 Dashboard 内可选的分析入口，不要求把内部数据结构的每一层都变成可见标题。当前重复层级与拟议的收敛方式见 Components 下的「Multi-Page Navigation and Titles」；不要据此为普通单页看板增加 Page 包装或导航。
 
-Query Parameters 在首次运行前作为正文中的全宽卡片展开；成功运行后折叠，由 Header 的 Run/Query 组合重新打开。Controls 布局必须尊重每个子组件的最小可用宽度，并在可用空间内形成有界网格；不能为了填满容器而把每个字段无限拉长。
+工作树已将 Query Parameters 与 Dashboard Controls 接入可开关、可切换内容的右侧操作面板，详见下方组件约定。原来的正文展开、成功后自动折叠是旧布局，不再作为 Server 工作台行为。颜色、字体与控件 token 不变，不新增 DSL；独立报告不受此次迁移影响。
+
+右侧面板展开时，宽屏工作区为它让出空间；窄屏采用覆盖式抽屉，不把图表挤成不可读的窄列。关闭后归还占位。面板内部单列组织表单，标题与关闭入口固定，表单独立滚动；不要再嵌套一张 Query Card。面板宽度与切换断点在实现时按 Date Range、长选项和最小可读图表宽度验证，暂不编造固定数值。Controls 仍尊重每个子组件的最小可用宽度，不能为填满容器无限拉长。
 
 宽 Table 的横向位置是用户上下文。排序或局部刷新必须保留 `scrollLeft`、焦点和当前排序列，不能在数据更新后跳回第一列。长明细默认留在正常文档流；当产品提供折叠或临时查看入口时，关闭后必须释放占位，并保留清楚、可恢复的标题入口。
 
@@ -218,11 +220,29 @@ Dataviz 使用温和但精确的圆角：微元素 5px，输入与按钮 7px，�
 
 ### Query Parameters
 
-- 首次进入且尚无成功 Result 时在正文展开；成功查询后自动折叠，不复制第二份常驻参数摘要。
+- Server 使用右侧面板，行为见下一节；不复制第二份常驻参数摘要或独立表单状态。
 - 状态 Chip 必须准确显示 `Not applied`、`Applied`、`Unsaved changes`、`Outdated` 或失败；编辑中的 Draft 不能伪装成 Result 已采用的参数。
 - 动态候选使用 Dashboard-owned 候选物化；查询、级联、搜索与分页共享同一 immutable generation，不在每次交互时重新执行远端 SQL。
 - 多选只保存 `all/include/exclude/none` 和必要 operands，不展开完整候选池。搜索与分页使用 generation-bound opaque cursor，generation 变化后不得复用旧 cursor。
 - Revert 恢复 committed snapshot；Clear 与 None/All 的业务含义由 canonical state 和查询映射决定，不能从空数组猜测。
+
+### Right-Side Query / Control Panel
+
+**状态：2026-09-10，0.24.0 实现。** 复用现有表单，支持 Q/C 切换与关闭、Esc、宽屏停靠与窄屏覆盖。验证结果与发行状态以 plan.md 为准；本轮不宣称 Firefox/WebKit 已完成验收。
+
+- 同一右侧区域只有 `closed`、`query`、`controls` 三种展示状态。Q 打开 Query Parameters，再按 Q 关闭；C 打开 Dashboard Controls，再按 C 关闭。从另一种内容切入时直接替换，不并排打开两个面板。
+- Header 始终保留 `Query Parameters` / `Dashboard Controls` 入口、Q/C 提示和展开状态；无对应字段时置灰、不可点击，不隐藏按钮或改变排列。按 Q/C 遇到无字段时统一显示无参数提示，不打开空面板、不触发查询。单页与多 Page 使用相同操作，不要求作者新增 Page 或布局 DSL。
+- 快捷键仅在非编辑场景处理：Input、Textarea、Select、contenteditable、搜索框、代码编辑器、中文组合输入期间不拦截；不抢占带 Ctrl/Meta/Alt 的组合键，不响应按住键产生的重复事件。单字符快捷键需可关闭或限定到工作台焦点范围，不能只为鼠标用户设计。
+- Esc 优先关闭当前下拉框、日历或更上层对话框；没有内层浮层时才关闭面板。面板有显式关闭按钮，关闭后焦点回到发起入口。宽屏面板非模态，不锁住正文焦点；窄屏覆盖抽屉管理焦点并阻止背景误操作。
+- Query Parameters 保持 Draft / Applied 证据，修改后需 Run；Run 固定在面板底部且不遮住最后一个字段。Dashboard Controls 即时生效，不提供 Run 或冗余说明文案。现有 Header Run 若保留，必须复用同一提交动作，不能产生第二套状态。
+- 独立 HTML 报告不提供 Run 或 Share，也不列出运行查询、切换工作台 Sidebar 的快捷键；查询参数入口只展示已固化的取数证据，不伪装成可重新查库的表单。
+- 打开、关闭、切换面板不提交查询、不重置控件、不取消正在执行的 Run。保留草稿、已提交参数、Control canonical state；重开可查看查询使用的参数及与当前草稿的区别。
+- 首次无已应用结果且存在 Query Parameters 时自动展开 Q；查询完成后不强制关闭，由用户决定是否继续调参。此条取代旧布局的“成功后自动折叠”。
+- 切换 Dashboard / Page 时展示当前目标的字段与状态；旧请求不得覆盖新面板，不混用各页 Draft / Applied。没有对应面板内容时关闭，不显示上一页字段；导航不能等待候选初始化才能响应。
+- Section / View Controls 仍留在对应内容附近。独立报告、打印与导出不因此强制加入工作台侧栏。
+- 视觉沿用白底、克制的结构分隔、42px 控件几何和既有焦点样式；宽屏停靠面板不使用浮层重阴影。布局改变后通知图表 resize，避免逐帧驱动昂贵重绘；尊重 reduced-motion。
+
+**验收：** Q/Q、C/C、Q/C/Esc；输入与中文组合输入不误触；面板关开不丢草稿、不新增 Query；查询中关闭再打开；Dashboard / Page 快速切换；下拉框内 Esc 只关闭一层；窄屏焦点与关闭入口；Date Range 全日期、长多选摘要及最后一项字段不裁切。首次展开与查询后保留必须分别验证。
 
 ### Navigation and Direct Manipulation
 

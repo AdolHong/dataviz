@@ -852,14 +852,13 @@ window.datavizRuntime.registerRenderer('action.demo', {
         frame = page.frame_locator("#canvas-frame")
         expect(frame.locator('[data-view-id="labels"] .action-value')).to_have_text("1", timeout=30_000)
         expect(frame.locator('[data-view-id="summary"]')).to_contain_text("10", timeout=30_000)
-        expect(page.locator("#query-parameters-toggle")).to_have_attribute("aria-expanded", "false", timeout=10_000)
+        expect(page.locator("#query-parameters-toggle")).to_have_attribute("aria-expanded", "true", timeout=10_000)
         original_run = page.locator("#canvas-frame").get_attribute("data-run-id")
         original_frame = page.locator("#canvas-frame").get_attribute("data-frame-id")
         before = frame.locator("body").evaluate("""() => {
           window.actionSentinel = 'same-document';
           return {mounts:{...window.actionMounts}, updates:{...window.actionUpdates}};
         }""")
-        page.locator("#query-parameters-toggle").click()
         page.locator('#parameter-form input[name="label"]').fill("draft-not-applied")
         interrupted = []
         if transport == "json":
@@ -1426,9 +1425,13 @@ cache: {mode: none}
 def _open_dashboard(page: Page, base_url: str, dashboard_id: str) -> None:
     page.goto(base_url, wait_until="domcontentloaded")
     dashboard = page.locator(f'[data-nav-type="dashboard"][data-id="{dashboard_id}"]')
-    expect(dashboard).to_be_visible(timeout=10_000)
+    expect(dashboard).to_be_attached(timeout=10_000)
     switched = "active" not in (dashboard.get_attribute("class") or "").split()
     if switched:
+        if page.locator('#operation-panel[aria-modal="true"]').is_visible():
+            page.locator('#operation-panel-close').click()
+        if not dashboard.is_visible():
+            page.locator('#sidebar-toggle').click()
         dashboard.click()
         expect(dashboard).to_have_class(re.compile(r"\bactive\b"), timeout=10_000)
         expect(page.locator("#canvas-frame")).to_have_attribute(
@@ -1439,7 +1442,8 @@ def _open_dashboard(page: Page, base_url: str, dashboard_id: str) -> None:
 
 
 def _run_and_wait(page: Page, expected: str = "Ready") -> None:
-    page.locator("#run-button").click()
+    button = '#panel-run-button' if page.locator('#operation-panel[aria-modal="true"]').is_visible() else '#run-button'
+    page.locator(button).click()
     expect(page.locator("#query-diagnostics-label")).to_have_text(
         expected,
         timeout=30_000,
@@ -1519,8 +1523,6 @@ def test_parameter_domain_cascade_reload_and_tab_restore(page: Page, tmp_path: P
         expect(city_control.locator("[data-control-summary]")).to_have_text("全部")
 
         _run_and_wait(page)
-        expect(page.locator("#query-parameters-panel")).to_be_hidden()
-        page.locator("#query-parameters-toggle").click()
         expect(page.locator("#query-parameters-panel")).to_be_visible()
         expect(page.locator("#query-parameters-status")).to_have_text("Applied")
         remembered = page.evaluate(
@@ -1685,6 +1687,83 @@ def test_server_compute_waits_for_required_control_domain(page: Page, tmp_path: 
             expect(dependent).to_have_attribute("data-view-status", "empty" if domain_result == "empty" else "error", timeout=20_000)
             assert not any(call["transform_id"] == "dependent" for call in calls), calls
         assert errors == [], errors
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize('has_fields', [True, False])
+def test_operation_panel_shortcuts_and_responsive_state(page: Page, tmp_path: Path, has_fields: bool):
+    from dataviz.standalone import prepare_input
+    source = tmp_path / "panel.yaml"
+    source.write_text(yaml.safe_dump({
+        "schema": DASHBOARD_SCHEMA, "id": "panel", "title": "Panel analysis",
+        "query_parameters": [{"id": "label", "label": "Analysis label", "type": "single_input", "value_type": "text", "default": "applied"}] if has_fields else [],
+        "controls": [{"id": "factor", "label": "Factor", "type": "single_input", "value_type": "number", "default": 2}] if has_fields else [],
+        "sources": [{"id": "rows", "type": "python", "code": {"inline": "def load(context):\n    return [{'value': 42}]\n"}, "outputs": {"main": {"kind": "table"}}}],
+        "views": [{"id": "rows", "template": "table", "input": "source:rows/main"}],
+    }))
+    root, _ = prepare_input(source)
+    runs = []
+    page.on("request", lambda request: runs.append(request.url) if request.method == "POST" and request.url.endswith('/runs') else None)
+    with _running_server(root, watch=False) as url:
+        page.goto(url)
+        panel = page.locator('#operation-panel')
+        if not has_fields:
+            for selector in ['#query-parameters-toggle', '#dashboard-controls-toggle']:
+                expect(page.locator(selector)).to_be_visible()
+                expect(page.locator(selector)).to_be_disabled()
+            page.keyboard.press('q')
+            expect(page.locator('#shortcut-toast')).to_have_text('This Dashboard has no query parameters.')
+            page.keyboard.press('c')
+            expect(page.locator('#shortcut-toast')).to_have_text('This Dashboard has no dashboard controls.')
+            expect(panel).to_be_hidden()
+            assert not runs
+            return
+        expect(panel).to_be_visible()
+        field = page.locator('#parameter-form input[name="label"]')
+        field.fill('draft qc')
+        field.press('q')
+        expect(panel).to_be_visible()
+        field.fill('draft')
+        page.locator('#operation-panel-close').focus()
+        page.keyboard.press('q')
+        expect(panel).to_be_hidden()
+        page.keyboard.press('q')
+        expect(field).to_have_value('draft')
+        page.keyboard.press('c')
+        expect(page.locator('#operation-panel-title')).to_have_text('Dashboard Controls')
+        expect(page.locator('#operation-panel-close')).not_to_be_focused()
+        expect(page.locator('#panel-run-button')).to_be_hidden()
+        page.keyboard.press('c')
+        expect(panel).to_be_hidden()
+        page.keyboard.press('q')
+        page.locator('#panel-run-button').click()
+        expect(page.frame_locator('#canvas-frame').locator('[data-view-id="rows"]')).to_contain_text('42', timeout=20_000)
+        expect(panel).to_be_visible()
+        expect(field).to_have_value('draft')
+        assert len(runs) == 1
+        page.screenshot(path='/tmp/dataviz-operation-panel-desktop.png')
+        page.locator('#dashboard-controls-toggle').click()
+        expect(page.locator('#dashboard-control-form')).to_be_visible()
+        control = page.locator('#dashboard-control-form input[name="dashboard:panel/factor"]')
+        expect(control).to_be_visible()
+        box = control.bounding_box()
+        assert box['x'] >= panel.bounding_box()['x'] and box['y'] >= panel.bounding_box()['y'], page.locator('#dashboard-controls-control').evaluate('(node) => node.outerHTML')
+        page.screenshot(path='/tmp/dataviz-operation-panel-controls.png')
+        page.locator('#query-parameters-toggle').click()
+        page.set_viewport_size({"width": 390, "height": 844})
+        expect(panel).to_have_attribute('aria-modal', 'true')
+        expect(page.locator('#operation-panel-close')).to_be_focused()
+        expect(page.locator('.workbench')).to_have_attribute('inert', '')
+        assert panel.bounding_box()['width'] <= 390
+        page.screenshot(path='/tmp/dataviz-operation-panel-mobile.png')
+        page.locator('#operation-panel-close').click()
+        expect(panel).to_be_hidden()
+        assert not page.locator('.workbench').evaluate('(node) => node.inert')
+        page.locator('#query-parameters-toggle').click()
+        expect(field).to_have_value('draft')
+        page.keyboard.press('Escape')
+        expect(panel).to_be_hidden()
+        assert len(runs) == 1
 
 
 @pytest.mark.e2e
@@ -2219,15 +2298,15 @@ def test_header_overlays_stay_in_viewport_and_query_parameters_are_discoverable(
     with _running_server(SHOWCASE) as base_url:
         _open_dashboard(page, base_url, "cascade-explorer")
 
-        # Dashboards without Query Parameters do not render an empty tray.  The
-        # Run control must say why its split-button toggle is absent.
-        expect(page.locator("#query-parameters-toggle")).to_be_hidden()
+        # Empty entry points keep their Header position but cannot open a panel.
+        expect(page.locator("#query-parameters-toggle")).to_be_visible()
+        expect(page.locator("#query-parameters-toggle")).to_be_disabled()
         expect(page.locator("#query-parameters-control")).to_be_hidden()
         expect(page.locator("#query-control-meta")).to_have_text("No parameters")
 
         for trigger, panel_selector in (
             (
-                "#dashboard-controls-control > summary",
+                "#dashboard-controls-toggle",
                 ".header-control__popover--controls",
             ),
         ):
@@ -2282,12 +2361,6 @@ def test_portable_query_tray_uses_document_flow_and_leaves_the_viewport(page: Pa
                 brand:pick(brand, ['display', 'alignItems', 'gap', 'height', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'color', 'backgroundColor', 'borderRadius']),
                 brandMark:pick(brand.querySelector('.dv-shell-brand__mark'), ['display', 'width', 'height', 'color', 'backgroundColor', 'borderRadius', 'fontFamily', 'fontSize', 'fontWeight', 'letterSpacing']),
                 brandName:pick(brand.querySelector('.dv-shell-brand__name'), ['color', 'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing']),
-                control:pick(control, ['display', 'alignItems', 'gap', 'height', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'color', 'backgroundColor', 'borderColor', 'borderRadius', 'fontFamily', 'fontSize', 'fontWeight', 'letterSpacing']),
-                controlPopover:pick(document.querySelector('.dv-shell-control__popover'), ['color', 'backgroundColor', 'borderColor', 'borderRadius', 'boxShadow']),
-                card:pick(card, ['backgroundColor', 'borderColor', 'borderRadius', 'boxShadow']),
-                title:pick(title, ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight']),
-                label:pick(field.querySelector(':scope > label'), ['fontFamily', 'fontSize', 'fontWeight']),
-                value:pick(value, ['fontFamily', 'fontSize', 'minHeight']),
               };
             }"""
         )
@@ -2298,6 +2371,14 @@ def test_portable_query_tray_uses_document_flow_and_leaves_the_viewport(page: Pa
     with _running_static_server(report_path.parent) as report_url:
         page.goto(f"{report_url}/{report_path.name}", wait_until="domcontentloaded")
         toggle = page.locator("[data-runtime-query-toggle]")
+        expect(page.locator('#run-button, #share-control, button.query-run-control__primary')).to_have_count(0)
+        page.keyboard.press('?')
+        help_dialog = page.locator('[data-runtime-shortcut-help]')
+        expect(help_dialog).to_be_visible()
+        expect(help_dialog).not_to_contain_text('Run query')
+        expect(help_dialog).not_to_contain_text('Sidebar')
+        expect(help_dialog).not_to_contain_text('Ctrl/Cmd')
+        page.keyboard.press('Escape')
         panel = page.locator("#dv-runtime-query-panel")
         canvas = page.locator(".dv-canvas")
         expect(toggle).to_have_attribute("aria-expanded", "false")
@@ -2323,12 +2404,6 @@ def test_portable_query_tray_uses_document_flow_and_leaves_the_viewport(page: Pa
                 brand:pick(brand, ['display', 'alignItems', 'gap', 'height', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'color', 'backgroundColor', 'borderRadius']),
                 brandMark:pick(brand.querySelector('.dv-shell-brand__mark'), ['display', 'width', 'height', 'color', 'backgroundColor', 'borderRadius', 'fontFamily', 'fontSize', 'fontWeight', 'letterSpacing']),
                 brandName:pick(brand.querySelector('.dv-shell-brand__name'), ['color', 'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing']),
-                control:pick(control, ['display', 'alignItems', 'gap', 'height', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'color', 'backgroundColor', 'borderColor', 'borderRadius', 'fontFamily', 'fontSize', 'fontWeight', 'letterSpacing']),
-                controlPopover:pick(document.querySelector('.dv-shell-control__popover'), ['color', 'backgroundColor', 'borderColor', 'borderRadius', 'boxShadow']),
-                card:pick(card, ['backgroundColor', 'borderColor', 'borderRadius', 'boxShadow']),
-                title:pick(title, ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight']),
-                label:pick(field.querySelector('label'), ['fontFamily', 'fontSize', 'fontWeight']),
-                value:pick(value, ['fontFamily', 'fontSize', 'minHeight']),
               };
             }"""
         )
@@ -2444,7 +2519,6 @@ def test_committed_parameter_content_and_stale_selection_export(page: Page, tmp_
             "区域"
         )
 
-        page.locator("#query-parameters-toggle").click()
         expect(page.locator("#query-parameters-toggle")).to_have_attribute(
             "aria-expanded", "true"
         )
@@ -3106,7 +3180,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
         } <= set(owner_contract["packages"])
 
         header = page.locator("#dashboard-controls-control")
-        header.locator("summary").click()
+        page.locator("#dashboard-controls-toggle").click()
 
         text_control = header.locator(
             '[data-control-component="input"]',
@@ -3211,7 +3285,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
             options.nth(index).click()
         expect(checkbox.locator("select option:checked")).to_have_count(3)
         page.keyboard.press("Escape")
-        expect(header).not_to_have_attribute("open", "")
+        expect(header).to_be_hidden()
 
         story_index = frame.locator(".gallery-story-index")
         expect(story_index).to_be_visible()
@@ -3565,7 +3639,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
 
 
 @pytest.mark.e2e
-def test_default_query_grid_uses_up_to_six_bounded_tracks_without_oversizing_range_picker(
+def test_sidebar_query_grid_keeps_bounded_fields_and_equal_entry_heights(
     page: Page, tmp_path: Path
 ):
     workspace = _copy_workspace(MINIMAL, tmp_path / "six-column-query-grid")
@@ -3621,14 +3695,13 @@ def test_default_query_grid_uses_up_to_six_bounded_tracks_without_oversizing_ran
               ownerWidth:form.parentElement.getBoundingClientRect().width,
             })"""
         )
-        assert wide["columns"] == 5, wide
-        assert wide["columns"] <= 6, wide
+        assert wide["columns"] == 1, wide
         assert wide["width"] >= wide["ownerWidth"] * 0.94, wide
         range_box = range_field.bounding_box()
         wide_box = wide_field.bounding_box()
         assert range_box is not None and wide_box is not None
         assert range_box["width"] < 500, range_box
-        assert wide_box["width"] > range_box["width"] * 1.8, (range_box, wide_box)
+        assert abs(wide_box["width"] - range_box["width"]) <= 1, (range_box, wide_box)
         entry_heights = {
             "range": range_field.locator(".dv-date-range__field").evaluate(
                 "node => node.getBoundingClientRect().height"
@@ -3648,11 +3721,11 @@ def test_default_query_grid_uses_up_to_six_bounded_tracks_without_oversizing_ran
 
         page.set_viewport_size({"width": 760, "height": 700})
         expect(page.locator("#query-parameters-control")).to_have_attribute(
-            "data-control-effective-columns", "2"
+            "data-control-effective-columns", "1"
         )
         assert (
             form.evaluate("form => getComputedStyle(form).gridTemplateColumns.split(' ').length")
-            == 2
+            == 1
         )
 
         page.set_viewport_size({"width": 480, "height": 700})
@@ -3732,112 +3805,36 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(page: Page, 
         expect(toggle).to_have_attribute("aria-expanded", "true")
         expect(panel).not_to_have_attribute("data-overlay-placement", re.compile(".+"))
 
-        wide_geometry = panel.evaluate(
-            """panel => {
-              const form = panel.querySelector('#parameter-form');
-              const card = panel.closest('.dv-query-card').getBoundingClientRect();
-              const frame = document.querySelector('#canvas-frame').getBoundingClientRect();
-              return {
-                panelWidth: panel.getBoundingClientRect().width,
-                formWidth: form.getBoundingClientRect().width,
-                columns: getComputedStyle(form).gridTemplateColumns.split(' ').length,
-                cardLeft:card.left,
-                cardRight:card.right,
-                frameLeft:frame.left,
-                frameRight:frame.right,
-              };
-            }"""
-        )
-        assert wide_geometry["columns"] == 4, wide_geometry
-        assert wide_geometry["formWidth"] >= wide_geometry["panelWidth"] * 0.94, wide_geometry
-        assert abs((wide_geometry["cardLeft"] - wide_geometry["frameLeft"]) - 48) <= 1, (
-            wide_geometry
-        )
-        assert abs((wide_geometry["frameRight"] - wide_geometry["cardRight"]) - 48) <= 1, (
-            wide_geometry
-        )
+        rail = page.locator('#operation-panel')
+        scroller = page.locator('#operation-panel-body')
+        assert form.evaluate("node => getComputedStyle(node).gridTemplateColumns.split(' ').length") == 1
+        rail_box, canvas_box = rail.bounding_box(), canvas.bounding_box()
+        assert canvas_box['x'] + canvas_box['width'] <= rail_box['x'] + 1
+        assert abs(rail_box['x'] + rail_box['width'] - 1800) <= 1
+        assert rail.evaluate("node => getComputedStyle(node).position") == 'fixed'
 
         page.set_viewport_size({"width": 900, "height": 360})
-        # ResizeObserver publishes the effective track count on the next
-        # rendering turn. Wait for that explicit Runtime state instead of
-        # racing computed style immediately after changing the viewport.
-        expect(control).not_to_have_attribute(
-            "data-control-effective-columns",
-            "4",
-        )
-
-        geometry = panel.evaluate(
-            """panel => {
-              const form = panel.querySelector('#parameter-form');
-              const rect = panel.getBoundingClientRect();
-              const owner = panel.closest('[data-control-role="query"]');
-              const card = panel.closest('.dv-query-card');
-              return {
-                position:getComputedStyle(panel).position,
-                width:rect.width,
-                cardWidth:card.getBoundingClientRect().width,
-                configuredColumns:owner.dataset.controlColumns,
-                effectiveColumns:owner.dataset.controlEffectiveColumns,
-                columnWidth:Number(owner.dataset.controlColumnWidth),
-                columns: getComputedStyle(form).gridTemplateColumns.split(' ').length,
-                formWidth:form.getBoundingClientRect().width,
-                panelClientHeight: panel.clientHeight,
-                panelScrollHeight: panel.scrollHeight,
-                panelOverflow: getComputedStyle(panel).overflow,
-              };
-            }"""
-        )
-        assert geometry["position"] == "relative", geometry
-        # The panel occupies the Card content box; the two-pixel delta is the
-        # Card's left and right border.
-        assert abs(geometry["width"] - geometry["cardWidth"]) <= 2, geometry
-        assert geometry["configuredColumns"] == "4"
-        expected_columns = max(
-            1,
-            min(4, int((geometry["formWidth"] + 10) // (geometry["columnWidth"] + 10))),
-        )
-        assert geometry["columns"] == expected_columns
-        assert geometry["effectiveColumns"] == str(expected_columns)
-        assert geometry["panelOverflow"] == "auto"
-        assert geometry["panelScrollHeight"] > geometry["panelClientHeight"]
-
-        page.evaluate(
-            """() => {
-              const card = document.querySelector('.dv-query-card');
-              window.scrollTo(0, card.offsetTop + card.offsetHeight + 100);
-            }"""
-        )
-        page.wait_for_timeout(100)
-        flow_geometry = page.evaluate(
-            """() => ({
-              topbarTop:document.querySelector('.topbar').getBoundingClientRect().top,
-              panelBottom:document.querySelector('#query-parameters-panel').getBoundingClientRect().bottom,
-            })"""
-        )
-        assert abs(flow_geometry["topbarTop"]) <= 1, flow_geometry
-        assert flow_geometry["panelBottom"] <= 1, flow_geometry
-        page.evaluate("window.scrollTo(0, 0)")
-
-        expanded_canvas_top = canvas.bounding_box()["y"]
-        page.keyboard.press("Escape")
-        expect(panel).to_be_visible()
-        toggle.click()
+        expect(rail).to_have_attribute('aria-modal', 'true')
+        expect(page.locator('.workbench')).to_have_attribute('inert', '')
+        geometry = scroller.evaluate("""node => ({
+            client:node.clientHeight, scroll:node.scrollHeight,
+            overflow:getComputedStyle(node).overflowY,
+            bottom:node.getBoundingClientRect().bottom,
+        })""")
+        assert geometry['scroll'] > geometry['client'], geometry
+        assert geometry['overflow'] == 'auto', geometry
+        assert geometry['bottom'] <= 360, geometry
+        expanded_canvas_top = canvas.bounding_box()['y']
+        page.keyboard.press('Escape')
         expect(panel).to_be_hidden()
-        expect(toggle).to_have_attribute("aria-expanded", "false")
-        collapsed_canvas_top = canvas.bounding_box()["y"]
-        assert collapsed_canvas_top < expanded_canvas_top - 40
+        assert abs(canvas.bounding_box()['y'] - expanded_canvas_top) <= 1
+        expect(page.locator('body')).to_have_class(re.compile(r'\bsidebar-collapsed\b'))
+        page.locator('#sidebar-toggle').click()
+        expect(page.locator('body')).not_to_have_class(re.compile(r'\bsidebar-collapsed\b'))
+        page.locator('#sidebar-toggle').click()
         toggle.click()
         expect(panel).to_be_visible()
-        expect(toggle).to_have_attribute("aria-expanded", "true")
-
-        # Crossing the tablet breakpoint collapses the Sidebar automatically.
-        # Exercise both toggle directions, then leave underlying controls clear.
-        expect(page.locator("body")).to_have_class(re.compile(r"\bsidebar-collapsed\b"))
-        page.locator("#sidebar-toggle").click()
-        expect(page.locator("body")).not_to_have_class(re.compile(r"\bsidebar-collapsed\b"))
-        page.locator("#sidebar-toggle").click()
-        expect(page.locator("body")).to_have_class(re.compile(r"\bsidebar-collapsed\b"))
-        panel.evaluate("panel => { panel.scrollTop = panel.scrollHeight; }")
+        scroller.evaluate("node => { node.scrollTop = node.scrollHeight; }")
         model_field = form.locator(".field", has=page.locator("#input-model_list"))
         trigger = model_field.locator("[data-control-trigger]")
         expect(trigger).to_be_visible()
@@ -3865,6 +3862,9 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(page: Page, 
         # ordinary outside-click handler. Its authenticated interaction
         # message must dismiss Shell-owned data-entry overlays without
         # collapsing the Query Panel itself.
+        page.keyboard.press('Escape')
+        page.set_viewport_size({"width": 1800, "height": 720})
+        trigger.click()
         page.frame_locator("#canvas-frame").locator("body").click(position={"x": 8, "y": 8})
         expect(selector_panel).to_be_hidden()
         expect(panel).to_be_visible()
@@ -3942,7 +3942,7 @@ def test_cross_browser_narrow_control_overlay_keyboard_scroll_and_aria(page: Pag
         expect(panel).to_be_visible()
         expect(toggle).to_have_attribute("aria-expanded", "true")
 
-        geometry = panel.evaluate(
+        geometry = page.locator('#operation-panel-body').evaluate(
             """panel => {
               const form = panel.querySelector('#parameter-form');
               const rect = panel.getBoundingClientRect();
@@ -3957,15 +3957,15 @@ def test_cross_browser_narrow_control_overlay_keyboard_scroll_and_aria(page: Pag
               };
             }"""
         )
-        assert geometry["left"] >= 8, geometry
+        assert geometry["left"] >= 0, geometry
         assert geometry["top"] >= 8, geometry
-        assert geometry["right"] <= geometry["viewport"][0] - 8, geometry
-        assert geometry["height"] <= geometry["viewport"][1] * 0.52 + 1, geometry
+        assert geometry["right"] <= geometry["viewport"][0], geometry
+        assert geometry["bottom"] < geometry["viewport"][1], geometry
         assert geometry["columns"] == 1, geometry
         assert geometry["panelScrollHeight"] > geometry["panelClientHeight"], geometry
         assert geometry["panelOverflow"] == "auto", geometry
 
-        panel.evaluate("panel => { panel.scrollTop = panel.scrollHeight; }")
+        page.locator('#operation-panel-body').evaluate("panel => { panel.scrollTop = panel.scrollHeight; }")
         model_field = form.locator(".field", has=page.locator("#input-model_list"))
         trigger = model_field.locator("[data-control-trigger]")
         expect(trigger).to_be_visible()
@@ -4009,8 +4009,6 @@ def test_cross_browser_narrow_control_overlay_keyboard_scroll_and_aria(page: Pag
         page.mouse.click(2, 510)
         expect(panel).to_be_visible()
         page.keyboard.press("Escape")
-        expect(panel).to_be_visible()
-        toggle.click()
         expect(panel).to_be_hidden()
         expect(toggle).to_have_attribute("aria-expanded", "false")
         page.locator("#run-button").click()
@@ -4034,7 +4032,7 @@ def test_server_header_hydrates_dataset_driven_dashboard_selection_options(
         _open_dashboard(page, base_url, "sales-overview")
         _run_and_wait(page)
         header = page.locator("#dashboard-controls-control")
-        header.locator("summary").click()
+        page.locator("#dashboard-controls-toggle").click()
         selector = header.locator('select[name="dashboard:sales-overview/region"]')
         expect(selector).to_have_attribute("data-value-encoding", "string")
         expect(selector.locator("option")).to_have_count(3, timeout=20_000)
@@ -4070,7 +4068,7 @@ def test_unified_dashboard_controls_drive_browser_named_output(page: Page, tmp_p
         _open_dashboard(page, base_url, "chart-gallery")
         control = page.locator("#dashboard-controls-control")
         expect(control.locator("#dashboard-control-meta")).to_have_text("2 controls")
-        control.locator("summary").click()
+        page.locator("#dashboard-controls-toggle").click()
         expect(control.locator("#dashboard-control-group")).to_be_visible()
         expect(control.locator("#dashboard-control-form .control-scope")).to_have_count(2)
         control_geometry = control.evaluate(
@@ -4088,12 +4086,12 @@ def test_unified_dashboard_controls_drive_browser_named_output(page: Page, tmp_p
               };
             }"""
         )
-        assert control_geometry["template"] == "grid"
-        assert control_geometry["effectiveColumns"] == "2"
-        assert control_geometry["columns"] == 2
+        assert control_geometry["template"] == "stack"
+        assert control_geometry["effectiveColumns"] == "1"
+        assert control_geometry["columns"] == 1
         assert control_geometry["panelWidth"] <= 610
         assert control_geometry["formWidth"] <= 570
-        assert all(width <= 280 for width in control_geometry["fieldWidths"])
+        assert all(width <= control_geometry["panelWidth"] for width in control_geometry["fieldWidths"])
 
         _run_and_wait(page)
         frame = page.frame_locator("#canvas-frame")
@@ -4112,7 +4110,6 @@ def test_unified_dashboard_controls_drive_browser_named_output(page: Page, tmp_p
             timeout=15_000,
         )
 
-        control.locator("summary").click()
         city_count = page.locator('input[name="dashboard:chart-gallery/radar_city_count"]')
         city_count.fill("1")
         page.wait_for_function(
@@ -4152,7 +4149,9 @@ def test_unified_dashboard_controls_drive_browser_named_output(page: Page, tmp_p
         inspector.locator(".dialog-close").click()
 
         page.locator("#sidebar-toggle").click()
-        expect(control).not_to_have_attribute("open", "")
+        expect(control).to_be_visible()
+        page.locator('#dashboard-controls-toggle').click()
+        expect(control).to_be_hidden()
 
 
 @pytest.mark.e2e
@@ -4258,7 +4257,7 @@ def test_selection_cascade_popovers_view_isolation_and_table_wheel(page: Page, t
 
         # Header and Canvas-owned popovers both close when focus moves elsewhere.
         header = page.locator("#dashboard-controls-control")
-        header.locator("summary").click()
+        page.locator("#dashboard-controls-toggle").click()
         expect(header).to_have_attribute("open", "")
         province = header.locator('[data-control-component="checkbox-group"]')
         expect(province.locator(".dv-checkbox-group__toolbar")).to_have_count(0)
@@ -4278,7 +4277,7 @@ def test_selection_cascade_popovers_view_isolation_and_table_wheel(page: Page, t
         ) == ["福建"]
         guangdong.click()
         frame.locator('[data-view-id="map-bars"] .dv-view-body').click()
-        expect(header).not_to_have_attribute("open", "")
+        expect(header).to_be_visible()
 
         section_popover = frame.locator('.dv-context-controls[data-control-origin="section"]')
         section_popover.locator("summary").click()
@@ -4618,7 +4617,7 @@ def test_managed_renderer_lifecycle_matrix_in_server_and_export(page: Page, tmp_
         }
 
         # update: retain one region and preserve each Renderer instance.
-        page.locator("#dashboard-controls-control > summary").click()
+        page.locator("#dashboard-controls-toggle").click()
         options = page.locator(
             '#dashboard-control-form [data-control-component="checkbox-group"] .dv-checkbox-option'
         )
@@ -4664,7 +4663,7 @@ def test_managed_renderer_lifecycle_matrix_in_server_and_export(page: Page, tmp_
 
         # export is generated from the same live canonical state before the
         # Server host is explicitly disposed.
-        page.locator("#dashboard-controls-control > summary").click()
+        page.locator("#dashboard-controls-toggle").click()
         with page.expect_download(timeout=20_000) as download_info:
             _export_html(page)
         download_info.value.save_as(report_path)
@@ -4944,7 +4943,7 @@ def test_perspective_enters_empty_state_immediately_after_last_selection_is_clea
         detail = frame.locator('[data-view-id="sales-detail"]')
         expect(perspective).to_have_attribute("data-view-status", "ready", timeout=30_000)
 
-        page.locator("#dashboard-controls-control > summary").click()
+        page.locator("#dashboard-controls-toggle").click()
         options = page.locator(
             '#dashboard-control-form [data-control-component="checkbox-group"] .dv-checkbox-option'
         )
@@ -5166,7 +5165,7 @@ def test_parameter_editor_choice_rows_share_the_drag_sorting_model(page: Page, t
 
     with _running_server(workspace) as base_url:
         _open_dashboard(page, base_url, "chart-gallery")
-        page.locator("#dashboard-controls-control > summary").click(button="right")
+        page.locator("#dashboard-controls-toggle").click(button="right")
         dialog = page.locator("#parameter-editor-dialog")
         expect(dialog).to_be_visible()
 
@@ -5223,8 +5222,8 @@ def test_date_default_editor_uses_one_mode_and_one_value_per_endpoint(page: Page
             })"""
         )
         assert query_geometry["fieldWidths"]
-        assert max(query_geometry["fieldWidths"]) <= 282, query_geometry
-        assert query_geometry["usedWidth"] < query_geometry["formWidth"] * 0.72, query_geometry
+        assert max(query_geometry["fieldWidths"]) <= query_geometry["formWidth"] + 1, query_geometry
+        assert query_geometry["usedWidth"] <= query_geometry["formWidth"] + 1, query_geometry
 
         page.locator("#run-button").click(button="right")
         dialog = page.locator("#parameter-editor-dialog")
@@ -5691,7 +5690,7 @@ def test_server_python_and_browser_js_share_output_contract_and_block_html_expor
             == completed_before_selection
         )
 
-        page.locator("#dashboard-controls-control summary").click()
+        page.locator("#dashboard-controls-toggle").click()
         factor = page.locator(
             '#dashboard-control-form input[name="dashboard:runtime-matrix/factor"]'
         )

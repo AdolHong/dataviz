@@ -23,6 +23,7 @@
         </div>
       </div>
       <div class="topbar-actions dv-shell-header-actions">
+        <button id="keyboard-shortcuts-toggle" class="button button--ghost" type="button" aria-label="Keyboard shortcuts">Shortcuts</button>
         <details id="share-control" class="header-control share-control" data-header-popover data-overlay-floating="true" data-overlay-width="250" data-empty="true">
           <summary id="share-button" class="share-control__trigger" aria-disabled="true">
             <strong>SHARE</strong>
@@ -33,7 +34,8 @@
             <button id="download-button" type="button" disabled>Export HTML</button>
           </div>
         </details>
-        <details id="dashboard-controls-control" class="header-control dv-shell-control" data-header-popover data-dv-control-panel data-control-role="dashboard" data-control-origin="dashboard" data-control-count="0" data-overlay-floating="true" data-overlay-width="760">
+        <button id="dashboard-controls-toggle" class="button button--ghost" type="button" aria-controls="operation-panel" aria-expanded="false" aria-keyshortcuts="C">Dashboard Controls <kbd>C</kbd></button>
+        <details id="dashboard-controls-control" class="header-control dv-shell-control" data-dv-control-panel data-control-role="dashboard" data-control-origin="dashboard" data-control-count="0" open>
           <summary class="header-control__trigger dv-shell-control__trigger" title="Open controls; right-click to edit defaults">
             <span class="header-control__mark dv-shell-control__mark" aria-hidden="true">C</span>
             <strong class="header-control__label dv-shell-control__label">DASHBOARD CONTROLS</strong>
@@ -54,7 +56,7 @@
             <span class="query-run-control__copy"><strong data-run-label>RUN</strong><small id="query-control-meta">Not applied</small></span>
           </button>
           <button id="query-parameters-toggle" class="query-run-control__toggle" type="button" aria-controls="query-parameters-panel" aria-expanded="true" aria-label="Collapse query parameters" aria-keyshortcuts="Q" title="Collapse query parameters (Q)">
-            <span class="query-run-control__chevron" aria-hidden="true"></span>
+            <span>Query Parameters</span><kbd>Q</kbd>
           </button>
         </div>
       </div>
@@ -119,6 +121,15 @@
         <iframe id="canvas-frame" title="Dashboard canvas"></iframe>
       </section>
     </main>
+    <button id="operation-backdrop" type="button" aria-label="Close settings panel" hidden></button>
+    <aside id="operation-panel" aria-labelledby="operation-panel-title" hidden>
+      <header class="operation-panel__header">
+        <div><h2 id="operation-panel-title">Query Parameters</h2></div>
+        <button id="operation-panel-close" class="button button--ghost" type="button" aria-label="Close settings panel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      </header>
+      <div id="operation-panel-body"></div>
+      <footer id="operation-panel-footer"><button id="panel-run-button" class="button button--run" type="button">RUN</button></footer>
+    </aside>
   </div>
   <dialog id="node-inspector" class="node-inspector" aria-labelledby="node-inspector-title">
     <header class="node-inspector__header">
@@ -143,11 +154,13 @@
       <header><h2 id="keyboard-shortcuts-title">Keyboard Shortcuts</h2><button type="submit" aria-label="Close">×</button></header>
       <dl>
         <div><dt><kbd>Q</kbd></dt><dd>Query parameters</dd></div>
+        <div><dt><kbd>C</kbd></dt><dd>Dashboard controls</dd></div>
         <div><dt><kbd>Ctrl/Cmd</kbd><span>+</span><kbd>Enter</kbd></dt><dd>Run query</dd></div>
         <div><dt><kbd>B</kbd></dt><dd>Sidebar</dd></div>
         <div><dt><kbd>Esc</kbd></dt><dd>Close temporary panel</dd></div>
         <div><dt><kbd>?</kbd></dt><dd>Keyboard shortcuts</dd></div>
       </dl>
+      <label><input id="single-key-shortcuts" type="checkbox" checked> Enable single-key shortcuts (Q, C, B, ?)</label>
       <footer><button type="submit" class="button button--ghost">Close</button></footer>
     </form>
   </dialog>

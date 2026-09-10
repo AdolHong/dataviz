@@ -1401,6 +1401,8 @@ Object.assign(datavizRuntime, {
           for (const key of new Set(Object.values(this.transformControlInputs(id)).map(binding => binding.control))) {
             const domain = this.controlDomainEvidence?.get(key);
             const definition = datavizControlDefinition(key);
+            // Free-form inputs have no candidate domain to wait for.
+            if (!['single_select', 'multiple_select'].includes(definition.type)) continue;
             const label = definition.label || key;
             if (domain?.status === 'error' || domain?.status === 'field_mismatch') {
               throw datavizRuntimeError({code:'control_domain_unavailable',
@@ -4186,14 +4188,16 @@ datavizRuntimeQueryToggle?.addEventListener('click', () => {
   );
 });
 const datavizKeyboardTargetIsEditable = target => target instanceof Element && Boolean(
-  target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]')
+  target.isContentEditable || target.closest('input, textarea, select, [role="textbox"], .monaco-editor, .cm-editor')
 );
 const datavizKeyboardShortcutCommand = event => {
   if (event.defaultPrevented || event.repeat || event.isComposing || event.keyCode === 229) return null;
   if (document.querySelector('dialog[open]')) return null;
+  if (window.parent !== window && event.key === 'Escape' && !document.querySelector(':popover-open')) return 'close-operation-panel';
   if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'Enter') return 'run-query';
   if (event.ctrlKey || event.metaKey || event.altKey || datavizKeyboardTargetIsEditable(event.target)) return null;
   if (event.key.toLowerCase() === 'q') return 'toggle-query-parameters';
+  if (window.parent !== window && event.key.toLowerCase() === 'c') return 'toggle-dashboard-controls';
   if (event.key.toLowerCase() === 'b') return 'toggle-sidebar';
   if (event.key === '?') return 'show-shortcuts';
   return null;

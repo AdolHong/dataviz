@@ -540,7 +540,7 @@ function toggleSidebar() {
 
 function keyboardTargetIsEditable(target) {
   if (!(target instanceof Element)) return false;
-  return Boolean(target.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]'));
+  return target.isContentEditable || Boolean(target.closest('input, textarea, select, [role="textbox"], .monaco-editor, .cm-editor'));
 }
 
 function keyboardShortcutCommand(event) {
@@ -548,7 +548,9 @@ function keyboardShortcutCommand(event) {
   if (document.querySelector('dialog[open]')) return null;
   if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'Enter') return 'run-query';
   if (event.ctrlKey || event.metaKey || event.altKey || keyboardTargetIsEditable(event.target)) return null;
+  if (!$('#single-key-shortcuts').checked) return null;
   if (event.key.toLowerCase() === 'q') return 'toggle-query-parameters';
+  if (event.key.toLowerCase() === 'c') return 'toggle-dashboard-controls';
   if (event.key.toLowerCase() === 'b') return 'toggle-sidebar';
   if (event.key === '?') return 'show-shortcuts';
   return null;
@@ -568,6 +570,19 @@ function showShortcutToast(message) {
 }
 
 function executeKeyboardShortcut(command) {
+  if (command === 'close-operation-panel') {
+    if (!operationPanelMode) return false;
+    setOperationPanel(null);
+    return true;
+  }
+  if (command === 'toggle-dashboard-controls') {
+    if (!dashboardControls().length) {
+      showShortcutToast('This Dashboard has no dashboard controls.');
+      return true;
+    }
+    setOperationPanel(operationPanelMode === 'controls' ? null : 'controls', {focus:true});
+    return true;
+  }
   if (command === 'toggle-query-parameters') {
     if (Number($('#query-parameters-control').dataset.controlCount || 0) <= 0) {
       showShortcutToast('This Dashboard has no query parameters.');
@@ -1904,10 +1919,10 @@ function applyDashboardControlPresentation(dashboard) {
   const shell = window.datavizComponents?.presentationShell;
   if (!shell?.applyControlPanel) return;
   const controls = dashboard.presentation?.control_panels || {};
-  shell.applyControlPanel($('#query-parameters-control'), controls.query, {
+  shell.applyControlPanel($('#query-parameters-control'), {...controls.query, template:'stack'}, {
     role:'query', count:dashboard.query_parameters.length,
   });
-  shell.applyControlPanel($('#dashboard-controls-control'), controls.dashboard, {
+  shell.applyControlPanel($('#dashboard-controls-control'), {...controls.dashboard, template:'stack'}, {
     role:'dashboard', count:dashboardControls().length,
   });
 }
@@ -1934,7 +1949,116 @@ function setQueryParametersOpen(open, {persist = false} = {}) {
   $('#query-run-control').classList.toggle('is-parameters-open', expanded);
   const runtime = activeRuntime();
   if (runtime && hasParameters) runtime.queryParametersOpen = expanded;
+  setOperationPanel(expanded ? 'query' : null, {persist:false});
   if (persist) saveTabUiState();
+}
+
+let operationPanelMode = null;
+let operationPanelOpener = null;
+const operationPanelNarrow = window.matchMedia('(max-width: 1279px)');
+
+function syncOperationPanelLayout() {
+  const panel = $('#operation-panel');
+  const modal = Boolean(operationPanelMode) && operationPanelNarrow.matches;
+  panel.setAttribute('role', modal ? 'dialog' : 'complementary');
+  if (modal) panel.setAttribute('aria-modal', 'true');
+  else panel.removeAttribute('aria-modal');
+  $('#operation-backdrop').hidden = !modal;
+  document.querySelectorAll('.topbar, .rail, .workbench').forEach(node => { node.inert = modal; });
+  document.body.classList.toggle('operation-panel-modal', modal);
+  if (modal && !panel.contains(document.activeElement)) $('#operation-panel-close').focus({preventScroll:true});
+}
+
+function setOperationPanel(mode, {focus = false, persist = true} = {}) {
+  if (mode === 'query' && !state.dashboard?.query_parameters?.length) mode = null;
+  if (mode === 'controls' && !dashboardControls().length) mode = null;
+  const panel = $('#operation-panel');
+  const changed = operationPanelMode !== mode;
+  if (mode && !operationPanelMode) operationPanelOpener = document.activeElement;
+  if (changed) window.datavizComponents?.overlay.closeAll({group:'data-entry'});
+  operationPanelMode = mode;
+  panel.hidden = !mode;
+  document.body.classList.toggle('operation-panel-open', Boolean(mode));
+  $('#query-parameters-control').hidden = mode !== 'query';
+  $('#query-parameters-panel').hidden = mode !== 'query';
+  $('#query-parameters-control').dataset.open = String(mode === 'query');
+  $('#dashboard-controls-control').hidden = mode !== 'controls';
+  const hasControls = dashboardControls().length > 0;
+  const hasParameters = Boolean(state.dashboard?.query_parameters?.length);
+  $('#dashboard-controls-toggle').disabled = !hasControls;
+  $('#query-parameters-toggle').disabled = !hasParameters;
+  $('#dashboard-controls-toggle').setAttribute('aria-expanded', String(mode === 'controls'));
+  $('#query-parameters-toggle').setAttribute('aria-expanded', String(mode === 'query'));
+  $('#query-parameters-toggle').setAttribute('aria-label', `${mode === 'query' ? 'Close' : 'Open'} query parameters`);
+  $('#query-parameters-toggle').title = hasParameters
+    ? `${mode === 'query' ? 'Close' : 'Open'} query parameters (Q)`
+    : 'This Dashboard has no query parameters.';
+  $('#dashboard-controls-toggle').title = hasControls
+    ? `${mode === 'controls' ? 'Close' : 'Open'} dashboard controls (C)`
+    : 'This Dashboard has no dashboard controls.';
+  $('#query-run-control').classList.toggle('is-parameters-open', mode === 'query');
+  $('#operation-panel-title').textContent = mode === 'controls' ? 'Dashboard Controls' : 'Query Parameters';
+  $('#operation-panel-footer').hidden = mode !== 'query';
+  $('#operation-panel-query-tools').hidden = mode !== 'query';
+  $('#query-parameters-status').hidden = mode !== 'query';
+  const runtime = activeRuntime();
+  if (runtime) runtime.queryParametersOpen = mode === 'query';
+  syncOperationPanelLayout();
+  if (focus && mode && operationPanelNarrow.matches) $('#operation-panel-close').focus({preventScroll:true});
+  if (!mode && changed) {
+    const target = operationPanelOpener?.isConnected
+      && operationPanelOpener.matches('button, a[href], input, select, textarea, [tabindex], iframe')
+      && !operationPanelOpener.closest('[hidden]')
+      ? operationPanelOpener : $('#query-parameters-toggle');
+    target?.focus({preventScroll:true});
+  }
+  if (persist) saveTabUiState();
+}
+
+function initializeOperationPanel() {
+  $('#keyboard-shortcuts-toggle').addEventListener('click', () => executeKeyboardShortcut('show-shortcuts'));
+  try { $('#single-key-shortcuts').checked = localStorage.getItem('dataviz.single-key-shortcuts') !== 'off'; } catch (_) {}
+  $('#single-key-shortcuts').addEventListener('change', event => {
+    try { localStorage.setItem('dataviz.single-key-shortcuts', event.target.checked ? 'on' : 'off'); } catch (_) {}
+  });
+  $('#operation-panel-body').append($('#query-parameters-control'), $('#dashboard-controls-control'));
+  const queryTools = $('#query-parameters-control .dv-query-card__header');
+  queryTools.id = 'operation-panel-query-tools';
+  $('#operation-panel-close').before(queryTools);
+  queryTools.before($('#query-parameters-status'));
+  $('#dashboard-controls-control > summary').hidden = true;
+  $('#dashboard-controls-toggle').addEventListener('click', () => executeKeyboardShortcut('toggle-dashboard-controls'));
+  $('#dashboard-controls-toggle').addEventListener('contextmenu', event => {
+    event.preventDefault();
+    openParameterEditor('dashboard').catch(console.error);
+  });
+  for (const id of ['operation-panel-close', 'operation-backdrop']) {
+    $(`#${id}`).addEventListener('click', () => setOperationPanel(null));
+  }
+  $('#panel-run-button').addEventListener('click', () => $('#run-button').click());
+  const syncRun = () => {
+    $('#panel-run-button').disabled = $('#run-button').disabled;
+    $('#panel-run-button').textContent = $('#run-button [data-run-label]').textContent;
+  };
+  new MutationObserver(syncRun).observe($('#run-button'), {attributes:true, childList:true, subtree:true, characterData:true});
+  syncRun();
+  const syncTop = () => document.body.style.setProperty('--operation-panel-top', `${document.querySelector('.topbar').getBoundingClientRect().bottom}px`);
+  new ResizeObserver(syncTop).observe(document.querySelector('.topbar'));
+  operationPanelNarrow.addEventListener('change', syncOperationPanelLayout);
+  document.addEventListener('keydown', event => {
+    if (!operationPanelMode || event.defaultPrevented || event.isComposing || document.querySelector('dialog[open]')) return;
+    if (document.querySelector(':popover-open')) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setOperationPanel(null);
+    } else if (event.key === 'Tab' && operationPanelNarrow.matches) {
+      const nodes = [...$('#operation-panel').querySelectorAll('button, input, select, textarea, [tabindex="0"]')]
+        .filter(node => !node.disabled && node.getClientRects().length);
+      const first = nodes[0], last = nodes.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    }
+  });
 }
 
 function toggleQueryParameters() {
@@ -3054,7 +3178,6 @@ async function finishRun(runId, dashboardId, pageId = null) {
     runtime.runId = runId;
     sealCommittedQuerySnapshot(runtime, record.result.query_parameter_state);
     runtime.queryParameterState ||= structuredClone(record.result.query_parameter_state || {});
-    runtime.queryParametersOpen = false;
     runtime.queryStatus = ['ready', 'partial'].includes(status) ? status : 'error';
     runtime.queryLabel = status === 'ready' ? 'Ready' : status === 'partial' ? 'Partial' : 'Failed';
     runtime.queryDefinitionStale = false;
@@ -3084,7 +3207,6 @@ async function finishRun(runId, dashboardId, pageId = null) {
     setControlsEnabled(Boolean(runtime.runId));
     setComputeState();
     setQueryState(committed ? null : runtime.message);
-    if (committed) setQueryParametersOpen(false, {persist:true});
     if (committed && $('#workspace-update').dataset.impact === 'query') {
       hideWorkspaceUpdate();
     }
@@ -4671,6 +4793,7 @@ window.addEventListener('message', (event) => {
     return;
   }
   if (event.data?.type === 'dataviz:keyboard-shortcut') {
+    if (!$('#single-key-shortcuts').checked && ['toggle-query-parameters', 'toggle-dashboard-controls', 'toggle-sidebar', 'show-shortcuts'].includes(event.data.command)) return;
     executeKeyboardShortcut(String(event.data.command || ''));
     return;
   }
@@ -4725,6 +4848,7 @@ $('#dashboard-controls-control > summary').addEventListener('contextmenu', event
   openParameterEditor('dashboard').catch(error => console.error('[dataviz:parameter-editor]', error));
 });
 initializeSidebarResize();
+initializeOperationPanel();
 const sidebarMobile = window.matchMedia('(max-width: 980px)');
 sidebarMobile.addEventListener('change', event => {
   if (event.matches) state.sidebarCollapsed = true;

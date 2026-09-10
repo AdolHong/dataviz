@@ -131,6 +131,7 @@ def resolve_control_state(
     provided: Mapping[str, Mapping[str, Any]] | None,
     *,
     phase: Literal["execution", "canvas-hydration"] = "execution",
+    execution_keys: set[str] | None = None,
 ) -> ControlStatePayload:
     from dataviz.workspace.controls import scoped_control_registry
 
@@ -142,9 +143,13 @@ def resolve_control_state(
             "Unknown Control key",
             details={"code": "control_state_unknown", "keys": unknown},
         )
-    allow_unresolved = phase == "canvas-hydration"
     resolved: ControlStatePayload = {}
     for key, control in registry.items():
+        # Preserve the full canonical snapshot, but a branch must not require
+        # an unrelated inferred Control whose domain has not arrived yet.
+        allow_unresolved = phase == "canvas-hydration" or (
+            execution_keys is not None and key not in execution_keys
+        )
         try:
             entry = (
                 normalize_input_state_entry(

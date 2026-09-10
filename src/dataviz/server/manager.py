@@ -555,10 +555,11 @@ class RunManager:
         event_limit = runtime.max_retained_interaction_events
         dashboard = executor.ensure_valid(query_run.dashboard, query_run.page_id)
         ensure_query_run_compatible(dashboard, query_run)
-        compile_interactive_plan(dashboard, target_id)
+        plan = compile_interactive_plan(dashboard, target_id)
         resolved_control_state = resolve_control_states(
             dashboard.definition,
             control_state,
+            execution_keys={binding["control"] for node in plan for binding in node.control_inputs.values()},
         )
         key = (session_id, run_record.dashboard_id, run_id, target_id)
         with self.lock:

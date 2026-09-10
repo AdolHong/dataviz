@@ -10,6 +10,15 @@ from dataviz.cli import app
 import dataviz.documentation as documentation
 
 
+def test_query_reload_diagnosis_is_discoverable_by_symptom():
+    result = next(item for item in documentation.search_documentation("刷新 默认值")["results"]
+                  if item["topic"] == "query-parameters")
+    response = CliRunner().invoke(app, shlex.split(result["command"])[1:])
+    assert response.exit_code == 0, response.output
+    assert "reload_restoration" in response.stdout
+    assert "可见组件必须一起同步" in response.stdout
+
+
 @pytest.mark.parametrize("query", ["级联候选为空", "右图漏刷"])
 def test_interaction_stability_is_discoverable_by_symptom(query):
     match = next(item for item in documentation.search_documentation(query)["results"]

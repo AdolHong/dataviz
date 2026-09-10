@@ -4,7 +4,22 @@
 
 当前协议基线（由 `protocols.py` 与回归检查约束）：`dataviz/workspace/v2`、`dataviz/dashboard/v20`、`dataviz/parameter-domain/v2`、`dataviz/parameter-domain-contract/v3`、`dataviz/parameter-lookup/v1`、`dataviz/parameter-materialization/v1`、`dataviz/dashboard-bundle/v2`、`dataviz/report-manifest/v3`、`dataviz/presentation/v2`、`dataviz/source/v6`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v13`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v6`、`dataviz/runtime/v15`、`dataviz/analysis-result/v5`、`dataviz/analysis-evidence/v5`。Component Registry 以 `dataviz components` 为准，不在阶段清单重复登记。
 
-当前包版本：`0.23.1`。本文件区分本地发行构建、工作树变更与待验证事项，不以完成过的历史阶段作为未来计划。架构理由见 [ARCHITECTURE](ARCHITECTURE.md)，视觉规范见 [DESIGN](DESIGN.md)，代码见 [实现索引](docs/product-architecture.md)，发行历史见 [CHANGELOG](CHANGELOG.md)。
+当前包版本：`0.23.3`。本文件区分本地发行构建、工作树变更与待验证事项，不以完成过的历史阶段作为未来计划。架构理由见 [ARCHITECTURE](ARCHITECTURE.md)，视觉规范见 [DESIGN](DESIGN.md)，代码见 [实现索引](docs/product-architecture.md)，发行历史见 [CHANGELOG](CHANGELOG.md)。
+
+## 0.23.3 导航与参数初始化解耦
+
+- Page 详情使用当前 Workspace 快照，只构造目标页，不重扫/校验全 Workspace；文件热更新与显式刷新继续负责目录发现。
+- 导航开始即取消上一条 Page 详情与旧 Lookup；初始化和父子候选串行流程在每次 await 后检查导航身份，旧响应/重试不修改新页。
+- 目标元数据尚未就绪时 Run 保持禁用，防止旧页回调重新启用；Sidebar/Page 导航不禁用。失败则保留原页并恢复其候选加载。
+- 真实浏览器刻意挂起请求，验证连续切 Page、切 Dashboard、请求取消、无多余 Query、无旧子级 Lookup；Chromium 专项 **2 passed，25.26 秒**（含迟到失败），Firefox **1 passed，12.70 秒**，WebKit **1 passed，12.15 秒**。既有多页状态与候选分页 Chromium 两项通过。
+- 没有新增 DSL、Worker 或复杂缓存；不承诺取消已在服务端执行的数据库物化，也不以此测试声称所有浏览器主线程卡顿都已消失。本轮不运行完整浏览器套件或安装冒烟。
+- 最终相关非浏览器/发行检查 **110 passed，15.77 秒**；初轮静态断言误将失败恢复分支计入成功导航顺序，已明确限定成功路径，版本文档同步后复验通过。
+
+## 0.23.2 本地发行
+
+包含下述多页稳定性与查询参数可见恢复修复。沿用已记录的完整/专项测试证据，
+本轮只做版本一致性与发行产物检查，不重跑浏览器全套或安装冒烟，不上传远端仓库。
+完整 Chromium 曾有两个失败，修正或单独复验情况见下文；不声明完整套件一次全绿。
 
 ## 0.23.1 工作树验证
 
@@ -23,6 +38,47 @@
 - 多页的已知未完成边界仍见下方清单及 Changelog，现有测试通过不代表跨页失效和热更新隔离已完成。
 
 ## 工作树：Dashboard 多 Page 独立分析入口（实施中）
+
+2026-09-10 稳定性专项：热更新语义快照开始覆盖所有 Page 的依赖闭包，
+Workspace Change 事件新增按 Dashboard/Page 定位的 `page_changes` 证据，保留原有
+Dashboard 汇总。已补非默认页 Python、独立参数、共享 Python、展示改动和删页回归。
+Shell 已消费按页证据：未打开页也标记过期，未受影响的当前页不重建 Canvas、不自动查询；
+导航元数据刷新保留当前 Page 参数定义，异步导航有 generation 保护。
+事件消费游标与 Run 返回的已知版本分离，避免新 Run 确认吞掉其他 Page 的事件；
+会话恢复以服务端兼容性检查为准，避免旧事件把新结果误标过期。
+非浏览器相关 **25 passed**；Chromium 专项覆盖真实代码编辑、切回、重跑、展示编辑、
+新增目录和刷新恢复。共享数据保存后的跨页失效提示已接入，整体验收正在进行。
+
+共享数据失效的证据层已接入：每个 Source 执行或命中缓存时记录读取的 mutation epoch，
+同一个捕获值同时用于缓存键与 Run diagnostics，避免两个时点读取导致证据错配。
+`GET /api/runs/{id}` 与 `/api/session/runs` 返回 `data_outdated_sources`，区分数据变化和
+Query 定义变化，不改写历史 Result。两页共用 Source、第三页不依赖该 Source 的回归
+证明只标记前两页，重跑其中一页不清除另一页的过期证据，也不隐式执行任何 Query。
+Action/Page 相关 **51 passed**，追加共享页 API 回归后 Page **14 passed**。
+浏览器已通过现有事件连接接收 Source 版本并提示 Data changed，关闭文件热更新时仍有效。
+真实 SQLite Chromium 回归 **1 passed，19.04 秒**：三页执行、保存局部更新、相关页过期、
+无自动查询、刷新恢复、显式重跑；保存中离页只有已发送动作完成，第二个排队动作无回执、
+无写入且不改投其他页。既有 Action 浏览器 JSON/Arrow 两种传输专项 **2 passed**。
+新增快速切页立即 Run 保护，避免详情加载期间提交上一页；参数编辑器读写绑定所选 Page，
+保留整个文件的版本冲突检查，不修改其他页同名参数。Page 非浏览器 **15 passed**。
+最终非浏览器复验（参数编辑器与 Worker 管道补丁后）**724 passed，113.30 秒**。
+Worker 退出前已发送的最后一帧现在会被读取；查询与 Action 各覆盖成功帧和 EOF，
+不重启动作、不把 exit code 0 当成写入成功。此前一次 Action 回执仍为 running 的偶发
+失败未确认根因，已增强断言现场，后续完整复验未复现，不声称已定位修复。
+完整 Chromium **83 passed、2 failed**：一项是测试未适配平板断点自动收起 Sidebar，
+已修正并验证双向切换；另一项为推导候选未加载，单独两次重跑通过，根因仍待观察。
+修正后两项合并重跑 **2 passed，23.62 秒**，不将其表述为完整套件一次全绿。
+Firefox 专项首轮 **4 passed、1 failed**，修复 Action 同步成功后未清除当前 Page
+过期徽标的问题，失败项复验 **1 passed**；WebKit 同一专项 **5 passed**。
+新增 Control checkpoint 与滚动恢复断言后，多页专项 Chromium/Firefox/WebKit 各 **1 passed**。
+下游日期范围、单选框刷新显示默认值已复现并修复：底层恢复正确，但
+`setQueryParameterStates` 原先只同步多选框；现于所有值和 intent 回填后统一同步参数组件，
+Run 发送前显式保存草稿并更新 URL。没有新增 DSL 或自动查询。
+查询中/完成后刷新各覆盖底层值、可见日期、单选摘要、实际结果及仅一次 Query；
+Chromium 两项加既有多页/日期投影组合 **4 passed，62.54 秒**，Firefox **2 passed，36.06 秒**，
+WebKit **2 passed，35.88 秒**。相关非浏览器 **85 passed**；新增症状搜索测试后
+文档搜索 **18 passed**。CLI `docs --search '刷新 默认值'` 可定位恢复边界与排查方法。
+这些是本次补丁后的专项复验，不是重新运行完整浏览器套件；随 0.23.2 本地发行。
 
 边界：Dashboard 统一代码/资源/发布，Page 独立参数和运行状态；不做共享参数、
 软链接复用、跨页 Control、页面嵌套或第二套执行引擎。继承现有安静工作台视觉，

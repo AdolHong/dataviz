@@ -689,6 +689,8 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
     "interaction-stability": {
         "summary": "品类切片、商品选择变 null、级联候选为空、右图漏刷、刷新后 409：联动稳定性诊断。",
         "checks": [
+            "动态必选 Control 初始化时，依赖它的 Interactive Transform 等待候选域与默认值就绪，不提交空值制造 control_state_required 422；等待的是数据与 Control，而不是其他 Section 的图表渲染。无关 Transform 可继续执行。",
+            "候选加载完成但为空时显示 No available options；加载失败或字段映射错误保留明确错误。服务端按目标 Transform 的依赖闭包检查必选值，实际依赖的非法空值仍拒绝，不放宽必选约束。",
             "先看 canonical Control state，不用手动高亮推断选择成功。点击被接受后，原生高亮与消费 View 应使用同一份选择。",
             "depends_on 声明父 Control；级联字段优先使用该 View 已有 filter 绑定，否则使用父 Control 的 field/path_fields（未指定时为 id）。不需要为了候选级联而给所有 View 补父过滤。字段应显式映射，平台不猜业务关系。",
             "声明过的候选 schema 缺少父字段时 validate 报 control_dependency_field_unknown；没有静态 schema 时查看运行时 option_domain，不能把 field_mismatch 当成合法空选。",
@@ -815,8 +817,10 @@ update(context, descriptor, state) {
         ],
     },
     "pages": {
-        "summary": "多个分析页面、第二条分析路径、不同参数：Dashboard 内统一代码，Page 独立 Query 参数、运行结果和 Control；简单看板无需 pages。",
-        "status": "实施中：模型、CLI、Server 按页执行、报告、整项目 Bundle 与浏览器 Page 导航已接入；基础切页/恢复 Chromium 专项通过，跨页失效与热更新隔离仍待完成和验收。",
+        "summary": "多个分析页面、第二条分析路径、不同参数、跨页保存与数据过期：Dashboard 内统一代码，Page 独立 Query 参数、运行结果和 Control；简单看板无需 pages。",
+        "status": "已接入按页执行、报告、整项目 Bundle、浏览器导航、按页热更新和共享数据过期提示；关键 Chromium 流程已验证，当前工作树正在进行整体验收。",
+        "hot_reload_evidence": "服务端按各 Page 依赖闭包识别代码、参数与展示变化；Workspace Change 的 page_changes 提供按页影响，changes 保留 Dashboard 汇总。Shell 按页标记 Query 定义过期，包括未打开页；不自动查询、不重建未受影响页的 Canvas。导航刷新保留当前 Page 与参数类型。",
+        "data_freshness_evidence": "Run 与会话恢复 API 的 data_outdated_sources 返回已声明 Source 失效的 observed/current 版本；这是运行时证据，不修改历史 Result，也不等于 Query 定义变化。只追踪同 Dashboard 下的 Source ID，不根据共用数据库路径猜测依赖。事件连接会提示 Data changed，关闭文件热更新时也有效；未受影响页不变，其他页不会自动查询。用户在过期页 Run 后更新该页；保存成功不代表所有页已同步。",
         "rules": [
             "没有 pages 时继续在顶层声明 query_parameters、controls、sections、views；不需要默认 Page 包装层。",
             "需要第二条分析路径时，将参数与展示移入 pages，每页声明 id/title/query_parameters/controls/sections/views/layout。",
@@ -1324,6 +1328,8 @@ sections:
     },
     "query-parameters": {
         "summary": "Query Parameter 创建不可变 Query Run；每个参数只保存一份 canonical state，Dashboard-owned SQL 候选由 Server 物化并通过 Lookup 搜索或分页。",
+        "reload_restoration": "同标签页刷新应恢复当前 Page 的参数草稿，已提交参数另存于 Run 的 query_parameter_state。查询中和查询完成后均不应把可见日期、单选摘要重置为默认值；底层 input/select 与可见组件必须一起同步。刷新不会自动发起新查询。诊断时同时对照 URL、表单底层值、可见摘要和 Run 参数，不要仅凭面板默认文字认定服务器查询用了默认值。另开标签页不保证继承原会话。",
+        "navigation_loading": "切换 Dashboard/Page 不等待候选 Lookup 完成。新导航立即取消旧页面详情和浏览器 Lookup 请求，旧初始化链及迟到响应不能更新新页；目标页详情未就绪时禁止 Run，但导航仍可继续点击。Page 详情读取已安装 Workspace 快照、只构造目标页，不执行全 Workspace 校验；目录发现与全项目检查仍由文件热更新或显式 Workspace 刷新负责。取消浏览器请求不等于取消已经开始的服务端 Domain 物化或数据库查询。",
         "remote_select": "Remote Select 的输入、搜索和翻页只触发 Parameter Lookup；选择提交后才改变 canonical Query Parameter state。打开的下拉框必须立即投影最新 request generation 的候选，迟到响应不得覆盖新搜索。",
         "dynamic_domains": {
             "purpose": "一个 SQL Domain 物化一张完整候选关系；多个 Query Parameter 可从不同字段去重投影，父级变化只在该 generation 上过滤，不重跑 SQL。",

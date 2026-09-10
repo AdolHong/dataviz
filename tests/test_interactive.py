@@ -59,6 +59,47 @@ def test_server_only_base_outputs_are_not_browser_payload(tmp_path: Path):
             renderer._portable_bundle(dashboard, run, store, asset_mode=mode)
 
 
+def test_interaction_checks_required_dynamic_controls_only_in_target_closure(tmp_path):
+    root = build_interactive_workspace(tmp_path / "control-readiness")
+    path = root / "dashboards/interactive/dashboard.yaml"
+    definition = yaml.safe_load(path.read_text())
+    definition["controls"].append({"id": "category", "type": "single_select", "value_type": "text",
+                                   "field": "region", "required": True, "clearable": False,
+                                   "initial": {"mode": "first"},
+                                   "options": {"mode": "infer", "source": "source:raw/main"}})
+    transform_path = root / "dashboards/interactive/transforms/summary.yaml"
+    selected = yaml.safe_load(transform_path.read_text())
+    selected["id"] = "selected"
+    selected["control_inputs"]["category"] = {"mode": "value", "control": "dashboard.category"}
+    (transform_path.parent / "selected.yaml").write_text(yaml.safe_dump(selected))
+    definition["interactive_transforms"].append("transforms/selected.yaml")
+    definition["views"].append({"id": "selected", "template": "table", "input": "interactive:selected/main"})
+    path.write_text(yaml.safe_dump(definition))
+    workspace = load_workspace(root)
+    run = Executor(workspace).run("interactive", query_parameter_state=query_state())
+    controls = interaction_state() | {"dashboard:interactive/category": {"value": None, "revision": 0}}
+    executor = InteractionExecutor(workspace)
+    assert executor.execute(run, "summary", control_state=controls).status == "ready"
+    with pytest.raises(ExecutionFailure, match="a value is required"):
+        executor.execute(run, "selected", control_state=controls)
+    # API and manager enforce the same rule, while retaining complete canonical
+    # snapshots and refusing an actual dependency's missing required value.
+    with TestClient(create_app(root, watch=False)) as client:
+        response = client.post("/api/dashboards/interactive/runs", json={
+            "session_id": SESSION_A, "query_parameter_state": query_state()})
+        run_id = response.json()["run_id"]
+        for _ in range(200):
+            if client.get(f"/api/runs/{run_id}", params={"session_id": SESSION_A}).json()["result"]:
+                break
+            time.sleep(.02)
+        body = {"session_id": SESSION_A, "generation": 1, "control_state": controls}
+        response = client.post(f"/api/runs/{run_id}/interactions", json=body | {"transform_id": "summary"})
+        assert response.status_code == 200, response.text
+        response = client.post(f"/api/runs/{run_id}/interactions", json=body | {"transform_id": "selected"})
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"]["code"] == "control_state_required"
+
+
 def query_state(*, batch: int = 7) -> dict[str, dict[str, object]]:
     return {
         "batch": {"value": batch},

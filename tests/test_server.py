@@ -1072,7 +1072,10 @@ def test_server_shell_owns_dashboard_and_query_parameter_url_state():
         script.index("function setFormValues")
     ]
     assert "syncDashboardLocation(historyMode, runtime.queryParameterState || {});" in select_block
-    assert select_block.index("syncDashboardLocation(historyMode") < select_block.index(
+    # Failed metadata loads may resume the previous Page's cancelled Lookup.
+    # The successful navigation path must still commit its route first.
+    selected_page = select_block[select_block.index("state.dashboard = selected;"):]
+    assert selected_page.index("syncDashboardLocation(historyMode") < selected_page.index(
         "resolveQueryParameterDomains"
     )
 
@@ -2298,6 +2301,6 @@ def load(context):
         time.sleep(0.03)
 
     assert records["first_a"]["status"] == "cancelled"
-    assert records["second_a"]["result"]["status"] == "ready"
+    assert records["second_a"]["result"]["status"] == "ready", records["second_a"]
     assert records["first_b"]["result"]["status"] == "ready"
     assert records["first_b"]["result"]["query_parameter_state"]["delay"] == {"value": 0.2}

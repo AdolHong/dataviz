@@ -247,7 +247,8 @@ class InteractionExecutor:
             )
         interaction_id = interaction_id or f"ix_{uuid.uuid4().hex[:16]}"
         resolved_control_state = resolve_control_states(
-            dashboard.definition, control_state
+            dashboard.definition, control_state,
+            execution_keys={binding["control"] for node in plan for binding in node.control_inputs.values()},
         )
         result = InteractionResult(
             interaction_id=interaction_id,

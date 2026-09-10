@@ -174,6 +174,8 @@ def execute_action(*, journal: ActionJournal, scope: str, request_id: str,
                     pass
                 break
             if not process.is_alive():
+                if receiver.poll(0):
+                    continue
                 break
         if outcome is None:
             outcome = {"status": "unknown", "error": {

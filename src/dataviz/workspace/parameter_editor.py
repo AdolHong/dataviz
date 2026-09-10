@@ -121,6 +121,7 @@ def parameter_editor_contract(dashboard: LoadedDashboard) -> dict[str, Any]:
     return {
         "schema": EDITOR_SCHEMA,
         "dashboard_id": definition.id,
+        "page_id": dashboard.page_id,
         "dashboard_title": dashboard.title,
         "revision": _revision(source),
         "groups": groups,
@@ -171,7 +172,12 @@ class ParameterEditor:
             if not isinstance(document, CommentedMap):
                 raise WorkspaceError("Dashboard YAML must be an object", file=path)
 
-            sequence, definitions = self._resolve_group(document, dashboard, owner)
+            scope = document
+            if dashboard.page_id is not None:
+                scope = self._find_owner(document.get("pages"), dashboard.page_id)
+                if scope is None:
+                    raise WorkspaceError("The edited Page no longer exists", file=path)
+            sequence, definitions = self._resolve_group(scope, dashboard, owner)
             current_ids = [definition.id for definition in definitions]
             if len(order) != len(set(order)) or set(order) != set(current_ids):
                 raise WorkspaceError(
@@ -290,6 +296,7 @@ class ParameterEditor:
             return {
                 "schema": EDITOR_SCHEMA,
                 "dashboard_id": dashboard.definition.id,
+                "page_id": dashboard.page_id,
                 "owner": owner,
                 "revision": _revision(content),
             }

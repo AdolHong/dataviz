@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.23.3 — 2026-09-10
+
+- Keep Dashboard/Page navigation independent of slow parameter Lookup: abort superseded browser requests immediately and stop obsolete initialization/cascade chains after navigation.
+- Generate Page detail from the installed Workspace snapshot and selected Dashboard only, avoiding repeated whole-Workspace discovery and validation on each Page click. File watch and explicit Workspace refresh retain discovery responsibilities.
+- Keep Run disabled while destination metadata is pending, including when old-page callbacks finish; navigation stays available. Browser request cancellation does not promise cancellation of already-running database materialization.
+
+## 0.23.2 — 2026-09-10
+
+- Restore visible date-range inputs and single-select summaries together with native query state after reload, both during and after a query. Persist submitted drafts before sending Run; restoration does not issue another query.
+- Scope hot-reload evidence and parameter editing to the selected Page. Preserve sibling state, navigation, Control checkpoints and scroll position; guard fast Page-switch/Run races and stale Lookup retries.
+- Track declared Source mutation versions without changing immutable Results. Notify affected sibling Pages that data changed, including when file watching is disabled, without automatic queries. Clear the current Page's stale badge after successful Action refresh.
+- Drain final Python worker messages before treating process exit as a missing result; preserve Action receipt safety without replaying writes.
+- Document restoration and cross-Page freshness boundaries. Full non-browser verification and targeted three-engine regressions are recorded in plan.md; an intermittent inferred-option loading failure remains under observation.
+
 ## 0.23.1 — 2026-09-10
 
 - Fix Page navigation CSS swallowed by an unterminated comment. Use one Dashboard heading and styled Page navigation in the Server workbench; suppress duplicate embedded Page headings while preserving standalone report titles and page descriptions.

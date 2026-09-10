@@ -8,7 +8,10 @@ import hashlib
 from pathlib import Path
 import sqlite3
 import time
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from dataviz.execution.results import RunResult
 
 
 class ActionConflict(ValueError):
@@ -26,17 +29,43 @@ def action_journal_path(workspace_root: Path) -> Path:
 
 def source_mutation_epoch(workspace_root: Path, dashboard_id: str, source: str) -> int:
     """Read-only cache fence shared by tab sessions and standalone snapshots."""
+    return source_mutation_epochs(workspace_root, dashboard_id).get(source, 0)
+
+
+def source_mutation_epochs(workspace_root: Path, dashboard_id: str) -> dict[str, int]:
+    """Read one consistent version snapshot without creating mutable storage."""
     path = action_journal_path(workspace_root)
     if not path.is_file():
-        return 0
+        return {}
     connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=30)
     try:
-        row = connection.execute(
-            "SELECT version FROM source_epochs WHERE dashboard=? AND source=?", (dashboard_id, source)
-        ).fetchone()
-        return row[0] if row else 0
+        return dict(connection.execute(
+            "SELECT source, version FROM source_epochs WHERE dashboard=?", (dashboard_id,)
+        ).fetchall())
     finally:
         connection.close()
+
+
+def changed_run_sources(workspace_root: Path, run: RunResult) -> dict[str, dict[str, int]]:
+    """Runtime freshness evidence; never mutate an immutable Query Result.
+
+    Only declared Source invalidations within this Dashboard are tracked.
+    Shared database paths do not imply undeclared business dependencies.
+    Older Results without version evidence are conservatively treated as epoch 0.
+    """
+    current = source_mutation_epochs(workspace_root, run.dashboard)
+    return {
+        node_id: {"observed": node.diagnostics.get("source_mutation_epoch", 0), "current": current[node_id]}
+        for node_id, node in run.nodes.items()
+        if node.node_type == "source" and node.status in {"ready", "empty"}
+        and current.get(node_id, 0) > node.diagnostics.get("source_mutation_epoch", 0)
+    }
+
+
+def run_source_versions(run: RunResult) -> dict[str, int]:
+    return {node_id: node.diagnostics.get("source_mutation_epoch", 0)
+            for node_id, node in run.nodes.items()
+            if node.node_type == "source" and node.status in {"ready", "empty"}}
 
 
 class ActionJournal:

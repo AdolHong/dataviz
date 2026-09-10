@@ -52,17 +52,23 @@ def test_pages_preserve_independent_queries_and_history(page: Page, tmp_path: Pa
         "import time\ndef load(context):\n    time.sleep(.3)\n"
         "    return {'main': [{'period': str(context.query_inputs['period'])}]}\n"
     )
+    for name in ("annual", "history"):
+        shutil.copyfile(dashboard / "rules.py", dashboard / f"{name}.py")
+    (dashboard / "scroll.css").write_text("body { min-height: 2400px; }\n")
     (dashboard / "dashboard.yaml").write_text(yaml.safe_dump({
         "schema": DASHBOARD_SCHEMA, "id": "holiday", "title": "Holiday analysis",
+        "canvas": {"styles": ["scroll.css"]},
         "sources": [
-            {"id": name, "type": "python", "code": "rules.py", "query_inputs": {"period": "year"},
+            {"id": name, "type": "python", "code": f"{name}.py", "query_inputs": {"period": "year"},
              "outputs": {"main": {"kind": "table"}}} for name in ("annual", "history")],
         "pages": [
             {"id": "annual", "title": "One year", "query_parameters": [
                 {"id": "year", "label": "Year", "type": "single_input", "value_type": "integer", "default": 2025}],
+             "controls": [{"id": "factor", "type": "single_input", "value_type": "integer", "default": 1}],
              "views": [{"id": "table", "template": "table", "input": "source:annual/main"}]},
             {"id": "history", "title": "Across years", "query_parameters": [
                 {"id": "year", "label": "Years", "type": "multiple_input", "value_type": "integer", "default": [2023, 2024]}],
+             "controls": [{"id": "factor", "type": "single_input", "value_type": "integer", "default": 10}],
              "views": [{"id": "table", "template": "table", "input": "source:history/main"}]},
         ],
     }))
@@ -92,6 +98,23 @@ def test_pages_preserve_independent_queries_and_history(page: Page, tmp_path: Pa
         expect(page.locator("#run-button strong")).to_have_text("RUN")
         assert len(runs) == 2
         assert {request["page_id"] for request in runs} == {"annual", "history"}
+        frame.locator('body').evaluate("""async () => {
+          await window.dataviz.control.set('dashboard:holiday/factor', 5);
+          await window.dataviz.applyControls({keys:['dashboard:holiday/factor']});
+          window.scrollTo(0, 450);
+        }""")
+        expect(frame.locator('body')).to_have_js_property('scrollHeight', 2400)
+        history.click()
+        expect(frame.locator('[data-view-id="table"]')).to_contain_text('2023', timeout=15_000)
+        assert frame.locator('body').evaluate("() => window.dataviz.control.state('dashboard:holiday/factor').value") == 10
+        frame.locator('body').evaluate("""async () => {
+          await window.dataviz.control.set('dashboard:holiday/factor', 20);
+          await window.dataviz.applyControls({keys:['dashboard:holiday/factor']});
+        }""")
+        annual.click()
+        expect(frame.locator('[data-view-id="table"]')).to_contain_text('2025', timeout=15_000)
+        assert frame.locator('body').evaluate("() => window.dataviz.control.state('dashboard:holiday/factor').value") == 5
+        assert frame.locator('body').evaluate('() => window.scrollY') == 450
         history.click()
         expect(history).to_have_attribute("aria-current", "page")
         expect(page.locator("#canvas-frame")).to_have_attribute("data-run-id", history_run)
@@ -99,11 +122,82 @@ def test_pages_preserve_independent_queries_and_history(page: Page, tmp_path: Pa
         page.reload()
         expect(history).to_have_attribute("aria-current", "page")
         expect(frame.locator('[data-view-id="table"]')).to_contain_text("2023", timeout=30_000)
+        assert frame.locator('body').evaluate("() => window.dataviz.control.state('dashboard:holiday/factor').value") == 20
         assert len(runs) == 2
         page.go_back()
         expect(annual).to_have_attribute("aria-current", "page")
         expect(frame.locator('[data-view-id="table"]')).to_contain_text("2025", timeout=30_000)
         assert len(runs) == 2
+
+        # Editing an inactive Page marks only that Page outdated, without
+        # querying or replacing the currently visible Canvas.
+        active_frame_id = page.locator("#canvas-frame").get_attribute("data-frame-id")
+        history_code = dashboard / "history.py"
+        history_code.write_text(history_code.read_text() + "\n# history-only change\n")
+        expect(history).to_contain_text("Outdated", timeout=10_000)
+        expect(annual).not_to_contain_text("Outdated")
+        expect(page.locator("#canvas-frame")).to_have_attribute("data-frame-id", active_frame_id)
+        expect(page.locator("#query-diagnostics-label")).to_have_text("Ready")
+        assert len(runs) == 2
+        history.click()
+        expect(page.locator("#query-diagnostics-label")).to_have_text("Outdated")
+        expect(frame.locator("body")).to_contain_text("QUERY RUN OUTDATED", timeout=10_000)
+        assert "#page=history" in page.url
+        page.locator("#run-button").click()
+        expect(page.locator("#query-diagnostics-label")).to_have_text("Ready", timeout=30_000)
+        assert len(runs) == 3
+
+        # Reload the active Page's presentation, keeping its identity and
+        # parameters (the default Page uses an incompatible scalar type).
+        definition_path = dashboard / "dashboard.yaml"
+        definition = yaml.safe_load(definition_path.read_text())
+        definition["pages"][1]["views"][0]["title"] = "Updated history table"
+        definition_path.write_text(yaml.safe_dump(definition))
+        expect(page.locator("#workspace-update-title")).to_have_text("Canvas reloaded", timeout=10_000)
+        expect(history).to_have_attribute("aria-current", "page")
+        expect(page.locator('#parameter-form input[name="year"]')).to_have_value("[2023,2024]")
+        expect(frame.locator('[data-view-id="table"]')).to_contain_text("Updated history table", timeout=10_000)
+        assert len(runs) == 3
+
+        # Navigation-only refresh must not replace the selected Page's detail
+        # metadata with the default Page returned by /api/workspace.
+        other = root / "dashboards" / "other"
+        other.mkdir()
+        (other / "rules.py").write_text("def load(context):\n    return {'main': []}\n")
+        (other / "dashboard.yaml").write_text(yaml.safe_dump({
+            "schema": DASHBOARD_SCHEMA, "id": "other", "title": "Other",
+            "sources": [{"id": "data", "type": "python", "code": "rules.py", "outputs": {"main": {"kind": "table"}}}],
+            "views": [{"id": "table", "template": "table", "input": "source:data/main"}],
+        }))
+        expect(page.locator('.nav-button[data-id="other"]')).to_be_visible(timeout=10_000)
+        expect(history).to_have_attribute("aria-current", "page")
+        expect(page.locator('#parameter-form input[name="year"]')).to_have_value("[2023,2024]")
+        assert len(runs) == 3
+        page.locator("#run-button").click()
+        expect(page.locator("#query-diagnostics-label")).to_have_text("Ready", timeout=30_000)
+        assert len(runs) == 4 and runs[-1]["page_id"] == "history"
+        page.reload()
+        expect(history).to_have_attribute("aria-current", "page")
+        expect(frame.locator('[data-view-id="table"]')).to_contain_text("Updated history table", timeout=30_000)
+        expect(page.locator("#query-diagnostics-label")).to_have_text("Ready")
+        expect(history).not_to_contain_text("Outdated")
+        assert len(runs) == 4
+
+        page.locator('#run-button').click(button="right")
+        editor = page.locator('#parameter-editor-dialog')
+        expect(editor).to_be_visible()
+        item = editor.locator('[data-editor-item="year"]')
+        item.locator('[data-editor-disclosure]').click()
+        expect(item.locator('[data-editor-multiple-value]')).to_have_count(2)
+        item.locator('[data-editor-multiple-value]').first.fill("2022")
+        editor.get_by_role('button', name='Save', exact=True).click()
+        expect(editor).to_be_hidden()
+        expect(history).to_have_attribute('aria-current', 'page')
+        changed = yaml.safe_load(definition_path.read_text())
+        assert changed['pages'][0]['query_parameters'][0]['default'] == 2025
+        assert changed['pages'][1]['query_parameters'][0]['default'] == [2022, 2024]
+        assert 'query_parameters' not in changed
+        assert len(runs) == 4
 
 
 @pytest.mark.e2e
@@ -154,11 +248,11 @@ def _free_port() -> int:
 
 
 @contextmanager
-def _running_server(workspace: Path):
+def _running_server(workspace: Path, *, watch: bool = True):
     port = _free_port()
     server = uvicorn.Server(
         uvicorn.Config(
-            create_app(workspace),
+            create_app(workspace, watch=watch),
             host="127.0.0.1",
             port=port,
             log_level="warning",
@@ -177,6 +271,125 @@ def _running_server(workspace: Path):
     finally:
         server.should_exit = True
         thread.join(timeout=10)
+
+
+@pytest.mark.e2e
+def test_shared_action_marks_sibling_page_without_querying(page: Page, tmp_path: Path):
+    from dataviz.standalone import prepare_input
+
+    database = tmp_path / "shared.sqlite"
+    with sqlite3.connect(database) as connection:
+        connection.execute("create table labels (value integer)")
+        connection.execute("insert into labels values (1)")
+    auth = tmp_path / "auth.yaml"
+    auth.write_text(yaml.safe_dump({"adapters": {"db": {"type": "sqlalchemy", "url": f"sqlite:///{database}"}}}))
+    source = tmp_path / "review.yaml"
+    source.write_text(yaml.safe_dump({
+        "schema": DASHBOARD_SCHEMA, "id": "review", "title": "Review",
+        "sources": [{"id": name, "type": "sql", "adapter": "db", "code": {"inline": sql},
+                     "outputs": {"main": {"kind": "table"}}}
+                    for name, sql in [("labels", "select value from labels"), ("sales", "select 42 as value")]],
+        "server_actions": [{"id": "save", "resources": {"db": "db"}, "invalidates": ["source:labels"],
+                            "code": {"inline": '''
+from sqlalchemy import create_engine, text
+def execute(context):
+    import time
+    time.sleep(context.payload.get('delay', 0))
+    engine = create_engine(context.resources.config('db')['url'])
+    try:
+        with engine.begin() as connection:
+            connection.execute(text('update labels set value=value+1'))
+        context.invalidate('source:labels')
+        return {'saved': True}
+    finally:
+        engine.dispose()
+'''}}],
+        "pages": [{"id": name, "title": name, "server_actions": ["save"] if name == "edit" else [],
+                   "views": [{"id": "value", "template": "custom", "renderer": "review.value",
+                              "input": f"source:{'sales' if name == 'isolated' else 'labels'}/main"}]}
+                  for name in ["edit", "history", "isolated"]],
+        "canvas": {"scripts": [{"inline": '''
+window.datavizRuntime.registerRenderer('review.value', {
+  mount(context, descriptor) {
+    const value = document.createElement('output'); value.className = 'review-value';
+    const feedback = document.createElement('output'); feedback.className = 'review-feedback';
+    const save = document.createElement('button'); save.textContent = 'Save';
+    save.disabled = !context.actions.available;
+    save.onclick = async () => {
+      try { await context.actions.invoke('save', {}); feedback.textContent = 'Saved'; }
+      catch (error) { feedback.textContent = error.message; }
+    };
+    value.textContent = descriptor.rows[0]?.value;
+    context.body.append(value, save, feedback);
+    return {value};
+  },
+  update(context, descriptor, state) { state.value.textContent = descriptor.rows[0]?.value; return state; },
+  dispose() {},
+});
+'''}]},
+    }))
+    root, _ = prepare_input(source, auth=auth)
+    queries = []
+    writes = []
+    page.on("request", lambda request: queries.append(request.post_data_json)
+            if request.method == "POST" and request.url.endswith("/runs") else None)
+    page.on("request", lambda request: writes.append(request.post_data_json)
+            if request.method == "POST" and "/actions/save" in request.url else None)
+    with _running_server(root, watch=False) as url:
+        page.goto(url)
+        frame = page.frame_locator("#canvas-frame")
+        tab = lambda name: page.locator(f'#page-navigation-list button[data-page-id="{name}"]')
+        for name in ["edit", "history", "isolated"]:
+            tab(name).click()
+            _run_and_wait(page)
+            assert queries[-1]["page_id"] == name
+            expect(frame.locator('.review-value')).to_have_text("42" if name == "isolated" else "1", timeout=30_000)
+        tab("edit").click()
+        expect(frame.get_by_role("button", name="Save", exact=True)).to_be_enabled(timeout=15_000)
+        frame.get_by_role("button", name="Save", exact=True).click()
+        expect(frame.locator('.review-feedback')).to_have_text("Saved", timeout=30_000)
+        expect(frame.locator('.review-value')).to_have_text("2")
+        expect(tab("history")).to_contain_text("Data changed", timeout=10_000)
+        expect(tab("isolated")).not_to_contain_text("Data changed")
+        expect(tab("edit")).not_to_contain_text("Data changed")
+        assert len(queries) == 3 and len(writes) == 1
+        with sqlite3.connect(database) as connection:
+            assert connection.execute("select value from labels").fetchone()[0] == 2
+        tab("history").click()
+        expect(frame.locator('.review-value')).to_have_text("1", timeout=15_000)
+        expect(page.locator('#workspace-update-title')).to_have_text("Shared data changed")
+        assert len(queries) == 3
+        page.reload()
+        expect(tab("history")).to_contain_text("Data changed", timeout=15_000)
+        expect(frame.locator('.review-value')).to_have_text("1", timeout=15_000)
+        page.locator('#workspace-update-action').click()
+        expect(frame.locator('.review-value')).to_have_text("2", timeout=30_000)
+        expect(tab("history")).not_to_contain_text("Data changed")
+        expect(page.locator('#workspace-update')).to_be_hidden()
+        assert len(queries) == 4 and len(writes) == 1
+
+        # A write already submitted may finish after navigation; a second
+        # queued write must never be retargeted to the newly selected Page.
+        tab("edit").click()
+        expect(frame.get_by_role("button", name="Save", exact=True)).to_be_enabled(timeout=15_000)
+        page.once("dialog", lambda dialog: dialog.accept())
+        with page.expect_response(lambda response: response.request.method == "POST" and response.url.endswith("/actions/save")):
+            with page.expect_request(lambda request: request.method == "POST" and request.url.endswith("/actions/save")) as first_write:
+                frame.locator('body').evaluate("""() => {
+                  window.dataviz.serverActions.invoke('save', {delay:1}, {requestId:'leaving-first'}).catch(() => {});
+                  window.dataviz.serverActions.invoke('save', {}, {requestId:'leaving-second'}).catch(() => {});
+                }""")
+            tab("isolated").click()
+            expect(tab("isolated")).to_have_attribute("aria-current", "page")
+        expect(frame.locator('.review-value')).to_have_text("42", timeout=15_000)
+        expect(tab("history")).to_contain_text("Data changed", timeout=10_000)
+        assert len(writes) == 2 and writes[-1]["request_id"] == "leaving-first"
+        assert len(queries) == 4
+        session_id = first_write.value.post_data_json["session_id"]
+        not_sent = page.request.get(f"{url}/api/dashboards/review/actions/save/leaving-second", params={"session_id": session_id})
+        assert not_sent.status == 404
+        with sqlite3.connect(database) as connection:
+            assert connection.execute("select value from labels").fetchone()[0] == 3
 
 
 @pytest.fixture(scope="session")
@@ -1408,6 +1621,124 @@ def test_parameter_domain_cascade_reload_and_tab_restore(page: Page, tmp_path: P
         assert "locations.sql" not in report
         assert '"provinces": {"selection": "include", "value": ["GD"]}' in report
         assert '"cities": {"selection": "include", "value": ["SZ"]}' in report
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("domain_result", ["ready", "empty", "error"])
+def test_server_compute_waits_for_required_control_domain(page: Page, tmp_path: Path, domain_result: str):
+    from dataviz.standalone import prepare_input
+
+    source = tmp_path / "readiness.yaml"
+    ending = ("raise RuntimeError('category domain failed')" if domain_result == "error" else
+              "return [{'category': 'A'}]" if domain_result == "ready" else
+              "return pd.DataFrame(columns=['category'])")
+    source.write_text(yaml.safe_dump({
+        "schema": DASHBOARD_SCHEMA, "id": "readiness", "title": "Readiness",
+        "controls": [{"id": "category", "label": "Category", "type": "single_select", "value_type": "text",
+                      "field": "category", "required": True, "clearable": False, "initial": {"mode": "first"},
+                      "options": {"mode": "infer", "source": "source:categories/main"}}],
+        "sources": [
+            {"id": "rows", "type": "python", "code": {"inline": "def load(context):\n    return [{'value': 42}]\n"},
+             "outputs": {"main": {"kind": "table"}}},
+            {"id": "categories", "type": "python", "code": {"inline":
+                "import time\nimport pandas as pd\ndef load(context):\n"
+                "    deadline = time.monotonic() + 25\n"
+                "    while not (context.dashboard_root / 'release').exists():\n"
+                "        if time.monotonic() > deadline: raise RuntimeError('test gate timed out')\n"
+                "        time.sleep(.02)\n    " + ending + "\n"},
+                 "outputs": {"main": {"kind": "table", "schema": [{"name": "category"}]}}},
+        ],
+        "interactive_transforms": [
+            {"id": name, "runtime": "server-python", "trigger": "auto",
+             "code": {"inline": "def transform(context):\n    return {'main': [{'value': 42}]}\n"},
+             "inputs": {"rows": "source:rows/main"},
+             "control_inputs": ({"category": {"mode": "value", "control": "dashboard.category"}} if name == "dependent" else {}),
+             "outputs": {"main": {"kind": "table"}}, "export": {"mode": "snapshot"}}
+            for name in ("free", "dependent")],
+        "views": [{"id": name, "template": "table", "input": f"interactive:{name}/main"}
+                  for name in ("free", "dependent")],
+    }))
+    root, _ = prepare_input(source)
+    loaded = load_workspace(root).dashboard("readiness")
+    calls, errors = [], []
+    page.on("request", lambda request: calls.append(request.post_data_json)
+            if request.method == "POST" and request.url.endswith("/interactions") else None)
+    page.on("response", lambda response: errors.append(response.status)
+            if "/interactions" in response.url and response.status >= 400 else None)
+    with _running_server(root, watch=False) as url:
+        page.goto(url)
+        page.locator('#run-button').click()
+        frame = page.frame_locator('#canvas-frame')
+        free = frame.locator('[data-view-id="free"]')
+        dependent = frame.locator('[data-view-id="dependent"]')
+        try:
+            expect(free).to_contain_text("42", timeout=20_000)
+            expect(dependent).to_have_attribute("data-view-status", "loading")
+            assert calls and all(call["transform_id"] == "free" for call in calls), calls
+        finally:
+            (loaded.root / "release").touch()
+        if domain_result == "ready":
+            expect(dependent).to_contain_text("42", timeout=20_000)
+            submitted = [call for call in calls if call["transform_id"] == "dependent"]
+            assert submitted and all(call["control_state"]["dashboard:readiness/category"]["value"] == "A" for call in submitted)
+        else:
+            expect(dependent).to_have_attribute("data-view-status", "empty" if domain_result == "empty" else "error", timeout=20_000)
+            assert not any(call["transform_id"] == "dependent" for call in calls), calls
+        assert errors == [], errors
+
+
+@pytest.mark.e2e
+def test_navigation_supersedes_slow_page_and_lookup_requests(page: Page, tmp_path: Path):
+    workspace = _copy_workspace(SHOWCASE, tmp_path / "slow-navigation")
+    path = workspace / "dashboards" / "功能示例##parameter-domain-lab" / "dashboard.yaml"
+    definition = yaml.safe_load(path.read_text())
+    fields = {key: definition.pop(key) for key in ("query_parameters", "views", "sections")}
+    definition["pages"] = [{"id": name, "title": name, **fields} for name in ("first", "slow", "last")]
+    path.write_text(yaml.safe_dump(definition, allow_unicode=True))
+    held = []
+    lookups = []
+    failed = []
+    runs = []
+
+    def hold_lookup(route):
+        lookups.append(route.request.post_data_json)
+        held.append(route)
+
+    page.route("**/parameter-domains/lookup", hold_lookup)
+    page.route("**/pages/slow", lambda route: held.append(route))
+    page.on("requestfailed", lambda request: failed.append(request.url))
+    page.on("request", lambda request: runs.append(request.url)
+            if request.method == "POST" and request.url.endswith("/runs") else None)
+    with _running_server(workspace, watch=False) as url:
+        page.goto(f"{url}/dashboards/parameter-domain-lab#page=first")
+        first = page.locator('#page-navigation-list [data-page-id="first"]')
+        slow = page.locator('#page-navigation-list [data-page-id="slow"]')
+        last = page.locator('#page-navigation-list [data-page-id="last"]')
+        expect(first).to_have_attribute("aria-current", "page")
+        page.wait_for_function("document.querySelector('#input-provinces').closest('.dv-control').getAttribute('aria-busy') === 'true'")
+        with page.expect_request("**/pages/slow"):
+            slow.click()
+        expect(page.locator('#run-button')).to_be_disabled()
+        last.click()
+        expect(last).to_have_attribute("aria-current", "page", timeout=5_000)
+        expect(page).to_have_url(re.compile(r"#page=last$"))
+        # Lookup is deliberately held, so native options do not exist yet.
+        # The canonical finite selection remains in the Page's URL/state.
+        assert "provinces=GD" in page.url
+        # Neither held request was released to let navigation complete.
+        assert any("/pages/slow" in request for request in failed)
+        assert any("/parameter-domains/lookup" in request for request in failed)
+        other = page.locator('[data-nav-type="dashboard"][data-id="chart-gallery"]')
+        other.click()
+        expect(other).to_have_class(re.compile(r"\bactive\b"), timeout=5_000)
+        expect(page.locator('#canvas-frame')).to_have_attribute("data-dashboard-id", "chart-gallery")
+        # Drain abort continuations; stale outer loops must not request cities
+        # against the new Page or Dashboard after their first await returns.
+        page.evaluate("() => new Promise(resolve => setTimeout(resolve, 100))")
+        assert lookups and all(item["parameter"] == "provinces" for item in lookups), lookups
+        assert runs == []
+        for route in held:
+            route.abort()
 
 
 @pytest.mark.e2e
@@ -3499,8 +3830,11 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(page: Page, 
         expect(panel).to_be_visible()
         expect(toggle).to_have_attribute("aria-expanded", "true")
 
-        # At tablet width the open Sidebar is intentionally an overlay. Close
-        # it before exercising controls underneath that overlay.
+        # Crossing the tablet breakpoint collapses the Sidebar automatically.
+        # Exercise both toggle directions, then leave underlying controls clear.
+        expect(page.locator("body")).to_have_class(re.compile(r"\bsidebar-collapsed\b"))
+        page.locator("#sidebar-toggle").click()
+        expect(page.locator("body")).not_to_have_class(re.compile(r"\bsidebar-collapsed\b"))
         page.locator("#sidebar-toggle").click()
         expect(page.locator("body")).to_have_class(re.compile(r"\bsidebar-collapsed\b"))
         panel.evaluate("panel => { panel.scrollTop = panel.scrollHeight; }")
@@ -4935,6 +5269,67 @@ def test_date_default_editor_uses_one_mode_and_one_value_per_endpoint(page: Page
         "2026-08-01",
         {"mode": "relative", "anchor": "today", "offset": "-1d"},
     ]
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize("reload_phase", ["running", "ready"])
+def test_query_reload_restores_visible_date_range_and_single_select(page: Page, tmp_path: Path, reload_phase: str):
+    from dataviz.standalone import prepare_input
+
+    dashboard = tmp_path / "query.yaml"
+    dashboard.write_text(yaml.safe_dump({
+        "schema": DASHBOARD_SCHEMA, "id": "query-restore", "title": "Query restore",
+        "query_parameters": [
+            {"id": "dates", "type": "range_input", "value_type": "date",
+             "default": ["2026-09-03", "2026-09-09"]},
+            {"id": "grain", "type": "single_select", "value_type": "text", "clearable": True,
+             "default": {"mode": "value", "value": "all"},
+             "options": {"mode": "static", "choices": [
+                 {"label": "全部", "value": "all"}, {"label": "品类", "value": "category"}]}},
+        ],
+        "sources": [{"id": "rows", "type": "python", "query_inputs": {"dates": "dates", "grain": "grain"},
+                     "code": {"inline": "import time\ndef load(context):\n    time.sleep(6)\n    return [{'dates': str(context.query_inputs['dates']), 'grain': context.query_inputs['grain']}]\n"},
+                     "outputs": {"main": {"kind": "table"}}}],
+        "views": [{"id": "table", "template": "table", "input": "source:rows/main"}],
+    }), encoding="utf-8")
+    runs = []
+    page.on("request", lambda request: runs.append(request.post_data_json)
+            if request.method == "POST" and request.url.endswith("/runs") else None)
+    root, _ = prepare_input(dashboard)
+    assert load_workspace(root).dashboard("query-restore").definition.id == "query-restore"
+    with _running_server(root, watch=False) as url:
+        page.goto(url)
+        endpoints = page.locator('#parameter-form .dv-date-range__endpoint')
+        endpoints.nth(0).fill("2026-09-09")
+        endpoints.nth(1).fill("2026-09-09")
+        endpoints.nth(1).press("Enter")
+        select = page.locator('#parameter-form select[name="grain"]')
+        field = page.locator('#parameter-form .field', has=page.locator('select[name="grain"]'))
+        field.locator('[data-control-trigger]').click()
+        field.locator('.dv-choice-option', has_text="品类").click()
+        summary = field.locator('[data-control-summary]')
+        expect(summary).to_have_text("品类")
+        page.locator('#run-button').click()
+        expect(page.locator('#run-button strong')).to_have_text("CANCEL")
+        if reload_phase == "ready":
+            expect(page.locator('#run-button strong')).to_have_text("RUN", timeout=30_000)
+        page.reload(wait_until="domcontentloaded")
+        expect(select).to_have_value("category")
+        expect(page.locator('#parameter-form input[name="dates"]')).to_have_value("2026-09-09,2026-09-09")
+        if not endpoints.nth(0).is_visible():
+            page.locator('#query-parameters-toggle').click()
+        # Native inputs alone are insufficient: the visible component must
+        # project the restored state rather than its mount-time defaults.
+        expect(endpoints.nth(0)).to_have_value("2026-09-09")
+        expect(endpoints.nth(1)).to_have_value("2026-09-09")
+        expect(summary).to_have_text("品类")
+        table = page.frame_locator('#canvas-frame').locator('[data-view-id="table"]')
+        expect(table).to_contain_text("category", timeout=30_000)
+        assert "2026-09-03" not in table.inner_text()
+        assert len(runs) == 1
+        assert runs[0]["query_parameter_state"] == {
+            "dates": {"value": ["2026-09-09", "2026-09-09"]}, "grain": {"value": "category"},
+        }
 
 
 @pytest.mark.e2e

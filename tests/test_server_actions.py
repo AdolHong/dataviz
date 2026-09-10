@@ -15,7 +15,7 @@ from dataviz.protocols import DASHBOARD_SCHEMA
 from dataviz.standalone import prepare_input
 from dataviz.workspace import load_workspace
 from dataviz.execution.action_journal import (
-    ActionConflict, ActionJournal, action_journal_path, source_mutation_epoch,
+    ActionConflict, ActionJournal, action_journal_path, source_mutation_epoch, changed_run_sources,
 )
 from dataviz.execution.action_process import execute_action
 from dataviz.execution.executor import Executor
@@ -431,6 +431,8 @@ def test_selective_source_refresh_reuses_unaffected_branch_and_preserves_old_run
     monkeypatch.setattr(SOURCE_RUNNERS["sql"], "execute", track)
     first = executor.run("test")
     assert first.status == "ready", first
+    assert first.nodes["source:labels"].diagnostics["source_mutation_epoch"] == 0
+    assert changed_run_sources(root, first) == {}
     another_session = Executor(load_workspace(root), cache_namespace="another-session")
     assert another_session.run("test").status == "ready"
     cached = another_session.run("test")
@@ -444,10 +446,14 @@ def test_selective_source_refresh_reuses_unaffected_branch_and_preserves_old_run
                    dashboard_id="test")
     assert source_mutation_epoch(root, "test", "source:labels") == 1
     assert source_mutation_epoch(root, "test", "source:sales") == 0
+    assert changed_run_sources(root, first) == {"source:labels": {"observed": 0, "current": 1}}
+    assert changed_run_sources(root, cached) == changed_run_sources(root, first)
     calls.clear()
     updated = executor.run("test", query_parameter_state=first.query_parameter_state,
                            _reuse_run=first, _refresh_sources={"source:labels"})
     assert updated.status == "ready", updated
+    assert updated.nodes["source:labels"].diagnostics["source_mutation_epoch"] == 1
+    assert changed_run_sources(root, updated) == {}
     assert calls == ["source:labels"]
     assert updated.nodes["source:sales"].result_origin == "result"
     assert updated.nodes["dataset:summary"].result_origin == "executed"
@@ -462,6 +468,7 @@ def test_selective_source_refresh_reuses_unaffected_branch_and_preserves_old_run
     calls.clear()
     ordinary = another_session.run("test")
     assert ordinary.status == "ready"
+    assert changed_run_sources(root, ordinary) == {}
     assert ordinary.nodes["source:sales"].result_origin == "cache"
     assert ArtifactStore(root, ordinary.run_id).read_table(
         ordinary.outputs["dataset:summary/main"]

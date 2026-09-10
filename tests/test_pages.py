@@ -102,6 +102,64 @@ def page_workspace(multipage, tmp_path):
     return workspace_root
 
 
+def test_hot_reload_tracks_inactive_page_and_shared_code(page_workspace):
+    from dataviz.server.hot_reload import (
+        WorkspaceSemanticSnapshot, WorkspaceChangeJournal,
+        classify_page_changes, classify_workspace_change,
+    )
+    from dataviz.workspace import load_workspace
+
+    root = page_workspace / "dashboards" / "holiday"
+    path = root / "dashboard.yaml"
+    definition = yaml.safe_load(path.read_text())
+    (root / "history.py").write_text((root / "rules.py").read_text())
+    definition["sources"][1]["code"] = "history.py"
+    path.write_text(yaml.safe_dump(definition))
+
+    def snapshot():
+        return WorkspaceSemanticSnapshot.from_workspace(load_workspace(page_workspace))
+
+    before = snapshot()
+    (root / "history.py").write_text("def load(context):\n    return {'main': [{'changed': 1}]}\n")
+    after = snapshot()
+    paths = {str(root / "history.py")}
+    assert classify_page_changes(before, after, paths) == {"holiday": {"history": "query"}}
+    assert classify_workspace_change(before, after, paths)[0] == {"holiday": "query"}
+    event = WorkspaceChangeJournal().publish(
+        status="ready", changes={"holiday": "query"},
+        page_changes=classify_page_changes(before, after, paths),
+    )
+    assert event.as_dict()["page_changes"] == {"holiday": {"history": "query"}}
+
+    # Parameter defaults and types belong to their Page, not its sibling.
+    before = after
+    definition["pages"][1]["query_parameters"][0]["default"] = [2024, 2025]
+    path.write_text(yaml.safe_dump(definition))
+    after = snapshot()
+    assert classify_page_changes(before, after, {str(path)}) == {"holiday": {"history": "query"}}
+
+    # Restore a shared implementation: changing it must invalidate both closures.
+    definition["sources"][1]["code"] = "rules.py"
+    path.write_text(yaml.safe_dump(definition))
+    before = snapshot()
+    (root / "rules.py").write_text("def load(context):\n    return {'main': [{'shared': 1}]}\n")
+    after = snapshot()
+    assert classify_page_changes(before, after, {str(root / "rules.py")}) == {
+        "holiday": {"annual": "query", "history": "query"},
+    }
+
+    # Presentation edits must not become query invalidations.
+    before = after
+    definition["pages"][1]["views"][0]["title"] = "Updated details"
+    path.write_text(yaml.safe_dump(definition))
+    after = snapshot()
+    assert classify_page_changes(before, after, {str(path)}) == {"holiday": {"history": "canvas"}}
+    definition["pages"].pop()
+    path.write_text(yaml.safe_dump(definition))
+    removed = snapshot()
+    assert classify_page_changes(after, removed, {str(path)}) == {"holiday": {"history": "canvas"}}
+
+
 def test_executor_records_page_identity_and_rejects_sibling_run(page_workspace):
     from dataviz.errors import ExecutionFailure
     from dataviz.execution import Executor
@@ -121,6 +179,24 @@ def test_executor_records_page_identity_and_rejects_sibling_run(page_workspace):
     assert history.query_parameter_state["year"]["value"] == [2023, 2024]
     with pytest.raises(ExecutionFailure, match="another Page"):
         ensure_query_run_compatible(workspace.dashboard("holiday", "history"), annual)
+
+
+def test_page_detail_does_not_rescan_or_validate_workspace(page_workspace, monkeypatch):
+    import importlib
+    from fastapi.testclient import TestClient
+
+    server = importlib.import_module("dataviz.server.app")
+    app = server.create_app(page_workspace, watch=False)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Page navigation must not rescan/validate the Workspace")
+    monkeypatch.setattr(server, "load_workspace", forbidden)
+    monkeypatch.setattr(server, "validate_workspace", forbidden)
+    with TestClient(app) as client:
+        for page in ("annual", "history", "annual"):
+            response = client.get(f"/api/dashboards/holiday/pages/{page}")
+            assert response.status_code == 200, response.text
+            assert response.json()["page_id"] == page
+        assert client.get("/api/dashboards/holiday/pages/missing").status_code == 404
 
 
 def test_server_keeps_both_pages_running_and_restorable(page_workspace):
@@ -174,6 +250,93 @@ def test_server_keeps_both_pages_running_and_restorable(page_workspace):
             "session_id": session, "run_id": history.run_id})
         assert report.status_code == 200, report.text[:500]
         assert "Across years" in report.text
+
+
+def test_parameter_editor_targets_page_and_preserves_siblings(page_workspace):
+    from fastapi.testclient import TestClient
+    from dataviz.server.app import create_app
+
+    path = page_workspace / "dashboards/holiday/dashboard.yaml"
+    original = yaml.safe_load(path.read_text())
+    app = create_app(page_workspace, watch=False)
+    with TestClient(app) as client:
+        endpoint = "/api/dashboards/holiday/parameter-editor"
+        contract = client.get(endpoint, params={"page_id": "history"}).json()
+        assert contract["page_id"] == "history"
+        group = next(item for item in contract["groups"] if item["owner"] == "query")
+        assert group["items"][0]["default"] == [2023, 2024]
+        group["items"][0]["default"] = [2024, 2025]
+        group = {"owner": group["owner"], "order": group["order"],
+                 "items": [{"id": item["id"], "default": item["default"]} for item in group["items"]]}
+        response = client.patch(endpoint, params={"page_id": "history"}, json={
+            "revision": contract["revision"], "group": group,
+        })
+        assert response.status_code == 200, response.text
+        assert response.json()["editor"]["page_id"] == "history"
+        updated = yaml.safe_load(path.read_text())
+        assert updated["pages"][0] == original["pages"][0]
+        assert updated["sources"] == original["sources"]
+        assert updated["pages"][1]["query_parameters"][0]["default"] == [2024, 2025]
+        assert "query_parameters" not in updated
+        stale = client.patch(endpoint, params={"page_id": "history"}, json={"revision": contract["revision"], "group": group})
+        assert stale.status_code == 409
+        assert client.get(endpoint, params={"page_id": "missing"}).status_code == 409
+
+
+def test_shared_source_versions_identify_only_affected_page_results(page_workspace):
+    import copy
+    import time
+    from fastapi.testclient import TestClient
+    from dataviz.server.app import create_app
+    from dataviz.execution.action_journal import ActionJournal, action_journal_path
+
+    path = page_workspace / "dashboards/holiday/dashboard.yaml"
+    definition = yaml.safe_load(path.read_text())
+    isolated = copy.deepcopy(definition["pages"][0])
+    isolated["id"] = "isolated"
+    definition["sources"].append({"id": "labels", "type": "python", "code": "rules.py",
+                                  "outputs": {"main": {"kind": "table"}}})
+    for page in definition["pages"]:
+        page["views"].append({"id": "labels", "template": "table", "input": "source:labels/main"})
+    definition["pages"].append(isolated)
+    path.write_text(yaml.safe_dump(definition))
+    app = create_app(page_workspace, watch=False)
+    session = "shared_pages"
+    with TestClient(app) as client:
+        records = {}
+
+        def run(page_id):
+            response = client.post("/api/dashboards/holiday/runs", json={"session_id": session, "page_id": page_id})
+            assert response.status_code == 200, response.text
+            record = app.state.manager.get(response.json()["run_id"], session)
+            with record.condition:
+                assert record.condition.wait_for(lambda: record.result is not None or record.error is not None, timeout=15)
+            assert record.status == "ready", record.error
+            return record
+
+        for page_id in ("annual", "history", "isolated"):
+            records[page_id] = run(page_id)
+        original = records["history"].result.model_dump_json()
+        journal = ActionJournal(action_journal_path(page_workspace))
+        journal.claim("test", "save", "payload", deadline=time.time() + 30)
+        journal.finish("test", "save", {"status": "succeeded", "invalidations": ["source:labels"]}, dashboard_id="holiday")
+
+        def states():
+            return {item["page_id"]: item for item in client.get("/api/session/runs", params={"session_id": session}).json()["runs"]}
+
+        result = states()
+        for page_id in ("annual", "history"):
+            assert result[page_id]["data_outdated_sources"] == {"source:labels": {"observed": 0, "current": 1}}
+            assert result[page_id]["query_outdated"] is False  # Data changed, not Python/query contract.
+            assert result[page_id]["run_id"] == records[page_id].run_id  # No implicit Query.
+        assert result["isolated"]["data_outdated_sources"] == {}
+        run("annual")
+        result = states()
+        assert result["annual"]["data_outdated_sources"] == {}
+        assert result["history"]["data_outdated_sources"]
+        evidence = client.get(f'/api/runs/{records["history"].run_id}', params={"session_id": session}).json()
+        assert evidence["data_outdated_sources"] == result["history"]["data_outdated_sources"]
+        assert records["history"].result.model_dump_json() == original
 
 
 def test_validation_covers_nondefault_pages_without_leaking_their_parameters(page_workspace):

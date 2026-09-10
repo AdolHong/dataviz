@@ -588,12 +588,18 @@ class Executor:
             )
 
         try:
+            source_epoch = (
+                source_mutation_epoch(self.workspace.root, dashboard.definition.id, node.id)
+                if node.kind == "source" else None
+            )
+            if source_epoch is not None:
+                diagnostics["source_mutation_epoch"] = source_epoch
             context = self._context_for_node(
                 node, dashboard, parameters, run_result, store, adapters
             )
             definition = node.definition
             cache_key = self._cache_key(
-                node, dashboard, parameters, run_result, adapters
+                node, dashboard, parameters, run_result, adapters, source_epoch=source_epoch
             )
             cached = None if refresh else self.cache.load(cache_key, definition.cache, store)
             if cached is not None:
@@ -905,6 +911,8 @@ class Executor:
         parameters: dict[str, Any],
         result: RunResult,
         adapters: AdapterResolver,
+        *,
+        source_epoch: int | None,
     ) -> str:
         definition = node.definition
         files: dict[str, str] = {}
@@ -944,10 +952,7 @@ class Executor:
         payload = {
             "dashboard": dashboard.definition.id,
             "page_id": dashboard.page_id,
-            "source_mutation_epoch": (
-                source_mutation_epoch(self.workspace.root, dashboard.definition.id, node.id)
-                if node.kind == "source" else None
-            ),
+            "source_mutation_epoch": source_epoch,
             "node": node.id,
             "definition": definition.model_dump(mode="json", by_alias=True),
             "query_inputs": project_query_inputs(node.parameter_inputs, parameters),

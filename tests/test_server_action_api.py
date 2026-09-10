@@ -194,6 +194,7 @@ def test_view_only_invalidation_does_not_query(action_app, monkeypatch):
     response = invoke(client, original.run_id, payload={"effect": "view"})
     assert response.status_code == 200, response.text
     receipt = response.json()
+    assert receipt["status"] == "succeeded", receipt
     assert receipt["refresh"]["timings"]["scheduling_ms"] >= 0
     assert {key: value for key, value in receipt["refresh"].items() if key != "timings"} == {"status": "ready", "query_executed": False,
                                   "views": ["sales"], "base_run_id": original.run_id, "run_id": original.run_id}

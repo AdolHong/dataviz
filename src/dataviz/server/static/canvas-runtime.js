@@ -1396,6 +1396,31 @@ Object.assign(datavizRuntime, {
             && window.dataviz.interaction?.query_snapshot_available === false
           ) return;
           const executionControlState = datavizControlStateSnapshot();
+          // A ready data input does not imply its dynamic Control domain is
+          // ready. Gate only this consumer, not every Control in the Page.
+          for (const key of new Set(Object.values(this.transformControlInputs(id)).map(binding => binding.control))) {
+            const domain = this.controlDomainEvidence?.get(key);
+            const definition = datavizControlDefinition(key);
+            const label = definition.label || key;
+            if (domain?.status === 'error' || domain?.status === 'field_mismatch') {
+              throw datavizRuntimeError({code:'control_domain_unavailable',
+                message:`Control options unavailable: ${label} (${domain.status})`, control:key});
+            }
+            const emptyRequired = domain?.status === 'empty' && definition.required;
+            if (domain?.status === 'pending' || emptyRequired) {
+              this.interactiveAdapters[spec.runtime]?.cancel(id);
+              outputReferences.forEach(reference => staleOutputs.add(reference));
+              const message = emptyRequired ? `No available options: ${label}` : `Waiting for control options: ${label}`;
+              if (emptyRequired) {
+                this.markTransformTerminal(id, 'empty', message);
+                this.publishTransformStatus(id, 'empty', {message});
+              } else {
+                this.markTransformLoading(id, message);
+                this.publishTransformStatus(id, 'queued', {message});
+              }
+              return;
+            }
+          }
           const capturedControlState = datavizCaptureConsumerControlState(
             this.transformControlInputs(id),
             executionControlState,
@@ -1763,6 +1788,7 @@ Object.assign(datavizRuntime, {
       changed.add(reference);
     });
     if (this.initializing) return changed;
+    refreshControlOptionDomains();
     const affectedViewIds = this.affectedViews([], changed);
     this.renderViews({
       initial:false,
@@ -2667,6 +2693,9 @@ const datavizReconcileHeadlessControlDomain = (key, availability) => {
   const candidates = availability.options
     .filter(option => option.available !== false)
     .map(option => option.value);
+  // An empty required domain is an unavailable selection, not a user commit.
+  // Keep the last state until candidates return; the scheduler gates this domain.
+  if (definition.required && candidates.length === 0) return;
   const bySignature = new Map(
     candidates.map(value => [datavizValueSignature(value), value])
   );

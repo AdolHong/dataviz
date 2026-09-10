@@ -247,6 +247,10 @@ def execute_python_node(
                     },
                 )
             if not process.is_alive():
+                # The child may send and exit between poll() and is_alive().
+                # Drain its final message before declaring a missing result.
+                if parent.poll(0):
+                    continue
                 raise ExecutionFailure(
                     f"Python {node_kind} process exited without a result",
                     file=definition_path,

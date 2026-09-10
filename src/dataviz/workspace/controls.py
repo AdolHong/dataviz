@@ -131,8 +131,9 @@ def resolve_control_states(
     provided: dict[str, dict[str, Any]] | None,
     *,
     phase: ControlResolutionPhase = "execution",
+    execution_keys: set[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
-    return resolve_control_state(dashboard, provided, phase=phase)
+    return resolve_control_state(dashboard, provided, phase=phase, execution_keys=execution_keys)
 
 
 def project_control_values(

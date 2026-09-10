@@ -39,7 +39,7 @@ from dataviz.content_templates import (
 )
 from dataviz.errors import DatavizError, ExecutionFailure, WorkspaceError
 from dataviz.execution.results import RunResult
-from dataviz.execution.interactive import InteractionExecutor
+from dataviz.execution.interactive import InteractionExecutor, compile_interactive_plan, normalize_interactive_target
 from dataviz.execution.fingerprint import ensure_query_run_compatible
 from dataviz.execution.outputs import normalize_outputs, validate_output_destination
 from dataviz.execution.parameter_materializations import ParameterMaterializationStore
@@ -54,11 +54,12 @@ from dataviz.server.hot_reload import (
     WorkspaceFileWatcher,
     WorkspaceSemanticSnapshot,
     classify_workspace_change,
+    classify_page_changes,
 )
 from dataviz.state_snapshot import normalize_consumer_revisions
 from dataviz.server.manager import RunManager
 from dataviz.server.actions import ActionService, ActionBusy
-from dataviz.execution.action_journal import ActionConflict
+from dataviz.execution.action_journal import ActionConflict, changed_run_sources, run_source_versions, source_mutation_epochs
 from dataviz.workspace import load_workspace, validate_workspace
 from dataviz.input_state import initial_input_state
 from dataviz.workspace.controls import (
@@ -337,6 +338,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 current_semantics,
                 changed_paths,
             )
+            page_impacts = classify_page_changes(reload_semantics, current_semantics, changed_paths)
             error_diagnostics = [
                 item for item in diagnostics if item.get("level") == "error"
             ]
@@ -350,6 +352,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 change_journal.publish(
                     status="invalid",
                     changes=impacts,
+                    page_changes=page_impacts,
                     navigation_changed=navigation_changed,
                     changed_paths=changed_paths,
                     diagnostics=error_diagnostics,
@@ -369,6 +372,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             change_journal.publish(
                 status="ready",
                 changes=impacts,
+                page_changes=page_impacts,
                 navigation_changed=navigation_changed,
                 changed_paths=changed_paths,
                 message="Workspace changes loaded.",
@@ -402,8 +406,9 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
     def require_canonical_control_state(
         definition,
         provided: dict[str, dict[str, Any]],
+        *, execution_keys: set[str] | None = None,
     ) -> dict[str, dict[str, Any]]:
-        canonical = resolve_control_states(definition, provided)
+        canonical = resolve_control_states(definition, provided, execution_keys=execution_keys)
         def signature(value):
             return json.dumps(
                 value,
@@ -702,15 +707,19 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             headers={"Cache-Control": "no-store"},
         )
 
-    def workspace_summary_payload(page_selection: tuple[str, str] | None = None):
+    def workspace_summary_payload(page_selection: tuple[str, str] | None = None, *, snapshot=None):
         from dataviz import __version__
         # Dashboard directory names are the navigation labels. Users and AI may
         # copy, rename or remove them without going through this server, so the
         # filesystem must be rescanned before publishing the tree.
-        snapshot = refresh_workspace(preserve_on_error=True)
-        diagnostics = [item.as_dict() for item in validate_workspace(snapshot)]
+        snapshot = snapshot or refresh_workspace(preserve_on_error=True)
+        # Page detail is not a Workspace validation request. Its consumer only
+        # needs the selected Dashboard projection, not every sibling contract.
+        diagnostics = [] if page_selection else [item.as_dict() for item in validate_workspace(snapshot)]
         dashboards = []
         for entry in snapshot.catalog:
+            if page_selection is not None and entry.id != page_selection[0]:
+                continue
             dashboard = entry.dashboard
             if page_selection is not None and entry.id == page_selection[0] and dashboard is not None:
                 dashboard = snapshot.dashboard(entry.id, page_selection[1])
@@ -975,6 +984,15 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         async def stream():
             nonlocal cursor
             keepalive_at = time.monotonic()
+            freshness_at = 0.0
+            freshness_signature = None
+
+            def freshness():
+                dashboards = {record.dashboard_id for record in manager.latest_for_session(session_id)}
+                return [{"dashboard_id": identifier,
+                         "source_versions": source_mutation_epochs(workspace_root, identifier)}
+                        for identifier in sorted(dashboards)]
+
             while True:
                 if await request.is_disconnected():
                     break
@@ -992,6 +1010,15 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                         f"data: {payload}\n\n"
                     )
                 now = time.monotonic()
+                if now - freshness_at >= 1:
+                    # SQLite reads must not block the ASGI event loop. This is
+                    # version evidence only: no Source or Transform executes.
+                    states = await asyncio.to_thread(freshness)
+                    signature = json.dumps(states, sort_keys=True)
+                    if signature != freshness_signature:
+                        yield f"event: source_changed\ndata: {signature}\n\n"
+                        freshness_signature = signature
+                    freshness_at = now
                 if now - keepalive_at >= 10:
                     yield ": keepalive\n\n"
                     keepalive_at = now
@@ -1021,8 +1048,12 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
     @app.get("/api/dashboards/{dashboard_id}/pages/{page_id}")
     def page_summary(dashboard_id: str, page_id: str):
         try:
-            _, dashboard = dashboard_from_disk(dashboard_id, page_id=page_id)
-            payload = workspace_summary_payload((dashboard_id, dashboard.page_id))
+            # Navigation consumes the installed Workspace snapshot. File watch
+            # and explicit Workspace reload own discovery/whole-project checks.
+            snapshot = current_workspace()
+            if snapshot.catalog_entry(dashboard_id).dashboard is None:
+                raise WorkspaceError(f"Dashboard unavailable: {dashboard_id}")
+            payload = workspace_summary_payload((dashboard_id, page_id), snapshot=snapshot)
             return next(item for item in payload["dashboards"] if item["id"] == dashboard_id)
         except WorkspaceError as error:
             raise HTTPException(404, error.as_dict()) from error
@@ -1084,9 +1115,9 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         return apply_navigation_change(lambda: navigation_editor.purge(trash_id))
 
     @app.get("/api/dashboards/{dashboard_id}/parameter-editor")
-    def dashboard_parameter_editor(dashboard_id: str):
+    def dashboard_parameter_editor(dashboard_id: str, page_id: str | None = None):
         try:
-            _, dashboard = dashboard_from_disk(dashboard_id)
+            _, dashboard = dashboard_from_disk(dashboard_id, page_id=page_id)
             return parameter_editor_contract(dashboard)
         except WorkspaceError as error:
             raise HTTPException(409, error.as_dict()) from error
@@ -1095,9 +1126,10 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
     def update_dashboard_parameter_editor(
         dashboard_id: str,
         request: ParameterEditorUpdateRequest,
+        page_id: str | None = None,
     ):
         try:
-            _, dashboard = dashboard_from_disk(dashboard_id)
+            _, dashboard = dashboard_from_disk(dashboard_id, page_id=page_id)
             result = parameter_editor.update_group(
                 dashboard,
                 expected_revision=request.revision,
@@ -1109,7 +1141,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             return {
                 "status": "success",
                 "result": result,
-                "editor": parameter_editor_contract(fresh.dashboard(dashboard_id)),
+                "editor": parameter_editor_contract(fresh.dashboard(dashboard_id, page_id)),
             }
         except WorkspaceError as error:
             raise HTTPException(409, error.as_dict()) from error
@@ -1254,6 +1286,8 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             "status": record.status,
             "server_interactive_inputs": record.server_interactive_inputs,
             "snapshot": record.snapshot.model_dump(mode="json", by_alias=True) if record.snapshot else None,
+            "data_outdated_sources": changed_run_sources(workspace_root, record.result or record.snapshot)
+            if record.result or record.snapshot else {},
             "result": record.result.model_dump(mode="json", by_alias=True) if record.result else None,
             "error": record.error,
             "event_offset": record.event_offset,
@@ -1269,6 +1303,9 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
 
     @app.get("/api/session/runs")
     def session_runs(session_id: str):
+        # Capture before compatibility checks. Later events remain replayable;
+        # earlier changes are already reflected in the restored page state.
+        workspace_revision = change_journal.revision
         records = manager.latest_for_session(checked_session(session_id))
         try:
             snapshot = refresh_workspace(preserve_on_error=True)
@@ -1306,9 +1343,11 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                     },
                     "ready": record.result is not None,
                     "query_outdated": query_outdated,
+                    "data_outdated_sources": changed_run_sources(workspace_root, query_run) if query_run else {},
+                    "source_versions": run_source_versions(query_run) if query_run else {},
                 }
             )
-        return {"runs": payload}
+        return {"runs": payload, "workspace_revision": workspace_revision}
 
     @app.get("/api/runs/{run_id}/events")
     async def run_events(run_id: str, session_id: str):
@@ -1349,9 +1388,11 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                     details={"code": "query_run_unavailable"},
                 )
             dashboard = snapshot.dashboard(query_record.dashboard_id, query_record.page_id)
+            plan = compile_interactive_plan(dashboard, normalize_interactive_target(request.transform_id))
             canonical_control_state = require_canonical_control_state(
                 dashboard.definition,
                 request.control_state,
+                execution_keys={binding["control"] for node in plan for binding in node.control_inputs.values()},
             )
             record = manager.start_interaction(
                 run_id,

@@ -742,6 +742,9 @@ const datavizReconcileHeadlessControlDomain = (key, availability) => {
   const candidates = availability.options
     .filter(option => option.available !== false)
     .map(option => option.value);
+  // An empty required domain is an unavailable selection, not a user commit.
+  // Keep the last state until candidates return; the scheduler gates this domain.
+  if (definition.required && candidates.length === 0) return;
   const bySignature = new Map(
     candidates.map(value => [datavizValueSignature(value), value])
   );

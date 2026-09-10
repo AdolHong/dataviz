@@ -223,6 +223,7 @@ Object.assign(datavizRuntime, {
       changed.add(reference);
     });
     if (this.initializing) return changed;
+    refreshControlOptionDomains();
     const affectedViewIds = this.affectedViews([], changed);
     this.renderViews({
       initial:false,

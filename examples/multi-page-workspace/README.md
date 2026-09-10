@@ -39,12 +39,12 @@ dataviz run examples/multi-page-workspace holiday --page history --format json
 dataviz report examples/multi-page-workspace <result-id> --output history.html
 ```
 
-本例不演示持久化标注或热更新；0.23.0 的跨页共享数据失效提示、热更新隔离仍有未完成
-边界，不能据此假设一个 Page 保存后，其他 Page 会自动同步。修改共享 Python 后两页
-都可能受影响，应重新验证两条路径。
+本例不演示持久化标注。当前工作树支持按 Page 识别热更新，以及共享 Source 保存后的
+Data changed 提示；其他页不会自动查询，需要在该页显式 Run。修改共享 Python 后两页
+都可能受影响，应重新验证两条路径。旧发行包的能力以对应发行说明为准。
 
 ## 验证范围
 
 本例通过严格校验、两页实际 Python 执行与计算一致性测试，以及 Chromium 两页图表
-加载专项。推荐桌面浏览器查看；后续工作树已修复 Page 导航样式与重复标题，并在切入
-窄屏时收起 Sidebar。上述 UI 修复尚未重新打包到 0.23.0，不宣称移动端完整验收。
+加载专项。推荐桌面浏览器查看；0.23.1 已修复 Page 导航样式与重复标题，并在切入
+窄屏时收起 Sidebar。不宣称移动端完整验收；最新稳定性改动仍在工作树验收，尚未重新打包。

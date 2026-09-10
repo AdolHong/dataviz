@@ -5,7 +5,7 @@ import json
 import os
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Literal
 from urllib.parse import urlparse
@@ -215,18 +215,31 @@ class WorkspaceSemanticSnapshot:
     catalog: dict[str, tuple[str, str, str | None, str]]
     query_environment: str
     server_environment: str
+    pages: dict[str, dict[str, DashboardSemanticSnapshot]] = field(default_factory=dict)
+    page_navigation: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_workspace(cls, workspace: LoadedWorkspace) -> "WorkspaceSemanticSnapshot":
-        dashboards = {
-            identifier: DashboardSemanticSnapshot(
+        def snapshot(dashboard: LoadedDashboard) -> DashboardSemanticSnapshot:
+            return DashboardSemanticSnapshot(
                 root=str(dashboard.root.resolve()),
                 query=_query_signature(dashboard),
                 query_files=_query_file_inputs(workspace, dashboard),
                 analysis=_analysis_signature(dashboard),
                 canvas=_canvas_signature(workspace, dashboard),
             )
+
+        dashboards = {
+            identifier: snapshot(dashboard)
             for identifier, dashboard in workspace.dashboards.items()
+        }
+        pages = {
+            identifier: {
+                page.id: snapshot(workspace.dashboard(identifier, page_id=page.id))
+                for page in dashboard.project_definition.pages
+            }
+            for identifier, dashboard in workspace.dashboards.items()
+            if dashboard.project_definition and dashboard.project_definition.pages
         }
         catalog = {
             entry.id: (
@@ -254,10 +267,17 @@ class WorkspaceSemanticSnapshot:
             catalog=catalog,
             query_environment=query_environment,
             server_environment=server_environment,
+            pages=pages,
+            page_navigation={
+                identifier: _digest({"title": dashboard.project_definition.title,
+                                     "pages": [(page.id, page.title) for page in dashboard.project_definition.pages]})
+                for identifier, dashboard in workspace.dashboards.items()
+                if dashboard.project_definition and dashboard.project_definition.pages
+            },
         )
 
 
-def classify_workspace_change(
+def _classify_workspace_change(
     previous: WorkspaceSemanticSnapshot,
     current: WorkspaceSemanticSnapshot,
     changed_paths: set[str],
@@ -296,7 +316,7 @@ def classify_workspace_change(
         elif before.root != after.root:
             promote(identifier, "navigation")
 
-    navigation_changed = previous.catalog != current.catalog
+    navigation_changed = previous.catalog != current.catalog or previous.page_navigation != current.page_navigation
     if previous.query_environment != current.query_environment:
         for identifier in current_ids:
             promote(identifier, "query")
@@ -315,11 +335,44 @@ def classify_workspace_change(
     return impacts, navigation_changed
 
 
+def classify_page_changes(
+    previous: WorkspaceSemanticSnapshot,
+    current: WorkspaceSemanticSnapshot,
+    changed_paths: set[str],
+) -> dict[str, dict[str, ReloadImpact]]:
+    """Compare every Page's execution closure, including inactive Pages."""
+    changes = {}
+    for identifier in sorted(previous.pages.keys() | current.pages.keys()):
+        impacts, _ = _classify_workspace_change(
+            replace(previous, dashboards=previous.pages.get(identifier, {})),
+            replace(current, dashboards=current.pages.get(identifier, {})),
+            changed_paths,
+        )
+        # Include empty maps: consumers can distinguish an unaffected Page
+        # from an older event that only carried Dashboard-level evidence.
+        changes[identifier] = impacts
+    return changes
+
+
+def classify_workspace_change(
+    previous: WorkspaceSemanticSnapshot,
+    current: WorkspaceSemanticSnapshot,
+    changed_paths: set[str],
+) -> tuple[dict[str, ReloadImpact], bool]:
+    impacts, navigation_changed = _classify_workspace_change(previous, current, changed_paths)
+    for identifier, pages in classify_page_changes(previous, current, changed_paths).items():
+        for impact in pages.values():
+            if identifier not in impacts or _IMPACT_PRIORITY[impact] > _IMPACT_PRIORITY[impacts[identifier]]:
+                impacts[identifier] = impact
+    return impacts, navigation_changed
+
+
 @dataclass(frozen=True, slots=True)
 class WorkspaceChangeEvent:
     revision: int
     status: Literal["ready", "invalid"]
     changes: dict[str, ReloadImpact] = field(default_factory=dict)
+    page_changes: dict[str, dict[str, ReloadImpact]] = field(default_factory=dict)
     navigation_changed: bool = False
     changed_paths: tuple[str, ...] = ()
     diagnostics: tuple[dict[str, Any], ...] = ()
@@ -336,6 +389,7 @@ class WorkspaceChangeEvent:
                 for identifier, impact in sorted(self.changes.items())
             ],
             "navigation_changed": self.navigation_changed,
+            "page_changes": self.page_changes,
             "changed_paths": list(self.changed_paths),
             "diagnostics": list(self.diagnostics),
             "message": self.message,
@@ -365,6 +419,7 @@ class WorkspaceChangeJournal:
         *,
         status: Literal["ready", "invalid"],
         changes: dict[str, ReloadImpact] | None = None,
+        page_changes: dict[str, dict[str, ReloadImpact]] | None = None,
         navigation_changed: bool = False,
         changed_paths: set[str] | None = None,
         diagnostics: list[dict[str, Any]] | None = None,
@@ -376,6 +431,7 @@ class WorkspaceChangeJournal:
                 revision=self._revision,
                 status=status,
                 changes=dict(changes or {}),
+                page_changes={identifier: dict(pages) for identifier, pages in (page_changes or {}).items()},
                 navigation_changed=navigation_changed,
                 changed_paths=tuple(sorted(changed_paths or set())[:100]),
                 diagnostics=tuple((diagnostics or [])[:50]),

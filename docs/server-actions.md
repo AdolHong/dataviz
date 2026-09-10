@@ -223,6 +223,30 @@ Portable HTML is read-only and exposes unavailability, not a live write endpoint
 
 ## Invalidation and selective refresh
 
+### Other Pages and open sessions
+
+Within the same Dashboard, Pages consuming the invalidated Source are marked
+**Data changed** when their displayed Run predates the successful write. The
+current Action still refreshes its own Page through the normal receipt flow;
+other Pages do **not** query automatically. Run an outdated Page explicitly to
+update it. Saving successfully does not mean all Pages have synchronized.
+
+This uses recorded Source versions, not matching database paths. If separate
+Sources happen to read the same database, declare their invalidations explicitly;
+the platform cannot infer the business relationship. External writes that bypass
+Server Actions are not tracked by this mechanism.
+
+`data_outdated_sources` in Run/session responses exposes `observed` and `current`
+versions without rewriting the immutable Result. The event connection compares
+versions against the browser's displayed Run, including when a write succeeded
+but its refresh failed. File watching may be disabled; these notifications still
+work. Reconnection and session restoration recover current version evidence.
+When leaving a Page, unsent queued Actions are cancelled; an already submitted
+Action may finish, and its receipt remains the authority. Never resubmit it
+under a new request ID just because its old Page is no longer visible.
+
+### Refresh scope
+
 `invalidates` is the maximum allowed effect set, validated against the loaded
 dashboard before execution. Python requests a subset through
 `context.invalidate("source:annotations")`. An undeclared effect is an error.

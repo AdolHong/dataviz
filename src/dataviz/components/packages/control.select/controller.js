@@ -21,7 +21,6 @@
     let virtual = false;
     let searchTimer = null;
     let searchComposing = false;
-    let openSnapshot = null;
 
     const querySelection = () => input.dataset.querySelection || 'all';
     const querySelected = option => {
@@ -83,13 +82,9 @@
     const clear = document.createElement('button');
     clear.type = 'button';
     clear.textContent = control.dataset.clearLabel || 'Clear';
-    const revert = document.createElement('button');
-    revert.type = 'button';
-    revert.textContent = 'Revert';
-    revert.title = 'Revert changes made while this menu is open';
     const count = document.createElement('small');
     count.setAttribute('aria-live', 'polite');
-    footerActions.append(all, clear, revert);
+    footerActions.append(all, clear);
     footer.append(footerActions, count);
     panel.append(search, viewport, empty, footer);
     picker.append(trigger, panel);
@@ -99,11 +94,6 @@
       width: Number(control.dataset.overlayWidth || 680),
       focus: search,
       onOpen: () => {
-        openSnapshot = {
-          selection:queryParameter && input.multiple ? querySelection() : null,
-          intent:input.multiple ? api.inferSelectionIntent(input) : null,
-          values:api.selectedOptions(input).map(option => option.value),
-        };
         sync();
       },
     });
@@ -212,7 +202,7 @@
       empty.hidden = renderedOptions.length > 0;
       viewport.hidden = renderedOptions.length === 0;
       const operandCount = api.selectedOptions(input).length;
-      const availableCount = Number(input.dataset.queryTotal || api.availableOptions(input).length);
+      const availableCount = Number(input.dataset.queryUniverseTotal || input.dataset.queryTotal || api.availableOptions(input).length);
       const selectedCount = queryParameter && input.multiple
         ? querySelection() === 'all' ? availableCount
         : querySelection() === 'none' ? 0
@@ -225,14 +215,29 @@
       clear.hidden = !allowEmpty;
       clear.disabled = input.disabled || selectedCount === 0;
       all.hidden = !input.multiple;
-      revert.hidden = !input.multiple;
-      const currentValues = api.selectedOptions(input).map(option => option.value);
-      revert.disabled = input.disabled || !openSnapshot || (
-        openSnapshot.selection === (queryParameter ? querySelection() : null)
-        && openSnapshot.intent === api.inferSelectionIntent(input)
-        && openSnapshot.values.length === currentValues.length
-        && openSnapshot.values.every(value => currentValues.includes(value))
-      );
+      const searching = input.multiple && Boolean(search.value.trim());
+      const matches = filtered.filter(option => !option.disabled);
+      const matchedSelected = matches.filter(querySelected).length;
+      clear.textContent = searching ? 'Clear results' : (control.dataset.clearLabel || 'Clear');
+      if (searching) {
+        count.textContent = `${matches.length} matching · ${matchedSelected} selected`;
+        all.textContent = 'Select results';
+        all.dataset.action = 'select-results';
+        all.disabled = input.disabled || !matches.length || matchedSelected === matches.length
+          || (maxSelected > 0 && selectedCount + matches.length - matchedSelected > maxSelected);
+        clear.disabled = input.disabled || matchedSelected === 0;
+        all.title = 'Select matching options; keep other selections';
+        const incomplete = remoteOptions && (
+          input.dataset.querySearch !== search.value.trim() || input.dataset.queryHasMore === 'true'
+        );
+        if (incomplete) {
+          all.disabled = clear.disabled = true;
+          all.title = clear.title = 'Load all matching results before applying a bulk action';
+        } else clear.title = 'Clear matching options; keep other selections';
+        api.renderSummary(trigger, input, control, control.dataset.placeholder || 'Choose…');
+        trigger.disabled = input.disabled;
+        return;
+      }
       if (queryParameter && input.multiple) {
         all.textContent = control.dataset.selectAllLabel || 'Select all';
         all.dataset.action = 'select-all';
@@ -250,7 +255,7 @@
         || api.inferSelectionIntent(input) === 'all_available';
       all.title = maxSelected > 0 && candidates.length > maxSelected
         ? `Selection limit is ${maxSelected}; select individual options instead.`
-        : 'Select all available options, including options hidden by search';
+        : 'Select all available options';
       api.renderSummary(trigger, input, control, control.dataset.placeholder || 'Choose…');
       trigger.disabled = input.disabled;
     }
@@ -283,7 +288,8 @@
           && control.dataset.showUnavailable !== 'true'
         ) return false;
         if (control.dataset.hideSelected === 'true' && option.selected) return false;
-        return remoteOptions || !query || api.optionSearchText(option).includes(query);
+        return remoteOptions ? (!query || option.dataset.queryMatch === 'true')
+          : !query || api.optionSearchText(option).includes(query);
       });
       active = Math.min(active, Math.max(0, filtered.length - 1));
       render();
@@ -320,6 +326,7 @@
         sync();
         return;
       }
+      render();
       // CJK input methods emit intermediate `input` events while the candidate
       // text is still being composed. Replacing an open top-layer picker during
       // that lifecycle can leave Chromium displaying the pre-lookup rows until
@@ -361,6 +368,7 @@
     });
     all.addEventListener('click', () => {
       if (!input.multiple || input.disabled) return;
+      if (search.value.trim()) { changeResults(true); return; }
       if (queryParameter) {
         setQuerySelection('all');
         sync();
@@ -376,6 +384,7 @@
     });
     clear.addEventListener('click', () => {
       if (input.disabled || !allowEmpty) return;
+      if (input.multiple && search.value.trim()) { changeResults(false); return; }
       if (queryParameter && input.multiple) setQuerySelection('none');
       else api.clearOptions(input);
       api.markSelectionIntent(input, 'explicit');
@@ -383,15 +392,24 @@
       api.emitChange(input);
       if (!input.multiple) overlay.close({returnFocus: true});
     });
-    revert.addEventListener('click', () => {
-      if (input.disabled || !input.multiple || !openSnapshot) return;
-      const values = new Set(openSnapshot.values);
-      api.options(input).forEach(option => { option.selected = values.has(option.value); });
-      if (queryParameter) setQuerySelection(openSnapshot.selection || 'all');
-      else api.markSelectionIntent(input, openSnapshot.intent || 'explicit');
+    function changeResults(select) {
+      if ((select ? all : clear).disabled) return;
+      const matches = filtered.filter(option => !option.disabled);
+      if (queryParameter) {
+        const mode = querySelection();
+        if (mode === 'all') setQuerySelection('exclude');
+        if (mode === 'none') setQuerySelection('include');
+        matches.forEach(option => { option.selected = querySelection() === 'exclude' ? !select : select; });
+        if (!api.selectedOptions(input).length) {
+          setQuerySelection(querySelection() === 'exclude' ? 'all' : 'none');
+        }
+      } else {
+        matches.forEach(option => { option.selected = select; });
+        api.markSelectionIntent(input, 'explicit');
+      }
       sync();
       api.emitChange(input);
-    });
+    }
 
     return {
       sync,

@@ -2397,6 +2397,8 @@ async function selectDashboard(id, {historyMode = 'push', locationSearch = null,
   closeHeaderPopovers();
   clearContextControlGroups();
   state.dashboard = selected;
+  $('#dashboard-empty').hidden = true;
+  $('.canvas-panel').hidden = false;
   state.navigationPending = false;
   state.selectedPages[id] = selected.page_id || null;
   renderPageNavigation();
@@ -2489,7 +2491,7 @@ async function selectDashboard(id, {historyMode = 'push', locationSearch = null,
   loadCanvasFrame(id, runtime.pendingRunId || runtime.runId);
   $('#run-button').disabled = !runnable || runtime.queryRequestInFlight;
   $('#run-button').classList.toggle('is-cancelling', Boolean(runtime.pendingRunId));
-  setRunButtonLabel(runtime.pendingRunId ? 'CANCEL' : 'RUN');
+  setRunButtonLabel(runtime.pendingRunId ? 'Cancel' : 'Run');
   setShareEnabled(Boolean(runtime.runId) && runtime.controlConnected);
   saveTabUiState();
   // Dashboard navigation owns the route and must commit immediately. Dynamic
@@ -2868,6 +2870,14 @@ async function lookupQueryParameter(parameter, {
     if (input) {
       input.disabled = false;
       input.dataset.queryTotal = String(response.total || 0);
+      input.dataset.querySearch = search;
+      input.dataset.queryHasMore = String(Boolean(response.next_cursor));
+      const matchValues = new Set(items.map(item => JSON.stringify(item.value)));
+      Array.from(input.options).forEach(option => {
+        let value;
+        value = input.dataset.valueEncoding === 'json' ? JSON.parse(option.value) : option.value;
+        option.dataset.queryMatch = String(matchValues.has(JSON.stringify(value)));
+      });
       // `total` is the number of matches for this request. Keep the latest
       // unfiltered total separately so an auto-search control does not hide
       // itself after a narrow query returns fewer than the UI threshold.
@@ -3105,14 +3115,14 @@ async function runDashboard() {
   if (runtime.pendingRunId) {
     const runId = runtime.pendingRunId;
     $('#run-button').disabled = true;
-    setRunButtonLabel('CANCELLING…');
+    setRunButtonLabel('Cancelling…');
     try {
       await request(`/api/runs/${encodeURIComponent(runId)}?${sessionQuery()}`, {method:'DELETE'});
       runtime.message = 'Cancelling this Dashboard query…';
       $('#run-message').textContent = runtime.message;
     } catch (error) {
       $('#run-button').disabled = state.navigationPending;
-      setRunButtonLabel('CANCEL');
+      setRunButtonLabel('Cancel');
       runtime.message = error.message;
       $('#run-message').textContent = error.message;
     }
@@ -3179,7 +3189,7 @@ async function runDashboard() {
     if (activeRuntime() === runtime) {
       $('#run-button').disabled = state.navigationPending;
       $('#run-button').classList.add('is-cancelling');
-      setRunButtonLabel('CANCEL');
+      setRunButtonLabel('Cancel');
       loadCanvasFrame(dashboardId, response.run_id);
     }
     renderPageNavigation();
@@ -3196,7 +3206,7 @@ async function runDashboard() {
       $('#query-diagnostics-label').textContent = 'Failed';
       $('#run-button').disabled = state.navigationPending;
       $('#run-button').classList.remove('is-cancelling');
-      setRunButtonLabel('RUN');
+      setRunButtonLabel('Run');
     }
   }
 }
@@ -3283,7 +3293,7 @@ async function finishRun(runId, dashboardId, pageId = null) {
     $('#run-message').textContent = runtime.message;
     $('#run-button').disabled = state.navigationPending;
     $('#run-button').classList.remove('is-cancelling');
-    setRunButtonLabel('RUN');
+    setRunButtonLabel('Run');
     setShareEnabled(Boolean(runtime.runId));
     $('#query-diagnostics').dataset.status = runtime.queryStatus;
     $('#query-diagnostics-label').textContent = runtime.queryLabel;
@@ -4293,10 +4303,18 @@ async function refreshNavigation(
   const routed = state.payload.dashboards.find((item) => item.id === requestedDashboardId);
   const preferred = state.payload.dashboards.find((item) => item.path === preferredPath);
   const remembered = state.payload.dashboards.find((item) => item.id === state.preferredDashboardId);
-  const fallback = state.payload.dashboards.find((item) => item.runnable) || state.payload.dashboards[0];
-  const selected = routed || preferred || remembered || fallback;
+  const selected = requestedDashboardId ? routed : preferred || remembered;
   if (!selected) {
     state.dashboard = null;
+    state.preferredDashboardId = null;
+    setOperationPanel(null, {focus:false, persist:false});
+    $('#dashboard-empty').hidden = false;
+    $('.canvas-panel').hidden = true;
+    $('#canvas-frame').removeAttribute('src');
+    $('#page-navigation').hidden = true;
+    $('#run-button').disabled = true;
+    $('#query-parameters-toggle').disabled = true;
+    $('#dashboard-controls-toggle').disabled = true;
     renderNavigation();
     return null;
   }
@@ -4928,6 +4946,7 @@ window.addEventListener('message', (event) => {
   }
   if (event.data?.type === 'dataviz:keyboard-shortcut') {
     if (!$('#single-key-shortcuts').checked && event.data.single_key) return;
+    delete document.documentElement.dataset.dvHeaderKeyboard;
     executeKeyboardShortcut(String(event.data.command || ''));
     return;
   }

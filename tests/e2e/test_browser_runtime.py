@@ -45,6 +45,44 @@ SHOWCASE = ROOT / "examples" / "feature-showcase"
 
 
 @pytest.mark.e2e
+def test_root_requires_explicit_or_remembered_dashboard(page: Page):
+    with _running_server(MINIMAL) as base_url:
+        requests = []
+        page.on("request", lambda request: requests.append(request.url))
+        page.goto(base_url, wait_until="networkidle")
+        expect(page.locator("#dashboard-empty")).to_be_visible()
+        expect(page.locator(".nav-button.active")).to_have_count(0)
+        expect(page.locator("#run-button")).to_be_disabled()
+        expect(page.locator("#query-parameters-toggle")).to_be_disabled()
+        expect(page.locator("#dashboard-controls-toggle")).to_be_disabled()
+        assert not any("/canvas" in url or "/parameter-domains/" in url for url in requests)
+        assert page.url.rstrip("/") == base_url.rstrip("/")
+        page.reload(wait_until="networkidle")
+        expect(page.locator("#dashboard-empty")).to_be_visible()
+
+        _open_dashboard(page, base_url, "sales-overview")
+        expect(page.locator("#dashboard-empty")).to_be_hidden()
+        page.goto(base_url, wait_until="domcontentloaded")
+        expect(page).to_have_url(re.compile(r"/dashboards/sales-overview"))
+        expect(page.locator("#canvas-frame")).to_have_attribute("data-dashboard-id", "sales-overview")
+
+        # A removed remembered dashboard must not silently select another one.
+        page.evaluate("""() => {
+          for (const key of Object.keys(sessionStorage)) {
+            if (!key.startsWith('dataviz.tab-ui.v4.')) continue;
+            const saved = JSON.parse(sessionStorage.getItem(key));
+            saved.activeDashboardId = 'removed-dashboard';
+            sessionStorage.setItem(key, JSON.stringify(saved));
+          }
+        }""")
+        page.goto(base_url, wait_until="networkidle")
+        expect(page.locator("#dashboard-empty")).to_be_visible()
+        expect(page.locator(".nav-button.active")).to_have_count(0)
+        page.goto(base_url + "/dashboards/sales-overview", wait_until="domcontentloaded")
+        expect(page.locator("#canvas-frame")).to_have_attribute("data-dashboard-id", "sales-overview")
+
+
+@pytest.mark.e2e
 def test_cascader_search_density_and_exported_sidebar_corners(page: Page, tmp_path: Path):
     workspace = _copy_workspace(SHOWCASE, tmp_path / 'cascader-density')
     path = workspace / 'dashboards/功能示例##cascade-explorer/dashboard.yaml'
@@ -124,19 +162,28 @@ def test_cascader_sidebar_bounds_and_global_all(page: Page, tmp_path: Path, view
         clear = panel.get_by_role('button', name=re.compile('^Clear'))
         clear.click()
         expect(cascader.locator('select')).to_have_values([])
-        panel.get_by_role('button', name='Revert', exact=True).click()
+        expect(panel.get_by_role('button', name='Revert', exact=True)).to_have_count(0)
+        panel.get_by_role('button', name='Select all', exact=True).click()
         page.wait_for_function("document.querySelector('#canvas-frame').contentWindow.dataviz.control.state('view:city-detail/district').intent === 'all_available'")
         assert cascader.locator('select').evaluate('s => s.selectedOptions.length === s.options.length')
         clear.click()
         expect(cascader.locator('select')).to_have_values([])
         panel.locator('.dv-choice-search').fill('深圳')
-        all_button = panel.get_by_role('button', name='Select all', exact=True)
+        all_button = panel.get_by_role('button', name='Select results', exact=True)
         all_button.click()
-        # Search narrows browsing only; All selects the full current candidate domain.
-        assert cascader.locator('select').evaluate('s => s.options.length > 1 && s.selectedOptions.length === s.options.length')
+        assert cascader.locator('select').evaluate('s => s.selectedOptions.length > 0 && [...s.selectedOptions].every(o => o.textContent.includes("深圳"))')
+        expect(all_button).to_be_disabled()
+        panel.locator('.dv-choice-search').fill('佛山')
+        panel.get_by_role('button', name='Select results', exact=True).click()
+        panel.get_by_role('button', name='Clear results', exact=True).click()
+        assert cascader.locator('select').evaluate('s => s.selectedOptions.length > 0 && [...s.selectedOptions].every(o => o.textContent.includes("深圳"))')
+        panel.locator('.dv-choice-search').fill('')
+        panel.get_by_role('button', name='Select all', exact=True).click()
         page.wait_for_function("document.querySelector('#canvas-frame').contentWindow.dataviz.control.state('view:city-detail/district').intent === 'all_available'")
         panel.locator('.dv-choice-search').fill('no-matching-path')
         expect(panel.locator('.dv-choice-empty')).to_be_visible()
+        expect(panel.get_by_role('button', name='Select results', exact=True)).to_be_disabled()
+        expect(panel.get_by_role('button', name='Clear results', exact=True)).to_be_disabled()
         assert_bounds()
         panel.locator('.dv-choice-search').press('Escape')
         expect(panel).to_be_hidden()
@@ -362,19 +409,19 @@ def test_pages_preserve_independent_queries_and_history(page: Page, tmp_path: Pa
         expect(page.locator('#parameter-form input[name="year"]')).to_have_value("2025")
         assert runs == []
         page.locator("#run-button").click()
-        expect(page.locator("#run-button strong")).to_have_text("CANCEL")
+        expect(page.locator("#run-button strong")).to_have_text("Cancel")
         history.click()
         expect(history).to_have_attribute("aria-current", "page")
         expect(page.locator('#parameter-form input[name="year"]')).to_have_value("[2023,2024]")
         page.locator("#run-button").click()
         frame = page.frame_locator("#canvas-frame")
         expect(frame.locator('[data-view-id="table"]')).to_contain_text("2023", timeout=30_000)
-        expect(page.locator("#run-button strong")).to_have_text("RUN", timeout=30_000)
+        expect(page.locator("#run-button strong")).to_have_text("Run", timeout=30_000)
         history_run = page.locator("#canvas-frame").get_attribute("data-run-id")
         annual.click()
         expect(annual).to_have_attribute("aria-current", "page")
         expect(frame.locator('[data-view-id="table"]')).to_contain_text("2025", timeout=30_000)
-        expect(page.locator("#run-button strong")).to_have_text("RUN")
+        expect(page.locator("#run-button strong")).to_have_text("Run")
         assert len(runs) == 2
         assert {request["page_id"] for request in runs} == {"annual", "history"}
         frame.locator('body').evaluate("""async () => {
@@ -500,7 +547,7 @@ def test_multi_page_example_renders_both_analysis_paths(page: Page, tmp_path: Pa
             page.locator("#run-button").click()
             expect(frame.locator('[data-view-id="details"]')).to_contain_text("水果", timeout=30_000)
             expect(frame.locator('[data-view-id="trend"] .js-plotly-plot')).to_be_visible()
-            expect(page.locator("#run-button strong")).to_have_text("RUN", timeout=30_000)
+            expect(page.locator("#run-button strong")).to_have_text("Run", timeout=30_000)
             expect(frame.locator(".dv-report-header h1")).to_be_hidden()
             for width, height in ((1440, 1050), (390, 844)):
                 page.set_viewport_size({"width": width, "height": height})
@@ -2327,6 +2374,31 @@ def test_parameter_domain_lookup_search_and_cursor_pagination(page: Page, tmp_pa
         generations = {payload["generation"] for payload in ready_responses}
         assert len(generations) == 1
 
+        # Search-scoped actions preserve the compact all/exclude semantics and
+        # exceptions outside the current server-side matching domain.
+        search.fill("城市 619")
+        clear_results = city_control.get_by_role("button", name="Clear results", exact=True)
+        expect(clear_results).to_be_enabled()
+        clear_results.click()
+        expect(city).to_have_attribute("data-query-selection", "exclude")
+        expect(city).to_have_values(["C619"])
+        search.fill("城市 618")
+        expect(city_control.locator(".dv-choice-option")).to_have_count(1)
+        expect(clear_results).to_be_enabled()
+        clear_results.click()
+        expect(city).to_have_values(["C619", "C618"])
+        city_control.get_by_role("button", name="Select results", exact=True).click()
+        expect(city).to_have_values(["C619"])
+        search.fill("")
+        city_control.get_by_role("button", name="Clear", exact=True).click()
+        expect(city).to_have_attribute("data-query-selection", "none")
+        search.fill("城市 619")
+        select_results = city_control.get_by_role("button", name="Select results", exact=True)
+        expect(select_results).to_be_enabled()
+        select_results.click()
+        expect(city).to_have_attribute("data-query-selection", "include")
+        expect(city).to_have_values(["C619"])
+
 
 @pytest.mark.e2e
 def test_remote_single_select_search_repaints_with_scalar_state(page: Page, tmp_path: Path):
@@ -2728,6 +2800,41 @@ def test_portable_query_tray_uses_shared_sidebar_for_clicks_and_shortcuts(page: 
     with _running_server(MINIMAL) as base_url:
         _open_dashboard(page, base_url, "sales-overview")
         _run_and_wait(page)
+        for selector in (
+            '#keyboard-shortcuts-toggle', '#dashboard-controls-toggle',
+            '#query-parameters-toggle', '#run-button strong',
+        ):
+            button = page.locator(selector)
+            expect(button).to_have_css('font-size', '12px')
+            expect(button).to_have_css('font-weight', '600')
+            expect(button).to_have_css('letter-spacing', 'normal')
+            expect(button).to_have_css('text-transform', 'none')
+        expect(page.locator('#run-button strong')).to_have_text('Run')
+        page.keyboard.press('Escape')
+        page.mouse.move(0, 300)
+        for selector in ('#keyboard-shortcuts-toggle', '#dashboard-controls-toggle',
+                         '#query-parameters-toggle', '#share-button'):
+            expect(page.locator(selector)).to_have_css('color', 'rgb(84, 90, 99)')
+        expect(page.locator('#run-button strong')).to_have_css('color', 'rgb(255, 255, 255)')
+        page.locator('.topbar').screenshot(path='/tmp/dataviz-header-02410.png')
+        # Hotkeys and pointer focus must not look like a second selected state.
+        for key, selector in (('q', '#sidebar-toggle'), ('w', '#query-parameters-toggle'),
+                              ('e', '#dashboard-controls-toggle')):
+            button = page.locator(selector)
+            button.click()
+            page.keyboard.press(key)
+            button.focus()
+            expect(button).to_have_css('outline-style', 'none')
+            expect(button).to_have_css('box-shadow', 'none')
+        page.keyboard.press('Escape')
+        page.locator('#keyboard-shortcuts-toggle').focus()
+        page.keyboard.press('Tab')
+        focused_header = page.locator('.topbar :focus')
+        expect(focused_header).to_have_count(1)
+        expect(focused_header).to_have_css('outline-style', 'solid')
+        page.locator('#sidebar-toggle').focus()
+        expect(page.locator('#sidebar-toggle')).to_have_css('outline-style', 'solid')
+        page.mouse.click(400, 200)
         server_visual = page.evaluate(
             """() => {
               const header = document.querySelector('.topbar');
@@ -2829,6 +2936,15 @@ def test_portable_query_tray_uses_shared_sidebar_for_clicks_and_shortcuts(page: 
         expect(sidebar).to_have_count(0)
         page.keyboard.press('e')
         expect(sidebar).to_have_attribute('aria-label', 'Controls')
+        scope_heading = sidebar.locator('h3').last
+        expect(scope_heading).to_be_focused()
+        expect(scope_heading).to_have_css('outline-style', 'none')
+        page.screenshot(path='/tmp/dataviz-export-heading-focus.png')
+        page.keyboard.press('Tab')
+        focused_control = sidebar.locator(':focus')
+        expect(focused_control).to_have_count(1)
+        assert focused_control.evaluate('(el) => el.matches("button, input, select, textarea, [role=combobox]")')
+        expect(focused_control).to_have_css('outline-style', 'solid')
         toggle.click()
         expect(sidebar).to_have_attribute('aria-label', 'Parameters')
         entry.click()
@@ -3785,15 +3901,16 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
         grouped_select.locator(".dv-choice-search").fill("Growth")
         expect(grouped_select.locator("footer small")).to_contain_text("2 matching")
         grouped_action = grouped_select.locator(".dv-select-footer__actions button").first
-        expect(grouped_action).to_have_text("Select all")
+        expect(grouped_action).to_have_text("Select results")
         grouped_action.click()
         assert (
             grouped_select.locator("select").evaluate("select => select.selectedOptions.length")
-            == 4
+            == 2
         )
-        expect(grouped_action).to_have_text("Select all")
+        expect(grouped_action).to_have_text("Select results")
         expect(grouped_action).to_be_disabled()
-        grouped_select.get_by_role("button", name="Revert").click()
+        expect(grouped_select.get_by_role("button", name="Revert")).to_have_count(0)
+        grouped_select.get_by_role("button", name="Clear results", exact=True).click()
         assert (
             grouped_select.locator("select").evaluate("select => select.selectedOptions.length")
             == 0
@@ -3802,7 +3919,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
         grouped_select.locator(".dv-choice-option").first.click()
         expect(grouped_select.locator("[data-control-summary]")).to_have_text("Atlas")
         expect(grouped_select.locator(".dv-choice-summary__tag")).to_have_count(0)
-        grouped_select.get_by_role("button", name="Revert").click()
+        grouped_select.get_by_role("button", name="Clear", exact=True).click()
         expect(grouped_select.locator("select")).to_have_values([])
         long_label = "这是一个需要完整阅读的超长商品名称" * 12
         grouped_select.locator("select option").first.evaluate(
@@ -5716,9 +5833,9 @@ def test_query_reload_restores_visible_date_range_and_single_select(page: Page, 
         summary = field.locator('[data-control-summary]')
         expect(summary).to_have_text("品类")
         page.locator('#run-button').click()
-        expect(page.locator('#run-button strong')).to_have_text("CANCEL")
+        expect(page.locator('#run-button strong')).to_have_text("Cancel")
         if reload_phase == "ready":
-            expect(page.locator('#run-button strong')).to_have_text("RUN", timeout=30_000)
+            expect(page.locator('#run-button strong')).to_have_text("Run", timeout=30_000)
         page.reload(wait_until="domcontentloaded")
         expect(select).to_have_value("category")
         expect(page.locator('#parameter-form input[name="dates"]')).to_have_value("2026-09-09,2026-09-09")
@@ -7776,7 +7893,7 @@ def test_cancelled_query_branch_reaches_a_terminal_view_state(page: Page, tmp_pa
         cancelled_run_id = page.locator("#canvas-frame").get_attribute("data-run-id")
         session_id = page.evaluate("() => sessionStorage.getItem('dataviz.tab-session.v2')")
         assert cancelled_run_id and session_id
-        expect(page.locator("#run-button")).to_contain_text("CANCEL")
+        expect(page.locator("#run-button")).to_contain_text("Cancel")
         page.locator("#run-button").click()
         expect(page.locator("#run-message")).to_contain_text("Query cancelled", timeout=20_000)
         # The shell restores the previously committed Dataset (none in this

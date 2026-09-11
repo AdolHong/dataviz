@@ -1,6 +1,21 @@
 (function installPresentationShellController(global) {
   'use strict';
   const root = global.datavizComponents = global.datavizComponents || {};
+  // Header focus rings belong to sequential keyboard navigation, not hotkeys
+  // or pointer-driven focus restoration. Keep DOM focus and tab order intact.
+  if (!root.headerFocusInstalled) {
+    root.headerFocusInstalled = true;
+    document.addEventListener('pointerdown', () => {
+      delete document.documentElement.dataset.dvHeaderKeyboard;
+    }, true);
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Tab') document.documentElement.dataset.dvHeaderKeyboard = 'true';
+      else if (['q', 'w', 'e', 'r'].includes(event.key.toLowerCase())
+        && !event.target.closest?.('input, textarea, select, [contenteditable="true"]')) {
+        delete document.documentElement.dataset.dvHeaderKeyboard;
+      }
+    }, true);
+  }
   const statuses = new Set([
     'ready', 'loading', 'stale', 'empty', 'error', 'cancelled', 'unavailable',
   ]);

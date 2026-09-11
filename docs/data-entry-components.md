@@ -1,5 +1,13 @@
 # Data Entry Component 语义契约
 
+多选 Select 与 Cascader 使用一致的批量操作，不提供 Revert：
+
+- 未搜索：Select all / Clear，作用于完整候选域。
+- 搜索中：Select results / Clear results，只加入或取消匹配项，保留搜索外选择；统计显示匹配数与其中已选数。
+- 无匹配、匹配项全选或全未选时禁用对应按钮；全选结果超过 max_selected 限制时禁用，不做部分选择。Clear 遵守 clearable 策略。
+- 远程 Select 搜索请求尚未返回或匹配结果尚未加载完分页时，批量操作暂不可用；加载完整清单后可操作，避免误把当前一页当成全部结果。
+- 清除搜索词不改变选择，只恢复全局操作。单选不提供批量选择。
+
 Dataviz 把三个问题彻底分开：
 
 1. `dashboard.yaml` 定义值是什么；Query Parameter 创建 Query Run，scoped Control 持有查询后的交互状态。

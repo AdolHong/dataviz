@@ -27,9 +27,9 @@ components:
       overlay: viewport-aware
       navigation_state: independent from selection state
       multi_branch_selection: true
-      select_all: full_current_candidate_domain_including_search_hidden_paths
+      select_all: full_domain_without_search_matching_paths_with_search
       clear: respects_clearable_policy
-      revert: restore_menu_open_selection_and_intent
+      search_bulk_actions: preserve_selections_outside_search_results
       branch_selection: optional_descendant_toggle
       checked_summary: [child, parent, all]
     semantic_dom: [.dv-cascader, .dv-control-panel, .dv-cascader-panel, .dv-cascader-columns, .dv-cascader-column, .dv-cascader-option]

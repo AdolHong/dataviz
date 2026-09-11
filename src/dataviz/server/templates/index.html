@@ -26,7 +26,7 @@
         <button id="keyboard-shortcuts-toggle" class="button button--ghost" type="button" aria-label="Keyboard shortcuts">Shortcuts</button>
         <details id="share-control" class="header-control share-control" data-header-popover data-overlay-floating="true" data-overlay-width="250" data-empty="true">
           <summary id="share-button" class="share-control__trigger" aria-disabled="true">
-            <strong>SHARE</strong>
+            <strong>Share</strong>
             <span class="header-control__chevron" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4 6 4 4 4-4"/></svg></span>
           </summary>
           <div class="header-control__popover share-control__menu">
@@ -53,7 +53,7 @@
         </details>
         <div id="query-run-control" class="query-run-control">
           <button id="run-button" class="button button--run query-run-control__primary" type="button" aria-keyshortcuts="R Meta+Control+R Control+Enter Meta+Enter Control+End" title="Run query; right-click to edit parameter defaults" disabled>
-            <span class="query-run-control__copy"><strong data-run-label>RUN</strong><small id="query-control-meta">Not applied</small></span>
+            <span class="query-run-control__copy"><strong data-run-label>Run</strong><small id="query-control-meta">Not applied</small></span>
           </button>
           <button id="query-parameters-toggle" class="query-run-control__toggle" type="button" aria-controls="query-parameters-panel" aria-expanded="true" aria-label="Collapse parameters" aria-keyshortcuts="W Meta+Control+W" title="Collapse parameters">
             <span>Parameters</span>
@@ -77,6 +77,7 @@
     </aside>
 
     <main class="workbench">
+      <p id="dashboard-empty" role="status" hidden>Select a dashboard from the sidebar.</p>
       <section id="page-navigation" class="page-navigation" hidden>
         <h1 id="page-project-title"></h1>
         <nav id="page-navigation-list" aria-label="Analysis pages"></nav>

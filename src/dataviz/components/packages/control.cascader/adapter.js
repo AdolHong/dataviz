@@ -8,7 +8,6 @@
     const separator = control.dataset.pathSeparator || ' / ';
     const allowEmpty = control.dataset.clearable === 'true';
     const maxSelected = Math.max(0, Number(control.dataset.maxSelected || 0));
-    let openSnapshot = null;
     let activePath = [];
     const picker = document.createElement('div');
     picker.className = 'dv-cascader';
@@ -43,13 +42,9 @@
     const clear = document.createElement('button');
     clear.type = 'button';
     clear.textContent = control.dataset.clearLabel || 'Clear selection';
-    const revert = document.createElement('button');
-    revert.type = 'button';
-    revert.textContent = 'Revert';
-    revert.title = 'Revert changes made while this menu is open';
     const count = document.createElement('small');
     count.setAttribute('aria-live', 'polite');
-    actions.append(all, clear, revert);
+    actions.append(all, clear);
     footer.append(actions, count);
     panel.append(search, columns, empty, footer);
     picker.append(trigger, panel);
@@ -59,7 +54,6 @@
       focus: search,
       onOpen: () => {
         render(true);
-        openSnapshot = {values:[...selected()], intent:api.inferSelectionIntent(input)};
         render(false);
       },
     });
@@ -227,19 +221,25 @@
       all.title = maxSelected > 0 && paths.length > maxSelected
         ? `Selection limit is ${maxSelected}; select individual paths instead.`
         : 'Select all available paths, including paths hidden by search';
-      revert.hidden = !input.multiple;
-      revert.disabled = input.disabled || !openSnapshot || (
-        openSnapshot.intent === api.inferSelectionIntent(input)
-        && openSnapshot.values.length === selectedValues.size
-        && openSnapshot.values.every(value => selectedValues.has(value))
-      );
+      const matches = matchingOptions();
+      const matchedSelected = matches.filter(option => option.selected).length;
+      all.textContent = query ? 'Select results' : (control.dataset.selectAllLabel || 'Select all');
+      clear.textContent = query && input.multiple ? 'Clear results' : (control.dataset.clearLabel || 'Clear');
+      if (query && input.multiple) {
+        count.textContent = `${matches.length} matching · ${matchedSelected} selected`;
+        all.disabled = input.disabled || !matches.length || matchedSelected === matches.length
+          || (maxSelected > 0 && selectedValues.size + matches.length - matchedSelected > maxSelected);
+        all.title = 'Select matching paths; keep other selections';
+      }
       clear.hidden = !allowEmpty;
       clear.disabled = input.disabled || selectedValues.size === 0;
+      if (query && input.multiple) clear.disabled = input.disabled || matchedSelected === 0;
       trigger.disabled = input.disabled;
       if (overlay.isOpen()) overlay.reposition();
     }
     search.addEventListener('input', () => render(false));
     all.addEventListener('click', () => {
+      if (search.value.trim()) { changeResults(true); return; }
       if (input.disabled || !input.multiple || !api.availableOptions(input).length
         || (maxSelected && api.availableOptions(input).length > maxSelected)) return;
       if (selectionKeyFor(input)) api.markSelectionIntent(input, 'all_available');
@@ -249,20 +249,24 @@
     });
     clear.addEventListener('click', () => {
       if (!allowEmpty || input.disabled) return;
+      if (input.multiple && search.value.trim()) { changeResults(false); return; }
       if (selectionKeyFor(input)) api.markSelectionIntent(input, 'explicit');
       api.clearOptions(input);
       render(false);
       api.emitChange(input);
     });
     api.keyboardList(panel, button => button.click());
-    revert.addEventListener('click', () => {
-      if (input.disabled || !input.multiple || !openSnapshot) return;
-      const values = new Set(openSnapshot.values);
-      api.options(input).forEach(option => { option.selected = values.has(option.value); });
-      if (selectionKeyFor(input)) api.markSelectionIntent(input, openSnapshot.intent || 'explicit');
+    function matchingOptions() {
+      const query = search.value.trim().toLocaleLowerCase();
+      return api.availableOptions(input).filter(option => option.textContent.toLocaleLowerCase().includes(query));
+    }
+    function changeResults(select) {
+      if (input.disabled || !input.multiple || (select ? all : clear).disabled) return;
+      matchingOptions().forEach(option => { option.selected = select; });
+      if (selectionKeyFor(input)) api.markSelectionIntent(input, 'explicit');
       render(false);
       api.emitChange(input);
-    });
+    }
     return {sync: () => render(true), overlay};
   });
   function selectionKeyFor(input) {

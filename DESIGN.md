@@ -214,7 +214,7 @@ Dataviz 使用温和但精确的圆角：微元素 5px，输入与按钮 7px，�
 
 - 单行 Input、Input Number、Select、Date Picker 与 Date Range 共用 42px 外框高度。复合控件由外框拥有边框和圆角，内部原生 Input 不再绘制第二层矩形。
 - Date Range 的两端日期必须使用可收缩但不截断的布局；日历按钮是独立的尾部区域。
-- Multiple Select 默认提供 Select all 与 Revert。摘要表达有效选择而非内部存储模式：不超过 `max_tag_count`（默认 2）时显示具体值，不超过 20 项时显示“已选 N 项”，更大集合只在排除侧更短时显示“全部，排除 N 项”。具体值使用轻靛蓝 Chip，过长文本省略并通过展开列表或 Tooltip 查看全文。
+- Multiple Select 与多选 Cascader 不提供 Revert。未搜索时提供 Select all / Clear；搜索时改为 Select results / Clear results，仅修改匹配项，保留搜索外选择；Clear 遵守允许空值策略。摘要表达有效选择而非内部存储模式：不超过 `max_tag_count`（默认 2）时显示具体值，不超过 20 项时显示“已选 N 项”，更大集合只在排除侧更短时显示“全部，排除 N 项”。具体值使用轻靛蓝 Chip，过长文本省略并通过展开列表或 Tooltip 查看全文。
 - 字符计数不默认显示；只有作者明确设置长度约束且计数能帮助完成输入时才出现。
 - Remote Select 必须区分搜索词、当前候选、已选值、unavailable 状态和 generation。Lookup 返回后，打开的列表必须立即更新；旧请求不得覆盖新请求。
 
@@ -227,6 +227,8 @@ Dataviz 使用温和但精确的圆角：微元素 5px，输入与按钮 7px，�
 - Revert 恢复 committed snapshot；Clear 与 None/All 的业务含义由 canonical state 和查询映射决定，不能从空数组猜测。
 
 ### Right-Side Query / Control Panel
+
+- Header 的 Shortcuts、Share、Controls、Parameters、Run 统一 12px / 600 无衬线字体与正常字间距，不强制全大写。Run 仅通过主按钮底色突出；禁用态不改变字体规格。
 
 **当前约束（0.24.5）：** 复用现有表单，支持 W/E 切换与关闭、Esc、宽屏停靠与窄屏覆盖。验证结果与发行状态以 plan.md 为准。
 

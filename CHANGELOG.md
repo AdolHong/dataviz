@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.24.12 — 2026-09-11
+
+- Keep the root URL on an empty entry when the tab has no valid remembered Dashboard; no longer load the first runnable Dashboard automatically.
+- Preserve valid tab-history restoration and explicit Dashboard URLs. Disable query/control actions on the empty entry without loading a Dashboard canvas or parameter candidates.
+
+## 0.24.11 — 2026-09-11
+
+- Align ordinary Header action text colors while preserving primary, expanded and disabled states.
+- Prevent pointer and Q/W/E shortcut focus restoration from drawing misleading Header/brand focus rings; preserve visible focus for Tab navigation in server and exported HTML shells.
+
+## 0.24.10 — 2026-09-11
+
+- Unify Header action typography and use Run/Cancel/Share casing; preserve the primary Run surface and disabled states.
+- Remove menu-local Revert from multi-select and Cascader. Search switches bulk actions to Select results / Clear results, preserving selections outside the matching domain.
+- Suppress misleading focus outlines on sidebar scope headings while retaining visible keyboard focus on interactive controls.
+
 ## 0.24.9 — 2026-09-11
 
 - Align exported HTML Header clicks and W/E shortcuts on the same Parameters/Controls sidebar, preserving read-only query evidence and eliminating the legacy dashboard popover/body query-card paths.

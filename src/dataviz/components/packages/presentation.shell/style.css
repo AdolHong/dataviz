@@ -850,8 +850,28 @@ button.dv-shell-brand:focus-visible {
 .dv-shell-header-actions .query-run-control__copy strong {
   font-family: var(--dv-font-sans);
   font-size: 12px;
-  font-weight: 700;
-  letter-spacing: .02em;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+/* Header actions share typography; color and surface convey priority/state. */
+html:not([data-dv-header-keyboard]) :is(.dv-shell-header-actions, .topbar-actions) :is(button, summary):focus,
+html:not([data-dv-header-keyboard]) button.dv-shell-brand:focus {
+  outline: none;
+  box-shadow: none;
+}
+html[data-dv-header-keyboard] :is(.dv-shell-header-actions, .topbar-actions) :is(button, summary):focus-visible,
+html[data-dv-header-keyboard] button.dv-shell-brand:focus-visible {
+  outline: 2px solid #4451a3;
+  outline-offset: 2px;
+  box-shadow: none;
+}
+.dv-shell-header-actions :is(#keyboard-shortcuts-toggle, #dashboard-controls-toggle,
+  #query-parameters-toggle, [data-runtime-query-toggle], .share-control__trigger > strong,
+  .dv-shell-control__trigger > .dv-shell-control__label, [data-runtime-shortcuts-toggle]) {
+  font: 600 12px/1.2 var(--dv-font-sans);
+  letter-spacing: 0;
+  text-transform: none;
 }
 .dv-shell-header-actions .query-run-control__toggle {
   position: absolute;
@@ -905,7 +925,8 @@ button.dv-shell-brand:focus-visible {
 .dv-context-sidebar{position:fixed;top:0;right:0;bottom:0;z-index:100;display:flex;flex-direction:column;width:min(var(--dv-operation-panel-width),100vw);box-sizing:border-box;background:#fafbf9;color:var(--dv-ink,#1f2521);border-left:1px solid #e6e9e5;font:14px/1.45 var(--dv-font-sans,sans-serif)}
 .dv-context-sidebar>header{display:flex;align-items:center;justify-content:space-between;padding:20px 16px}
 .dv-context-sidebar h2{margin:0;font-size:16px}
-.dv-context-sidebar h2[tabindex="-1"]:focus{outline:none}
+/* Headings receive entry focus for navigation, not an interactive selection ring. */
+.dv-context-sidebar :is(h2,h3)[tabindex="-1"]:focus{outline:none}
 .dv-context-sidebar>header button{width:36px;height:36px;border:0;background:transparent;color:inherit;font-size:24px;cursor:pointer}
 .dv-context-sidebar>header button:hover{background:#eef0f8}
 .dv-context-sidebar :focus-visible{outline:2px solid #4451a3;outline-offset:3px}

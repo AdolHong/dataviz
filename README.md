@@ -4,6 +4,16 @@
 
 Dataviz 是一个 workspace-first、AI-friendly 的本地数据看板工具。Dashboard 以普通文件保存，可以进入 Git、复制和审查；人类在浏览器中查询、交互和阅读，AI 通过 CLI 获取当前版本的最小开发契约、复用已有数据口径并继续分析。
 
+## 配套 AI Skill
+
+从 0.24.7 起，wheel 随包提供 `dataviz/skills/dataviz/SKILL.md`，内容来自本仓库唯一源文件 `dataviz-skill.md`。源码包和 ZIP 同样携带该源文件，安装时生成相同的包内资源。使用安装 Dataviz 的 Python 可读取全文：
+
+```bash
+python -c "from importlib.resources import files; print(files('dataviz').joinpath('skills/dataviz/SKILL.md').read_text(encoding='utf-8'))"
+```
+
+需要在 AI 工具中使用时，将内容保存为该工具要求的 `dataviz/SKILL.md`；Dataviz 不会自动安装或覆盖用户的 Skill。
+
 ## 从一个 YAML 开始
 
 只做一个小看板时，无需先创建 Workspace。`dataviz docs standalone --format json` 提供可运行的单 YAML 示例（含内嵌 SQL）和独立 Adapter 配置：

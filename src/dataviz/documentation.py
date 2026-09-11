@@ -698,6 +698,7 @@ DOC_TOPICS: dict[str, dict[str, Any]] = {
             "同 Run 的 Canvas 重载从服务端 generation 水位接续，仍拒绝旧 generation。不自动重试过期写入，不重跑 Query 来修正本地选择。",
         ],
         "diagnostics": {
+            "view_report": "作者模式点击 View 的证据信号，再选 Copy diagnosis。汇总当前状态、等待/失败输入、输入行数/字节、Control revision 与 Renderer binding revision；unknown 表示证据不足，不默认标记 ready。默认复制省略业务值、标题、原始错误和 Transform trace payload。仍包含配置 ID 与引用，分享前需审阅。界面中的原始分段证据及其 Copy 按钮不属于脱敏报告。",
             "selection": "window.dataviz.control.state(canonicalKey)",
             "domain": "window.datavizRuntime.controlDomainEvidence.get(canonicalKey)",
             "domain_states": "pending=输入未到；field_mismatch=字段映射失败；error=上游失败；empty=合法候选为空；ready/static=可用。sources 带 reference、rows、missing_fields。关系无法解析时保留原选择，不伪装成空候选。",
@@ -1667,7 +1668,7 @@ timeout_seconds: 120
             "radio-group": "少量可见单选；不合成 All/Clear。",
             "select": "平面单选或多选；下拉在视口内提供更宽阅读面，分页/非虚拟候选自动换行显示全文，本地大列表使用固定行高虚拟化并以 Tooltip 提供全文。search/virtual 支持 auto/always/never；单选不提供批量操作，多选默认提供 Select all 与本次打开期间的 Revert。",
             "checkbox-group": "2–5 个并列选项的直接多选；不显示全选、反选或清空工具栏。",
-            "cascader": "用 path_fields 逐级浏览并选择完整路径。",
+            "cascader": "用 path_fields 逐级浏览并选择完整路径。与 select 共用 select_all_label / clear_label：单选仅提供允许的 Clear；多选提供 Select all / Clear / Revert。全选针对完整当前候选域，不限搜索结果；Clear 遵守 clearable；Revert 撤销本次菜单打开后的选择修改（不是恢复 initial）。",
             "tree-select": "在窄弹层中搜索、展开和选择层级路径。",
             "date-picker": "选择一个 ISO 日期，遵守 min_date/max_date。",
             "range-picker": "一个触发器与一个弹层共同编辑 [start, end]。",
@@ -1680,6 +1681,7 @@ timeout_seconds: 120
         ],
         "behavior": [
             "Single Select 不出现 All、Select all 或 Invert；optional + clearable 的单选允许 Clear，required single 始终恰好一个值且拒绝 clearable。",
+            "Select 与 Cascader 统一使用 select_all_label / clear_label；多选菜单固定提供 Select all、允许时的 Clear 和 Revert。Select all 选择完整当前候选域，不受搜索过滤影响；受 max_selected 限制时禁用，不截断成部分全选。旧 invert_label 配置仍可读取，但菜单不再切换为 Invert。",
             "Multi Select 的关闭态摘要按有效选择规模表达，而不机械暴露 compact state：all/all_available 显示‘全部’；不超过 max_tag_count（默认 2）时显示具体值；不超过 20 项时显示‘已选 N 项’；更大集合仅在 exclude 一侧更短时显示‘全部，排除 N 项’，否则显示已选数量。菜单中 Select all 是动作，Revert 只撤销本次打开后的编辑；Query Card 全局 Revert 仍恢复上次 committed Query snapshot。",
             "Control canonical state 是 {value, revision, intent?}；候选型多选可带 all_available/explicit intent，自由集合只保存 list value。",
             "mode: filter 必须同时解释 value 与 intent：multiple_select 的 all_available 按已解析的候选值过滤，不等于无条件放行整个 Output；compact value=[] 的静态候选仍受 choices 白名单约束，非静态 compact 全选保持通过。empty: passthrough|match_none 解释 explicit 空集。原生 View、Interactive Transform 与 Portable/Web Component Runtime 遵守同一规则。",

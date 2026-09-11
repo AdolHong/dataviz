@@ -19,6 +19,14 @@ def test_query_reload_diagnosis_is_discoverable_by_symptom():
     assert "可见组件必须一起同步" in response.stdout
 
 
+def test_view_diagnosis_privacy_and_unknown_state_are_documented():
+    response = CliRunner().invoke(app, ["docs", "interaction-stability", "--format", "json"])
+    assert response.exit_code == 0
+    assert "Copy diagnosis" in response.stdout
+    assert "unknown" in response.stdout
+    assert "分享前需审阅" in response.stdout
+
+
 @pytest.mark.parametrize("query", ["级联候选为空", "右图漏刷"])
 def test_interaction_stability_is_discoverable_by_symptom(query):
     match = next(item for item in documentation.search_documentation(query)["results"]

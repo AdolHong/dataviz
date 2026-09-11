@@ -32,7 +32,7 @@ jobs:
           uv run --no-editable dataviz --help
           uv run --no-editable dataviz version
           uv run --no-editable dataviz schemas dashboard --format json
-          uv run --no-editable dataviz components --check --format json
+          uv run --no-editable dataviz components check --format json
       - name: Static correctness checks
         if: matrix.python == '3.12'
         run: |
@@ -63,7 +63,7 @@ jobs:
         run: |
           uv run --no-editable dataviz --help
           uv run --no-editable dataviz version
-          uv run --no-editable dataviz components --check --format json
+          uv run --no-editable dataviz components check --format json
           uv run --no-editable pytest -m "not e2e"
           uv run --no-project python scripts/check_repository_clean.py
           git diff --exit-code
@@ -93,12 +93,22 @@ jobs:
       - run: uv lock --check
       - run: uv sync --python 3.12 --extra dev --no-editable
       - run: uv pip check --python .venv/bin/python
-      - run: uv run --no-editable playwright install --with-deps ${{ matrix.browser }}
+      # CLI analysis/render checks own a Chromium session regardless of the UI matrix.
+      - run: uv run --no-editable playwright install --with-deps chromium ${{ matrix.browser }}
       - run: uv run --no-editable pytest tests/e2e
         env:
           DATAVIZ_BROWSER: ${{ matrix.browser }}
+          DATAVIZ_E2E_ARTIFACT_DIR: ${{ runner.temp }}/browser-evidence
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-evidence-${{ matrix.browser }}
+          path: ${{ runner.temp }}/browser-evidence
+          retention-days: 7
+          if-no-files-found: warn
 
   distributions:
+    needs: [python-contracts, macos-noneditable, javascript-syntax, browsers]
     name: wheel, sdist and pip ZIP
     runs-on: ubuntu-latest
     steps:
@@ -127,13 +137,23 @@ jobs:
             uv venv "$environment" --python 3.12
             uv pip install --python "$environment/bin/python" "$artifact"
             "$environment/bin/dataviz" version
+            "$environment/bin/python" -c "from importlib.resources import files; p = files('dataviz').joinpath('skills/dataviz/SKILL.md'); assert 'name: dataviz' in p.read_text(encoding='utf-8')"
             "$environment/bin/dataviz" schemas dashboard --format json
-            "$environment/bin/dataviz" components --check --format json
+            "$environment/bin/dataviz" components check --format json
             "$environment/bin/dataviz" init "$workspace"
             "$environment/bin/dataviz" validate "$workspace"
             "$environment/bin/dataviz" report "$workspace" hello --output "$workspace/report.html"
             test -s "$workspace/report.html"
           done
+      - name: Bind artifacts to successful quality gates
+        env:
+          QUALITY_GATES: ${{ toJSON(needs) }}
+          SOURCE_REVISION: ${{ github.sha }}
+          CI_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          uv run --python 3.12 --no-project python scripts/release_evidence.py \
+            --directory "$RUNNER_TEMP/dataviz-dist" \
+            --revision "$SOURCE_REVISION" --run-url "$CI_RUN_URL" --gates "$QUALITY_GATES"
       - uses: actions/upload-artifact@v4
         with:
           name: ai-dataviz-distributions
@@ -142,3 +162,4 @@ jobs:
             ${{ runner.temp }}/dataviz-dist/*.tar.gz
             ${{ runner.temp }}/dataviz-dist/*.zip
             ${{ runner.temp }}/dataviz-dist/*.sha256
+            ${{ runner.temp }}/dataviz-dist/release-evidence.json

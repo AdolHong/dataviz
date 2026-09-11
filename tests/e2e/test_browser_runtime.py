@@ -15,6 +15,8 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from collections import deque
+from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 import uvicorn
@@ -40,6 +42,104 @@ from dataviz.workspace import load_workspace
 
 ROOT = Path(__file__).resolve().parents[2]
 SHOWCASE = ROOT / "examples" / "feature-showcase"
+
+
+@pytest.mark.e2e
+def test_cascader_search_density_and_exported_sidebar_corners(page: Page, tmp_path: Path):
+    workspace = _copy_workspace(SHOWCASE, tmp_path / 'cascader-density')
+    path = workspace / 'dashboards/功能示例##cascade-explorer/dashboard.yaml'
+    dashboard = yaml.safe_load(path.read_text())
+    for control_id in ['locations', 'locations2']:
+        dashboard['controls'].append({
+            'id': control_id, 'type': 'multiple_select', 'value_type': 'text',
+            'label': control_id, 'path_fields': ['province', 'city'], 'options': {'mode': 'infer'},
+        })
+        dashboard['views'][0]['control_inputs'][control_id] = {
+            'mode': 'filter', 'control': f'dashboard.{control_id}',
+            'field': ['province', 'city'], 'inputs': ['main'], 'empty': 'match_none',
+        }
+    path.write_text(yaml.safe_dump(dashboard, allow_unicode=True))
+    report = tmp_path / 'cascaders.html'
+    with _running_server(workspace) as url:
+        _open_dashboard(page, url, 'cascade-explorer')
+        _run_and_wait(page)
+        with page.expect_download() as download:
+            _export_html(page)
+        download.value.save_as(report)
+    with _running_static_server(tmp_path) as url:
+        page.goto(f'{url}/{report.name}')
+        page.locator('[data-editor-owner="view:city-detail"] > summary').click()
+        sidebar = page.locator('.dv-context-sidebar')
+        expect(sidebar).to_be_visible()
+        controls = sidebar.locator('.dv-context-sidebar__body > section').first.locator('[data-control-component="cascader"]')
+        expect(controls).to_have_count(2)
+        page.screenshot(path='/tmp/dataviz-cascader-export-corners.png')
+        wrapper = sidebar.locator('.dv-runtime-popover').first
+        style = wrapper.evaluate("node => ({radius:getComputedStyle(node).borderRadius, overflow:getComputedStyle(node).overflow})")
+        heights = []
+        for index in range(2):
+            control = controls.nth(index)
+            control.locator('[data-control-trigger]').click()
+            search = control.locator('.dv-choice-search')
+            for query, count in [('广东', 2), (' / ', 4)]:
+                search.fill(query)
+                rows = control.locator('.dv-cascader-results .dv-cascader-option')
+                expect(rows).to_have_count(count)
+                heights.extend(rows.evaluate_all('rows => rows.map(row => row.getBoundingClientRect().height)'))
+            search.press('Escape')
+        print({'export_wrapper': style, 'search_row_heights': heights})
+        assert max(heights) <= 50
+        assert max(heights) - min(heights) <= 1
+        assert style == {'radius': '0px', 'overflow': 'visible'}
+
+
+@pytest.mark.parametrize('viewport_width', [1440, 894, 375])
+@pytest.mark.e2e
+def test_cascader_sidebar_bounds_and_global_all(page: Page, tmp_path: Path, viewport_width):
+    workspace = _copy_workspace(SHOWCASE, tmp_path / 'cascader-bounds')
+    path = workspace / 'dashboards/功能示例##cascade-explorer/dashboard.yaml'
+    dashboard = yaml.safe_load(path.read_text())
+    view = next(view for view in dashboard['views'] if view['id'] == 'city-detail')
+    control = next(control for control in view['controls'] if control['id'] == 'district')
+    control['path_fields'] = ['province', 'city']
+    view['control_inputs']['district']['field'] = ['province', 'city']
+    path.write_text(yaml.safe_dump(dashboard, allow_unicode=True))
+    page.set_viewport_size({'width': viewport_width, 'height': 900})
+    with _running_server(workspace) as url:
+        _open_dashboard(page, url, 'cascade-explorer')
+        _run_and_wait(page)
+        frame = page.frame_locator('#canvas-frame')
+        frame.locator('[data-editor-owner="view:city-detail"] > summary').click()
+        cascader = page.locator('#operation-panel [data-control-component="cascader"]')
+        cascader.locator('[data-control-trigger]').click()
+        panel = cascader.locator('.dv-cascader-panel')
+        expect(panel).to_be_visible()
+        page.screenshot(path=f'/tmp/dataviz-cascader-{viewport_width}.png')
+        def assert_bounds():
+            box = panel.bounding_box()
+            assert box['x'] >= 11
+            assert box['x'] + box['width'] <= viewport_width - 11
+            assert panel.evaluate('node => node.scrollWidth <= node.clientWidth + 1')
+        assert_bounds()
+        clear = panel.get_by_role('button', name=re.compile('^Clear'))
+        clear.click()
+        expect(cascader.locator('select')).to_have_values([])
+        panel.get_by_role('button', name='Revert', exact=True).click()
+        page.wait_for_function("document.querySelector('#canvas-frame').contentWindow.dataviz.control.state('view:city-detail/district').intent === 'all_available'")
+        assert cascader.locator('select').evaluate('s => s.selectedOptions.length === s.options.length')
+        clear.click()
+        expect(cascader.locator('select')).to_have_values([])
+        panel.locator('.dv-choice-search').fill('深圳')
+        all_button = panel.get_by_role('button', name='Select all', exact=True)
+        all_button.click()
+        # Search narrows browsing only; All selects the full current candidate domain.
+        assert cascader.locator('select').evaluate('s => s.options.length > 1 && s.selectedOptions.length === s.options.length')
+        page.wait_for_function("document.querySelector('#canvas-frame').contentWindow.dataviz.control.state('view:city-detail/district').intent === 'all_available'")
+        panel.locator('.dv-choice-search').fill('no-matching-path')
+        expect(panel.locator('.dv-choice-empty')).to_be_visible()
+        assert_bounds()
+        panel.locator('.dv-choice-search').press('Escape')
+        expect(panel).to_be_hidden()
 
 
 @pytest.mark.e2e
@@ -586,8 +686,9 @@ def browser() -> Browser:
 
 
 @pytest.fixture
-def page(browser: Browser) -> Page:
-    context = browser.new_context(viewport={"width": 1440, "height": 900})
+def page(browser: Browser, failure_artifacts, state_timeline) -> Page:
+    context = failure_artifacts(browser.new_context(viewport={"width": 1440, "height": 900}))
+    context.add_init_script(state_timeline)
     # Optional real-resource cache: do not make repeated CDN availability a
     # prerequisite for every interaction assertion. No decoder/renderer mocks.
     asset_dir = os.environ.get("DATAVIZ_E2E_ASSET_DIR")
@@ -611,25 +712,29 @@ def page(browser: Browser) -> Page:
                 headers={"Access-Control-Allow-Origin": "*"},
             ))
     page = context.new_page()
-    diagnostics = []
+    diagnostics = deque(maxlen=30)
+    def safe_url(url):
+        parts = urlsplit(url)
+        # Query parameters and URL credentials may contain business values.
+        return urlunsplit((parts.scheme, parts.hostname or '', parts.path, '', ''))
     pending_requests = {}
     page.on("request", lambda request: pending_requests.__setitem__(request, time.monotonic()))
 
     def finished(request):
         started = pending_requests.pop(request, None)
         if started is not None and time.monotonic() - started > 1:
-            diagnostics.append({"url": request.url, "resource_type": request.resource_type,
+            diagnostics.append({"url": safe_url(request.url), "resource_type": request.resource_type,
                                 "elapsed_ms": round((time.monotonic() - started) * 1000)})
 
     page.on("requestfinished", finished)
     page.on("requestfailed", finished)
-    page.on("console", lambda message: diagnostics.append({"console_error": message.text}) if message.type == "error" else None)
-    page.on("pageerror", lambda error: diagnostics.append({"error": str(error)}))
+    page.on("console", lambda message: diagnostics.append({"console_error": True}) if message.type == "error" else None)
+    page.on("pageerror", lambda error: diagnostics.append({"page_error": True}))
     page.on("requestfailed", lambda request: diagnostics.append({
-        "url": request.url, "failure": request.failure,
+        "url": safe_url(request.url), "failure": request.failure,
     }))
     page.on("response", lambda response: diagnostics.append({
-        "url": response.url, "status": response.status,
+        "url": safe_url(response.url), "status": response.status,
     }) if response.status >= 400 else None)
     yield page
     # Pytest displays captured teardown output on failure. Keep evidence bounded
@@ -638,27 +743,27 @@ def page(browser: Browser) -> Page:
     for frame in page.frames:
         try:
             frames.append({
-                "url": frame.url,
+                "url": safe_url(frame.url),
                 "state": frame.locator("body").evaluate("""body => ({
-                  title: document.title,
                   readyState:document.readyState,
                   controlPhase:typeof datavizControlChannel === 'undefined' ? null : datavizControlChannel.phase,
                   canvas: !!document.querySelector('.dv-canvas'),
-                  errors: [...body.querySelectorAll('.dv-view-error')].map(n => n.textContent),
+                  error_count: body.querySelectorAll('.dv-view-error').length,
                   views: [...body.querySelectorAll('[data-view-id]')].map(n => ({
                     id:n.dataset.viewId, status:n.dataset.viewStatus,
                   })),
-                  text: document.querySelector('.dv-canvas') ? null : body.innerText.slice(0, 1000),
+                  timeline: window.__datavizTestTimeline || [],
                 })""", timeout=2000),
             })
         except Exception as error:
-            frames.append({"url": frame.url, "inspection_error": str(error)})
-    print("Browser evidence:", json.dumps({"events": diagnostics[-30:], "frames": frames,
-        "pending_requests": [{"url": request.url, "resource_type": request.resource_type,
+            frames.append({"url": safe_url(frame.url), "inspection_error": type(error).__name__})
+    print("Browser evidence:", json.dumps({"events": list(diagnostics), "frames": frames,
+        "pending_requests": [{"url": safe_url(request.url), "resource_type": request.resource_type,
                               "elapsed_ms": round((time.monotonic() - started) * 1000)}
                              for request, started in list(pending_requests.items())[-15:]],
     }, ensure_ascii=False))
-    context.close()
+    if not os.environ.get("DATAVIZ_E2E_ARTIFACT_DIR"):
+        context.close()
 
 
 @pytest.mark.e2e
@@ -2618,7 +2723,7 @@ def test_header_overlays_stay_in_viewport_and_query_parameters_are_discoverable(
 
 
 @pytest.mark.e2e
-def test_portable_query_tray_uses_document_flow_and_leaves_the_viewport(page: Page, tmp_path: Path):
+def test_portable_query_tray_uses_shared_sidebar_for_clicks_and_shortcuts(page: Page, tmp_path: Path):
     report_path = tmp_path / "portable-header-controls.html"
     with _running_server(MINIMAL) as base_url:
         _open_dashboard(page, base_url, "sales-overview")
@@ -2681,10 +2786,6 @@ def test_portable_query_tray_uses_document_flow_and_leaves_the_viewport(page: Pa
         portable_visual = page.evaluate(
             """() => {
               const header = document.querySelector('.dv-runtime-header');
-              const card = document.querySelector('.dv-query-card');
-              const title = card.querySelector('h2');
-              const field = card.querySelector('.dv-query-value');
-              const value = field.querySelector('output');
               const brand = document.querySelector('.dv-shell-brand');
               const control = document.querySelector('.dv-shell-control__trigger');
               const pick = (node, properties) => Object.fromEntries(
@@ -2701,56 +2802,46 @@ def test_portable_query_tray_uses_document_flow_and_leaves_the_viewport(page: Pa
         )
         assert abs(portable_visual.pop("headerHeight") - server_visual.pop("headerHeight")) <= 1
         assert portable_visual == server_visual
-        geometry = page.evaluate(
-            """() => {
-              const toolbar = document.querySelector('.dv-runtime-header').getBoundingClientRect();
-              const panel = document.querySelector('#dv-runtime-query-panel').getBoundingClientRect();
-              const canvas = document.querySelector('.dv-canvas').getBoundingClientRect();
-              const card = document.querySelector('.dv-query-card').getBoundingClientRect();
-              const canvasPadding = parseFloat(getComputedStyle(document.querySelector('.dv-canvas')).paddingLeft);
-              return {
-                toolbar:{top:toolbar.top,bottom:toolbar.bottom},
-                panel:{top:panel.top,bottom:panel.bottom,position:getComputedStyle(document.querySelector('#dv-runtime-query-panel')).position},
-                canvas:{top:canvas.top},
-                horizontal:{cardLeft:card.left,cardRight:card.right,canvasLeft:canvas.left,canvasRight:canvas.right,canvasPadding},
-              };
-            }"""
-        )
-        assert geometry["panel"]["position"] == "relative", geometry
-        assert geometry["panel"]["top"] >= geometry["toolbar"]["bottom"] - 1, geometry
-        assert geometry["canvas"]["top"] >= geometry["panel"]["bottom"] - 1, geometry
-        horizontal = geometry["horizontal"]
-        assert (
-            abs(horizontal["cardLeft"] - horizontal["canvasLeft"] - horizontal["canvasPadding"])
-            <= 1
-        ), geometry
-        assert (
-            abs(horizontal["canvasRight"] - horizontal["cardRight"] - horizontal["canvasPadding"])
-            <= 1
-        ), geometry
-
-        # Query evidence is Header content, not an Overlay. Escape and outside
-        # clicks do not close it, and scrolling naturally moves it away while
-        # the compact toolbar remains available.
-        page.keyboard.press("Escape")
-        expect(panel).to_be_visible()
-        canvas.click(position={"x": 4, "y": 4})
-        expect(panel).to_be_visible()
-        page.evaluate(
-            """() => {
-              const card = document.querySelector('.dv-query-card');
-              window.scrollTo(0, card.offsetTop + card.offsetHeight + 100);
-            }"""
-        )
-        page.wait_for_timeout(100)
-        scrolled = page.evaluate(
-            """() => ({
-              toolbarTop:document.querySelector('.dv-runtime-header').getBoundingClientRect().top,
-              panelBottom:document.querySelector('#dv-runtime-query-panel').getBoundingClientRect().bottom,
-            })"""
-        )
-        assert abs(scrolled["toolbarTop"]) <= 1, scrolled
-        assert scrolled["panelBottom"] <= 1, scrolled
+        sidebar = page.locator('.dv-context-sidebar')
+        expect(sidebar).to_have_attribute('aria-label', 'Parameters')
+        assert sidebar.bounding_box()['width'] == 320
+        assert panel.locator('input, select, textarea').count() == 0
+        expect(page.locator('.dv-runtime-query-tray')).to_be_hidden()
+        canvas_top = canvas.bounding_box()['y']
+        page.screenshot(path='/tmp/dataviz-export-parameters-sidebar.png')
+        page.keyboard.press('w')
+        expect(sidebar).to_have_count(0)
+        assert canvas.bounding_box()['y'] == pytest.approx(canvas_top, abs=1)
+        page.keyboard.press('w')
+        expect(sidebar).to_have_attribute('aria-label', 'Parameters')
+        toggle.click()
+        expect(sidebar).to_have_count(0)
+        toggle.click()
+        page.keyboard.press('Escape')
+        expect(sidebar).to_have_count(0)
+        expect(toggle).to_be_focused()
+        owner = page.locator('.dv-runtime-control[data-control-origin="dashboard"]')
+        entry = owner.locator(':scope > summary')
+        entry.click()
+        expect(sidebar).to_have_attribute('aria-label', 'Controls')
+        expect(owner).not_to_have_attribute('open', '')
+        page.keyboard.press('e')
+        expect(sidebar).to_have_count(0)
+        page.keyboard.press('e')
+        expect(sidebar).to_have_attribute('aria-label', 'Controls')
+        toggle.click()
+        expect(sidebar).to_have_attribute('aria-label', 'Parameters')
+        entry.click()
+        expect(sidebar).to_have_attribute('aria-label', 'Controls')
+        entry.click()
+        expect(sidebar).to_have_count(0)
+        page.set_viewport_size({'width': 375, 'height': 760})
+        page.keyboard.press('w')
+        expect(sidebar).to_have_attribute('aria-modal', 'true')
+        assert sidebar.bounding_box()['width'] == 320
+        page.screenshot(path='/tmp/dataviz-export-parameters-mobile.png')
+        page.keyboard.press('Escape')
+        expect(sidebar).to_have_count(0)
 
 
 @pytest.mark.e2e
@@ -3698,9 +3789,10 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
         grouped_action.click()
         assert (
             grouped_select.locator("select").evaluate("select => select.selectedOptions.length")
-            == 2
+            == 4
         )
-        expect(grouped_action).to_have_text("Invert")
+        expect(grouped_action).to_have_text("Select all")
+        expect(grouped_action).to_be_disabled()
         grouped_select.get_by_role("button", name="Revert").click()
         assert (
             grouped_select.locator("select").evaluate("select => select.selectedOptions.length")
@@ -4442,6 +4534,21 @@ def test_unified_dashboard_controls_drive_browser_named_output(page: Page, tmp_p
         expect(inspector).to_contain_text("Renderer input and timing")
         expect(inspector).to_contain_text("latest-metrics")
         expect(inspector.locator("#node-inspector-copy-diagnosis")).to_be_visible()
+        expect(inspector.locator('.node-inspector__status')).to_have_text('ready')
+        # Clipboard uses the bounded report, not the raw trace sections.
+        page.evaluate("""() => {
+          window.copiedDiagnosis = null;
+          Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{
+            writeText:async text => { window.copiedDiagnosis = JSON.parse(text); },
+          }});
+        }""")
+        inspector.locator('#node-inspector-copy-diagnosis').click()
+        page.wait_for_function('window.copiedDiagnosis !== null')
+        diagnosis = page.evaluate('window.copiedDiagnosis')
+        assert diagnosis['status'] == 'ready'
+        assert diagnosis['inputs']['main']['rows'] == 1
+        assert 'renderer' not in diagnosis  # Raw nested renderer payload is omitted.
+        assert 'privacy' in diagnosis
         inspector.locator(".dialog-close").click()
 
         page.locator("#sidebar-toggle").click()

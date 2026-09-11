@@ -592,7 +592,7 @@ class PresentationControlComponentDefinition(Model):
             },
             "cascader": {
                 "show_unavailable", "search", "search_placeholder", "empty_text",
-                "clear_label", "level_labels", "path_separator", "selection_strategy",
+                "clear_label", "select_all_label", "level_labels", "path_separator", "selection_strategy",
                 "show_checked_strategy", "max_tag_count",
             },
             "date-picker": {"clear_label"},

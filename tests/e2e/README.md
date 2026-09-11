@@ -1,5 +1,21 @@
 # Browser test resources
 
+## Failure artifacts
+
+For synthetic fixtures, set `DATAVIZ_E2E_ARTIFACT_DIR=/tmp/dataviz-evidence`.
+Runtime browser tests then retain a Playwright trace and viewport screenshot on
+test failure, grouped by browser and a hash of the test identity. Passing tests
+discard the trace. CI uploads failures with a seven-day retention period.
+Open a trace with `playwright show-trace /path/to/0-trace.zip`.
+
+**Raw traces and screenshots can contain DOM, network payloads and business
+values.** This is opt-in locally and intended only for synthetic test fixtures,
+not arbitrary customer dashboards. The bounded console diagnosis is separate;
+raw artifacts are not claimed to be redacted. CLI-owned browser contexts do not
+currently use the Runtime page fixture and therefore are not covered by this
+artifact lifecycle. The self-test deliberately fails a nested pytest run and
+checks that only the failed test retains a valid trace and PNG.
+
 `test_browser_runtime.py` automatically reuses `dataviz-tool/.browser-test-assets/`
 when present. This directory is git-ignored and is not part of the package.
 `DATAVIZ_E2E_ASSET_DIR` can select another cache directory.

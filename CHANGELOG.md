@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.24.9 — 2026-09-11
+
+- Align exported HTML Header clicks and W/E shortcuts on the same Parameters/Controls sidebar, preserving read-only query evidence and eliminating the legacy dashboard popover/body query-card paths.
+- Keep sparse Cascader search results at natural row height instead of stretching rows to fill the hierarchy panel.
+- Remove inherited popover rounding and scrolling from exported Controls sidebar group containers, preventing the final input's corners from being clipped.
+
+## 0.24.8 — 2026-09-11
+
+- Fix Cascader overflow in the right sidebar by removing the conflicting minimum width and keeping the actual border box consistent with overlay positioning; wrap long paths and footer actions within the viewport.
+- Unify multi-select and Cascader actions as Select all / Clear / Revert. All uses the complete current candidate domain, including search-hidden paths; Clear respects clearable and Revert restores the menu-open selection and intent. Single-select hides multi-select actions.
+- Cascader accepts the existing select_all_label option. Legacy invert_label remains accepted, but Select all no longer toggles into Invert.
+
+## 0.24.7 — 2026-09-11
+
+- Include the matching Dataviz Skill in wheels at `dataviz/skills/dataviz/SKILL.md`, generated from the single root `dataviz-skill.md` during builds, including builds from source archives.
+- Keep skill installation into AI tools explicit; packaging does not modify user skill directories.
+
+## 0.24.6 — 2026-09-11
+
+- Correct View diagnosis status and expose bounded input, revision and Control domain evidence without copying business values or raw errors.
+- Add targeted/core-journey/full verification profiles and opt-in browser failure traces, screenshots and bounded state timelines.
+- Gate CI distributions on quality jobs and attach source/gate/archive-hash evidence; install CLI-owned Chromium throughout the browser matrix.
+- Reconcile current panel documentation and verify executable CLI commands, test selection and failure-evidence capture. No DSL changes.
+
 ## 0.24.5 — 2026-09-11
 
 - Unify Parameters and Controls drawers at 320px with 16px horizontal padding, including standalone Controls and the desktop content offset. Keep full date-range values visible.

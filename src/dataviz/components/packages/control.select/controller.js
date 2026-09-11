@@ -76,7 +76,7 @@
     empty.hidden = true;
     const footer = document.createElement('footer');
     const footerActions = document.createElement('span');
-    footerActions.className = 'dv-select-footer__actions';
+    footerActions.className = 'dv-select-footer__actions dv-choice-footer-actions';
     const all = document.createElement('button');
     all.type = 'button';
     all.textContent = control.dataset.selectAllLabel || 'Select all';
@@ -241,24 +241,16 @@
         trigger.disabled = input.disabled;
         return;
       }
-      const candidates = filtered.filter(option => !option.disabled);
-      const allCandidatesSelected = candidates.length > 0 && candidates.every(option => option.selected);
-      const required = candidates.filter(option => !option.selected).length;
-      const remaining = maxSelected ? Math.max(0, maxSelected - selectedCount) : Number.POSITIVE_INFINITY;
-      all.textContent = allCandidatesSelected
-        ? control.dataset.invertLabel || 'Invert'
-        : control.dataset.selectAllLabel || 'Select all';
-      all.dataset.action = allCandidatesSelected ? 'invert' : 'select-all';
-      const invertedSelectedCount = selectedCount
-        + candidates.filter(option => !option.selected).length
-        - candidates.filter(option => option.selected).length;
+      const candidates = api.availableOptions(input);
+      all.textContent = control.dataset.selectAllLabel || 'Select all';
+      all.dataset.action = 'select-all';
       all.disabled = input.disabled
         || candidates.length === 0
-        || (!allCandidatesSelected && required > remaining)
-        || (allCandidatesSelected && !allowEmpty && invertedSelectedCount === 0);
-      all.title = !allCandidatesSelected && required > remaining
-        ? `Selection limit is ${maxSelected}; narrow the search or clear values first.`
-        : '';
+        || (maxSelected > 0 && candidates.length > maxSelected)
+        || api.inferSelectionIntent(input) === 'all_available';
+      all.title = maxSelected > 0 && candidates.length > maxSelected
+        ? `Selection limit is ${maxSelected}; select individual options instead.`
+        : 'Select all available options, including options hidden by search';
       api.renderSummary(trigger, input, control, control.dataset.placeholder || 'Choose…');
       trigger.disabled = input.disabled;
     }
@@ -375,14 +367,10 @@
         api.emitChange(input);
         return;
       }
-      const candidates = filtered.filter(option => !option.disabled);
-      const allCandidatesSelected = candidates.length > 0 && candidates.every(option => option.selected);
-      const selectedOutsideCandidates = api.selectedOptions(input).filter(
-        option => !candidates.includes(option)
-      ).length;
-      if (allCandidatesSelected && !allowEmpty && selectedOutsideCandidates === 0) return;
-      candidates.forEach(option => { option.selected = !allCandidatesSelected; });
-      api.markSelectionIntent(input, allCandidatesSelected ? 'explicit' : 'all_available');
+      const candidates = api.availableOptions(input);
+      if (!candidates.length || (maxSelected && candidates.length > maxSelected)) return;
+      candidates.forEach(option => { option.selected = true; });
+      api.markSelectionIntent(input, 'all_available');
       sync();
       api.emitChange(input);
     });
@@ -400,7 +388,7 @@
       const values = new Set(openSnapshot.values);
       api.options(input).forEach(option => { option.selected = values.has(option.value); });
       if (queryParameter) setQuerySelection(openSnapshot.selection || 'all');
-      else api.setSelectionIntent(input, openSnapshot.intent || 'explicit');
+      else api.markSelectionIntent(input, openSnapshot.intent || 'explicit');
       sync();
       api.emitChange(input);
     });

@@ -122,6 +122,15 @@ const showDatavizRuntimeShortcutToast = message => {
   }, 1800);
 };
 const setDatavizRuntimeQueryOpen = open => {
+  if (window.parent === window) {
+    if (!datavizRuntimeQueryToggle || !datavizRuntimeQueryPanel) return false;
+    if (open) datavizOpenParameterSidebar();
+    else if (datavizContextQueryRestore) datavizCloseContextControls({focus:false});
+    datavizRuntimeQueryToggle.setAttribute('aria-expanded', String(Boolean(open)));
+    datavizRuntimeQueryToggle.setAttribute('aria-label', open ? 'Collapse parameters' : 'Expand parameters');
+    datavizRuntimeQueryToggle.title = open ? 'Collapse parameters' : 'Expand parameters';
+    return Boolean(open);
+  }
   if (open && datavizContextOwner) datavizCloseContextControls({focus:false});
   if (!datavizRuntimeQueryToggle || !datavizRuntimeQueryPanel) return false;
   const expanded = Boolean(open);
@@ -168,10 +177,9 @@ document.addEventListener('keydown', event => {
     return;
   }
   if (command === 'toggle-query-parameters' && datavizRuntimeQueryToggle) {
-    if (datavizContextOwner) datavizCloseContextControls({focus:false});
     event.preventDefault();
     window.datavizComponents?.overlay.closeAll({group:'popover'});
-    const tray = datavizRuntimeQueryPanel?.closest('.dv-runtime-query-tray');
+    const tray = document.querySelector('.dv-runtime-query-tray');
     if (Number(tray?.dataset.controlCount || 0) <= 0) {
       showDatavizRuntimeShortcutToast('当前报告没有查询参数');
       return;
@@ -181,10 +189,7 @@ document.addEventListener('keydown', event => {
     );
   } else if (command === 'toggle-dashboard-controls') {
     event.preventDefault();
-    const owner = document.querySelector('.dv-runtime-control[data-control-origin="dashboard"]');
-    if (datavizContextPanel) datavizCloseContextControls();
-    else if (owner) datavizOpenContextControls(owner);
-    else showDatavizRuntimeShortcutToast('This report has no dashboard controls.');
+    datavizToggleDashboardSidebar();
   } else if (command === 'show-shortcuts' && datavizRuntimeShortcutHelp) {
     event.preventDefault();
     window.datavizComponents?.overlay.closeAll({group:'popover'});
@@ -233,6 +238,15 @@ document.addEventListener('click', event => {
       type:'dataviz:view-evidence-inspect',
       view_id:viewId,
       evidence:{
+        status:viewSignal.closest('.dv-view')?.dataset.viewStatus || null,
+        controls:datavizControlImpactSnapshot().filter(item =>
+          item.affected_views.includes(viewId) || item.potential_views.includes(viewId)
+        ).slice(0, 50).map(item => ({
+          key:item.key,
+          revision:datavizControlEntry(item.key)?.revision ?? null,
+          intent:datavizControlEntry(item.key)?.intent ?? null,
+          domain:item.option_domain,
+        })),
         refresh:structuredClone(datavizRuntime.viewRefreshEvidence.get(viewId) || null),
         renderer:structuredClone(datavizRuntime.viewRenderEvidence.get(viewId) || null),
         lifecycle:structuredClone(datavizRuntime.rendererLifecycleEvidence.get(viewId) || null),

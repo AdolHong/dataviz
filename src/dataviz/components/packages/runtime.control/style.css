@@ -72,3 +72,5 @@
 .dv-control-panel footer { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding-top: .35rem; border-top: 1px solid var(--dv-line, #e3ddce); }
 .dv-control-panel footer button { padding: .35rem 0; color: var(--dv-accent, #3949ab); background: transparent; border: 0; cursor: pointer; }
 .dv-control-panel footer small { color: var(--dv-muted, #667085); }
+.dv-choice-footer-actions { display: flex; flex-wrap: wrap; gap: .8rem; }
+.dv-choice-footer-actions button:disabled { opacity: .4; cursor: not-allowed; }

@@ -4,7 +4,31 @@
 
 当前协议基线（由 `protocols.py` 与回归检查约束）：`dataviz/workspace/v2`、`dataviz/dashboard/v20`、`dataviz/parameter-domain/v2`、`dataviz/parameter-domain-contract/v3`、`dataviz/parameter-lookup/v1`、`dataviz/parameter-materialization/v1`、`dataviz/dashboard-bundle/v2`、`dataviz/report-manifest/v3`、`dataviz/presentation/v2`、`dataviz/source/v6`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v13`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v6`、`dataviz/runtime/v15`、`dataviz/analysis-result/v5`、`dataviz/analysis-evidence/v5`。Component Registry 以 `dataviz components` 为准，不在阶段清单重复登记。
 
-当前包版本：`0.24.5`。本文件区分本地发行构建、工作树变更与待验证事项，不以完成过的历史阶段作为未来计划。架构理由见 [ARCHITECTURE](ARCHITECTURE.md)，视觉规范见 [DESIGN](DESIGN.md)，代码见 [实现索引](docs/product-architecture.md)，发行历史见 [CHANGELOG](CHANGELOG.md)。
+当前包版本：`0.24.9`。本文件区分本地发行构建、工作树变更与待验证事项，不以完成过的历史阶段作为未来计划。架构理由见 [ARCHITECTURE](ARCHITECTURE.md)，视觉规范见 [DESIGN](DESIGN.md)，代码见 [实现索引](docs/product-architecture.md)，发行历史见 [CHANGELOG](CHANGELOG.md)。
+
+## 0.24.9 导出面板统一与级联视觉修复
+
+- 导出 HTML 的 Parameters/Controls 点击与 W/E 共用右侧栏；同项收起、异项切换、Esc 关闭，参数保持只读，不增加 Run 或 Share。
+- 搜索结果不再平分容器高度；导出侧栏内去掉继承的弹窗圆角裁切，保持末尾控件边角完整。
+- 升版前定向验证：面板相关非浏览器 69 passed，三个浏览器各 2 passed；级联视觉另有非浏览器 63 passed、Chromium 5 passed、Firefox/WebKit 各 1 passed。本次打包不重跑全量或安装冒烟。
+
+## 0.24.8 选择控件一致性与级联边界
+
+- 修复 Cascader 计算宽度与 CSS 最小宽度冲突造成的右侧越界；验证真实侧栏而非独立 CSS 片段。
+- Select/Cascader 多选统一 Select all / Clear / Revert；全选不受搜索影响、遵守选择数量上限，Revert 恢复菜单打开时的值与 intent。单选不显示多选动作。
+- Cascader 复用 select_all_label / clear_label；保留旧 invert_label 配置兼容，但不再将全选按钮切换为 Invert。
+- 本次仅运行选择控件、文档与发行相关定向测试，不运行全量测试或安装冒烟。
+- 定向验证：非浏览器 174 passed；Chromium 5 passed；Firefox / WebKit 各 3 passed。首次发行检查因计划版本未同步失败，修正文案后定向组重新通过。
+
+## 0.24.7 Skill 随包分发
+
+- 构建时从唯一源文件 dataviz-skill.md 生成包内 skills/dataviz/SKILL.md；wheel、源码包及 ZIP 安装结果一致，不写入用户 AI 工具目录。
+- 补充构建刷新/缺失源文件回归与 CI 安装资源检查。本轮只验证发行相关路径，不重跑浏览器套件。
+
+## 0.24.6 稳定性与开发体验
+
+- View 诊断、失败证据、测试分档、CI 发布门禁与文档一致性专项，详见 [验收记录](docs/reliability-workstream.md)。不改 DSL。
+- 升版前非浏览器 742 项、Chromium 核心交互 15 项及三个浏览器受影响用例通过；本次打包不重复全套浏览器测试，也不声称远端 CI 已执行。
 
 ## 0.24.5 紧凑侧栏与 Canvas 快捷键
 

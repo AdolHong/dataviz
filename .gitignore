@@ -19,3 +19,4 @@ dist/
 
 # Real CDN resources reused by local browser tests; never release artifacts.
 /.browser-test-assets/
+/.test-evidence/

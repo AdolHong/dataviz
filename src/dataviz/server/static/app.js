@@ -3617,6 +3617,54 @@ function formatEvidenceBytes(value) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
+function viewDiagnosis(view, evidence = {}, identity = {}) {
+  // Allow-list metadata rather than recursively copying business values/errors.
+  const number = value => Number.isFinite(value) ? value : null;
+  const entries = value => Object.entries(value || {}).slice(0, 50);
+  const revisions = value => Object.fromEntries(entries(value).map(([key, revision]) => [key, number(revision)]));
+  const refresh = evidence.refresh || {};
+  const renderer = evidence.renderer || {};
+  const known = new Set(['ready', 'empty', 'waiting', 'loading', 'error', 'cancelled', 'unavailable', 'stale']);
+  const status = known.has(evidence.status) ? evidence.status
+    : refresh.failed_input ? 'error' : refresh.waiting_input ? 'waiting' : 'unknown';
+  const input = value => value ? {alias:value.alias, reference:value.reference} : null;
+  return {
+    kind:'view',
+    dashboard:identity.dashboard || null,
+    page:identity.page || null,
+    run:identity.run || null,
+    view:{id:view.id, renderer:renderer.renderer || view.subtype || null},
+    status,
+    stage:status === 'error' && refresh.failed_input ? 'input_failed'
+      : status === 'waiting' && refresh.waiting_input ? 'waiting_input' : status,
+    query_executed:typeof refresh.query_executed === 'boolean' ? refresh.query_executed : null,
+    waiting_input:input(refresh.waiting_input),
+    failed_input:input(refresh.failed_input),
+    inputs:Object.fromEntries(entries(renderer.inputs).map(([alias, profile]) => [alias, {
+      reference:profile.reference, rows:number(profile.rows), bytes:number(profile.bytes),
+    }])),
+    control_revisions:revisions(refresh.control_revisions),
+    binding_revisions:revisions(renderer.binding_revisions),
+    controls:(evidence.controls || []).slice(0, 50).map(control => ({
+      key:control.key,
+      revision:number(control.revision),
+      intent:['all_available', 'explicit'].includes(control.intent) ? control.intent : null,
+      domain:control.domain ? {
+        status:control.domain.status,
+        available_count:number(control.domain.available_count),
+        sources:(control.domain.sources || []).slice(0, 50).map(source => ({
+          reference:source.reference, status:source.status, rows:number(source.rows),
+          missing_fields:(source.missing_fields || []).slice(0, 50),
+        })),
+      } : null,
+    })),
+    changed_controls:(refresh.changed_controls || []).slice(0, 50),
+    changed_inputs:(refresh.changed_inputs || []).slice(0, 50),
+    render:{generation:number(renderer.generation), duration_ms:number(renderer.duration_ms)},
+    privacy:'metadata-only; values, titles, raw errors and trace payloads omitted',
+  };
+}
+
 function renderViewInspector(view, evidence = {}) {
   const body = $('#node-inspector-body');
   const renderer = evidence.renderer || {};
@@ -3624,21 +3672,16 @@ function renderViewInspector(view, evidence = {}) {
   const profiles = Object.values(renderer.inputs || {});
   const rows = profiles.reduce((total, item) => total + Number(item.rows || 0), 0);
   const bytes = profiles.reduce((total, item) => total + Number(item.bytes || 0), 0);
-  setInspectorDiagnosis({
-    kind:'view',
-    dashboard:state.dashboard?.id || null,
-    view:{id:view.id, title:view.title || null, renderer:renderer.renderer || view.subtype || null},
-    status:'ready',
-    refresh:structuredClone(evidence.refresh || null),
-    renderer:structuredClone(renderer),
-    lifecycle:structuredClone(lifecycle),
+  const diagnosis = viewDiagnosis(view, evidence, {
+    dashboard:state.dashboard?.id, page:activeRuntime()?.pageId, run:state.runId,
   });
+  setInspectorDiagnosis(diagnosis);
   body.replaceChildren();
   $('#node-inspector-title').textContent = view.title || view.id;
   $('#node-inspector-subtitle').textContent = view.description || `view · ${view.subtype}`;
   const summary = inspectorElement('section', 'node-inspector__summary');
-  const stamp = inspectorElement('div', 'node-inspector__status', 'view evidence');
-  stamp.dataset.status = 'ready';
+  const stamp = inspectorElement('div', 'node-inspector__status', diagnosis.stage);
+  stamp.dataset.status = diagnosis.status;
   const facts = inspectorElement('div', 'node-inspector__facts');
   facts.append(
     inspectorFact('View', view.id),

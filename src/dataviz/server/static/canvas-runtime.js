@@ -3035,6 +3035,7 @@ document.querySelectorAll('.dv-context-controls__panel, .dv-runtime-control > .d
   datavizContextTemplates.set(panel, panel.cloneNode(true));
 });
 let datavizContextPanel = null;
+let datavizContextQueryRestore = null;
 const datavizContextEmbedded = () => window.parent !== window;
 const datavizContextPath = owner => {
   if (owner.dataset.controlOrigin === 'dashboard') return [];
@@ -3051,7 +3052,11 @@ const datavizContextTitle = owner => {
   return `${scope} · ${name || owner.dataset.controlOwnerTitle || owner.dataset.editorOwner.split(':').slice(1).join(':')}`;
 };
 const datavizCloseContextControls = ({notify = true, focus = true} = {}) => {
-  const opener = datavizContextOwner?.querySelector(':scope > summary');
+  const opener = datavizContextQueryRestore ? datavizRuntimeQueryToggle : datavizContextOwner?.querySelector(':scope > summary');
+  if (datavizContextQueryRestore) {
+    datavizContextQueryRestore();
+    datavizContextQueryRestore = null;
+  }
   if (!datavizContextFollowsPopover) opener?.setAttribute('aria-expanded', 'false');
   datavizContextOwner = null;
   datavizContextControlKeys.clear();
@@ -3068,6 +3073,56 @@ const datavizCloseContextControls = ({notify = true, focus = true} = {}) => {
   if (notify && datavizContextEmbedded()) datavizPostToParent({type:'dataviz:context-controls', groups:[]});
   if (focus && opener?.isConnected) opener.focus({preventScroll:true});
   window.dispatchEvent(new Event('resize'));
+};
+const datavizMountOperationSidebar = (sidebar, heading, focus) => {
+  datavizContextPanel = sidebar;
+  document.body.classList.add('dv-context-sidebar-open');
+  const syncLayout = () => {
+    if (datavizContextPanel !== sidebar) return;
+    const modal = matchMedia('(max-width: 1279px)').matches;
+    sidebar.setAttribute('role', modal ? 'dialog' : 'complementary');
+    if (modal) sidebar.setAttribute('aria-modal', 'true'); else sidebar.removeAttribute('aria-modal');
+    for (const selector of ['.dv-canvas', '.dv-runtime-header']) {
+      const node = document.querySelector(selector);
+      if (node) node.inert = modal;
+    }
+  };
+  syncLayout();
+  sidebar._syncLayout = syncLayout;
+  if (focus) heading?.focus({preventScroll:true});
+  heading?.scrollIntoView({block:'nearest'});
+  window.dispatchEvent(new Event('resize'));
+};
+const datavizOpenParameterSidebar = () => {
+  if (datavizContextQueryRestore) return;
+  datavizCloseContextControls({focus:false});
+  window.datavizComponents?.overlay.closeAll({group:'runtime-header'});
+  const panel = datavizRuntimeQueryPanel;
+  const home = document.createComment('Parameters content home');
+  panel.before(home);
+  const sidebar = document.createElement('aside');
+  sidebar.className = 'dv-context-sidebar';
+  sidebar.dataset.operationMode = 'query';
+  sidebar.setAttribute('aria-label', 'Parameters');
+  sidebar.innerHTML = '<header><h2 tabindex="-1">Parameters</h2><button type="button" aria-label="Close parameters">×</button></header><div class="dv-context-sidebar__body"></div>';
+  sidebar.querySelector('button').onclick = () => datavizCloseContextControls();
+  sidebar.querySelector('.dv-context-sidebar__body').append(panel);
+  panel.hidden = false;
+  datavizContextQueryRestore = () => {
+    panel.hidden = true;
+    home.replaceWith(panel);
+    datavizRuntimeQueryToggle.setAttribute('aria-expanded', 'false');
+    datavizRuntimeQueryToggle.setAttribute('aria-label', 'Expand parameters');
+    datavizRuntimeQueryToggle.title = 'Expand parameters';
+  };
+  document.body.append(sidebar);
+  datavizMountOperationSidebar(sidebar, sidebar.querySelector('h2'), true);
+};
+const datavizToggleDashboardSidebar = () => {
+  const owner = document.querySelector('.dv-runtime-control[data-control-origin="dashboard"]');
+  if (datavizContextPanel && !datavizContextQueryRestore) datavizCloseContextControls();
+  else if (owner) datavizOpenContextControls(owner);
+  else showDatavizRuntimeShortcutToast('This report has no dashboard controls.');
 };
 const datavizOpenContextControls = (owner, {focus = true, follow = false} = {}) => {
   if (datavizContextOwner === owner && !follow) { datavizCloseContextControls(); return; }
@@ -3147,27 +3202,17 @@ const datavizOpenContextControls = (owner, {focus = true, follow = false} = {}) 
   });
   refreshControlOptionDomains({canonicalKeys:new Set(Object.keys(datavizControlStateSnapshot()))});
   setControlInputs(datavizControlStateSnapshot());
-  datavizContextPanel = sidebar;
-  document.body.classList.add('dv-context-sidebar-open');
-  const syncLayout = () => {
-    if (!datavizContextPanel) return;
-    const modal = matchMedia('(max-width: 1279px)').matches;
-    sidebar.setAttribute('role', modal ? 'dialog' : 'complementary');
-    if (modal) sidebar.setAttribute('aria-modal', 'true'); else sidebar.removeAttribute('aria-modal');
-    for (const selector of ['.dv-canvas', '.dv-runtime-header']) {
-      const node = document.querySelector(selector);
-      if (node) node.inert = modal;
-    }
-  };
-  syncLayout();
-  sidebar._syncLayout = syncLayout;
   const heading = sidebar.querySelector('section:last-child h3');
-  if (!follow && (focus || matchMedia('(max-width:1279px)').matches)) heading?.focus({preventScroll:true});
-  heading?.scrollIntoView({block:'nearest'});
-  window.dispatchEvent(new Event('resize'));
+  datavizMountOperationSidebar(sidebar, heading, !follow && (focus || matchMedia('(max-width:1279px)').matches));
 };
 document.addEventListener('click', event => {
   const dashboard = event.target.closest?.('.dv-runtime-control[data-control-origin="dashboard"] > summary');
+  if (dashboard && !datavizContextEmbedded()) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    datavizToggleDashboardSidebar();
+    return;
+  }
   if (dashboard && datavizContextOwner) {
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -3204,7 +3249,7 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Tab' && datavizContextPanel.getAttribute('aria-modal') === 'true') {
     const nodes = [...datavizContextPanel.querySelectorAll('button,input,select,textarea,[tabindex="0"]')]
       .filter(node => !node.disabled && node.getClientRects().length);
-    if (event.shiftKey && (document.activeElement === nodes[0] || document.activeElement.tagName === 'H3')) { event.preventDefault(); nodes.at(-1)?.focus(); }
+    if (event.shiftKey && (document.activeElement === nodes[0] || ['H2', 'H3'].includes(document.activeElement.tagName))) { event.preventDefault(); nodes.at(-1)?.focus(); }
     else if (!event.shiftKey && document.activeElement === nodes.at(-1)) { event.preventDefault(); nodes[0]?.focus(); }
   }
 });
@@ -4388,6 +4433,15 @@ const showDatavizRuntimeShortcutToast = message => {
   }, 1800);
 };
 const setDatavizRuntimeQueryOpen = open => {
+  if (window.parent === window) {
+    if (!datavizRuntimeQueryToggle || !datavizRuntimeQueryPanel) return false;
+    if (open) datavizOpenParameterSidebar();
+    else if (datavizContextQueryRestore) datavizCloseContextControls({focus:false});
+    datavizRuntimeQueryToggle.setAttribute('aria-expanded', String(Boolean(open)));
+    datavizRuntimeQueryToggle.setAttribute('aria-label', open ? 'Collapse parameters' : 'Expand parameters');
+    datavizRuntimeQueryToggle.title = open ? 'Collapse parameters' : 'Expand parameters';
+    return Boolean(open);
+  }
   if (open && datavizContextOwner) datavizCloseContextControls({focus:false});
   if (!datavizRuntimeQueryToggle || !datavizRuntimeQueryPanel) return false;
   const expanded = Boolean(open);
@@ -4434,10 +4488,9 @@ document.addEventListener('keydown', event => {
     return;
   }
   if (command === 'toggle-query-parameters' && datavizRuntimeQueryToggle) {
-    if (datavizContextOwner) datavizCloseContextControls({focus:false});
     event.preventDefault();
     window.datavizComponents?.overlay.closeAll({group:'popover'});
-    const tray = datavizRuntimeQueryPanel?.closest('.dv-runtime-query-tray');
+    const tray = document.querySelector('.dv-runtime-query-tray');
     if (Number(tray?.dataset.controlCount || 0) <= 0) {
       showDatavizRuntimeShortcutToast('当前报告没有查询参数');
       return;
@@ -4447,10 +4500,7 @@ document.addEventListener('keydown', event => {
     );
   } else if (command === 'toggle-dashboard-controls') {
     event.preventDefault();
-    const owner = document.querySelector('.dv-runtime-control[data-control-origin="dashboard"]');
-    if (datavizContextPanel) datavizCloseContextControls();
-    else if (owner) datavizOpenContextControls(owner);
-    else showDatavizRuntimeShortcutToast('This report has no dashboard controls.');
+    datavizToggleDashboardSidebar();
   } else if (command === 'show-shortcuts' && datavizRuntimeShortcutHelp) {
     event.preventDefault();
     window.datavizComponents?.overlay.closeAll({group:'popover'});
@@ -4499,6 +4549,15 @@ document.addEventListener('click', event => {
       type:'dataviz:view-evidence-inspect',
       view_id:viewId,
       evidence:{
+        status:viewSignal.closest('.dv-view')?.dataset.viewStatus || null,
+        controls:datavizControlImpactSnapshot().filter(item =>
+          item.affected_views.includes(viewId) || item.potential_views.includes(viewId)
+        ).slice(0, 50).map(item => ({
+          key:item.key,
+          revision:datavizControlEntry(item.key)?.revision ?? null,
+          intent:datavizControlEntry(item.key)?.intent ?? null,
+          domain:item.option_domain,
+        })),
         refresh:structuredClone(datavizRuntime.viewRefreshEvidence.get(viewId) || null),
         renderer:structuredClone(datavizRuntime.viewRenderEvidence.get(viewId) || null),
         lifecycle:structuredClone(datavizRuntime.rendererLifecycleEvidence.get(viewId) || null),

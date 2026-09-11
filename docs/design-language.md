@@ -36,7 +36,7 @@ Dataviz 的默认方向是 **Quiet white shell + clean analytical canvas**：稳
 
 标题、subtitle 和 description 是分析内容，不是装饰。Query Parameter 或 Control 决定当前分析对象时，应通过内容插值让上下文可见，而不是要求用户重新打开参数面板确认。
 
-Server Header 横跨整个屏幕：左侧的 Dataviz Logo/品牌名同时是 Sidebar disclosure，后接 Source/Dataset 状态灯；右侧依次放 SHARE、Dashboard Controls，最右侧是“查询 + ▼”分段按钮。SHARE 的临时菜单只显示“分享链接”和“导出 HTML”，不附加解释小字；包含 Server Python Interactive Transform 时“导出 HTML”禁用。Sidebar 与 Workbench 都从 Header 下方开始，不再显示独立 Navigation 按钮或重复的 Dashboards 标题。查询主按钮执行 Query，箭头整体显示或隐藏 Workbench 顶部、正常文档流中的圆角 Query Card；不新增独立 Parameters 按钮。Card 首行只写“查询参数”，不放运行按钮；字段按“标题在上、输入在下”排列，不补参数数量或说明文案。Query Card 与 Canvas 共用 `clamp(22px, 3vw, 48px)` 水平 gutter。Server 默认展开，导出 HTML 默认折叠；展开推动 Canvas，不覆盖内容。Dashboard/Section/View Controls 使用临时浮层，并遵循外部点击与 `Esc` 关闭语义。Controls 托盘只呈现业务字段标签与组件；consumer mode、作用域和影响 View 数量属于 Runtime 诊断信息，不作为默认视觉层级。Query Pipeline 不再占用操作位：Source/Dataset 节点在 Dataviz 品牌右侧对应状态灯，悬停只显示任务名，点击进入完整证据。View 的依赖节点和 Renderer 灯位于 `PLOTLY / TABLE / PERSPECTIVE` 标签左侧，仅在运行、过期或失败时出现，完成后消失；导出 HTML 不重复展示已固化为 Ready 的 Source 灯。
+Server Header 横跨整个屏幕；左侧品牌按钮切换 Workspace Sidebar，旁边显示查询节点状态。右侧保留 Share（仅服务端）、Controls、Parameters 和 Run。Parameters 与 Controls 使用同一个右侧操作面板：320px 外宽、左右 16px 内距，宽屏停靠并为正文预留相同宽度，窄屏覆盖且不超过视口。Parameters 只保留字段、状态和诊断/刷新入口，不重复底部 Run；Header Run 与快捷键执行查询，关闭面板不丢草稿。Controls 按 Dashboard → Section → View 展示当前上下文，省略空祖先组；同入口再次点击收起，不同入口替换上下文。Section/View 默认 sidebar，显式 popover 仍支持，打开弹窗不关闭已有侧栏。快捷键默认 Q/W/E/R 分别对应左侧 Sidebar、Parameters、Controls、Run，可在帮助中关闭单键；Esc 与 ? 保留。独立 HTML 不提供 Run、Share 或 Workspace Sidebar，查询参数只展示固化证据，Controls 继续使用现有可用交互。完整视觉约束以 DESIGN.md 为准；此文不维护另一套像素或行为默认值。
 
 一个 Section 应回答一个问题，并且至多有一个主要 View。其余 View 是解释、比较或明细，应降低视觉重量。
 

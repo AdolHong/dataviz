@@ -228,18 +228,19 @@ Dataviz 使用温和但精确的圆角：微元素 5px，输入与按钮 7px，�
 
 ### Right-Side Query / Control Panel
 
-**状态：2026-09-10，0.24.0 实现。** 复用现有表单，支持 W/E 切换与关闭、Esc、宽屏停靠与窄屏覆盖。验证结果与发行状态以 plan.md 为准；本轮不宣称 Firefox/WebKit 已完成验收。
+**当前约束（0.24.5）：** 复用现有表单，支持 W/E 切换与关闭、Esc、宽屏停靠与窄屏覆盖。验证结果与发行状态以 plan.md 为准。
 
-- 同一右侧区域只有 `closed`、`query`、`controls` 三种展示状态。Q 打开 Query Parameters，再按 Q 关闭；C 打开 Dashboard Controls，再按 C 关闭。从另一种内容切入时直接替换，不并排打开两个面板。
-- Header 始终保留 `Query Parameters` / `Dashboard Controls` 入口和展开状态，不显示字母快捷键徽标；无对应字段时置灰、不可点击，不隐藏按钮或改变排列。按 W/E 遇到无字段时统一显示无参数提示，不打开空面板、不触发查询。单页与多 Page 使用相同操作，不要求作者新增 Page 或布局 DSL。
+- 同一右侧区域只有 `closed`、`query`、`controls` 三种展示状态。W 打开 Parameters，再按 W 关闭；E 打开 Controls，再按 E 关闭。从另一种内容切入时直接替换，不并排打开两个面板。
+- Header 始终保留 `Parameters` / `Controls` 入口和展开状态，不显示字母快捷键徽标；无对应字段时置灰、不可点击，不隐藏按钮或改变排列。按 W/E 遇到无字段时统一显示无参数提示，不打开空面板、不触发查询。单页与多 Page 使用相同操作，不要求作者新增 Page 或布局 DSL。
 - 快捷键仅在非编辑场景处理：Input、Textarea、Select、contenteditable、搜索框、代码编辑器、中文组合输入期间不拦截；仅响应明确列出的组合键，不抢占其他 Ctrl/Meta/Alt 组合键，不响应按住键产生的重复事件。单字符快捷键需可关闭或限定到工作台焦点范围，不能只为鼠标用户设计。
 - Esc 优先关闭当前下拉框、日历或更上层对话框；没有内层浮层时才关闭面板。面板有显式关闭按钮，关闭后焦点回到发起入口。宽屏面板非模态，不锁住正文焦点；窄屏覆盖抽屉管理焦点并阻止背景误操作。
-- Query Parameters 保持 Draft / Applied 证据，修改后需 Run；Run 固定在面板底部且不遮住最后一个字段。Dashboard Controls 即时生效，不提供 Run 或冗余说明文案。现有 Header Run 若保留，必须复用同一提交动作，不能产生第二套状态。
+- Parameters 保持 Draft / Applied 证据，修改后需 Run；仅保留 Header Run 与快捷键，不在面板底部重复按钮或分割线。Controls 即时生效，不提供 Run 或冗余说明文案。所有查询入口复用同一提交动作，不能产生第二套状态。
 - 独立 HTML 报告不提供 Run 或 Share，也不列出运行查询、切换工作台 Sidebar 的快捷键；查询参数入口只展示已固化的取数证据，不伪装成可重新查库的表单。
+- 独立 HTML 的 Header Parameters/Controls 点击与 W/E 共用右侧栏开关：同项关闭、不同项切换、Esc 关闭；不再保留正文参数卡片或 Dashboard Controls 弹窗入口。查询证据只移动展示位置，不复制状态、不执行 Query；显式 Section/View Popover 覆盖继续遵守既有约定。
 - 打开、关闭、切换面板不提交查询、不重置控件、不取消正在执行的 Run。保留草稿、已提交参数、Control canonical state；重开可查看查询使用的参数及与当前草稿的区别。
-- 首次无已应用结果且存在 Query Parameters 时自动展开 Q；查询完成后不强制关闭，由用户决定是否继续调参。此条取代旧布局的“成功后自动折叠”。
+- 首次无已应用结果且存在 Query Parameters 时自动展开 Parameters；查询完成后不强制关闭，由用户决定是否继续调参。此条取代旧布局的“成功后自动折叠”。
 - 切换 Dashboard / Page 时展示当前目标的字段与状态；旧请求不得覆盖新面板，不混用各页 Draft / Applied。没有对应面板内容时关闭，不显示上一页字段；导航不能等待候选初始化才能响应。
-- 0.24.0 的 Section / View Controls 仍留在对应内容附近；下一阶段的可选上下文侧栏见下节。已实现行为与待实现设计不得混写。
+- Section / View Controls 的入口保留在对应内容附近，默认进入上下文侧栏；显式 popover 覆盖与祖先层级组合见下节。
 - 视觉沿用白底、克制的结构分隔、42px 控件几何和既有焦点样式；宽屏停靠面板不使用浮层重阴影。布局改变后通知图表 resize，避免逐帧驱动昂贵重绘；尊重 reduced-motion。
 
 **验收：** W/W、E/E、W/E/Esc；输入与中文组合输入不误触；面板关开不丢草稿、不新增 Query；查询中关闭再打开；Dashboard / Page 快速切换；下拉框内 Esc 只关闭一层；窄屏焦点与关闭入口；Date Range 全日期、长多选摘要及最后一项字段不裁切。首次展开与查询后保留必须分别验证。

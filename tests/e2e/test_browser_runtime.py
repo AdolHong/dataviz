@@ -67,7 +67,7 @@ def test_contextual_controls_sidebar_and_portable_state(page: Page, tmp_path: Pa
         panel = page.locator('#operation-panel')
         expect(panel).to_be_visible()
         expect(panel.locator('[data-context-group]')).to_have_count(2)
-        assert panel.bounding_box()['width'] == 360
+        assert panel.bounding_box()['width'] == 320
         assert panel.locator('[data-context-group="view:city-detail"] .control-scope').first.bounding_box()['width'] == pytest.approx(panel.locator('[data-context-group="view:city-detail"] h3').bounding_box()['width'], abs=1)
         expect(panel.locator('[data-context-group="section:geography"]')).to_be_visible()
         after = dashboard_heading.bounding_box()
@@ -78,7 +78,7 @@ def test_contextual_controls_sidebar_and_portable_state(page: Page, tmp_path: Pa
         page.wait_for_function("document.querySelector('#canvas-frame').contentWindow.dataviz.control_state['view:city-detail/min_value']?.value === 100")
         page.screenshot(path='/tmp/dataviz-context-desktop.png')
         value.evaluate('(node) => node.blur()')
-        page.keyboard.press('c')
+        page.keyboard.press('e')
         expect(panel.locator('[data-context-group]')).to_have_count(0)
         expect(panel).to_be_hidden()
         entry.click()
@@ -104,7 +104,7 @@ def test_contextual_controls_sidebar_and_portable_state(page: Page, tmp_path: Pa
         panel = page.locator('.dv-context-sidebar')
         expect(panel).to_be_visible()
         expect(panel.locator('.dv-context-sidebar__body > section')).to_have_count(3)
-        page.keyboard.press('c')
+        page.keyboard.press('e')
         expect(panel).to_have_count(0)
         entry.click()
         expect(panel).to_be_visible()
@@ -195,9 +195,9 @@ def test_contextual_controls_sibling_switch_and_popover_override(page: Page, tmp
         if not with_dashboard:
             expect(page.locator('#dashboard-controls-toggle')).to_be_disabled()
             page.locator('#operation-panel-title').click()
-            page.keyboard.press('c')
+            page.keyboard.press('e')
             expect(panel).to_be_hidden()
-            page.keyboard.press('c')
+            page.keyboard.press('e')
             expect(page.locator('#shortcut-toast')).to_contain_text('no dashboard controls')
             first.click()
         second.click()
@@ -1621,8 +1621,9 @@ def _open_dashboard(page: Page, base_url: str, dashboard_id: str) -> None:
 
 
 def _run_and_wait(page: Page, expected: str = "Ready") -> None:
-    button = '#panel-run-button' if page.locator('#operation-panel[aria-modal="true"]').is_visible() else '#run-button'
-    page.locator(button).click()
+    if page.locator('#operation-panel[aria-modal="true"]').is_visible():
+        page.locator('#operation-panel-close').click()
+    page.locator('#run-button').click()
     expect(page.locator("#query-diagnostics-label")).to_have_text(
         expected,
         timeout=30_000,
@@ -1893,39 +1894,133 @@ def test_operation_panel_shortcuts_and_responsive_state(page: Page, tmp_path: Pa
             for selector in ['#query-parameters-toggle', '#dashboard-controls-toggle']:
                 expect(page.locator(selector)).to_be_visible()
                 expect(page.locator(selector)).to_be_disabled()
-            page.keyboard.press('q')
+            page.keyboard.press('w')
             expect(page.locator('#shortcut-toast')).to_have_text('This Dashboard has no query parameters.')
-            page.keyboard.press('c')
+            page.keyboard.press('e')
             expect(page.locator('#shortcut-toast')).to_have_text('This Dashboard has no dashboard controls.')
             expect(panel).to_be_hidden()
             assert not runs
             return
         expect(panel).to_be_visible()
         field = page.locator('#parameter-form input[name="label"]')
-        assert panel.bounding_box()['width'] == 360
+        expect(page.locator('#query-parameters-toggle')).to_have_text('Parameters')
+        expect(page.locator('#dashboard-controls-toggle')).to_have_text('Controls')
+        expect(page.locator('#operation-panel-title')).to_have_text('Parameters')
+        waiting = page.frame_locator('#canvas-frame')
+        waiting.locator('main').click()
+        page.keyboard.press('w')
+        expect(panel).to_be_hidden()
+        waiting.locator('main').click()
+        page.keyboard.press('w')
+        expect(panel).to_be_visible()
+        waiting.locator('main').click()
+        page.keyboard.press('e')
+        expect(page.locator('#operation-panel-title')).to_have_text('Controls')
+        waiting.locator('main').click()
+        page.keyboard.press('w')
+        expect(field).to_be_visible()
+        waiting.locator('main').click()
+        page.keyboard.press('q')
+        expect(page.locator('#sidebar-toggle')).to_have_attribute('aria-expanded', 'false')
+        waiting.locator('main').click()
+        page.keyboard.press('q')
+        expect(page.locator('#sidebar-toggle')).to_have_attribute('aria-expanded', 'true')
+        assert panel.bounding_box()['width'] == 320
         page.screenshot(path='/tmp/dataviz-query-width.png')
         assert page.locator('#parameter-form').evaluate('node => node.scrollWidth <= node.clientWidth')
+        dates = page.locator('#parameter-form .dv-date-range__endpoint[type="text"]')
+        expect(dates).to_have_count(2)
+        expect(dates.nth(0)).to_have_value('2026-09-01')
+        expect(dates.nth(1)).to_have_value('2026-09-11')
+        assert dates.evaluate_all('nodes => nodes.every(node => node.scrollWidth <= node.clientWidth + 1)')
+        assert page.locator('.workbench').evaluate('node => parseFloat(getComputedStyle(node).marginRight)') == 320
         field.fill('draft qc')
         field.press('q')
         expect(panel).to_be_visible()
         field.fill('draft')
         page.locator('#operation-panel-close').focus()
-        page.keyboard.press('q')
+        page.keyboard.press('w')
         expect(panel).to_be_hidden()
-        page.keyboard.press('q')
+        page.keyboard.press('w')
         expect(field).to_have_value('draft')
-        page.keyboard.press('c')
+        page.keyboard.press('e')
         expect(page.locator('#operation-panel-title')).to_have_text('Controls')
         expect(page.locator('#operation-panel-close')).not_to_be_focused()
-        expect(page.locator('#panel-run-button')).to_be_hidden()
-        page.keyboard.press('c')
+        expect(page.locator('#operation-panel-footer, #panel-run-button')).to_have_count(0)
+        page.keyboard.press('e')
         expect(panel).to_be_hidden()
-        page.keyboard.press('q')
-        page.locator('#panel-run-button').click()
+        page.keyboard.press('w')
+        waiting.locator('main').click()
+        page.keyboard.press('r')
         expect(page.frame_locator('#canvas-frame').locator('[data-view-id="rows"]')).to_contain_text('42', timeout=20_000)
         expect(panel).to_be_visible()
         expect(field).to_have_value('draft')
         assert len(runs) == 1
+        expect(page.locator('#query-parameters-toggle kbd, #dashboard-controls-toggle kbd')).to_have_count(0)
+        ready = page.frame_locator('#canvas-frame')
+        ready.locator('[data-view-id="rows"]').click()
+        page.keyboard.press('w')
+        expect(panel).to_be_hidden()
+        ready.locator('[data-view-id="rows"]').click()
+        page.keyboard.press('w')
+        expect(panel).to_be_visible()
+        # The host must recognize editable elements from the iframe's realm.
+        ready.locator('body').evaluate("""node => {
+          const input = document.createElement('input');
+          input.id = 'shortcut-typing-probe';
+          node.prepend(input);
+        }""")
+        ready.locator('#shortcut-typing-probe').fill('')
+        ready.locator('#shortcut-typing-probe').press('w')
+        expect(ready.locator('#shortcut-typing-probe')).to_have_value('w')
+        expect(panel).to_be_visible()
+        ready.locator('#shortcut-typing-probe').evaluate('node => node.remove()')
+        # Every explicit chord/alias is accepted; typing, IME and repeats are not.
+        assert page.evaluate("""async () => {
+          const source = await fetch('/static/app.js').then(response => response.text());
+          const handlers = source.slice(source.indexOf('function keyboardTargetIsEditable('), source.indexOf('let shortcutToastTimer'));
+          const classify = new Function('document', '$', handlers + ';return keyboardShortcutCommand;')(document, selector => document.querySelector(selector));
+          const command = overrides => classify({key:'r', target:document.body, ...overrides});
+          return ['q','w','e','r'].map(key => command({key})).concat([
+            command({key:'R', ctrlKey:true, metaKey:true}),
+            command({key:'Enter', metaKey:true}), command({key:'Enter', ctrlKey:true}),
+            command({key:'End', ctrlKey:true}), command({key:'r', repeat:true}),
+            command({key:'r', isComposing:true}), command({key:'r', altKey:true}),
+            command({key:'r', target:document.querySelector('#parameter-form input')}),
+            command({key:'c'}), command({key:'b'})]);
+        }""") == ['toggle-sidebar', 'toggle-query-parameters', 'toggle-dashboard-controls', 'run-query'] + ['run-query'] * 4 + [None] * 6
+        page.keyboard.press('q')
+        expect(page.locator('#sidebar-toggle')).to_have_attribute('aria-expanded', 'false')
+        page.keyboard.press('q')
+        expect(page.locator('#sidebar-toggle')).to_have_attribute('aria-expanded', 'true')
+        page.keyboard.press('?')
+        help_dialog = page.locator('#keyboard-shortcuts-dialog')
+        expect(help_dialog).to_be_visible()
+        page.locator('#single-key-shortcuts').uncheck()
+        expect(help_dialog.locator('[data-shortcut-key="W"]')).to_have_text('Cmd + Ctrl + W')
+        page.screenshot(path='/tmp/dataviz-0244-shortcuts-desktop.png')
+        page.keyboard.press('Escape')
+        page.locator('#operation-panel-close').focus()
+        page.keyboard.press('w')
+        expect(panel).to_be_visible()
+        page.keyboard.press('Meta+Control+w')
+        expect(panel).to_be_hidden()
+        # Canvas forwards modified shortcuts even with single-key mode disabled.
+        frame = page.frame_locator('#canvas-frame')
+        frame.locator('body').click(position={'x':5, 'y':5})
+        page.keyboard.press('e')
+        expect(panel).to_be_hidden()
+        page.keyboard.press('Meta+Control+e')
+        expect(page.locator('#operation-panel-title')).to_have_text('Controls')
+        page.keyboard.press('?')
+        expect(help_dialog).to_be_visible()
+        page.set_viewport_size({'width':390, 'height':844})
+        page.screenshot(path='/tmp/dataviz-0244-shortcuts-mobile.png')
+        assert help_dialog.evaluate('node => node.scrollWidth <= node.clientWidth')
+        page.locator('#single-key-shortcuts').check()
+        page.keyboard.press('Escape')
+        page.set_viewport_size({'width':1440, 'height':900})
+        page.locator('#query-parameters-toggle').click()
         page.screenshot(path='/tmp/dataviz-operation-panel-desktop.png')
         page.locator('#dashboard-controls-toggle').click()
         expect(page.locator('#dashboard-control-form')).to_be_visible()
@@ -2563,8 +2658,20 @@ def test_portable_query_tray_uses_document_flow_and_leaves_the_viewport(page: Pa
         expect(help_dialog).not_to_contain_text('Run query')
         expect(help_dialog).not_to_contain_text('Sidebar')
         expect(help_dialog).not_to_contain_text('Ctrl/Cmd')
+        help_dialog.locator('[data-runtime-single-key-shortcuts]').uncheck()
+        expect(help_dialog.locator('[data-shortcut-key="W"]')).to_have_text('Cmd + Ctrl + W')
         page.keyboard.press('Escape')
         panel = page.locator("#dv-runtime-query-panel")
+        page.keyboard.press('w')
+        expect(panel).to_be_hidden()
+        page.keyboard.press('Meta+Control+w')
+        expect(panel).to_be_visible()
+        page.keyboard.press('Meta+Control+w')
+        expect(panel).to_be_hidden()
+        page.keyboard.press('?')
+        expect(help_dialog).to_be_visible()
+        help_dialog.locator('[data-runtime-single-key-shortcuts]').check()
+        page.keyboard.press('Escape')
         canvas = page.locator(".dv-canvas")
         expect(toggle).to_have_attribute("aria-expanded", "false")
         expect(panel).to_be_hidden()

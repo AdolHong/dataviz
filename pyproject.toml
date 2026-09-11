@@ -1,6 +1,6 @@
 [project]
 name = "ai-dataviz"
-version = "0.24.3"
+version = "0.24.5"
 description = "Workspace-first data dashboards for humans and AI"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"

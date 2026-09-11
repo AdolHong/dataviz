@@ -1223,7 +1223,7 @@ def test_query_parameters_reuse_the_form_in_the_operation_panel():
     assert "data-overlay-floating" not in query_owner_tag
     assert "data-control-panel-body" in query_owner
     assert 'class="dv-query-card"' in query_owner
-    assert '<h2>Query Parameters</h2>' in query_owner
+    assert '<h2>Parameters</h2>' in query_owner
     assert 'id="query-parameters-status"' in query_owner
     assert 'id="dashboard-controls-control"' not in query_owner
     assert 'id="query-run-control"' not in query_owner
@@ -1456,11 +1456,11 @@ def test_header_uses_node_signal_lights_and_ends_with_share_controls_then_run():
     )
     assert (
         '<strong class="header-control__label dv-shell-control__label">'
-        'DASHBOARD CONTROLS</strong>' in template
+        'Controls</strong>' in template
     )
     assert '<small id="dashboard-control-meta" hidden>' in template
     assert 'class="dv-control-chevron dv-shell-control__chevron"' in canvas_renderer
-    assert '<strong class="dv-shell-control__label">DASHBOARD CONTROLS</strong>' in canvas_renderer
+    assert '<strong class="dv-shell-control__label">Controls</strong>' in canvas_renderer
     assert '#dashboard-controls-control>.header-control__trigger{' not in style
     assert 'Dashboard Control visuals are owned by presentation.shell' in style
     assert '.button--run{color:#fff;background:#25282d;border-color:#25282d' in style
@@ -1477,16 +1477,19 @@ def test_keyboard_shortcuts_are_cross_platform_guarded_and_cross_frame():
     ).read_text()
     renderer = (ROOT / "src" / "dataviz" / "rendering" / "canvas.py").read_text()
 
-    assert 'aria-keyshortcuts="B"' in template
-    assert 'aria-keyshortcuts="Q"' in template
-    assert 'aria-keyshortcuts="Control+Enter Meta+Enter"' in template
+    assert 'aria-keyshortcuts="Q Meta+Control+Q"' in template
+    assert 'aria-keyshortcuts="W Meta+Control+W"' in template
+    assert 'aria-keyshortcuts="R Meta+Control+R Control+Enter Meta+Enter Control+End"' in template
     assert 'id="keyboard-shortcuts-dialog"' in template
     assert 'id="shortcut-toast"' in template
     assert "event.repeat || event.isComposing || event.keyCode === 229" in script
-    assert "(event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'Enter'" in script
-    assert "event.key.toLowerCase() === 'q'" in script
-    assert "event.key.toLowerCase() === 'b'" in script
-    assert "event.key.toLowerCase() === 'r'" not in script
+    assert "(event.ctrlKey || event.metaKey) && event.key === 'Enter'" in script
+    assert "q:'toggle-sidebar'" in script
+    assert "w:'toggle-query-parameters'" in script
+    assert "r:'run-query'" in script
+    assert "event.data.single_key" in script
+    assert '<kbd>Q</kbd>' not in template
+    assert '<kbd>C</kbd>' not in template
     assert "keyboardTargetIsEditable(event.target)" in script
     assert "showShortcutToast('This Dashboard has no query parameters.')" in script
     assert "dataviz:keyboard-shortcut" in script
@@ -1494,7 +1497,7 @@ def test_keyboard_shortcuts_are_cross_platform_guarded_and_cross_frame():
     assert "window.parent !== window" in runtime
     assert 'data-runtime-shortcut-help' in renderer
     assert 'data-runtime-shortcut-toast' in renderer
-    assert 'aria-keyshortcuts="Q"' in renderer
+    assert 'aria-keyshortcuts="W Meta+Control+W"' in renderer
     assert "showDatavizRuntimeShortcutToast('当前报告没有查询参数')" in runtime
 
 

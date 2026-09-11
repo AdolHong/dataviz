@@ -1410,8 +1410,7 @@ class CanvasRenderer:
                 f'data-runtime-popover data-overlay-group="runtime-header" data-control-origin="dashboard" '
                 f'data-overlay-floating="true" {control_panel_attributes}>'
                 '<summary class="dv-shell-control__trigger">'
-                '<span class="dv-context-controls__mark dv-shell-control__mark">C</span>'
-                '<strong class="dv-shell-control__label">DASHBOARD CONTROLS</strong>'
+                '<strong class="dv-shell-control__label">Controls</strong>'
                 '<span class="dv-control-chevron dv-shell-control__chevron" aria-hidden="true"><svg viewBox="0 0 16 16">'
                 '<path d="m4 6 4 4 4-4"/></svg></span></summary>'
                 '<div class="dv-runtime-popover dv-runtime-popover--controls dv-shell-control__popover">'
@@ -1425,10 +1424,10 @@ class CanvasRenderer:
             query_control = (
                 '<button class="dv-shell-control__trigger" type="button" '
                 'data-runtime-query-toggle aria-controls="dv-runtime-query-panel" '
-                'aria-expanded="false" aria-keyshortcuts="Q" title="展开查询参数 (Q)" '
-                'aria-label="展开查询参数">'
-                '<strong class="dv-shell-control__label">查询参数</strong>'
-                '<kbd>Q</kbd></button>'
+                'aria-expanded="false" aria-keyshortcuts="W Meta+Control+W" title="Open parameters" '
+                'aria-label="Open parameters">'
+                '<strong class="dv-shell-control__label">Parameters</strong>'
+                '</button>'
             )
         return (
             '<header class="dv-runtime-header dv-shell-header" aria-label="Report controls">'
@@ -1441,7 +1440,7 @@ class CanvasRenderer:
             f'<section class="dv-runtime-query-tray dv-query-card-host" '
             f'{query_panel_attributes} data-open="false"{card_hidden}>'
             '<div class="dv-query-card">'
-            '<header class="dv-query-card__header"><h2>查询参数</h2></header>'
+            '<header class="dv-query-card__header"><h2>Parameters</h2></header>'
             '<div id="dv-runtime-query-panel" class="dv-runtime-popover '
             'dv-runtime-popover--query dv-runtime-query-panel dv-query-card__body" '
             'data-control-panel-body hidden>'
@@ -1452,11 +1451,13 @@ class CanvasRenderer:
             'aria-labelledby="dv-runtime-shortcuts-title"><form method="dialog">'
             '<header><h2 id="dv-runtime-shortcuts-title">快捷键</h2>'
             '<button type="submit" aria-label="关闭">×</button></header><dl>'
-            '<div><dt><kbd>Q</kbd></dt><dd>查询参数</dd></div>'
-            '<div><dt><kbd>C</kbd></dt><dd>Dashboard controls</dd></div>'
+            '<div><dt><kbd data-shortcut-key="W">W</kbd></dt><dd>Parameters</dd></div>'
+            '<div><dt><kbd data-shortcut-key="E">E</kbd></dt><dd>Controls</dd></div>'
             '<div><dt><kbd>Esc</kbd></dt><dd>关闭临时面板</dd></div>'
             '<div><dt><kbd>?</kbd></dt><dd>快捷键帮助</dd></div>'
-            '</dl><footer><button type="submit">关闭</button></footer></form></dialog>'
+            '</dl><label><input type="checkbox" data-runtime-single-key-shortcuts checked> '
+            'Enable single-key shortcuts (W, E)</label>'
+            '<footer><button type="submit">关闭</button></footer></form></dialog>'
         )
 
     def _control_html(

@@ -279,7 +279,17 @@ function loadCanvasFrame(dashboardId, runId = null) {
   const page = runtime.pageId ? `&page_id=${encodeURIComponent(runtime.pageId)}` : '';
   frame.src = `/api/dashboards/${encodeURIComponent(dashboardId)}/canvas?${sessionQuery()}${run}${page}&frame_id=${encodeURIComponent(frameId)}`;
   frame.addEventListener('load', () => {
-    if (!restoreScrollY || frame.dataset.frameId !== frameId) return;
+    if (frame.dataset.frameId !== frameId) return;
+    // The waiting/error Canvas has no runtime keyboard bridge. Own embedded
+    // shortcuts here as well, before chart handlers or runtime forwarding.
+    try {
+      const canvasDocument = frame.contentDocument;
+      canvasDocument?.addEventListener('keydown', event => {
+        if (frame.dataset.frameId !== frameId || canvasDocument.querySelector('dialog[open]')) return;
+        handleKeyboardShortcut(event);
+      }, {capture:true});
+    } catch (_) { /* Only same-origin Canvas documents are eligible. */ }
+    if (!restoreScrollY) return;
     const restore = () => {
       try { frame.contentWindow.scrollTo({top:restoreScrollY, behavior:'instant'}); } catch (_) { /* same-origin frame may still be initializing */ }
     };
@@ -509,7 +519,7 @@ function applySidebarState({persist = false} = {}) {
   const toggle = $('#sidebar-toggle');
   toggle.setAttribute('aria-expanded', String(!state.sidebarCollapsed));
   toggle.setAttribute('aria-label', state.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
-  toggle.title = `${state.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'} (B)`;
+  toggle.title = `${state.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}`;
   const resizer = $('#sidebar-resizer');
   resizer.setAttribute('aria-valuemin', String(bounds.min));
   resizer.setAttribute('aria-valuemax', String(bounds.max));
@@ -543,21 +553,22 @@ function toggleSidebar() {
 }
 
 function keyboardTargetIsEditable(target) {
-  if (!(target instanceof Element)) return false;
+  // Elements inside Canvas belong to a different Window/Element realm.
+  if (!target || typeof target.closest !== 'function') return false;
   return target.isContentEditable || Boolean(target.closest('input, textarea, select, [role="textbox"], .monaco-editor, .cm-editor'));
 }
 
 function keyboardShortcutCommand(event) {
   if (event.defaultPrevented || event.repeat || event.isComposing || event.keyCode === 229) return null;
   if (document.querySelector('dialog[open]')) return null;
-  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'Enter') return 'run-query';
-  if (event.ctrlKey || event.metaKey || event.altKey || keyboardTargetIsEditable(event.target)) return null;
-  if (!$('#single-key-shortcuts').checked) return null;
-  if (event.key.toLowerCase() === 'q') return 'toggle-query-parameters';
-  if (event.key.toLowerCase() === 'c') return 'toggle-dashboard-controls';
-  if (event.key.toLowerCase() === 'b') return 'toggle-sidebar';
-  if (event.key === '?') return 'show-shortcuts';
-  return null;
+  if (!event.altKey && !event.shiftKey && (
+    ((event.ctrlKey || event.metaKey) && event.key === 'Enter')
+    || (event.ctrlKey && !event.metaKey && event.key === 'End')
+  )) return 'run-query';
+  if (!event.ctrlKey && !event.metaKey && !event.altKey && !keyboardTargetIsEditable(event.target) && event.key === '?') return 'show-shortcuts';
+  const chord = event.metaKey && event.ctrlKey && !event.altKey && !event.shiftKey;
+  if (!chord && (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || keyboardTargetIsEditable(event.target) || !$('#single-key-shortcuts').checked)) return null;
+  return {q:'toggle-sidebar', w:'toggle-query-parameters', e:'toggle-dashboard-controls', r:'run-query'}[event.key.toLowerCase()] || null;
 }
 
 let shortcutToastTimer = null;
@@ -1952,9 +1963,9 @@ function setQueryParametersOpen(open, {persist = false} = {}) {
   toggle.setAttribute('aria-expanded', String(expanded));
   toggle.setAttribute(
     'aria-label',
-    expanded ? 'Collapse query parameters' : 'Expand query parameters',
+    expanded ? 'Collapse parameters' : 'Expand parameters',
   );
-  toggle.title = `${expanded ? 'Collapse query parameters' : 'Expand query parameters'} (Q)`;
+  toggle.title = `${expanded ? 'Collapse parameters' : 'Expand parameters'}`;
   $('#query-run-control').classList.toggle('is-parameters-open', expanded);
   const runtime = activeRuntime();
   if (runtime && hasParameters) runtime.queryParametersOpen = expanded;
@@ -2059,16 +2070,15 @@ function setOperationPanel(mode, {focus = false, persist = true} = {}) {
   $('#query-parameters-toggle').disabled = !hasParameters;
   $('#dashboard-controls-toggle').setAttribute('aria-expanded', String(mode === 'controls'));
   $('#query-parameters-toggle').setAttribute('aria-expanded', String(mode === 'query'));
-  $('#query-parameters-toggle').setAttribute('aria-label', `${mode === 'query' ? 'Close' : 'Open'} query parameters`);
+  $('#query-parameters-toggle').setAttribute('aria-label', `${mode === 'query' ? 'Close' : 'Open'} parameters`);
   $('#query-parameters-toggle').title = hasParameters
-    ? `${mode === 'query' ? 'Close' : 'Open'} query parameters (Q)`
+    ? `${mode === 'query' ? 'Close' : 'Open'} parameters`
     : 'This Dashboard has no query parameters.';
   $('#dashboard-controls-toggle').title = hasControls
-    ? `${mode === 'controls' ? 'Close' : 'Open'} dashboard controls (C)`
+    ? `${mode === 'controls' ? 'Close' : 'Open'} controls`
     : 'This Dashboard has no dashboard controls.';
   $('#query-run-control').classList.toggle('is-parameters-open', mode === 'query');
-  $('#operation-panel-title').textContent = mode === 'controls' ? 'Controls' : 'Query Parameters';
-  $('#operation-panel-footer').hidden = mode !== 'query';
+  $('#operation-panel-title').textContent = mode === 'controls' ? 'Controls' : 'Parameters';
   $('#operation-panel-query-tools').hidden = mode !== 'query';
   $('#query-parameters-status').hidden = mode !== 'query';
   const runtime = activeRuntime();
@@ -2088,7 +2098,12 @@ function setOperationPanel(mode, {focus = false, persist = true} = {}) {
 function initializeOperationPanel() {
   $('#keyboard-shortcuts-toggle').addEventListener('click', () => executeKeyboardShortcut('show-shortcuts'));
   try { $('#single-key-shortcuts').checked = localStorage.getItem('dataviz.single-key-shortcuts') !== 'off'; } catch (_) {}
+  const updateShortcutHelp = () => document.querySelectorAll('[data-shortcut-key]').forEach(key => {
+    key.textContent = `${$('#single-key-shortcuts').checked ? '' : 'Cmd + Ctrl + '}${key.dataset.shortcutKey}`;
+  });
+  updateShortcutHelp();
   $('#single-key-shortcuts').addEventListener('change', event => {
+    updateShortcutHelp();
     try { localStorage.setItem('dataviz.single-key-shortcuts', event.target.checked ? 'on' : 'off'); } catch (_) {}
   });
   $('#operation-panel-body').append($('#query-parameters-control'), $('#dashboard-controls-control'));
@@ -2105,13 +2120,6 @@ function initializeOperationPanel() {
   for (const id of ['operation-panel-close', 'operation-backdrop']) {
     $(`#${id}`).addEventListener('click', () => setOperationPanel(null));
   }
-  $('#panel-run-button').addEventListener('click', () => $('#run-button').click());
-  const syncRun = () => {
-    $('#panel-run-button').disabled = $('#run-button').disabled;
-    $('#panel-run-button').textContent = $('#run-button [data-run-label]').textContent;
-  };
-  new MutationObserver(syncRun).observe($('#run-button'), {attributes:true, childList:true, subtree:true, characterData:true});
-  syncRun();
   const syncTop = () => document.body.style.setProperty('--operation-panel-top', `${document.querySelector('.topbar').getBoundingClientRect().bottom}px`);
   new ResizeObserver(syncTop).observe(document.querySelector('.topbar'));
   operationPanelNarrow.addEventListener('change', syncOperationPanelLayout);
@@ -4876,7 +4884,7 @@ window.addEventListener('message', (event) => {
     return;
   }
   if (event.data?.type === 'dataviz:keyboard-shortcut') {
-    if (!$('#single-key-shortcuts').checked && ['toggle-query-parameters', 'toggle-dashboard-controls', 'toggle-sidebar', 'show-shortcuts'].includes(event.data.command)) return;
+    if (!$('#single-key-shortcuts').checked && event.data.single_key) return;
     executeKeyboardShortcut(String(event.data.command || ''));
     return;
   }

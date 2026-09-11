@@ -4,7 +4,20 @@
 
 当前协议基线（由 `protocols.py` 与回归检查约束）：`dataviz/workspace/v2`、`dataviz/dashboard/v20`、`dataviz/parameter-domain/v2`、`dataviz/parameter-domain-contract/v3`、`dataviz/parameter-lookup/v1`、`dataviz/parameter-materialization/v1`、`dataviz/dashboard-bundle/v2`、`dataviz/report-manifest/v3`、`dataviz/presentation/v2`、`dataviz/source/v6`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v13`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v6`、`dataviz/runtime/v15`、`dataviz/analysis-result/v5`、`dataviz/analysis-evidence/v5`。Component Registry 以 `dataviz components` 为准，不在阶段清单重复登记。
 
-当前包版本：`0.24.3`。本文件区分本地发行构建、工作树变更与待验证事项，不以完成过的历史阶段作为未来计划。架构理由见 [ARCHITECTURE](ARCHITECTURE.md)，视觉规范见 [DESIGN](DESIGN.md)，代码见 [实现索引](docs/product-architecture.md)，发行历史见 [CHANGELOG](CHANGELOG.md)。
+当前包版本：`0.24.5`。本文件区分本地发行构建、工作树变更与待验证事项，不以完成过的历史阶段作为未来计划。架构理由见 [ARCHITECTURE](ARCHITECTURE.md)，视觉规范见 [DESIGN](DESIGN.md)，代码见 [实现索引](docs/product-architecture.md)，发行历史见 [CHANGELOG](CHANGELOG.md)。
+
+## 0.24.5 紧凑侧栏与 Canvas 快捷键
+
+- 本轮布局调整：Parameters/Controls 统一 320px、水平内距 16px，正文预留空间同步缩小；移除 Parameters 底部重复 Run 和分割线及按钮同步监听。保留 Header Run、快捷键和窄屏关闭后运行路径；16 项定向非浏览器检查、3 项 Chrome 面板/上下文回归通过，桌面/手机截图日期显示完整。
+- 本轮快捷键修复：外层为当前同源 Canvas 安装快捷键捕获，覆盖无 Runtime 的查询前/错误页面；修正跨 iframe 的输入元素识别。已处理的事件不再由 Runtime 重复转发，保留输入与弹窗保护。
+- 本次发行定向复验：非浏览器/发行检查 **48 passed，2.99 秒**；Chromium **7 passed，84.12 秒**，覆盖上下文侧栏（含独立 HTML）、同级切换与 Popover、快捷键和响应式布局、Header 与导出。未执行完整套件、Firefox/WebKit 或安装冒烟。
+
+## 0.24.4 快捷键映射
+
+- 默认 Q 左侧 Sidebar、W Query Parameters、E Controls、R Run；帮助可关闭单键，改用 Cmd+Ctrl+Q/W/E/R。运行另保留 Cmd/Ctrl+Enter 并支持 Ctrl+End；Esc、? 不变。
+- 去掉 Header 字母徽标；帮助按开关更新并持久化。导出 HTML 仅展示 W/E 与 Esc/?，不新增 Run 或 Sidebar。
+- 仅执行快捷键、上下文面板、导出及发行定向检查；本轮不重跑完整非浏览器和三浏览器套件，不做安装冒烟。
+- 定向非浏览器与发行检查 **32 passed**；Chromium 工作台/上下文 **3 passed**，导出 HTML 在修复 Esc 关闭帮助后的焦点恢复后单项 **1 passed，13.48 秒**。四个相关场景均已通过；未宣称一次全绿。帮助弹窗桌面和手机截图已检查，Header 无旧 Q/C 徽标。
 
 ## 0.24.3 统一 Q/C 面板宽度
 

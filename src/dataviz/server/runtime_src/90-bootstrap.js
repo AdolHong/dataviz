@@ -81,6 +81,31 @@ const syncPortableChoices = control => control.querySelector('.dv-control')?._sy
 const datavizRuntimeQueryToggle = document.querySelector('[data-runtime-query-toggle]');
 const datavizRuntimeQueryPanel = document.querySelector('#dv-runtime-query-panel');
 const datavizRuntimeShortcutHelp = document.querySelector('[data-runtime-shortcut-help]');
+let datavizRuntimeShortcutOpener;
+const restoreDatavizShortcutFocus = () => {
+  if (datavizRuntimeShortcutHelp.contains(document.activeElement)) document.activeElement.blur();
+  const target = datavizRuntimeShortcutOpener?.isConnected && datavizRuntimeShortcutOpener !== document.body
+    ? datavizRuntimeShortcutOpener : datavizRuntimeQueryToggle;
+  target?.focus({preventScroll:true});
+};
+datavizRuntimeShortcutHelp?.addEventListener('close', restoreDatavizShortcutFocus);
+datavizRuntimeShortcutHelp?.addEventListener('cancel', event => {
+  event.preventDefault();
+  datavizRuntimeShortcutHelp.close();
+  restoreDatavizShortcutFocus();
+});
+const datavizRuntimeSingleKeyShortcuts = document.querySelector('[data-runtime-single-key-shortcuts]');
+if (datavizRuntimeSingleKeyShortcuts) {
+  try { datavizRuntimeSingleKeyShortcuts.checked = localStorage.getItem('dataviz.single-key-shortcuts') !== 'off'; } catch (_) {}
+  const updateHelp = () => datavizRuntimeShortcutHelp.querySelectorAll('[data-shortcut-key]').forEach(key => {
+    key.textContent = `${datavizRuntimeSingleKeyShortcuts.checked ? '' : 'Cmd + Ctrl + '}${key.dataset.shortcutKey}`;
+  });
+  updateHelp();
+  datavizRuntimeSingleKeyShortcuts.addEventListener('change', () => {
+    try { localStorage.setItem('dataviz.single-key-shortcuts', datavizRuntimeSingleKeyShortcuts.checked ? 'on' : 'off'); } catch (_) {}
+    updateHelp();
+  });
+}
 const datavizRuntimeShortcutToast = document.querySelector('[data-runtime-shortcut-toast]');
 let datavizRuntimeShortcutToastTimer;
 const showDatavizRuntimeShortcutToast = message => {
@@ -104,9 +129,9 @@ const setDatavizRuntimeQueryOpen = open => {
   datavizRuntimeQueryToggle.setAttribute('aria-expanded', String(expanded));
   datavizRuntimeQueryToggle.setAttribute(
     'aria-label',
-    expanded ? 'Collapse query parameters' : 'Expand query parameters',
+    expanded ? 'Collapse parameters' : 'Expand parameters',
   );
-  datavizRuntimeQueryToggle.title = `${expanded ? 'Collapse query parameters' : 'Expand query parameters'} (Q)`;
+  datavizRuntimeQueryToggle.title = `${expanded ? 'Collapse parameters' : 'Expand parameters'}`;
   if (tray) tray.dataset.open = String(expanded);
   datavizRuntimeQueryPanel.hidden = !expanded;
   return expanded;
@@ -123,13 +148,15 @@ const datavizKeyboardShortcutCommand = event => {
   if (event.defaultPrevented || event.repeat || event.isComposing || event.keyCode === 229) return null;
   if (document.querySelector('dialog[open]')) return null;
   if (window.parent !== window && event.key === 'Escape' && !document.querySelector(':popover-open')) return 'close-operation-panel';
-  if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key === 'Enter') return 'run-query';
-  if (event.ctrlKey || event.metaKey || event.altKey || datavizKeyboardTargetIsEditable(event.target)) return null;
-  if (event.key.toLowerCase() === 'q') return 'toggle-query-parameters';
-  if (event.key.toLowerCase() === 'c') return 'toggle-dashboard-controls';
-  if (event.key.toLowerCase() === 'b') return 'toggle-sidebar';
-  if (event.key === '?') return 'show-shortcuts';
-  return null;
+  if (!event.altKey && !event.shiftKey && (
+    ((event.ctrlKey || event.metaKey) && event.key === 'Enter')
+    || (event.ctrlKey && !event.metaKey && event.key === 'End')
+  )) return 'run-query';
+  if (!event.ctrlKey && !event.metaKey && !event.altKey && !datavizKeyboardTargetIsEditable(event.target) && event.key === '?') return 'show-shortcuts';
+  const chord = event.metaKey && event.ctrlKey && !event.altKey && !event.shiftKey;
+  if (!chord && (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || datavizKeyboardTargetIsEditable(event.target))) return null;
+  if (!chord && window.parent === window && !datavizRuntimeSingleKeyShortcuts?.checked) return null;
+  return {q:'toggle-sidebar', w:'toggle-query-parameters', e:'toggle-dashboard-controls', r:'run-query'}[event.key.toLowerCase()] || null;
 };
 document.addEventListener('keydown', event => {
   const command = datavizKeyboardShortcutCommand(event);
@@ -137,7 +164,7 @@ document.addEventListener('keydown', event => {
   if (window.parent !== window) {
     window.datavizComponents?.overlay.closeAll({group:'popover'});
     event.preventDefault();
-    datavizPostToParent({type:'dataviz:keyboard-shortcut', command});
+    datavizPostToParent({type:'dataviz:keyboard-shortcut', command, single_key:!event.ctrlKey && !event.metaKey && /^[qwer]$/i.test(event.key)});
     return;
   }
   if (command === 'toggle-query-parameters' && datavizRuntimeQueryToggle) {
@@ -161,6 +188,7 @@ document.addEventListener('keydown', event => {
   } else if (command === 'show-shortcuts' && datavizRuntimeShortcutHelp) {
     event.preventDefault();
     window.datavizComponents?.overlay.closeAll({group:'popover'});
+    datavizRuntimeShortcutOpener = document.activeElement;
     datavizRuntimeShortcutHelp.showModal();
   }
 });

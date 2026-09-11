@@ -228,11 +228,11 @@ Dataviz 使用温和但精确的圆角：微元素 5px，输入与按钮 7px，�
 
 ### Right-Side Query / Control Panel
 
-**状态：2026-09-10，0.24.0 实现。** 复用现有表单，支持 Q/C 切换与关闭、Esc、宽屏停靠与窄屏覆盖。验证结果与发行状态以 plan.md 为准；本轮不宣称 Firefox/WebKit 已完成验收。
+**状态：2026-09-10，0.24.0 实现。** 复用现有表单，支持 W/E 切换与关闭、Esc、宽屏停靠与窄屏覆盖。验证结果与发行状态以 plan.md 为准；本轮不宣称 Firefox/WebKit 已完成验收。
 
 - 同一右侧区域只有 `closed`、`query`、`controls` 三种展示状态。Q 打开 Query Parameters，再按 Q 关闭；C 打开 Dashboard Controls，再按 C 关闭。从另一种内容切入时直接替换，不并排打开两个面板。
-- Header 始终保留 `Query Parameters` / `Dashboard Controls` 入口、Q/C 提示和展开状态；无对应字段时置灰、不可点击，不隐藏按钮或改变排列。按 Q/C 遇到无字段时统一显示无参数提示，不打开空面板、不触发查询。单页与多 Page 使用相同操作，不要求作者新增 Page 或布局 DSL。
-- 快捷键仅在非编辑场景处理：Input、Textarea、Select、contenteditable、搜索框、代码编辑器、中文组合输入期间不拦截；不抢占带 Ctrl/Meta/Alt 的组合键，不响应按住键产生的重复事件。单字符快捷键需可关闭或限定到工作台焦点范围，不能只为鼠标用户设计。
+- Header 始终保留 `Query Parameters` / `Dashboard Controls` 入口和展开状态，不显示字母快捷键徽标；无对应字段时置灰、不可点击，不隐藏按钮或改变排列。按 W/E 遇到无字段时统一显示无参数提示，不打开空面板、不触发查询。单页与多 Page 使用相同操作，不要求作者新增 Page 或布局 DSL。
+- 快捷键仅在非编辑场景处理：Input、Textarea、Select、contenteditable、搜索框、代码编辑器、中文组合输入期间不拦截；仅响应明确列出的组合键，不抢占其他 Ctrl/Meta/Alt 组合键，不响应按住键产生的重复事件。单字符快捷键需可关闭或限定到工作台焦点范围，不能只为鼠标用户设计。
 - Esc 优先关闭当前下拉框、日历或更上层对话框；没有内层浮层时才关闭面板。面板有显式关闭按钮，关闭后焦点回到发起入口。宽屏面板非模态，不锁住正文焦点；窄屏覆盖抽屉管理焦点并阻止背景误操作。
 - Query Parameters 保持 Draft / Applied 证据，修改后需 Run；Run 固定在面板底部且不遮住最后一个字段。Dashboard Controls 即时生效，不提供 Run 或冗余说明文案。现有 Header Run 若保留，必须复用同一提交动作，不能产生第二套状态。
 - 独立 HTML 报告不提供 Run 或 Share，也不列出运行查询、切换工作台 Sidebar 的快捷键；查询参数入口只展示已固化的取数证据，不伪装成可重新查库的表单。
@@ -242,7 +242,7 @@ Dataviz 使用温和但精确的圆角：微元素 5px，输入与按钮 7px，�
 - 0.24.0 的 Section / View Controls 仍留在对应内容附近；下一阶段的可选上下文侧栏见下节。已实现行为与待实现设计不得混写。
 - 视觉沿用白底、克制的结构分隔、42px 控件几何和既有焦点样式；宽屏停靠面板不使用浮层重阴影。布局改变后通知图表 resize，避免逐帧驱动昂贵重绘；尊重 reduced-motion。
 
-**验收：** Q/Q、C/C、Q/C/Esc；输入与中文组合输入不误触；面板关开不丢草稿、不新增 Query；查询中关闭再打开；Dashboard / Page 快速切换；下拉框内 Esc 只关闭一层；窄屏焦点与关闭入口；Date Range 全日期、长多选摘要及最后一项字段不裁切。首次展开与查询后保留必须分别验证。
+**验收：** W/W、E/E、W/E/Esc；输入与中文组合输入不误触；面板关开不丢草稿、不新增 Query；查询中关闭再打开；Dashboard / Page 快速切换；下拉框内 Esc 只关闭一层；窄屏焦点与关闭入口；Date Range 全日期、长多选摘要及最后一项字段不裁切。首次展开与查询后保留必须分别验证。
 
 #### Unified panel width
 
@@ -252,15 +252,16 @@ Dataviz 使用温和但精确的圆角：微元素 5px，输入与按钮 7px，�
 
 **统一宽度方案：**
 
-- 以 **360px 外宽、左右各 20px 内距、约 320px 可用内容宽度**作为实现起点，最终需用真实日期范围、长选项和缩放验收。按 CSS 像素定义，不根据截图的物理像素推算；边框与滚动条计入实际可用宽度。
-- Q/C 及各层 Controls 共用同一宽度来源；标题、字段区域、分割线与 Query 底部操作区对齐。切换面板、切换 Section/View、候选加载或选中项变化均不改变外宽，不以测量当前文字来自动伸缩面板。
+- 0.24.5 收紧至 320px，移除 Parameters 侧栏底部重复 Run 与分割线；仅保留 Header Run 和快捷键。窄屏关闭抽屉后可点击 Header Run，编辑草稿不丢失。
+- 以 **320px 外宽、左右各 16px 内距、约 288px 可用内容宽度**作为实现起点，最终需用真实日期范围、长选项和缩放验收。按 CSS 像素定义，不根据截图的物理像素推算；边框与滚动条计入实际可用宽度。
+- W/E 及各层 Controls 共用同一宽度来源；标题、字段区域、分割线保持对齐。切换面板、切换 Section/View、候选加载或选中项变化均不改变外宽，不以测量当前文字来自动伸缩面板。
 - 右侧面板里的 Input、Input Number、Select、Multiple Select、Date Picker、Date Range 使用整行可用宽度。解除面板内部重复的 280px 字段上限与旧固定列宽；不全局改动原位表单或 Popover 的宽度规则。
 - Checkbox / Radio 选项自然排列并按可用宽度换行，不均分拉伸、不扩大点击项之间的空隙。长标签可换行；Select 摘要保留既有省略与查看全文机制，不以标签长度撑宽侧栏。
-- 日期范围必须显示两端完整日期及日历入口，不能以缩小字号或隐藏字符换取紧凑。若真实字体、缩放和控件尾部占位证明 320px 内容区不足，应统一修订 Q/C 基准宽度，不给 Query 再造一个独立宽度。
-- 宽屏继续停靠；窄屏沿用覆盖抽屉，宽度不超过可用视口，手机可全宽。此轮不新增拖动调宽、按控件自动扩宽、双列表单或 DSL 字段。独立 HTML 已有的右侧 Controls 使用相同规则；不因此将只读 Query 证据改造成另一套编辑面板。
-- 保留 42px 输入框高度、层级间 56px 留白、现有层级颜色与标题线，以及 C/同入口收起、不同入口切换、显式 Popover 等已确认行为。
+- 日期范围必须显示两端完整日期及日历入口，不能以缩小字号或隐藏字符换取紧凑。若真实字体、缩放和控件尾部占位证明 288px 内容区不足，应统一修订 W/E 基准宽度，不给 Query 再造一个独立宽度。
+- 宽屏继续停靠；窄屏沿用覆盖抽屉，宽度不超过可用视口，手机仍以 320px 为上限，小于 320px 时适应视口。此轮不新增拖动调宽、按控件自动扩宽、双列表单或 DSL 字段。独立 HTML 已有的右侧 Controls 使用相同规则；不因此将只读 Query 证据改造成另一套编辑面板。
+- 保留 42px 输入框高度、层级间 56px 留白、现有层级颜色与标题线，以及 E/同入口收起、不同入口切换、显式 Popover 等已确认行为。
 
-**实施验收：** 同时检查 Q/C、单层与三层 Controls、桌面/窄屏/手机、浏览器 100%/125%/200% 缩放；覆盖长中英文标题、少量 Checkbox、长多选摘要、日期范围、滚动条与最后一个字段。断言输入外框右缘与标题线右缘对齐，内容不横向溢出、日期不裁切，Q/C 切换宽度稳定；正文图表正确 resize，焦点、草稿和 canonical 状态不变，打开或调整展示不新增 Query。此处为待执行验收，不是测试通过记录。
+**实施验收：** 同时检查 W/E、单层与三层 Controls、桌面/窄屏/手机、浏览器 100%/125%/200% 缩放；覆盖长中英文标题、少量 Checkbox、长多选摘要、日期范围、滚动条与最后一个字段。断言输入外框右缘与标题线右缘对齐，内容不横向溢出、日期不裁切，W/E 切换宽度稳定；正文图表正确 resize，焦点、草稿和 canonical 状态不变，打开或调整展示不新增 Query。此处为待执行验收，不是测试通过记录。
 
 ### Contextual Controls
 
@@ -306,7 +307,7 @@ Dataviz 使用温和但精确的圆角：微元素 5px，输入与按钮 7px，�
 
 - 独立 HTML 应复用同一展示方式与上下文规则，但不引入工作台导航 Rail、Run 或 Share；Query Parameters 仍是只读证据。仅导出当前报告实际包含的 Section/View，不引用其他 Page。
 - 打印时去掉侧栏、浮层和操作入口，不打印空白占位；沿用报告已有参数证据，不把全部控件表单摊进正文。
-- 实施验收：同 Section 两个 View 来回切换、跨 Section 切换、空祖先组、没有 Dashboard Controls、混合 popover/sidebar 默认与覆盖、Q/C/Esc、快速点击与迟到响应、控件更新后状态一致、跨 Page 清理、长表单目标组可见、宽窄屏焦点及图表 resize、独立 HTML 同行为。断言无额外 Query、无重复 Control commit、无兄弟 View 表单泄漏。
+- 实施验收：同 Section 两个 View 来回切换、跨 Section 切换、空祖先组、没有 Dashboard Controls、混合 popover/sidebar 默认与覆盖、W/E/Esc、快速点击与迟到响应、控件更新后状态一致、跨 Page 清理、长表单目标组可见、宽窄屏焦点及图表 resize、独立 HTML 同行为。断言无额外 Query、无重复 Control commit、无兄弟 View 表单泄漏。
 
 ### Navigation and Direct Manipulation
 
@@ -381,3 +382,9 @@ draft/applied 独立、历史恢复等既有行为不能因层级收敛而改变
 - **Don't** 依赖颜色独自表达错误、选择或可用性。
 - **Don't** 把 Draft、Preview 或 Runtime 临时状态描述成已封存 Result。
 - **Don't** 为某个 Dashboard 的局部风格破坏 Shell、Controls 和导出页之间的一致性。
+
+### Keyboard mapping (0.24.4)
+
+Header 入口与右侧面板标题统一使用 `Parameters` / `Controls`，快捷键帮助和无障碍操作名称同步；Dashboard / Section / View 层级标签保留，内部 Query Parameter / Control 概念及 DSL 不变。
+
+默认启用单键：Q 左侧 Sidebar、W Query Parameters、E Controls、R Run。帮助弹窗可关闭单键；关闭后使用 Cmd+Ctrl+Q/W/E/R。组合键始终可用，运行另支持 Cmd/Ctrl+Enter 与 Ctrl+End。Esc 和 ? 保留，? 不受单键开关影响。输入、组合输入、重复按键不触发单键操作。帮助弹窗按开关显示当前映射，Header 不显示旧字母徽标。导出 HTML 仅提供 W/E、Esc、?，不提供 Run 或左侧工作台 Sidebar。

@@ -646,14 +646,14 @@ body.sidebar-collapsed button.brand{color:var(--ink)}
 #page-navigation-list button:focus-visible { outline: 2px solid #4451a3; outline-offset: 2px; }
 @media (max-width: 720px) { .page-navigation { padding: 16px 16px 8px; } }
 /* The operation rail reuses the existing forms; it owns only their layout. */
-body { --operation-panel-width:var(--dv-operation-panel-width,360px); --operation-panel-top:58px; --shell-sidebar-bg:#fafbf9; }
+body { --operation-panel-width:var(--dv-operation-panel-width,320px); --operation-panel-top:58px; --shell-sidebar-bg:#fafbf9; }
 #operation-panel[hidden], #operation-backdrop[hidden], #operation-panel [hidden] { display:none!important; }
 #operation-panel { position:fixed; z-index:40; top:var(--operation-panel-top); right:0; bottom:0; width:var(--operation-panel-width); max-width:100vw; display:flex; flex-direction:column; color:var(--ink); background:var(--shell-sidebar-bg); border-left:1px solid var(--line); }
-#operation-panel .operation-panel__header { position:relative; display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:22px 52px 20px 20px; }
+#operation-panel .operation-panel__header { position:relative; display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:22px 52px 20px 16px; }
 #operation-panel h2 { margin:0; font:700 16px/1.4 var(--font-body, sans-serif); }
 #operation-panel-close { position:absolute; top:16px; right:12px; width:36px; height:36px; padding:8px; }
 #operation-panel-close svg { width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.7; }
-#operation-panel-body { min-height:0; flex:1; overflow:auto; overscroll-behavior:contain; padding:0 20px 24px; }
+#operation-panel-body { min-height:0; flex:1; overflow:auto; overscroll-behavior:contain; padding:0 16px 24px; }
 #operation-panel #query-parameters-control, #operation-panel #dashboard-controls-control { position:static; width:100%; max-width:none; margin:0; padding:0; border:0; box-shadow:none; background:transparent; }
 #operation-panel .dv-query-card { padding:0; border:0; border-radius:0; box-shadow:none; background:transparent; }
 #operation-panel #operation-panel-query-tools { display:flex; align-items:center; flex-wrap:wrap; gap:6px; padding:0; margin-left:auto; min-height:28px; }
@@ -664,8 +664,6 @@ body { --operation-panel-width:var(--dv-operation-panel-width,360px); --operatio
 #operation-panel .header-control__popover::before { display:none; }
 #operation-panel #parameter-form, #operation-panel #dashboard-control-form { display:grid; grid-template-columns:minmax(0,1fr)!important; gap:20px; }
 #operation-panel .field { min-width:0; max-width:100%; }
-#operation-panel-footer { flex:none; padding:16px 20px; border-top:1px solid var(--line); background:var(--shell-sidebar-bg); }
-#operation-panel-footer .button { width:100%; min-height:42px; justify-content:center; }
 #operation-backdrop { position:fixed; inset:0; z-index:39; border:0; background:rgba(25,31,40,.18); }
 body.operation-panel-modal { overflow:hidden; }
 #query-run-control { flex:0 0 auto; width:auto; gap:8px; }
@@ -677,11 +675,10 @@ body.operation-panel-modal { overflow:hidden; }
 #keyboard-shortcuts-toggle { padding:8px; font-size:11px; color:#606872; }
 #dashboard-controls-toggle { display:block; width:auto; flex:none; min-height:42px; white-space:nowrap; }
 #dashboard-controls-toggle[aria-expanded="true"], #query-parameters-toggle[aria-expanded="true"] { color:#26306f; background:#eef0f8; }
-#dashboard-controls-toggle kbd, #query-parameters-toggle kbd { font:600 11px/1.4 monospace; padding:2px 4px; border:1px solid currentColor; border-radius:4px; }
 #operation-panel button:focus-visible { outline:2px solid #4451a3; outline-offset:2px; }
 @media(min-width:1280px) { body.operation-panel-open .workbench { margin-right:var(--operation-panel-width); } }
 @media(max-width:1279px) { #operation-panel { top:0; z-index:41; border:0; box-shadow:-8px 0 32px rgba(25,31,40,.12); } }
-@media(max-width:520px) { #operation-panel { width:100%; } #query-parameters-toggle span { display:none; } }
+@media(max-width:520px) { #query-parameters-toggle span { display:none; } }
 #operation-panel #dashboard-control-form{gap:56px;max-width:none}
 #dashboard-control-form>section{display:grid;gap:12px;min-width:0}
 #dashboard-control-form>section>.control-scope{width:100%;max-width:100%}

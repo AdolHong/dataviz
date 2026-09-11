@@ -1,3 +1,3 @@
 """Workspace-first data dashboard runtime."""
 
-__version__ = "0.24.3"
+__version__ = "0.24.5"

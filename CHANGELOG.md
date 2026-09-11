@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.24.5 — 2026-09-11
+
+- Unify Parameters and Controls drawers at 320px with 16px horizontal padding, including standalone Controls and the desktop content offset. Keep full date-range values visible.
+- Remove the duplicate Parameters footer Run button, separator and synchronization observer. Retain Header Run and keyboard execution; narrow-screen users can close the drawer and run without losing their draft.
+- Shorten Header, panel and shortcut-help labels to Parameters / Controls without changing DSL or scope semantics.
+- Handle shortcuts from the current same-origin Canvas before Runtime forwarding, including waiting/error documents without a runtime bridge. Recognize iframe editable targets correctly and avoid duplicate execution.
+- Verify the affected panel, shortcut, contextual-controls and export paths only; this patch does not repeat the full suites.
+
+## 0.24.4 — 2026-09-11
+
+- Default single-key shortcuts to Q (left sidebar), W (query parameters), E (controls), R (run). Keep Escape and help (?) available; single-key mode can be disabled in shortcut help.
+- Support Cmd+Ctrl+Q/W/E/R with single-key mode disabled, plus Cmd/Ctrl+Enter and Ctrl+End for Run. Preserve editable-target, IME, repeat and modal guards; forward modified shortcuts from Canvas independently of the single-key preference.
+- Remove Header Q/C key badges. Update shortcut help with the active mapping and persist the preference; exported HTML exposes only its supported W/E operations, not Run or the workspace sidebar.
+- Run targeted shortcut, contextual-panel and export regressions only; full suites are intentionally not repeated for this patch.
+
 ## 0.24.3 — 2026-09-11
 
 - Unify Query Parameters and Controls sidebar width at 360px, sharing the layout token with standalone Controls and the surrounding content offset.

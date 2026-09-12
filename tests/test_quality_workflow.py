@@ -45,6 +45,14 @@ def test_browser_failure_upload_is_conditional_and_bounded():
     jobs = yaml.safe_load((ROOT / '.github/workflows/quality.yml').read_text())['jobs']
     install = next(step['run'] for step in jobs['browsers']['steps'] if 'playwright install' in step.get('run', ''))
     assert 'chromium ${{ matrix.browser }}' in install
+    browser_steps = jobs['browsers']['steps']
+    run = next(step['run'] for step in browser_steps if step.get('name') == 'Run verified browser suite')
+    assert 'scripts/test_browsers.py --fetch-assets' in run
+    assert '--browsers ${{ matrix.browser }}' in run
+    assert '--output-dir' in run
+    cache = next(step for step in browser_steps if step.get('uses', '').startswith('actions/cache'))
+    assert cache['with']['path'] == '.browser-test-assets'
+    assert "hashFiles('tests/e2e/assets.json')" in cache['with']['key']
     upload = next(step for step in jobs['browsers']['steps'] if step.get('uses', '').startswith('actions/upload-artifact'))
     assert upload['if'] == 'failure()'
     assert upload['with']['retention-days'] == 7

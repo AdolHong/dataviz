@@ -1,0 +1,62 @@
+[
+  {
+    "file": "Arrow.es2015.min.js",
+    "url": "https://cdn.jsdelivr.net/npm/apache-arrow@21.1.0/Arrow.es2015.min.js",
+    "content_type": "application/javascript",
+    "sha256": "d3f0ded2a2bdd1208232b942f8e4810f7a402564fac3c78b4574158cd542acb9"
+  },
+  {
+    "file": "world_110m.json",
+    "url": "https://cdn.plot.ly/un/world_110m.json",
+    "content_type": "application/json",
+    "sha256": "e1bf51740ad28396265e52123ea7315d692f112664ab2cb0f1ea76a96fe1bb0a"
+  },
+  {
+    "file": "perspective/client.js",
+    "url": "https://cdn.jsdelivr.net/npm/@perspective-dev/client@5.4.0/dist/cdn/perspective.js",
+    "content_type": "application/javascript",
+    "sha256": "ca387e2b9d20e4c70478c5becc5abe53d2a0655fdd36c0c163050253532cb465"
+  },
+  {
+    "file": "perspective/viewer.js",
+    "url": "https://cdn.jsdelivr.net/npm/@perspective-dev/viewer@5.4.0/dist/cdn/perspective-viewer.js",
+    "content_type": "application/javascript",
+    "sha256": "bf67ee20e2dca1aaccd402d319010eb16d94a7022b969f4b8908048701233db6"
+  },
+  {
+    "file": "perspective/viewer.wasm",
+    "url": "https://cdn.jsdelivr.net/npm/@perspective-dev/viewer@5.4.0/dist/wasm/perspective-viewer.wasm",
+    "content_type": "application/wasm",
+    "sha256": "45460781c703f843035be10c8f980fe038dbc65895e127a7a05dbdf8f70b0a07"
+  },
+  {
+    "file": "perspective/worker.js",
+    "url": "https://cdn.jsdelivr.net/npm/@perspective-dev/client@5.4.0/dist/cdn/perspective-server.worker.js",
+    "content_type": "application/javascript",
+    "sha256": "b8742dfbf5887897665731b7405e561d784916a790e58f7eb426669cfbc8eb93"
+  },
+  {
+    "file": "perspective/server.wasm",
+    "url": "https://cdn.jsdelivr.net/npm/@perspective-dev/server@5.4.0/dist/wasm/perspective-server.memory64.wasm",
+    "content_type": "application/wasm",
+    "sha256": "ac7c3714365c4f50449c889226c3ae577f83785fffb3f6c27d1dfdb46fb07ba3"
+  },
+  {
+    "file": "perspective/datagrid.js",
+    "url": "https://cdn.jsdelivr.net/npm/@perspective-dev/viewer-datagrid@5.4.0/dist/cdn/perspective-viewer-datagrid.js",
+    "content_type": "application/javascript",
+    "sha256": "b5c825894ade356ea5bf52f83be5d444911d0d4a57f2546bddfcb4873939bcf8"
+  },
+  {
+    "file": "perspective/charts.js",
+    "url": "https://cdn.jsdelivr.net/npm/@perspective-dev/viewer-charts@5.4.0/dist/cdn/perspective-viewer-charts.js",
+    "content_type": "application/javascript",
+    "sha256": "ca0232ca0cbbc79527cc0b51a3668fffed9ebedaf62433cde00854d699b0e2ee"
+  },
+  {
+    "file": "perspective/themes.css",
+    "url": "https://cdn.jsdelivr.net/npm/@perspective-dev/viewer@5.4.0/dist/css/themes.css",
+    "content_type": "text/css",
+    "sha256": "c2e51571e597b7f3bc4fd34c173625205ce8fb76cc9eaf0d4af398c5345123c4"
+  }
+]

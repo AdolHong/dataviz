@@ -20,7 +20,6 @@ from typing import Any
 
 import typer
 import yaml
-import click
 
 from dataviz import __version__
 from dataviz.cli_actions import actions_app
@@ -206,6 +205,10 @@ def parse_params(values: list[str] | None) -> dict[str, Any]:
         if "=" not in value:
             raise typer.BadParameter(f"Parameter must use name=value: {value}")
         name, raw = value.split("=", 1)
+        if not name or name != name.strip():
+            raise typer.BadParameter("Parameter name must be non-empty and have no surrounding whitespace")
+        if name in result:
+            raise typer.BadParameter(f"Duplicate parameter: {name}; pass each name once")
         try:
             result[name] = json.loads(raw)
         except json.JSONDecodeError:
@@ -604,17 +607,11 @@ def _browser_runtime_benchmark(
     }
 
 
-def handle_error(exc: Exception) -> None:
+def handle_error(exc: Exception, *, analysis: bool = False) -> None:
     error = exc.as_dict() if isinstance(exc, DatavizError) else {
         "type": type(exc).__name__, "message": str(exc)
     }
-    context = click.get_current_context(silent=True)
-    command_path = f" {context.command_path} " if context else ""
-    is_data_command = any(
-        marker in command_path
-        for marker in (" catalog ", " result ", " evidence ", " run ")
-    )
-    if is_data_command:
+    if analysis:
         if not error.get("code"):
             error["code"] = (
                 "analysis_argument_invalid"
@@ -1975,7 +1972,7 @@ def scaffold(
     recipe: str | None = typer.Argument(
         None,
         help=(
-            "Recipe such as dashboard, view.line, control.cascader, "
+            "Defaults to a runnable standalone YAML; other recipes include minimal, view.line, control.cascader, "
             "dataset-transform.server-python, or interactive-transform.browser-js"
         ),
     ),
@@ -2010,8 +2007,7 @@ def scaffold(
                             f"- `{definition['id']}` · {definition['route']}"
                         )
             return
-        if recipe is None:
-            raise typer.BadParameter("Provide a recipe, or use --list")
+        recipe = recipe or scaffold_catalog()["default"]
         payload = scaffold_recipe(recipe, identifier)
         if output is not None:
             root = output.resolve()
@@ -2030,7 +2026,15 @@ def scaffold(
                     "id": identifier,
                     "output": str(root),
                     "files": [str(path) for path in written],
-                    "next": payload["verify"],
+                    "next": [
+                        command.replace("<workspace>/dashboard.yaml", shlex.quote(str(root / "dashboard.yaml")))
+                        .replace("<workspace>", shlex.quote(str(root)))
+                        .replace("--output report.html", "--output " + shlex.quote(str(root / "report.html")))
+                        if payload["scope"] != "fragment" else command
+                        for command in payload["verify"]
+                    ],
+                    "scope": payload["scope"],
+                    "notes": payload["notes"],
                 }
             )
             return
@@ -2268,7 +2272,7 @@ def _analysis_primary_search_entries(
     )
 
 
-def _analysis_catalog_payload(catalog, entries: list[dict[str, Any]]) -> dict[str, Any]:
+def _analysis_catalog_payload(catalog, entries: list[dict[str, Any]], *, workspace: Path | None = None) -> dict[str, Any]:
     incomplete = [
         entry["reference"]
         for entry in entries
@@ -2279,7 +2283,15 @@ def _analysis_catalog_payload(catalog, entries: list[dict[str, Any]]) -> dict[st
         "generation": catalog.generation,
         "count": len(entries),
         "entries": [analysis_entry_summary(entry) for entry in entries],
-        "diagnostics": list(getattr(catalog, "diagnostics", [])) + (
+        "diagnostics": list(getattr(catalog, "diagnostics", [])) + ([{
+            "level": "advice",
+            "code": "analysis_catalog_no_matches",
+            "message": "No matching data contracts under the current filters. This does not mean the Workspace has no data. Try fewer terms or inspect the catalog; internal, draft and deprecated Outputs remain excluded unless explicitly requested.",
+            "next_actions": [
+                f"dataviz catalog list {shlex.quote(str(workspace))} --top 10",
+                "dataviz docs catalog-discovery",
+            ],
+        }] if not entries and workspace is not None else []) + (
             [
                 {
                     "level": "advice",
@@ -2296,6 +2308,39 @@ def _analysis_catalog_payload(catalog, entries: list[dict[str, Any]]) -> dict[st
         ),
         "stale": bool(getattr(catalog, "stale", False)),
     })
+
+
+def _analysis_catalog_diagnostics(payload: dict[str, Any]) -> None:
+    for diagnostic in payload["diagnostics"]:
+        typer.echo(f"{diagnostic.get('code', 'catalog')}: {diagnostic.get('message', '')}")
+        for command in diagnostic.get("next_actions", []):
+            typer.echo(f"  Next: {command}")
+
+
+def _analysis_describe_closure(closure: dict[str, Any], detail: str) -> None:
+    if detail == "summary":
+        counts = [f"{key}: {len(values)}" for key, values in closure.items() if values]
+        if counts:
+            typer.echo("  Dependencies: " + ", ".join(counts))
+        return
+    if detail == "debug":
+        for key, values in closure.items():
+            if values:
+                typer.echo(f"  {key}: {json.dumps(values, ensure_ascii=False)}")
+        return
+    for node in closure.get("nodes", []):
+        typer.echo(f"\n  Node: {node['node_id']} · {node['runtime']}")
+        typer.echo(f"  Definition: {node['definition_path']}")
+        typer.echo(json.dumps(node["definition"], ensure_ascii=False, indent=2))
+        for asset in node.get("assets", []):
+            typer.echo(f"  Asset: {asset['path']} · {asset['role']}")
+            if asset.get("content_hash"):
+                typer.echo(f"  Hash: {asset['content_hash']}")
+            if "content" in asset:
+                # Keep code lines readable instead of a Python repr with escaped newlines.
+                typer.echo(asset["content"])
+            elif asset.get("content_omitted"):
+                typer.echo(f"  Omitted: {asset['content_omitted']}")
 
 
 def _analysis_validate_kind(kind: str | None) -> str | None:
@@ -2398,7 +2443,7 @@ def evidence_create(
     except typer.Exit:
         raise
     except Exception as exc:
-        handle_error(exc)
+        handle_error(exc, analysis=True)
 
 
 @evidence_app.command("promote")
@@ -2436,7 +2481,7 @@ def evidence_promote(
     except typer.Exit:
         raise
     except Exception as exc:
-        handle_error(exc)
+        handle_error(exc, analysis=True)
 
 
 def _parameter_domain_ids(dashboard: Any, selected: list[str] | None) -> list[str]:
@@ -2609,13 +2654,14 @@ def catalog_list(
             top=top,
         )
         if output_format == "json":
-            print_json(_analysis_catalog_payload(catalog, entries))
+            print_json(_analysis_catalog_payload(catalog, entries, workspace=workspace))
             return
         _analysis_catalog_text(entries)
+        _analysis_catalog_diagnostics(_analysis_catalog_payload(catalog, entries, workspace=workspace))
     except typer.Exit:
         raise
     except Exception as exc:
-        handle_error(exc)
+        handle_error(exc, analysis=True)
 
 
 @catalog_app.command("search")
@@ -2688,13 +2734,14 @@ def catalog_search(
             for entry in entries
         ]
         if output_format == "json":
-            print_json(_analysis_catalog_payload(catalog, entries))
+            print_json(_analysis_catalog_payload(catalog, entries, workspace=workspace))
             return
         _analysis_catalog_text(entries)
+        _analysis_catalog_diagnostics(_analysis_catalog_payload(catalog, entries, workspace=workspace))
     except typer.Exit:
         raise
     except Exception as exc:
-        handle_error(exc)
+        handle_error(exc, analysis=True)
 
 
 @catalog_app.command("describe")
@@ -2759,7 +2806,7 @@ def catalog_describe(
                     },
                     "closure": local_closure,
                     "next_actions": [
-                        f"dataviz run {shlex.quote(str(workspace))} {resolved['reference']}"
+                        shlex.join(["dataviz", "run", str(workspace), resolved["reference"]])
                     ],
                 }
                 if detail == "full" and loaded is not None:
@@ -2783,6 +2830,10 @@ def catalog_describe(
                     {
                         "status": "error",
                         "requested_reference": requested,
+                        "next_actions": [
+                            shlex.join(["dataviz", "catalog", "list", str(workspace), "--top", "10"]),
+                            "dataviz docs target-references",
+                        ],
                         "error": {
                             "code": details.get("code", "analysis_describe_failed"),
                             "message": str(error),
@@ -2807,27 +2858,36 @@ def catalog_describe(
                     typer.echo(
                         f"{item['requested_reference']}: ERROR {item['error']['message']}"
                     )
+                    for command in item["next_actions"]:
+                        typer.echo(f"  Next: {command}")
                     continue
                 entry = item["entry"]
                 typer.echo(str(entry.get("title") or entry["reference"]))
                 if entry.get("purpose"):
                     typer.echo(f"  {entry['purpose']}")
+                if entry.get("grain"):
+                    typer.echo(f"  Grain: {entry['grain']}")
+                if entry.get("assurance"):
+                    typer.echo(f"  Assurance: {entry['assurance'].get('status', 'unspecified')}")
+                for caveat in entry.get("caveats", []):
+                    typer.echo(f"  Caveat: {caveat}")
                 typer.echo(
                     f"  Ref: {entry['reference']} · {entry['kind']}"
                 )
                 parameters = _analysis_parameter_text(entry)
                 typer.echo(f"  Parameters: {parameters or 'none'}")
-                closure = item.get("closure") or {}
-                for key, values in closure.items():
-                    if values:
-                        typer.echo(f"  {key}: {values}")
+                for control in item["invocation"].get("controls", []):
+                    typer.echo(f"  Control: {control['key']} · {control['value_type']}")
+                _analysis_describe_closure(item.get("closure") or {}, detail)
                 typer.echo(f"  Run: {item['next_actions'][0]}")
+                if detail != "full":
+                    typer.echo("  More: " + shlex.join(["dataviz", "catalog", "describe", str(workspace), entry["reference"], "--detail", "full"]))
         if failed:
             raise typer.Exit(1)
     except typer.Exit:
         raise
     except Exception as exc:
-        handle_error(exc)
+        handle_error(exc, analysis=True)
 
 
 @result_app.command("list")
@@ -2868,7 +2928,7 @@ def result_list(
     except typer.Exit:
         raise
     except Exception as exc:
-        handle_error(exc)
+        handle_error(exc, analysis=True)
 
 
 @result_app.command("show")
@@ -2939,7 +2999,7 @@ def result_show(
     except typer.Exit:
         raise
     except Exception as exc:
-        handle_error(exc)
+        handle_error(exc, analysis=True)
 
 
 @result_app.command("inspect")
@@ -3007,7 +3067,7 @@ def result_inspect(
     except typer.Exit:
         raise
     except Exception as exc:
-        handle_error(exc)
+        handle_error(exc, analysis=True)
 
 
 @result_app.command("export")
@@ -3039,42 +3099,45 @@ def result_export(
     except typer.Exit:
         raise
     except Exception as exc:
-        handle_error(exc)
+        handle_error(exc, analysis=True)
 
 
 @app.command()
 def run(
     workspace: Path = typer.Argument(..., exists=True),
     target: str | None = typer.Argument(None, help="Dashboard id or canonical Target Reference; optional for a standalone YAML"),
-    page: str | None = typer.Option(None, "--page", help="Optional analysis Page; defaults to the first declared Page, or the top-level Dashboard"),
+    page: str | None = typer.Option(None, "--page", help="Optional analysis Page; defaults to the first declared Page, or the top-level Dashboard", rich_help_panel="Multi-page and interaction"),
     auth: Path | None = typer.Option(None, "--auth", exists=True, help="Explicit Adapter file, auth directory or Workspace for a standalone Dashboard"),
     also: list[str] | None = typer.Option(
-        None, "--also", help="Repeat compatible canonical Output targets in one execution"
+        None, "--also", help="Repeat compatible canonical Output targets in one execution", rich_help_panel="Advanced analysis"
     ),
-    query_param: list[str] | None = typer.Option(None, "--query-param"),
-    control: list[str] | None = typer.Option(None, "--control"),
-    output_name: str | None = typer.Option(None, "--output", help="View input name"),
-    runtime: str = typer.Option("auto", "--runtime", help="auto, server, or browser"),
+    query_param: list[str] | None = typer.Option(None, "--query-param", help="Query input as name=value or name=JSON; each name once"),
+    control: list[str] | None = typer.Option(None, "--control", help="Post-query Control key=value; each key once", rich_help_panel="Multi-page and interaction"),
+    output_name: str | None = typer.Option(None, "--output", help="View input name", rich_help_panel="Advanced analysis"),
+    runtime: str = typer.Option("auto", "--runtime", help="auto, server, or browser", rich_help_panel="Advanced analysis"),
     output_format: str = typer.Option("text", "--format", help="text or json"),
     preview_rows: int = typer.Option(10, "--preview-rows", min=1),
     refresh: bool = typer.Option(False, "--refresh"),
-    refresh_catalog: bool = typer.Option(False, "--refresh-catalog"),
-    allow_network: bool = typer.Option(False, "--allow-network"),
+    refresh_catalog: bool = typer.Option(False, "--refresh-catalog", help="Rebuild the discovery index", rich_help_panel="Advanced analysis"),
+    allow_network: bool = typer.Option(False, "--allow-network", help="Allow HTTP(S) for browser computation", rich_help_panel="Advanced analysis"),
     timeout_seconds: float = typer.Option(60.0, "--timeout", min=1.0),
-    detail: str = typer.Option("summary", "--detail", help="summary, debug, or full"),
-    overlay: str | None = typer.Option(None, "--overlay"),
-    dry_run: bool = typer.Option(False, "--dry-run"),
-    allow_partial: bool = typer.Option(False, "--allow-partial"),
+    detail: str = typer.Option("summary", "--detail", help="summary, debug, or full", rich_help_panel="Advanced analysis"),
+    overlay: str | None = typer.Option(None, "--overlay", help="Temporary Analysis Overlay file; - reads stdin", rich_help_panel="Advanced analysis"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Validate an Overlay without executing; requires --overlay", rich_help_panel="Advanced analysis"),
+    allow_partial: bool = typer.Option(False, "--allow-partial", help="Accept a partial Result as successful", rich_help_panel="Advanced analysis"),
     from_result: str | None = typer.Option(
         None,
         "--from-result",
         help="Reuse exact Dataset Transform inputs from one immutable Result",
+        rich_help_panel="Advanced analysis",
     ),
 ) -> None:
     """Execute a Dashboard or canonical data Target and seal one immutable Result."""
     try:
         from dataviz.standalone import prepare_input
 
+        parsed_query = parse_params(query_param)
+        parsed_controls = parse_params(control)
         workspace, standalone_id = prepare_input(workspace, auth=auth)
         target = target or standalone_id
         if target is None:
@@ -3088,8 +3151,8 @@ def run(
                 target=parsed.canonical,
                 page_id=page,
                 also=tuple(also or ()),
-                query_parameter_state=parse_params(query_param),
-                controls=parse_params(control),
+                query_parameter_state=parsed_query,
+                controls=parsed_controls,
                 output_name=output_name,
                 runtime=runtime,
                 preview_rows=preview_rows,
@@ -3118,7 +3181,7 @@ def run(
     except typer.Exit:
         raise
     except Exception as exc:
-        handle_error(exc)
+        handle_error(exc, analysis=True)
 
 
 @app.command()

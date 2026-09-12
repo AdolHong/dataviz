@@ -38,9 +38,21 @@ dataviz docs --component view.custom --format json
 
 返回的 `dataviz/authoring-route/v1` 包含 `closure`、`concepts`、`documents`、`scaffolds`、`commands` 与 `excluded_concepts`。调用方不需要解析自然语言来判断下一份文档。
 
-## 完整 Scaffold profiles
+## 最短入口与完整 Scaffold profiles
 
-三个 profile 都会生成一个可直接运行的 Workspace，而不是等待人工拼接的 YAML 片段：
+一个简单看板先从单 YAML 开始：
+
+```bash
+dataviz scaffold standalone --id sales --output ./sales
+dataviz validate ./sales/dashboard.yaml --strict
+dataviz run ./sales/dashboard.yaml --format json
+```
+
+省略 recipe 同样生成 standalone；默认只含一个 dashboard.yaml 和内嵌的两行 Python 样例，不需要 auth、数据库、Page、Section 或浏览器扩展。需要真实 SQL 连接时再读 `docs standalone`；需要组织多个看板时再选 Workspace profile。`run` 返回 Result 的后续命令用于只读检查与报告，避免重复取数。
+
+写入后的完整 profile 返回实际目标路径的下一步命令（含 shell 引号）；片段保留明确的 owning Workspace/Dashboard 占位符，不把片段目录或片段 ID 当作可运行目标。已有文件默认不覆盖。
+
+以下三个 profile 生成完整 Workspace：
 
 ```bash
 dataviz scaffold minimal --id sales --output ./sales-workspace
@@ -54,7 +66,7 @@ dataviz scaffold custom-renderer --id special-view --output ./renderer-workspace
 - `scope`：完整 `workspace` 或可组合的 `fragment`；
 - profile 清单和默认 profile。
 
-单个 Scaffold payload 还提供固定验证链：
+Workspace profile 的 Scaffold payload 提供验证链：
 
 ```text
 validate → report → visual-check

@@ -18,6 +18,7 @@
     const valueType = control.dataset.valueType || 'text';
     const maxItems = Math.max(0, Number(control.dataset.maxItems || 0));
     let synchronizing = false;
+    let valueSignature;
 
     const parse = () => {
       if (!input.value) return [];
@@ -38,6 +39,7 @@
       const values = [...rows.querySelectorAll('[data-multiple-value]')]
         .map(typed).filter(value => value !== null);
       input.value = JSON.stringify(values);
+      valueSignature = input.value;
       input.dispatchEvent(new Event('input', {bubbles:true}));
       api.emitChange(input);
       syncButtons();
@@ -81,8 +83,17 @@
       rows.querySelectorAll('input, button').forEach(element => { element.disabled = input.disabled; });
     };
     const render = () => {
-      synchronizing = true;
       const values = parse();
+      const signature = JSON.stringify(values);
+      // Whole-form snapshots also arrive for unrelated Control commits. An
+      // unchanged value must not delete an unsubmitted blank row or the active
+      // input's selection/caret. Real external value changes still replace rows.
+      if (signature === valueSignature) {
+        syncButtons();
+        return;
+      }
+      valueSignature = signature;
+      synchronizing = true;
       rows.replaceChildren();
       values.forEach(append);
       synchronizing = false;

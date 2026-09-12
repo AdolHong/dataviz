@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.25.1 — 2026-09-13
+
+- Unify browser testing under `scripts/test_browsers.py`: verify pinned upstream resources, run isolated Chromium/Firefox/WebKit processes in parallel (optional serial mode) and retain separate logs and failure artifacts without automatic retries.
+- Reuse that entry point in CI with a manifest-keyed resource cache, and synchronize the project version in the lockfile without changing dependency versions.
+- Extend the real-resource cache to Perspective 5.4.0 JS/WASM/Worker assets and remove duplicate fixture cache setup; keep the actual renderer and lifecycle assertions.
+- Preserve the current empty-entry, sidebar and frame-isolation behavior in E2E tests; add cache-integrity and matrix-runner failure/log-protection tests. Full local gates passed: 776 non-browser tests and 120 tests each in Chromium, Firefox and WebKit, using verified real-resource caches. See `docs/release-0.25.1.md` for scope and earlier failure evidence.
+- Preserve Multiple Input blank draft rows and caret when an unchanged value is synchronized by an unrelated Control commit; real external value changes still replace rows.
+- Reject stale selected-item metadata when a Query Parameter changes during lookup; refresh against the current selection before reconciling the same parent domain.
+- Coordinate managed Plotly chart initialization/disposal with active box/lasso selection, so a sibling chart cannot cancel the selection completion callback; retain real-gesture regression coverage.
+
+## 0.25.0 — 2026-09-12
+
+- Default Scaffold to a runnable single-YAML Dashboard, with quoted next-step commands; retain explicit Workspace profiles and distinguish fragments from runnable Dashboards.
+- Align Quickstart, task routes and bundled Skill with progressive authoring; group advanced Run options separately.
+- Improve Analysis empty-search and invalid-reference diagnostics, and progressively disclose semantics, dependency details and code.
+- Reject duplicate or malformed parameter names, explicitly select Analysis error contracts independently of Typer/Click internals, and shell-quote Result continuation paths.
+- Align E2E fixture navigation, sidebar assertions and browser lifetime with the current application behavior; preserve empty-root and frame-isolation contracts.
+- No DSL changes. CLI evidence is recorded in `docs/cli-progressive-review.md`; browser results and unresolved Firefox/WebKit limitations are recorded in `docs/release-0.25.0.md`. This local build does not have an all-green three-browser release gate.
+
 ## 0.24.13 — 2026-09-12
 
 - Align shared Header, sidebar fields, responsive overlays and keyboard help across Server, Share and exported HTML, preserving environment-specific execution capabilities.

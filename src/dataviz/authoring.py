@@ -747,7 +747,7 @@ def _scaffold_output(title: str, purpose: str, grain: str) -> dict[str, Any]:
     }
 
 
-SCAFFOLD_PROFILES = ("minimal", "interactive", "custom-renderer")
+SCAFFOLD_PROFILES = ("standalone", "minimal", "interactive", "custom-renderer")
 
 
 def scaffold_recipes() -> tuple[str, ...]:
@@ -776,6 +776,8 @@ def scaffold_recipes() -> tuple[str, ...]:
 
 
 def _scaffold_route(recipe: str) -> str:
+    if recipe == "standalone":
+        return "minimal"
     if recipe == "server-action.python":
         return "server-actions"
     if recipe in SCAFFOLD_PROFILES:
@@ -793,20 +795,45 @@ def scaffold_catalog() -> dict[str, Any]:
     """Describe profile and fragment recipes without requiring prose parsing."""
     return {
         "schema": "dataviz/scaffold-catalog/v2",
-        "default": "minimal",
+        "default": "standalone",
         "profiles": list(SCAFFOLD_PROFILES),
         "recipes": [
             {
                 "id": recipe,
                 "route": _scaffold_route(recipe),
-                "scope": "workspace" if recipe in SCAFFOLD_PROFILES else "fragment",
+                "scope": _scaffold_scope(recipe),
             }
             for recipe in scaffold_recipes()
         ],
     }
 
 
+def _scaffold_scope(recipe: str) -> str:
+    if recipe == "standalone":
+        return "standalone"
+    return "workspace" if recipe in SCAFFOLD_PROFILES else "fragment"
+
+
 def _profile_files(profile: str, item_id: str) -> dict[str, str]:
+    if profile == "standalone":
+        return {"dashboard.yaml": _yaml({
+            "schema": "dataviz/dashboard/v20",
+            "id": item_id,
+            "title": item_id.replace("-", " ").title(),
+            "sources": [{
+                "id": "data", "type": "python",
+                "code": {"inline": (
+                    "import pandas as pd\n\n"
+                    "def load(context):\n"
+                    "    return pd.DataFrame([\n"
+                    "        {'category': 'Alpha', 'value': 12},\n"
+                    "        {'category': 'Beta', 'value': 19},\n"
+                    "    ])\n"
+                )},
+                "outputs": {"main": {"kind": "table"}},
+            }],
+            "views": [{"id": "overview", "template": "table", "input": "source:data/main"}],
+        })}
     dashboard_root = f"dashboards/{item_id}"
     workspace = {
         "schema": "dataviz/workspace/v2",
@@ -1493,7 +1520,23 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         )
 
     route = _scaffold_route(recipe)
-    scope = "workspace" if recipe in SCAFFOLD_PROFILES else "fragment"
+    scope = _scaffold_scope(recipe)
+    if scope == "standalone":
+        verify = [
+            "dataviz validate <workspace>/dashboard.yaml --strict --format json",
+            "dataviz run <workspace>/dashboard.yaml --format json",
+        ]
+    elif scope == "workspace":
+        verify = [
+            f"dataviz validate <workspace> --dashboard {item_id} --format json",
+            f"dataviz report <workspace> {item_id} --output report.html",
+            f"dataviz visual-check <workspace> {item_id} --target both",
+        ]
+    else:
+        verify = [
+            f"dataviz docs --task {route} --format json",
+            "dataviz validate <workspace> --dashboard <dashboard> --strict --format json",
+        ]
     return {
         "schema": "dataviz/scaffold/v1",
         "recipe": recipe,
@@ -1501,17 +1544,11 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
         "route": route,
         "scope": scope,
         "files": files,
-        "verify": ([
-            "dataviz docs server-actions --format json",
-            "dataviz validate <workspace> --dashboard <dashboard> --strict --format json",
-        ] if recipe == "server-action.python" else [
-            f"dataviz validate <workspace> --dashboard {item_id} --format json",
-            f"dataviz report <workspace> {item_id} --output report.html",
-            f"dataviz visual-check <workspace> {item_id} --target both",
-        ]),
+        "verify": verify,
         "notes": [
             "Snippets are strict current-schema examples; no legacy aliases are emitted.",
             "Run dataviz validate after placing or merging the files.",
+            *(["Fragment only: merge into an existing Dashboard before validation; <dashboard> is the owning Dashboard, not the fragment id."] if scope == "fragment" else []),
             *([
                 f"Add '{item_id}.yaml' to the owning Dashboard server_actions list; paths are relative to the Action definition.",
                 "This is a fail-closed Python starter, not a preconfigured CRUD service. Implement and test it using isolated resources.",

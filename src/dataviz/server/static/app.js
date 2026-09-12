@@ -2789,6 +2789,7 @@ async function lookupQueryParameter(parameter, {
   updateParameterDomainUi();
   renderQueryAuthorEvidence();
   const stateEntry = runtime.queryParameterState?.[parameter.id] || {value:[]};
+  const selectionSignature = JSON.stringify(stateEntry);
   try {
     const response = await request(
       `/api/dashboards/${encodeURIComponent(dashboard.id)}/parameter-domains/lookup`,
@@ -2812,6 +2813,13 @@ async function lookupQueryParameter(parameter, {
       dashboard, runtime, parameter, requestGeneration, parentSignature,
     });
     if (!currentRequest()) return null;
+    // selected_items validates the operands sent with this request, not a
+    // newer draft edited while it was in flight. Refresh that metadata before
+    // reconciliation; otherwise an old empty operand list can erase a new
+    // include/exclude choice even when the parent domain has not changed.
+    if (JSON.stringify(runtime.queryParameterState?.[parameter.id] || {value:[]}) !== selectionSignature) {
+      return lookupQueryParameter(parameter, {search, append, preserve});
+    }
     const items = append
       ? [...(previous.items || []), ...(response.items || [])]
       : (response.items || []);

@@ -405,6 +405,27 @@ def test_cli_runs_and_exports_selected_page_without_requery(page_workspace, tmp_
     assert json.loads(target.output)["page_id"] == "history"
 
 
+@pytest.mark.parametrize("flags", [
+    ["--page", "missing"],
+    ["--query-param", "not_a_parameter=1"],
+    ["--query-param", "year=not_an_integer"],
+    ["--query-param", "category=fruit"],  # Belongs only to the sibling Page.
+])
+def test_cli_invalid_page_or_parameters_never_execute_data(page_workspace, monkeypatch, flags):
+    import json
+    from typer.testing import CliRunner
+    from dataviz.cli import app
+    from dataviz.execution import Executor
+    def forbidden(*args, **kwargs):
+        pytest.fail("Invalid page/parameters must be rejected before Query execution")
+    monkeypatch.setattr(Executor, "run", forbidden)
+    response = CliRunner().invoke(app, ["run", str(page_workspace), "holiday", "--format", "json", *flags])
+    assert response.exit_code == 1, response.output
+    payload = json.loads(response.stdout)
+    assert payload["status"] == "failed"
+    assert payload["error"]["code"]
+
+
 def test_bundle_includes_second_page_assets_without_widening_runs(page_workspace, tmp_path):
     import json
     from dataviz.workspace import bundle_dashboard, load_workspace

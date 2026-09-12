@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import sqlite3
 import uuid
@@ -215,7 +216,7 @@ class AnalysisResultStore:
                     }
                 )
                 immutable_result["renderability"] = renderability
-            quoted_workspace = json.dumps(str(self.workspace), ensure_ascii=False)
+            quoted_workspace = shlex.quote(str(self.workspace))
             immutable_result["next_actions"] = [
                 f"dataviz result inspect {quoted_workspace} {result_id}",
                 f"dataviz result show {quoted_workspace} {result_id}",

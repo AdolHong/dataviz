@@ -320,14 +320,13 @@ AUTHORING_ROUTES: dict[str, dict[str, Any]] = {
         "inherits": [],
         "documents": ["minimal-dashboard"],
         "scaffolds": [
-            "minimal", "source.file", "source.sql", "source.python",
+            "standalone", "minimal", "source.file", "source.sql", "source.python",
             "view.metric", "view.line", "view.bar", "view.map", "view.table",
         ],
         "commands": [
-            "dataviz scaffold minimal --id <dashboard> --output <workspace>",
-            "dataviz validate <workspace> --dashboard <dashboard> --format json",
-            "dataviz report <workspace> <dashboard> --output report.html",
-            "dataviz visual-check <workspace> <dashboard> --target both",
+            "dataviz scaffold standalone --id sales --output ./sales",
+            "dataviz validate ./sales/dashboard.yaml --strict --format json",
+            "dataviz run ./sales/dashboard.yaml --format json",
         ],
         "excludes": ["control", "interactive-transform", "renderer-contract"],
     },
@@ -841,6 +840,7 @@ update(context, descriptor, state) {
     "standalone": {
         "summary": "单文件 standalone YAML 看板：内嵌 SQL/Python/JS、小型 Renderer，显式外部 auth；无需维护 Workspace 目录。",
         "commands": [
+            "dataviz scaffold standalone --id sales --output ./sales",
             "dataviz validate sales.yaml --auth connections.yaml --strict",
             "dataviz run sales.yaml --auth connections.yaml --format json",
             "dataviz serve sales.yaml --auth connections.yaml",
@@ -855,6 +855,7 @@ update(context, descriptor, state) {
         },
         "adapter_example": {"adapters": {"local": {"type": "sqlalchemy", "url": "sqlite:///:memory:"}}},
         "rules": [
+            "scaffold standalone（或省略 recipe）生成一个 dashboard.yaml，内含两行 Python 样例数据，无需 auth、数据库、Page 或浏览器测试扩展；执行返回的 next 命令即可校验和运行。SQL 示例才需要外部 Adapter 配置。",
             "validate/run/serve/report 接受 YAML 文件或含 dashboard.yaml 的目录；已有 Workspace 用法不变。",
             "--auth 显式选择 Adapter YAML、auth 目录或已有 Workspace（也可指定 workspace.yaml）；不自动搜索上级目录，不在看板内放凭据。",
             "auth 目录读取 adapters.yaml 与 adapters.local.yaml；外部 Workspace 只提供 Adapter 环境，不导入其 Source、Asset 或其他 Dashboard。",
@@ -873,16 +874,16 @@ update(context, descriptor, state) {
     "quickstart": {
         "summary": "从空环境到可验证 Dashboard、不可变 Result 和 HTML 报告的最短当前路径。",
         "workspace_start": {
-            "single_file": "dataviz docs standalone --format json — 单看板可从一个 YAML 开始，无需先 init Workspace。",
+            "single_file": "dataviz scaffold standalone --id sales --output ./sales — 一个可运行 YAML，无需先 init Workspace 或配置数据库。",
             "starter_workspace": "dataviz init <workspace>",
             "focused_scaffold": "dataviz scaffold minimal --id <dashboard-id> --output <workspace>",
             "rule": "init 直接生成可运行的 hello Dashboard；需要特定结构或能力时，再选择对应 Scaffold recipe。",
         },
         "commands": [
-            "dataviz docs standalone --format json",
-            "dataviz validate sales.yaml --auth connections.yaml --strict",
-            "dataviz run sales.yaml --auth connections.yaml --format json",
-            "dataviz serve sales.yaml --auth connections.yaml",
+            "dataviz scaffold standalone --id sales --output ./sales",
+            "dataviz validate ./sales/dashboard.yaml --strict",
+            "dataviz run ./sales/dashboard.yaml --format json",
+            "dataviz serve ./sales/dashboard.yaml",
         ],
         "next_steps": {
             "query_parameters": "dataviz docs query-parameters --format json",
@@ -892,7 +893,7 @@ update(context, descriptor, state) {
             "debug_or_verify": "dataviz docs workflow --format json",
         },
         "rules": [
-            "先复制 standalone 的最小 YAML 与外部连接配置；不要求 pages、sections、空 controls 或手工创建 Workspace。没有外部连接需求时可省略 --auth。",
+            "先生成单个 dashboard.yaml 并运行内嵌的两行样例；不要求 pages、sections、空 controls、外部连接或手工创建 Workspace。接入数据库时再读 standalone 并显式提供 --auth。",
             "serve 用于打开交互页面，不代表已应用前一步 CLI Run；在页面点击 Run 执行查询。查看已有 Result 而不重查时，按 results 文档导出报告。",
             "不要从自定义 HTML/CSS/JS 开始；先用默认 Renderer 证明数据契约。",
             "Adapter 由 Workspace 或 standalone --auth 显式提供；Dashboard 只写逻辑别名，不保存账号密码。",
@@ -923,10 +924,13 @@ update(context, descriptor, state) {
         ],
         "workflow": [
             "已知道看板时直接 run <workspace> <dashboard>，或 run sales.yaml --auth connections.yaml；不必先学习 Catalog 或 Target Reference。",
+            "run --help 将常用选项、Multi-page and interaction、Advanced analysis 分组；简单运行无需填写高级参数。--dry-run 仅检查显式 --overlay，不是通用查询预览。",
+            "--query-param/--control 使用 name=value 或 name=JSON；同一名称只传一次，重复或空名称直接报错，不静默覆盖。参数名不能有首尾空白，值仍可为空字符串或包含等号。",
             "不知道物理引用时先 catalog search；需要全局概览时使用 catalog list。",
             "执行前用 catalog describe 查看参数闭包、默认值、lineage、语义和可复制的 run 命令。",
             "run 只执行一次并原子封存 Result；预览行数不限制已保存的完整 Artifact。",
             "后续分页、检查、导出和 Evidence 都消费 result_id，不重新查询。",
+            "Result next_actions 使用 shell 引号保护路径中的空格、单引号、美元符号等；直接复制，不要删除引号或自己改成 JSON 引号。",
             "只有需要临时替换 SQL、代码或 File 输入时才增加 --overlay。",
             "单页无需 --page；显式多页省略时只运行第一条声明的 Page，返回 page_id。需要其他分析入口时才加 --page <id>；Result 的查看和导出沿用已封存 Page，不重复指定。",
         ],
@@ -947,6 +951,8 @@ update(context, descriptor, state) {
         ],
         "default_output": [
             "title、purpose、grain 和 assurance 是主体；kind、Dashboard 和物理引用是次级索引。",
+            "describe 默认文本显示粒度、可信状态、caveats 和调用参数；依赖只计数。--detail debug 展开引用，--detail full 展示节点定义与资产路径/hash，只有 --include-code 才内联代码。",
+            "list/search 空结果返回 analysis_catalog_no_matches 提示与只读下一步命令，而不是空白终端；它不表示 Workspace 没有数据，也不会自动纳入 internal、draft 或 deprecated 口径。",
             "紧凑附带 Query Parameter 契约、Output 摘要、相关 View、最小执行闭包和搜索命中原因。",
             "Source/View 命中默认投影到可复用 Output，避免与可复用 Output 平铺竞争。",
         ],
@@ -959,6 +965,7 @@ update(context, descriptor, state) {
             "Catalog generation 由 Dashboard 定义 hash 驱动，可安全重建；它不是第二份业务事实来源。",
             "list/search/describe 不执行 Source、候选查询或 Transform，也不创建 Result。",
             "批量 describe 固定在同一 generation，保持输入顺序并逐项返回错误。",
+            "describe 的错误项附带 Catalog 概览与引用语法文档命令；恢复命令只读，不自动修正引用或执行查询。",
         ],
         "related": ["target-references", "analysis-quickstart", "results", "outputs"],
     },
@@ -1056,7 +1063,7 @@ update(context, descriptor, state) {
             "minimal 只披露 Adapter → Source → View → Layout。",
             "只有任务需要查询后交互状态或计算时才进入 interactive。",
             "只有内置 View 无法表达视觉时才进入 custom-renderer。",
-            "每条 Scaffold profile 都是完整 Workspace，并声明 validate → report → visual-check 验证链。",
+            "默认 standalone profile 只生成一个可运行 YAML，先 validate → run，不要求浏览器扩展；minimal/interactive/custom-renderer 显式 profile 生成完整 Workspace，可继续 report → visual-check。fragment 需要先合并到所属 Dashboard。",
             "任务路由控制作者上下文，不改变 Runtime 的严格 Schema 或执行语义。",
         ],
         "related": ["quickstart", "workflow", "components", "ai-authoring"],

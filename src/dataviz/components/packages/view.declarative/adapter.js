@@ -434,6 +434,53 @@
         ) return;
       }
     };
+    // Plotly.newPlot/purge clear a library-wide throttle cache. Do not let a
+    // sibling's initialization/disposal cancel a box/lasso completion callback.
+    const pendingPlotlySelections = new Set();
+    const waitForPlotlySelections = async () => {
+      while (pendingPlotlySelections.size) {
+        await Promise.all([...pendingPlotlySelections]);
+      }
+    };
+    const guardPlotlySelection = host => {
+      let pending = null;
+      let resolvePending = null;
+      let releaseTimer = null;
+      const finish = () => {
+        clearTimeout(releaseTimer);
+        releaseTimer = null;
+        if (!pending) return;
+        pendingPlotlySelections.delete(pending);
+        pending = null;
+        resolvePending();
+        resolvePending = null;
+      };
+      const begin = event => {
+        if (event.button !== 0 || !event.target?.closest?.('.nsewdrag')
+          || !['select', 'lasso'].includes(host._fullLayout?.dragmode)) return;
+        finish();
+        pending = new Promise(resolve => { resolvePending = resolve; });
+        pendingPlotlySelections.add(pending);
+      };
+      const released = () => {
+        // Normal completion releases through Plotly's event. A click with no
+        // selection (or a cancelled gesture) must not block later charts forever.
+        if (pending && releaseTimer == null) releaseTimer = setTimeout(finish, 1000);
+      };
+      host.addEventListener('pointerdown', begin, true);
+      document.addEventListener('pointerup', released, true);
+      document.addEventListener('pointercancel', finish, true);
+      global.addEventListener('blur', finish);
+      for (const event of ['plotly_selected', 'plotly_deselect', 'plotly_click']) host.on(event, finish);
+      return () => {
+        finish();
+        host.removeEventListener('pointerdown', begin, true);
+        document.removeEventListener('pointerup', released, true);
+        document.removeEventListener('pointercancel', finish, true);
+        global.removeEventListener('blur', finish);
+        for (const event of ['plotly_selected', 'plotly_deselect', 'plotly_click']) host.removeListener(event, finish);
+      };
+    };
     const chartService = Object.freeze({
       plotly:Object.freeze({
         async mount(host, specification = {}, root = host?.closest?.('.dv-view')) {
@@ -444,6 +491,7 @@
             () => host?._context?.scrollZoom !== true,
             true,
           );
+          await waitForPlotlySelections();
           await global.Plotly.newPlot(
             host,
             specification.data || [],
@@ -458,6 +506,7 @@
             resizePending:false,
             disposed:false,
             releaseDragModeToggle:installPlotlyDragModeToggle(host),
+            releaseSelectionGuard:guardPlotlySelection(host),
           };
           state.observer = new ResizeObserver(() => {
             if (state.disposed) return;
@@ -530,7 +579,12 @@
           if (state) state.disposed = true;
           state?.observer?.disconnect?.();
           state?.releaseDragModeToggle?.();
-          if (state?.node) global.Plotly?.purge?.(state.node);
+          state?.releaseSelectionGuard?.();
+          if (state?.node) {
+            if (pendingPlotlySelections.size) {
+              void waitForPlotlySelections().then(() => global.Plotly?.purge?.(state.node));
+            } else global.Plotly?.purge?.(state.node);
+          }
         },
       }),
     });

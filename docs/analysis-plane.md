@@ -67,6 +67,10 @@ dataviz catalog describe WORKSPACE \
 
 `describe` 是 Run 前的只读 Invocation Contract，一次可以解析多个引用并保持输入顺序；它返回参数类型、required/default、候选摘要、Control/Output 摘要、lineage 和可复制 Run 命令，但不执行 Source、候选查询或 Transform。完整模式列出目标所需 Source、Dataset Transform 与 Interactive Transform，包括定义、Workspace 相对路径、content hash、Runtime 和 Output Contract。`--include-code` 才内联已脱敏且不超过 256 KiB 的 SQL/JS/Python；File Source 数据不会内联，Adapter 凭据也不会返回。
 
+文本默认优先展示业务语义、粒度、可信状态和 caveats，依赖按数量概览；`--detail debug` 展开依赖引用，`--detail full` 按节点展示定义和资产，不再输出整块 Python 字典表示。需要代码时再加 `--include-code`，代码保留实际换行。
+
+`list/search` 没有匹配时返回 `analysis_catalog_no_matches` 建议与只读恢复命令，而非空白终端；空结果不等于 Workspace 没有数据。默认可信/可见性筛选不自动放宽。`describe` 的未知引用错误项也提供概览和引用语法文档入口，不猜测替代目标或自动查询。
+
 ## 执行口径
 
 ```bash
@@ -81,6 +85,10 @@ dataviz run WORKSPACE 'sales::interactive:forecast/main' \
 ```
 
 Source/Base 只执行目标的最小 Query DAG。Derived Output 根据声明自动选择 server-python 或无头浏览器；浏览器默认阻止额外 HTTP(S) 请求，确实依赖 CDN 时显式使用 `--allow-network`。Playwright 未安装时按 CLI 给出的命令安装 `ai-dataviz[visual-check]` 和 Chromium。
+
+`run --help` 按常用选项、页面/交互、高级分析分组，不要求简单分析填写全部选项。同一 `--query-param` 或 `--control` 名称只传一次：重复、空名称或名称首尾空白被拒绝，不静默覆盖；值可用 JSON，也可为普通字符串。`--dry-run` 仍仅适用于显式 Overlay，不代表通用查库预览。
+
+Result 返回的后续命令使用 shell 引号保护完整路径；复制时保留引号。Analysis 命令显式选择结构化失败契约，不依赖 Typer/Click 的内部上下文共享。
 
 `run` 始终完整执行并封存不可变 Result，默认 stdout 只显示 Result ID/路径、紧凑 DAG、每个表格 Output 的前 10 行和下一步命令；`--preview-rows` 只改变终端预览，不裁剪实际结果。显式 `--format json` 使用 `dataviz/analysis-result/v5`，包含最终 compact Query Parameter state、有效 Controls、每个 consumer 的 effective/applied revision、对应 `applied_control_state` 与实际 View writer 的 `applied_writer_provenance`，以及输入 Artifact/hash、Schema、行数、Output hash、分段耗时、lineage 和 Result 句柄。机器契约可直接导出 JSON Schema：
 

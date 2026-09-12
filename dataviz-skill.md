@@ -53,7 +53,7 @@ Search covers topic and task documents. Execute the returned `command`: a `task:
 
 ### New Dashboard
 
-For one small Dashboard, read `dataviz docs standalone --format json` first. `validate/run/serve/report` accept one YAML with inline code and an explicit `--auth <adapter-file|auth-directory|workspace>`. Keep credentials external. This input convenience lowers to existing file-based schemas; do not apply `code: {inline: ...}` directly to ordinary Workspace definitions. Use the returned Result `next_actions` for inspection. Source edits create a new snapshot; use the original snapshot path for older Results. Choose a full Workspace for shared Assets, Catalog organization, or hot reload.
+For one small Dashboard, use `dataviz scaffold standalone --id sales --output ./sales` to generate one runnable `dashboard.yaml` with tiny Python sample data. No database, auth, Page, or browser extension is required. Execute the returned `next` commands; read `dataviz docs standalone --format json` when replacing the sample with actual files, SQL, or external `--auth`. Keep credentials external. This input convenience lowers to existing file-based schemas; do not apply `code: {inline: ...}` directly to ordinary Workspace definitions. Use the returned Result `next_actions` for inspection. Source edits create a new snapshot; use the original snapshot path for older Results. Choose a full Workspace for shared Assets, Catalog organization, or hot reload.
 
 Start with the minimal closure:
 
@@ -98,6 +98,16 @@ Use `dataviz schemas <schema> --full --format json` only when exact fields are n
 Use `inspect query` before running when the question is how canonical Query Parameter state becomes `query_filter` predicates and bound values. It is an explanation only: `executed: false` means row counts, cache hits, timings, and failures remain Result/Execution evidence. Use `dataviz docs --search '<term>'` or `dataviz docs troubleshooting` when a diagnostic or Runtime boundary is unclear. Read architecture documents only when changing the Runtime itself.
 
 ## Quick start: build a Dashboard
+
+For a small single-file analysis:
+
+```bash
+dataviz scaffold standalone --id sales --output ./sales
+dataviz validate ./sales/dashboard.yaml --strict
+dataviz run ./sales/dashboard.yaml --format json
+```
+
+Reuse the returned Result for further inspection and reports. A fragment recipe such as `view.line` must be merged into its owning Dashboard; its ID is not an executable Dashboard target.
 
 For a new runnable Workspace with a built-in `hello` Dashboard:
 
@@ -215,7 +225,7 @@ dataviz catalog list <workspace>
 dataviz catalog search <workspace> '收入|销售|日期' --top 10
 ```
 
-Catalog search is grep-like regular expression search. Search business synonyms when vocabulary is uncertain, then describe promising targets before execution:
+Catalog search is grep-like regular expression search. An empty result means no matches under the current filters, not necessarily no data. Use the returned read-only recovery commands or revise the terms; do not silently include internal/draft/deprecated Outputs as trusted matches. Search business synonyms when vocabulary is uncertain, then describe promising targets before execution:
 
 ```bash
 dataviz catalog describe <workspace> \
@@ -225,6 +235,8 @@ dataviz catalog describe <workspace> \
 ```
 
 Evaluate more than the title:
+
+Start with summary `describe`; use `--detail debug` for dependency references and `--detail full` for node definitions and asset paths/hashes. Add `--include-code` only when implementation text is needed. These commands do not execute data.
 
 - `purpose`: which question the Output answers;
 - `grain`: what one row represents;
@@ -260,6 +272,8 @@ dataviz run <workspace> '<target-reference>' \
 ```
 
 Use `--also '<target-reference>'` to seal compatible additional Outputs in the same execution. Let `--runtime auto` select the declared Runtime unless debugging a specific Runtime boundary. Use `--allow-network` only when the target explicitly requires external browser access.
+
+Pass each Query Parameter or Control name once; duplicate or empty names are rejected rather than silently overwritten. A single-page Dashboard does not require `--page`. `run --help` groups optional page/interaction and advanced analysis flags; `--dry-run` checks an explicit Overlay, not an arbitrary query. Preserve shell quoting in returned Result commands, especially for paths containing spaces or `$`.
 
 To debug a Dataset Transform without querying its upstream Source again, run the same canonical Transform Target with `--from-result <result-id>`. Dataviz accepts only the Transform's declared direct inputs when reference, kind, Schema, and stored Artifact hash remain compatible; mismatch fails and never falls back to the database. This creates a new immutable Result and leaves the input Result unchanged. Do not use it for Dashboard or Interactive targets.
 

@@ -95,10 +95,15 @@ jobs:
       - run: uv pip check --python .venv/bin/python
       # CLI analysis/render checks own a Chromium session regardless of the UI matrix.
       - run: uv run --no-editable playwright install --with-deps chromium ${{ matrix.browser }}
-      - run: uv run --no-editable pytest tests/e2e
-        env:
-          DATAVIZ_BROWSER: ${{ matrix.browser }}
-          DATAVIZ_E2E_ARTIFACT_DIR: ${{ runner.temp }}/browser-evidence
+      - uses: actions/cache@v4
+        with:
+          path: .browser-test-assets
+          key: browser-assets-${{ hashFiles('tests/e2e/assets.json') }}
+      - name: Run verified browser suite
+        run: >-
+          uv run --no-editable python scripts/test_browsers.py --fetch-assets
+          --browsers ${{ matrix.browser }}
+          --output-dir "${{ runner.temp }}/browser-evidence"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

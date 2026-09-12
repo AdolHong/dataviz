@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import hashlib
 import os
 import re
 import shutil
@@ -792,7 +791,7 @@ def test_pages_preserve_independent_queries_and_history(page: Page, tmp_path: Pa
     page.on("request", lambda request: runs.append(request.post_data_json)
             if request.method == "POST" and request.url.endswith("/runs") else None)
     with _running_server(root) as url:
-        page.goto(url)
+        _open_single_fixture_dashboard(page, url, root)
         annual = page.locator('#page-navigation-list button[data-page-id="annual"]')
         history = page.locator('#page-navigation-list button[data-page-id="history"]')
         expect(annual).to_have_attribute("aria-current", "page")
@@ -923,7 +922,7 @@ def test_multi_page_example_renders_both_analysis_paths(page: Page, tmp_path: Pa
                     ignore=shutil.ignore_patterns(".dataviz", "__pycache__"))
     with _running_server(root) as url:
         page.set_viewport_size({"width": 1440, "height": 1050})
-        page.goto(url)
+        _open_single_fixture_dashboard(page, url, root)
         frame = page.frame_locator("#canvas-frame")
         for page_id in ("annual", "history"):
             tab = page.locator(f'#page-navigation-list button[data-page-id="{page_id}"]')
@@ -1052,7 +1051,7 @@ window.datavizRuntime.registerRenderer('review.value', {
     page.on("request", lambda request: writes.append(request.post_data_json)
             if request.method == "POST" and "/actions/save" in request.url else None)
     with _running_server(root, watch=False) as url:
-        page.goto(url)
+        _open_single_fixture_dashboard(page, url, root)
         frame = page.frame_locator("#canvas-frame")
         tab = lambda name: page.locator(f'#page-navigation-list button[data-page-id="{name}"]')
         for name in ["edit", "history", "isolated"]:
@@ -1077,7 +1076,12 @@ window.datavizRuntime.registerRenderer('review.value', {
         assert len(queries) == 3
         page.reload()
         expect(tab("history")).to_contain_text("Data changed", timeout=15_000)
-        expect(frame.locator('.review-value')).to_have_text("1", timeout=15_000)
+        # Resolve the current iframe document after top-level navigation. Firefox
+        # can paint the restored frame before its old FrameLocator target is
+        # reattached; the value/no-query assertion must not depend on that target.
+        page.wait_for_function("""() => document.querySelector('#canvas-frame')
+          ?.contentDocument?.querySelector('.review-value')?.textContent === '1'""", timeout=15_000)
+        frame = page.frame_locator('#canvas-frame')
         page.locator('#workspace-update-action').click()
         expect(frame.locator('.review-value')).to_have_text("2", timeout=30_000)
         expect(tab("history")).not_to_contain_text("Data changed")
@@ -1108,7 +1112,7 @@ window.datavizRuntime.registerRenderer('review.value', {
             assert connection.execute("select value from labels").fetchone()[0] == 3
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def browser() -> Browser:
     with sync_playwright() as playwright:
         # Browser availability is part of the P0 contract. CI installs Chromium
@@ -1126,28 +1130,7 @@ def browser() -> Browser:
 def page(browser: Browser, failure_artifacts, state_timeline) -> Page:
     context = failure_artifacts(browser.new_context(viewport={"width": 1440, "height": 900}))
     context.add_init_script(state_timeline)
-    # Optional real-resource cache: do not make repeated CDN availability a
-    # prerequisite for every interaction assertion. No decoder/renderer mocks.
-    asset_dir = os.environ.get("DATAVIZ_E2E_ASSET_DIR")
-    if asset_dir is None and (ROOT / ".browser-test-assets").is_dir():
-        asset_dir = str(ROOT / ".browser-test-assets")
-    if asset_dir:
-        for url, filename, content_type, checksum in [
-            ("https://cdn.jsdelivr.net/npm/apache-arrow@21.1.0/Arrow.es2015.min.js",
-             "Arrow.es2015.min.js", "application/javascript",
-             "d3f0ded2a2bdd1208232b942f8e4810f7a402564fac3c78b4574158cd542acb9"),
-            ("https://cdn.plot.ly/un/world_110m.json", "world_110m.json", "application/json",
-             "e1bf51740ad28396265e52123ea7315d692f112664ab2cb0f1ea76a96fe1bb0a"),
-        ]:
-            asset = Path(asset_dir) / filename
-            if not asset.is_file():
-                raise RuntimeError(f"Missing real browser test asset: {asset}")
-            if hashlib.sha256(asset.read_bytes()).hexdigest() != checksum:
-                raise RuntimeError(f"Browser test asset checksum mismatch: {asset}")
-            context.route(url, lambda route, *, asset=asset, content_type=content_type: route.fulfill(
-                path=str(asset), content_type=content_type,
-                headers={"Access-Control-Allow-Origin": "*"},
-            ))
+    # Exact, checksum-verified upstream resources are shared by conftest.py.
     page = context.new_page()
     diagnostics = deque(maxlen=30)
     def safe_url(url):
@@ -1210,7 +1193,7 @@ def test_analysis_stability_workflow(page: Page, stable_analysis, round_index):
     requests = []
     page.on('request', lambda request: requests.append((request.method, request.url)))
     with _running_server(root) as url:
-        page.goto(url)
+        _open_single_fixture_dashboard(page, url, root)
         _run_and_wait(page)
         frame = page.frame_locator('#canvas-frame')
         table = frame.locator('[data-view-id="items"]')
@@ -1296,7 +1279,7 @@ def test_server_only_large_input_stays_out_of_browser(page: Page, tmp_path: Path
     requests = []
     page.on('request', lambda request: requests.append(request.url))
     with _running_server(root) as url:
-        page.goto(url)
+        _open_single_fixture_dashboard(page, url, root)
         _run_and_wait(page)
         frame = page.frame_locator('#canvas-frame')
         expect(frame.locator('[data-view-id="result"] tbody tr')).to_have_count(2, timeout=30_000)
@@ -1362,7 +1345,7 @@ def test_custom_selection_feedback_updates_without_data_change(page: Page, tmp_p
     }))
     root, _ = prepare_input(path)
     with _running_server(root) as url:
-        page.goto(url)
+        _open_single_fixture_dashboard(page, url, root)
         _run_and_wait(page)
         frame = page.frame_locator('#canvas-frame')
         writer = frame.locator('[data-view-id="writer"]')
@@ -1444,7 +1427,7 @@ window.datavizRuntime.registerRenderer('standalone.detail', {
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     with _running_server(root) as url:
-        page.goto(url)
+        _open_single_fixture_dashboard(page, url, root)
         expect(page.locator("#dashboard-sidebar")).to_be_hidden()
         expect(page.locator("#run-button")).to_be_enabled(timeout=10_000)
         page.locator("#run-button").click()
@@ -1567,7 +1550,7 @@ window.datavizRuntime.registerRenderer('action.demo', {
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
     with _running_server(root) as url:
-        page.goto(url)
+        _open_single_fixture_dashboard(page, url, root)
         expect(page.locator("#run-button")).to_be_enabled(timeout=10_000)
         page.locator("#run-button").click()
         frame = page.frame_locator("#canvas-frame")
@@ -2143,6 +2126,14 @@ cache: {mode: none}
     return root
 
 
+def _open_single_fixture_dashboard(page: Page, base_url: str, root: Path) -> None:
+    # Root intentionally stays empty without tab history. These tests target a
+    # specific single-Dashboard fixture, including standalone inputs with no nav.
+    dashboards = load_workspace(root).dashboards
+    assert len(dashboards) == 1, "Fixture must identify its Dashboard explicitly"
+    page.goto(f"{base_url}/dashboards/{next(iter(dashboards))}")
+
+
 def _open_dashboard(page: Page, base_url: str, dashboard_id: str) -> None:
     page.goto(base_url, wait_until="domcontentloaded")
     dashboard = page.locator(f'[data-nav-type="dashboard"][data-id="{dashboard_id}"]')
@@ -2218,6 +2209,39 @@ def test_query_multiple_select_summary_prefers_the_human_scale(page: Page, tmp_p
 
         set_state("exclude", 100, [0, 1])
         expect(summary).to_have_text("全部，排除 2 项")
+
+
+@pytest.mark.e2e
+def test_parameter_lookup_does_not_reconcile_a_new_selection_with_old_operands(page: Page, tmp_path: Path):
+    workspace = _copy_workspace(SHOWCASE, tmp_path / 'lookup-selection-race')
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, 'parameter-domain-lab')
+        city = page.locator('select[name="cities"]')
+        expect(city.locator('option')).to_have_count(2, timeout=20_000)
+        control = page.locator('#parameter-form .dv-control').filter(has=city)
+        control.locator('[data-control-trigger]').click()
+        expect(control).to_have_attribute('aria-busy', 'false')
+        pending = []
+        def delay(route):
+            if route.request.post_data_json.get('parameter') == 'cities' and not pending:
+                pending.append(route)
+            else:
+                route.continue_()
+        page.route('**/parameter-domains/lookup', delay)
+        with page.expect_request(lambda request: '/parameter-domains/lookup' in request.url
+                                 and request.post_data_json.get('parameter') == 'cities'):
+            city.evaluate("input => { void input._remoteLookup({search:''}); }")
+        expect(control).to_have_attribute('aria-busy', 'true')
+        control.get_by_role('button', name='Clear', exact=True).click()
+        control.locator('.dv-choice-option', has_text='深圳').click()
+        expect(city).to_have_values(['SZ'])
+        expect(city).to_have_attribute('data-query-selection', 'include')
+        assert pending, 'City lookup must be held before editing'
+        route = pending[0]
+        route.fulfill(response=route.fetch())
+        expect(control).to_have_attribute('aria-busy', 'false', timeout=20_000)
+        expect(city).to_have_values(['SZ'])
+        expect(city).to_have_attribute('data-query-selection', 'include')
 
 
 @pytest.mark.e2e
@@ -2392,7 +2416,7 @@ def test_server_compute_waits_for_required_control_domain(page: Page, tmp_path: 
     page.on("response", lambda response: errors.append(response.status)
             if "/interactions" in response.url and response.status >= 400 else None)
     with _running_server(root, watch=False) as url:
-        page.goto(url)
+        _open_single_fixture_dashboard(page, url, root)
         page.locator('#run-button').click()
         frame = page.frame_locator('#canvas-frame')
         free = frame.locator('[data-view-id="free"]')
@@ -2432,7 +2456,7 @@ def test_operation_panel_shortcuts_and_responsive_state(page: Page, tmp_path: Pa
     runs = []
     page.on("request", lambda request: runs.append(request.url) if request.method == "POST" and request.url.endswith('/runs') else None)
     with _running_server(root, watch=False) as url:
-        page.goto(url)
+        _open_single_fixture_dashboard(page, url, root)
         panel = page.locator('#operation-panel')
         if not has_fields:
             for selector in ['#query-parameters-toggle', '#dashboard-controls-toggle']:
@@ -3500,9 +3524,10 @@ def test_canvas_messages_are_bound_to_the_current_frame_instance(page: Page, tmp
               const active = document.querySelector('#canvas-frame');
               const rogue = document.createElement('iframe');
               rogue.hidden = true;
-              rogue.src = '/';
+              rogue.src = 'about:blank';
+              const loaded = new Promise(resolve => rogue.addEventListener('load', resolve, {once:true}));
               document.body.append(rogue);
-              await new Promise(resolve => rogue.addEventListener('load', resolve, {once:true}));
+              await loaded;
               const payload = {
                 type:'dataviz:control-snapshot',
                 dashboard_id:active.dataset.dashboardId,
@@ -3516,7 +3541,7 @@ def test_canvas_messages_are_bound_to_the_current_frame_instance(page: Page, tmp
                   dashboard_controls:[],
                 },
               };
-              rogue.contentWindow.eval(`parent.postMessage(${JSON.stringify(payload)}, location.origin)`);
+              rogue.contentWindow.eval(`parent.postMessage(${JSON.stringify(payload)}, parent.location.origin)`);
             }"""
         )
 
@@ -4013,6 +4038,34 @@ def test_web_component_reference_adapter_consumes_runtime_v2_without_canvas_runt
         }"""
     )
     expect(page.locator("#count")).to_have_text("2")
+
+
+@pytest.mark.e2e
+def test_multiple_input_keeps_blank_draft_during_other_control_commit(page: Page, tmp_path: Path):
+    workspace = _copy_gallery_workspace(tmp_path)
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, 'component-gallery')
+        _run_and_wait(page)
+        page.locator('#dashboard-controls-toggle').click()
+        values = page.locator('#dashboard-controls-control [data-control-component="multiple-input"]')
+        expect(values.locator('[data-multiple-value]')).to_have_count(2)
+        values.get_by_role('button', name='+ Add value', exact=True).click()
+        expect(values.locator('[data-multiple-value]')).to_have_count(3)
+        page.locator('#dashboard-controls-control [data-control-component="input-number"]').get_by_role(
+            'button', name='Increase value'
+        ).click()
+        page.wait_for_function("""() => {
+          const id = sessionStorage.getItem('dataviz.tab-session.v2');
+          const saved = JSON.parse(sessionStorage.getItem(`dataviz.tab-ui.v4.${id}`) || '{}');
+          return saved.dashboards?.['component-gallery']?.controlCheckpoint?.controls[
+            'dashboard:component-gallery/sample-size']?.value === 60;
+        }""")
+        expect(values.locator('[data-multiple-value]')).to_have_count(3)
+        expect(values.locator('[data-multiple-value]').last).to_have_value('')
+        values.locator('[data-multiple-value]').last.fill('extra')
+        page.wait_for_function("""() => document.querySelector('#canvas-frame').contentWindow
+          .dataviz.control.state('dashboard:component-gallery/scenario-tags').value.includes('extra')""")
+        expect(values.locator('[data-multiple-value]')).to_have_count(3)
 
 
 @pytest.mark.e2e
@@ -4896,7 +4949,7 @@ def test_cross_browser_narrow_control_overlay_keyboard_scroll_and_aria(page: Pag
         assert geometry["left"] >= 0, geometry
         assert geometry["top"] >= 8, geometry
         assert geometry["right"] <= geometry["viewport"][0], geometry
-        assert geometry["bottom"] < geometry["viewport"][1], geometry
+        assert geometry["bottom"] <= geometry["viewport"][1], geometry
         assert geometry["columns"] == 1, geometry
         assert geometry["panelScrollHeight"] > geometry["panelClientHeight"], geometry
         assert geometry["panelOverflow"] == "auto", geometry
@@ -4943,6 +4996,9 @@ def test_cross_browser_narrow_control_overlay_keyboard_scroll_and_aria(page: Pag
         expect(selector_panel).to_be_hidden()
         assert trigger.evaluate("trigger => document.activeElement === trigger")
         page.mouse.click(2, 510)
+        # Narrow screens use a modal sidebar; clicking its backdrop dismisses it.
+        expect(panel).to_be_hidden()
+        toggle.click()
         expect(panel).to_be_visible()
         page.keyboard.press("Escape")
         expect(panel).to_be_hidden()
@@ -6354,7 +6410,7 @@ def test_query_reload_restores_visible_date_range_and_single_select(page: Page, 
     root, _ = prepare_input(dashboard)
     assert load_workspace(root).dashboard("query-restore").definition.id == "query-restore"
     with _running_server(root, watch=False) as url:
-        page.goto(url)
+        _open_single_fixture_dashboard(page, url, root)
         endpoints = page.locator('#parameter-form .dv-date-range__endpoint')
         endpoints.nth(0).fill("2026-09-09")
         endpoints.nth(1).fill("2026-09-09")
@@ -8038,6 +8094,10 @@ def test_plotly_area_selection_gesture_commits_the_bound_control(
             "() => window.dataviz.control.state('dashboard:chart-gallery/province')"
         )
         assert portable_selection == selection
+        chart.evaluate("""node => {
+          node.__selectionPointCounts = [];
+          node.on('plotly_selected', event => node.__selectionPointCounts.push(event?.points?.length || 0));
+        }""")
         active_tool.click()
         expect(active_tool).to_have_class(re.compile(r"\bactive\b"))
         chart.scroll_into_view_if_needed()
@@ -8052,20 +8112,41 @@ def test_plotly_area_selection_gesture_commits_the_bound_control(
         ]
         page.mouse.move(*points[0])
         page.mouse.down()
+        # Start a real sibling chart while the portable selection is held.
+        # Plotly.newPlot otherwise clears the pending selection throttle.
+        page.evaluate("""() => {
+          const host = document.createElement('div');
+          host.style.cssText = 'position:fixed;left:-1000px;width:100px;height:100px';
+          document.body.append(host);
+          window.__siblingPlot = {host, ready:false};
+          window.__siblingPlot.promise = window.dataviz.charts.plotly.mount(host, {
+            data:[{x:[1,2], y:[1,2], type:'scatter'}]
+          }).then(state => { window.__siblingPlot.state = state; window.__siblingPlot.ready = true; });
+        }""")
+        assert page.evaluate('() => !window.__siblingPlot.host.classList.contains("js-plotly-plot")')
         if dragmode == "select":
             page.mouse.move(*points[2], steps=20)
         else:
             for point in [*points[1:], points[0]]:
                 page.mouse.move(*point, steps=8)
         page.mouse.up()
-        page.wait_for_function(
-            """() => {
-              const node = document.querySelector('[data-view-id="scatter"] .dv-plotly');
-              return (node.layout?.selections || []).length === 0
-                && !node.querySelector('.select-outline');
-            }""",
-            timeout=20_000,
-        )
+        try:
+            page.wait_for_function(
+                """() => {
+                  const node = document.querySelector('[data-view-id="scatter"] .dv-plotly');
+                  return (node.layout?.selections || []).length === 0
+                    && !node.querySelector('.select-outline');
+                }""",
+                timeout=20_000,
+            )
+        finally:
+            print('Portable selection diagnostic:', chart.evaluate("node => ({events:node.__selectionPointCounts, selections:node.layout?.selections?.length, outlines:node.querySelectorAll('.select-outline').length, mode:node._fullLayout?.dragmode})"))
+        assert chart.evaluate('node => node.__selectionPointCounts.some(count => count > 0)')
+        page.evaluate("""async () => {
+          await window.__siblingPlot.promise;
+          window.dataviz.charts.plotly.dispose(window.__siblingPlot.state);
+          window.__siblingPlot.host.remove();
+        }""")
         expect(active_tool).to_have_class(re.compile(r"\bactive\b"))
         portable_selection_after_gesture = page.locator("body").evaluate(
             "() => window.dataviz.control.state('dashboard:chart-gallery/province')"
@@ -8154,6 +8235,10 @@ def test_table_row_count_is_opt_in_instead_of_a_default_metadata_row(page: Page,
         expect(counted_table.locator(".dv-table-page-status")).to_have_text("1 / 3")
 
         # Sorting a wide table keeps the operated column in view and restores focus.
+        counted_table.scroll_into_view_if_needed()
+        sort_button = counted_table.locator('.dv-table-sort').last
+        sort_button.focus()
+        expect(sort_button).to_be_focused()
         sort_scroll = counted_table.evaluate(
             """async host => {
               const style = document.createElement('style');

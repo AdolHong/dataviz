@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import shutil
 from pathlib import Path
 
@@ -324,11 +325,54 @@ def test_quickstart_defers_optional_structure_and_analysis_flags():
     commands = quickstart["commands"]
     assert len(commands) == 4
     assert all("--page" not in command and "--overlay" not in command for command in commands)
-    assert any("run sales.yaml" in command for command in commands)
+    assert any("run ./sales/dashboard.yaml" in command for command in commands)
     assert quickstart["next_steps"]["second_analysis_page"] == "dataviz docs pages --format json"
     analysis = " ".join(DOC_TOPICS["analysis-quickstart"]["workflow"])
     assert "单页无需 --page" in analysis
     assert "不必先学习 Catalog" in analysis
+
+
+def test_quickstart_commands_run_without_auth_page_or_workspace(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    for command in DOC_TOPICS["quickstart"]["commands"][:3]:
+        result = runner.invoke(app, shlex.split(command)[1:])
+        assert result.exit_code == 0, result.output
+    published = json.loads(result.stdout)
+    assert published["status"] == "ready"
+    assert published["result_id"]
+    document = yaml.safe_load((tmp_path / "sales/dashboard.yaml").read_text())
+    assert not {"pages", "sections", "controls", "query_parameters"}.intersection(document)
+    assert not (tmp_path / "sales/workspace.yaml").exists()
+
+
+def test_scaffold_default_next_commands_handle_quoted_path_and_preserve_files(tmp_path):
+    runner = CliRunner()
+    root = tmp_path / "a user's analysis"
+    created = runner.invoke(app, ["scaffold", "--output", str(root)])
+    assert created.exit_code == 0, created.output
+    payload = json.loads(created.stdout)
+    assert payload["recipe"] == "standalone"
+    assert list(root.iterdir()) == [root / "dashboard.yaml"]
+    original = (root / "dashboard.yaml").read_bytes()
+    for command in payload["next"]:
+        assert "<workspace>" not in command
+        result = runner.invoke(app, shlex.split(command)[1:])
+        assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["status"] == "ready"
+    duplicate = runner.invoke(app, ["scaffold", "--output", str(root)])
+    assert duplicate.exit_code != 0
+    assert (root / "dashboard.yaml").read_bytes() == original
+
+
+@pytest.mark.parametrize("recipe", ["source.python", "view.line", "control.select", "server-action.python"])
+def test_fragment_verification_requires_owning_dashboard(recipe, tmp_path):
+    result = CliRunner().invoke(app, ["scaffold", recipe, "--id", "part", "--output", str(tmp_path / "fragment")])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["scope"] == "fragment"
+    assert any("<dashboard>" in command for command in payload["next"])
+    assert not any("--dashboard part" in command or "dataviz report" in command for command in payload["next"])
 
 
 def test_docs_do_not_restore_removed_chart_cli_or_shell_contracts():
@@ -636,7 +680,10 @@ def test_every_scaffold_recipe_matches_the_current_strict_models():
         files = payload["files"]
         assert payload["schema"] == "dataviz/scaffold/v1"
 
-        if recipe in {"minimal", "interactive", "custom-renderer"}:
+        if recipe == "standalone":
+            assert list(files) == ["dashboard.yaml"]
+            assert payload["scope"] == "standalone"
+        elif recipe in {"minimal", "interactive", "custom-renderer"}:
             assert files["workspace.yaml"]
             assert files["dashboards/sample/dashboard.yaml"]
         elif recipe == "dashboard":
@@ -815,9 +862,9 @@ def test_scaffold_catalog_is_machine_readable_and_dashboard_recipe_runs(tmp_path
     )
     assert catalog_result.exit_code == 0, catalog_result.stdout
     assert json.loads(catalog_result.stdout) == scaffold_catalog()
-    assert scaffold_catalog()["default"] == "minimal"
+    assert scaffold_catalog()["default"] == "standalone"
     assert scaffold_catalog()["profiles"] == [
-        "minimal", "interactive", "custom-renderer"
+        "standalone", "minimal", "interactive", "custom-renderer"
     ]
 
     root = tmp_path / "workspace"

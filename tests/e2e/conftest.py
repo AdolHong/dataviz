@@ -1,5 +1,6 @@
 """Use verified upstream assets for in-process CLI-owned browser contexts too."""
 import hashlib
+import json
 import os
 from pathlib import Path
 
@@ -91,12 +92,12 @@ def cached_browser_assets(monkeypatch):
     directory = Path(os.environ.get('DATAVIZ_E2E_ASSET_DIR', root / '.browser-test-assets'))
     if not directory.is_dir() and 'DATAVIZ_E2E_ASSET_DIR' not in os.environ:
         return
-    assets = [
-        ('https://cdn.jsdelivr.net/npm/apache-arrow@21.1.0/Arrow.es2015.min.js', 'Arrow.es2015.min.js',
-         'application/javascript', 'd3f0ded2a2bdd1208232b942f8e4810f7a402564fac3c78b4574158cd542acb9'),
-        ('https://cdn.plot.ly/un/world_110m.json', 'world_110m.json', 'application/json',
-         'e1bf51740ad28396265e52123ea7315d692f112664ab2cb0f1ea76a96fe1bb0a'),
-    ]
+    manifest = Path(__file__).with_name('assets.json')
+    # The synthetic failure-artifact harness copies this fixture in isolation.
+    if not manifest.is_file():
+        return
+    assets = [(a['url'], a['file'], a['content_type'], a['sha256'])
+              for a in json.loads(manifest.read_text())]
     for _, name, _, digest in assets:
         assert hashlib.sha256((directory / name).read_bytes()).hexdigest() == digest
     original = BrowserContext.new_page
@@ -106,10 +107,14 @@ def cached_browser_assets(monkeypatch):
         # Exact page-level routes inject local bytes even when the analysis
         # runner blocks external network. Other URLs retain its network policy.
         for url, name, content_type, _ in assets:
-            page.route(url, lambda route, *, name=name, content_type=content_type: route.fulfill(
+            def fulfill(route, *, name=name, content_type=content_type):
+                return route.fulfill(
                 path=str(directory / name), content_type=content_type,
                 headers={'Access-Control-Allow-Origin': '*'},
-            ))
+                )
+            # Context routes also cover real dedicated Worker module requests.
+            context.route(url, fulfill)
+            page.route(url, fulfill)
         return page
 
     monkeypatch.setattr(BrowserContext, 'new_page', new_page)

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 import shutil
+import shlex
 
 import pytest
 import yaml
@@ -32,6 +33,58 @@ from dataviz.workspace.models import OutputDefinition
 
 FEATURE_SHOWCASE = Path("examples/feature-showcase")
 SALES_WORKSPACE = Path("examples/sales-workspace")
+
+
+def test_discovery_empty_and_unknown_reference_offer_read_only_recovery(isolated_workspace, monkeypatch):
+    workspace = isolated_workspace(FEATURE_SHOWCASE)
+    def forbid_execution(*args, **kwargs):
+        pytest.fail("Discovery must not execute data")
+    monkeypatch.setattr(Executor, "run", forbid_execution)
+    runner = CliRunner()
+    for output_format in ["text", "json"]:
+        empty = runner.invoke(app, ["catalog", "search", str(workspace), "no-such-business-contract-zzzzz", "--format", output_format])
+        assert empty.exit_code == 0, empty.output
+        assert "analysis_catalog_no_matches" in empty.output
+        if output_format == "json":
+            payload = json.loads(empty.stdout)
+            assert payload["entries"] == []
+            commands = next(item["next_actions"] for item in payload["diagnostics"] if item["code"] == "analysis_catalog_no_matches")
+            for command in commands:
+                recovered = runner.invoke(app, shlex.split(command)[1:])
+                assert recovered.exit_code == 0, recovered.output
+    unknown = runner.invoke(app, ["catalog", "describe", str(workspace), "missing_ref", "--format", "json"])
+    assert unknown.exit_code == 1
+    item = json.loads(unknown.stdout)["items"][0]
+    assert item["error"]["code"] == "analysis_reference_unknown"
+    for command in item["next_actions"]:
+        assert runner.invoke(app, shlex.split(command)[1:]).exit_code == 0
+
+
+def test_describe_text_progressively_discloses_code_and_semantics(isolated_workspace, monkeypatch):
+    workspace = isolated_workspace(FEATURE_SHOWCASE)
+    def forbid_execution(*args, **kwargs):
+        pytest.fail("Describe must not execute data")
+    monkeypatch.setattr(Executor, "run", forbid_execution)
+    runner = CliRunner()
+    args = ["catalog", "describe", str(workspace), "date-parameter-lab::source:date-window/main"]
+    summary = runner.invoke(app, args)
+    assert summary.exit_code == 0, summary.output
+    assert "Grain:" in summary.output
+    assert "Assurance:" in summary.output
+    assert "query_nodes: [" not in summary.output
+    assert "Node:" not in summary.output
+    assert "Asset:" not in summary.output
+    full = runner.invoke(app, [*args, "--detail", "full"])
+    assert full.exit_code == 0, full.output
+    assert "Node: source:date-window" in full.output
+    assert "Hash:" in full.output
+    data = runner.invoke(app, [*args, "--detail", "full", "--include-code", "--format", "json"])
+    code = json.loads(data.stdout)["items"][0]["closure"]["nodes"][0]["assets"][0]["content"]
+    included = runner.invoke(app, [*args, "--detail", "full", "--include-code"])
+    assert included.exit_code == 0, included.output
+    assert code in included.output
+    assert code not in full.output
+    assert code not in summary.output
 
 
 @pytest.mark.parametrize(("kind", "suffix"), [("text", ".txt"), ("html", ".html")])

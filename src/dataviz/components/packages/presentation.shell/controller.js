@@ -1,6 +1,34 @@
 (function installPresentationShellController(global) {
   'use strict';
   const root = global.datavizComponents = global.datavizComponents || {};
+  // The static heading receives initial focus. Keep subsequent Tab navigation
+  // inside this modal across browsers, including WebKit's limited tab mode.
+  document.querySelectorAll('.keyboard-shortcuts-dialog, .dv-runtime-shortcuts').forEach(dialog => {
+    if (dialog.dataset.tabNavigationInstalled) return;
+    dialog.dataset.tabNavigationInstalled = 'true';
+    dialog.addEventListener('keydown', event => {
+      if (event.key !== 'Tab' || event.ctrlKey || event.metaKey || event.altKey) return;
+      const fields = [...dialog.querySelectorAll('button,input,select,textarea,a[href],[tabindex]')]
+        .filter(node => !node.disabled && node.tabIndex >= 0 && node.getClientRects().length);
+      if (!fields.length) return;
+      const current = fields.indexOf(document.activeElement);
+      const next = current < 0 ? (event.shiftKey ? fields.length - 1 : 0)
+        : (current + (event.shiftKey ? -1 : 1) + fields.length) % fields.length;
+      event.preventDefault();
+      fields[next].focus({preventScroll:true});
+    });
+  });
+  if (!root.headerGeometryInstalled) {
+    root.headerGeometryInstalled = true;
+    const header = document.querySelector('.topbar.dv-shell-header, .dv-runtime-header.dv-shell-header');
+    if (header && global.ResizeObserver) {
+      new ResizeObserver(() => {
+        const box = header.getBoundingClientRect();
+        document.documentElement.style.setProperty('--shell-header-height', `${box.height}px`);
+        document.body.style.setProperty('--operation-panel-top', `${box.bottom}px`);
+      }).observe(header);
+    }
+  }
   // Header focus rings belong to sequential keyboard navigation, not hotkeys
   // or pointer-driven focus restoration. Keep DOM focus and tab order intact.
   if (!root.headerFocusInstalled) {

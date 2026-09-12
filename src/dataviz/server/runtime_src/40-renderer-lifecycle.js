@@ -31,6 +31,7 @@ Object.assign(datavizRuntime, {
     return [...affected];
   },
   renderViews(context) {
+    if (this.disposed) return Promise.resolve([]);
     const affected = context.affectedViewIds == null ? null : new Set(context.affectedViewIds);
     const changedOutputReferences = new Set(context.changedOutputReferences || []);
     const completions = [];

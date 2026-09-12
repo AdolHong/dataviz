@@ -305,5 +305,5 @@ dataviz validate WORKSPACE --dashboard DASHBOARD --format json
 - Token 节省是待真实任务评测的产品假设，不承诺固定数字。
 - 成对评测工具已经实现；真实重复 trial 与结果发布尚待积累。
 - 当前运行协调只支持一个 Dataviz Server 进程写一个 Workspace/报告目标；Runtime 并发上限变更需要重启。
-- Plotly.js 4.0.0 与 TanStack Table Core 9.2.4 都由 Dataviz 固定并直接内置，Server 与 portable HTML 共用这些浏览器资产，不安装 Python `plotly`；Arrow 只有显式配置 Workspace 本地文件时离线，Perspective 当前仍依赖 CDN。manifest 的可移植性结论不覆盖自定义脚本自行发起的网络请求。
+- Plotly.js 4.1.0 与 TanStack Table Core 9.2.4 都由 Dataviz 固定并直接内置，Server 与 portable HTML 共用这些浏览器资产，不安装 Python `plotly`；Arrow 只有显式配置 Workspace 本地文件时离线，Perspective 当前仍依赖 CDN。manifest 的可移植性结论不覆盖自定义脚本自行发起的网络请求。
 - Dataviz 会隔离 Adapter 并脱敏错误/日志，但可信 Python Source 仍有能力主动把秘密作为 Output 返回；这是看板作者必须遵守的边界。

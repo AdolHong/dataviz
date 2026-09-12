@@ -10,14 +10,13 @@ from urllib.request import urlopen
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "4.0.0"
+VERSION = "4.1.0"
 URL = (
     "https://registry.npmjs.org/plotly.js-dist-min/-/"
     f"plotly.js-dist-min-{VERSION}.tgz"
 )
 EXPECTED_SHA512 = (
-    "Dm6Sr5aHaxDZ7HN6eLRBotMZ9zRYEd+eoimm27B8d2XOFiNpv0oO7QIE0WFwFAfPN16JHM/"
-    "6do6kDbasB+ftbQ=="
+    "OUeeE0z2csk0pYwKtT8zqBLZoCVQOcxxnbM2+V1SwLNVu7cSFNelWaGVhdhag2js6KvlcHDTrLAwrCG8odSUqA=="
 )
 DESTINATION = ROOT / "src" / "dataviz" / "vendor" / "plotly"
 ASSETS = {

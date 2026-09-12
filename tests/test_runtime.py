@@ -44,11 +44,11 @@ def test_workspace_is_valid():
 def test_plotly_runtime_is_the_pinned_direct_browser_asset():
     source = get_plotlyjs()
 
-    assert PLOTLY_JS_VERSION == "4.0.0"
+    assert PLOTLY_JS_VERSION == "4.1.0"
     assert PLOTLY_JS_SHA256 == (
-        "14461f3b4c91c8bb590a99d6d03c3fd031ca40eec07ebab79a5e3eac107cd7ca"
+        "03e18091beef5647aaf9e15f526981f325d760bb6b784fe0672a1e20585272cf"
     )
-    assert source.startswith("/**\n* plotly.js v4.0.0")
+    assert source.startswith("/**\n* plotly.js v4.1.0")
 
 
 def test_workspace_uses_physical_names_for_renamed_copied_and_deleted_dashboards(tmp_path: Path):
@@ -343,8 +343,8 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert "fonts.googleapis.com" not in report
     assert "@import url(" not in report
     assert '"tanstack_table": "9.2.4"' in report
-    assert '"plotly_js": "4.0.0"' in report
-    assert "plotly.js v4.0.0" in report
+    assert '"plotly_js": "4.1.0"' in report
+    assert "plotly.js v4.1.0" in report
     assert "globalThis.datavizTanStackTable" in report
     assert "PORTABLE ANALYSIS" not in report
     assert ">Query snapshot<" not in report
@@ -417,7 +417,7 @@ def test_custom_canvas_and_report(tmp_path: Path):
     assert '"dataset:sales-metrics/trend": [' in report
     assert "runtime.registerView(view.id" in report
     assert "window.datavizClient" not in report
-    assert "@perspective-dev/viewer@5.2.0" not in report
+    assert "@perspective-dev/viewer@5.4.0" not in report
     assert "perspective-viewer-datagrid.js" not in report
     assert "perspective-viewer-charts.js" not in report
     assert "runtime.registerRenderer('table'" in report

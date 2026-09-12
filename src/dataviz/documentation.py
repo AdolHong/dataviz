@@ -1902,11 +1902,11 @@ control_components:
         "field_matrix": _CHART_FIELD_MATRIX,
         "rule": "先验证数据口径、字段、聚合和 Named Output，再用 Plotly trace/layout/config 调整视觉细节。",
         "plotly_runtime": {
-            "version": "4.0.0",
+            "version": "4.1.0",
             "grammar": "内置 line/bar/stacked-bar/pie/scatter/heatmap/radar/map 都生成 Plotly traces 与 layout。",
             "native": "复杂视觉由 Custom Renderer 复用 context.charts.plotly，或直接调用完整 Plotly.js API。",
             "interaction": "图例、点击、框选、套索与缩放使用 Plotly 事件和 config；矩形/套索手势提交后自动隐藏临时轮廓并保留 Control 选择，再次点击当前激活的工具可退出选择模式；页面滚动仍由 Dashboard 优先处理。",
-            "offline": "Plotly.js 4.0.0 作为固定浏览器资产随 Dataviz 提供；Server 与 portable HTML 使用同一份 JS，不依赖 Python plotly 包。",
+            "offline": "Plotly.js 4.1.0 作为固定浏览器资产随 Dataviz 提供；Server 与 portable HTML 使用同一份 JS，不依赖 Python plotly 包。",
         },
         "layout_parameter_binding": {
             "purpose": "让参考线、参考区间、轴范围等 Plotly layout 值读取最近一次 RUN 已提交的 Query Parameter，同时保留 date/number/list 的真实类型。",
@@ -1929,7 +1929,7 @@ control_components:
             "data": "Server/Transform 生成 canonical Named Output；Browser Adapter 只把已计算字段投影为 Plotly traces，不重新解释业务口径。",
             "layout": "Dashboard options.layout 保存稳定作者意图；其中完整 {{ parameters.<id> }} 值在 Browser Runtime 中按 committed Query state 进行 typed binding，再合并 Theme、容器尺寸和响应式边距。",
             "config": "Browser Runtime 提供 page-first 滚轮、Modebar、框选交互、Resize 与离线安全默认，并关闭 Plotly 云端分享入口；View config 只覆盖明确的局部需求。",
-            "render": "浏览器直接调用内置 Plotly.js 4.0.0 的 newPlot/react/resize/purge，不经过 Python Figure。",
+            "render": "浏览器直接调用内置 Plotly.js 4.1.0 的 newPlot/react/resize/purge，不经过 Python Figure。",
         },
         "official_gallery": "https://plotly.com/javascript/",
         "official_source": "https://github.com/plotly/plotly.js/",
@@ -2419,7 +2419,7 @@ assets:
             )
         },
         "browser_assets": {
-            "plotly_js": "4.0.0（直接内置，不安装 Python plotly）",
+            "plotly_js": "4.1.0（直接内置，不安装 Python plotly）",
             "tanstack_table_core": "9.2.4（直接内置）",
             "workspace_asset_service": "Runtime v13 的 context.assets；Server URL 与 portable inline 共用同一作者 API。",
         },

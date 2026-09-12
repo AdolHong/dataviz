@@ -949,5 +949,126 @@ html[data-dv-header-keyboard] button.dv-shell-brand:focus-visible {
 .dv-context-sidebar .dv-context-controls__group>div,.dv-context-sidebar .dv-report-selection-group__fields{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:16px!important}
 .dv-context-sidebar .dv-report-selection-group__fields,.dv-context-sidebar .dv-compute-fields{width:100%;max-width:none!important}
 @media(min-width:1280px){body.dv-context-sidebar-open{margin-right:var(--dv-operation-panel-width)}}
-@media(max-width:1279px){.dv-context-sidebar{box-shadow:-12px 0 36px rgba(26,35,29,.12)}}
+@media(max-width:1279px){.dv-context-sidebar{border:0;box-shadow:-12px 0 36px rgba(26,35,29,.12)}}
 @media print{.dv-context-sidebar{display:none!important}body.dv-context-sidebar-open{margin-right:0}}
+/* Operation panels have one visual contract in host and standalone shells. */
+#operation-panel :is(#parameter-form, #dashboard-control-form, .dashboard-control-groups) {
+  padding: 0;
+  overflow: visible;
+  scrollbar-gutter: auto;
+}
+:is(#operation-panel, .dv-context-sidebar) {
+  /* Operation panels use the same neutral shell palette in every host. */
+  --dv-ink:#1f2521;
+  --dv-line:#e6e9e5;
+  --dv-panel:#fff;
+  --dv-paper:#fff;
+  --dv-accent:#4451a3;
+  --dv-accent-strong:#26306f;
+  --dv-muted:#747a74;
+  --dv-soft:#eef0f8;
+  color:#20242b;
+  font:14px/1.45 var(--dv-font-sans,sans-serif);
+  background:#fafbf9;
+}
+:is(#operation-panel, .dv-context-sidebar) :is(.field, .dv-control-field) {
+  display:flex;flex-direction:column;gap:6px;min-width:0;margin:0;
+}
+:is(#operation-panel, .dv-context-sidebar) :is(.field>label, .dv-control-field>span) {
+  color:#27322d;font:650 11px/1.45 var(--dv-font-sans,sans-serif);
+  letter-spacing:0;text-transform:none;
+}
+.dv-context-sidebar .dv-control-fields {
+  display:grid;grid-template-columns:minmax(0,1fr);gap:12px;
+}
+:is(#operation-panel, .dv-context-sidebar) :is(.dv-report-selection-group__fields, .control-form, .dv-context-controls__group>div) {
+  gap:12px!important;
+}
+:is(#operation-panel, .dv-context-sidebar)>header {
+  position:relative;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:22px 52px 20px 16px;
+}
+:is(#operation-panel, .dv-context-sidebar) h2 {
+  margin:0;
+  font:700 16px/1.4 var(--dv-font-sans,sans-serif);
+}
+:is(#operation-panel, .dv-context-sidebar)>header :is(#operation-panel-close, button[aria-label^="Close"]) {
+  position:absolute;top:16px;right:12px;width:36px;height:36px;
+  display:grid;place-items:center;padding:8px;border:0;border-radius:7px;
+  color:#747a82;background:transparent;font:600 12px/1.2 var(--dv-font-sans,sans-serif);
+  cursor:pointer;
+}
+:is(#operation-panel, .dv-context-sidebar)>header button svg {
+  width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;
+}
+#operation-panel :is(h2,h3)[tabindex="-1"]:focus {outline:none}
+.dv-context-backdrop {position:fixed;inset:0;z-index:99;border:0;background:rgba(25,31,40,.18)}
+.dv-context-backdrop[hidden] {display:none}
+@media(max-width:1279px) {
+  .dv-context-sidebar {box-shadow:-8px 0 32px rgba(25,31,40,.12)}
+  body.dv-context-sidebar-open {overflow:hidden}
+}
+@media print {.dv-context-backdrop{display:none}}
+/* Shared Header entries: role and availability differ, presentation does not. */
+.dv-shell-header-actions :is(#keyboard-shortcuts-toggle, #dashboard-controls-toggle,
+  #query-parameters-toggle, [data-runtime-shortcuts-toggle], [data-runtime-query-toggle],
+  [data-runtime-controls-disabled], .dv-shell-control__trigger) {
+  display:inline-flex;align-items:center;justify-content:center;
+  width:auto;min-width:0;height:40px;min-height:40px;padding:0 12px;
+  color:var(--dv-header-action-ink,#545a63);background:transparent;
+  border:1px solid transparent;border-radius:7px;box-sizing:border-box;cursor:pointer;
+  font:600 12px/1.2 var(--dv-font-sans);letter-spacing:0;text-transform:none;
+  transition:color .14s ease,background .14s ease,border-color .14s ease;
+}
+.dv-shell-header-actions :is([data-runtime-query-toggle], .dv-shell-control__trigger) > strong {
+  font:inherit;letter-spacing:inherit;color:inherit;
+}
+.dv-shell-header-actions :is(#keyboard-shortcuts-toggle, #dashboard-controls-toggle,
+  #query-parameters-toggle, [data-runtime-shortcuts-toggle], [data-runtime-query-toggle],
+  .dv-shell-control__trigger):hover:not(:disabled) {background:#f4f5f4}
+.dv-shell-header-actions :is(#dashboard-controls-toggle, #query-parameters-toggle,
+  [data-runtime-query-toggle], .dv-shell-control__trigger)[aria-expanded="true"] {
+  color:#26306f;background:#eef0f8;
+}
+.dv-shell-header-actions :is([data-runtime-query-toggle], [data-runtime-controls-disabled]):disabled {
+  opacity:.38;cursor:not-allowed;background:transparent;
+}
+.dv-shell-header-actions .dv-shell-control__chevron {display:none!important}
+/* Help keeps the same reading rhythm; unsupported shortcuts are omitted. */
+:is(.keyboard-shortcuts-dialog, .dv-runtime-shortcuts) {
+  width:min(430px,calc(100vw - 32px));padding:0;color:#252a2e;background:#fff;
+  border:1px solid #d9dddf;border-radius:12px;box-shadow:0 24px 72px rgba(28,35,31,.18);
+  font:14px/1.45 var(--dv-font-sans);
+}
+:is(.keyboard-shortcuts-dialog, .dv-runtime-shortcuts)::backdrop {background:rgba(28,32,30,.28);backdrop-filter:blur(2px)}
+:is(.keyboard-shortcuts-dialog, .dv-runtime-shortcuts) h2 {margin:0;font:700 20px/1.2 var(--dv-font-sans)}
+:is(.keyboard-shortcuts-dialog, .dv-runtime-shortcuts) h2[tabindex="-1"]:focus {outline:none}
+:is(.keyboard-shortcuts-dialog, .dv-runtime-shortcuts) dl>div {
+  grid-template-columns:minmax(150px,1fr) 1fr;border-bottom:1px solid #eceeef;
+}
+:is(.keyboard-shortcuts-dialog, .dv-runtime-shortcuts) dt {display:flex;align-items:center;gap:6px;margin:0}
+:is(.keyboard-shortcuts-dialog, .dv-runtime-shortcuts) kbd {
+  min-width:28px;padding:5px 8px;color:#343a3f;background:#f4f5f5;
+  border:1px solid #dfe2e4;border-bottom-color:#c9ced1;border-radius:5px;
+  text-align:center;font:650 10px var(--dv-font-mono);box-shadow:0 1px 0 #cfd3d5;
+}
+:is(.keyboard-shortcuts-dialog, .dv-runtime-shortcuts) dd {color:#60686e;font-size:13px}
+:is(.keyboard-shortcuts-dialog, .dv-runtime-shortcuts) footer button {
+  min-height:34px;padding:0 12px;color:#545a63;background:transparent;
+  border:1px solid transparent;border-radius:7px;cursor:pointer;
+  font:600 12px/1.2 var(--dv-font-sans);
+}
+@media(max-width:720px) {
+  .shell {grid-template-rows:auto minmax(0,1fr)}
+  .topbar.dv-shell-header, .dv-runtime-header.dv-shell-header {
+    display:flex;flex-wrap:wrap;height:auto;min-height:58px;gap:4px 12px;padding:8px 12px;
+  }
+  .dv-shell-header-actions, .dv-runtime-header>.dv-runtime-actions {
+    display:flex;flex:1 1 100%;flex-wrap:wrap;justify-content:flex-start;
+    min-width:0;gap:4px;margin-left:0;
+  }
+  .dv-shell-header-actions #query-parameters-toggle span {display:inline}
+}

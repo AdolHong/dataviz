@@ -186,7 +186,14 @@
     position(record);
     record.onOpen?.();
     const focusTarget = options.focus || record.focus;
-    if (focusTarget) requestAnimationFrame(() => focusTarget.focus({preventScroll: true}));
+    const openingFocus = document.activeElement;
+    const openingValue = openingFocus?.value;
+    if (focusTarget) requestAnimationFrame(() => {
+      // A later user action wins over this scheduled opening focus.
+      if (isOpen(record) && document.activeElement === openingFocus && openingFocus?.value === openingValue) {
+        focusTarget.focus({preventScroll: true});
+      }
+    });
   }
 
   function refresh(record, options = {}) {

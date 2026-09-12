@@ -81,8 +81,8 @@ def test_server_exposes_the_pinned_direct_plotly_browser_runtime():
     response = client.get("/runtime/plotly.js")
 
     assert response.status_code == 200
-    assert response.headers["x-dataviz-plotly-version"] == "4.0.0"
-    assert response.text.startswith("/**\n* plotly.js v4.0.0")
+    assert response.headers["x-dataviz-plotly-version"] == "4.1.0"
+    assert response.text.startswith("/**\n* plotly.js v4.1.0")
 
 
 def test_parameter_editor_updates_only_defaults_static_choices_and_sibling_order(
@@ -1426,11 +1426,11 @@ def test_header_uses_node_signal_lights_and_ends_with_share_controls_then_run():
     run = template.index('id="query-run-control"')
     query_card = template.index('id="query-parameters-control"')
     assert brand_end < signals < actions < share < controls < run < query_card
-    assert '<strong>SHARE</strong>' in template
+    assert '<strong>Share</strong>' in template
     assert 'id="copy-share-link" type="button">Copy share link</button>' in template
     assert 'id="download-button" type="button" disabled>Export HTML</button>' in template
     assert "shared_caches" not in template
-    assert '<strong data-run-label>RUN</strong>' in template
+    assert '<strong data-run-label>Run</strong>' in template
     assert 'class="button-light"' not in template
     assert ".query-parameters-control{" in style
     assert ".topbar-actions>.button{width:84px;height:40px;padding:0 14px}" in style

@@ -94,7 +94,7 @@
       return normalized;
     }
 
-    function commit(value, {close = true} = {}) {
+    function commit(value, {close = true, emit = true} = {}) {
       try {
         selected = validate(value);
       } catch (error) {
@@ -104,15 +104,23 @@
       setError('');
       input.value = selected;
       cursor = monthStart(parseIso(selected || today));
-      input.dispatchEvent(new Event('input', {bubbles: true}));
-      api.emitChange(input);
+      if (emit) {
+        input.dispatchEvent(new Event('input', {bubbles: true}));
+        api.emitChange(input);
+      }
       renderCalendar();
       if (close) overlay.close({returnFocus: true});
       return true;
     }
 
     function focusDate(value) {
-      requestAnimationFrame(() => panel.querySelector(`[data-date="${value}"]`)?.focus({preventScroll: true}));
+      const previousFocus = document.activeElement;
+      const previousValue = previousFocus?.value;
+      requestAnimationFrame(() => {
+        if (overlay.isOpen() && document.activeElement === previousFocus && previousFocus?.value === previousValue) {
+          panel.querySelector(`[data-date="${value}"]`)?.focus({preventScroll: true});
+        }
+      });
     }
 
     function renderMonth(date) {
@@ -229,7 +237,9 @@
       }
     });
     input.addEventListener('change', () => {
-      if (!commit(input.value, {close: false})) return;
+      // The current change already bubbles to consumers. Re-emitting it here
+      // recursively re-enters this listener, including calendar/Enter commits.
+      if (!commit(input.value, {close: false, emit: false})) return;
       selected = input.value;
     });
     input.addEventListener('keydown', event => {

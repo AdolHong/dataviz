@@ -45,6 +45,308 @@ SHOWCASE = ROOT / "examples" / "feature-showcase"
 
 
 @pytest.mark.e2e
+@pytest.mark.parametrize("with_fields", [True, False])
+def test_three_surface_shell_audit(page: Page, tmp_path: Path, with_fields: bool):
+    """Collect comparable Server/Share/HTML shell evidence from one Result."""
+    report = tmp_path / "three-surface.html"
+    evidence = {}
+    def appearance(locator):
+        return locator.evaluate("""async node => {
+          await Promise.all(node.getAnimations().map(animation => animation.finished.catch(() => {})));
+          const s = getComputedStyle(node);
+          return Object.fromEntries(['fontFamily','fontSize','fontWeight','color',
+            'backgroundColor','padding','borderRadius','borderWidth','height','letterSpacing']
+            .map(k => [k,s[k]]));
+        }""")
+
+    def inspect_surface(surface):
+        standalone = surface != "server"
+        controls = page.locator(
+            ('.dv-runtime-control[data-control-origin="dashboard"] > summary'
+             if with_fields else '[data-runtime-controls-disabled]')
+            if standalone else '#dashboard-controls-toggle'
+        )
+        parameters = page.locator('[data-runtime-query-toggle]' if standalone else '#query-parameters-toggle')
+        sidebar = page.locator('.dv-context-sidebar' if standalone else '#operation-panel')
+        shortcuts = page.locator('[data-runtime-shortcuts-toggle]' if standalone else '#keyboard-shortcuts-toggle')
+        help_dialog = page.locator('[data-runtime-shortcut-help]' if standalone else '#keyboard-shortcuts-dialog')
+        evidence[surface] = {}
+        page.keyboard.press("Escape")
+        if sidebar.is_visible():
+            page.keyboard.press("Escape")
+        expect(sidebar).to_be_hidden()
+        for width in (1440, 894, 375):
+            page.set_viewport_size({"width": width, "height": 900})
+            page.mouse.move(0, 899)
+            header_state = {key: appearance(node) for key, node in
+                            (("controls", controls), ("parameters", parameters), ("shortcuts", shortcuts))}
+            page.screenshot(path=f"/tmp/dataviz-audit-header-{surface}-{width}.png")
+            for entry in (controls, parameters, shortcuts):
+                box = entry.bounding_box()
+                assert box["x"] >= 0 and box["x"] + box["width"] <= width, (surface, width, box)
+                header_box = page.locator('.dv-runtime-header' if standalone else '.topbar').bounding_box()
+                assert box["y"] + box["height"] <= header_box["y"] + header_box["height"], (surface, width, box, header_box)
+            shortcuts.click()
+            expect(help_dialog).to_be_visible()
+            expect(help_dialog.locator("h2")).to_have_text("Keyboard Shortcuts")
+            expect(help_dialog.locator('h2')).to_be_focused()
+            assert help_dialog.locator('h2').evaluate('node => getComputedStyle(node).outlineStyle') == 'none'
+            help_state = {key: appearance(help_dialog.locator(selector)) for key, selector in
+                          (("title", "h2"), ("key", "kbd[data-shortcut-key=W]"), ("footer", "footer button"))}
+            page.keyboard.press("Escape")
+            expect(help_dialog).to_be_hidden()
+            expect(shortcuts).to_be_focused()
+            page.keyboard.press('?')
+            expect(help_dialog.locator('h2')).to_be_focused()
+            expect(help_dialog.locator('header button')).not_to_be_focused()
+            page.keyboard.press('Tab')
+            expect(help_dialog.locator(':focus')).to_have_count(1)
+            expect(help_dialog.locator('header button')).to_be_focused()
+            page.keyboard.press('Shift+Tab')
+            expect(help_dialog.locator('footer button')).to_be_focused()
+            expect(help_dialog.locator('h2')).not_to_be_focused()
+            page.keyboard.press('Escape')
+            expect(help_dialog).to_be_hidden()
+            expect(shortcuts).to_be_focused()
+            if not with_fields:
+                expect(controls).to_be_visible()
+                expect(controls).to_be_disabled()
+                expect(parameters).to_be_visible()
+                expect(parameters).to_be_disabled()
+                for key in ("w", "e"):
+                    page.keyboard.press(key)
+                    expect(sidebar).to_be_hidden()
+                    expect(page.locator('[data-runtime-shortcut-toast]' if standalone else '#shortcut-toast')).to_be_visible()
+                evidence[surface][str(width)] = {"header": header_state, "help": help_state}
+                continue
+            controls.click()
+            expect(sidebar).to_be_visible()
+            evidence[surface][str(width)] = sidebar.evaluate("""node => {
+              const style = el => {
+                const s = getComputedStyle(el);
+                return Object.fromEntries(['fontFamily','fontSize','fontWeight','color',
+                  'backgroundColor','padding','gap','borderRadius'].map(k => [k,s[k]]));
+              };
+              const box = node.getBoundingClientRect();
+              return {box:{x:box.x,y:box.y,width:box.width,height:box.height},
+                panel:style(node),heading:style(node.querySelector('h2')),
+                close:style(node.querySelector('header button[aria-label^="Close"]')),
+                scope:style(node.querySelector('h3')),
+                modal:node.getAttribute('aria-modal')};
+            }""")
+            assert evidence[surface][str(width)]["box"]["width"] == 320
+            evidence[surface][str(width)]["header"] = header_state
+            evidence[surface][str(width)]["help"] = help_state
+            page.screenshot(path=f"/tmp/dataviz-audit-{surface}-{width}.png")
+            page.keyboard.press("e")
+            expect(sidebar).to_be_hidden()
+            parameters.click()
+            expect(sidebar).to_be_visible()
+            if standalone:
+                expect(sidebar.locator("input, select, textarea")).to_have_count(0)
+            page.keyboard.press("w")
+            expect(sidebar).to_be_hidden()
+        if standalone:
+            expect(page.locator("#run-button, #share-button")).to_have_count(0)
+
+    workspace = _copy_workspace(MINIMAL, tmp_path / "audit-workspace")
+    if not with_fields:
+        dashboard_path = workspace / "dashboards/sales-overview/dashboard.yaml"
+        definition = yaml.safe_load(dashboard_path.read_text())
+        definition.pop("query_parameters")
+        definition.pop("controls")
+        definition.pop("subtitle")
+        for source in definition["sources"]:
+            source.pop("query_inputs", None)
+        for view in definition["views"]:
+            view.pop("control_inputs", None)
+            view.pop("options", None)
+        dashboard_path.write_text(yaml.safe_dump(definition, allow_unicode=True))
+        sql = dashboard_path.parent / "sources/sales.sql"
+        sql.write_text(sql.read_text().replace("$min_query_revenue", "0"))
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, "sales-overview")
+        _run_and_wait(page)
+        with page.expect_download(timeout=20_000) as download:
+            _export_html(page)
+        download.value.save_as(report)
+        page.locator("#share-button").click()
+        with page.expect_response(lambda response: response.url.endswith("/sales-overview/share")) as response:
+            page.locator("#copy-share-link").click()
+        share_url = response.value.json()["url"]
+        page.keyboard.press("Escape")
+        inspect_surface("server")
+        page.goto(base_url + share_url, wait_until="domcontentloaded")
+        expect(page.locator('[data-view-id="total-revenue"]')).to_have_attribute("data-view-status", "ready")
+        inspect_surface("share")
+        with _running_static_server(tmp_path) as static_url:
+            page.goto(static_url + "/" + report.name, wait_until="domcontentloaded")
+            expect(page.locator('[data-view-id="total-revenue"]')).to_have_attribute("data-view-status", "ready")
+            inspect_surface("html")
+    print("THREE_SURFACE_AUDIT " + json.dumps(evidence, ensure_ascii=False))
+    for surface in ("share", "html"):
+        for width in ("1440", "894", "375"):
+            for part in evidence["server"][width]:
+                assert evidence[surface][width][part] == evidence["server"][width][part], (surface, width, part)
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize('width', [1440, 375])
+def test_three_surface_choice_and_date_controls(page: Page, tmp_path: Path, width):
+    errors = []
+    page.on('pageerror', lambda error: errors.append(error.stack))
+    workspace = _copy_workspace(MINIMAL, tmp_path / 'choice-date')
+    folder = workspace / 'dashboards/sales-overview'
+    path = folder / 'dashboard.yaml'
+    dashboard = yaml.safe_load(path.read_text())
+    choices = [{'label': name, 'value': name} for name in ['Alpha', 'Beta', 'Gamma']]
+    dashboard['controls'] = [
+        {'id': 'single', 'type': 'single_select', 'value_type': 'text', 'label': 'Single',
+         'initial': {'mode': 'value', 'value': 'Alpha'}, 'options': {'mode': 'static', 'choices': choices}},
+        {'id': 'multi', 'type': 'multiple_select', 'value_type': 'text', 'label': 'Multiple',
+         'initial': {'mode': 'all'}, 'options': {'mode': 'static', 'choices': choices}},
+        {'id': 'date', 'type': 'single_input', 'value_type': 'date', 'label': 'Date', 'default': '2026-03-01'},
+        {'id': 'period', 'type': 'range_input', 'value_type': 'date', 'label': 'Period',
+         'default': ['2026-03-01', '2026-03-10']},
+    ]
+    for view in dashboard['views']:
+        view['control_inputs'] = {c['id']: {'mode': 'value', 'control': 'dashboard.' + c['id']}
+                                  for c in dashboard['controls']}
+    path.write_text(yaml.safe_dump(dashboard, allow_unicode=True))
+    presentation_path = folder / 'presentation.yaml'
+    presentation = yaml.safe_load(presentation_path.read_text())
+    presentation['control_components'] = {
+        'dashboard:sales-overview/' + key: {'component': component, **options}
+        for key, component, options in [('single', 'select', {'search': 'always'}),
+                                       ('multi', 'select', {'search': 'always'}),
+                                       ('date', 'date-picker', {}), ('period', 'range-picker', {})]
+    }
+    presentation_path.write_text(yaml.safe_dump(presentation, allow_unicode=True))
+    evidence = {}
+
+    def inspect(surface):
+        page.set_viewport_size({'width': width, 'height': 900})
+        standalone = surface != 'server'
+        canvas = page if standalone else page.frame_locator('#canvas-frame')
+        expect(canvas.locator('[data-view-id="sales-perspective"]')).to_have_attribute('data-view-status', 'ready', timeout=20_000)
+        assert canvas.locator('body').evaluate('''() => ({
+          plotly:window.Plotly.version, perspective:window.dataviz.runtime_versions.perspective
+        })''') == {'plotly': '4.1.0', 'perspective': '5.4.0'}
+        page.locator('.dv-runtime-control[data-control-origin="dashboard"] > summary'
+                     if standalone else '#dashboard-controls-toggle').click()
+        sidebar = page.locator('.dv-context-sidebar' if standalone else '#operation-panel')
+        expect(sidebar).to_be_visible()
+        def bounds(panel):
+            box = panel.bounding_box()
+            assert box['x'] >= 0 and box['x'] + box['width'] <= width + 1, (surface, box)
+            assert box['y'] >= 0 and box['y'] + box['height'] <= 901, (surface, box)
+        single, multi = [sidebar.locator('[data-control-component="select"]').nth(i) for i in (0, 1)]
+        single.locator('[data-control-trigger]').click()
+        search = single.locator('.dv-choice-search')
+        search.fill('Beta')
+        bounds(single.locator('[data-control-panel]'))
+        single.locator('.dv-choice-option').click()
+        expect(single.locator('select')).to_have_value('Beta')
+        expect(single.locator('[data-control-panel]')).to_be_hidden()
+        multi.locator('[data-control-trigger]').click()
+        panel = multi.locator('[data-control-panel]')
+        bounds(panel)
+        panel.get_by_role('button', name='Clear', exact=True).click()
+        expect(multi.locator('select')).to_have_values([])
+        search = multi.locator('.dv-choice-search')
+        search.fill('Alpha')
+        panel.get_by_role('button', name='Select results', exact=True).click()
+        search.fill('Beta')
+        panel.get_by_role('button', name='Select results', exact=True).click()
+        panel.get_by_role('button', name='Clear results', exact=True).click()
+        expect(multi.locator('select')).to_have_values(['Alpha'])
+        search.fill('')
+        search.press('e')
+        expect(search).to_have_value('e')
+        expect(sidebar).to_be_visible()
+        search.fill('no matching option')
+        expect(panel.locator('.dv-choice-empty')).to_be_visible()
+        expect(panel.get_by_role('button', name='Select results', exact=True)).to_be_disabled()
+        search.press('Escape')
+        expect(panel).to_be_hidden()
+        expect(sidebar).to_be_visible()
+        date = sidebar.locator('[data-control-component="date-picker"]')
+        date_input = date.locator('.dv-date-picker__control[type="text"]')
+        date_input.fill('2026-02-31')
+        expect(date_input).to_have_attribute('aria-invalid', 'true')
+        date_input.fill('2026-03-02')
+        date_input.press('Enter')
+        expect(date_input).to_have_attribute('aria-invalid', 'false')
+        date.locator('[data-control-trigger]').click()
+        expect(date.locator('[data-control-panel]')).to_be_visible()
+        bounds(date.locator('[data-control-panel]'))
+        page.keyboard.press('Escape')
+        period = sidebar.locator('[data-control-component="range-picker"]')
+        endpoints = period.locator('.dv-date-range__endpoint')
+        endpoints.nth(0).fill('2026-03-03')
+        endpoints.nth(1).fill('2026-03-08')
+        endpoints.nth(1).press('Enter')
+        expect(period.locator('input[data-control-input], input[data-control-state-input]')).to_have_value('2026-03-03,2026-03-08')
+        period.locator('[data-control-trigger]').click()
+        bounds(period.locator('[data-control-panel]'))
+        page.keyboard.press('Escape')
+        # Compare the whole field, not only the enhanced control's outer div.
+        # Labels and native trigger borders can inherit different host CSS.
+        evidence[surface] = sidebar.locator('[data-control-component]:visible').evaluate_all('''nodes => nodes.map(node => {
+          const s = getComputedStyle(node);
+          const field = node.closest('.field, .dv-control-field');
+          const label = field?.querySelector(':scope > label, :scope > span');
+          const ls = getComputedStyle(label);
+          const entry = node.querySelector('[data-control-trigger], [data-control-native="visible"]');
+          const es = getComputedStyle(entry);
+          const rect = field.getBoundingClientRect();
+          const parentTop = nodes[0].closest('.field, .dv-control-field').getBoundingClientRect().top;
+          return {component:node.dataset.controlComponent, font:s.fontFamily, size:s.fontSize,
+            color:s.color, background:s.backgroundColor, width:node.getBoundingClientRect().width,
+            label:{font:ls.font,color:ls.color,spacing:ls.letterSpacing,transform:ls.textTransform},
+            entry:{border:es.borderColor,background:es.backgroundColor},
+            field:{height:rect.height,top:rect.top-parentTop,gap:getComputedStyle(field).gap}};
+        })''')
+        browser_name = os.environ.get('DATAVIZ_BROWSER', 'chromium')
+        page.screenshot(path=f'/tmp/dataviz-choice-date-{browser_name}-{surface}-{width}.png')
+        page.keyboard.press('Escape')
+        expect(sidebar).to_be_hidden()
+        # Unlike the separate adapter-contract matrix, this fixture uses the
+        # actual CDN Perspective client/engine and must release its real worker.
+        disposal = canvas.locator('body').evaluate('''async () => {
+          const runtime = window.datavizRuntime;
+          const created = runtime.metrics.perspective.created;
+          runtime.dispose();
+          const deadline = performance.now() + 5000;
+          while (runtime.metrics.perspective.disposed < created && performance.now() < deadline)
+            await new Promise(resolve => setTimeout(resolve, 20));
+          return {created, disposed:runtime.metrics.perspective.disposed, states:runtime.viewAdapter.states.size};
+        }''')
+        assert disposal['created'] > 0 and disposal['disposed'] == disposal['created'], disposal
+        assert disposal['states'] == 0, disposal
+
+    with _running_server(workspace) as url, _running_static_server(tmp_path) as static_url:
+        _open_dashboard(page, url, 'sales-overview')
+        _run_and_wait(page)
+        with page.expect_download() as download:
+            _export_html(page)
+        report = tmp_path / 'choice-date.html'
+        download.value.save_as(report)
+        page.locator('#share-button').click()
+        with page.expect_response(lambda response: response.url.endswith('/sales-overview/share')) as response:
+            page.locator('#copy-share-link').click()
+        share_url = response.value.json()['url']
+        page.keyboard.press('Escape')
+        inspect('server')
+        page.goto(url + share_url)
+        inspect('share')
+        page.goto(f'{static_url}/{report.name}')
+        inspect('html')
+    assert evidence['server'] == evidence['share'] == evidence['html'], json.dumps(evidence, ensure_ascii=False)
+    assert not errors, errors
+
+
+@pytest.mark.e2e
 def test_root_requires_explicit_or_remembered_dashboard(page: Page):
     with _running_server(MINIMAL) as base_url:
         requests = []
@@ -132,8 +434,9 @@ def test_cascader_search_density_and_exported_sidebar_corners(page: Page, tmp_pa
 
 
 @pytest.mark.parametrize('viewport_width', [1440, 894, 375])
+@pytest.mark.parametrize('surface', ['server', 'share', 'html'])
 @pytest.mark.e2e
-def test_cascader_sidebar_bounds_and_global_all(page: Page, tmp_path: Path, viewport_width):
+def test_cascader_sidebar_bounds_and_global_all(page: Page, tmp_path: Path, viewport_width, surface):
     workspace = _copy_workspace(SHOWCASE, tmp_path / 'cascader-bounds')
     path = workspace / 'dashboards/功能示例##cascade-explorer/dashboard.yaml'
     dashboard = yaml.safe_load(path.read_text())
@@ -143,16 +446,39 @@ def test_cascader_sidebar_bounds_and_global_all(page: Page, tmp_path: Path, view
     view['control_inputs']['district']['field'] = ['province', 'city']
     path.write_text(yaml.safe_dump(dashboard, allow_unicode=True))
     page.set_viewport_size({'width': viewport_width, 'height': 900})
-    with _running_server(workspace) as url:
+    with _running_server(workspace) as url, _running_static_server(tmp_path) as static_url:
         _open_dashboard(page, url, 'cascade-explorer')
         _run_and_wait(page)
-        frame = page.frame_locator('#canvas-frame')
+        if page.locator('#sidebar-toggle').get_attribute('aria-expanded') == 'true':
+            page.locator('#sidebar-toggle').click()
+        if surface == 'html':
+            with page.expect_download() as download:
+                _export_html(page)
+            report = tmp_path / 'cascade-audit.html'
+            download.value.save_as(report)
+            page.goto(f'{static_url}/{report.name}')
+        elif surface == 'share':
+            page.locator('#share-button').click()
+            with page.expect_response(lambda response: response.url.endswith('/cascade-explorer/share')) as response:
+                page.locator('#copy-share-link').click()
+            page.goto(url + response.value.json()['url'])
+        frame = page.frame_locator('#canvas-frame') if surface == 'server' else page
         frame.locator('[data-editor-owner="view:city-detail"] > summary').click()
-        cascader = page.locator('#operation-panel [data-control-component="cascader"]')
+        sidebar = page.locator('#operation-panel' if surface == 'server' else '.dv-context-sidebar')
+        number = sidebar.locator('[data-control-component="input-number"]')
+        number_input = number.locator('input')
+        assert number_input.evaluate('node => getComputedStyle(node).appearance') == 'textfield'
+        number.get_by_role('button', name='Increase value').click()
+        expect(number_input).to_have_value('1')
+        number.get_by_role('button', name='Decrease value').click()
+        expect(number_input).to_have_value('0')
+        cascader = sidebar.locator('[data-control-component="cascader"]')
+        runtime = "document.querySelector('#canvas-frame').contentWindow" if surface == 'server' else 'window'
         cascader.locator('[data-control-trigger]').click()
         panel = cascader.locator('.dv-cascader-panel')
         expect(panel).to_be_visible()
-        page.screenshot(path=f'/tmp/dataviz-cascader-{viewport_width}.png')
+        browser_name = os.environ.get('DATAVIZ_BROWSER', 'chromium')
+        page.screenshot(path=f'/tmp/dataviz-cascader-{browser_name}-{surface}-{viewport_width}.png')
         def assert_bounds():
             box = panel.bounding_box()
             assert box['x'] >= 11
@@ -164,7 +490,7 @@ def test_cascader_sidebar_bounds_and_global_all(page: Page, tmp_path: Path, view
         expect(cascader.locator('select')).to_have_values([])
         expect(panel.get_by_role('button', name='Revert', exact=True)).to_have_count(0)
         panel.get_by_role('button', name='Select all', exact=True).click()
-        page.wait_for_function("document.querySelector('#canvas-frame').contentWindow.dataviz.control.state('view:city-detail/district').intent === 'all_available'")
+        page.wait_for_function(runtime + ".dataviz.control.state('view:city-detail/district').intent === 'all_available'")
         assert cascader.locator('select').evaluate('s => s.selectedOptions.length === s.options.length')
         clear.click()
         expect(cascader.locator('select')).to_have_values([])
@@ -179,7 +505,7 @@ def test_cascader_sidebar_bounds_and_global_all(page: Page, tmp_path: Path, view
         assert cascader.locator('select').evaluate('s => s.selectedOptions.length > 0 && [...s.selectedOptions].every(o => o.textContent.includes("深圳"))')
         panel.locator('.dv-choice-search').fill('')
         panel.get_by_role('button', name='Select all', exact=True).click()
-        page.wait_for_function("document.querySelector('#canvas-frame').contentWindow.dataviz.control.state('view:city-detail/district').intent === 'all_available'")
+        page.wait_for_function(runtime + ".dataviz.control.state('view:city-detail/district').intent === 'all_available'")
         panel.locator('.dv-choice-search').fill('no-matching-path')
         expect(panel.locator('.dv-choice-empty')).to_be_visible()
         expect(panel.get_by_role('button', name='Select results', exact=True)).to_be_disabled()
@@ -187,6 +513,7 @@ def test_cascader_sidebar_bounds_and_global_all(page: Page, tmp_path: Path, view
         assert_bounds()
         panel.locator('.dv-choice-search').press('Escape')
         expect(panel).to_be_hidden()
+        expect(sidebar).to_be_visible()
 
 
 @pytest.mark.e2e
@@ -282,6 +609,7 @@ def test_contextual_controls_sidebar_and_portable_state(page: Page, tmp_path: Pa
         expect(popup_select).to_have_values(['深圳'])
 
 
+
 @pytest.mark.e2e
 @pytest.mark.parametrize('with_dashboard', [True, False])
 def test_contextual_controls_sibling_switch_and_popover_override(page: Page, tmp_path: Path, with_dashboard: bool):
@@ -366,6 +694,68 @@ def test_contextual_controls_sibling_switch_and_popover_override(page: Page, tmp
         expect(sidebar_select).to_have_values(['佛山'])
         sidebar_select.select_option(['深圳'], force=True)
         expect(popup_select).to_have_values(['深圳'])
+
+
+        # Exercise the same contextual navigation on a real Share and HTML,
+        # including the no-dashboard-controls variant. Query values are read-only.
+        page.keyboard.press('Escape')
+        page.keyboard.press('Escape')
+        with page.expect_download() as download:
+            _export_html(page)
+        report = tmp_path / 'context-siblings.html'
+        download.value.save_as(report)
+        page.locator('#share-button').click()
+        with page.expect_response(lambda response: response.url.endswith('/cascade-explorer/share')) as response:
+            page.locator('#copy-share-link').click()
+        share_url = response.value.json()['url']
+        with _running_static_server(tmp_path) as static_url:
+            for surface, target in [('share', url + share_url), ('html', static_url + '/' + report.name)]:
+                page.goto(target)
+                panel = page.locator('.dv-context-sidebar')
+                section = page.locator('[data-editor-owner="section:geography"]')
+                first = page.locator('[data-editor-owner="view:city-detail"] > summary')
+                second = page.locator('[data-editor-owner="view:other-detail"] > summary')
+                section.locator('summary').click()
+                expect(section).to_have_attribute('open', '')
+                expect(panel).to_be_hidden()
+                section.locator('summary').click()
+                page.locator('[data-runtime-query-toggle]').click()
+                expect(panel.locator('input, select, textarea')).to_have_count(0)
+                section.locator('summary').click()
+                expect(panel).to_be_visible()
+                expect(panel.locator('h2')).to_have_text('Controls')
+                expect(panel.locator('.dv-context-sidebar__body > section')).to_have_count(2 if with_dashboard else 1)
+                section.locator('summary').click()
+                expect(panel).to_be_visible()
+                first.click()
+                expect(panel.locator('.dv-context-sidebar__body > section')).to_have_count(3 if with_dashboard else 2)
+                second.click()
+                expect(panel.get_by_role('heading', name=re.compile('另一张明细'))).to_be_visible()
+                expect(panel.get_by_role('heading', name=re.compile('级联后的城市明细'))).to_have_count(0)
+                browser_name = os.environ.get('DATAVIZ_BROWSER', 'chromium')
+                panel.screenshot(path=f'/tmp/dataviz-context-path-{browser_name}-{surface}-{with_dashboard}.png')
+                second.click()
+                expect(panel).to_be_hidden()
+                first.click()
+                section.locator('summary').click()
+                expect(panel).to_be_visible()
+                expect(section).to_have_attribute('open', '')
+                expect(panel.locator('.dv-context-sidebar__body > section')).to_have_count(2 if with_dashboard else 1)
+                popup_choice = section.locator('.dv-checkbox-option[data-value="佛山"]')
+                popup_choice.click()
+                expect(panel.locator('select[data-control-state-input="section:geography/city"]')).to_have_values(['佛山', '深圳'])
+                panel.locator('.dv-checkbox-option[data-value="深圳"]').click()
+                expect(section.locator('select')).to_have_values(['佛山'])
+                # Clicking the sidebar is outside the popover: native light
+                # dismiss closes it. Reopen to verify Escape closes only it.
+                expect(section).not_to_have_attribute('open', '')
+                section.locator('summary').click()
+                expect(section).to_have_attribute('open', '')
+                page.keyboard.press('Escape')
+                expect(section).not_to_have_attribute('open', '')
+                expect(panel).to_be_visible()
+                page.keyboard.press('e')
+                expect(panel).to_be_hidden()
 
 
 @pytest.mark.e2e
@@ -1761,7 +2151,9 @@ def _open_dashboard(page: Page, base_url: str, dashboard_id: str) -> None:
     if switched:
         if page.locator('#operation-panel[aria-modal="true"]').is_visible():
             page.locator('#operation-panel-close').click()
-        if not dashboard.is_visible():
+        # A translated-offscreen mobile navigation tree is still CSS-visible.
+        # Open it through its real button rather than attempting an offscreen click.
+        if page.locator('#sidebar-toggle').get_attribute('aria-expanded') == 'false' or not dashboard.is_visible():
             page.locator('#sidebar-toggle').click()
         dashboard.click()
         expect(dashboard).to_have_class(re.compile(r"\bactive\b"), timeout=10_000)
@@ -3624,7 +4016,8 @@ def test_web_component_reference_adapter_consumes_runtime_v2_without_canvas_runt
 
 
 @pytest.mark.e2e
-def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Page, tmp_path: Path):
+@pytest.mark.parametrize('surface', ['server', 'share', 'html'])
+def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Page, tmp_path: Path, surface):
     workspace = _copy_gallery_workspace(tmp_path)
     visual_path = workspace / 'dashboards/component-gallery/presentation.yaml'
     visual = yaml.safe_load(visual_path.read_text())
@@ -3655,10 +4048,21 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
         yaml.safe_dump(presentation, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )
-    with _running_server(workspace) as base_url:
+    with _running_server(workspace) as base_url, _running_static_server(tmp_path) as static_url:
         _open_dashboard(page, base_url, "component-gallery")
         _run_and_wait(page)
-        frame = page.frame_locator("#canvas-frame")
+        if surface == 'share':
+            page.locator('#share-button').click()
+            with page.expect_response(lambda response: response.url.endswith('/component-gallery/share')) as response:
+                page.locator('#copy-share-link').click()
+            page.goto(base_url + response.value.json()['url'])
+        elif surface == 'html':
+            with page.expect_download() as download:
+                _export_html(page)
+            report = tmp_path / 'component-gallery.html'
+            download.value.save_as(report)
+            page.goto(static_url + '/' + report.name)
+        frame = page.frame_locator("#canvas-frame") if surface == 'server' else page
         detail = frame.locator('[data-view-id="detail-table"]')
         expect(detail).to_have_attribute("data-view-status", "ready", timeout=20_000)
 
@@ -3682,12 +4086,13 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
             "presentation.shell",
         } <= set(owner_contract["packages"])
 
-        header = page.locator("#dashboard-controls-control")
-        page.locator("#dashboard-controls-toggle").click()
+        header = page.locator("#dashboard-controls-control" if surface == 'server' else '.dv-context-sidebar')
+        page.locator("#dashboard-controls-toggle" if surface == 'server'
+                     else '.dv-runtime-control[data-control-origin="dashboard"] > summary').click()
 
         text_control = header.locator(
             '[data-control-component="input"]',
-            has=page.locator('input[name="dashboard:component-gallery/analyst-note"]'),
+            has=page.locator('input[data-control-state-input="dashboard:component-gallery/analyst-note"]'),
         )
         expect(text_control.locator("input")).to_have_value("Review the selected cohort")
         text_control.locator("input").fill("Review East cohort")
@@ -3701,7 +4106,7 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
         assert text_input_visuals == {"borderStyle": "none", "borderRadius": "0px"}
         unbounded_text = header.locator(
             '[data-control-component="input"]',
-            has=page.locator('input[name="dashboard:component-gallery/unbounded-note"]'),
+            has=page.locator('input[data-control-state-input="dashboard:component-gallery/unbounded-note"]'),
         )
         expect(unbounded_text.locator(".dv-input__count")).to_be_hidden()
 
@@ -3745,7 +4150,18 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
         date_picker = header.locator('[data-control-component="date-picker"]')
         date_input = date_picker.locator('.dv-date-picker__control[type="text"]')
         expect(date_input).to_have_value(re.compile(r"^\d{4}-\d{2}-\d{2}$"))
-        date_picker.locator("[data-control-trigger]").click()
+        # Reproduce focus moving to text before the opening RAF runs. Pending
+        # calendar focus must not steal it and expose the draft to snapshots.
+        pending_focus = date_picker.evaluate('''async control => {
+          const input = control.querySelector('.dv-date-picker__control');
+          input.focus();
+          control.querySelector('[data-control-trigger]').click();
+          input.value = '2026-02-31';
+          input.dispatchEvent(new Event('input', {bubbles:true}));
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          return {focused:document.activeElement === input, value:input.value, invalid:input.getAttribute('aria-invalid')};
+        }''')
+        assert pending_focus == {'focused': True, 'value': '2026-02-31', 'invalid': 'true'}
         date_panel = date_picker.locator("[data-control-panel]")
         expect(date_panel).to_be_visible()
         expect(date_panel.locator(".dv-date-range__month")).to_have_count(1)
@@ -3761,10 +4177,24 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
         expect(date_panel).to_be_hidden()
 
         slider = header.locator(
-            'input[type="range"][name="dashboard:component-gallery/confidence"]'
+            'input[type="range"][data-control-state-input="dashboard:component-gallery/confidence"]'
         )
         slider.fill("0.85")
         expect(slider.locator("xpath=..").locator(".dv-slider__input")).to_have_value("0.85")
+
+        band = header.locator('.dv-slider--range')
+        expect(band.locator('.dv-slider__track').first).to_have_value('0.25')
+        expect(band.locator('.dv-slider__track').last).to_have_value('0.75')
+        band.locator('.dv-slider__input').first.fill('0.3')
+        expect(band.locator('.dv-slider__track').first).to_have_value('0.3')
+        band.locator('.dv-slider__track').last.fill('0.9')
+        expect(band.locator('.dv-slider__input').last).to_have_value('0.9')
+        values = header.locator('[data-control-component="multiple-input"]')
+        values.get_by_role('button', name='+ Add value', exact=True).click()
+        values.locator('[data-multiple-value]').last.fill('extra')
+        expect(values.locator('[data-multiple-value]')).to_have_count(3)
+        values.get_by_role('button', name='Remove value').last.click()
+        expect(values.locator('[data-multiple-value]')).to_have_count(2)
 
         checkbox = header.locator('[data-control-component="checkbox-group"]')
         expect(checkbox).to_be_visible()
@@ -4127,7 +4557,8 @@ def test_component_gallery_story_overlay_keyboard_a11y_and_virtual_dom(page: Pag
               };
             }"""
         )
-        page.locator('select[name="dashboard:component-gallery/region"]').select_option(
+        page.locator('select[data-control-state-input="dashboard:component-gallery/region"]'
+                     if surface != 'server' else 'select[name="dashboard:component-gallery/region"]').select_option(
             ["East"], force=True
         )
         custom = frame.locator('[data-view-id="custom-specimen"]')
@@ -5192,45 +5623,147 @@ def test_managed_renderer_lifecycle_matrix_in_server_and_export(page: Page, tmp_
             _export_html(page)
         download_info.value.save_as(report_path)
 
+        page.locator('#share-button').click()
+        with page.expect_response(lambda response: response.url.endswith('/sales-overview/share')) as response:
+            page.locator('#copy-share-link').click()
+        share_url = response.value.json()['url']
+
         # dispose
         assert_dispose(frame)
 
-    # export: the portable host repeats the same lifecycle rather than using a
-    # separate static chart implementation.
-    with _running_static_server(report_path.parent) as report_url:
-        page.goto(f"{report_url}/{report_path.name}", wait_until="domcontentloaded")
-        expect_ready(page)
-        mark_instances(page)
-        selection = page.locator(
-            '[data-control-key="dashboard:sales-overview/region"] select[data-control-input]'
-        )
+        # Share and HTML repeat the same lifecycle from the same Result.
+        with _running_static_server(report_path.parent) as report_url:
+            for target in (base_url + share_url, f"{report_url}/{report_path.name}"):
+                page.goto(target, wait_until="domcontentloaded")
+                expect_ready(page)
+                mark_instances(page)
+                selection = page.locator(
+                    '[data-control-key="dashboard:sales-overview/region"] select[data-control-input]'
+                )
 
-        selection.select_option(["华南"], force=True)
-        expect_ready(page)
-        assert_update_reuses_instances(page)
+                selection.select_option(["华南"], force=True)
+                expect_ready(page)
+                assert_update_reuses_instances(page)
 
-        selection.evaluate(
-            """input => {
-              window.datavizComponents.controls.clearOptions(input);
-              window.datavizComponents.controls.markSelectionIntent(input, 'explicit');
-              window.datavizComponents.controls.emitChange(input);
-            }"""
-        )
-        for view_id in view_ids:
-            expect(page.locator(f'[data-view-id="{view_id}"]')).to_have_attribute(
-                "data-view-status", "empty", timeout=2_000
-            )
+                selection.evaluate(
+                    """input => {
+                      window.datavizComponents.controls.clearOptions(input);
+                      window.datavizComponents.controls.markSelectionIntent(input, 'explicit');
+                      window.datavizComponents.controls.emitChange(input);
+                    }"""
+                )
+                for view_id in view_ids:
+                    expect(page.locator(f'[data-view-id="{view_id}"]')).to_have_attribute(
+                        "data-view-status", "empty", timeout=2_000
+                    )
 
-        selection.evaluate(
-            """input => {
-              input.options[0].selected = true;
-              window.datavizComponents.controls.markSelectionIntent(input, 'explicit');
-              window.datavizComponents.controls.emitChange(input);
-            }"""
-        )
-        expect_ready(page)
-        assert_interaction_and_resize(page)
-        assert_dispose(page)
+                selection.evaluate(
+                    """input => {
+                      input.options[0].selected = true;
+                      window.datavizComponents.controls.markSelectionIntent(input, 'explicit');
+                      window.datavizComponents.controls.emitChange(input);
+                    }"""
+                )
+                expect_ready(page)
+                assert_interaction_and_resize(page)
+                assert_dispose(page)
+
+
+@pytest.mark.e2e
+def test_three_surface_renderer_pending_error_and_recovery(page: Page, tmp_path: Path):
+    from dataviz.standalone import prepare_input
+
+    definition = tmp_path / 'view-states.yaml'
+    definition.write_text(yaml.safe_dump({
+        'schema': DASHBOARD_SCHEMA, 'id': 'view-states',
+        'controls': [{'id': 'mode', 'type': 'single_select', 'value_type': 'text',
+                      'initial': {'mode': 'value', 'value': 'ready'},
+                      'options': {'mode': 'static', 'choices': [{'label': x, 'value': x} for x in ['ready', 'pending', 'error']]}}],
+        'sources': [{'id': 'rows', 'type': 'python',
+                     'code': {'inline': "def load(context):\n    return [{'value': 7}]\n"},
+                     'outputs': {'main': {'kind': 'table'}}}],
+        'canvas': {'scripts': [{'inline': """window.datavizRuntime.registerRenderer('audit.states', {
+          validate() {
+            if (!window.auditInitialValidated) {
+              window.auditInitialValidated = true;
+              return new Promise(resolve => { window.releaseAuditInitial = resolve; });
+            }
+            const mode = window.dataviz.control.value('dashboard:view-states/mode');
+            if (mode === 'pending') return new Promise(resolve => { window.releaseAuditRender = resolve; });
+            if (mode === 'error') {
+              const error = new Error('Controlled renderer failure');
+              error.stack = error.message; throw error;
+            }
+          },
+          mount(context) {
+            const node = document.createElement('p'); node.textContent = 'Ready value: 7';
+            context.body.append(node); return {node};
+          },
+          update(context, descriptor, state) { return state; },
+          dispose(context, state) { state.node.remove(); }
+        });"""}]},
+        'views': [{'id': 'state', 'title': 'State feedback', 'template': 'custom',
+                   'renderer': 'audit.states', 'input': 'source:rows/main',
+                   'control_inputs': {'mode': {'mode': 'value', 'control': 'dashboard.mode'}}}],
+    }))
+    (tmp_path / 'presentation.yaml').write_text(yaml.safe_dump({
+        'schema': 'dataviz/presentation/v2', 'kind': 'presentation', 'dashboard': 'view-states',
+        'control_components': {'dashboard:view-states/mode': {'component': 'select'}},
+    }))
+    workspace, _ = prepare_input(definition)
+    evidence = {}
+
+    def inspect(surface):
+        frame = page.frame_locator('#canvas-frame') if surface == 'server' else page
+        view = frame.locator('[data-view-id="state"]')
+        expect(view).to_have_attribute('data-view-status', 'loading', timeout=20_000)
+        expect(view).to_have_attribute('aria-busy', 'true')
+        frame.locator('body').evaluate('() => window.releaseAuditInitial()')
+        expect(view).to_have_attribute('data-view-status', 'ready', timeout=20_000)
+        page.locator('#dashboard-controls-toggle' if surface == 'server'
+                     else '.dv-runtime-control[data-control-origin="dashboard"] > summary').click()
+        sidebar = page.locator('#operation-panel' if surface == 'server' else '.dv-context-sidebar')
+        def change(mode):
+            control = sidebar.locator('[data-control-component="select"]')
+            control.locator('[data-control-trigger]').click()
+            control.locator('.dv-choice-option').filter(has_text=re.compile('^' + mode + '$')).click()
+        change('pending')
+        expect(view).to_have_attribute('data-view-updating', 'true')
+        expect(view).to_have_attribute('aria-busy', 'true')
+        expect(view).to_contain_text('Ready value: 7')
+        frame.locator('body').evaluate('() => window.releaseAuditRender()')
+        expect(view).not_to_have_attribute('data-view-updating', 'true')
+        change('error')
+        expect(view).to_have_attribute('data-view-status', 'error')
+        alert = view.get_by_role('alert')
+        expect(alert).to_contain_text('Controlled renderer failure')
+        evidence[surface] = alert.evaluate('''node => {
+          const s = getComputedStyle(node);
+          return {font:s.font, color:s.color, background:s.backgroundColor, padding:s.padding, border:s.border};
+        }''')
+        change('ready')
+        expect(view).to_have_attribute('data-view-status', 'ready')
+        expect(view.get_by_role('alert')).to_have_count(0)
+        expect(view).to_contain_text('Ready value: 7')
+        page.locator('#operation-panel-close' if surface == 'server' else '.dv-context-sidebar > header button').click()
+
+    with _running_server(workspace) as url:
+        page.goto(url + '/dashboards/view-states')
+        _run_and_wait(page)
+        inspect('server')
+        report = tmp_path / 'view-states.html'
+        with page.expect_download() as download:
+            _export_html(page)
+        download.value.save_as(report)
+        page.locator('#share-button').click()
+        with page.expect_response(lambda response: response.url.endswith('/view-states/share')) as response:
+            page.locator('#copy-share-link').click()
+        page.goto(url + response.value.json()['url'])
+        inspect('share')
+        with _running_static_server(tmp_path) as static_url:
+            page.goto(static_url + '/' + report.name)
+            inspect('html')
+    assert evidence['server'] == evidence['share'] == evidence['html'], evidence
 
 
 @pytest.mark.e2e
@@ -5969,11 +6502,10 @@ def test_share_link_keeps_browser_interactions_and_uses_workspace_cache(page: Pa
         )
         page.locator('details[data-control-origin="dashboard"] > summary').click()
         delay = page.locator(
-            '[data-control-key="dashboard:worker-runtime/delay_ms"] input[data-control-input]'
+            '.dv-context-sidebar [data-control-key="dashboard:worker-runtime/delay_ms"] input[data-control-input]'
         )
-        delay.evaluate(
-            "input => { input.value = '6'; input.dispatchEvent(new Event('change', {bubbles:true})); }"
-        )
+        delay.fill('6')
+        delay.press('Tab')
         page.wait_for_function(
             "before => window.datavizRuntime.metrics.interactiveTransforms.completed > before",
             arg=completed,
@@ -7552,7 +8084,8 @@ def test_plotly_area_selection_gesture_commits_the_bound_control(
 
 
 @pytest.mark.e2e
-def test_table_row_count_is_opt_in_instead_of_a_default_metadata_row(page: Page, tmp_path: Path):
+@pytest.mark.parametrize('surface', ['server', 'share', 'html'])
+def test_table_row_count_is_opt_in_instead_of_a_default_metadata_row(page: Page, tmp_path: Path, surface):
     workspace = _copy_workspace(MINIMAL, tmp_path / "table-count-visibility")
     dashboard_path = workspace / "dashboards" / "sales-overview" / "dashboard.yaml"
     definition = yaml.safe_load(dashboard_path.read_text(encoding="utf-8"))
@@ -7580,10 +8113,21 @@ def test_table_row_count_is_opt_in_instead_of_a_default_metadata_row(page: Page,
         encoding="utf-8",
     )
 
-    with _running_server(workspace) as base_url:
+    with _running_server(workspace) as base_url, _running_static_server(tmp_path) as static_url:
         _open_dashboard(page, base_url, "sales-overview")
         _run_and_wait(page)
-        frame = page.frame_locator("#canvas-frame")
+        if surface == 'share':
+            page.locator('#share-button').click()
+            with page.expect_response(lambda response: response.url.endswith('/sales-overview/share')) as response:
+                page.locator('#copy-share-link').click()
+            page.goto(base_url + response.value.json()['url'])
+        elif surface == 'html':
+            with page.expect_download() as download:
+                _export_html(page)
+            report = tmp_path / 'table-operations.html'
+            download.value.save_as(report)
+            page.goto(static_url + '/' + report.name)
+        frame = page.frame_locator("#canvas-frame") if surface == 'server' else page
         default_table = frame.locator('[data-view-id="sales-detail"]')
         counted_table = frame.locator('[data-view-id="sales-detail-counted"]')
         expect(default_table).to_have_attribute("data-view-status", "ready")

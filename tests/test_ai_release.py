@@ -80,7 +80,7 @@ def test_plotly_is_a_direct_browser_asset_not_a_python_dependency():
     result = CliRunner().invoke(app, ["version", "--format", "json"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
-    assert payload["plotly_js"] == "4.0.0"
+    assert payload["plotly_js"] == "4.1.0"
     assert payload["protocols"] == CURRENT_PROTOCOL_SCHEMAS
 
 
@@ -315,7 +315,7 @@ def test_release_source_archives_include_the_skill_and_browser_runtimes():
     included = {path.relative_to(ROOT).as_posix() for path in release_zip.included_files()}
     assert "dataviz-skill.md" in included
     assert "ARCHITECTURE.md" in included
-    assert "src/dataviz/vendor/plotly/plotly-4.0.0.min.js" in included
+    assert "src/dataviz/vendor/plotly/plotly-4.1.0.min.js" in included
     assert "src/dataviz/vendor/plotly/LICENSE" in included
 
 

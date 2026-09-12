@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.24.13 — 2026-09-12
+
+- Align shared Header, sidebar fields, responsive overlays and keyboard help across Server, Share and exported HTML, preserving environment-specific execution capabilities.
+- Focus the Keyboard Shortcuts heading on opening instead of highlighting the close button; retain keyboard navigation and focus restoration.
+- Prevent delayed calendar/overlay focus from overriding later input; fix date change recursion, serialized numeric ranges and duplicate Firefox number spinners.
+- Upgrade Perspective to 5.4.0 and bundled Plotly.js to 4.1.0; manage worker cleanup and prevent disposed views from being recreated by late rendering.
+- Add three-surface interaction, visual-contract and lifecycle regressions. Verification scope and evidence are recorded in `docs/three-surface-ui-audit.md`; no DSL changes.
+
 ## 0.24.12 — 2026-09-11
 
 - Keep the root URL on an empty entry when the tab has no valid remembered Dashboard; no longer load the first runnable Dashboard automatically.

@@ -5,9 +5,9 @@ import hashlib
 from importlib.resources import files
 
 
-PLOTLY_JS_VERSION = "4.0.0"
+PLOTLY_JS_VERSION = "4.1.0"
 PLOTLY_JS_RESOURCE = f"vendor/plotly/plotly-{PLOTLY_JS_VERSION}.min.js"
-PLOTLY_JS_SHA256 = "14461f3b4c91c8bb590a99d6d03c3fd031ca40eec07ebab79a5e3eac107cd7ca"
+PLOTLY_JS_SHA256 = "03e18091beef5647aaf9e15f526981f325d760bb6b784fe0672a1e20585272cf"
 
 
 @lru_cache(maxsize=1)

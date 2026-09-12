@@ -11,6 +11,8 @@ document.querySelectorAll('.dv-context-controls__panel, .dv-runtime-control > .d
   datavizContextTemplates.set(panel, panel.cloneNode(true));
 });
 let datavizContextPanel = null;
+let datavizContextBackdrop = null;
+const datavizSidebarCloseIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>';
 let datavizContextQueryRestore = null;
 const datavizContextEmbedded = () => window.parent !== window;
 const datavizContextPath = owner => {
@@ -43,6 +45,8 @@ const datavizCloseContextControls = ({notify = true, focus = true} = {}) => {
   });
   datavizContextPanel?.remove();
   datavizContextPanel = null;
+  datavizContextBackdrop?.remove();
+  datavizContextBackdrop = null;
   document.body.classList.remove('dv-context-sidebar-open');
   document.querySelector('.dv-canvas')?.removeAttribute('inert');
   document.querySelector('.dv-runtime-header')?.removeAttribute('inert');
@@ -52,10 +56,22 @@ const datavizCloseContextControls = ({notify = true, focus = true} = {}) => {
 };
 const datavizMountOperationSidebar = (sidebar, heading, focus) => {
   datavizContextPanel = sidebar;
+  sidebar.querySelector('header button').innerHTML = datavizSidebarCloseIcon;
+  const backdrop = document.createElement('button');
+  backdrop.type = 'button';
+  backdrop.className = 'dv-context-backdrop';
+  backdrop.tabIndex = -1;
+  backdrop.setAttribute('aria-label', 'Close settings panel');
+  backdrop.onclick = () => datavizCloseContextControls();
+  sidebar.before(backdrop);
+  datavizContextBackdrop = backdrop;
   document.body.classList.add('dv-context-sidebar-open');
   const syncLayout = () => {
     if (datavizContextPanel !== sidebar) return;
     const modal = matchMedia('(max-width: 1279px)').matches;
+    backdrop.hidden = !modal;
+    const header = document.querySelector('.dv-runtime-header');
+    sidebar.style.top = modal ? '0px' : `${header?.getBoundingClientRect().bottom || 0}px`;
     sidebar.setAttribute('role', modal ? 'dialog' : 'complementary');
     if (modal) sidebar.setAttribute('aria-modal', 'true'); else sidebar.removeAttribute('aria-modal');
     for (const selector of ['.dv-canvas', '.dv-runtime-header']) {

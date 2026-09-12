@@ -114,7 +114,7 @@ class RuntimeDefinition(Model):
     # that the renderer never implemented.
     plotly_js: Literal["bundled"] = "bundled"
     arrow_js: str = "https://cdn.jsdelivr.net/npm/apache-arrow@21.1.0/Arrow.es2015.min.js"
-    perspective_version: str = "5.2.0"
+    perspective_version: str = "5.4.0"
     browser_table_transport: Literal["auto", "json", "arrow"] = "auto"
     arrow_min_rows: int = Field(2_000, ge=1)
     arrow_chunk_bytes: int = Field(524_288, ge=65_536, le=8_388_608)

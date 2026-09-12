@@ -4,4 +4,4 @@ id: minimal-workspace
 title: Declarative Dashboards
 folders: []
 runtime:
-  perspective_version: 5.2.0
+  perspective_version: 5.4.0

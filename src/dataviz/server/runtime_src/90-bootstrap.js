@@ -82,7 +82,17 @@ const datavizRuntimeQueryToggle = document.querySelector('[data-runtime-query-to
 const datavizRuntimeQueryPanel = document.querySelector('#dv-runtime-query-panel');
 const datavizRuntimeShortcutHelp = document.querySelector('[data-runtime-shortcut-help]');
 let datavizRuntimeShortcutOpener;
+const openDatavizShortcutHelp = event => {
+  if (!datavizRuntimeShortcutHelp || datavizRuntimeShortcutHelp.open) return;
+  window.datavizComponents?.overlay.closeAll({group:'popover'});
+  datavizRuntimeShortcutOpener = event?.currentTarget instanceof Element
+    ? event.currentTarget : document.activeElement;
+  datavizRuntimeShortcutHelp.showModal();
+  datavizRuntimeShortcutHelp.querySelector('h2').focus({preventScroll:true});
+};
+document.querySelector('[data-runtime-shortcuts-toggle]')?.addEventListener('click', openDatavizShortcutHelp);
 const restoreDatavizShortcutFocus = () => {
+  if (datavizRuntimeShortcutHelp.open) return;
   if (datavizRuntimeShortcutHelp.contains(document.activeElement)) document.activeElement.blur();
   const target = datavizRuntimeShortcutOpener?.isConnected && datavizRuntimeShortcutOpener !== document.body
     ? datavizRuntimeShortcutOpener : datavizRuntimeQueryToggle;
@@ -192,9 +202,7 @@ document.addEventListener('keydown', event => {
     datavizToggleDashboardSidebar();
   } else if (command === 'show-shortcuts' && datavizRuntimeShortcutHelp) {
     event.preventDefault();
-    window.datavizComponents?.overlay.closeAll({group:'popover'});
-    datavizRuntimeShortcutOpener = document.activeElement;
-    datavizRuntimeShortcutHelp.showModal();
+    openDatavizShortcutHelp();
   }
 });
 window.datavizComponents?.hydrate(document);

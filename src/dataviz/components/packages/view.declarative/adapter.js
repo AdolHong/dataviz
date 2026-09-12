@@ -1155,7 +1155,7 @@
         const worker = await awaitPerspectiveOperation(
           state,
           'worker create',
-          perspectiveRuntime.perspective.worker(),
+          perspectiveRuntime.createWorker ? perspectiveRuntime.createWorker() : perspectiveRuntime.perspective.worker(),
         );
         if (state.disposed) {
           worker?.terminate?.();
@@ -1462,6 +1462,7 @@
       return outcome.promise;
     };
     const renderInto = (root, key, producer) => {
+      if (disposed || runtime.disposed) return null;
       const previousStatus = root?.dataset.viewStatus || null;
       setRendererSignal(root, 'loading', {active:true});
       if (states.has(key)) applyUpdating(root, true, 'updating');
@@ -1471,6 +1472,7 @@
         root._datavizRenderGeneration = (root._datavizRenderGeneration || 0) + 1;
       }
       const generation = root?._datavizRenderGeneration || 0;
+      const superseded = () => disposed || runtime.disposed || root?._datavizRenderGeneration !== generation;
       let descriptor;
       try {
         descriptor = producer();
@@ -1516,7 +1518,7 @@
         root?._datavizInputProfiles || descriptorProfiles(descriptor)
       );
       const pending = Promise.resolve(previous).catch(() => {}).then(async () => {
-        if (root?._datavizRenderGeneration !== generation) {
+        if (superseded()) {
           return {status:'superseded', generation};
         }
         const started = performance.now();
@@ -1524,7 +1526,7 @@
         const lifecycle = lifecycleEvidence(key, type);
         try {
           await renderer.validate?.(descriptor);
-          if (root?._datavizRenderGeneration !== generation) {
+          if (superseded()) {
             return {status:'superseded', generation};
           }
           const mounted = states.get(key);
@@ -1536,7 +1538,7 @@
               mounted.state,
             ) ?? mounted.state;
             await mounted.state?.pending;
-            if (root?._datavizRenderGeneration !== generation) {
+            if (superseded()) {
               return {status:'superseded', generation};
             }
             runtime.metrics.renderers.updates += 1;
@@ -1551,7 +1553,7 @@
               descriptor,
             );
             await state?.pending;
-            if (root?._datavizRenderGeneration !== generation) {
+            if (superseded()) {
               await renderer.dispose?.(context(root, body, key, descriptor, generation), state);
               return {status:'superseded', generation};
             }

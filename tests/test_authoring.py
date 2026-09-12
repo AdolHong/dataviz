@@ -419,7 +419,7 @@ def test_chart_docs_expose_plotly_as_the_only_author_path():
     assert "数据口径" in charts["rule"]
     assert charts["official_gallery"] == "https://plotly.com/javascript/"
     assert charts["official_source"] == "https://github.com/plotly/plotly.js/"
-    assert charts["plotly_runtime"]["version"] == "4.0.0"
+    assert charts["plotly_runtime"]["version"] == "4.1.0"
     assert "不依赖 Python plotly" in charts["plotly_runtime"]["offline"]
     assert "canonical Named Output" in charts["ownership"]["data"]
     assert "Browser Runtime" in charts["ownership"]["layout"]
@@ -463,7 +463,7 @@ def test_version_docs_match_the_current_runtime_and_release_gate():
     assert strict["current"]["layout_contract"] == "dataviz/layout-contract/v1"
     assert strict["current"]["state_snapshot"] == "dataviz/state-snapshot/v6"
     assert strict["browser_assets"] == {
-        "plotly_js": "4.0.0（直接内置，不安装 Python plotly）",
+        "plotly_js": "4.1.0（直接内置，不安装 Python plotly）",
         "tanstack_table_core": "9.2.4（直接内置）",
         "workspace_asset_service": "Runtime v13 的 context.assets；Server URL 与 portable inline 共用同一作者 API。",
     }

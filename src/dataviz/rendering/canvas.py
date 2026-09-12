@@ -1418,6 +1418,11 @@ class CanvasRenderer:
                 '</div></details>'
             )
         card_is_present = bool(dashboard.definition.query_parameters)
+        if not control_block:
+            control_block = (
+                '<button type="button" data-runtime-controls-disabled disabled '
+                'title="This report has no dashboard controls.">Controls</button>'
+            )
         card_hidden = "" if card_is_present else " hidden"
         query_control = ""
         if card_is_present:
@@ -1429,6 +1434,12 @@ class CanvasRenderer:
                 '<strong class="dv-shell-control__label">Parameters</strong>'
                 '</button>'
             )
+        else:
+            query_control = (
+                '<button type="button" data-runtime-query-toggle disabled '
+                'aria-controls="dv-runtime-query-panel" aria-expanded="false" '
+                'title="This report has no query parameters.">Parameters</button>'
+            )
         return (
             '<header class="dv-runtime-header dv-shell-header" aria-label="Report controls">'
             '<div class="dv-runtime-brand dv-shell-brand" aria-label="Dataviz">'
@@ -1436,6 +1447,8 @@ class CanvasRenderer:
             '<strong class="dv-shell-brand__name">DATAVIZ</strong></div>'
             '<nav class="dv-runtime-actions dv-shell-header-actions" '
             'aria-label="Dataset and analysis controls">'
+            '<button type="button" data-runtime-shortcuts-toggle aria-label="Keyboard shortcuts">'
+            'Shortcuts</button>'
             f'{control_block}{query_control}</nav></header>'
             f'<section class="dv-runtime-query-tray dv-query-card-host" '
             f'{query_panel_attributes} data-open="false"{card_hidden}>'
@@ -1449,15 +1462,15 @@ class CanvasRenderer:
             'aria-live="polite" aria-atomic="true" hidden></div>'
             '<dialog class="dv-runtime-shortcuts" data-runtime-shortcut-help '
             'aria-labelledby="dv-runtime-shortcuts-title"><form method="dialog">'
-            '<header><h2 id="dv-runtime-shortcuts-title">快捷键</h2>'
-            '<button type="submit" aria-label="关闭">×</button></header><dl>'
+            '<header><h2 id="dv-runtime-shortcuts-title" tabindex="-1" autofocus>Keyboard Shortcuts</h2>'
+            '<button type="submit" aria-label="Close">×</button></header><dl>'
             '<div><dt><kbd data-shortcut-key="W">W</kbd></dt><dd>Parameters</dd></div>'
             '<div><dt><kbd data-shortcut-key="E">E</kbd></dt><dd>Controls</dd></div>'
-            '<div><dt><kbd>Esc</kbd></dt><dd>关闭临时面板</dd></div>'
-            '<div><dt><kbd>?</kbd></dt><dd>快捷键帮助</dd></div>'
+            '<div><dt><kbd>Esc</kbd></dt><dd>Close temporary panel</dd></div>'
+            '<div><dt><kbd>?</kbd></dt><dd>Keyboard shortcuts</dd></div>'
             '</dl><label><input type="checkbox" data-runtime-single-key-shortcuts checked> '
             'Enable single-key shortcuts (W, E)</label>'
-            '<footer><button type="submit">关闭</button></footer></form></dialog>'
+            '<footer><button type="submit">Close</button></footer></form></dialog>'
         )
 
     def _control_html(
@@ -1623,7 +1636,9 @@ class CanvasRenderer:
                 )
             else:
                 input_type = (
-                    "range"
+                    "text"
+                    if definition.type == "range_input"
+                    else "range"
                     if component == "slider" and definition.type == "single_input"
                     else "number"
                     if definition.value_type in {"number", "integer"}
@@ -2021,7 +2036,34 @@ window.datavizPerspectiveReady = (async () => {{
   await import("{base}/viewer-datagrid@{version}/dist/cdn/perspective-viewer-datagrid.js");
   await import("{base}/viewer-charts@{version}/dist/cdn/perspective-viewer-charts.js");
   await customElements.whenDefined("perspective-viewer");
-  return {{perspective, version: {json.dumps(self.workspace.definition.runtime.perspective_version)}}};
+  const createWorker = async () => {{
+    // 5.2.0 and 5.4.0 close their transport with MessagePort.close(), even when the
+    // default transport is a dedicated Worker. Own only this instance;
+    // never patch the browser's Worker prototype or suppress dispose errors.
+    if (!['5.2.0', '5.4.0'].includes({json.dumps(self.workspace.definition.runtime.perspective_version)})) return perspective.worker();
+    const source = 'import "{base}/client@{version}/dist/cdn/perspective-server.worker.js";';
+    const url = URL.createObjectURL(new Blob([source], {{type:'application/javascript'}}));
+    let transport;
+    try {{ transport = new Worker(url, {{type:'module'}}); }}
+    catch (error) {{ URL.revokeObjectURL(url); throw error; }}
+    const terminate = transport.terminate.bind(transport);
+    let closed = false;
+    transport.close = transport.terminate = () => {{
+      if (closed) return;
+      closed = true;
+      terminate();
+      URL.revokeObjectURL(url);
+    }};
+    let onError;
+    const failed = new Promise((_, reject) => {{
+      onError = event => reject(new Error(event.message || 'Perspective worker failed to load'));
+      transport.addEventListener('error', onError, {{once:true}});
+    }});
+    try {{ return await Promise.race([perspective.worker(Promise.resolve(transport)), failed]); }}
+    catch (error) {{ transport.close(); throw error; }}
+    finally {{ transport.removeEventListener('error', onError); }}
+  }};
+  return {{perspective, createWorker, version: {json.dumps(self.workspace.definition.runtime.perspective_version)}}};
 }})();
 </script>"""
 

@@ -795,6 +795,18 @@ def test_data_entry_components_reject_semantically_incompatible_configuration():
         PresentationControlComponentDefinition(component="radio-group", search="always")
 
 
+@pytest.mark.parametrize('value_type, values', [('number', [0.25, 0.75]), ('integer', [2, 7])])
+def test_portable_numeric_range_uses_serialized_text_backing(value_type, values):
+    workspace = load_workspace(WORKSPACE)
+    definition = ControlDefinition(id='band', type='range_input', value_type=value_type, default=values)
+    markup = CanvasRenderer(workspace)._portable_field(
+        'dashboard:sales-overview/band', definition, values, {'component': 'slider', 'show_input': True},
+    )
+    assert '<input type="text"' in markup
+    assert '<input type="number"' not in markup
+    assert f'value="{values[0]},{values[1]}"' in markup
+
+
 def test_portable_control_markup_supports_search_and_hidden_unavailable_options():
     workspace = load_workspace(WORKSPACE)
     dashboard = workspace.dashboard("sales-overview")
@@ -1183,7 +1195,7 @@ def test_default_renderer_builds_templates_and_portable_report(tmp_path: Path):
     assert "state.worker = worker" in report
     assert "applyStatus(root, 'ready', 'perspective')" in report
     assert "viewer.delete" in report
-    assert "@perspective-dev/viewer@5.2.0" in report
+    assert "@perspective-dev/viewer@5.4.0" in report
     assert '"template": "table"' in report
     assert "formatTableValue" in report
     assert "dv-table--striped" in report

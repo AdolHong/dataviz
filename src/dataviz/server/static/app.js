@@ -625,7 +625,11 @@ function executeKeyboardShortcut(command) {
   if (command === 'show-shortcuts') {
     closeHeaderPopovers();
     const dialog = $('#keyboard-shortcuts-dialog');
-    if (!dialog.open) dialog.showModal();
+    if (!dialog.open) {
+      dialog._shortcutOpener = document.activeElement;
+      dialog.showModal();
+      dialog.querySelector('h2').focus({preventScroll:true});
+    }
     return true;
   }
   return false;
@@ -1674,9 +1678,9 @@ function field(parameter, name = parameter.id, presentation = {}, behavior = {})
       ? document.createElement('textarea')
       : document.createElement('input');
     if (input instanceof HTMLInputElement) {
-      // The backing input holds a JSON array; numeric/date constraints belong
-      // to the component's individual value inputs, not this serialized value.
-      input.type = parameter.type === 'multiple_input'
+      // Collection/range backing inputs contain serialized values, not one
+      // number/date. Constraints belong to the component's endpoint inputs.
+      input.type = ['multiple_input', 'range_input'].includes(parameter.type)
         ? 'text'
         : parameter.value_type === 'boolean'
         ? 'checkbox'
@@ -2096,7 +2100,16 @@ function setOperationPanel(mode, {focus = false, persist = true} = {}) {
 }
 
 function initializeOperationPanel() {
-  $('#keyboard-shortcuts-toggle').addEventListener('click', () => executeKeyboardShortcut('show-shortcuts'));
+  $('#keyboard-shortcuts-toggle').addEventListener('click', event => {
+    event.currentTarget.focus({preventScroll:true});
+    executeKeyboardShortcut('show-shortcuts');
+  });
+  $('#keyboard-shortcuts-dialog').addEventListener('close', event => {
+    if (event.currentTarget.open) return;
+    const opener = event.currentTarget._shortcutOpener;
+    (opener?.isConnected && opener !== document.body ? opener : $('#keyboard-shortcuts-toggle'))
+      .focus({preventScroll:true});
+  });
   try { $('#single-key-shortcuts').checked = localStorage.getItem('dataviz.single-key-shortcuts') !== 'off'; } catch (_) {}
   const updateShortcutHelp = () => document.querySelectorAll('[data-shortcut-key]').forEach(key => {
     key.textContent = `${$('#single-key-shortcuts').checked ? '' : 'Cmd + Ctrl + '}${key.dataset.shortcutKey}`;

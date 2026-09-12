@@ -2,6 +2,7 @@
 .dv-input-number:focus-within { border-color: var(--dv-accent, #3949ab); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dv-accent, #3949ab) 14%, transparent); }
 .dv-input-number .dv-input-number__control { box-sizing: border-box; flex: 1 1 auto; width: 100%; height: 100%; min-width: 0; min-height: 0; padding: .5rem .7rem; color: inherit; background: transparent; border: 0; border-radius: 0; outline: 0; box-shadow: none; font-variant-numeric: tabular-nums; }
 .dv-input-number__control::-webkit-inner-spin-button { appearance: none; }
+.dv-input-number .dv-input-number__control { appearance: textfield; }
 .dv-input-number__affix { display: inline-flex; align-items: center; padding: 0 .6rem; color: var(--dv-muted, #667085); }
 .dv-input-number__affix[hidden], .dv-input-number__steps[hidden] { display: none; }
 .dv-input-number__steps { display: grid; flex: 0 0 2rem; border-left: 1px solid var(--dv-line, #d9e0ec); }

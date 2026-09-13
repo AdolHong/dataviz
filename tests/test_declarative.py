@@ -1181,7 +1181,8 @@ def test_default_renderer_builds_templates_and_portable_report(tmp_path: Path):
     assert "scrollZoom:false" in report
     assert "chartService.plotly.mount" in report
     assert "chartService.plotly.update" in report
-    assert "materializePlotlyDescriptor(spec, renderContext)" in report
+    assert "materializePlotlyDescriptor(descriptor, renderContext)" in report
+    assert "renderInto(rootNode, key, () => ({...services.decodeSpec(chartNode), type:'plotly'}))" in report
     assert "const syncPlotlyInteractions" in report
     # Initial bootstrap, managed mount and update all install the same event contract.
     assert report.count("syncPlotlyInteractions(state, descriptor)") == 2

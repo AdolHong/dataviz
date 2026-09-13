@@ -1,12 +1,42 @@
 # Browser test resources
 
-## One command
+## Choose the layer first
+
+Run from the repository root. Do not rerun the full matrix just because one test
+failed. Preserve its evidence, fix the cause, then rerun the affected scope.
+
+| Layer | Scope | Command |
+| --- | --- | --- |
+| Unit / contracts | State, filtering, configuration, packaging | `.venv/bin/python scripts/check_quality.py targeted --area interaction` (or `actions`, `shell`, `docs`) |
+| Components | Real component JS/CSS in small pages; no server or full Dashboard | `.venv/bin/python scripts/test_browsers.py --suite components` |
+| Core E2E | Query, independent pages, selection, save/refresh and export | `.venv/bin/python scripts/test_browsers.py --suite core` |
+| Extended | Long workflows, large data, special charts and CLI browser integration | `.venv/bin/python scripts/test_browsers.py --suite extended` |
+| Full | All of the browser layers, explicit comprehensive verification | `.venv/bin/python scripts/test_browsers.py --suite full` |
+
+Each browser command defaults to all three engines; use `--browsers firefox`
+and `-- -k <existing-test-name>` to narrow a regression check. `journeys` in
+`check_quality.py` now points at the actual core directory (one chosen engine).
+Analysis CLI and visual-check contracts explicitly use Chromium, so their nine
+cases run only in the Chromium lane of `extended`/`full`. Firefox/WebKit lanes
+do not repeat these Chromium launches; their UI and failure-artifact coverage
+remains intact. Each result in `summary.json` records its actual command.
+The existing CI full release gate is unchanged; these layers enable scoped local
+work, not silently skipping CI requirements. No default retry is introduced.
+
+`test_browser_runtime.py` has been split by responsibility. Shared server/data
+helpers are in `support/runtime.py`, browser fixtures in `support/browser.py`.
+Never import helpers from a `test_*.py` module. Migration and replacement coverage
+are recorded in [browser-test-migration.md](../../docs/browser-test-migration.md).
+The subsequent deep reductions, timing changes and retained regression boundaries
+are recorded in [browser-test-pruning.md](../../docs/browser-test-pruning.md).
+
+## Resource preparation
 
 ```sh
-.venv/bin/python scripts/test_browsers.py --fetch-assets
+.venv/bin/python scripts/test_browsers.py --suite components --fetch-assets
 ```
 
-This verifies/downloads the pinned real resources once, then runs the complete
+This verifies/downloads the pinned real resources once, then runs the chosen
 suite in isolated Chromium, Firefox and WebKit processes (three in parallel;
 use `--jobs 1` for serial diagnosis). It does not install browsers;
 install those once with `.venv/bin/python -m playwright install chromium firefox webkit`.
@@ -20,7 +50,7 @@ the manifest hash. A cache hit still verifies each file's SHA-256 before testing
 For a targeted diagnostic (not a full release gate):
 
 ```sh
-.venv/bin/python scripts/test_browsers.py --browsers webkit -- -k plotly_area_selection_gesture
+.venv/bin/python scripts/test_browsers.py --suite extended --browsers webkit -- -k plotly_area_selection_gesture
 ```
 
 After the first download, omit `--fetch-assets` to require the verified cache.
@@ -45,7 +75,7 @@ currently use the Runtime page fixture and therefore are not covered by this
 artifact lifecycle. The self-test deliberately fails a nested pytest run and
 checks that only the failed test retains a valid trace and PNG.
 
-`test_browser_runtime.py` automatically reuses `dataviz-tool/.browser-test-assets/`
+The shared browser fixture automatically reuses `dataviz-tool/.browser-test-assets/`
 when present. This directory is git-ignored and is not part of the package.
 `DATAVIZ_E2E_ASSET_DIR` can select another cache directory.
 
@@ -75,7 +105,7 @@ their normal resource loading behavior. Report cached-resource usage with result
 
 ## Analysis interaction stability
 
-`test_analysis_stability_workflow` runs three independent rounds using the
+`test_analysis_stability_workflow` runs one complete workflow using the
 `stable_analysis` fixture in `tests/conftest.py`. Each uses an isolated SQLite
 database, a six-item candidate catalog and 100,001 server-only fact rows.
 The test checks category changes, native Table selection/highlighting, Plotly
@@ -86,9 +116,7 @@ is used as a workaround. Network assertions reject full fact-table downloads.
 Run the same workflow for each engine:
 
 ```sh
-DATAVIZ_BROWSER=chromium .venv/bin/python -m pytest tests/e2e/test_browser_runtime.py -k analysis_stability_workflow
-DATAVIZ_BROWSER=firefox .venv/bin/python -m pytest tests/e2e/test_browser_runtime.py -k analysis_stability_workflow
-DATAVIZ_BROWSER=webkit .venv/bin/python -m pytest tests/e2e/test_browser_runtime.py -k analysis_stability_workflow
+.venv/bin/python scripts/test_browsers.py --suite core -- -k analysis_stability_workflow
 ```
 
 Failures retain bounded console errors, slow/pending request timing, document

@@ -34,7 +34,7 @@ def commands(profile: str, area: str | None = None) -> list[list[str]]:
     if area:
         raise ValueError("--area is only valid for targeted")
     if profile == "journeys":
-        return [pytest + ["tests/e2e/test_browser_runtime.py", "-k", " or ".join(JOURNEYS)]]
+        return [pytest + ["tests/e2e/core"]]
     if profile == "full":
         return [pytest + ["-m", "not e2e"], pytest + ["tests/e2e"]]
     raise ValueError(f"Unknown profile: {profile}")

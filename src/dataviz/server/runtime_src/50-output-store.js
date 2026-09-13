@@ -3,6 +3,8 @@ Object.assign(datavizRuntime, {
   commitOutput(rawReference, value, {kind, schema, signature = datavizValueSignature(value)} = {}) {
     const reference = canonicalOutputReference(rawReference);
     const portable = window.dataviz.portable;
+    // A direct publication supersedes any download of the previous snapshot.
+    this.transportPromises.delete(reference);
     portable.output_kinds ||= {};
     portable.output_schemas ||= {};
     const changed = this.outputSignatures.get(reference) !== signature
@@ -28,6 +30,7 @@ Object.assign(datavizRuntime, {
   },
   registerOutputTransport(reference, descriptor) {
     const canonical = canonicalOutputReference(reference);
+    this.transportPromises.delete(canonical);
     window.dataviz.portable.output_schemas ||= {};
     window.dataviz.portable.output_transports[canonical] = descriptor;
     if (Array.isArray(descriptor?.schema)) {
@@ -36,6 +39,7 @@ Object.assign(datavizRuntime, {
     return canonical;
   },
   hydrateOutput(reference, options = {}) {
+    if (this.disposed) return Promise.resolve(undefined);
     const canonical = canonicalOutputReference(reference);
     if (Object.prototype.hasOwnProperty.call(window.dataviz.portable.outputs, canonical)) {
       return Promise.resolve(window.dataviz.portable.outputs[canonical]);
@@ -45,8 +49,10 @@ Object.assign(datavizRuntime, {
     if (!descriptor) return Promise.resolve(undefined);
     this.metrics.transports.started += 1;
     const startedAt = performance.now();
+    const isCurrent = () => !this.disposed && this.transportPromises.get(canonical) === pending;
     const pending = datavizLoadTransport(descriptor)
       .then(async value => {
+        if (!isCurrent()) return undefined;
         this.metrics.transports.completed += 1;
         this.metrics.transports.arrowRows += Number(descriptor.row_count || 0);
         this.metrics.transports.arrowBytes += Number(value?.bytes?.byteLength || descriptor.byte_count || 0);
@@ -57,9 +63,8 @@ Object.assign(datavizRuntime, {
           query_executed:Boolean(options.queryExecuted),
         });
         return value;
-      })
-      .catch(async error => {
-        this.transportPromises.delete(canonical);
+      }, async error => {
+        if (!isCurrent()) return undefined;
         this.metrics.transports.failed += 1;
         this.metrics.transports.totalMs += performance.now() - startedAt;
         await this.failOutputs([canonical], datavizRuntimeError({
@@ -69,6 +74,9 @@ Object.assign(datavizRuntime, {
           reference:canonical,
         }));
         throw error;
+      })
+      .finally(() => {
+        if (this.transportPromises.get(canonical) === pending) this.transportPromises.delete(canonical);
       });
     this.transportPromises.set(canonical, pending);
     return pending;
@@ -78,9 +86,11 @@ Object.assign(datavizRuntime, {
     return Promise.allSettled(references.map(reference => this.hydrateOutput(reference)));
   },
   initializePortable() {
+    if (this.disposed) return Promise.resolve();
     if (this.initializationPromise) return this.initializationPromise;
     this.initializationPromise = (async () => {
       const checkpoint = await datavizAwaitControlRestore();
+      if (this.disposed) return;
       // Establish the immutable Base Output snapshot before reconciling dynamic
       // Control domains. Hydration may publish Arrow tables, but no View or
       // Interactive branch is allowed to observe a half-initialized Control state.
@@ -90,6 +100,7 @@ Object.assign(datavizRuntime, {
       } finally {
         this.initializing = false;
       }
+      if (this.disposed) return;
       // Establish initial domains before applying the all-or-nothing checkpoint,
       // then reconcile descendants once against the restored parent values.
       refreshControlOptionDomains();
@@ -98,6 +109,7 @@ Object.assign(datavizRuntime, {
         awaitConsumers:false,
         publishSnapshot:false,
       });
+      if (this.disposed) return;
       const snapshot = datavizMarkControlReady();
       // Canvas ready is a lifecycle contract, not a script-load notification.
       // Consumers may still be loading; readiness means typed actions are safe.

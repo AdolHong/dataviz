@@ -65,7 +65,37 @@ def test_runner_continues_after_failure_and_preserves_logs(tmp_path, monkeypatch
     summary = json.loads((output / 'summary.json').read_text())
     assert [item['exit_code'] for item in summary['results']] == [0, 1, 0]
     assert 'tests/e2e' in summary['command']
+    assert not any(arg.startswith('--ignore=') for arg in summary['results'][0]['command'])
+    for result in summary['results'][1:]:
+        assert all(f'--ignore={path}' in result['command'] for path in runner.CHROMIUM_CLI_TESTS)
     original = (output / 'chromium.log').read_bytes()
     with pytest.raises(RuntimeError, match='Refusing to overwrite'):
         runner.main()
     assert (output / 'chromium.log').read_bytes() == original
+
+
+@pytest.mark.parametrize('suite', ['components', 'core', 'extended', 'full'])
+def test_runner_limits_requested_suite_and_engine(tmp_path, monkeypatch, suite):
+    from types import SimpleNamespace
+    monkeypatch.setattr(runner.sys, 'argv', [
+        'test_browsers.py', '--suite', suite, '--browsers', 'firefox',
+        '--output-dir', str(tmp_path / 'evidence'), '--', '-k', 'specific_case',
+    ])
+    monkeypatch.setattr(runner, 'prepare_assets', lambda *args: None)
+    calls = []
+    def run(command, *, cwd, env, stdout, stderr):
+        calls.append((command, env['DATAVIZ_BROWSER']))
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(runner.subprocess, 'run', run)
+    assert runner.main() == 0
+    assert len(calls) == 1
+    command, browser = calls[0]
+    assert browser == 'firefox'
+    expected = ['tests/e2e'] if suite == 'full' else [f'tests/e2e/{suite}']
+    if suite == 'extended':
+        expected += ['tests/e2e/test_failure_artifacts.py']
+    assert command[3:command.index('-q')] == expected
+    assert command[command.index('-k'):command.index('-k') + 2] == ['-k', 'specific_case']
+    ignored = [arg for arg in command if arg.startswith('--ignore=')]
+    assert ignored == ([f'--ignore={path}' for path in runner.CHROMIUM_CLI_TESTS]
+                       if suite in {'extended', 'full'} else [])

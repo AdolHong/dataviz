@@ -24,6 +24,10 @@ const payload = {id:'B'};
 const first = actions.invoke('save', {id:'A'});
 const second = actions.invoke('save', payload, {onProgress:r => progress.push(r)});
 payload.id = 'WRONG';
+assert.equal(sent.length, 0, 'writes wait for host readiness');
+// The integration layer owns the identity-checked host handshake; this queue
+// unit supplies that readiness seam after proving early writes remain queued.
+vm.runInContext('datavizServerActionHostReady = true; void datavizDrainActions();', context);
 assert.equal(sent.length, 1);
 assert.equal(progress[0].status, 'queued');
 // Status bypasses the queue.

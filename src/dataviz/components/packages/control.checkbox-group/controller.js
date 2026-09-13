@@ -20,7 +20,11 @@
       const options = api.options(input);
       const selected = api.selectedOptions(input);
 
-      optionsHost.replaceChildren();
+      // A host snapshot can arrive between pointerdown/up or keydown/up.
+      // Keep unchanged targets attached so syncing cannot swallow activation
+      // or drop keyboard focus. Native option nodes may themselves be new.
+      const existing = new Map(Array.from(optionsHost.children, button => [button.dataset.value, button]));
+      let cursor = optionsHost.firstElementChild;
       options.forEach(option => {
         const unavailable = Boolean(option.disabled);
         if (
@@ -29,20 +33,27 @@
           && control.dataset.showUnavailable !== 'true'
         ) return;
         const capped = Boolean(maxSelected && selected.length >= maxSelected && !option.selected);
-        const button = document.createElement('button');
-        button.type = 'button';
+        let button = existing.get(option.value);
+        if (!button) {
+          button = document.createElement('button');
+          button.type = 'button';
+          const mark = document.createElement('i');
+          mark.setAttribute('aria-hidden', 'true');
+          button.append(mark, document.createElement('span'));
+        }
+        existing.delete(option.value);
         button.className = `dv-checkbox-option${option.selected ? ' is-selected' : ''}${unavailable ? ' is-unavailable' : ''}`;
         button.dataset.value = option.value;
         button.setAttribute('aria-pressed', String(option.selected));
         button.disabled = input.disabled || unavailable || capped;
-        const mark = document.createElement('i');
-        mark.setAttribute('aria-hidden', 'true');
-        mark.textContent = option.selected ? '✓' : '';
-        const label = document.createElement('span');
-        label.textContent = option.textContent;
-        button.append(mark, label);
-        optionsHost.append(button);
+        const [mark, label] = button.children;
+        const markText = option.selected ? '✓' : '';
+        if (mark.textContent !== markText) mark.textContent = markText;
+        if (label.textContent !== option.textContent) label.textContent = option.textContent;
+        if (button !== cursor) optionsHost.insertBefore(button, cursor);
+        cursor = button.nextElementSibling;
       });
+      existing.forEach(button => button.remove());
     }
 
     optionsHost.addEventListener('click', event => {

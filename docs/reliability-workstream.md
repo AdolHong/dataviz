@@ -20,7 +20,8 @@ remote CI results are not implied.
 
 ## State-transition scenario map
 
-Tests live in `tests/e2e/test_browser_runtime.py` (names below omit `test_`).
+Tests now live in `tests/e2e/core/` (names below omit `test_`). See
+[the migration map](browser-test-migration.md) for individual locations.
 
 - `server_compute_waits_for_required_control_domain`: delayed/empty candidate
   domains, no premature required-empty compute, recovery when ready.

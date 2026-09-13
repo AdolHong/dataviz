@@ -743,6 +743,7 @@ update(context, descriptor, state) {
         "recipe": annotation_recipe(),
         "progress_contract": {
             "onProgress(receipt)": "先收到本地 queued（含 request_id、初始 position、submitted:false）和 submitting 状态，再接收服务端完整回执，可重复。queued 不代表已保存。status=succeeded 才确认成功；refresh.status=ready 只表示服务端完成。快速刷新也会在浏览器更新前发送成功 progress。",
+            "query_readiness": "渐进式 Canvas 可能先显示数据、宿主后确认 Run 已提交；invoke 在既有本地队列等待当前 Run 的宿主确认，不提前发送写入。离开页面会取消未提交项；queued 不代表服务端已受理或已保存。",
             "连续保存": "invoke/refresh 共用每个 Canvas 的内存串行队列，最多等待 50 条；payload 入队时复制，请求 ID 独立，status 查回执不排队。执行超时从发送开始。不会合并写入、自动重试或改写版本号。Action 刷新的新 Run 可以接续；切换查询或关闭 Canvas 时未发送请求取消。action_not_submitted 表示未提交，不是保存结果未知。前一条结果不确定时先查回执，剩余排队请求取消。",
             "invoke_resolves": "invoke 继续等待浏览器同步；检查 refresh.status，failed/superseded 不等于页面已同步。",
             "error.receipt": "status=succeeded 时显示已保存／同步失败，使用同一 request ID 调 actions.refresh；failed/unknown 不保证回滚，不能自动换 ID 再保存。",
@@ -1863,6 +1864,8 @@ control_components:
             "contract_test": "dataviz renderer test 记录 mount/update/dispose 次数，并拒绝空 mount、dispose 后遗留 DOM 或 hook 失败。",
             "author_evidence": "Server 作者模式按 View 展示最近一次 mount/update 耗时、输入 rows/bytes 与可观察的 lifecycle warning；Copy diagnosis 只聚合这些现有会话事实，不进入 Result/Evidence。",
             "boundary": "生命周期检查只验证 hook、Renderer state 与可观察 DOM，不宣称能够侦测任意第三方事件监听器泄漏。",
+            "async_boundary": "终态、View 移除或 Runtime 销毁会作废旧挂载；迟到成功或异常不得覆盖当前状态。旧 context.body 与替换内容隔离；进行中的 update 结束后清理最终 state。mount 返回 state 后其 pending 失败也会调用 dispose。",
+            "author_cleanup": "将拥有的节点和资源放在 state 中，dispose 只清理自己拥有的内容，不重新查询全局 DOM 删除新 View。若 mount 在返回 state 前失败，作者应自行释放已分配资源；平台无法收回未返回的任意第三方资源。",
         },
         "isolation": "一个 Renderer 失败只影响自己的 View；输入没有变化时不 update。",
         "named_inputs": {

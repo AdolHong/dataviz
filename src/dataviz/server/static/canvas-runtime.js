@@ -1134,6 +1134,14 @@ Object.assign(datavizRuntime, {
     });
   },
   async executeTransform(id, item, inputValues, generation, controlState) {
+    const assertActive = () => {
+      if (this.disposed) {
+        throw Object.assign(new Error('Runtime disposed'), {
+          name:'AbortError', code:'interactive_transform_cancelled',
+        });
+      }
+    };
+    assertActive();
     const key = this.transformCacheKey(id, item, inputValues, controlState);
     const cacheEnabled = item.spec.cache?.mode !== 'none';
     if (!cacheEnabled) {
@@ -1151,7 +1159,9 @@ Object.assign(datavizRuntime, {
     const existing = this.inflightTransforms.get(inflightKey);
     if (existing) {
       this.transformCacheEvidence.set(id, {status:'inflight', entries:this.interactionCache.size});
-      return datavizCacheClone(await existing);
+      const value = await existing;
+      assertActive();
+      return datavizCacheClone(value);
     }
     if (cacheEnabled) {
       this.metrics.interactiveTransforms.cacheMisses += 1;
@@ -1162,7 +1172,9 @@ Object.assign(datavizRuntime, {
       if (!adapter) throw new Error(`Unsupported Interactive Runtime: ${item.spec.runtime}`);
       adapter.validate(item);
       const prepared = await adapter.prepare(item, inputValues, {controlState});
+      assertActive();
       const value = await adapter.execute(id, item, prepared, {generation, controlState});
+      assertActive();
       if (cacheEnabled) {
         this.interactionCache.set(key, datavizCacheClone(value));
         while (this.interactionCache.size > this.interactionCacheLimit) {
@@ -1254,6 +1266,7 @@ Object.assign(datavizRuntime, {
     });
   },
   async runTransforms(changedControlKeys = [], seedChangedOutputs = [], options = {}) {
+    if (this.disposed) return new Set();
     const outputs = window.dataviz.portable?.outputs || {};
     const changedControls = changedControlKeys == null ? null : new Set(changedControlKeys);
     const changedOutputs = new Set(seedChangedOutputs);
@@ -1303,6 +1316,7 @@ Object.assign(datavizRuntime, {
       const dependencyIds = this.transformDependencies(id);
       const task = (async () => {
         await Promise.all(dependencyIds.map(dependency => tasks.get(dependency)).filter(Boolean));
+        if (this.disposed) return;
         const declared = Object.keys(spec.outputs || {});
         const outputReferences = declared.map(name => `interactive:${id}/${name}`);
         const requiredOutputReferences = declared
@@ -1368,7 +1382,7 @@ Object.assign(datavizRuntime, {
         try {
           if (spec.trigger === 'auto' && relevant && Number(spec.debounce_ms || 0) > 0) {
             await new Promise(resolve => setTimeout(resolve, Number(spec.debounce_ms)));
-            if (this.transformRequests.get(id) !== request) return;
+            if (this.disposed || this.transformRequests.get(id) !== request) return;
           }
           const failedInput = Object.values(references).find(reference => {
             if (this.outputErrors.has(reference)) return true;
@@ -1483,7 +1497,7 @@ Object.assign(datavizRuntime, {
             executionControlState,
           );
           const durationMs = performance.now() - executionStarted;
-          if (this.transformRequests.get(id) !== request) return;
+          if (this.disposed || this.transformRequests.get(id) !== request) return;
           if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) {
             throw new Error(`Interactive Transform ${id} must return a Named Output object`);
           }
@@ -1537,7 +1551,7 @@ Object.assign(datavizRuntime, {
             renderOutputDelta(localChanged);
           }
         } catch (error) {
-          if (this.transformRequests.get(id) !== request) return;
+          if (this.disposed || this.transformRequests.get(id) !== request) return;
           if (error?.name === 'AbortError' || error?.code === 'interactive_transform_cancelled') {
             this.markTransformTerminal(id, 'cancelled', error.message);
             this.publishTransformStatus(id, 'cancelled', {message:error.message, error});
@@ -1725,7 +1739,7 @@ Object.assign(datavizRuntime, {
         || Promise.resolve({status:'ready', generation});
       completions.push(Promise.resolve(completion).then(outcome => {
         if (
-          outcome?.status !== 'ready'
+          this.disposed || outcome?.status !== 'ready'
           || Number(root?._datavizRenderGeneration || 0) !== generation
         ) return outcome;
         datavizCommitConsumerControlState(
@@ -1741,6 +1755,7 @@ Object.assign(datavizRuntime, {
   },
   async publishOutputs(bundle) {
     const changed = new Set();
+    if (this.disposed) return changed;
     Object.entries(bundle.outputs || {}).forEach(([rawReference, value]) => {
       const reference = canonicalOutputReference(rawReference);
       if (this.commitOutput(reference, value, {
@@ -1758,6 +1773,7 @@ Object.assign(datavizRuntime, {
       affectedViewIds,
     });
     const changedOutputs = await this.runTransforms([], changed);
+    if (this.disposed) return changedOutputs;
     window.dispatchEvent(new CustomEvent('dataviz:outputschange', {
       detail:{changed:[...changedOutputs], failed:[]},
     }));
@@ -1784,6 +1800,7 @@ Object.assign(datavizRuntime, {
   },
   async failOutputs(references, error) {
     const changed = new Set();
+    if (this.disposed) return changed;
     (references || []).forEach(rawReference => {
       const reference = canonicalOutputReference(rawReference);
       this.removeOutput(reference);
@@ -1800,6 +1817,7 @@ Object.assign(datavizRuntime, {
       affectedViewIds,
     });
     const changedOutputs = await this.runTransforms([], changed);
+    if (this.disposed) return changedOutputs;
     window.dispatchEvent(new CustomEvent('dataviz:outputschange', {
       detail:{changed:[...changedOutputs], failed:[...changed]},
     }));
@@ -1813,6 +1831,8 @@ Object.assign(datavizRuntime, {
   commitOutput(rawReference, value, {kind, schema, signature = datavizValueSignature(value)} = {}) {
     const reference = canonicalOutputReference(rawReference);
     const portable = window.dataviz.portable;
+    // A direct publication supersedes any download of the previous snapshot.
+    this.transportPromises.delete(reference);
     portable.output_kinds ||= {};
     portable.output_schemas ||= {};
     const changed = this.outputSignatures.get(reference) !== signature
@@ -1838,6 +1858,7 @@ Object.assign(datavizRuntime, {
   },
   registerOutputTransport(reference, descriptor) {
     const canonical = canonicalOutputReference(reference);
+    this.transportPromises.delete(canonical);
     window.dataviz.portable.output_schemas ||= {};
     window.dataviz.portable.output_transports[canonical] = descriptor;
     if (Array.isArray(descriptor?.schema)) {
@@ -1846,6 +1867,7 @@ Object.assign(datavizRuntime, {
     return canonical;
   },
   hydrateOutput(reference, options = {}) {
+    if (this.disposed) return Promise.resolve(undefined);
     const canonical = canonicalOutputReference(reference);
     if (Object.prototype.hasOwnProperty.call(window.dataviz.portable.outputs, canonical)) {
       return Promise.resolve(window.dataviz.portable.outputs[canonical]);
@@ -1855,8 +1877,10 @@ Object.assign(datavizRuntime, {
     if (!descriptor) return Promise.resolve(undefined);
     this.metrics.transports.started += 1;
     const startedAt = performance.now();
+    const isCurrent = () => !this.disposed && this.transportPromises.get(canonical) === pending;
     const pending = datavizLoadTransport(descriptor)
       .then(async value => {
+        if (!isCurrent()) return undefined;
         this.metrics.transports.completed += 1;
         this.metrics.transports.arrowRows += Number(descriptor.row_count || 0);
         this.metrics.transports.arrowBytes += Number(value?.bytes?.byteLength || descriptor.byte_count || 0);
@@ -1867,9 +1891,8 @@ Object.assign(datavizRuntime, {
           query_executed:Boolean(options.queryExecuted),
         });
         return value;
-      })
-      .catch(async error => {
-        this.transportPromises.delete(canonical);
+      }, async error => {
+        if (!isCurrent()) return undefined;
         this.metrics.transports.failed += 1;
         this.metrics.transports.totalMs += performance.now() - startedAt;
         await this.failOutputs([canonical], datavizRuntimeError({
@@ -1879,6 +1902,9 @@ Object.assign(datavizRuntime, {
           reference:canonical,
         }));
         throw error;
+      })
+      .finally(() => {
+        if (this.transportPromises.get(canonical) === pending) this.transportPromises.delete(canonical);
       });
     this.transportPromises.set(canonical, pending);
     return pending;
@@ -1888,9 +1914,11 @@ Object.assign(datavizRuntime, {
     return Promise.allSettled(references.map(reference => this.hydrateOutput(reference)));
   },
   initializePortable() {
+    if (this.disposed) return Promise.resolve();
     if (this.initializationPromise) return this.initializationPromise;
     this.initializationPromise = (async () => {
       const checkpoint = await datavizAwaitControlRestore();
+      if (this.disposed) return;
       // Establish the immutable Base Output snapshot before reconciling dynamic
       // Control domains. Hydration may publish Arrow tables, but no View or
       // Interactive branch is allowed to observe a half-initialized Control state.
@@ -1900,6 +1928,7 @@ Object.assign(datavizRuntime, {
       } finally {
         this.initializing = false;
       }
+      if (this.disposed) return;
       // Establish initial domains before applying the all-or-nothing checkpoint,
       // then reconcile descendants once against the restored parent values.
       refreshControlOptionDomains();
@@ -1908,6 +1937,7 @@ Object.assign(datavizRuntime, {
         awaitConsumers:false,
         publishSnapshot:false,
       });
+      if (this.disposed) return;
       const snapshot = datavizMarkControlReady();
       // Canvas ready is a lifecycle contract, not a script-load notification.
       // Consumers may still be loading; readiness means typed actions are safe.
@@ -1941,6 +1971,7 @@ Object.assign(datavizRuntime, {
     window.dataviz.serverActions?.dispose();
     this.cancelTransforms('Runtime disposed');
     this.inflightTransforms.clear();
+    this.transportPromises?.clear();
     this.sectionAdapter?.dispose();
     this.viewAdapter?.dispose();
     this.presentationAdapter?.dispose();
@@ -4080,6 +4111,9 @@ window.addEventListener('message', event => {
     const previous = window.dataviz.interaction;
     const next = event.data.interaction || null;
     window.dataviz.interaction = next;
+    datavizServerActionHostReady = next?.query_complete === true
+      && next.run_id === window.dataviz.run_id;
+    if (datavizServerActionHostReady) void datavizDrainActions();
     const endpointChanged = [
       'run_id', 'session_id', 'start_url', 'status_url', 'outputs_url',
       'query_snapshot_available', 'query_complete',
@@ -4121,13 +4155,16 @@ const datavizServerActionRequests = new Map();
 // In-memory FIFO, not a durable job queue. Only dispatch starts the RPC timeout.
 const datavizServerActionQueue = [];
 let datavizServerActionActive = false;
+// A progressive Canvas may render before its host commits the Run. Keep
+// accepted writes queued until the identity-checked host handshake arrives.
+let datavizServerActionHostReady = false;
 const datavizCancelQueuedActions = message => {
   datavizServerActionQueue.splice(0).forEach(item => item.reject(
     datavizServerActionError(message, {code:'action_not_submitted', requestId:item.requestId})
   ));
 };
 const datavizDrainActions = async () => {
-  if (datavizServerActionActive) return;
+  if (datavizServerActionActive || !datavizServerActionHostReady) return;
   datavizServerActionActive = true;
   try {
     while (datavizServerActionQueue.length) {

@@ -3,13 +3,16 @@ const datavizServerActionRequests = new Map();
 // In-memory FIFO, not a durable job queue. Only dispatch starts the RPC timeout.
 const datavizServerActionQueue = [];
 let datavizServerActionActive = false;
+// A progressive Canvas may render before its host commits the Run. Keep
+// accepted writes queued until the identity-checked host handshake arrives.
+let datavizServerActionHostReady = false;
 const datavizCancelQueuedActions = message => {
   datavizServerActionQueue.splice(0).forEach(item => item.reject(
     datavizServerActionError(message, {code:'action_not_submitted', requestId:item.requestId})
   ));
 };
 const datavizDrainActions = async () => {
-  if (datavizServerActionActive) return;
+  if (datavizServerActionActive || !datavizServerActionHostReady) return;
   datavizServerActionActive = true;
   try {
     while (datavizServerActionQueue.length) {

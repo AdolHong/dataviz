@@ -158,7 +158,7 @@ Object.assign(datavizRuntime, {
         || Promise.resolve({status:'ready', generation});
       completions.push(Promise.resolve(completion).then(outcome => {
         if (
-          outcome?.status !== 'ready'
+          this.disposed || outcome?.status !== 'ready'
           || Number(root?._datavizRenderGeneration || 0) !== generation
         ) return outcome;
         datavizCommitConsumerControlState(
@@ -174,6 +174,7 @@ Object.assign(datavizRuntime, {
   },
   async publishOutputs(bundle) {
     const changed = new Set();
+    if (this.disposed) return changed;
     Object.entries(bundle.outputs || {}).forEach(([rawReference, value]) => {
       const reference = canonicalOutputReference(rawReference);
       if (this.commitOutput(reference, value, {
@@ -191,6 +192,7 @@ Object.assign(datavizRuntime, {
       affectedViewIds,
     });
     const changedOutputs = await this.runTransforms([], changed);
+    if (this.disposed) return changedOutputs;
     window.dispatchEvent(new CustomEvent('dataviz:outputschange', {
       detail:{changed:[...changedOutputs], failed:[]},
     }));
@@ -217,6 +219,7 @@ Object.assign(datavizRuntime, {
   },
   async failOutputs(references, error) {
     const changed = new Set();
+    if (this.disposed) return changed;
     (references || []).forEach(rawReference => {
       const reference = canonicalOutputReference(rawReference);
       this.removeOutput(reference);
@@ -233,6 +236,7 @@ Object.assign(datavizRuntime, {
       affectedViewIds,
     });
     const changedOutputs = await this.runTransforms([], changed);
+    if (this.disposed) return changedOutputs;
     window.dispatchEvent(new CustomEvent('dataviz:outputschange', {
       detail:{changed:[...changedOutputs], failed:[...changed]},
     }));

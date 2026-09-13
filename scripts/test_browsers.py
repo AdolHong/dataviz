@@ -15,6 +15,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / 'tests/e2e/assets.json'
+CHROMIUM_CLI_TESTS = [
+    'tests/e2e/test_analysis_browser.py',
+    'tests/e2e/test_visual_check_cli.py',
+]
 
 
 def prepare_assets(directory: Path, fetch: bool) -> None:
@@ -41,6 +45,8 @@ def main() -> int:
     parser.add_argument('--browsers', nargs='+', choices=['chromium', 'firefox', 'webkit'],
                         default=['chromium', 'firefox', 'webkit'])
     parser.add_argument('--output-dir', type=Path)
+    parser.add_argument('--suite', choices=['components', 'core', 'extended', 'full'], default='full',
+                        help='Choose scope explicitly; full retained for existing CI callers')
     parser.add_argument('--jobs', type=int, choices=[1, 2, 3], default=3,
                         help='Isolated browser processes in parallel; use 1 for serial diagnosis')
     parser.add_argument('pytest_args', nargs=argparse.REMAINDER, help='Optional targeted arguments after --')
@@ -52,7 +58,12 @@ def main() -> int:
     extra = args.pytest_args
     if extra[:1] == ['--']:
         extra = extra[1:]
-    command = [sys.executable, '-m', 'pytest', 'tests/e2e', '-q', '-o', 'addopts=', *extra]
+    targets = ['tests/e2e'] if args.suite == 'full' else [f'tests/e2e/{args.suite}']
+    if args.suite == 'extended':
+        targets += ['tests/e2e/test_analysis_browser.py', 'tests/e2e/test_visual_check_cli.py',
+                    'tests/e2e/test_failure_artifacts.py']
+    command = [sys.executable, '-m', 'pytest', *targets, '-q', '-o', 'addopts=',
+               '--durations=10', *extra]
     results = []
     for browser in args.browsers:
         if (output / f'{browser}.log').exists():
@@ -63,10 +74,19 @@ def main() -> int:
         print(f'{browser}: running; log {log}', flush=True)
         env = {**os.environ, 'DATAVIZ_BROWSER': browser, 'DATAVIZ_E2E_ASSET_DIR': str(assets),
                'DATAVIZ_E2E_ARTIFACT_DIR': str(output.resolve() / 'failures')}
+        browser_command = list(command)
+        if browser != 'chromium' and args.suite in {'extended', 'full'}:
+            # These CLI contracts explicitly launch Chromium regardless of the
+            # matrix engine. Run them once, in the Chromium lane, not three times.
+            # Remove explicit targets as --ignore does not exclude direct paths.
+            browser_command = [part for part in browser_command if part not in CHROMIUM_CLI_TESTS]
+            browser_command += [f'--ignore={path}' for path in CHROMIUM_CLI_TESTS]
+            print(f'{browser}: Chromium-only CLI contracts belong to the chromium lane', flush=True)
         with log.open('x') as stream:
-            completed = subprocess.run(command, cwd=ROOT, env=env, stdout=stream, stderr=subprocess.STDOUT)
+            completed = subprocess.run(browser_command, cwd=ROOT, env=env, stdout=stream, stderr=subprocess.STDOUT)
         print(f'{browser}: exit {completed.returncode}\n' + '\n'.join(log.read_text().splitlines()[-3:]), flush=True)
-        return {'browser': browser, 'exit_code': completed.returncode, 'log': str(log)}
+        return {'browser': browser, 'exit_code': completed.returncode, 'log': str(log),
+                'command': browser_command}
 
     with ThreadPoolExecutor(max_workers=args.jobs) as executor:
         for future in as_completed([executor.submit(run_browser, browser) for browser in args.browsers]):

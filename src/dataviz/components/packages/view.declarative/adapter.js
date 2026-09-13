@@ -8,6 +8,7 @@
     if (!runtime || !controller || !services || runtime.viewAdapter) return;
 
     const states = new Map();
+    const invalidations = new WeakMap();
     let perspectiveSerial = 0;
     let tableSearchSerial = 0;
     let disposed = false;
@@ -105,8 +106,8 @@
       assets:services.assets,
       controlBinding:bindingContext(root, key, descriptor, generation),
       actions:{
-        get available() { return Boolean(body.isConnected && global.dataviz?.serverActions?.available); },
-        invoke:(action, payload = {}, options = {}) => body.isConnected
+        get available() { return Boolean(!disposed && !runtime.disposed && body.isConnected && global.dataviz?.serverActions?.available); },
+        invoke:(action, payload = {}, options = {}) => !disposed && !runtime.disposed && body.isConnected
           ? (global.dataviz?.serverActions?.invoke(action, payload, options)
             || Promise.reject(new Error('Server Actions are unavailable')))
           : Promise.reject(new Error('Renderer is no longer mounted')),
@@ -1143,7 +1144,7 @@
               await awaitPerspectiveOperation(state, 'table dispose', table.delete());
             }
           } finally {
-            worker?.terminate?.();
+            await awaitPerspectiveOperation(state, 'worker dispose', worker?.terminate?.());
             if (state.countedCreated) runtime.metrics.perspective.disposed += 1;
           }
         }
@@ -1373,13 +1374,20 @@
       return state;
     };
     const clearRoot = (root, key) => {
-      const body = root?.querySelector('.dv-view-body');
+      let body = root?.querySelector('.dv-view-body');
       if (!root || !body) return {root, body};
       root.classList.remove('dv-view--table', 'dv-view--perspective');
-      body.replaceChildren();
+      // Isolate old async hooks from the replacement view content. Their
+      // context.body remains a detached cleanup target, never the new body.
+      const replacement = body.cloneNode(false);
+      body.replaceWith(replacement);
+      body = replacement;
       return {root, body};
     };
-    const disposeRenderer = (root, key) => {
+    const disposeRenderer = (root, key, invalidate = true) => {
+      // Terminal states and repeat-card removal must also invalidate a mount
+      // that has not returned its state yet. There may be no states entry.
+      if (root && invalidate) invalidations.set(root, (invalidations.get(root) || 0) + 1);
       const mounted = states.get(key);
       if (!mounted) return;
       states.delete(key);
@@ -1395,10 +1403,9 @@
           'dispose',
         );
       }
-      try {
-        Promise.resolve(
-          mounted.renderer.dispose?.(context(root, mounted.body, key), mounted.state)
-        ).then(() => {
+      const release = async () => {
+        try {
+          await mounted.renderer.dispose?.(context(root, mounted.body, key), mounted.state);
           if (
             evidence.custom
             && !states.has(key)
@@ -1412,24 +1419,18 @@
               'dispose',
             );
           }
-        }).catch(error => {
-          lifecycleDiagnostic(
-            evidence,
-            'custom_renderer_dispose_failed',
-            error?.message || String(error),
-            'dispose',
-          );
+        } catch (error) {
+          lifecycleDiagnostic(evidence, 'custom_renderer_dispose_failed',
+            error?.message || String(error), 'dispose');
           console.error(`[dataviz:${key}] Renderer dispose failed`, error);
-        });
-      } catch (error) {
-        lifecycleDiagnostic(
-          evidence,
-          'custom_renderer_dispose_failed',
-          error?.message || String(error),
-          'dispose',
-        );
-        console.error(`[dataviz:${key}] Renderer dispose failed`, error);
-      }
+        }
+      };
+      // An update may still be initializing resources. Let it settle before
+      // disposing its final state, while the host can immediately show a new
+      // terminal body. Internal renderer replacement already awaits old work.
+      return invalidate && root?._datavizRendererPending
+        ? Promise.resolve(root._datavizRendererPending).catch(() => {}).then(release)
+        : release();
     };
     const terminal = (root, key, {status, title, message, modifier = status}) => {
       if (!root) return;
@@ -1526,7 +1527,10 @@
         root._datavizRenderGeneration = (root._datavizRenderGeneration || 0) + 1;
       }
       const generation = root?._datavizRenderGeneration || 0;
-      const superseded = () => disposed || runtime.disposed || root?._datavizRenderGeneration !== generation;
+      const invalidation = root ? invalidations.get(root) || 0 : 0;
+      const superseded = () => disposed || runtime.disposed
+        || root?._datavizRenderGeneration !== generation
+        || (root && (invalidations.get(root) || 0) !== invalidation);
       let descriptor;
       try {
         descriptor = producer();
@@ -1578,6 +1582,7 @@
         const started = performance.now();
         let phase = 'validate';
         const lifecycle = lifecycleEvidence(key, type);
+        let releasePendingMount = null;
         try {
           await renderer.validate?.(descriptor);
           if (superseded()) {
@@ -1598,7 +1603,8 @@
             runtime.metrics.renderers.updates += 1;
             lifecycle.updates += 1;
           } else {
-            if (mounted) disposeRenderer(mounted.root, key);
+            if (mounted) await disposeRenderer(mounted.root, key, false);
+            if (superseded()) return {status:'superseded', generation};
             const {body} = clearRoot(root, key);
             if (!body) throw new Error(`Unknown view: ${key}`);
             phase = 'mount';
@@ -1606,12 +1612,16 @@
               context(root, body, key, descriptor, generation),
               descriptor,
             );
+            releasePendingMount = () => renderer.dispose?.(context(root, body, key, descriptor, generation), state);
             await state?.pending;
             if (superseded()) {
-              await renderer.dispose?.(context(root, body, key, descriptor, generation), state);
+              const release = releasePendingMount;
+              releasePendingMount = null;
+              await release();
               return {status:'superseded', generation};
             }
             states.set(key, {type, renderer, state, root, body});
+            releasePendingMount = null;
             runtime.metrics.renderers.mounts += 1;
             lifecycle.mounts += 1;
             lifecycle.active = true;
@@ -1651,9 +1661,15 @@
           });
           return {status:'ready', generation, duration_ms:Number(durationMs.toFixed(2))};
         } catch (error) {
-          if (root?._datavizRenderGeneration === generation) {
-            showError(root, key, type, phase, error);
+          if (releasePendingMount) {
+            try { await releasePendingMount(); }
+            catch (cleanupError) {
+              lifecycleDiagnostic(lifecycle, 'custom_renderer_dispose_failed',
+                cleanupError?.message || String(cleanupError), 'dispose');
+            }
           }
+          if (superseded()) return {status:'superseded', generation};
+          showError(root, key, type, phase, error);
           return {status:'error', generation, error};
         } finally {
           runtime.metrics.renderers.totalMs += performance.now() - started;
@@ -1994,27 +2010,8 @@
       const body = chartNode.closest('.dv-view-body');
       const key = rootNode?.dataset.viewId;
       if (!rootNode || !body || !key) return;
-      const spec = services.decodeSpec(chartNode);
-      const renderContext = context(rootNode, body, key, spec);
-      const pending = materializePlotlyDescriptor(spec, renderContext).then(specification => (
-        chartService.plotly.mount(chartNode, specification, rootNode)
-      )).then(chart => {
-        const state = {
-          ...chart,
-          descriptor:spec,
-          renderContext,
-          controlClickHandler:null,
-          controlSelectedHandler:null,
-          controlActionFrame:null,
-        };
-        syncPlotlyInteractions(state, spec);
-        states.set(key, {
-          type:'plotly', renderer:runtime.renderers.get('plotly'), state, root:rootNode, body,
-        });
-        runtime.metrics.renderers.mounts += 1;
-        return state;
-      }).catch(error => showError(rootNode, key, 'plotly', 'mount', error));
-      rootNode._datavizRendererPending = pending;
+      // First-paint artifacts use the same cancellable lifecycle as updates.
+      renderInto(rootNode, key, () => ({...services.decodeSpec(chartNode), type:'plotly'}));
     });
     document.querySelectorAll('.dv-perspective-bootstrap').forEach((bootstrap, index) => {
       try {
@@ -2026,17 +2023,7 @@
         const rootNode = bootstrap.closest('.dv-view');
         if (!body) return;
         const key = rootNode?.dataset.viewId || `artifact:${index}`;
-        const renderContext = context(rootNode, body, key);
-        const state = createPerspective(renderContext, {type:'perspective', ...payload});
-        states.set(key, {
-          type:'perspective',
-          renderer:runtime.renderers.get('perspective'),
-          state,
-          root:rootNode,
-          body,
-        });
-        runtime.metrics.renderers.mounts += 1;
-        if (rootNode) rootNode._datavizRendererPending = state.pending;
+        renderInto(rootNode, key, () => ({...payload, type:'perspective'}));
       } catch (error) {
         bootstrap.textContent = `Interactive table failed: ${error.message}`;
       }

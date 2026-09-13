@@ -249,6 +249,7 @@
     }
     owner._datavizOverlayRecord = record;
     records.add(record);
+    const listeners = new AbortController();
     if (record.trigger && record.panel) {
       if (!record.panel.id) record.panel.id = `dv-overlay-${Math.random().toString(36).slice(2, 10)}`;
       record.trigger.setAttribute('aria-controls', record.panel.id);
@@ -264,7 +265,7 @@
         event.preventDefault();
         event.stopPropagation();
         isOpen(record) ? close(record) : open(record);
-      });
+      }, {signal:listeners.signal});
       owner.addEventListener('toggle', () => {
         if (record.expectedToggleState === owner.open) {
           record.expectedToggleState = null;
@@ -274,13 +275,13 @@
         if (record.silent) return;
         if (owner.open) open(record);
         else close(record);
-      });
+      }, {signal:listeners.signal});
     } else if (options.toggleOnTrigger !== false) {
       record.trigger?.addEventListener('click', event => {
         event.preventDefault();
         event.stopPropagation();
         isOpen(record) ? close(record) : open(record);
-      });
+      }, {signal:listeners.signal});
     }
     record.api = {
       open: value => open(record, value),
@@ -289,7 +290,13 @@
       refresh: value => refresh(record, value),
       reposition: () => position(record),
       isOpen: () => isOpen(record),
-      destroy: () => records.delete(record),
+      destroy: () => {
+        if (!records.has(record)) return;
+        close(record);
+        listeners.abort();
+        records.delete(record);
+        if (owner._datavizOverlayRecord === record) delete owner._datavizOverlayRecord;
+      },
     };
     // Browsers may restore native <details open> state before this controller
     // hydrates (notably when reopening a portable report or traversing history).
@@ -338,6 +345,15 @@
     close(active, {returnFocus: true});
   });
   const reposition = () => [...records].filter(isOpen).forEach(position);
+  // Parameter forms are replaced when navigating. The registry must not keep
+  // detached controls alive; synchronous reparenting into a tray stays intact.
+  const removals = new MutationObserver(changes => {
+    if (!changes.some(change => change.removedNodes.length)) return;
+    [...records].forEach(record => {
+      if (!record.owner.isConnected) record.api.destroy();
+    });
+  });
+  removals.observe(document, {childList:true, subtree:true});
   global.addEventListener('resize', reposition, {passive: true});
   global.addEventListener('scroll', reposition, {capture: true, passive: true});
 

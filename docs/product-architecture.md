@@ -220,6 +220,10 @@ mount → update → empty → restore → interaction → resize → dispose �
 
 Plotly、普通 Table、Perspective、文本、图片和自定义 Renderer 都通过四个作者 hook 工作；Empty/Restore 由 View 宿主统一管理，Interaction/Resize 由 Adapter 或 Chart Service 管理，Export 复用同一 Runtime。Python 首屏 bootstrap 也注册到 View ID 状态表，不能成为不受 update/dispose 管理的旁路。
 
+异步边界不只看 render generation：终态、卡片移除和 Runtime 销毁也使旧任务失效。
+替换内容与旧 `context.body` 隔离，旧 update 完成后释放最终 state；mount 返回 state 后的 pending 失败同样清理。
+作者必须自行清理 mount 返回 state 前抛错时已分配的资源，dispose 不应重新查询全局 DOM 影响新视图。
+
 Plotly 是 Dataviz 唯一的作者图表接口。声明式模板负责常见字段映射，并允许通过 `options.trace`、`options.layout` 与 `config` 覆盖；可信 Custom Renderer 既可以通过 `context.charts.plotly` 继承平台生命周期，也可以使用页面内嵌的完整 Plotly.js API 实现自定义 trace、函数、事件与命令式交互。Dataviz 不维护封闭的图表能力白名单。官方文档与 Gallery 是视觉和 API 参考，项目 Recipe 只是少量完成 Dataviz 生命周期适配的样例。作者不选择图表引擎，Scaffold、focused docs 和 Gallery 也不暴露引擎分支。
 
 页面滚动优先于图表手势：Plotly 模板默认关闭 `scrollZoom`。直接调用底层 API 时必须自行承担 Theme、Resize、Update、Purge、事件解绑和滚轮所有权。Perspective 自己拥有内部滚动和 WASM/Table 生命周期；只有内部确实能继续滚动时才拦截滚轮。

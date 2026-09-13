@@ -1,6 +1,6 @@
 [project]
 name = "ai-dataviz"
-version = "0.25.1"
+version = "0.25.4"
 description = "Workspace-first data dashboards for humans and AI"
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
@@ -48,7 +48,7 @@ dataviz = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
 markers = ["e2e: real-browser runtime tests"]
 
 [tool.ruff]

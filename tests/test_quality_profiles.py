@@ -21,12 +21,11 @@ def test_targeted_requires_explicit_scope():
 
 
 def test_journey_selectors_have_real_tests():
-    source = (ROOT / "tests/e2e/test_browser_runtime.py").read_text()
+    source = '\n'.join(path.read_text() for path in (ROOT / 'tests/e2e/core').glob('test_*.py'))
     for selector in quality.JOURNEYS:
         assert f"def test_{selector}" in source, selector
     command = quality.commands("journeys")[0]
-    assert command[-2] == "-k"
-    assert set(command[-1].split(" or ")) == set(quality.JOURNEYS)
+    assert command[-1] == 'tests/e2e/core'
 
 
 def test_full_does_not_silently_reduce_scope():

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.25.4 — 2026-09-14
+
+- Await asynchronous Perspective Worker termination before reporting disposal; strengthen real-resource lifecycle coverage with 20 restore cycles and native Worker/observer accounting across browsers.
+- Fence obsolete Output downloads after replacement, direct publication, removal or Runtime disposal; release settled transport promises and stop initialization after disposal at each awaited boundary.
+- Release detached overlay records after form replacement; destroy closes the surface, removes activation listeners and permits clean registration. Synchronous tray reparenting remains supported.
+- Audit save recovery, navigation isolation, dynamic domains and resource lifetime without changing DSL. Add lost-response/reload receipt recovery and deterministic transport/overlay regressions; scope and evidence: `docs/stability-boundaries-workstream.md`.
+
+## 0.25.3 — 2026-09-13
+
+- Preserve radio-group activation and focus across snapshots, including replaced native options and keyboard navigation.
+- Invalidate Renderer work on terminal state/removal/disposal, isolate replacement bodies, clean returned state after pending failure and defer cleanup until an active update settles. First-paint Plotly/Perspective artifacts now use the same lifecycle. Disposed Renderer contexts cannot invoke writes.
+- Stop Transform execution after disposal during preparation; prevent late cache writes, output/error mutations and notifications after Runtime disposal.
+- Queue early Server Actions until the identity-checked host confirms the current Query Run, preserving unsubmitted cancellation and save/refresh semantics.
+- Add deterministic async component/Node regressions and reuse targeted three-browser core, renderer, lookup and action journeys. Evidence and limitations: `docs/async-lifecycle-workstream.md`. No DSL or visual changes.
+
+## 0.25.2 — 2026-09-13
+
+- Preserve checkbox button identity during state synchronization so an intervening snapshot does not swallow mouse or Space-key activation or discard keyboard focus. Add deterministic component regressions for interrupted gestures and replaced options; no DSL or visual changes.
+- Split browser coverage into component, core and extended layers, retain original-case coverage mapping, and add scoped execution and first-failure evidence rules in `AGENTS.md`. Remove redundant heavy permutations and shorten server teardown without adding retries or weakening assertions.
+- Reuse the preceding full-run evidence and verify the checkbox fix with three-engine component and original failing E2E regressions plus 156 related non-browser checks. This is not a fresh full-matrix pass; see `docs/release-0.25.2.md` and `docs/checkbox-sync-regression.md`.
+
 ## 0.25.1 — 2026-09-13
 
 - Unify browser testing under `scripts/test_browsers.py`: verify pinned upstream resources, run isolated Chromium/Firefox/WebKit processes in parallel (optional serial mode) and retain separate logs and failure artifacts without automatic retries.

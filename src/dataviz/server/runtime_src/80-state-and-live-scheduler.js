@@ -808,6 +808,9 @@ window.addEventListener('message', event => {
     const previous = window.dataviz.interaction;
     const next = event.data.interaction || null;
     window.dataviz.interaction = next;
+    datavizServerActionHostReady = next?.query_complete === true
+      && next.run_id === window.dataviz.run_id;
+    if (datavizServerActionHostReady) void datavizDrainActions();
     const endpointChanged = [
       'run_id', 'session_id', 'start_url', 'status_url', 'outputs_url',
       'query_snapshot_available', 'query_complete',

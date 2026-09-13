@@ -6,6 +6,11 @@ from pathlib import Path
 
 import pytest
 
+# The artifact self-test copies this file into an isolated synthetic harness.
+# There it supplies its own page/engine fixtures and has no support package.
+if Path(__file__).with_name('support').is_dir():
+    from e2e.support.browser import browser, page  # noqa: F401
+
 
 STATE_TIMELINE = """(() => {
   const events = [];

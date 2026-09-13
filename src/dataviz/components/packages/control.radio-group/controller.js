@@ -22,7 +22,8 @@
 
     function sync() {
       const options = api.options(input);
-      group.replaceChildren();
+      const existing = new Map(Array.from(group.children, button => [button.dataset.value, button]));
+      let cursor = group.firstElementChild;
       options.forEach((option, index) => {
         const unavailable = Boolean(option.disabled);
         if (
@@ -30,27 +31,40 @@
           && option.dataset.preserveValue !== 'true'
           && control.dataset.showUnavailable !== 'true'
         ) return;
-        const button = document.createElement('button');
+        const button = existing.get(option.value) || document.createElement('button');
+        existing.delete(option.value);
         button.type = 'button';
         button.className = `dv-radio-group__option${option.selected ? ' is-selected' : ''}${unavailable ? ' is-unavailable' : ''}`;
         button.dataset.value = option.value;
-        button.textContent = option.textContent;
+        if (button.textContent !== option.textContent) button.textContent = option.textContent;
         button.setAttribute('role', 'radio');
         button.setAttribute('aria-checked', String(option.selected));
         button.tabIndex = option.selected || (!api.selectedOptions(input).length && index === 0) ? 0 : -1;
         button.disabled = input.disabled || unavailable;
-        button.addEventListener('click', () => choose(option));
-        button.addEventListener('keydown', event => {
-          if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
-          event.preventDefault();
-          const enabled = options.filter(item => !item.disabled);
-          const current = enabled.indexOf(option);
-          const delta = ['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 1;
-          choose(enabled[(current + delta + enabled.length) % enabled.length], {focus: true});
-        });
-        group.append(button);
+        if (button !== cursor) group.insertBefore(button, cursor);
+        cursor = button.nextElementSibling;
       });
+      existing.forEach(button => button.remove());
     }
+
+    // Resolve options at activation time: native candidates may have been
+    // replaced by a snapshot while the button/focus remains in place.
+    const targetOption = event => {
+      const button = event.target.closest('.dv-radio-group__option');
+      if (!button || button.disabled) return null;
+      return api.options(input).find(option => option.value === button.dataset.value);
+    };
+    group.addEventListener('click', event => choose(targetOption(event)));
+    group.addEventListener('keydown', event => {
+      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+      const option = targetOption(event);
+      if (!option) return;
+      event.preventDefault();
+      const enabled = api.options(input).filter(item => !item.disabled);
+      const current = enabled.indexOf(option);
+      const delta = ['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 1;
+      choose(enabled[(current + delta + enabled.length) % enabled.length], {focus:true});
+    });
 
     mount.replaceChildren(group);
     return {sync};

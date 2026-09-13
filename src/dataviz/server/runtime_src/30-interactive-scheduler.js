@@ -230,6 +230,14 @@ Object.assign(datavizRuntime, {
     });
   },
   async executeTransform(id, item, inputValues, generation, controlState) {
+    const assertActive = () => {
+      if (this.disposed) {
+        throw Object.assign(new Error('Runtime disposed'), {
+          name:'AbortError', code:'interactive_transform_cancelled',
+        });
+      }
+    };
+    assertActive();
     const key = this.transformCacheKey(id, item, inputValues, controlState);
     const cacheEnabled = item.spec.cache?.mode !== 'none';
     if (!cacheEnabled) {
@@ -247,7 +255,9 @@ Object.assign(datavizRuntime, {
     const existing = this.inflightTransforms.get(inflightKey);
     if (existing) {
       this.transformCacheEvidence.set(id, {status:'inflight', entries:this.interactionCache.size});
-      return datavizCacheClone(await existing);
+      const value = await existing;
+      assertActive();
+      return datavizCacheClone(value);
     }
     if (cacheEnabled) {
       this.metrics.interactiveTransforms.cacheMisses += 1;
@@ -258,7 +268,9 @@ Object.assign(datavizRuntime, {
       if (!adapter) throw new Error(`Unsupported Interactive Runtime: ${item.spec.runtime}`);
       adapter.validate(item);
       const prepared = await adapter.prepare(item, inputValues, {controlState});
+      assertActive();
       const value = await adapter.execute(id, item, prepared, {generation, controlState});
+      assertActive();
       if (cacheEnabled) {
         this.interactionCache.set(key, datavizCacheClone(value));
         while (this.interactionCache.size > this.interactionCacheLimit) {
@@ -350,6 +362,7 @@ Object.assign(datavizRuntime, {
     });
   },
   async runTransforms(changedControlKeys = [], seedChangedOutputs = [], options = {}) {
+    if (this.disposed) return new Set();
     const outputs = window.dataviz.portable?.outputs || {};
     const changedControls = changedControlKeys == null ? null : new Set(changedControlKeys);
     const changedOutputs = new Set(seedChangedOutputs);
@@ -399,6 +412,7 @@ Object.assign(datavizRuntime, {
       const dependencyIds = this.transformDependencies(id);
       const task = (async () => {
         await Promise.all(dependencyIds.map(dependency => tasks.get(dependency)).filter(Boolean));
+        if (this.disposed) return;
         const declared = Object.keys(spec.outputs || {});
         const outputReferences = declared.map(name => `interactive:${id}/${name}`);
         const requiredOutputReferences = declared
@@ -464,7 +478,7 @@ Object.assign(datavizRuntime, {
         try {
           if (spec.trigger === 'auto' && relevant && Number(spec.debounce_ms || 0) > 0) {
             await new Promise(resolve => setTimeout(resolve, Number(spec.debounce_ms)));
-            if (this.transformRequests.get(id) !== request) return;
+            if (this.disposed || this.transformRequests.get(id) !== request) return;
           }
           const failedInput = Object.values(references).find(reference => {
             if (this.outputErrors.has(reference)) return true;
@@ -579,7 +593,7 @@ Object.assign(datavizRuntime, {
             executionControlState,
           );
           const durationMs = performance.now() - executionStarted;
-          if (this.transformRequests.get(id) !== request) return;
+          if (this.disposed || this.transformRequests.get(id) !== request) return;
           if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) {
             throw new Error(`Interactive Transform ${id} must return a Named Output object`);
           }
@@ -633,7 +647,7 @@ Object.assign(datavizRuntime, {
             renderOutputDelta(localChanged);
           }
         } catch (error) {
-          if (this.transformRequests.get(id) !== request) return;
+          if (this.disposed || this.transformRequests.get(id) !== request) return;
           if (error?.name === 'AbortError' || error?.code === 'interactive_transform_cancelled') {
             this.markTransformTerminal(id, 'cancelled', error.message);
             this.publishTransformStatus(id, 'cancelled', {message:error.message, error});

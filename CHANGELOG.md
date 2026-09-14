@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Bound browser-test phases with an independent process watchdog, retain per-test phase events and Python stacks, report timeout as failure, and clean up owned browser/driver processes without automatic retries. The historical Firefox stall's exact call remains unproven; this hardens diagnosis and recovery, not application Runtime behavior.
+
+## 0.25.7 — 2026-09-14
+
+- Align browser JSON/Arrow date, timestamp, unsafe integer, Decimal, binary and nested table cells; normalize Custom Renderer auxiliary tables and Worker Frame outputs. Reject invalid JSON cache/snapshot values instead of losing types, distinguish shared references from cycles, and stop treating malformed table inputs as empty results. Python Artifact types remain unchanged.
+- Add browser-js `context.rows(alias)` for transport-independent row arrays across JSON, Arrow and auto; retain lazy Frame access and legacy raw inputs. Missing/non-table aliases now raise `interactive_input_not_table` from rows/table instead of silently becoming empty tables. Update authoring templates, CLI docs and bundled Skill; cover real transport thresholds, selection changes, empty results and recovery.
+
 ## 0.25.6 — 2026-09-14
 
 - Restore the Server Parameters button's right-click default-configuration editor, retaining the Run shortcut and surfacing editor-load failures. No Share/HTML write access is added.

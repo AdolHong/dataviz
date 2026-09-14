@@ -13,6 +13,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from dataviz.artifacts.models import ArtifactDescriptor
+from dataviz.artifacts.browser_values import browser_table_rows
 from dataviz.filesystem import atomic_copy_file, atomic_write_bytes, sha256_file
 
 
@@ -267,6 +268,10 @@ class ArtifactStore:
         with pa.ipc.new_stream(sink, table.schema) as writer:
             writer.write_table(table)
         return sink.getvalue().to_pybytes()
+
+    def read_browser_rows(self, descriptor: ArtifactDescriptor) -> list[dict]:
+        """Preserve browser cell semantics without changing the stored Artifact."""
+        return browser_table_rows(self.read_arrow_table(descriptor))
 
     def read_value(self, descriptor: ArtifactDescriptor) -> Any:
         path = self.resolve(descriptor)

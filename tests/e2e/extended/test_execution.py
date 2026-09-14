@@ -2,6 +2,7 @@ from __future__ import annotations
 
 
 import re
+import yaml
 
 
 from pathlib import Path
@@ -24,7 +25,90 @@ from e2e.support.runtime import (
     _run_and_wait,
     PROGRESSIVE,
     WORKER,
+    _export_html,
+    _running_static_server,
 )
+
+
+@pytest.mark.e2e
+@pytest.mark.parametrize('transport', ['json', 'arrow'])
+def test_rich_worker_frame_values_survive_server_share_html(page: Page, tmp_path: Path, transport):
+    import json
+    from datetime import date, datetime
+    from decimal import Decimal
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from dataviz.artifacts.browser_values import browser_table_rows
+
+    workspace = _copy_workspace(WORKER, tmp_path / 'rich-values')
+    config_path = workspace / 'workspace.yaml'
+    config = yaml.safe_load(config_path.read_text())
+    config['runtime'].update(browser_table_transport=transport)
+    config_path.write_text(yaml.safe_dump(config))
+    folder = workspace / 'dashboards/worker-runtime'
+    data = pa.table({'id':[9007199254740993], 'day':[date(2026,9,14)],
+                     'timestamp':[datetime(2026,9,14)], 'amount':[Decimal('1.20')]})
+    pq.write_table(data, folder / 'data/rows.parquet')
+    dashboard_path = folder / 'dashboard.yaml'
+    dashboard = yaml.safe_load(dashboard_path.read_text())
+    dashboard['sources'][0].update(path='data/rows.parquet', format='parquet')
+    dashboard_path.write_text(yaml.safe_dump(dashboard))
+    (folder / 'transforms/scaled.js').write_text('''function transform(c) {
+      return {main:c.frame([{name:'canonical',value:JSON.stringify(c.rows('rows'))}])};
+    }''')
+    expected = browser_table_rows(data)
+    report = tmp_path / 'rich.html'
+
+    def verify(scope):
+        table = scope.locator('[data-view-id="scaled-table"]')
+        expect(table).to_have_attribute('data-view-status', 'ready', timeout=15_000)
+        assert json.loads(table.locator('tbody tr td').nth(1).inner_text()) == expected
+
+    with _running_server(workspace) as url:
+        _open_dashboard(page, url, 'worker-runtime')
+        _run_and_wait(page)
+        verify(page.frame_locator('#canvas-frame'))
+        with page.expect_download(timeout=20_000) as download:
+            _export_html(page)
+        download.value.save_as(report)
+        page.locator('#share-button').click()
+        with page.expect_response(lambda response: response.url.endswith('/api/dashboards/worker-runtime/share')) as response:
+            page.locator('#copy-share-link').click()
+        page.goto(f"{url}{response.value.json()['url']}", wait_until='domcontentloaded')
+        verify(page)
+    with _running_static_server(tmp_path) as url:
+        page.goto(f'{url}/rich.html', wait_until='domcontentloaded')
+        verify(page)
+
+@pytest.mark.e2e
+@pytest.mark.parametrize('transport,threshold', [('json', 1), ('arrow', 2000), ('auto', 1), ('auto', 2000)])
+def test_worker_rows_normalizes_real_transports(page: Page, tmp_path: Path, transport, threshold):
+    workspace = _copy_workspace(WORKER, tmp_path / 'rows-transport')
+    config_path = workspace / 'workspace.yaml'
+    config = yaml.safe_load(config_path.read_text())
+    config['runtime'].update(browser_table_transport=transport, arrow_min_rows=threshold)
+    config_path.write_text(yaml.safe_dump(config))
+    code = workspace / 'dashboards/worker-runtime/transforms/scaled.js'
+    code.write_text('''function transform(context) {
+      const minimum = Number(context.control_inputs.delay_ms);
+      return {main:context.rows('rows').filter(row => row.value >= minimum)
+        .sort((a,b) => b.value-a.value).map(row => ({name:row.name,value:row.value}))};
+    }''')
+    with _running_server(workspace) as url:
+        _open_dashboard(page, url, 'worker-runtime')
+        _run_and_wait(page)
+        frame = page.frame_locator('#canvas-frame')
+        control = page.locator('input[name="dashboard:worker-runtime/delay_ms"]')
+        # Initial minimum=5 produces a legitimate empty output. Wait for the
+        # first worker result before changing controls, not merely Query ready.
+        expect(frame.locator('[data-view-id="scaled-table"]')).to_have_attribute('data-view-status', 'empty', timeout=15_000)
+        for minimum, count in [(1, 2), (2, 1), (3, 0), (1, 2)]:
+            control.evaluate('(node,value) => {node.value=String(value); node.dispatchEvent(new Event("change",{bubbles:true}));}', minimum)
+            expect(frame.locator('[data-view-id="scaled-table"]')).to_have_attribute('data-view-status', 'ready' if count else 'empty')
+            expect(frame.locator('[data-view-id="scaled-table"] tbody tr')).to_have_count(count)
+        arrow_rows = frame.locator('body').evaluate('() => window.datavizRuntime.metrics.transports.arrowRows')
+        assert (arrow_rows > 0) == (transport == 'arrow' or (transport == 'auto' and threshold == 1))
+
 
 @pytest.mark.e2e
 def test_browser_transform_session_cache_reuses_equivalent_control_state(
@@ -329,4 +413,3 @@ def test_progressive_failure_and_consecutive_run_are_isolated(page: Page, tmp_pa
         assert first_run_id and second_run_id and first_run_id != second_run_id
         expect(slow).to_have_attribute("data-view-status", "ready", timeout=15_000)
         expect(slow).to_contain_text(re.compile("slow-second"))
-

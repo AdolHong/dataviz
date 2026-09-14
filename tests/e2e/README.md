@@ -44,6 +44,18 @@ Each run gets its own `.test-evidence/<timestamp>/` directory, per-browser logs,
 failure traces and a `summary.json`. A failed browser does not prevent the other
 two from running, and any failure makes the command exit nonzero. No automatic
 retry hides the first result. Reusing an existing evidence log is refused.
+The runner bounds each collection/setup/call/teardown/session-finish phase at
+180 seconds (`--phase-timeout SECONDS` for a justified slow scenario). It writes
+`<engine>.progress.json`, `<engine>.progress.events.jsonl` and
+`<engine>.progress.stacks.log`. A stalled phase dumps Python stacks and fails the
+lane; an independent parent deadline also covers startup or an unresponsive
+driver. Timeout is exit 124 in `summary.json`, with `timed_out` and `last_phase`.
+Owned browser/driver descendants are stopped even after abrupt pytest exit.
+No automatic retry or conversion of timeouts into passes is performed. Hard
+termination cannot promise a completed Playwright trace; phase/stack evidence is
+independent of browser responsiveness. Nested diagnostic pytest processes do not
+overwrite the outer lane's progress. Direct pytest still uses its usual timeout
+behavior; invoke the runner for the watchdog guarantees.
 CI uses the same entry point per matrix engine, with the resource cache keyed by
 the manifest hash. A cache hit still verifies each file's SHA-256 before testing.
 

@@ -570,13 +570,39 @@ const datavizNormalizeControlValue = (definition, value, {namespace = 'control',
     return fail(error);
   }
 };
-const datavizNormalizeArrowValue = value => {
+const datavizNormalizeArrowValue = (value, type = null) => {
+  if (value == null) return null;
+  if (type?.dictionary) return datavizNormalizeArrowValue(value, type.dictionary);
+  const kind = String(type || '');
+  if (/^(Date|Timestamp)/.test(kind)) {
+    const iso = new Date(Number(value)).toISOString();
+    return kind.startsWith('Date') ? iso.slice(0, 10) : iso;
+  }
+  if (kind.startsWith('Decimal') && ArrayBuffer.isView(value)) {
+    let integer = 0n;
+    for (let index = value.length - 1; index >= 0; index--) integer = (integer << 32n) | BigInt(value[index] >>> 0);
+    const bits = BigInt(value.length * 32);
+    if (integer & (1n << (bits - 1n))) integer -= 1n << bits;
+    const negative = integer < 0n;
+    let digits = (negative ? -integer : integer).toString();
+    const scale = Number(type.scale || 0);
+    if (scale > 0) { digits = digits.padStart(scale + 1, '0'); digits = `${digits.slice(0, -scale)}.${digits.slice(-scale)}`; }
+    else if (scale < 0) digits += '0'.repeat(-scale);
+    return `${negative ? '-' : ''}${digits}`;
+  }
+  if (/^(List|FixedSizeList)/.test(kind)) {
+    return Array.from(value, item => datavizNormalizeArrowValue(item, type.children?.[0]?.type));
+  }
+  if (kind.startsWith('Struct')) {
+    return Object.fromEntries(type.children.map(field => [field.name, datavizNormalizeArrowValue(value[field.name], field.type)]));
+  }
   if (value instanceof Date) return value.toISOString();
   if (typeof value === 'bigint') {
     const number = Number(value);
     return Number.isSafeInteger(number) ? number : String(value);
   }
-  if (ArrayBuffer.isView(value)) return Array.from(value, datavizNormalizeArrowValue);
+  if (typeof value === 'number' && !Number.isFinite(value)) return null;
+  if (ArrayBuffer.isView(value)) return Array.from(value, item => datavizNormalizeArrowValue(item));
   return value;
 };
 class DatavizArrowOutput {
@@ -593,7 +619,7 @@ class DatavizArrowOutput {
     const fields = this.table.schema.fields.map(field => field.name);
     const columns = fields.map(field => this.table.getChild(field));
     this._rows = Array.from({length:this.table.numRows}, (_, rowIndex) => Object.fromEntries(
-      fields.map((field, columnIndex) => [field, datavizNormalizeArrowValue(columns[columnIndex]?.get(rowIndex))])
+      fields.map((field, columnIndex) => [field, datavizNormalizeArrowValue(columns[columnIndex]?.get(rowIndex), this.table.schema.fields[columnIndex].type)])
     ));
     return this._rows;
   }
@@ -603,38 +629,54 @@ class DatavizArrowOutput {
     this._columnar = {
       __datavizColumnarTable:true,
       length:this.table.numRows,
-      columns:Object.fromEntries(fields.map(field => [
+      columns:Object.fromEntries(fields.map((field, index) => [
         field,
-        Array.from(this.table.getChild(field) || [], datavizNormalizeArrowValue),
+        Array.from(this.table.getChild(field) || [], value => datavizNormalizeArrowValue(value, this.table.schema.fields[index].type)),
       ])),
     };
     return this._columnar;
   }
 }
-const datavizTableRows = value => value?.__datavizArrowOutput ? value.rows() : (Array.isArray(value) ? value : []);
+const datavizTableRows = value => {
+  // Undefined is a not-yet-published Output, not a malformed published table.
+  if (value === undefined) return [];
+  if (value?.__datavizArrowOutput) return value.rows();
+  if (Array.isArray(value) && value.every(row => row && typeof row === 'object' && !Array.isArray(row))) return value;
+  throw datavizContractError('input_not_table', 'Expected table rows, received a non-table value');
+};
 const datavizMaterializeOutput = value => value?.__datavizArrowOutput ? value.rows() : value;
-const datavizSnapshotValue = value => {
-  if (value?.__datavizArrowOutput) return value.rows().map(datavizSnapshotValue);
-  if (Array.isArray(value)) return value.map(datavizSnapshotValue);
-  if (value && typeof value === 'object') {
-    if (value instanceof Blob || value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
-      throw new Error('Binary browser Outputs cannot be embedded as JSON snapshots');
-    }
-    return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [key, datavizSnapshotValue(item)])
-    );
+const datavizCloneOutput = (value, snapshot = false, ancestors = new WeakSet(), path = '$') => {
+  const fail = reason => {
+    throw datavizContractError('interactive_output_not_json_serializable',
+      `Output ${path} ${reason}; return JSON values explicitly`, {path});
+  };
+  if (value?.__datavizArrowOutput) {
+    return snapshot ? datavizCloneOutput(value.rows(), true, ancestors, path) : value;
   }
-  return value;
+  if (value === null || ['string', 'boolean'].includes(typeof value)) return value;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) fail('must be finite');
+    return value;
+  }
+  if (!value || typeof value !== 'object') fail(`has unsupported type ${typeof value}`);
+  if (ancestors.has(value)) fail('contains a circular reference');
+  if (!Array.isArray(value) && ![Object.prototype, null].includes(Object.getPrototypeOf(value))) {
+    fail(`has unsupported object type ${Object.prototype.toString.call(value)}`);
+  }
+  ancestors.add(value);
+  try {
+    return Array.isArray(value)
+      ? Array.from(value, (item, index) => datavizCloneOutput(item, snapshot, ancestors, `${path}[${index}]`))
+      : Object.fromEntries(Object.entries(value).map(([key, item]) => [
+          key, datavizCloneOutput(item, snapshot, ancestors, `${path}.${key}`),
+        ]));
+  } finally {
+    ancestors.delete(value);
+  }
 };
+const datavizSnapshotValue = value => datavizCloneOutput(value, true);
 const datavizWorkerValue = value => value?.__datavizArrowOutput ? value.columnar() : value;
-const datavizCacheClone = value => {
-  if (value?.__datavizArrowOutput) return value;
-  if (Array.isArray(value)) return value.map(datavizCacheClone);
-  if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, datavizCacheClone(item)]));
-  }
-  return value;
-};
+const datavizCacheClone = value => datavizCloneOutput(value);
 const datavizDecodeBase64Chunks = chunks => {
   const decoded = (chunks || []).map(chunk => Uint8Array.from(atob(chunk), value => value.charCodeAt(0)));
   const bytes = new Uint8Array(decoded.reduce((total, value) => total + value.byteLength, 0));
@@ -663,22 +705,19 @@ const datavizLoadTransport = async descriptor => {
   return new DatavizArrowOutput(table, descriptor, bytes);
 };
 const datavizJsonCompatible = value => {
-  const seen = new WeakSet();
-  const visit = item => {
-    if (typeof item === 'number' && !Number.isFinite(item)) return false;
-    if (typeof item === 'bigint' || typeof item === 'function' || typeof item === 'symbol' || typeof item === 'undefined') return false;
-    if (!item || typeof item !== 'object') return true;
-    if (seen.has(item)) return false;
-    seen.add(item);
-    return (Array.isArray(item) ? item : Object.values(item)).every(visit);
-  };
-  return visit(value);
+  try { datavizCloneOutput(value, true); return true; }
+  catch (_) { return false; }
 };
 const datavizDtypeMatches = (value, dtype = '') => {
   const normalized = String(dtype).toLowerCase();
   if (!normalized || value == null) return true;
   if (normalized.includes('bool')) return typeof value === 'boolean';
-  if (normalized.includes('int') || normalized.includes('uint')) return typeof value === 'number' && Number.isInteger(value);
+  if (normalized.includes('int') || normalized.includes('uint')) {
+    const integral = (typeof value === 'number' && Number.isSafeInteger(value))
+      || (typeof value === 'string' && /^-?\d+$/.test(value) && (BigInt(value) > 9007199254740991n || BigInt(value) < -9007199254740991n));
+    return integral && (!normalized.includes('uint') || (typeof value === 'string' ? BigInt(value) >= 0n : value >= 0));
+  }
+  if (normalized.includes('decimal')) return typeof value === 'string' && /^-?\d+(?:\.\d+)?$/.test(value);
   if (normalized.includes('float') || normalized === 'number' || normalized.includes('double')) return typeof value === 'number' && Number.isFinite(value);
   if (normalized.includes('date') || normalized.includes('time')) return value instanceof Date || (typeof value === 'string' && !Number.isNaN(Date.parse(value)));
   if (normalized.includes('str') || normalized.includes('string')) return typeof value === 'string';

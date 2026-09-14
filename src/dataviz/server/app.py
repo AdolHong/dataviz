@@ -1542,8 +1542,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                     },
                     "artifact": artifact.model_dump(mode="json", by_alias=True),
                 }
-            value = store.read_value(artifact)
-            value = json.loads(value.to_json(orient="records", date_format="iso"))
+            value = store.read_browser_rows(artifact)
         else:
             value = store.read_value(artifact)
         if isinstance(value, Path):
@@ -1643,8 +1642,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                     },
                     "artifact": artifact.model_dump(mode="json", by_alias=True),
                 }
-            value = store.read_value(artifact)
-            value = json.loads(value.to_json(orient="records", date_format="iso"))
+            value = store.read_browser_rows(artifact)
         else:
             value = store.read_value(artifact)
         if isinstance(value, Path):

@@ -936,7 +936,7 @@ def _profile_files(profile: str, item_id: str) -> dict[str, str]:
         files[f"{dashboard_root}/transforms/scaled.js"] = (
             "function transform(context) {\n"
             "  const factor = Number(context.control_inputs.factor ?? 1);\n"
-            "  return {main: context.inputs.rows.map(row => ({\n"
+            "  return {main: context.rows('rows').map(row => ({\n"
             "    ...row, value: Number(row.value) * factor,\n"
             "  }))};\n"
             "}\n"
@@ -1251,7 +1251,7 @@ def scaffold_recipe(name: str, identifier: str) -> dict[str, Any]:
                 "function transform(context) {\n"
                 "  // inputs/query_inputs/control_inputs aliases come only from this Transform YAML.\n"
                 "  // Example: a declared control_inputs.factor is context.control_inputs.factor.\n"
-                "  return {main: context.inputs.data.map(row => ({...row}))};\n"
+                "  return {main: context.rows('data').map(row => ({...row}))};\n"
                 "}\n"
                 if suffix == "js"
                 else "def transform(context):\n    return {\"main\": context.table(\"data\")}\n"

@@ -165,7 +165,12 @@
     const contract = state.dependency_contract?.views?.[view.id]?.filter_contract || [];
     const boundControl = controlBinding(view, state)?.control;
     const reference = inputReferences(view, state)[alias] || mainInputReference(view, state);
-    const sourceRows = state.data.table(reference).rows();
+    const raw = state.data.output(reference);
+    // Custom renderers also accept scalar/object inputs. They have no row
+    // projection, but must keep their original value in descriptor.inputs.
+    const nonTableCustom = view.template === 'custom' && raw !== undefined
+      && !Array.isArray(raw) && !raw?.__datavizArrowOutput;
+    const sourceRows = nonTableCustom ? [] : state.data.table(reference).rows();
     let rows = sourceRows;
     const controls = [];
     contract.forEach(item => {
@@ -611,7 +616,7 @@
           const filters = state.dependency_contract?.views?.[view.id]?.filter_contract || [];
           return [name, filters.some(item => item.consumer_binding?.inputs?.includes(name))
             ? selectRowsWithEvidence(view, state, name).rows
-            : raw];
+            : raw?.__datavizArrowOutput ? raw.rows() : raw];
         })
       );
       return {

@@ -2,9 +2,72 @@
 import hashlib
 import json
 import os
+import faulthandler
+import time
 from pathlib import Path
 
 import pytest
+
+
+def _watchdog_state(nodeid, phase):
+    path = os.environ.get('DATAVIZ_E2E_PROGRESS')
+    if not path or os.environ.get('DATAVIZ_E2E_WATCHDOG_OWNER') != str(os.getpid()):
+        return None
+    destination = Path(path)
+    payload = {'pid':os.getpid(), 'nodeid':nodeid, 'phase':phase, 'at':time.monotonic()}
+    temporary = destination.with_suffix('.tmp')
+    temporary.write_text(json.dumps(payload))
+    temporary.replace(destination)
+    with destination.with_suffix('.events.jsonl').open('a') as stream:
+        stream.write(json.dumps(payload) + '\n')
+    return destination
+
+
+def pytest_configure(config):
+    if os.environ.get('DATAVIZ_E2E_PROGRESS') and not os.environ.get('DATAVIZ_E2E_WATCHDOG_OWNER'):
+        os.environ['DATAVIZ_E2E_WATCHDOG_OWNER'] = str(os.getpid())
+        _watchdog_state('', 'collection')
+
+
+def _bounded_phase(item, phase):
+    destination = _watchdog_state(item.nodeid, phase)
+    if destination is None:
+        yield
+        return
+    with destination.with_suffix('.stacks.log').open('a') as stacks:
+        stacks.write(f'\n{item.nodeid} [{phase}]\n')
+        stacks.flush()
+        faulthandler.dump_traceback_later(float(os.environ['DATAVIZ_E2E_PHASE_TIMEOUT']), file=stacks, exit=True)
+        try:
+            yield
+        finally:
+            faulthandler.cancel_dump_traceback_later()
+            _watchdog_state(item.nodeid, f'{phase}_complete')
+
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_collection(session):
+    yield from _bounded_phase(session, 'collection')
+
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_sessionfinish(session):
+    yield from _bounded_phase(session, 'sessionfinish')
+
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_runtest_setup(item):
+    yield from _bounded_phase(item, 'setup')
+
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_runtest_call(item):
+    yield from _bounded_phase(item, 'call')
+
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_runtest_teardown(item):
+    yield from _bounded_phase(item, 'teardown')
 
 # The artifact self-test copies this file into an isolated synthetic harness.
 # There it supplies its own page/engine fixtures and has no support package.

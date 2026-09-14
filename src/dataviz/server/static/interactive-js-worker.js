@@ -21,6 +21,12 @@ const datavizNumericAggregate = (items, operation = 'sum', select = value => val
 
 class DatavizFrame {
   constructor(rows = []) {
+    if (Array.isArray(rows) ? rows.some(row => !row || typeof row !== 'object' || Array.isArray(row)) : !rows?.__datavizColumnarTable) {
+      const error = new TypeError('frame() expects rows or a columnar table');
+      error.code = 'interactive_input_not_table';
+      error.details = {input_type:rows === null ? 'null' : typeof rows};
+      throw error;
+    }
     this._rows = Array.isArray(rows) ? rows : null;
     this._columnar = rows?.__datavizColumnarTable ? rows : null;
   }
@@ -131,6 +137,7 @@ const serializeError = (error, transformId, code = 'interactive_transform_failed
   transform_id:transformId,
   runtime:'browser-js',
   worker:true,
+  ...(error?.code === 'interactive_input_not_table' ? {details:error.details} : {}),
 });
 
 const resolveEntrypoint = (code, entrypoint, dependencies = {}) => {
@@ -175,12 +182,23 @@ self.addEventListener('message', async event => {
     const inputs = Object.fromEntries(Object.entries(request.context?.inputs || {}).map(
       ([name, value]) => [name, value?.__datavizColumnarTable ? new DatavizFrame(value) : value]
     ));
-    const output = await transform({
+    const table = name => {
+      const value = inputs[name];
+      if (Object.hasOwn(inputs, name) && (Array.isArray(value) || value instanceof DatavizFrame)) {
+        return value instanceof DatavizFrame ? value : new DatavizFrame(value);
+      }
+      const error = new TypeError(`Input "${name}" is missing or is not a table; use a declared table alias with context.rows() or context.table().`);
+      error.code = 'interactive_input_not_table';
+      error.details = {input_alias:String(name), input_type:value === null ? 'null' : typeof value};
+      throw error;
+    };
+    const result = await transform({
       inputs,
       input:name => inputs[name],
       query_inputs:request.context?.query_inputs || {},
       control_inputs:request.context?.control_inputs || {},
-      table:name => inputs[name] instanceof DatavizFrame ? inputs[name] : new DatavizFrame(inputs[name]),
+      table,
+      rows:name => table(name).rows(),
       frame:rows => rows instanceof DatavizFrame ? rows : new DatavizFrame(rows),
       cancelled:isCancelled,
       throwIfCancelled,
@@ -195,6 +213,13 @@ self.addEventListener('message', async event => {
         });
       },
     });
+    // Normalize only top-level Named Output Frame instances, before structured
+    // clone loses their prototype. Ordinary object Outputs remain untouched.
+    const output = result && typeof result === 'object' && [Object.prototype, null].includes(Object.getPrototypeOf(result))
+      ? Object.fromEntries(Object.entries(result).map(([name, value]) => [
+          name, value instanceof DatavizFrame ? value.rows() : value,
+        ]))
+      : result;
     throwIfCancelled();
     self.postMessage({
       protocol:DATAVIZ_INTERACTIVE_WORKER_PROTOCOL,

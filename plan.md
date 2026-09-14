@@ -2,13 +2,13 @@
 
 更新时间：2026-09-14
 
-0.25.6：恢复 Parameters 右键编辑默认配置入口，保留 Run 兼容入口；相关回归与发行范围见 `docs/release-0.25.6.md`。以下历史段落不代表当前全量结果。
+0.25.7：统一 JSON/Arrow 浏览器数据边界、Worker rows/Frame、Custom 辅助输入和缓存快照校验；相关回归与发行范围见 `docs/release-0.25.7.md`。以下历史段落不代表当前全量结果。
 
 0.25.3 本地补丁构建：完成异步时序与生命周期专项，修复单选同步、Renderer/Transform 销毁后的迟到任务及 Action 提前提交；不改变 DSL。复用专项分层与三浏览器定向证据，打包不重跑全量；范围见 `docs/release-0.25.3.md`。
 
 当前协议基线（由 `protocols.py` 与回归检查约束）：`dataviz/workspace/v2`、`dataviz/dashboard/v20`、`dataviz/parameter-domain/v2`、`dataviz/parameter-domain-contract/v3`、`dataviz/parameter-lookup/v1`、`dataviz/parameter-materialization/v1`、`dataviz/dashboard-bundle/v2`、`dataviz/report-manifest/v3`、`dataviz/presentation/v2`、`dataviz/source/v6`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v13`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v6`、`dataviz/runtime/v15`、`dataviz/analysis-result/v5`、`dataviz/analysis-evidence/v5`。Component Registry 以 `dataviz components` 为准，不在阶段清单重复登记。
 
-当前工作树版本：`0.25.6`，本次定向验证范围见 [0.25.6 验收记录](docs/release-0.25.6.md)。本文件区分本地发行构建、工作树变更与待验证事项，不以完成过的历史阶段作为未来计划。架构理由见 [ARCHITECTURE](ARCHITECTURE.md)，视觉规范见 [DESIGN](DESIGN.md)，代码见 [实现索引](docs/product-architecture.md)，发行历史见 [CHANGELOG](CHANGELOG.md)。
+当前工作树版本：`0.25.7`，本次验证范围见 [0.25.7 验收记录](docs/release-0.25.7.md)。本文件区分本地发行构建、工作树变更与待验证事项，不以完成过的历史阶段作为未来计划。架构理由见 [ARCHITECTURE](ARCHITECTURE.md)，视觉规范见 [DESIGN](DESIGN.md)，代码见 [实现索引](docs/product-architecture.md)，发行历史见 [CHANGELOG](CHANGELOG.md)。
 
 ## 0.24.9 导出面板统一与级联视觉修复
 

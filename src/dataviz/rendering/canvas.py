@@ -1166,8 +1166,7 @@ class CanvasRenderer:
                         payload_bytes += sum(len(chunk.encode("ascii")) for chunk in chunks)
                     output_kinds[reference] = artifact.kind
                     continue
-                value = store.read_value(artifact)
-                value = json.loads(value.to_json(orient="records", date_format="iso"))
+                value = store.read_browser_rows(artifact)
             else:
                 value = store.read_value(artifact)
                 if isinstance(value, Path):

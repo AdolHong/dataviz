@@ -4,13 +4,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
-import subprocess
 import sys
 from datetime import datetime, timezone
 from urllib.request import urlopen
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from browser_watchdog import run_supervised
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,8 +50,12 @@ def main() -> int:
                         help='Choose scope explicitly; full retained for existing CI callers')
     parser.add_argument('--jobs', type=int, choices=[1, 2, 3], default=3,
                         help='Isolated browser processes in parallel; use 1 for serial diagnosis')
+    parser.add_argument('--phase-timeout', type=float, default=180,
+                        help='Maximum seconds per setup/call/teardown phase; default 180, no retries')
     parser.add_argument('pytest_args', nargs=argparse.REMAINDER, help='Optional targeted arguments after --')
     args = parser.parse_args()
+    if args.phase_timeout <= 0 or not math.isfinite(args.phase_timeout):
+        parser.error('--phase-timeout must be a positive finite number')
     assets = Path(os.environ.get('DATAVIZ_E2E_ASSET_DIR', ROOT / '.browser-test-assets')).resolve()
     prepare_assets(assets, args.fetch_assets)
     output = args.output_dir or ROOT / '.test-evidence' / datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
@@ -82,10 +87,10 @@ def main() -> int:
             browser_command = [part for part in browser_command if part not in CHROMIUM_CLI_TESTS]
             browser_command += [f'--ignore={path}' for path in CHROMIUM_CLI_TESTS]
             print(f'{browser}: Chromium-only CLI contracts belong to the chromium lane', flush=True)
-        with log.open('x') as stream:
-            completed = subprocess.run(browser_command, cwd=ROOT, env=env, stdout=stream, stderr=subprocess.STDOUT)
-        print(f'{browser}: exit {completed.returncode}\n' + '\n'.join(log.read_text().splitlines()[-3:]), flush=True)
-        return {'browser': browser, 'exit_code': completed.returncode, 'log': str(log),
+        result = run_supervised(browser_command, cwd=ROOT, env=env, log=log,
+                                progress=output / f'{browser}.progress.json', timeout=args.phase_timeout)
+        print(f'{browser}: exit {result["exit_code"]}\n' + '\n'.join(log.read_text().splitlines()[-3:]), flush=True)
+        return {'browser': browser, **result, 'log': str(log),
                 'command': browser_command}
 
     with ThreadPoolExecutor(max_workers=args.jobs) as executor:

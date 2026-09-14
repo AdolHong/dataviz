@@ -18,6 +18,9 @@
 不要重新引入被合并的宽度／页面全排列或固定 Chromium CLI 的三分组重复；新增排列须说明独立风险。
 `scripts/test_browsers.py` 不加筛选参数会运行全套；定向验证须显式选择引擎和用例。
 确认实际选中了预期用例，不能把零用例、跳过或收集失败算作通过。
+运行器按阶段监护（默认 180 秒）；停滞时先读对应 `*.progress.json`、
+`*.progress.events.jsonl`、`*.progress.stacks.log` 和 summary 的 `last_phase`。
+超时退出码 124 是失败，不得自动重试或直接扩大到全套；调整 `--phase-timeout` 须说明慢用例依据。
 
 ## 失败后只扩大到必要范围
 

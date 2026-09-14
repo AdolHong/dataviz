@@ -272,7 +272,7 @@ outputs:
   main: {kind: table}
 export: {mode: interactive}""",
         "worker_example": """function transform(context) {
-  const rows = context.inputs.rows || [];
+  const rows = context.rows('rows');
   const factor = Number(context.control_inputs.factor ?? 1);
   return {main: rows.map(row => ({...row, value: Number(row.value) * factor}))};
 }""",
@@ -1551,10 +1551,18 @@ timeout_seconds: 120
         },
         "runtime_context": {
             "inputs": "context.inputs.<alias> 或 context.input(<alias>) 读取 inputs 中声明的 Base/Derived Named Output；table 输入也可用 context.table(<alias>)。",
+            "rows": "browser-js 推荐 context.rows(alias)：JSON/Arrow/auto 都返回普通行对象数组副本，可用 Array.filter/sort/slice。会物化该表，较大数据优先 context.table(alias) 的列式/Frame API；不要把 Array.isArray(context.inputs.alias) 为 false 当成无数据。",
+            "table": "browser-js context.table(alias) 始终返回 DatavizFrame；filter 返回 Frame，sort(field, direction) 按字段排序，rows() 转为数组。原始 context.inputs/input 为兼容保留 JSON 数组或 Arrow Frame；不能对它们混用数组与 Frame 的 sort 接口。rows/table 的未声明别名或非表输入抛 interactive_input_not_table（含 input_alias/input_type），合法空表仍返回空结果。",
             "query_inputs": "context.query_inputs.<alias> 只读取 query_inputs 中显式声明的 Query Parameter projection。",
             "control_inputs": "context.control_inputs.<alias> 只读取 control_inputs 中 mode:value 的局部 alias；mode:filter 已在代码执行前过滤对应输入。不存在 context.selections。",
             "progress": "context.progress(value, message) 报告当前 generation 的有限进度；旧 generation 被 supersede 后不能覆盖新结果。",
             "boundary": "Browser Worker 没有 DOM、Adapter、Source、全局 Control Store 或隐式 Query API；YAML 未声明的值不进入 context。",
+        },
+        "browser_value_contract": {
+            "tables": "JSON/Arrow 的公开 rows/columnar 单元格采用共同表示；Custom Renderer 主表和所有命名辅助表均为 rows[]，scalar/object 不转成表。原始 inputs 的容器仍为兼容保留。",
+            "dates": "date 为 YYYY-MM-DD；timestamp 为 UTC ISO 字符串，毫秒精度。无时区 timestamp 按 UTC 时间线解释，不套用本机时区。原始服务端 Artifact 精度不变。",
+            "numbers": "超出 JavaScript 安全整数范围的整数、Decimal 均使用精确十进制字符串；浮点非有限值在表传输中为 null。binary 为字节数组，list/struct 递归转换。精确金额计算应留在服务端，不应直接 Number(decimal)。",
+            "outputs": "browser-js Named Output 可返回 DatavizFrame，发布前转成 rows。其他输出必须为 JSON 值；Date/Map/Set/typed array/BigInt/undefined/NaN/Infinity/循环引用在缓存或快照边界报 interactive_output_not_json_serializable，包含 path。日期请显式 toISOString()，不要依赖缓存隐式转换。合法共享引用不属于循环。",
         },
         "runtime_choice": {
             "default_order": ["browser-js", "server-python"],

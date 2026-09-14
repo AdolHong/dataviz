@@ -2,6 +2,8 @@ import importlib.util
 import hashlib
 import json
 from pathlib import Path
+import sys
+from unittest.mock import patch
 
 import pytest
 
@@ -9,7 +11,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('browser_runner', ROOT / 'scripts/test_browsers.py')
 runner = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(runner)
+with patch.object(sys, 'path', [str(ROOT / 'scripts'), *sys.path]):
+    spec.loader.exec_module(runner)
 
 
 def test_asset_manifest_is_unique_and_versioned():
@@ -49,21 +52,21 @@ def test_cache_missing_or_modified_bytes_fail_without_network(tmp_path, monkeypa
 
 
 def test_runner_continues_after_failure_and_preserves_logs(tmp_path, monkeypatch):
-    from types import SimpleNamespace
     output = tmp_path / 'evidence'
     monkeypatch.setattr(runner.sys, 'argv', ['test_browsers.py', '--output-dir', str(output)])
     monkeypatch.setattr(runner, 'prepare_assets', lambda *args: None)
     calls = []
-    def run(command, *, cwd, env, stdout, stderr):
+    def run(command, *, cwd, env, log, progress, timeout):
         browser = env['DATAVIZ_BROWSER']
         calls.append(browser)
-        stdout.write(f'{browser}: real command stand-in\n')
-        return SimpleNamespace(returncode=int(browser == 'firefox'))
-    monkeypatch.setattr(runner.subprocess, 'run', run)
+        log.write_text(f'{browser}: real command stand-in\n')
+        return {'exit_code':124 if browser == 'firefox' else 0, 'timed_out':browser == 'firefox', 'last_phase':{}}
+    monkeypatch.setattr(runner, 'run_supervised', run)
     assert runner.main() == 1
     assert sorted(calls) == ['chromium', 'firefox', 'webkit']
     summary = json.loads((output / 'summary.json').read_text())
-    assert [item['exit_code'] for item in summary['results']] == [0, 1, 0]
+    assert [item['exit_code'] for item in summary['results']] == [0, 124, 0]
+    assert summary['results'][1]['timed_out']
     assert 'tests/e2e' in summary['command']
     assert not any(arg.startswith('--ignore=') for arg in summary['results'][0]['command'])
     for result in summary['results'][1:]:
@@ -76,17 +79,17 @@ def test_runner_continues_after_failure_and_preserves_logs(tmp_path, monkeypatch
 
 @pytest.mark.parametrize('suite', ['components', 'core', 'extended', 'full'])
 def test_runner_limits_requested_suite_and_engine(tmp_path, monkeypatch, suite):
-    from types import SimpleNamespace
     monkeypatch.setattr(runner.sys, 'argv', [
         'test_browsers.py', '--suite', suite, '--browsers', 'firefox',
         '--output-dir', str(tmp_path / 'evidence'), '--', '-k', 'specific_case',
     ])
     monkeypatch.setattr(runner, 'prepare_assets', lambda *args: None)
     calls = []
-    def run(command, *, cwd, env, stdout, stderr):
+    def run(command, *, cwd, env, log, progress, timeout):
         calls.append((command, env['DATAVIZ_BROWSER']))
-        return SimpleNamespace(returncode=0)
-    monkeypatch.setattr(runner.subprocess, 'run', run)
+        log.write_text('ok\n')
+        return {'exit_code':0, 'timed_out':False, 'last_phase':{}}
+    monkeypatch.setattr(runner, 'run_supervised', run)
     assert runner.main() == 0
     assert len(calls) == 1
     command, browser = calls[0]

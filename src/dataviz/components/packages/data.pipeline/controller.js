@@ -5,7 +5,12 @@
 
   class DatavizFrame {
     constructor(rows = [], numericAggregate) {
-      this._rows = Array.isArray(rows) ? rows : [];
+      if (!Array.isArray(rows) || rows.some(row => !row || typeof row !== 'object' || Array.isArray(row))) {
+        const error = new TypeError('frame() expects table rows; use table(reference) for an Output');
+        error.code = 'input_not_table';
+        throw error;
+      }
+      this._rows = rows;
       this._numericAggregate = numericAggregate;
     }
     rows() { return this._rows.map(row => ({...row})); }
@@ -195,7 +200,7 @@
         tableRows(global.dataviz.portable?.outputs?.[canonicalOutputReference(reference)]),
         numericAggregate,
       ),
-      frame: rows => new DatavizFrame(rows, numericAggregate),
+      frame: rows => rows instanceof DatavizFrame ? rows : new DatavizFrame(rows, numericAggregate),
     };
   }
 

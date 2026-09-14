@@ -759,10 +759,12 @@ def test_browser_transform_docs_and_scaffold_show_the_declared_context_contract(
     browser_task = AUTHORING_DOCUMENTS["browser-compute"]
     interactive_task = AUTHORING_DOCUMENTS["interactive-dashboard"]
 
-    assert "context.inputs.data" in worker
+    assert "context.rows('data')" in worker
     assert "context.control_inputs.factor" in worker
     assert set(docs["runtime_context"]) == {
         "inputs",
+        "rows",
+        "table",
         "query_inputs",
         "control_inputs",
         "progress",

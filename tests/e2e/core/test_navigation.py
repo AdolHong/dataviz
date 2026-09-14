@@ -209,7 +209,7 @@ def test_pages_preserve_independent_queries_and_history(page: Page, tmp_path: Pa
         expect(history).not_to_contain_text("Outdated")
         assert len(runs) == 4
 
-        page.locator('#run-button').click(button="right")
+        page.locator('#query-parameters-toggle').click(button="right")
         editor = page.locator('#parameter-editor-dialog')
         expect(editor).to_be_visible()
         item = editor.locator('[data-editor-item="year"]')
@@ -224,4 +224,3 @@ def test_pages_preserve_independent_queries_and_history(page: Page, tmp_path: Pa
         assert changed['pages'][1]['query_parameters'][0]['default'] == [2022, 2024]
         assert 'query_parameters' not in changed
         assert len(runs) == 4
-

@@ -578,6 +578,42 @@ def test_query_control_tray_is_responsive_bounded_and_selector_safe(page: Page, 
 
 
 @pytest.mark.e2e
+def test_parameters_header_context_menu_edits_defaults_without_running(page: Page, tmp_path: Path):
+    workspace = _copy_workspace(SHOWCASE, tmp_path / "parameters-context-menu")
+    definition = workspace / "dashboards" / "功能示例##parameter-playground" / "dashboard.yaml"
+    runs = []
+    page.on('request', lambda request: runs.append(request.url)
+            if request.method == 'POST' and request.url.endswith('/runs') else None)
+    with _running_server(workspace) as base_url:
+        _open_dashboard(page, base_url, 'parameter-playground')
+        trigger = page.locator('#query-parameters-toggle')
+        dialog = page.locator('#parameter-editor-dialog')
+        for opened in (False, True):
+            if trigger.get_attribute('aria-expanded') != str(opened).lower():
+                trigger.click()
+            trigger.click(button='right')
+            expect(dialog).to_be_visible()
+            expect(dialog.locator('[data-editor-item="multiplier"]')).to_be_visible()
+            dialog.get_by_role('button', name='Cancel', exact=True).click()
+            expect(dialog).to_be_hidden()
+            expect(trigger).to_have_attribute('aria-expanded', str(opened).lower())
+
+        trigger.click(button='right')
+        item = dialog.locator('[data-editor-item="multiplier"]')
+        item.locator('[data-editor-disclosure]').click()
+        item.locator('.parameter-editor__default input').fill('3')
+        dialog.get_by_role('button', name='Save', exact=True).click()
+        expect(dialog).to_be_hidden()
+        assert yaml.safe_load(definition.read_text())['query_parameters'][0]['default'] == 3
+        page.locator('#run-button').click(button='right')
+        expect(dialog).to_be_visible()
+        item.locator('[data-editor-disclosure]').click()
+        expect(item.locator('.parameter-editor__default input')).to_have_value('3')
+        dialog.get_by_role('button', name='Cancel', exact=True).click()
+        assert runs == []
+
+
+@pytest.mark.e2e
 def test_parameter_editor_choice_rows_share_the_drag_sorting_model(page: Page, tmp_path: Path):
     workspace = _copy_workspace(SHOWCASE, tmp_path / "choice-editor")
     dashboard_path = workspace / "dashboards" / "功能示例##chart-gallery" / "dashboard.yaml"
@@ -741,4 +777,3 @@ def test_cancelled_query_branch_reaches_a_terminal_view_state(page: Page, tmp_pa
         expect(cancelled_slow).to_have_attribute("data-view-status", "cancelled", timeout=20_000)
         expect(cancelled_slow).to_contain_text("Computation cancelled")
         expect(cancelled_fast).to_have_attribute("data-view-status", "ready")
-

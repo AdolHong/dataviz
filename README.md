@@ -75,10 +75,10 @@ uv sync --python 3.12 --extra dev --no-editable \
 uv run --no-editable dataviz version
 ```
 
-从本地发行 wheel 安装（当前 0.25.5，包含配套 Skill）：
+从本地发行 wheel 安装（当前 0.25.6，包含配套 Skill）：
 
 ```bash
-python -m pip install ./ai_dataviz-0.25.5-py3-none-any.whl
+python -m pip install ./ai_dataviz-0.25.6-py3-none-any.whl
 dataviz version
 ```
 

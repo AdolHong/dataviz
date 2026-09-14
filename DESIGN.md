@@ -390,4 +390,6 @@ draft/applied 独立、历史恢复等既有行为不能因层级收敛而改变
 
 Header 入口与右侧面板标题统一使用 `Parameters` / `Controls`，快捷键帮助和无障碍操作名称同步；Dashboard / Section / View 层级标签保留，内部 Query Parameter / Control 概念及 DSL 不变。
 
+Server 中右键 `Parameters` 编辑当前 Page 的查询参数默认配置；保留右键 `Run` 的兼容入口。左键仍只切换侧栏。编辑与查询分离，保存配置不会自动 Run；取消不改变侧栏展开状态。Share 与导出 HTML 不开放此配置写入入口。
+
 默认启用单键：Q 左侧 Sidebar、W Controls、E Query Parameters、R Run。帮助弹窗可关闭单键；关闭后使用 Cmd+Ctrl+Q/W/E/R。组合键始终可用，运行另支持 Cmd/Ctrl+Enter 与 Ctrl+End。Esc 和 ? 保留，? 不受单键开关影响。输入、组合输入、重复按键不触发单键操作。帮助弹窗按开关显示当前映射，Header 不显示旧字母徽标。导出 HTML 仅提供 W/E、Esc、?，不提供 Run 或左侧工作台 Sidebar。

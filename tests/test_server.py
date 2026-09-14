@@ -377,6 +377,8 @@ def test_nested_parameter_editor_actions_are_server_context_menus_only():
     assert "dataviz:open-parameter-editor" in runtime
     assert "data-dv-author-control-editor" not in renderer
     assert "parameter-editor__drag-handle" in server_app
+    assert "['query-parameters-toggle', 'run-button']" in server_app
+    assert "Could not open parameter editor:" in server_app
     assert "dataset.editorDateAtom" in server_app
     assert "dataset.editorDisclosure" in server_app
     assert "dataviz:editor-change" in server_app

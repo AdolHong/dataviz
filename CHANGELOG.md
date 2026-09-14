@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.25.6 — 2026-09-14
+
+- Restore the Server Parameters button's right-click default-configuration editor, retaining the Run shortcut and surfacing editor-load failures. No Share/HTML write access is added.
+
 ## 0.25.5 — 2026-09-14
 
 - Wait for explicit Renderer validation readiness in the three-surface pending/error/recovery test instead of treating an input-loading View as a ready test harness. Full local run and scoped failure resolution: `docs/release-0.25.5.md`.

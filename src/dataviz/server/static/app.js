@@ -5013,10 +5013,15 @@ window.addEventListener('message', (event) => {
 });
 $('#sidebar-toggle').addEventListener('click', toggleSidebar);
 document.addEventListener('keydown', handleKeyboardShortcut);
-$('#run-button').addEventListener('contextmenu', event => {
-  event.preventDefault();
-  openParameterEditor('query').catch(error => console.error('[dataviz:parameter-editor]', error));
-});
+for (const id of ['query-parameters-toggle', 'run-button']) {
+  $(`#${id}`).addEventListener('contextmenu', event => {
+    event.preventDefault();
+    openParameterEditor('query').catch(error => {
+      console.error('[dataviz:parameter-editor]', error);
+      showShortcutToast(`Could not open parameter editor: ${error.message}`);
+    });
+  });
+}
 $('#dashboard-controls-control > summary').addEventListener('contextmenu', event => {
   event.preventDefault();
   openParameterEditor('dashboard').catch(error => console.error('[dataviz:parameter-editor]', error));

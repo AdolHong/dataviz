@@ -283,6 +283,7 @@ def test_release_inputs_exclude_local_credentials_and_reject_symlinks(
         "pyproject.toml",
         "setup.py",
         "README.md",
+        "LICENSE",
         "ARCHITECTURE.md",
         "dataviz-skill.md",
         "DESIGN.md",
@@ -318,10 +319,22 @@ def test_release_version_sources_match():
 
 def test_release_source_archives_include_the_skill_and_browser_runtimes():
     included = {path.relative_to(ROOT).as_posix() for path in release_zip.included_files()}
+    assert "LICENSE" in included
     assert "dataviz-skill.md" in included
     assert "ARCHITECTURE.md" in included
     assert "src/dataviz/vendor/plotly/plotly-4.1.0.min.js" in included
     assert "src/dataviz/vendor/plotly/LICENSE" in included
+
+
+def test_mit_license_is_declared_and_retained_in_distributions():
+    metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert metadata["project"]["license"] == "MIT"
+    assert metadata["project"]["license-files"] == ["LICENSE"]
+    assert "include LICENSE" in (ROOT / "MANIFEST.in").read_text(encoding="utf-8").splitlines()
+    license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
+    assert license_text.startswith("MIT License\n")
+    assert "Copyright (c) 2026 AdolHong" in license_text
+    assert "THE SOFTWARE IS PROVIDED \"AS IS\"" in license_text
 
 
 def test_reference_frontend_adapter_is_exportable_and_has_no_canvas_runtime_dependency(

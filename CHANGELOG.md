@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.25.12 — 2026-09-15
+
+- Adopt the MIT License; include LICENSE in wheel, sdist and release ZIP, declare SPDX package metadata and update README licensing guidance. Preserve third-party licenses and bundled Skill. No Runtime or DSL changes.
+
 ## 0.25.11 — 2026-09-14
 
 - Condense the README around a component-interaction diagram, authoring keywords and prompt examples; clarify standalone/auth reuse, explicit Control bindings and Server Action writeback boundaries. Retain bundled Skill; no Runtime or DSL changes.

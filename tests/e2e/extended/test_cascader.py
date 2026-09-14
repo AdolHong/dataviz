@@ -140,12 +140,19 @@ def test_cascader_sidebar_bounds_and_global_all(page: Page, tmp_path: Path, surf
         panel.locator('.dv-choice-search').fill('深圳')
         all_button = panel.get_by_role('button', name='Select results', exact=True)
         all_button.click()
-        assert cascader.locator('select').evaluate('s => s.selectedOptions.length > 0 && [...s.selectedOptions].every(o => o.textContent.includes("深圳"))')
+        # Server controls are acknowledged through the Canvas bridge. Wait for
+        # the committed value, not an immediate read after dispatching a click.
+        expect(cascader.locator('select')).to_have_values([re.compile('深圳')])
         expect(all_button).to_be_disabled()
         panel.locator('.dv-choice-search').fill('佛山')
         panel.get_by_role('button', name='Select results', exact=True).click()
+        # Snapshot and bridged controls need not use the same option order.
+        # Assert the exact selected set, with acknowledgement waits for each.
+        expect(cascader.locator('select option:checked')).to_have_count(2)
+        for city in ('佛山', '深圳'):
+            expect(cascader.locator(f'select option:checked[value*="{city}"]')).to_have_count(1)
         panel.get_by_role('button', name='Clear results', exact=True).click()
-        assert cascader.locator('select').evaluate('s => s.selectedOptions.length > 0 && [...s.selectedOptions].every(o => o.textContent.includes("深圳"))')
+        expect(cascader.locator('select')).to_have_values([re.compile('深圳')])
         panel.locator('.dv-choice-search').fill('')
         panel.get_by_role('button', name='Select all', exact=True).click()
         page.wait_for_function(runtime + ".dataviz.control.state('view:city-detail/district').intent === 'all_available'")

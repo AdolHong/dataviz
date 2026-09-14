@@ -49,7 +49,26 @@ def test_managed_renderer_lifecycle_matrix_in_server_and_export(page: Page, tmp_
     mount -> update -> empty -> restore -> interaction -> resize -> dispose -> export.
     """
     page.add_init_script('''(() => {
-      const resources = window.__lifecycleResources = {workers:0, observers:0};
+      const resources = window.__lifecycleResources = {workers:0, observers:0, gestureListeners:0};
+      const tracked = [];
+      const nativeAdd = EventTarget.prototype.addEventListener;
+      const nativeRemove = EventTarget.prototype.removeEventListener;
+      const capture = options => typeof options === 'boolean' ? options : Boolean(options?.capture);
+      EventTarget.prototype.addEventListener = function(type, callback, options) {
+        if ((this === window || this === document) && ['pointerup','pointercancel','blur'].includes(type)
+            && callback && !options?.once && !tracked.some(entry => entry.target === this
+              && entry.type === type && entry.callback === callback && entry.capture === capture(options))) {
+          tracked.push({target:this, type, callback, capture:capture(options)});
+          resources.gestureListeners++;
+        }
+        return nativeAdd.call(this, type, callback, options);
+      };
+      EventTarget.prototype.removeEventListener = function(type, callback, options) {
+        const index = tracked.findIndex(entry => entry.target === this && entry.type === type
+          && entry.callback === callback && entry.capture === capture(options));
+        if (index >= 0) { tracked.splice(index, 1); resources.gestureListeners--; }
+        return nativeRemove.call(this, type, callback, options);
+      };
       const NativeWorker = window.Worker, NativeObserver = window.ResizeObserver;
       window.Worker = class extends NativeWorker {
         constructor(...args) { super(...args); this._counted = true; resources.workers++; }
@@ -550,22 +569,18 @@ def test_workspace_asset_service_matches_server_and_portable_html(page: Page, tm
     with _running_server(workspace) as base_url:
         _open_dashboard(page, base_url, "sales-overview")
         _run_and_wait(page)
-        page.wait_for_function(
-            """async () => {
-              const sessionId = sessionStorage.getItem('dataviz.tab-session.v2');
-              const response = await fetch(`/api/session/runs?session_id=${encodeURIComponent(sessionId)}`);
-              const payload = await response.json();
-              return payload.runs.some(item => item.dashboard_id === 'sales-overview' && item.status === 'ready');
-            }""",
-            timeout=30_000,
-        )
         identity = page.evaluate(
             """async () => {
-              const sessionId = sessionStorage.getItem('dataviz.tab-session.v2');
-              const response = await fetch(`/api/session/runs?session_id=${encodeURIComponent(sessionId)}`);
-              const payload = await response.json();
-              const run = payload.runs.find(item => item.dashboard_id === 'sales-overview' && item.status === 'ready');
-              return {sessionId, runId:run.run_id};
+              const deadline = Date.now() + 30000;
+              while (Date.now() < deadline) {
+                const sessionId = sessionStorage.getItem('dataviz.tab-session.v2');
+                const response = await fetch(`/api/session/runs?session_id=${encodeURIComponent(sessionId)}`);
+                const payload = await response.json();
+                const run = payload.runs.find(item => item.dashboard_id === 'sales-overview' && item.status === 'ready');
+                if (run) return {sessionId, runId:run.run_id};
+                await new Promise(resolve => setTimeout(resolve, 50));
+              }
+              throw new Error('asset Run did not finish');
             }"""
         )
         page.goto(

@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 0.25.11 — 2026-09-14
+
+- Condense the README around a component-interaction diagram, authoring keywords and prompt examples; clarify standalone/auth reuse, explicit Control bindings and Server Action writeback boundaries. Retain bundled Skill; no Runtime or DSL changes.
+
+## 0.25.10 — 2026-09-14
+
+- Correct asynchronous recovery-test waits and record delivery/recovery boundaries. Retain bundled authoring Skill; no DSL changes. Local packaging and known Firefox risk: `docs/release-0.25.10.md`.
+- Bound the host Server Action HTTP chain to its existing 290-second budget, including preflight and stalled fetches; release the host slot after timeout while retaining unknown/saved outcomes and never replaying writes.
+- Bound each query-completion status GET to 30 seconds, release its timer on settlement, and retain the original Run for retry on timeout; no server query cancellation or write retry is introduced.
+- Route common recovery symptoms to existing status/refresh diagnostics before rerunning computation or writes; document unknown outcomes, cancelled unsent requests, version identity and evidence redaction. Test searchable recovery guidance and its linked CLI topics.
+- Recover permanently closed query event streams through the existing Run receipt; preserve pending Run identity when status checks return queued/loading. Keep native reconnection for transient disconnects and never resubmit a query during status recovery.
+- Correct CLI Controls guidance to match scoped search bulk actions, removed menu Revert, and remote-result completeness guards; keep Query snapshot Revert distinct. Add a documentation regression without changing DSL or component behavior.
+
+## 0.25.9 — 2026-09-14
+
+- Fence late Run cancellation replies by Page and Run identity; allow failed completion reads to retry the same Run without resubmitting queries. Close Live streams and abort pending downloads on Runtime disposal, ignore late events, and add targeted race/recovery/resource regressions. Scope: `docs/async-recovery-resource-review.md`.
+- Add cross-process Action failure and precise JSON/Arrow selection regressions; wait for acknowledged cascader selection sets rather than assuming option ordering. Add opt-in navigation step checkpoints without retries or extended timeouts. Keep the unresolved Firefox navigation stall explicit in `docs/release-0.25.9.md`.
+- Synchronize release lock versions and correct example/release guidance; retain the bundled authoring Skill. No DSL changes.
+
+## 0.25.8 — 2026-09-14
+
+- Replace stale successful views on synchronous render/Live Output failures, preserve error causes across browser stack formats, and distinguish pending/empty/error in existing View diagnostics. Keep current Control and Interactive status evidence available while redacting values from copied diagnosis. Add real 0.25.6-to-worktree JSON/Arrow upgrade acceptance; scope and expected type changes: `docs/stability-upgrade-acceptance.md`.
+
 - Bound browser-test phases with an independent process watchdog, retain per-test phase events and Python stacks, report timeout as failure, and clean up owned browser/driver processes without automatic retries. The historical Firefox stall's exact call remains unproven; this hardens diagnosis and recovery, not application Runtime behavior.
 
 ## 0.25.7 — 2026-09-14

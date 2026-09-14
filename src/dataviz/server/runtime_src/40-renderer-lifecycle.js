@@ -36,12 +36,32 @@ Object.assign(datavizRuntime, {
     const changedOutputReferences = new Set(context.changedOutputReferences || []);
     const completions = [];
     this.views.forEach((definition, id) => {
-      if (affected && !affected.has(id)) return;
+      if (affected && !affected.has(id)) {
+        this.viewRefreshEvidence.set(id, {
+          ...this.viewRefreshEvidence.get(id),
+          last_schedule:{status:'not_affected', changed_controls:[...(context.changedControlKeys || [])]},
+        });
+        return;
+      }
       const inputReferences = Object.entries(definition.inputs).map(([alias, reference]) => ({
         alias,
         reference:canonicalOutputReference(reference),
       }));
       const references = inputReferences.map(item => item.reference);
+      const portable = window.dataviz.portable || {};
+      const inputProfiles = Object.fromEntries(inputReferences.map(({alias, reference}) => {
+        const present = Object.prototype.hasOwnProperty.call(portable.outputs || {}, reference);
+        const value = portable.outputs?.[reference];
+        const failed = this.outputErrors.has(reference)
+          || (reference.startsWith('interactive:') && this.transformErrors.has(reference.slice(12).split('/')[0]));
+        const profile = present && !failed ? datavizValueProfile(value) : {rows:null,bytes:null,transport:null};
+        return [alias, {
+          reference, kind:portable.output_kinds?.[reference] || null,
+          status:failed ? 'error' : !present ? 'pending' : profile.rows === 0 ? 'empty' : 'ready',
+          input_type:!present ? null : value?.__datavizArrowOutput ? 'arrow-table' : Array.isArray(value) ? 'rows' : value === null ? 'null' : typeof value,
+          ...profile,
+        }];
+      }));
       const failedInput = inputReferences.find(({reference}) => {
         if (this.outputErrors.has(reference)) return true;
         const canonical = canonicalOutputReference(reference);
@@ -52,6 +72,8 @@ Object.assign(datavizRuntime, {
         const transformId = canonical.startsWith('interactive:') ? canonical.slice('interactive:'.length).split('/')[0] : null;
         const failure = this.outputErrors.get(canonical) || this.transformErrors.get(transformId);
         this.viewRefreshEvidence.set(id, {
+          input_profiles:inputProfiles,
+          last_schedule:{status:'input_failed'},
           initial:Boolean(context.initial),
           query_executed:Boolean(context.queryExecuted),
           failed_input:{
@@ -94,6 +116,8 @@ Object.assign(datavizRuntime, {
       );
       if (missingInput) {
         this.viewRefreshEvidence.set(id, {
+          input_profiles:inputProfiles,
+          last_schedule:{status:'waiting_input'},
           initial:Boolean(context.initial),
           query_executed:Boolean(context.queryExecuted),
           waiting_input:{alias:missingInput.alias, reference:missingInput.reference},
@@ -120,6 +144,8 @@ Object.assign(datavizRuntime, {
         return trace ? [[transformId, structuredClone(trace)]] : [];
       }));
       this.viewRefreshEvidence.set(id, {
+        input_profiles:inputProfiles,
+        last_schedule:{status:'render'},
         initial:Boolean(context.initial),
         changed_controls:[...(context.changedControlKeys || [])],
         changed_inputs:references.filter(reference => (
@@ -134,22 +160,30 @@ Object.assign(datavizRuntime, {
         interactive_transforms:transformTraces,
         query_executed:Boolean(context.queryExecuted),
         control_revisions:Object.fromEntries(Object.entries(capturedControlState).map(([key, entry]) => [key, entry.revision])),
+        control_state:structuredClone(capturedControlState),
       });
       if (root) {
-        root._datavizInputProfiles = Object.fromEntries(
-          Object.entries(definition.inputs).map(([name, reference]) => {
-            const canonical = canonicalOutputReference(reference);
-            const value = window.dataviz.portable?.outputs?.[canonical];
-            return [name, {
-              reference:canonical,
-              ...datavizValueProfile(value),
-            }];
-          })
-        );
+        root._datavizInputProfiles = inputProfiles;
       }
       try {
         definition.render(window.dataviz, context);
       } catch (error) {
+        const failure = {
+          code:error?.code || 'view_render_failed',
+          message:error?.message || String(error),
+          view_id:id,
+          phase:'dispatch',
+        };
+        this.viewRefreshEvidence.set(id, {
+          ...this.viewRefreshEvidence.get(id), render_error:failure,
+          last_schedule:{status:'render_failed'},
+        });
+        // Route synchronous dispatch/descriptor failures through the same
+        // terminal rendering path as asynchronous renderer failures. Keeping
+        // the previous chart marked ready would misrepresent the new state.
+        this.viewAdapter?.renderInto(root, id, () => {
+          throw datavizRuntimeError(failure);
+        });
         console.error(`[dataviz:${id}:render]`, error);
         return;
       }

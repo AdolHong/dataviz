@@ -336,9 +336,19 @@ window.dataviz.applyControls = async (options = {}) => {
 };
 window.dataviz.connectLive = () => {
   const live = window.dataviz.live;
-  if (!live || window.dataviz.liveSource) return;
+  if (datavizRuntime.disposed || !live || window.dataviz.liveSource) return;
   const source = new EventSource(live.events_url);
   const fetched = new Map();
+  const downloads = new AbortController();
+  datavizRuntime.liveCleanup = () => {
+    source.close();
+    downloads.abort();
+    fetched.clear();
+    if (window.dataviz.liveSource === source) window.dataviz.liveSource = null;
+  };
+  const on = (name, callback) => source.addEventListener(name, event => {
+    if (!datavizRuntime.disposed) callback(event);
+  });
   const fetchOutput = async (reference, artifact) => {
     const required = window.dataviz.portable?.browser_output_references;
     if (Array.isArray(required) && !required.includes(reference)) {
@@ -354,6 +364,7 @@ window.dataviz.connectLive = () => {
         // Resume missing branches after initialization without superseding an
         // initial execution that already observed this immutable artifact.
         await datavizRuntime.initializationPromise;
+        if (datavizRuntime.disposed) return;
         if (datavizControlChannel.phase === 'ready') {
           await datavizRuntime.runTransforms([], new Set());
         }
@@ -363,12 +374,13 @@ window.dataviz.connectLive = () => {
     const previous = fetched.get(reference);
     if (previous) return previous;
     const encoded = reference.split('/').map(encodeURIComponent).join('/');
-    const promise = fetch(`${live.outputs_url}/${encoded}?session_id=${encodeURIComponent(live.session_id)}`)
+    const promise = fetch(`${live.outputs_url}/${encoded}?session_id=${encodeURIComponent(live.session_id)}`, {signal:downloads.signal})
       .then(async response => {
         if (!response.ok) throw new Error(`Output ${reference} is unavailable (${response.status})`);
         return response.json();
       })
       .then(payload => {
+        if (datavizRuntime.disposed) return;
         if (payload.transport) {
           datavizRuntime.registerOutputTransport(payload.reference, payload.transport);
           return datavizRuntime.hydrateOutput(payload.reference, {queryExecuted:true});
@@ -382,8 +394,14 @@ window.dataviz.connectLive = () => {
           },
         });
       })
-      .catch(error => {
+      .catch(async error => {
+        if (datavizRuntime.disposed) return;
         fetched.delete(reference);
+        await datavizRuntime.failOutputs([reference], datavizRuntimeError({
+          code:error?.code || 'output_fetch_failed',
+          message:error?.message || String(error),
+          reference:canonicalOutputReference(reference),
+        }));
         datavizSetViewPipelineNodeStatus(
           canonicalOutputReference(reference).split('/')[0],
           'error',
@@ -393,7 +411,7 @@ window.dataviz.connectLive = () => {
     fetched.set(reference, promise);
     return promise;
   };
-  source.addEventListener('output_ready', message => {
+  on('output_ready', message => {
     const event = JSON.parse(message.data);
     if (event.run_id !== live.run_id || !event.data?.reference) return;
     if (window.dataviz.interaction) {
@@ -412,13 +430,13 @@ window.dataviz.connectLive = () => {
     node_unavailable:'unavailable',
   };
   Object.entries(queryNodeStatuses).forEach(([name, status]) => {
-    source.addEventListener(name, message => {
+    on(name, message => {
       const event = JSON.parse(message.data);
       if (event.run_id !== live.run_id || !event.node_id) return;
       datavizSetViewPipelineNodeStatus(event.node_id, status);
     });
   });
-  ['node_error', 'node_cancelled', 'node_unavailable'].forEach(name => source.addEventListener(name, message => {
+  ['node_error', 'node_cancelled', 'node_unavailable'].forEach(name => on(name, message => {
     const event = JSON.parse(message.data);
     if (event.run_id !== live.run_id) return;
     if (window.dataviz.interaction) {
@@ -431,20 +449,20 @@ window.dataviz.connectLive = () => {
     });
     datavizRuntime.failOutputs(event.data?.outputs || [], error);
   }));
-  source.addEventListener('run_ready', () => {
+  on('run_ready', () => {
     source.close();
     window.dataviz.status = 'ready';
     window.dispatchEvent(new CustomEvent('dataviz:runready', {detail:{run_id:live.run_id}}));
   });
-  source.addEventListener('run_error', () => {
+  on('run_error', () => {
     window.dataviz.status = 'error';
     source.close();
   });
-  source.addEventListener('run_cancelled', () => {
+  on('run_cancelled', () => {
     window.dataviz.status = 'cancelled';
     source.close();
   });
-  source.addEventListener('stream_end', () => source.close());
+  on('stream_end', () => source.close());
   window.dataviz.liveSource = source;
 };
 const setControlInputs = states => {

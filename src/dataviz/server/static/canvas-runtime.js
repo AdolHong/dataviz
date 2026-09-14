@@ -1287,9 +1287,13 @@ Object.assign(datavizRuntime, {
     });
   },
   publishTransformStatus(id, status, details = {}) {
-    if (details.trace && typeof details.trace === 'object') {
-      this.interactiveTraces.set(id, structuredClone(details.trace));
-    }
+    const trace = {
+      ...(details.trace || this.interactiveTraces.get(id) || {}),
+      status,
+      error_code:details.error?.code || details.error?.details?.code || null,
+    };
+    if (status !== 'ready') trace.cache = null;
+    this.interactiveTraces.set(id, structuredClone(trace));
     datavizSetViewPipelineNodeStatus(`interactive:${id}`, status);
     datavizPostToParent({
       type:'dataviz:interactive-status',
@@ -1301,7 +1305,7 @@ Object.assign(datavizRuntime, {
         code:details.error.code || details.error.details?.code || 'interactive_transform_error',
         message:details.error.message || String(details.error),
       } : null,
-      trace:details.trace || null,
+      trace,
     });
   },
   async runTransforms(changedControlKeys = [], seedChangedOutputs = [], options = {}) {
@@ -1656,12 +1660,32 @@ Object.assign(datavizRuntime, {
     const changedOutputReferences = new Set(context.changedOutputReferences || []);
     const completions = [];
     this.views.forEach((definition, id) => {
-      if (affected && !affected.has(id)) return;
+      if (affected && !affected.has(id)) {
+        this.viewRefreshEvidence.set(id, {
+          ...this.viewRefreshEvidence.get(id),
+          last_schedule:{status:'not_affected', changed_controls:[...(context.changedControlKeys || [])]},
+        });
+        return;
+      }
       const inputReferences = Object.entries(definition.inputs).map(([alias, reference]) => ({
         alias,
         reference:canonicalOutputReference(reference),
       }));
       const references = inputReferences.map(item => item.reference);
+      const portable = window.dataviz.portable || {};
+      const inputProfiles = Object.fromEntries(inputReferences.map(({alias, reference}) => {
+        const present = Object.prototype.hasOwnProperty.call(portable.outputs || {}, reference);
+        const value = portable.outputs?.[reference];
+        const failed = this.outputErrors.has(reference)
+          || (reference.startsWith('interactive:') && this.transformErrors.has(reference.slice(12).split('/')[0]));
+        const profile = present && !failed ? datavizValueProfile(value) : {rows:null,bytes:null,transport:null};
+        return [alias, {
+          reference, kind:portable.output_kinds?.[reference] || null,
+          status:failed ? 'error' : !present ? 'pending' : profile.rows === 0 ? 'empty' : 'ready',
+          input_type:!present ? null : value?.__datavizArrowOutput ? 'arrow-table' : Array.isArray(value) ? 'rows' : value === null ? 'null' : typeof value,
+          ...profile,
+        }];
+      }));
       const failedInput = inputReferences.find(({reference}) => {
         if (this.outputErrors.has(reference)) return true;
         const canonical = canonicalOutputReference(reference);
@@ -1672,6 +1696,8 @@ Object.assign(datavizRuntime, {
         const transformId = canonical.startsWith('interactive:') ? canonical.slice('interactive:'.length).split('/')[0] : null;
         const failure = this.outputErrors.get(canonical) || this.transformErrors.get(transformId);
         this.viewRefreshEvidence.set(id, {
+          input_profiles:inputProfiles,
+          last_schedule:{status:'input_failed'},
           initial:Boolean(context.initial),
           query_executed:Boolean(context.queryExecuted),
           failed_input:{
@@ -1714,6 +1740,8 @@ Object.assign(datavizRuntime, {
       );
       if (missingInput) {
         this.viewRefreshEvidence.set(id, {
+          input_profiles:inputProfiles,
+          last_schedule:{status:'waiting_input'},
           initial:Boolean(context.initial),
           query_executed:Boolean(context.queryExecuted),
           waiting_input:{alias:missingInput.alias, reference:missingInput.reference},
@@ -1740,6 +1768,8 @@ Object.assign(datavizRuntime, {
         return trace ? [[transformId, structuredClone(trace)]] : [];
       }));
       this.viewRefreshEvidence.set(id, {
+        input_profiles:inputProfiles,
+        last_schedule:{status:'render'},
         initial:Boolean(context.initial),
         changed_controls:[...(context.changedControlKeys || [])],
         changed_inputs:references.filter(reference => (
@@ -1754,22 +1784,30 @@ Object.assign(datavizRuntime, {
         interactive_transforms:transformTraces,
         query_executed:Boolean(context.queryExecuted),
         control_revisions:Object.fromEntries(Object.entries(capturedControlState).map(([key, entry]) => [key, entry.revision])),
+        control_state:structuredClone(capturedControlState),
       });
       if (root) {
-        root._datavizInputProfiles = Object.fromEntries(
-          Object.entries(definition.inputs).map(([name, reference]) => {
-            const canonical = canonicalOutputReference(reference);
-            const value = window.dataviz.portable?.outputs?.[canonical];
-            return [name, {
-              reference:canonical,
-              ...datavizValueProfile(value),
-            }];
-          })
-        );
+        root._datavizInputProfiles = inputProfiles;
       }
       try {
         definition.render(window.dataviz, context);
       } catch (error) {
+        const failure = {
+          code:error?.code || 'view_render_failed',
+          message:error?.message || String(error),
+          view_id:id,
+          phase:'dispatch',
+        };
+        this.viewRefreshEvidence.set(id, {
+          ...this.viewRefreshEvidence.get(id), render_error:failure,
+          last_schedule:{status:'render_failed'},
+        });
+        // Route synchronous dispatch/descriptor failures through the same
+        // terminal rendering path as asynchronous renderer failures. Keeping
+        // the previous chart marked ready would misrepresent the new state.
+        this.viewAdapter?.renderInto(root, id, () => {
+          throw datavizRuntimeError(failure);
+        });
         console.error(`[dataviz:${id}:render]`, error);
         return;
       }
@@ -2007,6 +2045,8 @@ Object.assign(datavizRuntime, {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this.liveCleanup?.();
+    this.liveCleanup = null;
     window.dataviz.serverActions?.dispose();
     this.cancelTransforms('Runtime disposed');
     this.inflightTransforms.clear();
@@ -3678,9 +3718,19 @@ window.dataviz.applyControls = async (options = {}) => {
 };
 window.dataviz.connectLive = () => {
   const live = window.dataviz.live;
-  if (!live || window.dataviz.liveSource) return;
+  if (datavizRuntime.disposed || !live || window.dataviz.liveSource) return;
   const source = new EventSource(live.events_url);
   const fetched = new Map();
+  const downloads = new AbortController();
+  datavizRuntime.liveCleanup = () => {
+    source.close();
+    downloads.abort();
+    fetched.clear();
+    if (window.dataviz.liveSource === source) window.dataviz.liveSource = null;
+  };
+  const on = (name, callback) => source.addEventListener(name, event => {
+    if (!datavizRuntime.disposed) callback(event);
+  });
   const fetchOutput = async (reference, artifact) => {
     const required = window.dataviz.portable?.browser_output_references;
     if (Array.isArray(required) && !required.includes(reference)) {
@@ -3696,6 +3746,7 @@ window.dataviz.connectLive = () => {
         // Resume missing branches after initialization without superseding an
         // initial execution that already observed this immutable artifact.
         await datavizRuntime.initializationPromise;
+        if (datavizRuntime.disposed) return;
         if (datavizControlChannel.phase === 'ready') {
           await datavizRuntime.runTransforms([], new Set());
         }
@@ -3705,12 +3756,13 @@ window.dataviz.connectLive = () => {
     const previous = fetched.get(reference);
     if (previous) return previous;
     const encoded = reference.split('/').map(encodeURIComponent).join('/');
-    const promise = fetch(`${live.outputs_url}/${encoded}?session_id=${encodeURIComponent(live.session_id)}`)
+    const promise = fetch(`${live.outputs_url}/${encoded}?session_id=${encodeURIComponent(live.session_id)}`, {signal:downloads.signal})
       .then(async response => {
         if (!response.ok) throw new Error(`Output ${reference} is unavailable (${response.status})`);
         return response.json();
       })
       .then(payload => {
+        if (datavizRuntime.disposed) return;
         if (payload.transport) {
           datavizRuntime.registerOutputTransport(payload.reference, payload.transport);
           return datavizRuntime.hydrateOutput(payload.reference, {queryExecuted:true});
@@ -3724,8 +3776,14 @@ window.dataviz.connectLive = () => {
           },
         });
       })
-      .catch(error => {
+      .catch(async error => {
+        if (datavizRuntime.disposed) return;
         fetched.delete(reference);
+        await datavizRuntime.failOutputs([reference], datavizRuntimeError({
+          code:error?.code || 'output_fetch_failed',
+          message:error?.message || String(error),
+          reference:canonicalOutputReference(reference),
+        }));
         datavizSetViewPipelineNodeStatus(
           canonicalOutputReference(reference).split('/')[0],
           'error',
@@ -3735,7 +3793,7 @@ window.dataviz.connectLive = () => {
     fetched.set(reference, promise);
     return promise;
   };
-  source.addEventListener('output_ready', message => {
+  on('output_ready', message => {
     const event = JSON.parse(message.data);
     if (event.run_id !== live.run_id || !event.data?.reference) return;
     if (window.dataviz.interaction) {
@@ -3754,13 +3812,13 @@ window.dataviz.connectLive = () => {
     node_unavailable:'unavailable',
   };
   Object.entries(queryNodeStatuses).forEach(([name, status]) => {
-    source.addEventListener(name, message => {
+    on(name, message => {
       const event = JSON.parse(message.data);
       if (event.run_id !== live.run_id || !event.node_id) return;
       datavizSetViewPipelineNodeStatus(event.node_id, status);
     });
   });
-  ['node_error', 'node_cancelled', 'node_unavailable'].forEach(name => source.addEventListener(name, message => {
+  ['node_error', 'node_cancelled', 'node_unavailable'].forEach(name => on(name, message => {
     const event = JSON.parse(message.data);
     if (event.run_id !== live.run_id) return;
     if (window.dataviz.interaction) {
@@ -3773,20 +3831,20 @@ window.dataviz.connectLive = () => {
     });
     datavizRuntime.failOutputs(event.data?.outputs || [], error);
   }));
-  source.addEventListener('run_ready', () => {
+  on('run_ready', () => {
     source.close();
     window.dataviz.status = 'ready';
     window.dispatchEvent(new CustomEvent('dataviz:runready', {detail:{run_id:live.run_id}}));
   });
-  source.addEventListener('run_error', () => {
+  on('run_error', () => {
     window.dataviz.status = 'error';
     source.close();
   });
-  source.addEventListener('run_cancelled', () => {
+  on('run_cancelled', () => {
     window.dataviz.status = 'cancelled';
     source.close();
   });
-  source.addEventListener('stream_end', () => source.close());
+  on('stream_end', () => source.close());
   window.dataviz.liveSource = source;
 };
 const setControlInputs = states => {
@@ -4646,6 +4704,10 @@ document.addEventListener('click', event => {
     viewSignal.blur();
     const viewId = viewSignal.closest('.dv-view')?.dataset.viewId;
     if (!viewId) return;
+    const currentTraces = Object.fromEntries(Object.values(datavizRuntime.views.get(viewId)?.inputs || {})
+      .map(canonicalOutputReference).filter(reference => reference.startsWith('interactive:'))
+      .map(reference => reference.slice('interactive:'.length).split('/')[0])
+      .map(id => [id, structuredClone(datavizRuntime.interactiveTraces.get(id) || {status:'unknown'})]));
     datavizPostToParent({
       type:'dataviz:view-evidence-inspect',
       view_id:viewId,
@@ -4657,9 +4719,13 @@ document.addEventListener('click', event => {
           key:item.key,
           revision:datavizControlEntry(item.key)?.revision ?? null,
           intent:datavizControlEntry(item.key)?.intent ?? null,
+          value:structuredClone(datavizControlEntry(item.key)?.value ?? null),
           domain:item.option_domain,
         })),
-        refresh:structuredClone(datavizRuntime.viewRefreshEvidence.get(viewId) || null),
+        refresh:{
+          ...structuredClone(datavizRuntime.viewRefreshEvidence.get(viewId) || {}),
+          interactive_transforms:currentTraces,
+        },
         renderer:structuredClone(datavizRuntime.viewRenderEvidence.get(viewId) || null),
         lifecycle:structuredClone(datavizRuntime.rendererLifecycleEvidence.get(viewId) || null),
       },

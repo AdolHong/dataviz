@@ -37,3 +37,19 @@ assert.equal(controls[0].intent,'all_available');
 assert(!JSON.stringify(controls).includes('PRIVATE'));
 assert.equal(Object.keys(diagnose({renderer:{inputs:Object.fromEntries(Array.from({length:100},(_,i)=>[i,{rows:1}]))}}).inputs).length,50);
 console.log('View diagnosis statuses, revisions, privacy and bounds passed');
+const pending=diagnose({status:'loading',refresh:{waiting_input:{alias:'main',reference:'source:new/main'},
+ input_profiles:{main:{reference:'source:new/main',status:'pending',rows:null,input_type:null}},
+ last_schedule:{status:'waiting_input'}},renderer:{inputs:{main:{rows:999}}}});
+assert.equal(pending.inputs.main.rows,null,'do not report the old render row count for pending input');
+assert.equal(pending.inputs.main.status,'pending');
+assert.equal(pending.stage,'waiting_input');
+assert.equal(pending.scheduling.status,'waiting_input');
+const failed=diagnose({refresh:{render_error:{code:'view_render_failed',message:'PRIVATE'}}});
+assert.equal(failed.stage,'render_failed');
+assert.equal(failed.error_code,'view_render_failed');
+assert(!JSON.stringify(failed).includes('PRIVATE'));
+const cached=diagnose({refresh:{control_state:{x:{value:'PRIVATE'}},
+ interactive_transforms:{t:{status:'ready',cache:{status:'hit'},inputs:{raw:'PRIVATE'}}}}});
+assert.equal(cached.transforms.t.cache,'hit');
+assert.equal(cached.transforms.t.status,'ready');
+assert(!JSON.stringify(cached).includes('PRIVATE'));

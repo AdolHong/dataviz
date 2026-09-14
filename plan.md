@@ -2,6 +2,8 @@
 
 更新时间：2026-09-14
 
+0.25.11：精简 README，增加联动图、核心术语与提示词示例；不改 Runtime/DSL。恢复与已知风险见 `docs/delivery-recovery-review.md`。
+
 0.25.7：统一 JSON/Arrow 浏览器数据边界、Worker rows/Frame、Custom 辅助输入和缓存快照校验；相关回归与发行范围见 `docs/release-0.25.7.md`。以下历史段落不代表当前全量结果。
 
 0.25.3 本地补丁构建：完成异步时序与生命周期专项，修复单选同步、Renderer/Transform 销毁后的迟到任务及 Action 提前提交；不改变 DSL。复用专项分层与三浏览器定向证据，打包不重跑全量；范围见 `docs/release-0.25.3.md`。

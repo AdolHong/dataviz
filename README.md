@@ -1,184 +1,89 @@
 # Dataviz
 
-**让 AI 快速搭建可靠的 Dashboard，也能直接发现、执行和复用 Dashboard 背后的分析数据。**
+让 AI 用 SQL、Python 和 YAML 构建可查询、可联动、可标注的数据看板；也能通过 CLI 搜索已有口径、查数和复用结果。
 
-Dataviz 是一个 workspace-first、AI-friendly 的本地数据看板工具。Dashboard 以普通文件保存，可以进入 Git、复制和审查；人类在浏览器中查询、交互和阅读，AI 通过 CLI 获取当前版本的最小开发契约、复用已有数据口径并继续分析。
+从一个 YAML 起步，复杂时再组织为多页面 Dashboard 或 Workspace。配置与代码都是普通文件，可纳入 Git；无需从零编写前端。
 
-## 配套 AI Skill
+## 组件怎样联动？
 
-从 0.24.7 起，wheel 随包提供 `dataviz/skills/dataviz/SKILL.md`，内容来自本仓库唯一源文件 `dataviz-skill.md`。源码包和 ZIP 同样携带该源文件，安装时生成相同的包内资源。使用安装 Dataviz 的 Python 可读取全文：
+```mermaid
+flowchart LR
+  P[Query Parameters 查询参数] -->|点击 Run| S[Source 取数]
+  S --> T[Dataset Transform 计算]
+  T --> O[Named Output 命名结果]
+  O --> V[View 表格 / 图表 / 指标]
+  V -->|点击行或数据点 · control_binding| C[Control 选择状态]
+  C -->|显式绑定筛选 / 交互计算| V
+  C -->|depends_on 级联候选| C2[下级 Control]
+  V -.->|显式保存 · 自定义 View| A[Server Action · Python]
+  A --> D[(SQLite / 数据库 / 文件)]
+  A -.->|声明失效并刷新相关分支| S
+  O --> R[CLI / Result · AI 查数与复查]
+```
+
+取数不需要预处理时，Source 的 Output 可直接接 View。**查询参数改完要 Run；Control 用于查询后的交互，不自动重跑整套查询。** 复杂交互可用浏览器 JS 或服务端 Python 的 Interactive Transform。
+
+## 给 AI 的关键词
+
+| 关键词 | 告诉 AI 什么 |
+| --- | --- |
+| **Query Parameter** | “日期、模型是查询参数，点击 Run 后重新取数。” |
+| **Dashboard → Page → Section → View** | 看板 → 可选分析页 → 分区 → 表格/图表。简单看板不必声明 Page 或 Section；多页可各有参数和结果。 |
+| **Dashboard / Section / View Control** | 页面全局、分区内、单个视图的选择状态；作用对象通过依赖与绑定声明，不是自动过滤所有图。 |
+| **级联 · `depends_on`** | “省份 → 城市 → 门店”，父级选择改变下级候选；用 select、multiple select 或 cascader 展示。 |
+| **点选联动 · `control_binding`** | 表格行或支持选择事件的图表更新 Control，其他 View 订阅它显示详情；不是图表间直接互相修改。 |
+| **Source / Transform / Named Output** | 从哪里取数、怎样计算、结果叫什么；多个 View 可以消费同一结果。 |
+| **Server Action** | 显式调用服务端 Python 做新增、修改、删除或业务计算；自定义表格按钮可用于人工标注，保存后局部刷新。 |
+| **Adapter / auth** | 连接与凭据放在看板之外；不是网站用户登录系统。 |
+| **Catalog / Result** | AI 搜索已有口径；执行后封存结果，后续检查、分页、导出不必重新查库。 |
+
+例如这样描述需求，而不必先会写 DSL：
+
+> 日期用 Query Parameter；品类用 Dashboard Control，商品用 Section Control 并级联品类。左表点选商品绑定 Control，右图跟随；切换商品不重查销售库。
+
+> 自定义商品表增加“敏感 / 非敏感”互斥标注，通过 Server Action 按商品＋节日写入 SQLite；保存后只刷新标注数据，分别显示保存与刷新状态。
+
+> 一个 Dashboard 两个 Page：同年跨品类、同品类跨年，各有查询参数，共用看板内 Python 规则。
+
+## 两种起步方式
+
+Python 3.11–3.14，推荐 3.12。从本地发行 wheel 安装（当前 **0.25.11**，包含配套 Skill）：
 
 ```bash
-python -c "from importlib.resources import files; print(files('dataviz').joinpath('skills/dataviz/SKILL.md').read_text(encoding='utf-8'))"
+python -m pip install ./ai_dataviz-0.25.11-py3-none-any.whl
+dataviz scaffold standalone --id sales --output ./sales
+dataviz validate ./sales/dashboard.yaml --strict
+dataviz serve ./sales/dashboard.yaml --port 8080
 ```
 
-需要在 AI 工具中使用时，将内容保存为该工具要求的 `dataviz/SKILL.md`；Dataviz 不会自动安装或覆盖用户的 Skill。
+打开 <http://127.0.0.1:8080>。这个单文件样例自带假数据，不需要数据库；支持内嵌 SQL / Python / JS 和少量自定义 Renderer。修改后重启服务。
 
-## 从一个 YAML 开始
+单文件看板需要真实连接时，加 `--auth connections.yaml`；也可指定 auth 目录或已有 Workspace，复用其 Adapter 配置而不导入其他看板、数据或代码，凭据不进入快照。
 
-只做一个小看板时，无需先创建 Workspace。`dataviz docs standalone --format json` 提供可运行的单 YAML 示例（含内嵌 SQL）和独立 Adapter 配置：
-
-```bash
-dataviz validate sales.yaml --auth connections.yaml --strict
-dataviz run sales.yaml --auth connections.yaml
-dataviz serve sales.yaml --auth connections.yaml
-```
-
-`--auth` 也可指向认证目录或已有 Workspace；凭据不进入看板。代码可内嵌，也可引用同目录文件。单文件入口复用现有执行器，结果保存在 `.dataviz/standalone` 的独立快照中；`run` 返回后续检查命令。首版编辑后需重启 `serve`，需要热更新或共享 Asset 时使用完整 Workspace。
-
-## 它解决什么问题
-
-传统的 AI Dashboard 工作通常止于页面：
-
-```text
-AI 写 SQL / Python / HTML → 人类看图 → 数据和分析逻辑被封在页面里
-```
-
-Dataviz 将 Dashboard 同时变成人类界面和 AI 分析空间：
-
-```text
-Workspace → Query Parameter → Source → Transform → Named Output
-                                                    ├─→ View → 人类看图与交互
-                                                    └─→ Catalog / CLI → AI 查数与分析
-```
-
-它重点解决两件事：
-
-1. **AI 友好地开发 Dashboard**
-
-   AI 不需要先阅读完整 Runtime，也不必每次从零生成网页。它可以按任务获取最小文档和 Scaffold，编写普通文件，再通过静态校验、真实执行和浏览器检查完成闭环。
-
-2. **AI 直接复用 Dashboard 的分析能力**
-
-   Dashboard 不是只能截图识别的交付终点。AI 可以搜索已有数据口径，查看参数和依赖，执行 Source、Output 或 View，并在不可变 Result 上继续分页查看、导出和沉淀 Evidence。
-
-## 设计理念
-
-- **Workspace 是事实来源**：Dashboard、Source、Transform 和 Presentation 都是可审查文件；Catalog 只是可重建索引。
-- **人和 AI 共用一套执行语义**：Server、CLI、HTML 和 Browser Runtime 共用 Dependency Contract 与 Named Output。
-- **复杂度下沉到框架**：作者关心业务问题、数据口径、Controls、Views 和布局；依赖图、状态事务、缓存和 Renderer 生命周期由 Compiler/Runtime 管理。
-- **渐进披露**：简单 Dashboard 只读取最小路径；需要交互计算或 Custom Renderer 时才展开对应契约。
-- **结果可复查**：CLI 执行产生不可变 Result；后续查看和导出不重复昂贵查询。
-- **分析优先**：Plotly 是统一图表接口，TanStack Table 是默认表格内核；工具选择不应分散作者对数据口径和分析问题的注意力。
-
-## 安装
-
-要求 Python 3.11–3.14，推荐 Python 3.12。
-
-从源码安装：
-
-```bash
-git clone https://github.com/AdolHong/dataviz.git
-cd dataviz
-uv sync --python 3.12 --extra dev --no-editable \
-  --reinstall-package ai-dataviz
-uv run --no-editable dataviz version
-```
-
-从本地发行 wheel 安装（当前 0.25.7，包含配套 Skill）：
-
-```bash
-python -m pip install ./ai_dataviz-0.25.7-py3-none-any.whl
-dataviz version
-```
-
-也可以从发行 ZIP 安装：
-
-```bash
-python -m pip install ./ai-dataviz-<version>.zip
-dataviz version
-```
-
-源码环境运行下文命令时，可将 `dataviz` 替换为 `uv run --no-editable dataviz`。
-
-维护 Dataviz 本身时，可以快速检查项目声明、源码和当前 Python 实际导入的版本是否一致：
-
-```bash
-.venv/bin/python scripts/check_version_drift.py
-```
-
-开发命令继续显式使用 `PYTHONPATH=src`；检查脚本不包装 CLI、测试、构建或发布。
-
-需要真实浏览器视觉检查时，安装可选依赖：
-
-```bash
-pip install "ai-dataviz[visual-check]"
-python -m playwright install chromium
-```
-
-## Quickstart：启动 Dashboard
-
-创建 Workspace 并启动 Server：
+需要管理多个看板、共享静态资源或热更新时：
 
 ```bash
 dataviz init myworkspace
 dataviz serve myworkspace --port 8080
 ```
 
-打开 <http://127.0.0.1:8080>。
-
-让 AI 新建或修改 Dashboard 时，从安装包自带的最小文档开始：
+## 让 AI 按需读文档
 
 ```bash
 dataviz docs --task minimal --format json
-dataviz scaffold minimal --id sales-overview --output sales-workspace
-dataviz validate sales-workspace --dashboard sales-overview --strict
-dataviz report sales-workspace sales-overview --output report.html
-dataviz visual-check sales-workspace sales-overview --target both
+dataviz docs --search '级联' --format json
+dataviz docs server-actions --format json
+dataviz catalog search myworkspace '收入'
 ```
 
-只有任务确实需要 Query 后交互或自定义渲染时，才改用 `interactive` 或 `custom-renderer` 文档与 Scaffold。
-
-需要显式服务端计算或写入时，从 `dataviz docs server-actions --format json` 开始。
-Server Action 由普通 Python 实现业务校验与 CRUD，通过外部 Adapter/auth 绑定资源，
-保存后可局部刷新指定 Source 或 View。它不属于自动执行的只读 DAG；静态 HTML
-不能写入，超时也不会自动重放。完整边界见 [Server Actions](docs/server-actions.md)。
-
-## Quickstart：让 AI 查数和分析
-
-先搜索 Workspace 中已有的数据口径：
+[配套 Skill](dataviz-skill.md) 指导 AI 按需查契约、开发、校验和分析。安装包内全文可读取后保存到 AI 工具要求的 `dataviz/SKILL.md`；不会自动覆盖已有 Skill：
 
 ```bash
-dataviz catalog search myworkspace '收入|利润'
-dataviz catalog describe myworkspace 'sales::source:orders/main'
+python -c "from importlib.resources import files; print(files('dataviz').joinpath('skills/dataviz/SKILL.md').read_text(encoding='utf-8'))"
 ```
 
-执行目标并封存不可变 Result：
+[样例](examples/) · [渐进式开发](docs/progressive-authoring.md) · [AI 查数与结果复用](docs/analysis-plane.md) · [写入与标注](docs/server-actions.md) · [源码安装与发布](docs/versioning-and-release.md) · [Changelog](CHANGELOG.md)
 
-```bash
-dataviz run myworkspace 'sales::source:orders/main' \
-  --query-param region=华东
-```
+**使用边界：** 导出的 HTML 可保留浏览器交互，但不能执行服务端 Python 或写入；写入超时不代表回滚，应查原请求回执。Server 默认本地使用、无内建账号体系，只运行可信代码，远程访问需外部访问控制。当前 `0.x` 仅接受现行 Schema。
 
-之后直接读取 Result，不重新执行查询：
-
-```bash
-dataviz result show myworkspace result_... --offset 0 --limit 100
-dataviz result inspect myworkspace result_...
-dataviz result export myworkspace result_... \
-  'sales::source:orders/main' --to ./exported-output
-```
-
-`result export` 复制 Result 中的原生 Artifact，不重新执行查询，也不转换文件格式。
-
-典型 AI 工作流是：
-
-```text
-docs / scaffold → validate → run → report / visual-check
-catalog search → catalog describe → run → result show
-```
-
-## 下一步阅读
-
-- [Dataviz AI Skill](dataviz-skill.md)：AI 如何开发、分析、复用和长期维护 Dashboard
-- [设计与架构不变量](DESIGN.md)：完整产品设计与 Runtime 契约
-- [当前实施计划](plan.md)：尚未完成的工作与发布门禁
-- [渐进式作者入口](docs/progressive-authoring.md)：minimal、interactive、custom-renderer
-- [AI Analysis Plane](docs/analysis-plane.md)：Catalog、Target、Result、Overlay、Evidence
-- [Dashboard 视觉语言](docs/design-language.md)：默认视觉与 Presentation 边界
-- [版本与发布流程](docs/versioning-and-release.md)
-- [变更记录](CHANGELOG.md)
-
-当前项目处于 `0.x` 阶段，只接受现行严格 Schema。Server 默认仅监听本机且不提供内建账号体系；远程使用需要放在可信网络或外部访问控制之后。
-
-项目尚未添加正式 `LICENSE` 文件；公开可见不等于已经授予再分发或商用权利。
+**许可：** 仓库尚未添加正式 `LICENSE`；公开可见不等于已授予再分发或商用权利。

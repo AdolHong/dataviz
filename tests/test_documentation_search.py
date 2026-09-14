@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 
 import pytest
@@ -8,6 +9,38 @@ from typer.testing import CliRunner
 
 from dataviz.cli import app
 import dataviz.documentation as documentation
+
+
+@pytest.mark.parametrize('query,required', [
+    ('保存未确认', ['actions status', '不要自动换 ID', '业务事务已经回滚']),
+    ('保存成功但刷新失败', ['actions refresh', '不重复执行写入']),
+    ('action_not_submitted', ['未提交', '不要批量盲重试']),
+    ('查询一直 Loading', ['Retry status', '不重复提交查询']),
+])
+def test_recovery_symptoms_route_to_safe_troubleshooting(query, required):
+    match = next(item for item in documentation.search_documentation(query)['results']
+                 if item['topic'] == 'troubleshooting')
+    response = CliRunner().invoke(app, shlex.split(match['command'])[1:])
+    assert response.exit_code == 0, response.output
+    for phrase in required:
+        assert phrase in response.stdout
+    # Follow the related public topics rather than silently publishing a typo.
+    for topic in set(re.findall(r'docs ([a-z][a-z-]+)', response.stdout)):
+        linked = CliRunner().invoke(app, ['docs', topic, '--format', 'json'])
+        assert linked.exit_code == 0, linked.output
+
+
+def test_control_docs_match_scoped_bulk_actions_without_menu_revert():
+    response = CliRunner().invoke(app, ["docs", "controls", "--format", "json"])
+    assert response.exit_code == 0, response.output
+    document = json.loads(response.stdout)
+    text = json.dumps(document, ensure_ascii=False)
+    for phrase in ('Select results / Clear results', '保留搜索外选择',
+                   '未加载的分页', '菜单没有 Revert', 'committed Query snapshot'):
+        assert phrase in text
+    for stale in ('本次打开期间的 Revert', '多选提供 Select all / Clear / Revert',
+                  '不受搜索过滤影响'):
+        assert stale not in text
 
 
 def test_query_reload_diagnosis_is_discoverable_by_symptom():
@@ -25,6 +58,17 @@ def test_view_diagnosis_privacy_and_unknown_state_are_documented():
     assert "Copy diagnosis" in response.stdout
     assert "unknown" in response.stdout
     assert "分享前需审阅" in response.stdout
+    assert "GET 最多等待 30 秒" in response.stdout
+    assert "不取消服务端 Query" in response.stdout
+
+
+def test_view_triage_can_be_found_without_runtime_implementation_names():
+    matches = documentation.search_documentation('图表没刷新')["results"]
+    match = next(item for item in matches if item['topic']=='interaction-stability')
+    response = CliRunner().invoke(app, shlex.split(match['command'])[1:])
+    assert response.exit_code == 0
+    for phrase in ['input_type', 'pending', 'control_state', 'not_affected', 'cache=hit', 'output_fetch_failed']:
+        assert phrase in response.stdout
 
 
 @pytest.mark.parametrize("query", ["级联候选为空", "右图漏刷"])

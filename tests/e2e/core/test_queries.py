@@ -203,6 +203,16 @@ def test_portable_query_tray_uses_shared_sidebar_for_clicks_and_shortcuts(page: 
             }"""
         )
         assert abs(portable_visual.pop("headerHeight") - server_visual.pop("headerHeight")) <= 1
+        # Fully transparent RGB channels are not visible. Firefox may retain
+        # the hover color's RGB at alpha=0 after a transition on only one page.
+        # Normalize that equivalent representation, not nonzero alpha/colors.
+        for visual in (portable_visual, server_visual):
+            for properties in visual.values():
+                for name, value in properties.items():
+                    if name in {'color', 'backgroundColor'} and re.fullmatch(
+                        r'rgba\(\s*\d+,\s*\d+,\s*\d+,\s*0(?:\.0+)?\s*\)', value
+                    ):
+                        properties[name] = 'transparent'
         assert portable_visual == server_visual
         sidebar = page.locator('.dv-context-sidebar')
         expect(sidebar).to_have_attribute('aria-label', 'Parameters')

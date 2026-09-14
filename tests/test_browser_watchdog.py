@@ -28,9 +28,10 @@ def resource():
     if {phase!r} == 'setup': time.sleep(60)
     yield
     if {phase!r} == 'teardown': time.sleep(60)
-def test_probe():
-    if {phase!r} == 'call': time.sleep(60)
-    assert {phase!r} != 'failure'
+def test_probe(browser_step):
+    with browser_step('synthetic-api-wait'):
+        if {phase!r} == 'call': time.sleep(60)
+        assert {phase!r} != 'failure'
 ''')
     progress = tmp_path / 'progress.json'
     env = {k:v for k,v in os.environ.items() if not k.startswith('DATAVIZ_E2E_')}
@@ -46,6 +47,16 @@ def test_probe():
         assert state['phase'] == phase
         assert 'test_probe.py' in progress.with_suffix('.stacks.log').read_text()
         assert 'Timeout (' in progress.with_suffix('.stacks.log').read_text()
+    steps = progress.with_suffix('.steps.jsonl')
+    if phase == 'setup':
+        assert not steps.exists()
+    else:
+        events = [json.loads(line) for line in steps.read_text().splitlines()]
+        assert events[0]['step'] == 'synthetic-api-wait'
+        assert events[0]['status'] == 'started'
+        expected = ['started'] if phase == 'call' else ['started', 'failed' if phase == 'failure' else 'completed']
+        assert [event['status'] for event in events] == expected
+        assert all(set(event) == {'nodeid', 'step', 'status', 'at'} for event in events)
     child_pid = int((tmp_path/'child.pid').read_text())
     assert not psutil.pid_exists(child_pid) or psutil.Process(child_pid).status() == psutil.STATUS_ZOMBIE
 

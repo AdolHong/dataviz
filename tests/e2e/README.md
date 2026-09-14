@@ -32,6 +32,13 @@ are recorded in [browser-test-pruning.md](../../docs/browser-test-pruning.md).
 
 ## Resource preparation
 
+Use synchronous predicates with `wait_for_function`. An `async` predicate returns
+a truthy Promise before its resolved condition is known, so it can falsely finish
+on the first poll. For asynchronous status reads, use an awaited `evaluate` loop
+that checks the terminal state, has an explicit deadline and throws on expiry.
+Keep write-count and persisted-data assertions: receipt polling must never resubmit
+the mutation. The phase watchdog also bounds a status read that itself hangs.
+
 ```sh
 .venv/bin/python scripts/test_browsers.py --suite components --fetch-assets
 ```
@@ -56,6 +63,14 @@ termination cannot promise a completed Playwright trace; phase/stack evidence is
 independent of browser responsiveness. Nested diagnostic pytest processes do not
 overwrite the outer lane's progress. Direct pytest still uses its usual timeout
 behavior; invoke the runner for the watchdog guarantees.
+For long asynchronous cases, opt into the `browser_step` fixture around specific
+suspected waits. It appends static step names and started/completed/failed states
+to `<engine>.progress.steps.jsonl`, without resetting the phase deadline. An
+unmatched started entry narrows a hard stall even when the Python stack only
+shows Playwright's greenlet dispatcher. Do not put arguments, URLs or business
+values in step names. Completed checkpoints do not explain a later stall outside
+those checkpoints, and a diagnostic rerun passing does not resolve an earlier
+unexplained timeout.
 CI uses the same entry point per matrix engine, with the resource cache keyed by
 the manifest hash. A cache hit still verifies each file's SHA-256 before testing.
 

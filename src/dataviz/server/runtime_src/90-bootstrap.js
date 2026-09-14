@@ -242,6 +242,10 @@ document.addEventListener('click', event => {
     viewSignal.blur();
     const viewId = viewSignal.closest('.dv-view')?.dataset.viewId;
     if (!viewId) return;
+    const currentTraces = Object.fromEntries(Object.values(datavizRuntime.views.get(viewId)?.inputs || {})
+      .map(canonicalOutputReference).filter(reference => reference.startsWith('interactive:'))
+      .map(reference => reference.slice('interactive:'.length).split('/')[0])
+      .map(id => [id, structuredClone(datavizRuntime.interactiveTraces.get(id) || {status:'unknown'})]));
     datavizPostToParent({
       type:'dataviz:view-evidence-inspect',
       view_id:viewId,
@@ -253,9 +257,13 @@ document.addEventListener('click', event => {
           key:item.key,
           revision:datavizControlEntry(item.key)?.revision ?? null,
           intent:datavizControlEntry(item.key)?.intent ?? null,
+          value:structuredClone(datavizControlEntry(item.key)?.value ?? null),
           domain:item.option_domain,
         })),
-        refresh:structuredClone(datavizRuntime.viewRefreshEvidence.get(viewId) || null),
+        refresh:{
+          ...structuredClone(datavizRuntime.viewRefreshEvidence.get(viewId) || {}),
+          interactive_transforms:currentTraces,
+        },
         renderer:structuredClone(datavizRuntime.viewRenderEvidence.get(viewId) || null),
         lifecycle:structuredClone(datavizRuntime.rendererLifecycleEvidence.get(viewId) || null),
       },

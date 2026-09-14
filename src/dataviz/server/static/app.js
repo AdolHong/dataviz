@@ -367,6 +367,14 @@ async function handleServerActionMessage(data, sourceWindow) {
     && !runtime.queryRequestInFlight && !runtime.queryDefinitionStale;
   let receipt = null;
   let ownsSlot = false;
+  let mutationSent = false;
+  const deadline = Date.now() + 290_000;
+  const transport = new AbortController();
+  const transportTimer = setTimeout(() => transport.abort(Object.assign(
+    new Error('Action HTTP wait timed out; server-side work was not cancelled. Check the original receipt.'),
+    {code:data.operation === 'invoke' && !mutationSent ? 'action_not_submitted' : 'action_response_unknown'},
+  )), 290_000);
+  const actionRequest = (url, options = {}) => request(url, {...options, signal:transport.signal});
   try {
     if (!['invoke', 'status', 'refresh'].includes(data.operation)
         || !(state.dashboard.server_actions || []).includes(data.action)) {
@@ -375,7 +383,7 @@ async function handleServerActionMessage(data, sourceWindow) {
     const base = `/api/dashboards/${encodeURIComponent(dashboardId)}/actions/${encodeURIComponent(data.action)}`;
     const receiptUrl = `${base}/${encodeURIComponent(data.request_id)}`;
     if (data.operation === 'status') {
-      receipt = await request(`${receiptUrl}?${sessionQuery()}`);
+      receipt = await actionRequest(`${receiptUrl}?${sessionQuery()}`);
       reply({type:'dataviz:server-action-result', receipt});
       return;
     }
@@ -383,16 +391,16 @@ async function handleServerActionMessage(data, sourceWindow) {
     if (runtime.pendingServerAction) throw Object.assign(new Error('Another Server Action is still in progress; this request was not submitted.'), {code:'action_not_submitted'});
     runtime.pendingServerAction = data.bridge_id;
     ownsSlot = true;
-    const oldRecord = await request(`/api/runs/${encodeURIComponent(identity.run_id)}?${sessionQuery()}`);
+    const oldRecord = await actionRequest(`/api/runs/${encodeURIComponent(identity.run_id)}?${sessionQuery()}`);
     if (!isCurrent()) throw Object.assign(new Error('The query changed before the Action was submitted.'), {code:'action_not_submitted'});
-    receipt = await request(data.operation === 'invoke' ? base : `${receiptUrl}/refresh`, {
+    mutationSent = true;
+    receipt = await actionRequest(data.operation === 'invoke' ? base : `${receiptUrl}/refresh`, {
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify(data.operation === 'invoke' ? {
         session_id:state.sessionId, run_id:identity.run_id,
         request_id:data.request_id, payload:data.payload,
       } : {session_id:state.sessionId}),
     });
-    const deadline = Date.now() + 290_000;
     while (receipt.status === 'running' || ['pending', 'scheduling', 'running'].includes(receipt.refresh?.status)) {
       reply({type:'dataviz:server-action-progress', receipt});
       if (!isCurrent() || Date.now() >= deadline) {
@@ -400,7 +408,7 @@ async function handleServerActionMessage(data, sourceWindow) {
           {code:'action_response_unknown'});
       }
       await new Promise(resolve => setTimeout(resolve, 250));
-      receipt = await request(`${receiptUrl}?${sessionQuery()}`);
+      receipt = await actionRequest(`${receiptUrl}?${sessionQuery()}`);
     }
     if (receipt.status !== 'succeeded') {
       throw Object.assign(new Error(receipt.error?.message || 'Server Action did not complete successfully.'),
@@ -413,14 +421,14 @@ async function handleServerActionMessage(data, sourceWindow) {
       const refreshStarted = performance.now();
       const nextRunId = receipt.refresh.run_id;
       const nextRecord = nextRunId && nextRunId !== identity.run_id
-        ? await request(`/api/runs/${encodeURIComponent(nextRunId)}?${sessionQuery()}`) : null;
+        ? await actionRequest(`/api/runs/${encodeURIComponent(nextRunId)}?${sessionQuery()}`) : null;
       const result = nextRecord?.result || null;
       const changedReferences = Object.entries(result?.outputs || {}).filter(([reference, artifact]) => (
         oldRecord.result?.outputs?.[reference]?.content_hash !== artifact.content_hash
       )).map(([reference]) => reference);
       const payloads = await Promise.all(changedReferences.map(reference => {
         const encoded = reference.split('/').map(encodeURIComponent).join('/');
-        return request(`/api/runs/${encodeURIComponent(nextRunId)}/outputs/${encoded}?${sessionQuery()}`);
+        return actionRequest(`/api/runs/${encodeURIComponent(nextRunId)}/outputs/${encoded}?${sessionQuery()}`);
       }));
       if (!isCurrent()) {
         receipt = {...receipt, refresh:{...receipt.refresh, status:'superseded'}};
@@ -465,6 +473,9 @@ async function handleServerActionMessage(data, sourceWindow) {
     receipt = {...receipt, client_timings:{...clientTimings, total_ms:performance.now() - clientStarted}};
     reply({type:'dataviz:server-action-result', receipt});
   } catch (error) {
+    // WebKit may reject fetch with a generic AbortError/code 20 instead of
+    // the supplied abort reason. Keep the host's submission classification.
+    if (transport.signal.aborted) error = transport.signal.reason || error;
     if (receipt) receipt = {...receipt, client_timings:{...clientTimings, total_ms:performance.now() - clientStarted}};
     if (receipt?.status === 'succeeded') {
       // The durable server receipt remains authoritative; this extra field
@@ -474,6 +485,7 @@ async function handleServerActionMessage(data, sourceWindow) {
     reply({type:'dataviz:server-action-result', receipt,
       error:{message:error.message || String(error), code:error.code || 'server_action_error'}});
   } finally {
+    clearTimeout(transportTimer);
     if (ownsSlot && runtime.pendingServerAction === data.bridge_id) runtime.pendingServerAction = null;
   }
 }
@@ -2504,7 +2516,7 @@ async function selectDashboard(id, {historyMode = 'push', locationSearch = null,
   loadCanvasFrame(id, runtime.pendingRunId || runtime.runId);
   $('#run-button').disabled = !runnable || runtime.queryRequestInFlight;
   $('#run-button').classList.toggle('is-cancelling', Boolean(runtime.pendingRunId));
-  setRunButtonLabel(runtime.pendingRunId ? 'Cancel' : 'Run');
+  setRunButtonLabel(runtime.finishRunError ? 'Retry status' : runtime.pendingRunId ? 'Cancel' : 'Run');
   setShareEnabled(Boolean(runtime.runId) && runtime.controlConnected);
   saveTabUiState();
   // Dashboard navigation owns the route and must commit immediately. Dynamic
@@ -3133,19 +3145,28 @@ async function runDashboard() {
   const dashboardId = state.dashboard.id;
   const runtime = runtimeFor(dashboardId);
   const pageId = runtime.pageId;
+  if (runtime.queryRequestInFlight) return;
+  if (runtime.pendingRunId && runtime.finishRunError) {
+    await finishRun(runtime.pendingRunId, dashboardId, pageId);
+    return;
+  }
   if (runtime.pendingRunId) {
     const runId = runtime.pendingRunId;
     $('#run-button').disabled = true;
     setRunButtonLabel('Cancelling…');
     try {
       await request(`/api/runs/${encodeURIComponent(runId)}?${sessionQuery()}`, {method:'DELETE'});
+      if (runtime.pendingRunId !== runId) return;
       runtime.message = 'Cancelling this Dashboard query…';
-      $('#run-message').textContent = runtime.message;
+      if (activeRuntime() === runtime) $('#run-message').textContent = runtime.message;
     } catch (error) {
-      $('#run-button').disabled = state.navigationPending;
-      setRunButtonLabel('Cancel');
+      if (runtime.pendingRunId !== runId) return;
       runtime.message = error.message;
-      $('#run-message').textContent = error.message;
+      if (activeRuntime() === runtime) {
+        $('#run-button').disabled = state.navigationPending;
+        setRunButtonLabel('Cancel');
+        $('#run-message').textContent = error.message;
+      }
     }
     return;
   }
@@ -3243,7 +3264,14 @@ function listen(runId, dashboardId, pageId = null) {
   source.addEventListener('run_error', () => finishRun(runId, dashboardId, pageId));
   source.addEventListener('run_cancelled', () => finishRun(runId, dashboardId, pageId));
   source.addEventListener('stream_end', () => source.close());
-  source.onerror = () => { if (source.readyState === EventSource.CLOSED) return; };
+  source.onerror = () => {
+    // CONNECTING is handled by EventSource's native reconnect. CLOSED will
+    // never deliver the terminal event; recover using the same Run receipt.
+    if (source.readyState !== EventSource.CLOSED || runtime.eventSource !== source
+        || runtime.pendingRunId !== runId) return;
+    runtime.closedRunStreamId = runId;
+    return finishRun(runId, dashboardId, pageId);
+  };
 }
 
 function updateEvent(event, dashboardId, pageId = null) {
@@ -3276,8 +3304,38 @@ function updateEvent(event, dashboardId, pageId = null) {
 async function finishRun(runId, dashboardId, pageId = null) {
   const runtime = runtimeFor(dashboardId, pageId);
   if (runId !== runtime.pendingRunId) return;
-  const record = await request(`/api/runs/${runId}?${sessionQuery()}`);
+  const statusRead = new AbortController();
+  const statusTimeout = setTimeout(() => statusRead.abort(
+    new Error('Query status request timed out after 30 seconds; the server query was not cancelled'),
+  ), 30_000);
+  let record;
+  try {
+    record = await request(`/api/runs/${runId}?${sessionQuery()}`, {signal:statusRead.signal});
+    if (['queued', 'loading'].includes(record.result?.status || record.status)) {
+      throw new Error('The query is still queued or running');
+    }
+  } catch (error) {
+    if (runId !== runtime.pendingRunId) return;
+    runtime.finishRunError = true;
+    runtime.queryStatus = 'error';
+    runtime.queryLabel = 'Unconfirmed';
+    runtime.message = `Could not confirm query completion: ${error.message}. Retry status without submitting another query.`;
+    if (activeRuntime() === runtime) {
+      $('#run-message').textContent = runtime.message;
+      $('#query-diagnostics').dataset.status = 'error';
+      $('#query-diagnostics-label').textContent = runtime.queryLabel;
+      $('#run-button').disabled = state.navigationPending;
+      $('#run-button').classList.remove('is-cancelling');
+      setRunButtonLabel('Retry status');
+    }
+    return;
+  } finally {
+    clearTimeout(statusTimeout);
+  }
   if (runId !== runtime.pendingRunId) return;
+  const recoverClosedStream = runtime.closedRunStreamId === runId;
+  runtime.closedRunStreamId = null;
+  runtime.finishRunError = false;
   const status = record.result?.status || record.status;
   runtime.message = status === 'ready' ? 'Dataset query completed.' : `Query finished with status: ${status}`;
   runtime.pendingRunId = null;
@@ -3326,7 +3384,9 @@ async function finishRun(runId, dashboardId, pageId = null) {
     }
     if (committed) {
       const frame = $('#canvas-frame');
-      if (frame.dataset.runId !== runId || frame.dataset.dashboardId !== dashboardId) {
+      if (recoverClosedStream || frame.dataset.runId !== runId || frame.dataset.dashboardId !== dashboardId) {
+        // A lost stream may also have stranded progressive Canvas inputs.
+        // Adopt the completed snapshot without executing another Query.
         loadCanvasFrame(dashboardId, runId);
       }
       // A progressive Canvas can finish loading before this Query Run commits.
@@ -3657,7 +3717,7 @@ function viewDiagnosis(view, evidence = {}, identity = {}) {
   const renderer = evidence.renderer || {};
   const known = new Set(['ready', 'empty', 'waiting', 'loading', 'error', 'cancelled', 'unavailable', 'stale']);
   const status = known.has(evidence.status) ? evidence.status
-    : refresh.failed_input ? 'error' : refresh.waiting_input ? 'waiting' : 'unknown';
+    : refresh.failed_input || refresh.render_error ? 'error' : refresh.waiting_input ? 'waiting' : 'unknown';
   const input = value => value ? {alias:value.alias, reference:value.reference} : null;
   return {
     kind:'view',
@@ -3667,13 +3727,25 @@ function viewDiagnosis(view, evidence = {}, identity = {}) {
     view:{id:view.id, renderer:renderer.renderer || view.subtype || null},
     status,
     stage:status === 'error' && refresh.failed_input ? 'input_failed'
-      : status === 'waiting' && refresh.waiting_input ? 'waiting_input' : status,
+      : status === 'error' && refresh.render_error ? 'render_failed'
+      : ['waiting', 'loading'].includes(status) && refresh.waiting_input ? 'waiting_input' : status,
     query_executed:typeof refresh.query_executed === 'boolean' ? refresh.query_executed : null,
     waiting_input:input(refresh.waiting_input),
     failed_input:input(refresh.failed_input),
-    inputs:Object.fromEntries(entries(renderer.inputs).map(([alias, profile]) => [alias, {
+    inputs:Object.fromEntries(entries(refresh.input_profiles || renderer.inputs).map(([alias, profile]) => [alias, {
       reference:profile.reference, rows:number(profile.rows), bytes:number(profile.bytes),
+      status:profile.status || null, kind:profile.kind || null,
+      input_type:profile.input_type || null, transport:profile.transport || null,
     }])),
+    scheduling:refresh.last_schedule ? {
+      status:refresh.last_schedule.status,
+      changed_controls:(refresh.last_schedule.changed_controls || []).slice(0,50),
+    } : null,
+    transforms:Object.fromEntries(entries(refresh.interactive_transforms).map(([id, trace]) => [id, {
+      status:trace.status || null, cache:trace.cache?.status || null,
+      missing_outputs:(trace.missing_outputs || []).slice(0,50),
+    }])),
+    error_code:refresh.failed_input?.code || refresh.render_error?.code || null,
     control_revisions:revisions(refresh.control_revisions),
     binding_revisions:revisions(renderer.binding_revisions),
     controls:(evidence.controls || []).slice(0, 50).map(control => ({

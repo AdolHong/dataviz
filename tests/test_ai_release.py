@@ -309,6 +309,11 @@ def test_release_inputs_exclude_local_credentials_and_reject_symlinks(
 
 def test_release_version_sources_match():
     release_zip.verify_release_version()
+    lock = tomllib.loads((ROOT / 'uv.lock').read_text(encoding='utf-8'))
+    project = release_zip.PROJECT
+    locked = [package for package in lock['package'] if package['name'] == project['name']]
+    assert len(locked) == 1
+    assert locked[0]['version'] == project['version'], 'Run uv lock after bumping the package version'
 
 
 def test_release_source_archives_include_the_skill_and_browser_runtimes():

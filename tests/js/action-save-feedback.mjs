@@ -12,7 +12,8 @@ let ticks = 0;
 let polls = 0;
 const ready = {status:'succeeded', request_id:'save1', refresh:{status:'ready', run_id:'run1', views:['detail']}};
 const context = {
-  performance:{now:() => ++ticks}, Date, console, setTimeout:fn => fn(),
+  performance:{now:() => ++ticks}, Date, console, AbortController,
+  setTimeout:(fn,ms) => {if(ms===250)fn();return 1;}, clearTimeout:()=>{},
   state:{dashboard:{id:'demo', server_actions:['save']}, sessionId:'session'},
   activeRuntime:() => runtime, canvasIdentity:() => identity,
   sameCanvasIdentity:(a,b) => JSON.stringify(a) === JSON.stringify(b),
@@ -21,8 +22,8 @@ const context = {
   request:async (url, options) => {
     if (url.startsWith('/api/runs/')) return {result:{outputs:{}}};
     if (scenario === 'refresh_failure') return {...ready, refresh:{status:'failed'}};
-    if (options && scenario === 'pending') return {...ready, refresh:{status:'running'}};
-    if (!options) polls++;
+    if (options?.method==='POST' && scenario === 'pending') return {...ready, refresh:{status:'running'}};
+    if (options?.method!=='POST') polls++;
     return ready;
   },
   $:() => ({contentWindow:{datavizRuntime:{applyActionRefresh:async () => {

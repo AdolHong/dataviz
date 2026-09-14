@@ -31,7 +31,7 @@ Component Registry 只在公开组件契约变化时升级；单个 Package 可�
 最低门禁：
 
 1. Python 3.11、3.12、3.13、3.14 运行 unit/contract tests。
-2. 快速迭代期默认在 Chromium 运行完整真实 Runtime 测试，包括 Query/Interaction isolation、两种 Interactive Runtime、Overlay、Control writer/consumer binding、Renderer 和 HTML Export。进入稳定发布期、修改跨浏览器敏感行为，或发布者明确要求时，再在 Firefox、WebKit 重复同一套完整 E2E；单浏览器门禁不代表跨浏览器兼容承诺已重新验证。
+2. CI distribution job 依赖 Chromium、Firefox、WebKit 三浏览器矩阵全部通过，覆盖 Query/Interaction isolation、两种 Interactive Runtime、Overlay、Control binding、Renderer 和 HTML Export。本地迭代按 AGENTS.md 选择相关测试；公共 Runtime 改动扩大到三浏览器核心，不因为升版或单项失败机械重跑全套。本地定向验收不能替代 CI 发布门禁，也不能表述为完整矩阵通过。
 3. `dataviz components check` 的 Package 元数据/资产/测试声明检查通过；组件行为由前两项 pytest 与浏览器 E2E 执行。
 4. 四个代表性 Workspace 通过 `validate`，并至少执行一个 Query/Report smoke。
 5. wheel、sdist 和 pip-installable ZIP 分别进入干净 venv，运行 `version`、`schemas`、`components check`、`init`、`validate` 和 `report`。
@@ -64,4 +64,4 @@ python scripts/build_release_zip.py --output-dir /tmp/dataviz-release
 - minor：`0.x` 阶段新增能力，或明确的 Breaking DSL/Runtime 断代。
 - major：进入稳定生产承诺后再定义。
 
-每次发布同时更新 `pyproject.toml`、`src/dataviz/__init__.py`（若版本在此声明）、README 安装示例和 CHANGELOG，并用 `dataviz version` 核对最终 wheel，而不是只检查源码文本。
+每次发布同时更新 `pyproject.toml`、`src/dataviz/__init__.py`（若版本在此声明）、README 安装示例和 CHANGELOG；运行 `uv lock` 同步项目自身版本，检查 diff 不应顺带升级无关依赖，再运行 `uv lock --check`。用 `dataviz version` 核对最终 wheel，而不是只检查源码文本。

@@ -1476,14 +1476,20 @@
       disposeRenderer(root, id);
       return clearRoot(root, id);
     };
-    const rendererError = (key, type, phase, error) => ({
+    const rendererError = (key, type, phase, error) => {
+      const message = error?.message || String(error);
+      const stack = error?.stack || null;
+      return {
       code:'renderer_lifecycle_error',
       view_id:key,
       renderer:type,
       phase,
-      message:error?.message || String(error),
-      stack:error?.stack || null,
-    });
+      message,
+      // Firefox/WebKit stacks can omit Error.message. Keep the diagnostic
+      // self-contained instead of replacing the cause with bare call sites.
+      stack:stack && !stack.includes(message) ? `${message}\n${stack}` : stack,
+      };
+    };
     const showError = (root, key, type, phase, error) => {
       runtime.metrics.renderers.failed += 1;
       const detail = rendererError(key, type, phase, error);

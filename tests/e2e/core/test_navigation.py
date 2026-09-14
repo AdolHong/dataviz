@@ -69,7 +69,7 @@ def test_root_requires_explicit_or_remembered_dashboard(page: Page):
 
 
 @pytest.mark.e2e
-def test_pages_preserve_independent_queries_and_history(page: Page, tmp_path: Path):
+def test_pages_preserve_independent_queries_and_history(page: Page, tmp_path: Path, browser_step):
     root = tmp_path / "workspace"
     dashboard = root / "dashboards" / "holiday"
     dashboard.mkdir(parents=True)
@@ -124,19 +124,21 @@ def test_pages_preserve_independent_queries_and_history(page: Page, tmp_path: Pa
         expect(page.locator("#run-button strong")).to_have_text("Run")
         assert len(runs) == 2
         assert {request["page_id"] for request in runs} == {"annual", "history"}
-        frame.locator('body').evaluate("""async () => {
-          await window.dataviz.control.set('dashboard:holiday/factor', 5);
-          await window.dataviz.applyControls({keys:['dashboard:holiday/factor']});
-          window.scrollTo(0, 450);
-        }""")
+        with browser_step('annual-control-apply-and-scroll'):
+            frame.locator('body').evaluate("""async () => {
+              await window.dataviz.control.set('dashboard:holiday/factor', 5);
+              await window.dataviz.applyControls({keys:['dashboard:holiday/factor']});
+              window.scrollTo(0, 450);
+            }""")
         expect(frame.locator('body')).to_have_js_property('scrollHeight', 2400)
         history.click()
         expect(frame.locator('[data-view-id="table"]')).to_contain_text('2023', timeout=15_000)
         assert frame.locator('body').evaluate("() => window.dataviz.control.state('dashboard:holiday/factor').value") == 10
-        frame.locator('body').evaluate("""async () => {
-          await window.dataviz.control.set('dashboard:holiday/factor', 20);
-          await window.dataviz.applyControls({keys:['dashboard:holiday/factor']});
-        }""")
+        with browser_step('history-control-apply'):
+            frame.locator('body').evaluate("""async () => {
+              await window.dataviz.control.set('dashboard:holiday/factor', 20);
+              await window.dataviz.applyControls({keys:['dashboard:holiday/factor']});
+            }""")
         annual.click()
         expect(frame.locator('[data-view-id="table"]')).to_contain_text('2025', timeout=15_000)
         assert frame.locator('body').evaluate("() => window.dataviz.control.state('dashboard:holiday/factor').value") == 5
@@ -145,12 +147,14 @@ def test_pages_preserve_independent_queries_and_history(page: Page, tmp_path: Pa
         expect(history).to_have_attribute("aria-current", "page")
         expect(page.locator("#canvas-frame")).to_have_attribute("data-run-id", history_run)
         assert "#page=history" in page.url
-        page.reload()
+        with browser_step('history-reload'):
+            page.reload()
         expect(history).to_have_attribute("aria-current", "page")
         expect(frame.locator('[data-view-id="table"]')).to_contain_text("2023", timeout=30_000)
         assert frame.locator('body').evaluate("() => window.dataviz.control.state('dashboard:holiday/factor').value") == 20
         assert len(runs) == 2
-        page.go_back()
+        with browser_step('history-go-back'):
+            page.go_back()
         expect(annual).to_have_attribute("aria-current", "page")
         expect(frame.locator('[data-view-id="table"]')).to_contain_text("2025", timeout=30_000)
         assert len(runs) == 2

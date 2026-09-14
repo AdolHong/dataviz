@@ -344,9 +344,13 @@ Object.assign(datavizRuntime, {
     });
   },
   publishTransformStatus(id, status, details = {}) {
-    if (details.trace && typeof details.trace === 'object') {
-      this.interactiveTraces.set(id, structuredClone(details.trace));
-    }
+    const trace = {
+      ...(details.trace || this.interactiveTraces.get(id) || {}),
+      status,
+      error_code:details.error?.code || details.error?.details?.code || null,
+    };
+    if (status !== 'ready') trace.cache = null;
+    this.interactiveTraces.set(id, structuredClone(trace));
     datavizSetViewPipelineNodeStatus(`interactive:${id}`, status);
     datavizPostToParent({
       type:'dataviz:interactive-status',
@@ -358,7 +362,7 @@ Object.assign(datavizRuntime, {
         code:details.error.code || details.error.details?.code || 'interactive_transform_error',
         message:details.error.message || String(details.error),
       } : null,
-      trace:details.trace || null,
+      trace,
     });
   },
   async runTransforms(changedControlKeys = [], seedChangedOutputs = [], options = {}) {

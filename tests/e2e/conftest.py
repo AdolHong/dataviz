@@ -4,6 +4,7 @@ import json
 import os
 import faulthandler
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,35 @@ def pytest_configure(config):
     if os.environ.get('DATAVIZ_E2E_PROGRESS') and not os.environ.get('DATAVIZ_E2E_WATCHDOG_OWNER'):
         os.environ['DATAVIZ_E2E_WATCHDOG_OWNER'] = str(os.getpid())
         _watchdog_state('', 'collection')
+
+
+@pytest.fixture
+def browser_step(request):
+    """Leave small checkpoints even when Playwright's greenlet never returns.
+
+    Use static step names only, never URLs, arguments or business values.
+    This separate journal does not renew the phase watchdog deadline.
+    """
+    def record(name, status):
+        path = os.environ.get('DATAVIZ_E2E_PROGRESS')
+        if not path or os.environ.get('DATAVIZ_E2E_WATCHDOG_OWNER') != str(os.getpid()):
+            return
+        payload = {'nodeid': request.node.nodeid, 'step': name,
+                   'status': status, 'at': time.monotonic()}
+        with Path(path).with_suffix('.steps.jsonl').open('a') as stream:
+            stream.write(json.dumps(payload) + '\n')
+
+    @contextmanager
+    def step(name):
+        record(name, 'started')
+        try:
+            yield
+        except BaseException:
+            record(name, 'failed')
+            raise
+        else:
+            record(name, 'completed')
+    return step
 
 
 def _bounded_phase(item, phase):

@@ -31,6 +31,99 @@ from e2e.support.runtime import (
 
 
 @pytest.mark.e2e
+@pytest.mark.parametrize('failure', ['completion-read', 'closed-stream', 'completion-timeout'])
+def test_run_completion_read_failure_can_retry_without_resubmission(page: Page, tmp_path: Path, failure):
+    workspace = _copy_workspace(WORKER, tmp_path / 'receipt-recovery')
+    with _running_server(workspace) as url:
+        _open_dashboard(page, url, 'worker-runtime')
+        submissions = []
+        page.on('request', lambda request: submissions.append(request.url)
+                if request.method == 'POST' and request.url.endswith('/runs') else None)
+        pattern = re.compile(r'/api/runs/[^/?]+\?')
+        def unavailable(route):
+            if failure == 'completion-timeout':
+                # Leave the real fetch pending until its client AbortController
+                # expires; returning from a route callback does not continue it.
+                return
+            route.fulfill(status=503, content_type='application/json', body='{"detail":"receipt unavailable"}')
+        page.route(pattern, unavailable)
+        if failure == 'closed-stream':
+            # HTTP 204 permanently closes a real EventSource (no reconnect).
+            page.route(re.compile(r'/api/runs/[^/?]+/events\?'),
+                       lambda route: route.fulfill(status=204, body=''))
+        page.locator('#run-button').click()
+        expect(page.locator('#run-button [data-run-label]')).to_have_text(
+            'Retry status', timeout=40000 if failure == 'completion-timeout' else 15000)
+        expect(page.locator('#query-diagnostics-label')).to_have_text('Unconfirmed')
+        assert len(submissions) == 1
+        page.unroute(pattern, unavailable)
+        if failure == 'closed-stream':
+            # The receipt recovery can precede completion. Wait for the actual
+            # existing Run; never submit a replacement query to make it ready.
+            page.evaluate('''async () => {
+              const deadline = Date.now() + 15000;
+              while (Date.now() < deadline) {
+                const canvas = document.querySelector('#canvas-frame');
+                const url = new URL(canvas.src);
+                const runId = url.searchParams.get('run_id');
+                const sessionId = url.searchParams.get('session_id');
+                if (!runId || !sessionId) throw new Error('missing existing Run identity');
+                const response = await fetch(`/api/runs/${encodeURIComponent(runId)}?session_id=${encodeURIComponent(sessionId)}`);
+                if (response.ok) {
+                  const record = await response.json();
+                  if (['ready', 'partial'].includes(record.result?.status || record.status)) return;
+                }
+                await new Promise(resolve => setTimeout(resolve, 50));
+              }
+              throw new Error('existing Run did not finish');
+            }''')
+        page.locator('#run-button').click()
+        expect(page.locator('#query-diagnostics-label')).to_have_text('Ready', timeout=15000)
+        expect(page.locator('#run-button [data-run-label]')).to_have_text('Run')
+        expect(page.frame_locator('#canvas-frame').locator('[data-view-id="scaled-table"]')).to_have_attribute(
+            'data-view-status', 'ready', timeout=15000)
+        assert len(submissions) == 1
+
+
+@pytest.mark.e2e
+def test_failed_update_never_leaves_successful_table_visible(page: Page, tmp_path: Path):
+    workspace = _copy_workspace(WORKER, tmp_path/'terminal-view')
+    with _running_server(workspace) as url:
+        _open_dashboard(page,url,'worker-runtime')
+        _run_and_wait(page)
+        frame=page.frame_locator('#canvas-frame')
+        table=frame.locator('[data-view-id="scaled-table"]')
+        expect(table).to_have_attribute('data-view-status','ready',timeout=15000)
+        frame.locator('body').evaluate("""async () => {
+          const runtime=window.datavizRuntime;
+          const definition=runtime.views.get('scaled-table');
+          window.restoreTestRender=definition.render;
+          definition.render=()=>{throw new Error('synthetic dispatch failure');};
+          await runtime.renderViews({affectedViewIds:['scaled-table']});
+        }""")
+        expect(table).to_have_attribute('data-view-status','error')
+        expect(table.locator('tbody tr')).to_have_count(0)
+        expect(table).to_contain_text('synthetic dispatch failure')
+        frame.locator('body').evaluate("""async () => {
+          const runtime=window.datavizRuntime;
+          runtime.views.get('scaled-table').render=window.restoreTestRender;
+          await runtime.renderViews({affectedViewIds:['scaled-table']});
+        }""")
+        expect(table).to_have_attribute('data-view-status','ready')
+        frame.locator('body').evaluate("""async () => {
+          await window.datavizRuntime.failOutputs(['source:raw/main'],
+            {code:'output_fetch_failed',message:'synthetic download failure'});
+        }""")
+        expect(table).to_have_attribute('data-view-status','error')
+        expect(table.locator('tbody tr')).to_have_count(0)
+        frame.locator('body').evaluate("""async () => {
+          await window.datavizRuntime.publishOutputs({outputs:{'source:raw/main':[]},
+            output_kinds:{'source:raw/main':'table'}});
+        }""")
+        expect(table).to_have_attribute('data-view-status','empty')
+
+
+@pytest.mark.e2e
 @pytest.mark.parametrize('transport', ['json', 'arrow'])
 def test_rich_worker_frame_values_survive_server_share_html(page: Page, tmp_path: Path, transport):
     import json

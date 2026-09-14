@@ -232,7 +232,7 @@ Dataviz 使用温和但精确的圆角：微元素 5px，输入与按钮 7px，�
 
 **当前约束（0.24.5）：** 复用现有表单，支持 W/E 切换与关闭、Esc、宽屏停靠与窄屏覆盖。验证结果与发行状态以 plan.md 为准。
 
-- 同一右侧区域只有 `closed`、`query`、`controls` 三种展示状态。W 打开 Parameters，再按 W 关闭；E 打开 Controls，再按 E 关闭。从另一种内容切入时直接替换，不并排打开两个面板。
+- 同一右侧区域只有 `closed`、`query`、`controls` 三种展示状态。E 打开 Parameters，再按 E 关闭；W 打开 Controls，再按 W 关闭。从另一种内容切入时直接替换，不并排打开两个面板。
 - Header 始终保留 `Parameters` / `Controls` 入口和展开状态，不显示字母快捷键徽标；无对应字段时置灰、不可点击，不隐藏按钮或改变排列。按 W/E 遇到无字段时统一显示无参数提示，不打开空面板、不触发查询。单页与多 Page 使用相同操作，不要求作者新增 Page 或布局 DSL。
 - 快捷键仅在非编辑场景处理：Input、Textarea、Select、contenteditable、搜索框、代码编辑器、中文组合输入期间不拦截；仅响应明确列出的组合键，不抢占其他 Ctrl/Meta/Alt 组合键，不响应按住键产生的重复事件。单字符快捷键需可关闭或限定到工作台焦点范围，不能只为鼠标用户设计。
 - Esc 优先关闭当前下拉框、日历或更上层对话框；没有内层浮层时才关闭面板。面板有显式关闭按钮，关闭后焦点回到发起入口。宽屏面板非模态，不锁住正文焦点；窄屏覆盖抽屉管理焦点并阻止背景误操作。
@@ -390,4 +390,4 @@ draft/applied 独立、历史恢复等既有行为不能因层级收敛而改变
 
 Header 入口与右侧面板标题统一使用 `Parameters` / `Controls`，快捷键帮助和无障碍操作名称同步；Dashboard / Section / View 层级标签保留，内部 Query Parameter / Control 概念及 DSL 不变。
 
-默认启用单键：Q 左侧 Sidebar、W Query Parameters、E Controls、R Run。帮助弹窗可关闭单键；关闭后使用 Cmd+Ctrl+Q/W/E/R。组合键始终可用，运行另支持 Cmd/Ctrl+Enter 与 Ctrl+End。Esc 和 ? 保留，? 不受单键开关影响。输入、组合输入、重复按键不触发单键操作。帮助弹窗按开关显示当前映射，Header 不显示旧字母徽标。导出 HTML 仅提供 W/E、Esc、?，不提供 Run 或左侧工作台 Sidebar。
+默认启用单键：Q 左侧 Sidebar、W Controls、E Query Parameters、R Run。帮助弹窗可关闭单键；关闭后使用 Cmd+Ctrl+Q/W/E/R。组合键始终可用，运行另支持 Cmd/Ctrl+Enter 与 Ctrl+End。Esc 和 ? 保留，? 不受单键开关影响。输入、组合输入、重复按键不触发单键操作。帮助弹窗按开关显示当前映射，Header 不显示旧字母徽标。导出 HTML 仅提供 W/E、Esc、?，不提供 Run 或左侧工作台 Sidebar。

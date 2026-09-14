@@ -568,7 +568,7 @@ function keyboardShortcutCommand(event) {
   if (!event.ctrlKey && !event.metaKey && !event.altKey && !keyboardTargetIsEditable(event.target) && event.key === '?') return 'show-shortcuts';
   const chord = event.metaKey && event.ctrlKey && !event.altKey && !event.shiftKey;
   if (!chord && (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || keyboardTargetIsEditable(event.target) || !$('#single-key-shortcuts').checked)) return null;
-  return {q:'toggle-sidebar', w:'toggle-query-parameters', e:'toggle-dashboard-controls', r:'run-query'}[event.key.toLowerCase()] || null;
+  return {q:'toggle-sidebar', w:'toggle-dashboard-controls', e:'toggle-query-parameters', r:'run-query'}[event.key.toLowerCase()] || null;
 }
 
 let shortcutToastTimer = null;

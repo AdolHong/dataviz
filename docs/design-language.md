@@ -36,7 +36,7 @@ Dataviz 的默认方向是 **Quiet white shell + clean analytical canvas**：稳
 
 标题、subtitle 和 description 是分析内容，不是装饰。Query Parameter 或 Control 决定当前分析对象时，应通过内容插值让上下文可见，而不是要求用户重新打开参数面板确认。
 
-Server Header 横跨整个屏幕；左侧品牌按钮切换 Workspace Sidebar，旁边显示查询节点状态。右侧保留 Share（仅服务端）、Controls、Parameters 和 Run。Parameters 与 Controls 使用同一个右侧操作面板：320px 外宽、左右 16px 内距，宽屏停靠并为正文预留相同宽度，窄屏覆盖且不超过视口。Parameters 只保留字段、状态和诊断/刷新入口，不重复底部 Run；Header Run 与快捷键执行查询，关闭面板不丢草稿。Controls 按 Dashboard → Section → View 展示当前上下文，省略空祖先组；同入口再次点击收起，不同入口替换上下文。Section/View 默认 sidebar，显式 popover 仍支持，打开弹窗不关闭已有侧栏。快捷键默认 Q/W/E/R 分别对应左侧 Sidebar、Parameters、Controls、Run，可在帮助中关闭单键；Esc 与 ? 保留。独立 HTML 不提供 Run、Share 或 Workspace Sidebar，查询参数只展示固化证据，Controls 继续使用现有可用交互。完整视觉约束以 DESIGN.md 为准；此文不维护另一套像素或行为默认值。
+Server Header 横跨整个屏幕；左侧品牌按钮切换 Workspace Sidebar，旁边显示查询节点状态。右侧保留 Share（仅服务端）、Controls、Parameters 和 Run。Parameters 与 Controls 使用同一个右侧操作面板：320px 外宽、左右 16px 内距，宽屏停靠并为正文预留相同宽度，窄屏覆盖且不超过视口。Parameters 只保留字段、状态和诊断/刷新入口，不重复底部 Run；Header Run 与快捷键执行查询，关闭面板不丢草稿。Controls 按 Dashboard → Section → View 展示当前上下文，省略空祖先组；同入口再次点击收起，不同入口替换上下文。Section/View 默认 sidebar，显式 popover 仍支持，打开弹窗不关闭已有侧栏。快捷键默认 Q/W/E/R 分别对应左侧 Sidebar、Controls、Parameters、Run，可在帮助中关闭单键；Esc 与 ? 保留。独立 HTML 不提供 Run、Share 或 Workspace Sidebar，查询参数只展示固化证据，Controls 继续使用现有可用交互。完整视觉约束以 DESIGN.md 为准；此文不维护另一套像素或行为默认值。
 
 一个 Section 应回答一个问题，并且至多有一个主要 View。其余 View 是解释、比较或明细，应降低视觉重量。
 

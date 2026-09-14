@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.25.5 — 2026-09-14
+
+- Wait for explicit Renderer validation readiness in the three-surface pending/error/recovery test instead of treating an input-loading View as a ready test harness. Full local run and scoped failure resolution: `docs/release-0.25.5.md`.
+- Isolate the Share/restart server-Python test from the browser fixture's one-second timeout; cover slow cold imports, retain hard-timeout/cancellation regressions and print complete interaction failure receipts.
+- Swap W/E shortcuts: W opens Controls and E opens Parameters, including modifier shortcuts, help and accessibility hints across Server, Share and exported HTML. Q/R/Esc/? remain unchanged.
+
 ## 0.25.4 — 2026-09-14
 
 - Await asynchronous Perspective Worker termination before reporting disposal; strengthen real-resource lifecycle coverage with 20 restore cycles and native Worker/observer accounting across browsers.

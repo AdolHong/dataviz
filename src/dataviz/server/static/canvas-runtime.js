@@ -4540,7 +4540,7 @@ const datavizKeyboardShortcutCommand = event => {
   const chord = event.metaKey && event.ctrlKey && !event.altKey && !event.shiftKey;
   if (!chord && (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || datavizKeyboardTargetIsEditable(event.target))) return null;
   if (!chord && window.parent === window && !datavizRuntimeSingleKeyShortcuts?.checked) return null;
-  return {q:'toggle-sidebar', w:'toggle-query-parameters', e:'toggle-dashboard-controls', r:'run-query'}[event.key.toLowerCase()] || null;
+  return {q:'toggle-sidebar', w:'toggle-dashboard-controls', e:'toggle-query-parameters', r:'run-query'}[event.key.toLowerCase()] || null;
 };
 document.addEventListener('keydown', event => {
   const command = datavizKeyboardShortcutCommand(event);

@@ -48,9 +48,9 @@ def test_operation_panel_shortcuts_and_responsive_state(page: Page, tmp_path: Pa
             for selector in ['#query-parameters-toggle', '#dashboard-controls-toggle']:
                 expect(page.locator(selector)).to_be_visible()
                 expect(page.locator(selector)).to_be_disabled()
-            page.keyboard.press('w')
-            expect(page.locator('#shortcut-toast')).to_have_text('This Dashboard has no query parameters.')
             page.keyboard.press('e')
+            expect(page.locator('#shortcut-toast')).to_have_text('This Dashboard has no query parameters.')
+            page.keyboard.press('w')
             expect(page.locator('#shortcut-toast')).to_have_text('This Dashboard has no dashboard controls.')
             expect(panel).to_be_hidden()
             assert not runs
@@ -62,16 +62,16 @@ def test_operation_panel_shortcuts_and_responsive_state(page: Page, tmp_path: Pa
         expect(page.locator('#operation-panel-title')).to_have_text('Parameters')
         waiting = page.frame_locator('#canvas-frame')
         waiting.locator('main').click()
-        page.keyboard.press('w')
+        page.keyboard.press('e')
         expect(panel).to_be_hidden()
         waiting.locator('main').click()
-        page.keyboard.press('w')
+        page.keyboard.press('e')
         expect(panel).to_be_visible()
         waiting.locator('main').click()
-        page.keyboard.press('e')
+        page.keyboard.press('w')
         expect(page.locator('#operation-panel-title')).to_have_text('Controls')
         waiting.locator('main').click()
-        page.keyboard.press('w')
+        page.keyboard.press('e')
         expect(field).to_be_visible()
         waiting.locator('main').click()
         page.keyboard.press('q')
@@ -93,17 +93,17 @@ def test_operation_panel_shortcuts_and_responsive_state(page: Page, tmp_path: Pa
         expect(panel).to_be_visible()
         field.fill('draft')
         page.locator('#operation-panel-close').focus()
-        page.keyboard.press('w')
-        expect(panel).to_be_hidden()
-        page.keyboard.press('w')
-        expect(field).to_have_value('draft')
         page.keyboard.press('e')
+        expect(panel).to_be_hidden()
+        page.keyboard.press('e')
+        expect(field).to_have_value('draft')
+        page.keyboard.press('w')
         expect(page.locator('#operation-panel-title')).to_have_text('Controls')
         expect(page.locator('#operation-panel-close')).not_to_be_focused()
         expect(page.locator('#operation-panel-footer, #panel-run-button')).to_have_count(0)
-        page.keyboard.press('e')
-        expect(panel).to_be_hidden()
         page.keyboard.press('w')
+        expect(panel).to_be_hidden()
+        page.keyboard.press('e')
         waiting.locator('main').click()
         page.keyboard.press('r')
         expect(page.frame_locator('#canvas-frame').locator('[data-view-id="rows"]')).to_contain_text('42', timeout=20_000)
@@ -113,10 +113,10 @@ def test_operation_panel_shortcuts_and_responsive_state(page: Page, tmp_path: Pa
         expect(page.locator('#query-parameters-toggle kbd, #dashboard-controls-toggle kbd')).to_have_count(0)
         ready = page.frame_locator('#canvas-frame')
         ready.locator('[data-view-id="rows"]').click()
-        page.keyboard.press('w')
+        page.keyboard.press('e')
         expect(panel).to_be_hidden()
         ready.locator('[data-view-id="rows"]').click()
-        page.keyboard.press('w')
+        page.keyboard.press('e')
         expect(panel).to_be_visible()
         # The host must recognize editable elements from the iframe's realm.
         ready.locator('body').evaluate("""node => {
@@ -125,8 +125,8 @@ def test_operation_panel_shortcuts_and_responsive_state(page: Page, tmp_path: Pa
           node.prepend(input);
         }""")
         ready.locator('#shortcut-typing-probe').fill('')
-        ready.locator('#shortcut-typing-probe').press('w')
-        expect(ready.locator('#shortcut-typing-probe')).to_have_value('w')
+        ready.locator('#shortcut-typing-probe').press('e')
+        expect(ready.locator('#shortcut-typing-probe')).to_have_value('e')
         expect(panel).to_be_visible()
         ready.locator('#shortcut-typing-probe').evaluate('node => node.remove()')
         # Every explicit chord/alias is accepted; typing, IME and repeats are not.
@@ -135,7 +135,7 @@ def test_operation_panel_shortcuts_and_responsive_state(page: Page, tmp_path: Pa
           const handlers = source.slice(source.indexOf('function keyboardTargetIsEditable('), source.indexOf('let shortcutToastTimer'));
           const classify = new Function('document', '$', handlers + ';return keyboardShortcutCommand;')(document, selector => document.querySelector(selector));
           const command = overrides => classify({key:'r', target:document.body, ...overrides});
-          return ['q','w','e','r'].map(key => command({key})).concat([
+          return ['q','e','w','r'].map(key => command({key})).concat([
             command({key:'R', ctrlKey:true, metaKey:true}),
             command({key:'Enter', metaKey:true}), command({key:'Enter', ctrlKey:true}),
             command({key:'End', ctrlKey:true}), command({key:'r', repeat:true}),
@@ -151,20 +151,20 @@ def test_operation_panel_shortcuts_and_responsive_state(page: Page, tmp_path: Pa
         help_dialog = page.locator('#keyboard-shortcuts-dialog')
         expect(help_dialog).to_be_visible()
         page.locator('#single-key-shortcuts').uncheck()
-        expect(help_dialog.locator('[data-shortcut-key="W"]')).to_have_text('Cmd + Ctrl + W')
+        expect(help_dialog.locator('[data-shortcut-key="E"]')).to_have_text('Cmd + Ctrl + E')
         page.screenshot(path='/tmp/dataviz-0244-shortcuts-desktop.png')
         page.keyboard.press('Escape')
         page.locator('#operation-panel-close').focus()
-        page.keyboard.press('w')
+        page.keyboard.press('e')
         expect(panel).to_be_visible()
-        page.keyboard.press('Meta+Control+w')
+        page.keyboard.press('Meta+Control+e')
         expect(panel).to_be_hidden()
         # Canvas forwards modified shortcuts even with single-key mode disabled.
         frame = page.frame_locator('#canvas-frame')
         frame.locator('body').click(position={'x':5, 'y':5})
-        page.keyboard.press('e')
+        page.keyboard.press('w')
         expect(panel).to_be_hidden()
-        page.keyboard.press('Meta+Control+e')
+        page.keyboard.press('Meta+Control+w')
         expect(page.locator('#operation-panel-title')).to_have_text('Controls')
         page.keyboard.press('?')
         expect(help_dialog).to_be_visible()
@@ -198,4 +198,3 @@ def test_operation_panel_shortcuts_and_responsive_state(page: Page, tmp_path: Pa
         page.keyboard.press('Escape')
         expect(panel).to_be_hidden()
         assert len(runs) == 1
-

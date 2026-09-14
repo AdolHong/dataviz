@@ -23,7 +23,7 @@ import dataviz.execution.cache as cache_module
 from dataviz.execution.events import ExecutionEvent
 from dataviz.sources import SOURCE_RUNNERS
 from dataviz.workspace import load_workspace
-from dataviz.workspace.models import CacheDefinition
+from dataviz.workspace.models import CacheDefinition, InteractiveTransformDefinition
 from dataviz.workspace.navigation import NavigationEditor
 
 
@@ -893,8 +893,9 @@ def test_shared_result_is_persisted_outside_dashboards_and_survives_restart(
         assert restarted.get("/shared/not-a-real-share").status_code == 404
 
 
+@pytest.mark.parametrize("cold_start_seconds", [0, 1.1], ids=["normal", "slow-cold-start"])
 def test_shared_result_adds_server_python_interaction_but_html_export_rejects_it(
-    tmp_path: Path,
+    tmp_path: Path, cold_start_seconds: float,
 ):
     root = tmp_path / "workspace"
     shutil.copytree(
@@ -913,12 +914,20 @@ def test_shared_result_adds_server_python_interaction_but_html_export_rejects_it
     transform["runtime"] = "server-python"
     transform["code"] = "scaled.py"
     transform["export"] = {"mode": "snapshot"}
+    # This tests Share persistence/restart, not execution latency. Do not carry
+    # the browser fixture's 1s deadline into a spawned Python process (imports
+    # and Artifact I/O count too). Use the normal Interactive runtime budget.
+    transform.pop("timeout_seconds", None)
+    interaction_timeout = InteractiveTransformDefinition.model_validate(transform).timeout_seconds
     transform_path.write_text(
         yaml.safe_dump(transform, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )
     transform_path.with_name("scaled.py").write_text(
-        """def transform(context):
+        # Deterministically model cold module loading beyond the JS fixture's
+        # one-second budget; this delay is not a polling/retry workaround.
+        f"import time\ntime.sleep({cold_start_seconds!r})\n"
+        + """def transform(context):
     frame = context.table("rows").copy()
     frame["value"] = frame["value"] * context.control_inputs["delay_ms"]
     return {"main": frame}
@@ -1045,7 +1054,10 @@ def test_shared_result_adds_server_python_interaction_but_html_export_rejects_it
         assert started.status_code == 200, started.text
         interaction_id = started.json()["interaction_id"]
         interaction = None
-        for _ in range(200):
+        # Observe a terminal receipt even when the worker consumes its full
+        # configured budget; API polling gets a small separate delivery margin.
+        deadline = time.monotonic() + interaction_timeout + 5
+        while time.monotonic() < deadline:
             interaction = restarted.get(
                 f"/api/interactions/{interaction_id}",
                 params={"session_id": shared_session},
@@ -1053,7 +1065,9 @@ def test_shared_result_adds_server_python_interaction_but_html_export_rejects_it
             if interaction["status"] in {"ready", "partial", "error", "cancelled"}:
                 break
             time.sleep(0.03)
-        assert interaction and interaction["status"] == "ready", interaction
+        assert interaction and interaction["status"] == "ready", json.dumps(
+            interaction, ensure_ascii=False, indent=2
+        )
         output = restarted.get(
             f"/api/interactions/{interaction_id}/outputs/interactive:scaled/main",
             params={"session_id": shared_session},
@@ -1478,14 +1492,21 @@ def test_keyboard_shortcuts_are_cross_platform_guarded_and_cross_frame():
     renderer = (ROOT / "src" / "dataviz" / "rendering" / "canvas.py").read_text()
 
     assert 'aria-keyshortcuts="Q Meta+Control+Q"' in template
-    assert 'aria-keyshortcuts="W Meta+Control+W"' in template
+    for content in (template, renderer):
+        assert 'aria-keyshortcuts="W Meta+Control+W"' in content
+        assert '<kbd data-shortcut-key="W">W</kbd></dt><dd>Controls</dd>' in content
+        assert '<kbd data-shortcut-key="E">E</kbd></dt><dd>Parameters</dd>' in content
+    for content in (script, runtime):
+        assert "w:'toggle-dashboard-controls'" in content
+        assert "e:'toggle-query-parameters'" in content
+    assert 'aria-keyshortcuts="E Meta+Control+E"' in template
     assert 'aria-keyshortcuts="R Meta+Control+R Control+Enter Meta+Enter Control+End"' in template
     assert 'id="keyboard-shortcuts-dialog"' in template
     assert 'id="shortcut-toast"' in template
     assert "event.repeat || event.isComposing || event.keyCode === 229" in script
     assert "(event.ctrlKey || event.metaKey) && event.key === 'Enter'" in script
     assert "q:'toggle-sidebar'" in script
-    assert "w:'toggle-query-parameters'" in script
+    assert "e:'toggle-query-parameters'" in script
     assert "r:'run-query'" in script
     assert "event.data.single_key" in script
     assert '<kbd>Q</kbd>' not in template
@@ -1497,7 +1518,7 @@ def test_keyboard_shortcuts_are_cross_platform_guarded_and_cross_frame():
     assert "window.parent !== window" in runtime
     assert 'data-runtime-shortcut-help' in renderer
     assert 'data-runtime-shortcut-toast' in renderer
-    assert 'aria-keyshortcuts="W Meta+Control+W"' in renderer
+    assert 'aria-keyshortcuts="E Meta+Control+E"' in renderer
     assert "showDatavizRuntimeShortcutToast('当前报告没有查询参数')" in runtime
 
 

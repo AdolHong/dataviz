@@ -113,8 +113,8 @@ def test_portable_query_tray_uses_shared_sidebar_for_clicks_and_shortcuts(page: 
         expect(page.locator('#run-button strong')).to_have_css('color', 'rgb(255, 255, 255)')
         page.locator('.topbar').screenshot(path='/tmp/dataviz-header-02410.png')
         # Hotkeys and pointer focus must not look like a second selected state.
-        for key, selector in (('q', '#sidebar-toggle'), ('w', '#query-parameters-toggle'),
-                              ('e', '#dashboard-controls-toggle')):
+        for key, selector in (('q', '#sidebar-toggle'), ('e', '#query-parameters-toggle'),
+                              ('w', '#dashboard-controls-toggle')):
             button = page.locator(selector)
             button.click()
             page.keyboard.press(key)
@@ -166,14 +166,14 @@ def test_portable_query_tray_uses_shared_sidebar_for_clicks_and_shortcuts(page: 
         expect(help_dialog).not_to_contain_text('Sidebar')
         expect(help_dialog).not_to_contain_text('Ctrl/Cmd')
         help_dialog.locator('[data-runtime-single-key-shortcuts]').uncheck()
-        expect(help_dialog.locator('[data-shortcut-key="W"]')).to_have_text('Cmd + Ctrl + W')
+        expect(help_dialog.locator('[data-shortcut-key="E"]')).to_have_text('Cmd + Ctrl + E')
         page.keyboard.press('Escape')
         panel = page.locator("#dv-runtime-query-panel")
-        page.keyboard.press('w')
+        page.keyboard.press('e')
         expect(panel).to_be_hidden()
-        page.keyboard.press('Meta+Control+w')
+        page.keyboard.press('Meta+Control+e')
         expect(panel).to_be_visible()
-        page.keyboard.press('Meta+Control+w')
+        page.keyboard.press('Meta+Control+e')
         expect(panel).to_be_hidden()
         page.keyboard.press('?')
         expect(help_dialog).to_be_visible()
@@ -211,10 +211,10 @@ def test_portable_query_tray_uses_shared_sidebar_for_clicks_and_shortcuts(page: 
         expect(page.locator('.dv-runtime-query-tray')).to_be_hidden()
         canvas_top = canvas.bounding_box()['y']
         page.screenshot(path='/tmp/dataviz-export-parameters-sidebar.png')
-        page.keyboard.press('w')
+        page.keyboard.press('e')
         expect(sidebar).to_have_count(0)
         assert canvas.bounding_box()['y'] == pytest.approx(canvas_top, abs=1)
-        page.keyboard.press('w')
+        page.keyboard.press('e')
         expect(sidebar).to_have_attribute('aria-label', 'Parameters')
         toggle.click()
         expect(sidebar).to_have_count(0)
@@ -227,9 +227,9 @@ def test_portable_query_tray_uses_shared_sidebar_for_clicks_and_shortcuts(page: 
         entry.click()
         expect(sidebar).to_have_attribute('aria-label', 'Controls')
         expect(owner).not_to_have_attribute('open', '')
-        page.keyboard.press('e')
+        page.keyboard.press('w')
         expect(sidebar).to_have_count(0)
-        page.keyboard.press('e')
+        page.keyboard.press('w')
         expect(sidebar).to_have_attribute('aria-label', 'Controls')
         scope_heading = sidebar.locator('h3').last
         expect(scope_heading).to_be_focused()
@@ -247,7 +247,7 @@ def test_portable_query_tray_uses_shared_sidebar_for_clicks_and_shortcuts(page: 
         entry.click()
         expect(sidebar).to_have_count(0)
         page.set_viewport_size({'width': 375, 'height': 760})
-        page.keyboard.press('w')
+        page.keyboard.press('e')
         expect(sidebar).to_have_attribute('aria-modal', 'true')
         assert sidebar.bounding_box()['width'] == 320
         page.screenshot(path='/tmp/dataviz-export-parameters-mobile.png')
@@ -314,4 +314,3 @@ def test_query_reload_restores_visible_date_range_and_single_select(page: Page, 
         assert runs[0]["query_parameter_state"] == {
             "dates": {"value": ["2026-09-09", "2026-09-09"]}, "grain": {"value": "category"},
         }
-

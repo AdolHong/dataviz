@@ -375,10 +375,16 @@ def test_three_surface_renderer_pending_error_and_recovery(page: Page, tmp_path:
           validate() {
             if (!window.auditInitialValidated) {
               window.auditInitialValidated = true;
-              return new Promise(resolve => { window.releaseAuditInitial = resolve; });
+              return new Promise(resolve => {
+                window.releaseAuditInitial = resolve;
+                document.body.dataset.auditInitialPending = 'true';
+              });
             }
             const mode = window.dataviz.control.value('dashboard:view-states/mode');
-            if (mode === 'pending') return new Promise(resolve => { window.releaseAuditRender = resolve; });
+            if (mode === 'pending') return new Promise(resolve => {
+              window.releaseAuditRender = resolve;
+              document.body.dataset.auditRenderPending = 'true';
+            });
             if (mode === 'error') {
               const error = new Error('Controlled renderer failure');
               error.stack = error.message; throw error;
@@ -405,6 +411,9 @@ def test_three_surface_renderer_pending_error_and_recovery(page: Page, tmp_path:
     def inspect(surface):
         frame = page.frame_locator('#canvas-frame') if surface == 'server' else page
         view = frame.locator('[data-view-id="state"]')
+        # A loading View may still be fetching inputs. Only the renderer's own
+        # marker proves its deferred validation (and resolver) exists.
+        expect(frame.locator('body')).to_have_attribute('data-audit-initial-pending', 'true', timeout=20_000)
         expect(view).to_have_attribute('data-view-status', 'loading', timeout=20_000)
         expect(view).to_have_attribute('aria-busy', 'true')
         frame.locator('body').evaluate('() => window.releaseAuditInitial()')
@@ -417,6 +426,7 @@ def test_three_surface_renderer_pending_error_and_recovery(page: Page, tmp_path:
             control.locator('[data-control-trigger]').click()
             control.locator('.dv-choice-option').filter(has_text=re.compile('^' + mode + '$')).click()
         change('pending')
+        expect(frame.locator('body')).to_have_attribute('data-audit-render-pending', 'true')
         expect(view).to_have_attribute('data-view-updating', 'true')
         expect(view).to_have_attribute('aria-busy', 'true')
         expect(view).to_contain_text('Ready value: 7')

@@ -77,6 +77,8 @@ def test_three_surface_shell_audit(page: Page, tmp_path: Path, with_fields: bool
             shortcuts.click()
             expect(help_dialog).to_be_visible()
             expect(help_dialog.locator("h2")).to_have_text("Keyboard Shortcuts")
+            for key, label in (("W", "Controls"), ("E", "Parameters")):
+                expect(help_dialog.locator(f'dl > div:has(kbd[data-shortcut-key="{key}"]) > dd')).to_have_text(label)
             expect(help_dialog.locator('h2')).to_be_focused()
             assert help_dialog.locator('h2').evaluate('node => getComputedStyle(node).outlineStyle') == 'none'
             help_state = {key: appearance(help_dialog.locator(selector)) for key, selector in
@@ -101,7 +103,7 @@ def test_three_surface_shell_audit(page: Page, tmp_path: Path, with_fields: bool
                 expect(controls).to_be_disabled()
                 expect(parameters).to_be_visible()
                 expect(parameters).to_be_disabled()
-                for key in ("w", "e"):
+                for key in ("e", "w"):
                     page.keyboard.press(key)
                     expect(sidebar).to_be_hidden()
                     expect(page.locator('[data-runtime-shortcut-toast]' if standalone else '#shortcut-toast')).to_be_visible()
@@ -126,13 +128,13 @@ def test_three_surface_shell_audit(page: Page, tmp_path: Path, with_fields: bool
             evidence[surface][str(width)]["header"] = header_state
             evidence[surface][str(width)]["help"] = help_state
             page.screenshot(path=f"/tmp/dataviz-audit-{surface}-{width}.png")
-            page.keyboard.press("e")
+            page.keyboard.press("w")
             expect(sidebar).to_be_hidden()
             parameters.click()
             expect(sidebar).to_be_visible()
             if standalone:
                 expect(sidebar.locator("input, select, textarea")).to_have_count(0)
-            page.keyboard.press("w")
+            page.keyboard.press("e")
             expect(sidebar).to_be_hidden()
         if standalone:
             expect(page.locator("#run-button, #share-button")).to_have_count(0)
@@ -214,7 +216,7 @@ def test_contextual_controls_sidebar_and_portable_state(page: Page, tmp_path: Pa
         page.wait_for_function("document.querySelector('#canvas-frame').contentWindow.dataviz.control_state['view:city-detail/min_value']?.value === 100")
         page.screenshot(path='/tmp/dataviz-context-desktop.png')
         value.evaluate('(node) => node.blur()')
-        page.keyboard.press('e')
+        page.keyboard.press('w')
         expect(panel.locator('[data-context-group]')).to_have_count(0)
         expect(panel).to_be_hidden()
         entry.click()
@@ -240,7 +242,7 @@ def test_contextual_controls_sidebar_and_portable_state(page: Page, tmp_path: Pa
         panel = page.locator('.dv-context-sidebar')
         expect(panel).to_be_visible()
         expect(panel.locator('.dv-context-sidebar__body > section')).to_have_count(3)
-        page.keyboard.press('e')
+        page.keyboard.press('w')
         expect(panel).to_have_count(0)
         entry.click()
         expect(panel).to_be_visible()
@@ -331,9 +333,9 @@ def test_contextual_controls_sibling_switch_and_popover_override(page: Page, tmp
         if not with_dashboard:
             expect(page.locator('#dashboard-controls-toggle')).to_be_disabled()
             page.locator('#operation-panel-title').click()
-            page.keyboard.press('e')
+            page.keyboard.press('w')
             expect(panel).to_be_hidden()
-            page.keyboard.press('e')
+            page.keyboard.press('w')
             expect(page.locator('#shortcut-toast')).to_contain_text('no dashboard controls')
             first.click()
         second.click()
@@ -415,7 +417,7 @@ def test_contextual_controls_sibling_switch_and_popover_override(page: Page, tmp
                 page.keyboard.press('Escape')
                 expect(section).not_to_have_attribute('open', '')
                 expect(panel).to_be_visible()
-                page.keyboard.press('e')
+                page.keyboard.press('w')
                 expect(panel).to_be_hidden()
 
 
@@ -464,4 +466,3 @@ def test_server_header_hydrates_dataset_driven_dashboard_selection_options(
         expect(
             frame.locator('[data-view-id="total-revenue"] .dv-metric__secondary')
         ).to_contain_text("订单")
-

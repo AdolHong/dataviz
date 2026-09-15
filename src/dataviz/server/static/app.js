@@ -13,6 +13,9 @@ const state = {
   sidebarWidth: 250,
   sidebarWidthCustomized: false,
   sidebarCollapsed: false,
+  expandedFolders: new Set(),
+  navigationSearch: '',
+  searchCollapsedFolders: new Set(),
   workspaceRevision: 0,
   workspaceEventRevision: 0,
   workspaceEventSource: null,
@@ -564,6 +567,7 @@ function saveTabUiState() {
         width: state.sidebarWidth,
         customized: state.sidebarWidthCustomized,
         collapsed: state.sidebarCollapsed,
+        expandedFolders: [...state.expandedFolders],
       },
       dashboards,
     }),
@@ -597,6 +601,7 @@ function restoreTabUiState() {
     state.preferredDashboardId = saved.activeDashboardId || null;
     state.selectedPages = saved.selectedPages || {};
     state.sidebarWidthCustomized = Boolean(saved.sidebar?.customized);
+    state.expandedFolders = new Set(Array.isArray(saved.sidebar?.expandedFolders) ? saved.sidebar.expandedFolders.filter(id => typeof id === 'string') : []);
     state.sidebarWidth = state.sidebarWidthCustomized
       ? Number(saved.sidebar?.width) || 250
       : 250;
@@ -4207,6 +4212,10 @@ function dashboardButton(dashboard) {
 }
 
 function renderNavigation() {
+  if (!state.payload) return;
+  const query = state.navigationSearch.trim().toLocaleLowerCase();
+  $('#dashboard-nav').dataset.searching = String(Boolean(query));
+  const matches = (...values) => values.some(value => String(value || '').toLocaleLowerCase().includes(query));
   const root = document.createElement('div');
   root.className = 'nav-tree';
   const foldersByParent = new Map();
@@ -4219,13 +4228,18 @@ function renderNavigation() {
   for (const folder of state.payload.folders || []) appendTo(foldersByParent, folder.parent_id, folder);
   for (const dashboard of state.payload.dashboards) appendTo(dashboardsByParent, dashboard.parent_id, dashboard);
 
-  const renderLevel = (parentId = null, depth = 0) => {
+  const renderLevel = (parentId = null, depth = 0, ancestorMatch = false) => {
     const level = document.createElement('div');
     level.className = 'nav-level';
     level.dataset.depth = depth;
     for (const folder of foldersByParent.get(parentId || '__root__') || []) {
+      const matched = Boolean(query) && (ancestorMatch || matches(folder.title, folder.logical_path));
+      const children = renderLevel(folder.id, depth + 1, matched);
+      if (query && !matched && !children.childElementCount) continue;
       const group = document.createElement('div');
       group.className = 'nav-folder';
+      const expanded = query ? !state.searchCollapsedFolders.has(folder.id) : state.expandedFolders.has(folder.id);
+      group.classList.toggle('is-collapsed', !expanded);
       group.dataset.folderId = folder.id;
       group.dataset.navType = 'folder';
       const toggle = document.createElement('button');
@@ -4234,11 +4248,23 @@ function renderNavigation() {
       toggle.dataset.navType = 'folder';
       toggle.dataset.folderId = folder.id;
       toggle.dataset.parentId = folder.parent_id || '';
-      toggle.draggable = true;
+      toggle.draggable = !query;
+      toggle.setAttribute('aria-expanded', String(expanded));
       toggle.innerHTML = `<i>›</i><strong>${escapeHtml(folder.title)}</strong>`;
       bindOverflowTitle(toggle, toggle.querySelector('strong'), folder.title);
-      const children = renderLevel(folder.id, depth + 1);
-      toggle.addEventListener('click', () => group.classList.toggle('is-collapsed'));
+      toggle.addEventListener('click', () => {
+        const open = group.classList.contains('is-collapsed');
+        group.classList.toggle('is-collapsed', !open);
+        toggle.setAttribute('aria-expanded', String(open));
+        if (query) {
+          if (open) state.searchCollapsedFolders.delete(folder.id);
+          else state.searchCollapsedFolders.add(folder.id);
+        } else {
+          if (open) state.expandedFolders.add(folder.id);
+          else state.expandedFolders.delete(folder.id);
+          saveTabUiState();
+        }
+      });
       toggle.addEventListener('dragstart', (event) => beginNavigationDrag(event, {
         type: 'folder', id: folder.id, parentId: folder.parent_id,
       }));
@@ -4250,16 +4276,33 @@ function renderNavigation() {
       level.append(group);
     }
     for (const dashboard of dashboardsByParent.get(parentId || '__root__') || []) {
+      if (query && !ancestorMatch && !matches(dashboard.canvas_name, dashboard.id, dashboard.path)) continue;
       level.append(dashboardButton(dashboard));
     }
     return level;
   };
   root.append(renderLevel());
   $('#dashboard-nav').replaceChildren(root);
+  $('#nav-search-empty').hidden = !query || Boolean(root.querySelector('.nav-button, .nav-folder'));
+  $('#nav-search-clear').hidden = !state.navigationSearch;
   renderTrash();
 }
 
+function setNavigationFoldersExpanded(folderId, expanded) {
+  for (const folder of state.payload.folders || []) {
+    if (folderId && folder.id !== folderId && !folderIsInside(folder.id, folderId)) continue;
+    if (state.navigationSearch.trim()) {
+      if (expanded) state.searchCollapsedFolders.delete(folder.id);
+      else state.searchCollapsedFolders.add(folder.id);
+    } else if (expanded) state.expandedFolders.add(folder.id);
+    else state.expandedFolders.delete(folder.id);
+  }
+  saveTabUiState();
+  renderNavigation();
+}
+
 function beginNavigationDrag(event, payload) {
+  if (state.navigationSearch.trim()) { event.preventDefault(); return; }
   state.draggedNavigation = payload;
   event.dataTransfer.effectAllowed = 'move';
   event.dataTransfer.setData('text/plain', `${payload.type}:${payload.id}`);
@@ -4304,6 +4347,7 @@ function installDashboardRowDrag(row, payload) {
     if (dragged) state.navigationDragEndedAt = performance.now();
   };
   row.addEventListener('pointerdown', (event) => {
+    if (state.navigationSearch.trim()) return;
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     pointer = {id:event.pointerId, x:event.clientX, y:event.clientY, dragging:false, parentId:undefined, target:null};
     row.setPointerCapture(event.pointerId);
@@ -4378,6 +4422,7 @@ function folderIsInside(folderId, possibleAncestorId) {
 }
 
 function canDropNavigation(parentId) {
+  if (state.navigationSearch.trim()) return false;
   const dragged = state.draggedNavigation;
   if (!dragged || dragged.parentId === parentId) return false;
   if (dragged.type === 'folder') {
@@ -4409,6 +4454,11 @@ async function commitNavigationDrop(parentId, target) {
       await request(`/api/navigation/dashboards/${encodeURIComponent(dragged.id)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({parent_id:parentId})});
     } else {
       await request(`/api/navigation/folders/${encodeURIComponent(dragged.id)}/placement`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({parent_id:parentId})});
+    }
+    if (parentId) {
+      if (!state.navigationSearch.trim()) state.expandedFolders.add(parentId);
+      state.searchCollapsedFolders.delete(parentId);
+      saveTabUiState();
     }
     await refreshNavigation(dragged.path);
     showShortcutToast(dragged.type === 'dashboard' ? 'Dashboard moved.' : 'Folder moved.');
@@ -4755,6 +4805,10 @@ function showNavMenu(event, target) {
   const dashboardId = target?.dataset.id;
   const trashId = target?.dataset.trashId;
   if (!target) actions.push(['＋', 'New folder', () => openFolderDialog(null)]);
+  if (!target || folderId) {
+    actions.push(['', 'Expand all subfolders', () => setNavigationFoldersExpanded(folderId, true)]);
+    actions.push(['', 'Collapse all subfolders', () => setNavigationFoldersExpanded(folderId, false)]);
+  }
   if (trashId) {
     actions.push(['↟', 'Restore location', () => restoreTrashItem(trashId)]);
     actions.push(['×', 'Delete permanently…', () => openPurgeTrashDialog(trashId)]);
@@ -4778,9 +4832,9 @@ function showNavMenu(event, target) {
     return button;
   }));
   menu.hidden = false;
-  const width = 176, height = actions.length * 39 + 12;
-  menu.style.left = `${Math.min(event.clientX, window.innerWidth - width - 8)}px`;
-  menu.style.top = `${Math.min(event.clientY, window.innerHeight - height - 8)}px`;
+  const {width, height} = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(event.clientX, window.innerWidth - width - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(event.clientY, window.innerHeight - height - 8))}px`;
 }
 
 function folderOptions(selected = null, excluded = null) {
@@ -5225,6 +5279,16 @@ $('#dashboard-nav').addEventListener('contextmenu', (event) => {
   const target = event.target.closest('[data-nav-type]');
   showNavMenu(event, target);
 });
+$('#nav-search').addEventListener('input', event => {
+  state.navigationSearch = event.target.value;
+  state.searchCollapsedFolders.clear();
+  renderNavigation();
+});
+$('#nav-search-clear').addEventListener('click', () => {
+  $('#nav-search').value = '';
+  $('#nav-search').dispatchEvent(new Event('input'));
+  $('#nav-search').focus();
+});
 $('#nav-trash-list').addEventListener('contextmenu', (event) => {
   const target = event.target.closest('[data-nav-type="trash"]');
   if (target) showNavMenu(event, target);
@@ -5237,7 +5301,7 @@ $('#nav-root-drop').addEventListener('dragover', (event) => navigationDragOver(e
 $('#nav-root-drop').addEventListener('dragleave', (event) => event.currentTarget.classList.remove('is-drop-target'));
 $('#nav-root-drop').addEventListener('drop', (event) => navigationDrop(event, null, event.currentTarget));
 $('.rail').addEventListener('contextmenu', (event) => {
-  if (event.target.closest('#dashboard-nav, #nav-trash')) return;
+  if (event.target.closest('#dashboard-nav, #nav-trash, .nav-search')) return;
   showNavMenu(event, null);
 });
 window.addEventListener('blur', () => {

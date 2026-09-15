@@ -47,10 +47,10 @@ flowchart LR
 
 ## 两种起步方式
 
-Python 3.11–3.14，推荐 3.12。从本地发行 wheel 安装（当前 **0.26.0**，包含配套 Skill）：
+Python 3.11–3.14，推荐 3.12。从本地发行 wheel 安装（当前 **0.26.1**，包含配套 Skill）：
 
 ```bash
-python -m pip install ./ai_dataviz-0.26.0-py3-none-any.whl
+python -m pip install ./ai_dataviz-0.26.1-py3-none-any.whl
 dataviz scaffold standalone --id sales --output ./sales
 dataviz validate ./sales/dashboard.yaml --strict
 dataviz serve ./sales/dashboard.yaml --port 8080

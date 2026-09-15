@@ -1536,6 +1536,13 @@ def test_server_sidebar_is_resizable_collapsible_and_tab_local():
     assert 'id="add-root-folder"' not in template
     assert "$('#add-root-folder')" not in script
     assert 'id="sidebar-resizer"' in template
+    assert 'id="nav-search" type="search"' in template
+    assert 'aria-label="Search dashboards and folders"' in template
+    assert 'id="nav-search-empty"' in template
+    assert 'expandedFolders: new Set()' in script
+    assert 'expandedFolders: [...state.expandedFolders]' in script
+    assert 'Expand all subfolders' in script
+    assert 'Collapse all subfolders' in script
     assert 'role="separator"' in template
     assert "width: state.sidebarWidth" in script
     assert "customized: state.sidebarWidthCustomized" in script

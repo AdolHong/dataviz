@@ -478,6 +478,19 @@ button.brand:hover{background:#f4f5f4}
 button.brand:focus-visible{outline:2px solid rgba(68,81,163,.38);outline-offset:2px}
 body.sidebar-collapsed button.brand{color:var(--ink)}
 .dashboard-nav{padding-top:10px}
+.nav-search{position:relative;flex:none;margin:12px 0 0;min-width:0}
+.nav-search input{box-sizing:border-box;width:100%;min-width:0;height:36px;padding:0 32px 0 10px;border:1px solid var(--line);border-radius:7px;background:var(--paper,#fff);color:var(--ink);font:inherit;font-size:13px}
+.nav-search input::placeholder{color:#626b65}
+.nav-search input:focus-visible{outline:2px solid var(--accent,#4451a3);outline-offset:1px}
+.nav-search input::-webkit-search-cancel-button{display:none}
+.nav-search button{position:absolute;right:3px;top:3px;width:30px;height:30px;display:grid;place-items:center;padding:6px;color:var(--ink);border:0;border-radius:5px;background:transparent;cursor:pointer}
+.nav-search button[hidden],.nav-search-empty[hidden]{display:none}
+.nav-search button:hover{background:#eef0f8}
+.nav-search svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5}
+.nav-search-empty{margin:14px 4px 0;color:#626b65;font-size:13px;line-height:1.5}
+.nav-context-menu{width:224px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px);overflow-y:auto}
+.nav-context-menu button span:empty{display:none}
+#dashboard-nav[data-searching="true"] .nav-button,#dashboard-nav[data-searching="true"] .nav-folder__toggle{cursor:pointer}
 
 @media(max-width:980px){
   .shell{

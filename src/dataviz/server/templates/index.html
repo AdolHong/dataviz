@@ -63,6 +63,11 @@
     </header>
 
     <aside id="dashboard-sidebar" class="rail">
+      <div class="nav-search" role="search" aria-label="Dashboard navigation">
+        <input id="nav-search" type="search" placeholder="Search dashboards…" aria-label="Search dashboards and folders" autocomplete="off" spellcheck="false">
+        <button id="nav-search-clear" type="button" aria-label="Clear navigation search" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+      </div>
+      <p id="nav-search-empty" class="nav-search-empty" role="status" hidden>No matching dashboards or folders.</p>
       <div id="nav-root-drop" class="nav-root-drop" aria-hidden="true">Move to top level</div>
       <nav id="dashboard-nav" class="dashboard-nav" aria-label="Dashboards"></nav>
       <details id="nav-trash" class="nav-trash" data-empty="true">

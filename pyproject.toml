@@ -1,6 +1,6 @@
 [project]
 name = "ai-dataviz"
-version = "0.26.0"
+version = "0.26.1"
 description = "Workspace-first data dashboards for humans and AI"
 readme = "README.md"
 license = "MIT"

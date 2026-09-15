@@ -314,6 +314,10 @@ Dataviz 使用温和但精确的圆角：微元素 5px，输入与按钮 7px，�
 
 ### Navigation and Direct Manipulation
 
+- Sidebar 顶部使用紧凑搜索框（36px 高），不区分大小写地匹配 Dashboard 名称、ID 和路径，以及 Folder 名称和逻辑路径。搜索保留并展开命中项的祖先路径；命中 Folder 时显示其全部后代。
+- Folder 默认折叠，普通浏览的展开状态保存在当前标签页会话中。搜索临时展开结果路径，搜索期间的手动展开/折叠不覆盖普通浏览状态；清空搜索后恢复原有展开状态。
+- Sidebar 根目录空白处与 Folder 右键菜单提供 `Expand all subfolders` / `Collapse all subfolders`：根目录递归作用于所有 Folder，Folder 菜单作用于该 Folder 及其全部后代；搜索期间仅改变临时展开状态。
+- 搜索生效时禁用 Folder 和 Dashboard 拖动及投放，清空搜索后恢复。普通浏览中成功投放到 Folder 后自动展开目标 Folder。
 - Sidebar Dashboard 行的任意非交互区域都可拖动；不显示六点拖动手柄。按下后超过小阈值才进入拖动，普通点击仍负责导航。
 - 拖动中使用紧跟指针、零过渡的浮动预览；源行变为虚线占位。Folder 目标显示 `DROP HERE`，底部根目录目标显示 `MOVE TO TOP LEVEL`；导航空白区域也可作为根目录投放区。
 - 参数编辑器属于高密度排序界面，Parameter Card 和 Choice Row 保留显式六点句柄。拖动与上下箭头是互补的鼠标/键盘路径；默认项复选框不兼任拖动入口。

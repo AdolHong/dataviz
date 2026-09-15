@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.26.1 — 2026-09-15
+
+- Add sidebar search for Dashboard names, IDs and folder paths. Folders start collapsed and retain tab-local expansion; root/folder context menus expand or collapse their subtrees. Search reveals matching paths without overwriting browsing expansion and disables dragging until cleared; normal browsing drops reveal the destination folder.
+
 ## 0.26.0 — 2026-09-15
 
 - Close automatic-refresh visibility/debounce and Perspective completion-handoff races found during release review; retain one latest update without background submissions or dropped renderer updates.

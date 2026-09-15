@@ -64,6 +64,97 @@ def test_multi_page_example_renders_both_analysis_paths(page: Page, tmp_path: Pa
 
 
 @pytest.mark.e2e
+def test_sidebar_search_and_recursive_folder_expansion(page: Page, tmp_path: Path):
+    workspace = _copy_workspace(MINIMAL, tmp_path / 'search-navigation')
+    config = workspace / 'workspace.yaml'
+    definition = yaml.safe_load(config.read_text())
+    definition['folders'] = [{'path': name} for name in ['分析', '分析/季度', 'Archive', 'Archive/Old']]
+    config.write_text(yaml.safe_dump(definition, allow_unicode=True))
+    (workspace / 'dashboards/sales-overview').rename(workspace / 'dashboards/分析##季度##sales-overview')
+    with _running_server(workspace) as base_url:
+        page.goto(base_url, wait_until='domcontentloaded')
+        folder = page.locator('.nav-folder__toggle', has_text='分析')
+        nested = page.locator('.nav-folder__toggle', has_text='季度')
+        archive = page.locator('.nav-folder__toggle', has_text='Archive')
+        dashboard = page.locator('.nav-button[data-id="sales-overview"]')
+        expect(folder).to_have_attribute('aria-expanded', 'false')
+        expect(nested).not_to_be_visible()
+        search = page.get_by_role('searchbox', name='Search dashboards and folders')
+        search.fill('SALES-OVERVIEW')
+        expect(dashboard).to_be_visible()
+        expect(folder).to_have_attribute('aria-expanded', 'true')
+        expect(archive).to_have_count(0)
+        search.fill('季度')
+        expect(dashboard).to_be_visible()
+        search.fill('qwer-no-match')
+        expect(page.locator('#nav-search-empty')).to_be_visible()
+        expect(search).to_be_focused()
+        page.get_by_role('button', name='Clear navigation search').click()
+        expect(folder).to_have_attribute('aria-expanded', 'false')
+        expect(dashboard).not_to_be_visible()
+        folder.click(button='right')
+        page.get_by_role('menuitem', name='Expand all subfolders', exact=True).click()
+        expect(dashboard).to_be_visible()
+        expect(nested).to_have_attribute('aria-expanded', 'true')
+        expect(archive).to_have_attribute('aria-expanded', 'false')
+        page.reload(wait_until='domcontentloaded')
+        expect(dashboard).to_be_visible()
+        # Blank navigation space is the root, not the last selected folder.
+        page.locator('#dashboard-nav').click(button='right', position={'x': 4, 'y': 350})
+        page.get_by_role('menuitem', name='Expand all subfolders', exact=True).click()
+        expect(archive).to_have_attribute('aria-expanded', 'true')
+        folder.click(button='right')
+        page.get_by_role('menuitem', name='Collapse all subfolders', exact=True).click()
+        expect(folder).to_have_attribute('aria-expanded', 'false')
+        expect(nested).to_have_attribute('aria-expanded', 'false')
+        expect(archive).to_have_attribute('aria-expanded', 'true')
+        page.locator('#dashboard-nav').click(button='right', position={'x': 4, 'y': 350})
+        page.get_by_role('menuitem', name='Collapse all subfolders', exact=True).click()
+        expect(archive).to_have_attribute('aria-expanded', 'false')
+        search.fill('sales')
+        expect(dashboard).to_be_visible()
+        for width in [1440, 390]:
+            page.set_viewport_size({'width': width, 'height': 900})
+            if page.locator('body').evaluate("el => el.classList.contains('sidebar-collapsed')"):
+                page.locator('#sidebar-toggle').click()
+            expect(search).to_be_visible()
+            page.wait_for_function("() => document.querySelector('.rail').getBoundingClientRect().left >= 0")
+            bounds = page.locator('.nav-search').bounding_box()
+            assert bounds and bounds['x'] >= 0 and bounds['x'] + bounds['width'] <= width
+            page.screenshot(path=str(ROOT / '.test-evidence' / f'nav-search-{width}.png'))
+        page.set_viewport_size({'width': 1440, 'height': 900})
+        # Searching disables both custom row dragging and native folder dragging.
+        search.fill('a')  # sales-overview and Archive both match.
+        expect(dashboard).to_be_visible()
+        expect(archive).to_be_visible()
+        expect(archive).to_have_attribute('draggable', 'false')
+        moves = []
+        page.on('request', lambda request: moves.append(request.url)
+                if request.method == 'PATCH' and '/api/navigation/' in request.url else None)
+        source = dashboard.bounding_box()
+        target = archive.bounding_box()
+        assert source and target
+        page.mouse.move(source['x'] + source['width'] / 2, source['y'] + source['height'] / 2)
+        page.mouse.down()
+        page.mouse.move(target['x'] + target['width'] / 2, target['y'] + target['height'] / 2, steps=8)
+        expect(page.locator('.nav-drag-preview')).to_have_count(0)
+        expect(page.locator('#nav-root-drop')).to_have_attribute('aria-hidden', 'true')
+        page.mouse.up()
+        expect(archive.locator('xpath=..').locator('.nav-button')).to_have_count(0)
+        assert moves == []
+        page.get_by_role('button', name='Clear navigation search').click()
+        expect(archive).to_have_attribute('aria-expanded', 'false')
+        page.reload(wait_until='domcontentloaded')
+        expect(archive).to_have_attribute('aria-expanded', 'false')
+        expect(archive).to_have_attribute('draggable', 'true')
+        folder.focus()
+        page.keyboard.press('Enter')
+        nested.focus()
+        page.keyboard.press('Enter')
+        expect(dashboard).to_be_visible()
+
+
+@pytest.mark.e2e
 def test_sidebar_dashboard_can_be_dragged_and_renamed_from_context_menu(
     page: Page, tmp_path: Path
 ):
@@ -151,4 +242,3 @@ def test_sidebar_dashboard_can_be_dragged_and_renamed_from_context_menu(
             page.locator('#dashboard-nav > .nav-tree > .nav-level > .nav-button[data-id="sales-overview"]')
         ).to_be_visible()
         assert (workspace / "dashboards" / "Sales review" / "dashboard.yaml").is_file()
-

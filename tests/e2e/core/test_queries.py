@@ -267,7 +267,7 @@ def test_portable_query_tray_uses_shared_sidebar_for_clicks_and_shortcuts(page: 
 
 @pytest.mark.e2e
 @pytest.mark.parametrize("reload_phase", ["running", "ready"])
-def test_query_reload_restores_visible_date_range_and_single_select(page: Page, tmp_path: Path, reload_phase: str):
+def test_query_reload_restores_visible_date_range_and_single_select(page: Page, tmp_path: Path, reload_phase: str, browser_step):
     from dataviz.standalone import prepare_input
 
     dashboard = tmp_path / "query.yaml"
@@ -292,7 +292,8 @@ def test_query_reload_restores_visible_date_range_and_single_select(page: Page, 
     root, _ = prepare_input(dashboard)
     assert load_workspace(root).dashboard("query-restore").definition.id == "query-restore"
     with _running_server(root, watch=False) as url:
-        _open_single_fixture_dashboard(page, url, root)
+        with browser_step('query-restore-open'):
+            _open_single_fixture_dashboard(page, url, root)
         endpoints = page.locator('#parameter-form .dv-date-range__endpoint')
         endpoints.nth(0).fill("2026-09-09")
         endpoints.nth(1).fill("2026-09-09")
@@ -303,11 +304,14 @@ def test_query_reload_restores_visible_date_range_and_single_select(page: Page, 
         field.locator('.dv-choice-option', has_text="品类").click()
         summary = field.locator('[data-control-summary]')
         expect(summary).to_have_text("品类")
-        page.locator('#run-button').click()
-        expect(page.locator('#run-button strong')).to_have_text("Cancel")
+        with browser_step('query-restore-submit'):
+            page.locator('#run-button').click()
+            expect(page.locator('#run-button strong')).to_have_text("Cancel")
         if reload_phase == "ready":
-            expect(page.locator('#run-button strong')).to_have_text("Run", timeout=30_000)
-        page.reload(wait_until="domcontentloaded")
+            with browser_step('query-restore-wait-ready'):
+                expect(page.locator('#run-button strong')).to_have_text("Run", timeout=30_000)
+        with browser_step('query-restore-reload'):
+            page.reload(wait_until="domcontentloaded")
         expect(select).to_have_value("category")
         expect(page.locator('#parameter-form input[name="dates"]')).to_have_value("2026-09-09,2026-09-09")
         if not endpoints.nth(0).is_visible():
@@ -318,7 +322,17 @@ def test_query_reload_restores_visible_date_range_and_single_select(page: Page, 
         expect(endpoints.nth(1)).to_have_value("2026-09-09")
         expect(summary).to_have_text("品类")
         table = page.frame_locator('#canvas-frame').locator('[data-view-id="table"]')
-        expect(table).to_contain_text("category", timeout=30_000)
+        with browser_step('query-restore-canvas-ready'):
+            # Reload may replace the placeholder iframe after the shell has
+            # restored its inputs. Wait in the stable top-level context before
+            # asking the browser driver to resolve a child execution context.
+            page.wait_for_function("""() => {
+              const frame = document.querySelector('#canvas-frame');
+              const view = frame?.contentDocument?.querySelector('[data-view-id="table"]');
+              return view?.dataset.viewStatus === 'ready';
+            }""", timeout=30_000)
+        with browser_step('query-restore-check-result'):
+            expect(table).to_contain_text("category", timeout=30_000)
         assert "2026-09-03" not in table.inner_text()
         assert len(runs) == 1
         assert runs[0]["query_parameter_state"] == {

@@ -30,7 +30,7 @@ const ctx={state:{dashboard:{id:'d'},navigationPending:false},runtimeFor:()=>run
   }
   return {status:process.argv[1]};
  }};
-vm.runInNewContext(source.slice(source.indexOf('async function runDashboard()'),source.indexOf('\nfunction listen('))+
+vm.runInNewContext(source.slice(source.indexOf('async function runDashboard('),source.indexOf('\nfunction listen('))+
  source.slice(source.indexOf('async function finishRun('),source.indexOf('\nfunction setControlsEnabled(')),ctx);
 (async()=>{
  await ctx.finishRun('run','d','one');
@@ -84,9 +84,10 @@ const old={pendingRunId:'old',pageId:'one'}, next={pageId:'two'};
 let active=old;
 const nodes={'#run-button':{disabled:false},'#run-message':{textContent:''}};
 const ctx={state:{dashboard:{id:'d'},navigationPending:false},runtimeFor:()=>old,
+ automaticRefreshTimer:null,clearTimeout:()=>{},
  activeRuntime:()=>active,$:id=>nodes[id],sessionQuery:()=>'',request:()=>gate,
  setRunButtonLabel:label=>{nodes.label=label;}};
-vm.runInNewContext(source.slice(source.indexOf('async function runDashboard()'),source.indexOf('\nfunction listen(')),ctx);
+vm.runInNewContext(source.slice(source.indexOf('async function runDashboard('),source.indexOf('\nfunction listen(')),ctx);
 (async()=>{
  const work=ctx.runDashboard();
  active=next;

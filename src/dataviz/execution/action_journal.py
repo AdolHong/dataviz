@@ -21,7 +21,10 @@ class ActionConflict(ValueError):
 def action_journal_path(workspace_root: Path) -> Path:
     metadata = workspace_root / ".dataviz" / "standalone.json"
     if metadata.is_file():
-        source = Path(json.loads(metadata.read_text())["source"]).resolve()
+        document = json.loads(metadata.read_text())
+        if document.get("action_journal"):
+            return Path(document["action_journal"])
+        source = Path(document["source"]).resolve()
         identity = hashlib.sha256(str(source).encode()).hexdigest()
         return source.parent / ".dataviz" / "actions" / identity / "receipts.sqlite"
     return workspace_root / ".dataviz" / "actions" / "receipts.sqlite"

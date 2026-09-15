@@ -27,8 +27,17 @@ class AdapterResolver:
             self.workspace_root / "auth" / "adapters.local.yaml",
         )
         standalone = self.workspace_root / ".dataviz" / "standalone.json"
+        local_adapters = {}
         if standalone.is_file():
-            environment = json.loads(standalone.read_text(encoding="utf-8")).get("auth")
+            metadata = json.loads(standalone.read_text(encoding="utf-8"))
+            for name, relative in metadata.get("data_adapters", {}).items():
+                target = (self.workspace_root / "dashboards" / "main" / relative).resolve()
+                if not target.is_relative_to(self.workspace_root.resolve()) or not target.is_file():
+                    raise SourceFailure("Invalid local data snapshot")
+                local_adapters[name] = {"type": "sqlalchemy",
+                    "url": "sqlite:///" + target.as_uri() + "?mode=ro&uri=true",
+                    "config": {"local_data_read_only": True}}
+            environment = metadata.get("auth")
             if environment:
                 selected = Path(environment)
                 if selected.is_file() and selected.name == "workspace.yaml":
@@ -90,6 +99,9 @@ class AdapterResolver:
                         current[field] = nested
                     else:
                         current[field] = value
+        if set(merged) & set(local_adapters):
+            raise SourceFailure("External auth conflicts with a local data Adapter name")
+        merged.update(local_adapters)
         try:
             adapters = AdaptersFile.model_validate({"adapters": merged}).adapters
         except ValidationError as error:
@@ -210,7 +222,7 @@ class AdapterResolver:
             )
         if isinstance(value, str) and value.startswith("sqlite:///"):
             relative = value.removeprefix("sqlite:///")
-            if relative != ":memory:" and not Path(relative).is_absolute():
+            if relative != ":memory:" and not relative.startswith("file:") and not Path(relative).is_absolute():
                 return f"sqlite:///{(self.workspace_root / relative).resolve()}"
         return value
 

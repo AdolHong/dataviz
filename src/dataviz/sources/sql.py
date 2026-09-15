@@ -288,6 +288,9 @@ def _run_sql_query(
                 engine_options["connect_args"] = dict(adapter["options"])
             engine = create_engine(str(url), **engine_options)
             database_connection = engine.connect()
+            if adapter.get("config", {}).get("local_data_read_only"):
+                from dataviz.local_data import enforce_sqlite_read_only
+                enforce_sqlite_read_only(database_connection.connection.driver_connection)
             _configure_statement_timeout(database_connection, adapter_type, timeout_seconds)
             phase = "query"
             statement = text(query)

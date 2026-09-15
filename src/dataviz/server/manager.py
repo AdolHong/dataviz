@@ -30,6 +30,7 @@ class RunRecord:
     run_id: str
     session_id: str
     dashboard_id: str
+    workspace: LoadedWorkspace | None = field(default=None, repr=False)
     page_id: str | None = None
     reused_run_id: str | None = None
     requested_parameter_state: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -91,7 +92,7 @@ class RunManager:
         )
         self.cleanup()
 
-    def install_workspace_snapshot(self, workspace: LoadedWorkspace) -> None:
+    def install_workspace_snapshot(self, workspace: LoadedWorkspace, *, standalone_source=None) -> None:
         """Publish one fully loaded Workspace for subsequently created work.
 
         Active Runs keep the immutable Workspace/Executor they captured at start.
@@ -99,7 +100,14 @@ class RunManager:
         another request while still letting the development Server pick up edits.
         """
         if workspace.root.resolve() != self.workspace.root.resolve():
-            raise ValueError("RunManager cannot switch to another Workspace root")
+            import json
+            from pathlib import Path
+            if standalone_source is None or any(
+                Path(json.loads((root / ".dataviz" / "standalone.json").read_text())["source"]).resolve()
+                != Path(standalone_source).resolve()
+                for root in (workspace.root, self.workspace.root)
+            ):
+                raise ValueError("RunManager cannot switch to another Workspace root")
         with self.lock:
             self.workspace = workspace
 
@@ -245,7 +253,7 @@ class RunManager:
             if current is None or current.workspace is not snapshot:
                 current = Executor(
                     snapshot,
-                    cache=current.cache if current is not None else None,
+                    cache=current.cache if current is not None and current.workspace.root == snapshot.root else None,
                     cache_namespace=session_id,
                 )
                 self.executors[session_id] = current
@@ -282,6 +290,7 @@ class RunManager:
             run_id=run_id,
             session_id=session_id,
             dashboard_id=dashboard_id,
+            workspace=workspace,
             page_id=page_id,
             reused_run_id=_reuse_run.run_id if _reuse_run else None,
             requested_parameter_state={
@@ -479,6 +488,7 @@ class RunManager:
         *,
         session_id: str,
         dashboard_id: str,
+        _workspace: LoadedWorkspace | None = None,
     ) -> RunRecord:
         """Register one persisted Query Result as an interactive, session-owned Run.
 
@@ -494,11 +504,13 @@ class RunManager:
                 if existing.session_id != session_id:
                     raise ValueError("Shared Query Run id belongs to another session")
                 return existing
-            dashboard = self.workspace.dashboard(dashboard_id, result.page_id)
+            snapshot = _workspace or self.workspace
+            dashboard = snapshot.dashboard(dashboard_id, result.page_id)
             record = RunRecord(
                 run_id=result.run_id,
                 session_id=session_id,
                 dashboard_id=dashboard_id,
+                workspace=snapshot,
                 page_id=result.page_id,
                 requested_parameter_state={
                     key: dict(value) for key, value in result.query_parameter_state.items()

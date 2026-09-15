@@ -38,6 +38,8 @@ def test_duplicate_assignments_fail_before_standalone_compilation(tmp_path, monk
 def test_result_next_actions_preserve_shell_sensitive_paths_and_do_not_requery(tmp_path, monkeypatch):
     runner = CliRunner()
     root = tmp_path / "owner's $sample `literal` folder"
+    state_home = tmp_path / "owner's $state `literal` folder"
+    monkeypatch.setenv('DATAVIZ_STATE_DIR', str(state_home))
     created = runner.invoke(app, ["scaffold", "--output", str(root)])
     assert created.exit_code == 0, created.output
     for command in json.loads(created.stdout)["next"]:
@@ -49,7 +51,7 @@ def test_result_next_actions_preserve_shell_sensitive_paths_and_do_not_requery(t
     monkeypatch.setattr(Executor, "run", forbidden)
     for command in published["next_actions"]:
         parts = shlex.split(command)
-        assert str(root) in parts[3]
+        assert str(state_home) in parts[3]
         assert shlex.quote(parts[3]) in command
         read = runner.invoke(app, parts[1:])
         assert read.exit_code == 0, read.output

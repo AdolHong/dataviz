@@ -1,6 +1,8 @@
 # Dataviz 实施计划
 
-更新时间：2026-09-14
+更新时间：2026-09-15
+
+0.26.0：本地单文件输入、自动分析/文件热更新/可选定时刷新，以及 Perspective 实例与分析偏好保留。流式 Source 暂缓。验收记录见 `docs/local-data-acceptance.md` 与 `docs/perspective-experience.md`；本次发布执行全量测试和安装冒烟。
 
 0.25.12：采用 MIT 许可证，同步 README、包元数据与发行包许可证收录；不改 Runtime/DSL。恢复与已知风险见 `docs/delivery-recovery-review.md`。
 
@@ -10,7 +12,7 @@
 
 当前协议基线（由 `protocols.py` 与回归检查约束）：`dataviz/workspace/v2`、`dataviz/dashboard/v20`、`dataviz/parameter-domain/v2`、`dataviz/parameter-domain-contract/v3`、`dataviz/parameter-lookup/v1`、`dataviz/parameter-materialization/v1`、`dataviz/dashboard-bundle/v2`、`dataviz/report-manifest/v3`、`dataviz/presentation/v2`、`dataviz/source/v6`、`dataviz/dataset-transform/v3`、`dataviz/interactive-transform/v4`、`dataviz/dependency-contract/v13`、`dataviz/layout-contract/v1`、`dataviz/state-snapshot/v6`、`dataviz/runtime/v15`、`dataviz/analysis-result/v5`、`dataviz/analysis-evidence/v5`。Component Registry 以 `dataviz components` 为准，不在阶段清单重复登记。
 
-当前工作树版本：`0.25.7`，本次验证范围见 [0.25.7 验收记录](docs/release-0.25.7.md)。本文件区分本地发行构建、工作树变更与待验证事项，不以完成过的历史阶段作为未来计划。架构理由见 [ARCHITECTURE](ARCHITECTURE.md)，视觉规范见 [DESIGN](DESIGN.md)，代码见 [实现索引](docs/product-architecture.md)，发行历史见 [CHANGELOG](CHANGELOG.md)。
+当前工作树版本：`0.26.0`。下方旧版本记录仅为历史，不代表本次验证结果。本文件区分本地发行构建、工作树变更与待验证事项。架构理由见 [ARCHITECTURE](ARCHITECTURE.md)，视觉规范见 [DESIGN](DESIGN.md)，代码见 [实现索引](docs/product-architecture.md)，发行历史见 [CHANGELOG](CHANGELOG.md)。
 
 ## 0.24.9 导出面板统一与级联视觉修复
 

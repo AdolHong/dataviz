@@ -2,6 +2,15 @@
 
 Dataviz 不再把完整 Runtime 架构作为每次开发的起点。CLI 先根据任务返回最小概念闭包；只有需求越过当前层级时，作者或 AI 才继续读取下一层契约。
 
+已有本地 CSV/SQLite 时，先 `dataviz inspect data <file>`，再读 `dataviz docs local-data`。
+用单 YAML 的命名 Source 配合 `--data name=path` 即可分析；无数据时才 scaffold 样例。
+代码长了拆到 `dashboard.yaml` 同目录，独立 Dashboard 文件夹不要求 Workspace。
+Page 用于同一主题的多条分析路径，与文件拆分无关；多个 Dashboard 才需要 Workspace 组织。
+单文件同样支持 Control、内嵌 SQL/Python/JS/CSS 和显式 Server Action；标注可变资源与凭据仍在外部 auth。
+本地 file/`--data`、无 Adapter/auth 的 Python Source，`serve` 默认打开即分析，参数与声明文件变化自动更新，无须重启；
+昂贵计算用 `--execution manual`。外部连接与 Parameter Domain 默认手动；
+自动模式不触发 Action，也不自动运行未打开的 Page。详见 `docs local-data`。
+
 ## 分层任务路径
 
 | 路径 | 何时使用 | 当前层级披露的主链 |

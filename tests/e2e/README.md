@@ -82,6 +82,10 @@ For a targeted diagnostic (not a full release gate):
 
 After the first download, omit `--fetch-assets` to require the verified cache.
 The authoritative exact URLs, MIME types and SHA-256 values are in `assets.json`.
+Firefox may bypass request routing for imports inside module Workers. Its cache
+fixture substitutes only Dataviz's exact Worker bootstrap import with the verified
+upstream Worker bytes inside the Blob. Native Worker execution and cleanup remain
+under test; this is not the Perspective contract stub. Other Blob content is unchanged.
 It includes Perspective 5.4.0's actual viewer, engine WASM, Worker, datagrid and
 chart modules; no Perspective renderer is replaced by a mock. Updates must
 review upstream bytes and update the manifest, not disable hash verification.

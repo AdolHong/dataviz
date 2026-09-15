@@ -1,0 +1,45 @@
+schema: dataviz/dashboard/v20
+id: local-sales
+title: 本地 CSV · 销售分析
+sources:
+  - id: sales
+    type: file
+    data: sales
+    outputs: {main: {kind: table}}
+dataset_transforms:
+  - id: totals
+    runtime: server-python
+    inputs: {sales: 'source:sales/main'}
+    outputs: {main: {kind: table}}
+    code:
+      inline: |
+        def transform(context):
+            sales = context.table("sales")
+            return {"main": sales.groupby("category", as_index=False)["revenue"].sum()}
+controls:
+  - id: category
+    type: single_select
+    value_type: text
+    field: category
+    initial: {mode: first}
+    options:
+      mode: static
+      choices:
+        - {label: 食品, value: food}
+        - {label: 饮料, value: drink}
+views:
+  - id: overview
+    title: 点击品类查看明细
+    template: table
+    input: dataset:totals/main
+    columns: [category, revenue]
+    control_binding: {control: dashboard.category, field: category}
+  - id: trend
+    title: 选中品类的每日收入
+    template: line
+    input: source:sales/main
+    x: date
+    y: revenue
+    aggregate: sum
+    control_inputs:
+      category: {mode: filter, control: dashboard.category, field: category, inputs: [main], empty: match_none}

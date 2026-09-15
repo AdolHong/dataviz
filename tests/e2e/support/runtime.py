@@ -58,11 +58,11 @@ def _free_port() -> int:
 
 
 @contextmanager
-def _running_server(workspace: Path, *, watch: bool = True):
+def _running_server(workspace: Path, *, watch: bool = True, standalone_input=None, execution=None, refresh_interval=None):
     port = _free_port()
     server = uvicorn.Server(
         uvicorn.Config(
-            create_app(workspace, watch=watch),
+            create_app(workspace, watch=watch, standalone_input=standalone_input, execution=execution, refresh_interval=refresh_interval),
             host="127.0.0.1",
             port=port,
             log_level="warning",

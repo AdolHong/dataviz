@@ -1,0 +1,48 @@
+schema: dataviz/dashboard/v20
+id: local-history
+title: 本地 SQLite · 品类查询
+query_parameters:
+  - id: minimum
+    type: single_input
+    value_type: number
+    label: 最低收入
+    default: 0
+sources:
+  - id: sales
+    type: sql
+    data: warehouse
+    query_inputs: {minimum: minimum}
+    code:
+      inline: |
+        SELECT date, category, revenue FROM sales
+        WHERE revenue >= :minimum
+        ORDER BY date, category
+    outputs: {main: {kind: table}}
+controls:
+  - id: category
+    type: multiple_select
+    value_type: text
+    field: category
+    initial: {mode: all}
+    options:
+      mode: static
+      choices:
+        - {label: 食品, value: food}
+        - {label: 饮料, value: drink}
+views:
+  - id: totals
+    title: 品类收入
+    template: bar
+    input: source:sales/main
+    x: category
+    y: revenue
+    aggregate: sum
+    control_inputs:
+      category: {mode: filter, control: dashboard.category, field: category, inputs: [main], empty: match_none}
+  - id: details
+    title: 查询后筛选明细
+    template: table
+    input: source:sales/main
+    columns: [date, category, revenue]
+    control_inputs:
+      category: {mode: filter, control: dashboard.category, field: category, inputs: [main], empty: match_none}

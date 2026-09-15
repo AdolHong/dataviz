@@ -949,6 +949,7 @@ def bundle_portable_dashboard(
 @app.command()
 def validate(
     workspace: Path = typer.Argument(..., exists=True),
+    data: list[str] | None = typer.Option(None, "--data", help="Standalone local input as name=CSV-or-SQLite-path; repeatable"),
     auth: Path | None = typer.Option(None, "--auth", exists=True, help="Explicit Adapter file, auth directory or Workspace for a standalone Dashboard"),
     dashboard: str | None = typer.Option(
         None,
@@ -973,7 +974,7 @@ def validate(
     try:
         from dataviz.standalone import prepare_input
 
-        workspace, standalone_id = prepare_input(workspace, auth=auth)
+        workspace, standalone_id = prepare_input(workspace, auth=auth, data=data)
         dashboard = dashboard or standalone_id
         report = validate_preflight(
             workspace,
@@ -1650,7 +1651,7 @@ def gallery(
     watch: bool = typer.Option(
         True,
         "--watch/--no-watch",
-        help="Watch Workspace files and hot-reload open dashboards",
+        help="Watch original Dashboard inputs or Workspace files for changes",
     ),
 ) -> None:
     """Open the runtime-native Data Entry, Section, View and Renderer Gallery."""
@@ -1706,6 +1707,21 @@ def renderer_test(
             raise typer.Exit(1)
     except typer.Exit:
         raise
+    except Exception as exc:
+        handle_error(exc)
+
+
+@inspect_app.command("data")
+def inspect_data(
+    path: Path = typer.Argument(..., exists=True, dir_okay=False),
+    rows: int = typer.Option(5, "--rows", min=0, max=20, help="Sample rows; 0 omits values"),
+    table: str | None = typer.Option(None, "--table", help="SQLite table to preview; default lists tables"),
+) -> None:
+    """Inspect local CSV/SQLite with bounded read-only samples; emits JSON, no YAML required."""
+    try:
+        from dataviz.local_data import inspect_local_data
+
+        print_json(inspect_local_data(path, rows=rows, table=table))
     except Exception as exc:
         handle_error(exc)
 
@@ -3105,6 +3121,7 @@ def result_export(
 @app.command()
 def run(
     workspace: Path = typer.Argument(..., exists=True),
+    data: list[str] | None = typer.Option(None, "--data", help="Standalone local input as name=CSV-or-SQLite-path; repeatable"),
     target: str | None = typer.Argument(None, help="Dashboard id or canonical Target Reference; optional for a standalone YAML"),
     page: str | None = typer.Option(None, "--page", help="Optional analysis Page; defaults to the first declared Page, or the top-level Dashboard", rich_help_panel="Multi-page and interaction"),
     auth: Path | None = typer.Option(None, "--auth", exists=True, help="Explicit Adapter file, auth directory or Workspace for a standalone Dashboard"),
@@ -3138,7 +3155,7 @@ def run(
 
         parsed_query = parse_params(query_param)
         parsed_controls = parse_params(control)
-        workspace, standalone_id = prepare_input(workspace, auth=auth)
+        workspace, standalone_id = prepare_input(workspace, auth=auth, data=data)
         target = target or standalone_id
         if target is None:
             raise typer.BadParameter("A Workspace requires an explicit Target")
@@ -3187,6 +3204,7 @@ def run(
 @app.command()
 def report(
     workspace: Path = typer.Argument(..., exists=True),
+    data: list[str] | None = typer.Option(None, "--data", help="Standalone local input as name=CSV-or-SQLite-path; repeatable"),
     target: str | None = typer.Argument(None, help="Result id or Dashboard id; optional for standalone YAML"),
     page: str | None = typer.Option(None, "--page", help="Page to run; a sealed Result already owns its Page"),
     auth: Path | None = typer.Option(None, "--auth", exists=True, help="External Adapter environment for standalone YAML"),
@@ -3198,9 +3216,15 @@ def report(
 ) -> None:
     """Write a report from an immutable Result, or run a Dashboard as a convenience."""
     try:
+        if target and target.startswith("result_") and (page is not None or query_param or control or refresh or allow_partial):
+            raise typer.BadParameter(
+                "A sealed Result already owns its parameters, Controls and Page; "
+                "omit --page, --query-param, --control, --refresh and --allow-partial. "
+                "To change them, report a Dashboard instead."
+            )
         from dataviz.standalone import prepare_input
 
-        workspace, standalone_id = prepare_input(workspace, auth=auth)
+        workspace, standalone_id = prepare_input(workspace, auth=auth, data=data)
         target = target or standalone_id
         if target is None:
             raise typer.BadParameter("A Workspace requires a Result or Dashboard target")
@@ -3539,7 +3563,10 @@ def prune_workspace(
 @app.command()
 def serve(
     workspace: Path = typer.Argument(..., exists=True),
+    data: list[str] | None = typer.Option(None, "--data", help="Standalone local input as name=CSV-or-SQLite-path; repeatable"),
     auth: Path | None = typer.Option(None, "--auth", exists=True, help="Explicit Adapter file, auth directory or Workspace for a standalone Dashboard"),
+    execution: str | None = typer.Option(None, "--execution", help="Standalone execution: auto or manual; local inputs default to auto"),
+    refresh_interval: int | None = typer.Option(None, "--refresh-interval", min=1, max=86400, help="Local auto mode: seconds after completion before refreshing again (1–86400); off by default"),
     host: str = typer.Option("127.0.0.1", "--host"),
     port: int = typer.Option(8080, "--port"),
     allow_remote: bool = typer.Option(
@@ -3550,7 +3577,7 @@ def serve(
     watch: bool = typer.Option(
         True,
         "--watch/--no-watch",
-        help="Watch Workspace files and hot-reload open dashboards",
+        help="Watch original standalone inputs or Workspace files for changes",
     ),
 ) -> None:
     """Start the human-facing interactive dashboard server."""
@@ -3559,11 +3586,17 @@ def serve(
 
     from dataviz.standalone import prepare_input
 
-    workspace, standalone_id = prepare_input(workspace, auth=auth)
+    if execution not in (None, "auto", "manual"):
+        raise typer.BadParameter("Choose auto or manual", param_hint="--execution")
+    original = workspace
+    workspace, standalone_id = prepare_input(workspace, auth=auth, data=data)
+    inputs = None
     if standalone_id:
-        typer.echo("Serving a standalone snapshot; restart serve after editing its YAML or dependencies.")
-        watch = False
-    application = create_app(workspace, watch=watch)
+        from dataviz.server.standalone import StandaloneInput
+        inputs = StandaloneInput(original, workspace, auth=auth, data=data)
+    elif execution is not None:
+        raise typer.BadParameter("--execution is for standalone Dashboards", param_hint="--execution")
+    application = create_app(workspace, watch=watch, standalone_input=inputs, execution=execution, refresh_interval=refresh_interval)
     uvicorn.run(application, host=host, port=port)
 
 

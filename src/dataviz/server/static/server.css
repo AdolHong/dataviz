@@ -199,6 +199,8 @@ body.sidebar-collapsed #sidebar-toggle{color:#4451a3;border:0}
   box-shadow:none;
 }
 .query-run-control__copy{display:grid;gap:1px;min-width:0;text-align:center}
+#run-button[data-automatic="true"]{background:transparent;color:var(--action-ink,#25282d);border-color:transparent}
+#run-button[data-automatic="true"]:hover:not(:disabled){background:#f4f5f4}
 .query-run-control__copy strong{font:650 9px/1.2 "SFMono-Regular",Consolas,monospace;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}
 .query-run-control__copy small{
   display:none;

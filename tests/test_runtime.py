@@ -434,7 +434,7 @@ def test_custom_canvas_and_report(tmp_path: Path):
     # second custom double-click handler on top of the library behavior.
     assert ".on('plotly_doubleclick'" not in report
     assert '.on("plotly_doubleclick"' not in report
-    assert "state.table.replace(state.latestRows)" in report
+    assert "state.table.replace(applied)" in report
 
 
 def test_declarative_charts_load_the_plotly_runtime():

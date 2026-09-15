@@ -386,6 +386,16 @@ draft/applied 独立、历史恢复等既有行为不能因层级收敛而改变
 - **Don't** 把 Draft、Preview 或 Runtime 临时状态描述成已封存 Result。
 - **Don't** 为某个 Dashboard 的局部风格破坏 Shell、Controls 和导出页之间的一致性。
 
+### Local standalone execution
+
+本地单文件默认自动分析（适用边界见 `docs/local-data-acceptance.md`）：首次打开不要求 Run，
+参数变化合并执行；`--execution manual` 保留显式运行。自动模式复用现有 Shell，
+运行入口显示低强调的 `Refresh`，不新增入门配置步骤。Workspace 与外部连接保持手动语义。
+可选定时刷新采用完成后计时，不累积周期请求；隐藏标签页暂停，Cancel 后暂停周期，
+显式 Refresh 恢复。文件/参数变化沿用合并调度，不以周期 tick 判定正在运行的结果过期。
+输入更新时保留成功结果；失败使用既有错误提示，修正后恢复。后台更新不等于保存标注，
+不自动调用 Server Action。导出 HTML 不获得自动查询或文件监听能力。
+
 ### Keyboard mapping (0.24.4)
 
 Header 入口与右侧面板标题统一使用 `Parameters` / `Controls`，快捷键帮助和无障碍操作名称同步；Dashboard / Section / View 层级标签保留，内部 Query Parameter / Control 概念及 DSL 不变。

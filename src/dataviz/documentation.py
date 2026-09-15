@@ -849,6 +849,36 @@ update(context, descriptor, state) {
         ],
         "related": ["standalone", "dataset-transforms", "controls"],
     },
+    "local-data": {
+        "summary": "本地 CSV / SQLite 开箱即用分析：inspect data 有界检查，单 YAML 用 --data name=path 命名绑定，无需 auth 或 Workspace。",
+        "commands": [
+            "dataviz inspect data sales.csv --rows 5",
+            "dataviz inspect data sales.sqlite",
+            "dataviz inspect data sales.sqlite --table sales --rows 3",
+            "dataviz validate analysis.yaml --data sales=./sales.csv --strict",
+            "dataviz run analysis.yaml --data sales=./sales.csv --format json",
+            "dataviz serve analysis.yaml --data sales=./sales.csv",
+        ],
+        "csv_source": {"id": "sales", "type": "file", "data": "sales", "outputs": {"main": {"kind": "table"}}},
+        "sqlite_source": {"id": "sales", "type": "sql", "data": "warehouse",
+                          "code": {"inline": "SELECT category, revenue FROM sales"},
+                          "outputs": {"main": {"kind": "table"}}},
+        "rules": [
+            "data 是独立 Source 的命名输入，CSV 用 type:file，SQLite 用 type:sql；不能同时声明 path/adapter。SQLite 示例绑定 --data warehouse=./sales.sqlite。缺失、重复、未使用或类型不匹配的绑定报错。",
+            "validate/run/serve/report 接受相同的重复 --data 参数。路径相对 CLI 当前目录；可显式绑定 YAML 目录外的文件。普通 Workspace 入口不接受 --data。",
+            "CSV 复制为内容快照，SQLite backup 包含已提交 WAL 数据；SQL 使用只读连接并禁止 ATTACH/写入。serve 监听原 YAML、声明依赖和绑定文件，修改无需重启；每次执行仍读取完整快照，不混用新旧输入。",
+            "本地 file/--data，以及无 Adapter/外部 auth 的 Python Source，单文件服务默认 auto：打开当前 Page 即分析，参数和文件变化合并后自动更新；--execution manual 改为手动 Run。运行中最多保留一次最新待更新，不自动执行 Server Action。",
+            "定时刷新默认关闭；serve --refresh-interval 10 在当前任务完成后等待 10 秒再刷新，仅支持本地 standalone auto。每次定时刷新跳过计算缓存并复用原计算链，不是流式增量。慢任务不积压定时请求；文件/参数连续变化只保留最新状态。隐藏标签页暂停定时器，恢复时执行已有的最新待更新状态，否则重新计时；Cancel 暂停定时刷新，手动 Refresh 可恢复。各标签页独立，不是服务端无人值守调度。",
+            "外部 Adapter 或 Parameter Domain 默认 manual，--execution auto 要求所有 Page 的输入均符合本地条件。Python 是可信代码，不是纯函数沙箱，不能静态证明没有自行联网或写文件；昂贵计算用 manual，写入用显式 Action。--no-watch 关闭文件监听，显式 Run 仍采用最新文件。",
+            "文件内容参与快照身份；旧 Result 用其 next_actions 的原快照路径导出，不替换绑定或回退重算。report <Result> 拒绝 --query-param/--control/--page/--refresh/--allow-partial，不能静默修改已封存结果。快照含原始数据，注意本地目录权限及分享范围。",
+            "inspect data 仅支持 UTF-8 CSV（逗号分隔）和 SQLite。CSV 最多读取 256 KiB、100 列；预览 0–20 行、单元格最多 256 字符。sample_type 仅根据样本推断，保留原字符串，不计算总行数。",
+            "SQLite 默认最多列 50 个表/视图名；--table 仅预览普通表，--rows 0 不输出值。连接只读、忙等待 1 秒、VM 执行预算 2 秒，过大的字段明确失败而非无限输出。检查结果可能含敏感业务值。",
+            "单 YAML 与独立 Dashboard 文件夹能力一致；code.inline 支持 SQL/Python/JS，canvas scripts/styles 支持内嵌 JS/CSS。拆分文件不要求 Workspace；Page 是另一分析路径，不是文件组织层级。",
+            "标注使用显式 Server Action 和外部 auth 的可变资源，不将 --data 快照用作标注库。只读连接不是任意可信 Python 的安全沙箱。",
+        ],
+        "examples": ["examples/local-csv", "examples/local-sqlite"],
+        "related": ["standalone", "sources", "controls", "server-actions"],
+    },
     "standalone": {
         "summary": "单文件 standalone YAML 看板：内嵌 SQL/Python/JS、小型 Renderer，显式外部 auth；无需维护 Workspace 目录。",
         "commands": [
@@ -867,7 +897,7 @@ update(context, descriptor, state) {
         },
         "adapter_example": {"adapters": {"local": {"type": "sqlalchemy", "url": "sqlite:///:memory:"}}},
         "rules": [
-            "scaffold standalone（或省略 recipe）生成一个 dashboard.yaml，内含两行 Python 样例数据，无需 auth、数据库、Page 或浏览器测试扩展；执行返回的 next 命令即可校验和运行。SQL 示例才需要外部 Adapter 配置。",
+            "已有本地 CSV/SQLite 时优先 docs local-data，用 --data 命名绑定，无需 auth。scaffold standalone（或省略 recipe）可生成一个含 Python 样例数据的 dashboard.yaml；远程 SQL 才需要配置外部 Adapter。",
             "validate/run/serve/report 接受 YAML 文件或含 dashboard.yaml 的目录；已有 Workspace 用法不变。",
             "--auth 显式选择 Adapter YAML、auth 目录或已有 Workspace（也可指定 workspace.yaml）；不自动搜索上级目录，不在看板内放凭据。",
             "auth 目录读取 adapters.yaml 与 adapters.local.yaml；外部 Workspace 只提供 Adapter 环境，不导入其 Source、Asset 或其他 Dashboard。",
@@ -875,12 +905,13 @@ update(context, descriptor, state) {
             "独立输入中 code 可为路径或严格的 {inline: text}；canvas.scripts/styles 可混用路径与 inline。SQL、Python 与 browser-js 仍由原有 Runtime 执行；只运行可信代码。",
             "这是独立输入的编译便利语法：先转为普通 Workspace，再执行现有 Schema 校验；Workspace 文件模式和 schemas 输出仍使用 code 文件路径。",
             "引用文件必须位于 YAML 所在目录内；仅携带已声明文件。相邻 presentation.yaml 和其声明资源会一并加载；未声明的动态文件读取不保证可用。",
-            "快照与 Result 位于 YAML 同目录的 .dataviz/standalone/<hash>；不要手改生成目录。run 的 next_actions 提供 Result 检查命令。",
+            "独立看板快照/缓存/Result 默认放在用户级持久状态目录，不污染 YAML 所在目录：macOS ~/Library/Application Support/Dataviz、Linux ${XDG_STATE_HOME:-~/.local/state}/dataviz、Windows %LOCALAPPDATA%/Dataviz。可用绝对路径 DATAVIZ_STATE_DIR 覆盖。run 返回实际 workspace 和 next_actions；Result 与保存回执不会作为临时缓存自动清除。",
+            "Action 回执在状态目录 actions 下跨快照复用；已有源目录 .dataviz/actions 回执继续原位使用，避免与旧服务分叉，不自动迁移或删除。旧 Result 仍从原 next_actions 的快照路径读取。普通 Workspace 存储不变。清理按 docs maintenance 使用 prune 预览，不手工删除活动目录。",
             "源文件或声明依赖变化产生新快照；导出旧 Result 时使用其 next_actions 中的原快照路径，不重新编译改过的 YAML。",
             "report 提供 result-id 时不重新查询；省略 target 时会运行该 Dashboard 再导出。",
-            "serve 为单看板快照，不显示 Sidebar；编辑原 YAML 或依赖后重启。生成快照不支持页面编辑写回。",
+            "serve 为单看板服务，不显示 Sidebar；编辑原 YAML 或依赖无需重启。本地文件、--data 和无 Adapter/auth 的 Python Source 默认自动分析，--execution manual 保留手动提交；自动模式不执行 Action。无效修改保留旧结果，修复原文件即可恢复。生成快照不支持页面编辑写回。",
             "凭据文件不复制到快照或报告；私有元数据仅保存外部路径。运行时继续读取外部配置并复用既有脱敏边界。",
-            "共享 Workspace Asset、Catalog 管理或常规热更新使用完整 Workspace；可迁入生成的标准 Dashboard 文件，不迁移私有元数据。",
+            "共享 Workspace Asset 或 Catalog 管理使用完整 Workspace；单文件与 Dashboard 文件夹已支持输入热更新。可迁入生成的标准 Dashboard 文件，不迁移私有元数据。",
         ],
     },
     "quickstart": {
@@ -898,6 +929,7 @@ update(context, descriptor, state) {
             "dataviz serve ./sales/dashboard.yaml",
         ],
         "next_steps": {
+            "local_csv_sqlite": "dataviz docs local-data --format json",
             "query_parameters": "dataviz docs query-parameters --format json",
             "local_interaction": "dataviz docs --task interactive --format json",
             "second_analysis_page": "dataviz docs pages --format json",
@@ -905,10 +937,10 @@ update(context, descriptor, state) {
             "debug_or_verify": "dataviz docs workflow --format json",
         },
         "rules": [
-            "先生成单个 dashboard.yaml 并运行内嵌的两行样例；不要求 pages、sections、空 controls、外部连接或手工创建 Workspace。接入数据库时再读 standalone 并显式提供 --auth。",
+            "已有 CSV/SQLite 时先 inspect data，再读 local-data 用 --data 命名绑定；无需 auth。没有输入时生成单个 dashboard.yaml 运行内嵌样例；不要求 pages、sections、空 controls 或手工创建 Workspace。远程数据库才读 standalone 并显式提供 --auth。",
             "serve 用于打开交互页面，不代表已应用前一步 CLI Run；在页面点击 Run 执行查询。查看已有 Result 而不重查时，按 results 文档导出报告。",
             "不要从自定义 HTML/CSS/JS 开始；先用默认 Renderer 证明数据契约。",
-            "Adapter 由 Workspace 或 standalone --auth 显式提供；Dashboard 只写逻辑别名，不保存账号密码。",
+            "本地 --data 自动生成只读输入绑定；外部 Adapter 由 Workspace 或 standalone --auth 显式提供，Dashboard 不保存账号密码。",
             "简单看板不要提前加载 Control、Interactive Transform 或 Custom Renderer 契约。",
             "所有 Output 引用必须写完整，例如 source:sales/main、dataset:model/trend、interactive:simulation/result。",
             "每次修改后运行 validate；未知字段、旧 schema 和不完整引用直接失败。",
@@ -1348,7 +1380,7 @@ sections:
     },
     "query-parameters": {
         "summary": "Query Parameter 创建不可变 Query Run；每个参数只保存一份 canonical state，Dashboard-owned SQL 候选由 Server 物化并通过 Lookup 搜索或分页。",
-        "reload_restoration": "同标签页刷新应恢复当前 Page 的参数草稿，已提交参数另存于 Run 的 query_parameter_state。查询中和查询完成后均不应把可见日期、单选摘要重置为默认值；底层 input/select 与可见组件必须一起同步。刷新不会自动发起新查询。诊断时同时对照 URL、表单底层值、可见摘要和 Run 参数，不要仅凭面板默认文字认定服务器查询用了默认值。另开标签页不保证继承原会话。",
+        "reload_restoration": "同标签页刷新应恢复当前 Page 的参数草稿，已提交参数另存于 Run 的 query_parameter_state。查询中和查询完成后均不应把可见日期、单选摘要重置为默认值；底层 input/select 与可见组件必须一起同步。Workspace 与 standalone 手动模式不会因刷新自动发起新查询；standalone 自动模式复用仍有效的 Result，无结果或输入过期时自动分析。诊断时同时对照 URL、表单底层值、可见摘要和 Run 参数，不要仅凭面板默认文字认定服务器查询用了默认值。另开标签页不保证继承原会话。",
         "navigation_loading": "切换 Dashboard/Page 不等待候选 Lookup 完成。新导航立即取消旧页面详情和浏览器 Lookup 请求，旧初始化链及迟到响应不能更新新页；目标页详情未就绪时禁止 Run，但导航仍可继续点击。Page 详情读取已安装 Workspace 快照、只构造目标页，不执行全 Workspace 校验；目录发现与全项目检查仍由文件热更新或显式 Workspace 刷新负责。取消浏览器请求不等于取消已经开始的服务端 Domain 物化或数据库查询。",
         "remote_select": "Remote Select 的输入、搜索和翻页只触发 Parameter Lookup；选择提交后才改变 canonical Query Parameter state。打开的下拉框必须立即投影最新 request generation 的候选，迟到响应不得覆盖新搜索。",
         "dynamic_domains": {
@@ -2079,7 +2111,7 @@ views:
         "summary": "Table 是默认数据表达组件；Perspective 只用于赋予终端用户临时分组、聚合、透视和多维探索能力。",
         "templates": {
             "table": "本地固定 TanStack Table Core + Dataviz 默认语义 DOM/CSS；无需 React 或运行时 CDN。",
-            "perspective": "Perspective v5 Web Component；拥有独立的自助分析 UI 和配置。",
+            "perspective": "Perspective v5 Web Component；拥有独立的自助分析 UI 和配置。数据更新复用 Viewer，空筛选即时显示空状态并保留实例，恢复后沿用透视设置；连续数据更新合并。分组、列、排序、筛选等设置在同标签页 sessionStorage 中按文档路径/Page/View/列结构/作者配置隔离，重新查询可恢复；不写回 YAML，不自动随 Share/HTML 分发，禁用浏览器存储时仅保留当前实例设置。",
         },
         "runtime": {
             "package": "@tanstack/table-core",

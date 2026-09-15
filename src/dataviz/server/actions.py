@@ -61,6 +61,8 @@ class ActionService:
         try:
             workspace = self.workspace_provider()
             with self.manager.pin_action_run(run_id, session_id) as record:
+                if record.workspace is not None and record.workspace.root != workspace.root:
+                    raise ExecutionFailure("Dashboard inputs changed; apply the new analysis before saving")
                 if record.dashboard_id != dashboard_id or record.result is None:
                     raise ExecutionFailure("Action requires an applied Query Run for this Dashboard")
                 dashboard = workspace.dashboard(dashboard_id, record.page_id)
@@ -108,6 +110,8 @@ class ActionService:
             if action_signature(dashboard, action_id) != receipt["invocation"]["action_signature"]:
                 raise ExecutionFailure("Action definition changed; run the query again before refreshing")
             with self.manager.pin_action_run(base_run_id, session_id) as original:
+                if original.workspace is not None and original.workspace.root != workspace.root:
+                    raise ExecutionFailure("Dashboard inputs changed; run the new analysis to refresh the saved write")
                 if original.result is None:
                     raise ExecutionFailure("Applied Query Run is no longer available")
                 ensure_query_run_compatible(dashboard, original.result)

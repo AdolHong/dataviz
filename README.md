@@ -8,7 +8,7 @@
 
 ```mermaid
 flowchart LR
-  P[Query Parameters 查询参数] -->|点击 Run| S[Source 取数]
+  P[Query Parameters 查询参数] -->|自动分析 / 手动 Run| S[Source 取数]
   S --> T[Dataset Transform 计算]
   T --> O[Named Output 命名结果]
   O --> V[View 表格 / 图表 / 指标]
@@ -21,7 +21,7 @@ flowchart LR
   O --> R[CLI / Result · AI 查数与复查]
 ```
 
-取数不需要预处理时，Source 的 Output 可直接接 View。**查询参数改完要 Run；Control 用于查询后的交互，不自动重跑整套查询。** 复杂交互可用浏览器 JS 或服务端 Python 的 Interactive Transform。
+取数不需要预处理时，Source 的 Output 可直接接 View。**本地单文件打开即分析，改参数或文件无需 Run、无需重启；昂贵计算用 `--execution manual`。** 外部连接默认手动；Control 用于查询后的交互，不自动重跑整套查询。
 
 ## 给 AI 的关键词
 
@@ -47,10 +47,10 @@ flowchart LR
 
 ## 两种起步方式
 
-Python 3.11–3.14，推荐 3.12。从本地发行 wheel 安装（当前 **0.25.12**，包含配套 Skill）：
+Python 3.11–3.14，推荐 3.12。从本地发行 wheel 安装（当前 **0.26.0**，包含配套 Skill）：
 
 ```bash
-python -m pip install ./ai_dataviz-0.25.12-py3-none-any.whl
+python -m pip install ./ai_dataviz-0.26.0-py3-none-any.whl
 dataviz scaffold standalone --id sales --output ./sales
 dataviz validate ./sales/dashboard.yaml --strict
 dataviz serve ./sales/dashboard.yaml --port 8080
@@ -58,7 +58,11 @@ dataviz serve ./sales/dashboard.yaml --port 8080
 
 打开 <http://127.0.0.1:8080>。这个单文件样例自带假数据，不需要数据库；支持内嵌 SQL / Python / JS 和少量自定义 Renderer。修改后重启服务。
 
-单文件看板需要真实连接时，加 `--auth connections.yaml`；也可指定 auth 目录或已有 Workspace，复用其 Adapter 配置而不导入其他看板、数据或代码，凭据不进入快照。
+已有本地数据？先 `dataviz inspect data sales.csv`（SQLite 可加 `--table sales`），再用 `--data sales=./sales.csv` 绑定 YAML 中的命名 Source；SQLite 同样支持，无需 auth。见 [CSV 联动示例](examples/local-csv/) / [SQLite 查询示例](examples/local-sqlite/) 和 `dataviz docs local-data`。
+
+单文件或独立 Dashboard 文件夹的运行状态放在用户级目录，不污染输入目录；命令返回实际位置。需要 HTML 时用 `dataviz report analysis.yaml --data sales=./sales.csv --output report.html`。导出旧 Result 用其返回的原快照路径，不重新计算。
+
+远程 SQL 或可变标注资源才需要 `--auth connections.yaml`；也可指定 auth 目录或已有 Workspace，复用其 Adapter 配置，凭据不进入快照。代码长了先拆到 `dashboard.yaml` 同目录，无需 Workspace；Page 用于同一主题的多条分析路径。
 
 需要管理多个看板、共享静态资源或热更新时：
 

@@ -50,6 +50,7 @@ def test_perspective_async_mount_has_bounded_table_fallback(page: Page, tmp_path
         perspective = frame.locator('[data-view-id="sales-perspective"]')
         expect(perspective).to_have_count(1, timeout=20_000)
         expect(perspective).to_have_attribute("data-view-status", "ready", timeout=5_000)
+
         expect(perspective.locator("[data-view-status-label]")).to_have_text("table fallback")
         expect(perspective.locator("table")).to_have_count(1)
         assert (
@@ -136,11 +137,14 @@ def test_perspective_fills_view_uses_opaque_settings_and_releases_page_wheel(
 
 
 @pytest.mark.e2e
+@pytest.mark.parametrize('real_runtime', [False, True], ids=['contract', 'real'])
 def test_perspective_enters_empty_state_immediately_after_last_selection_is_cleared(
     page: Page,
     tmp_path: Path,
+    real_runtime: bool,
 ):
-    _route_perspective_contract_runtime(page)
+    if not real_runtime:
+        _route_perspective_contract_runtime(page)
     report_path = tmp_path / "perspective-empty-selection.html"
     workspace = _copy_workspace(MINIMAL, tmp_path / 'perspective-empty')
     with _running_server(workspace) as base_url:
@@ -167,6 +171,13 @@ def test_perspective_enters_empty_state_immediately_after_last_selection_is_clea
         }""")
         expect(detail.locator('tbody tr')).to_have_count(4)
         expect(perspective).to_have_attribute("data-view-status", "ready", timeout=5_000)
+        configured = perspective.locator('perspective-viewer').evaluate("""async viewer => {
+          viewer.__retainedIdentity = 'selection-roundtrip';
+          await viewer.restore({group_by:['day'], columns:['orders', 'revenue'], sort:[['revenue', 'desc']]});
+          await viewer.flush();
+          return await viewer.save();
+        }""")
+        assert configured['group_by'] == ['day'], configured
 
         selection.evaluate("""input => {
           window.datavizComponents.controls.clearOptions(input);
@@ -177,11 +188,32 @@ def test_perspective_enters_empty_state_immediately_after_last_selection_is_clea
         expect(perspective).to_have_attribute("data-view-status", "empty", timeout=2_000)
         expect(perspective).to_contain_text("No rows match the current selections.", timeout=2_000)
 
-        # Returning from Empty creates one fresh Perspective instance; stale
-        # cleanup from the old instance must not overwrite the restored View.
+        # Empty does not discard the user's analysis or recreate the worker.
         selection.select_option(['华东'], force=True)
         expect(perspective).to_have_attribute("data-view-status", "ready", timeout=30_000)
         expect(perspective.locator("perspective-viewer")).to_have_count(1)
+        retained = perspective.locator('perspective-viewer').evaluate("""async viewer => ({
+          identity:viewer.__retainedIdentity, config:await viewer.save(),
+        })""")
+        assert retained['identity'] == 'selection-roundtrip'
+        assert retained['config']['group_by'] == ['day']
+        assert retained['config']['columns'] == ['orders', 'revenue']
+        assert retained['config']['sort'] == [['revenue', 'desc']]
+        saved = perspective.locator('perspective-viewer').evaluate("""async viewer => {
+          viewer.dispatchEvent(new Event('perspective-config-update'));
+          const mounted = [...window.datavizRuntime.viewAdapter.states.values()]
+            .find(item => item.state.viewer === viewer);
+          await mounted.state.preferencesSaving;
+          return JSON.parse(sessionStorage.getItem(mounted.state.preferenceKey));
+        }""")
+        assert saved['group_by'] == ['day']
+        assert 'table' not in saved
+        _run_and_wait(page)
+        expect(perspective).to_have_attribute('data-view-status', 'ready', timeout=30_000)
+        restored = perspective.locator('perspective-viewer').evaluate('async viewer => await viewer.save()')
+        assert restored['group_by'] == ['day']
+        assert restored['columns'] == ['orders', 'revenue']
+        assert restored['sort'] == [['revenue', 'desc']]
 
         with page.expect_download(timeout=20_000) as download_info:
             _export_html(page)

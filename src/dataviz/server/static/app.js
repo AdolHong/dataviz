@@ -79,6 +79,57 @@ function activeRuntime() {
   return state.dashboard ? runtimeFor(state.dashboard.id) : null;
 }
 
+function automaticExecution() {
+  const settings = state.payload?.standalone_execution;
+  return settings?.mode === 'auto' && settings.auto_allowed;
+}
+
+let automaticRefreshTimer = null;
+
+function armAutomaticRefresh() {
+  clearTimeout(automaticRefreshTimer);
+  const runtime = activeRuntime();
+  const seconds = Number(state.payload?.standalone_execution?.refresh_interval || 0);
+  if (!automaticExecution() || !seconds || !runtime || document.hidden
+      || state.navigationPending || runtime.autoRefreshPaused || runtime.finishRunError
+      || runtime.pendingRunId || runtime.queryRequestInFlight || runtime.autoRunQueued) return;
+  // Completion-based delay, not setInterval: a slow query never accumulates ticks.
+  automaticRefreshTimer = setTimeout(() => {
+    if (activeRuntime() !== runtime || document.hidden) return;
+    scheduleAutomaticRun({refresh:true});
+  }, seconds * 1000);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) clearTimeout(automaticRefreshTimer);
+  else if (activeRuntime()?.autoRunQueued) scheduleAutomaticRun();
+  else armAutomaticRefresh();
+});
+
+function scheduleAutomaticRun({refresh = false} = {}) {
+  const runtime = activeRuntime();
+  if (!runtime || !automaticExecution() || !state.dashboard?.runnable) return;
+  clearTimeout(automaticRefreshTimer);
+  runtime.autoRunQueued = true;
+  runtime.autoRefreshQueued = Boolean(runtime.autoRefreshQueued || refresh);
+  clearTimeout(runtime.autoRunTimer);
+  runtime.autoRunTimer = setTimeout(() => {
+    if (activeRuntime() !== runtime || !automaticExecution() || state.navigationPending || document.hidden) return;
+    // One active computation plus one latest draft, never an unbounded queue.
+    if (runtime.pendingRunId || runtime.queryRequestInFlight) return;
+    if (runtime.autoComposing) return;
+    if (!runtime.queryDomainReady || !$('#parameter-form').checkValidity()) {
+      runtime.autoRunQueued = false;
+      setQueryState('Check parameter values before updating.');
+      return;
+    }
+    runtime.autoRunQueued = false;
+    const refreshInputs = runtime.autoRefreshQueued;
+    runtime.autoRefreshQueued = false;
+    void runDashboard({automatic:true, refresh:refreshInputs});
+  }, 350);
+}
+
 function updateSourceFreshness(runtime, versions) {
   for (const [source, version] of Object.entries(versions)) {
     runtime.sourceCurrentVersions[source] = Math.max(runtime.sourceCurrentVersions[source] || 0, version);
@@ -1965,7 +2016,10 @@ function applyDashboardControlPresentation(dashboard) {
 
 function setRunButtonLabel(label) {
   const target = $('#run-button [data-run-label]');
-  if (target) target.textContent = label;
+  if (target) target.textContent = label === 'Run' && automaticExecution() ? 'Refresh' : label;
+  $('#run-button').classList.toggle('button--run', !automaticExecution());
+  $('#run-button').dataset.automatic = String(automaticExecution());
+  if (state.payload?.standalone_execution) $('#run-button').title = automaticExecution() ? 'Refresh analysis' : 'Run analysis';
 }
 
 function setQueryParametersOpen(open, {persist = false} = {}) {
@@ -2459,7 +2513,7 @@ async function selectDashboard(id, {historyMode = 'push', locationSearch = null,
   if (runtime.queryParametersOpen == null && hasQueryParameters) {
     // First arrival keeps parameters in the workbench. A remembered committed
     // Result starts with the tray collapsed, preserving room for analysis.
-    runtime.queryParametersOpen = !runtime.runId;
+    runtime.queryParametersOpen = !runtime.runId && !automaticExecution();
   }
   setQueryParametersOpen(runtime.queryParametersOpen);
   window.datavizComponents?.hydrate(document);
@@ -2513,7 +2567,7 @@ async function selectDashboard(id, {historyMode = 'push', locationSearch = null,
   setQueryState();
   setControlsEnabled(Boolean(runtime.runId) && runtime.controlConnected);
   setComputeState();
-  loadCanvasFrame(id, runtime.pendingRunId || runtime.runId);
+  loadCanvasFrame(id, automaticExecution() && runtime.runId ? runtime.runId : runtime.pendingRunId || runtime.runId);
   $('#run-button').disabled = !runnable || runtime.queryRequestInFlight;
   $('#run-button').classList.toggle('is-cancelling', Boolean(runtime.pendingRunId));
   setRunButtonLabel(runtime.finishRunError ? 'Retry status' : runtime.pendingRunId ? 'Cancel' : 'Run');
@@ -2535,6 +2589,11 @@ async function selectDashboard(id, {historyMode = 'push', locationSearch = null,
   } else {
     runtime.queryDomainReady = true;
     updateParameterDomainUi();
+  }
+  if (automaticExecution() && (!runtime.runId || runtime.queryDefinitionStale || runtime.autoRunQueued)) {
+    scheduleAutomaticRun();
+  } else {
+    armAutomaticRefresh();
   }
 }
 
@@ -3140,17 +3199,23 @@ function formValues(form) {
   return values;
 }
 
-async function runDashboard() {
+async function runDashboard({automatic = false, refresh = false} = {}) {
   if (!state.dashboard || state.navigationPending) return;
   const dashboardId = state.dashboard.id;
   const runtime = runtimeFor(dashboardId);
   const pageId = runtime.pageId;
+  if (automatic && (!automaticExecution() || runtime.pendingRunId)) return;
   if (runtime.queryRequestInFlight) return;
   if (runtime.pendingRunId && runtime.finishRunError) {
     await finishRun(runtime.pendingRunId, dashboardId, pageId);
     return;
   }
   if (runtime.pendingRunId) {
+    clearTimeout(automaticRefreshTimer);
+    runtime.autoRefreshPaused = true;
+    runtime.autoRefreshQueued = false;
+    clearTimeout(runtime.autoRunTimer);
+    runtime.autoRunQueued = false;
     const runId = runtime.pendingRunId;
     $('#run-button').disabled = true;
     setRunButtonLabel('Cancelling…');
@@ -3187,6 +3252,8 @@ async function runDashboard() {
     window.requestAnimationFrame(() => $('#parameter-form').reportValidity());
     return;
   }
+  clearTimeout(automaticRefreshTimer);
+  if (!automatic) runtime.autoRefreshPaused = false;
   closeHeaderPopovers();
   const requestedWorkspaceRevision = state.workspaceRevision;
   runtime.queryRequestInFlight = true;
@@ -3210,6 +3277,8 @@ async function runDashboard() {
         session_id: state.sessionId,
         page_id:pageId,
         query_parameter_state: runtime.queryParameterState,
+        automatic,
+        refresh: refresh || (!automatic && automaticExecution()),
       })
     });
     const runWorkspaceRevision = Number(
@@ -3232,7 +3301,7 @@ async function runDashboard() {
       $('#run-button').disabled = state.navigationPending;
       $('#run-button').classList.add('is-cancelling');
       setRunButtonLabel('Cancel');
-      loadCanvasFrame(dashboardId, response.run_id);
+      if (!automatic || !runtime.runId) loadCanvasFrame(dashboardId, response.run_id);
     }
     renderPageNavigation();
     listen(response.run_id, dashboardId, pageId);
@@ -3250,7 +3319,12 @@ async function runDashboard() {
       $('#run-button').classList.remove('is-cancelling');
       setRunButtonLabel('Run');
     }
+    if (automatic && activeRuntime() === runtime) {
+      showWorkspaceUpdate({impact:'invalid', title:'Analysis could not start', message:error.message, action:'query'});
+    }
   }
+  if (activeRuntime() === runtime && runtime.autoRunQueued && !runtime.pendingRunId) scheduleAutomaticRun();
+  else if (activeRuntime() === runtime) armAutomaticRefresh();
 }
 
 function listen(runId, dashboardId, pageId = null) {
@@ -3339,7 +3413,7 @@ async function finishRun(runId, dashboardId, pageId = null) {
   const status = record.result?.status || record.status;
   runtime.message = status === 'ready' ? 'Dataset query completed.' : `Query finished with status: ${status}`;
   runtime.pendingRunId = null;
-  const outdated = runtime.pendingRunOutdated;
+  const outdated = runtime.pendingRunOutdated || (automaticExecution() && runtime.autoRunQueued);
   const completedRevision = Number(runtime.pendingQueryRevision || 0);
   runtime.pendingRunOutdated = false;
   runtime.pendingQueryRevision = null;
@@ -3396,6 +3470,13 @@ async function finishRun(runId, dashboardId, pageId = null) {
     } else {
       loadCanvasFrame(dashboardId, runtime.runId);
     }
+    if (automaticExecution() && !committed && !outdated && status === 'error') {
+      const failed = Object.values(record.result?.nodes || {}).find(node => node.error);
+      showWorkspaceUpdate({impact:'invalid', title:'Analysis update failed',
+        message:failed?.error?.message || runtime.message, action:'query'});
+    }
+    if (runtime.autoRunQueued) scheduleAutomaticRun();
+    else armAutomaticRefresh();
   }
 }
 
@@ -3577,6 +3658,11 @@ function setQueryState(message = null) {
     detail = state.dashboard.message || 'Dashboard unavailable.';
     label = state.dashboard.status;
     visualState = 'error';
+  } else if (automaticExecution() && (runtime?.autoRunQueued || runtime?.pendingRunId || runtime?.queryRequestInFlight)) {
+    stale = true;
+    detail = 'Updating analysis. The last successful result remains visible.';
+    label = 'Updating';
+    visualState = 'changed';
   } else if (runtime?.queryDefinitionStale) {
     stale = true;
     detail = message || 'Dashboard query definition changed. Run query again to apply it.';
@@ -4396,7 +4482,8 @@ async function refreshNavigation(
   const routed = state.payload.dashboards.find((item) => item.id === requestedDashboardId);
   const preferred = state.payload.dashboards.find((item) => item.path === preferredPath);
   const remembered = state.payload.dashboards.find((item) => item.id === state.preferredDashboardId);
-  const selected = requestedDashboardId ? routed : preferred || remembered;
+  const selected = requestedDashboardId ? routed : preferred || remembered
+    || (state.payload.standalone_execution ? state.payload.dashboards[0] : null);
   if (!selected) {
     state.dashboard = null;
     state.preferredDashboardId = null;
@@ -4560,6 +4647,12 @@ async function handleWorkspaceChange(change) {
       runtime.queryLabel = 'Loading';
       runtime.message = 'Querying the updated Dashboard definition…';
       setQueryState();
+      hideWorkspaceUpdate();
+      return;
+    }
+    if (automaticExecution()) {
+      scheduleAutomaticRun();
+      setQueryState('Updating analysis…');
       hideWorkspaceUpdate();
       return;
     }
@@ -4895,10 +4988,20 @@ $('#workspace-update-action').addEventListener('click', () => {
   else reloadDashboardFromDisk();
 });
 const onQueryDraft = event => {
+  if (activeRuntime()) activeRuntime().autoComposing = Boolean(event.isComposing);
+  if (event.isComposing) {
+    clearTimeout(activeRuntime()?.autoRunTimer);
+    return;
+  }
   event.target?.setCustomValidity?.('');
   let parameterState;
   try { parameterState = queryParameterStates(); }
   catch (_error) {
+    const runtime = activeRuntime();
+    if (runtime && automaticExecution()) {
+      clearTimeout(runtime.autoRunTimer);
+      runtime.autoRunQueued = false;
+    }
     setQueryState();
     return;
   }
@@ -4937,9 +5040,11 @@ const onQueryDraft = event => {
   syncDashboardLocation('replace');
   setQueryState();
   syncCanvasQueryDraft();
+  scheduleAutomaticRun();
 };
 $('#parameter-form').addEventListener('input', onQueryDraft);
 $('#parameter-form').addEventListener('change', onQueryDraft);
+$('#parameter-form').addEventListener('compositionend', onQueryDraft);
 const onDashboardControlDraft = event => {
   const runtime = activeRuntime();
   const input = event.target;

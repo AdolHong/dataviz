@@ -264,18 +264,22 @@ def test_managed_renderer_lifecycle_matrix_in_server_and_export(page: Page, tmp_
         expect_ready(frame)
         assert_update_reuses_instances(frame)
 
-        # empty: the host publishes one terminal state and disposes all Renderers.
+        # Empty publishes a terminal state; Perspective retains its viewer/config.
         options.nth(0).click()
         for view_id in view_ids:
             view = frame.locator(f'[data-view-id="{view_id}"]')
             expect(view).to_have_attribute("data-view-status", "empty", timeout=2_000)
             expect(view).to_contain_text("No rows match the current selections.")
         assert frame.locator("body").evaluate(
-            "(_body, ids) => ids.every(id => !window.datavizRuntime.viewAdapter.states.has(id))",
+            """(_body, ids) => {
+              const states = window.datavizRuntime.viewAdapter.states;
+              return !states.has(ids[0]) && !states.has(ids[1])
+                && states.get(ids[2]).state.viewer.__datavizLifecycleIdentity === 'perspective-mounted';
+            }""",
             view_ids,
         )
 
-        # restore: every Renderer mounts exactly one fresh instance.
+        # Restore remounts Plotly, but reuses Perspective without losing settings.
         options.nth(0).click()
         expect_ready(frame)
         restored = frame.locator("body").evaluate(
@@ -292,7 +296,7 @@ def test_managed_renderer_lifecycle_matrix_in_server_and_export(page: Page, tmp_
             })""",
             view_ids,
         )
-        assert restored["identities"] == [None, None, None]
+        assert restored["identities"] == [None, None, "perspective-mounted"]
         assert restored["metrics"]["restores"] >= 3
 
         # interaction + resize
@@ -315,11 +319,11 @@ def test_managed_renderer_lifecycle_matrix_in_server_and_export(page: Page, tmp_
             options.nth(0).click()
             for view_id in view_ids:
                 expect(frame.locator(f'[data-view-id="{view_id}"]')).to_have_attribute('data-view-status', 'empty')
-            # Wait for the documented asynchronous Perspective cleanup, rather
-            # than adding a fixed pause that hides slow/missing disposal.
+            # Empty selection retains exactly one Perspective resource owner.
+            # Full teardown below must still release every worker and table.
             canvas = next(item for item in page.frames if '/canvas?' in item.url)
             canvas.wait_for_function('''() => window.datavizRuntime.metrics.perspective.created
-              === window.datavizRuntime.metrics.perspective.disposed''', timeout=5_000)
+              === window.datavizRuntime.metrics.perspective.disposed + 1''', timeout=5_000)
             options.nth(0).click()
             expect_ready(frame)
             assert resource_snapshot() == baseline, f'resource accumulation in cycle {cycle + 1}'

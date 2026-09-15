@@ -17,16 +17,23 @@ from dataviz.protocols import WORKSPACE_SCHEMA
 from dataviz.workspace.loading.parse_load import read_yaml
 
 
-def prepare_input(path: Path, *, auth: Path | None = None) -> tuple[Path, str | None]:
+def prepare_input(path: Path, *, auth: Path | None = None,
+                  data: list[str] | None = None, _dependencies: set[Path] | None = None) -> tuple[Path, str | None]:
     path = path.expanduser().resolve()
     if path.is_dir() and ((path / "workspace.yaml").is_file() or not (path / "dashboard.yaml").is_file()):
-        if auth is not None:
-            raise WorkspaceError("--auth is only supported for a standalone Dashboard")
+        if auth is not None or data:
+            raise WorkspaceError("--auth/--data are only supported for a standalone Dashboard")
         return path, None
     source = path / "dashboard.yaml" if path.is_dir() else path
     document = read_yaml(source)
     files: dict[str, bytes] = {}
     base = source.parent
+    dependencies = _dependencies if _dependencies is not None else set()
+    dependencies.update((source, base / "presentation.yaml"))
+    from dataviz.local_data import parse_data_bindings, local_data_kind, snapshot_local_data
+    bindings = parse_data_bindings(data)
+    used_bindings: set[str] = set()
+    data_adapters: dict[str, str] = {}
     environment = auth.expanduser().resolve() if auth is not None else None
     if environment is not None and not environment.exists():
         raise WorkspaceError("Explicit Adapter environment does not exist", file=environment)
@@ -40,6 +47,8 @@ def prepare_input(path: Path, *, auth: Path | None = None) -> tuple[Path, str | 
         if not isinstance(value, str):
             raise WorkspaceError("Standalone dependency must be a file path", file=source)
         selected = (owner / value).resolve()
+        if selected.is_relative_to(base):
+            dependencies.add(selected)
         if not selected.is_relative_to(base) or not selected.is_file():
             raise WorkspaceError("Standalone dependency must be a local file", file=source,
                                  details={"reference": value})
@@ -84,12 +93,35 @@ def prepare_input(path: Path, *, auth: Path | None = None) -> tuple[Path, str | 
             if not isinstance(entry, dict):
                 raise WorkspaceError(f"Invalid {collection} entry", file=source)
             entry = dict(entry)
+            bound_path = None
+            if "data" in entry:
+                alias = entry.pop("data")
+                if collection != "sources" or not isinstance(alias, str) or alias not in bindings:
+                    raise WorkspaceError("Source data requires a matching --data name=path", file=source)
+                if "path" in entry or "adapter" in entry:
+                    raise WorkspaceError("Source data cannot be combined with path or adapter", file=source)
+                selected = bindings[alias]
+                dependencies.update((selected, Path(str(selected) + "-wal")))
+                kind = local_data_kind(selected)
+                expected = "file" if kind == "csv" else "sql"
+                if entry.get("type") != expected:
+                    raise WorkspaceError(f"Input {alias} requires Source type {expected}", file=source)
+                used_bindings.add(alias)
+                bound_path = f"bound_data/{alias}.{'csv' if kind == 'csv' else 'sqlite'}"
+                if bound_path not in files:
+                    files[bound_path] = snapshot_local_data(selected)
+                if kind == "csv":
+                    entry["path"] = bound_path
+                else:
+                    adapter_name = f"local_data_{alias}"
+                    entry["adapter"] = adapter_name
+                    data_adapters[adapter_name] = bound_path
             if "code" in entry:
                 suffix = "sql" if collection == "parameter_domains" or entry.get("type") == "sql" else (
                     "js" if entry.get("runtime") == "browser-js" else "py"
                 )
                 entry["code"] = code(entry["code"], owner, suffix)
-            if "path" in entry and not entry.get("adapter") and not str(entry["path"]).startswith("asset:"):
+            if bound_path is None and "path" in entry and not entry.get("adapter") and not str(entry["path"]).startswith("asset:"):
                 entry["path"] = local(entry["path"], owner)
             if "code_dependencies" in entry:
                 if not isinstance(entry["code_dependencies"], list):
@@ -100,6 +132,9 @@ def prepare_input(path: Path, *, auth: Path | None = None) -> tuple[Path, str | 
                 entry["code_dependencies"] = [local(value, owner) for value in entry["code_dependencies"]]
             entries.append(entry)
         document[collection] = entries
+
+    if unused := set(bindings) - used_bindings:
+        raise WorkspaceError("Unused --data bindings", details={"names": sorted(unused)})
 
     if not isinstance(document.get("canvas", {}), dict):
         raise WorkspaceError("canvas must be an object", file=source)
@@ -134,12 +169,21 @@ def prepare_input(path: Path, *, auth: Path | None = None) -> tuple[Path, str | 
     files["dashboard.yaml"] = yaml.safe_dump(document, allow_unicode=True, sort_keys=False).encode()
 
     # Identity includes the source location and explicit environment, never secrets.
-    identity = json.dumps([str(source), str(environment)], sort_keys=True)
+    identity_parts = [str(source), str(environment)]
+    if bindings:
+        identity_parts.append({k: str(v) for k, v in bindings.items()})
+    identity = json.dumps(identity_parts, sort_keys=True)
     digest = hashlib.sha256(identity.encode())
     for name, content in sorted(files.items()):
         digest.update(name.encode())
         digest.update(content)
-    root = base / ".dataviz" / "standalone" / digest.hexdigest()
+    from dataviz.state_paths import standalone_state_home
+    state_home = standalone_state_home()
+    state_home.mkdir(parents=True, exist_ok=True, mode=0o700)
+    root = state_home / "standalone" / digest.hexdigest()
+    source_identity = hashlib.sha256(str(source).encode()).hexdigest()
+    legacy_journal = base / ".dataviz" / "actions" / source_identity / "receipts.sqlite"
+    journal = legacy_journal if legacy_journal.exists() else state_home / "actions" / source_identity / "receipts.sqlite"
     for name, content in files.items():
         destination = root / "dashboards" / "main" / name
         if not destination.exists() or destination.read_bytes() != content:
@@ -149,5 +193,8 @@ def prepare_input(path: Path, *, auth: Path | None = None) -> tuple[Path, str | 
     }))
     atomic_write_text(root / ".dataviz" / "standalone.json", json.dumps({
         "source": str(source), "auth": str(environment) if environment else None,
+        "data_adapters": data_adapters,
+        "action_journal": str(journal),
+        "dependencies": sorted(str(item) for item in dependencies),
     }))
     return root, document.get("id")

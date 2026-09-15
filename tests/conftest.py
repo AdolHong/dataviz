@@ -9,6 +9,12 @@ import pytest
 import yaml
 
 
+@pytest.fixture(autouse=True)
+def isolated_standalone_state(tmp_path, monkeypatch):
+    """Keep tests and their child servers out of the developer's durable state."""
+    monkeypatch.setenv("DATAVIZ_STATE_DIR", str(tmp_path / "user-state"))
+
+
 @pytest.fixture
 def stable_analysis(tmp_path):
     """One small catalog, a server-only fact table and isolated durable labels."""

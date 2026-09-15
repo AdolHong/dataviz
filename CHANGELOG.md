@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.26.0 — 2026-09-15
+
+- Close automatic-refresh visibility/debounce and Perspective completion-handoff races found during release review; retain one latest update without background submissions or dropped renderer updates.
+
+- Retain Perspective Viewers through empty selections, coalesce pending table updates, and restore compatible tab-local analysis preferences after a new Query. Keep YAML and shared/exported report defaults unchanged; streaming Sources remain out of scope.
+
+- Add opt-in local automatic `serve --refresh-interval SECONDS`: refresh through the existing computation pipeline after completion, coalesce file/parameter changes, pause timers for hidden tabs and after cancellation, and keep older in-flight results from replacing newer input generations.
+
+- Standalone local-input servers now support automatic first analysis, debounced parameter/file updates and `--execution manual`; edits adopt new immutable inputs without restarting, retaining prior successful results and explicit-only Actions.
+- Add standalone CSV/SQLite named inputs via repeatable --data across validate/run/serve/report, bounded read-only inspect data, inline-code examples and a local-data-first authoring Skill. Keep normal Workspace schemas unchanged.
+- Place new standalone snapshots, caches and Results in durable user state (overridable via DATAVIZ_STATE_DIR), keep shared Action receipts outside content snapshots and retain existing source-local journals without automatic migration. Sealed Result export rejects conflicting execution flags rather than silently ignoring them.
 ## 0.25.12 — 2026-09-15
 
 - Adopt the MIT License; include LICENSE in wheel, sdist and release ZIP, declare SPDX package metadata and update README licensing guidance. Preserve third-party licenses and bundled Skill. No Runtime or DSL changes.

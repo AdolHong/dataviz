@@ -1126,6 +1126,7 @@
       state.fallbackTable = null;
       if (state.disposed) return;
       state.disposed = true;
+      state.viewer?.removeEventListener?.('perspective-config-update', state.onPreferences);
       state.observer?.disconnect();
       state.pending = Promise.resolve(state.pending).catch(() => {}).then(async () => {
         const viewer = state.viewer;
@@ -1158,6 +1159,15 @@
       const {key, root, body} = renderContext;
       const rows = descriptor.rows || [];
       const columns = descriptor.columns || Object.keys(rows[0] || {});
+      // Tab-local preferences, scoped to the document, Page, View and author
+      // configuration. Never persist table names, rows or transport handles.
+      const preferenceKey = 'dataviz:perspective:v1:' + JSON.stringify([
+        global.location?.pathname, global.dataviz.dashboard_id, global.dataviz.page_id,
+        key, columns, descriptor.config || descriptor.perspective || {},
+        global.dataviz.runtime_versions?.perspective,
+      ]);
+      let preferences = null;
+      try { preferences = JSON.parse(global.sessionStorage.getItem(preferenceKey)); } catch (_) {}
       root?.classList.add('dv-view--perspective');
       const loading = document.createElement('div');
       loading.className = 'dv-perspective-loading';
@@ -1176,6 +1186,7 @@
         disposed:false,
         countedCreated:false,
         pending:Promise.resolve(),
+        preferenceKey,
       };
       state.pending = (async () => {
         if (!global.datavizPerspectiveReady) {
@@ -1261,8 +1272,39 @@
           ...(descriptor.config || descriptor.perspective || {}),
           table:tableName,
         }));
+        if (preferences && typeof preferences === 'object' && !Array.isArray(preferences)) {
+          try {
+            await awaitPerspectiveOperation(state, 'preferences restore', viewer.restore({...preferences, table:tableName}));
+          } catch (error) {
+            try { global.sessionStorage.removeItem(preferenceKey); } catch (_) {}
+            await awaitPerspectiveOperation(state, 'default restore', viewer.restore({
+              plugin:'Datagrid', columns, settings:false,
+              ...(descriptor.config || descriptor.perspective || {}), table:tableName,
+            }));
+            console.warn('[dataviz:perspective:preferences]', error);
+          }
+        }
+        state.onPreferences = () => {
+          state.preferencesDirty = true;
+          if (state.preferencesSaving || state.disposed) return;
+          state.preferencesSaving = (async () => {
+            while (state.preferencesDirty && !state.disposed) {
+              state.preferencesDirty = false;
+              const saved = await awaitPerspectiveOperation(state, 'preferences save', viewer.save());
+              const allowed = ['plugin', 'columns', 'group_by', 'split_by', 'sort', 'filter',
+                'aggregates', 'expressions', 'plugin_config', 'settings', 'theme'];
+              const value = Object.fromEntries(allowed.filter(name => name in saved).map(name => [name, saved[name]]));
+              const serialized = JSON.stringify(value);
+              if (!state.disposed && serialized.length <= 65536) {
+                try { global.sessionStorage.setItem(preferenceKey, serialized); } catch (_) {}
+              }
+            }
+          })().catch(error => console.warn('[dataviz:perspective:preferences]', error))
+            .finally(() => { state.preferencesSaving = null; });
+        };
+        viewer.addEventListener('perspective-config-update', state.onPreferences);
         await flushPerspective(state);
-        if (state.latestRows !== rows) {
+        if (state.latestRows.length && state.latestRows !== rows) {
           await awaitPerspectiveOperation(
             state,
             'table update',
@@ -1279,7 +1321,11 @@
         state.stage = 'ready';
         state.countedCreated = true;
         runtime.metrics.perspective.created += 1;
-        applyStatus(root, 'ready', 'perspective');
+        if (!state.latestRows.length) {
+          updatePerspective(renderContext, state.latestDescriptor, state);
+        } else {
+          applyStatus(root, 'ready', 'perspective');
+        }
       })().catch(error => {
         if (state.disposed) return;
         state.mode = 'fallback';
@@ -1316,18 +1362,18 @@
         disposePerspective(state);
         return createPerspective(renderContext, descriptor);
       }
-      // Perspective's table.replace([]) / viewer.flush() path can wait for an
-      // internal render timeout while leaving the previous pivot visible. An
-      // explicit empty Selection is already a terminal result, so publish that
-      // state synchronously and release the old viewer in the background. A
-      // later non-empty update follows the existing Empty -> create lifecycle.
+      // Do not flush an empty Perspective table (which may stall). Hide its
+      // retained viewer and show the ordinary empty state immediately instead.
+      // The same viewer, pivots and worker can resume when rows return.
       if (!state.latestRows.length && ['loading', 'perspective'].includes(state.mode)) {
         const columns = descriptor.columns || [];
-        state.mode = 'empty';
         renderContext.root?.classList.remove('dv-view--perspective');
-        disposePerspective(state);
+        if (state.viewer) state.viewer.style.display = 'none';
+        state.emptyBody ||= document.createElement('div');
+        renderContext.body.append(state.emptyBody);
+        tableService.tanstack.dispose(state.fallbackTable);
         state.fallbackTable = tableService.tanstack.mount(
-          renderContext.body,
+          state.emptyBody,
           {...descriptor, rows:[], columns},
           renderContext,
         );
@@ -1355,21 +1401,38 @@
         );
         return state;
       }
+      if (state.updateScheduled) return state;
+      state.updateScheduled = true;
+      let applied;
+      let failed = false;
       state.pending = Promise.resolve(state.pending).then(async () => {
-        if (state.disposed || !state.table) return;
-        await awaitPerspectiveOperation(
-          state,
-          'table update',
-          state.table.replace(state.latestRows),
-        );
-        await flushPerspective(state);
-        runtime.metrics.perspective.updated += 1;
-        applyStatus(renderContext.root, state.latestRows.length ? 'ready' : 'empty', 'perspective');
+        do {
+          if (state.disposed || !state.table || !state.latestRows.length) return;
+          applied = state.latestRows;
+          await awaitPerspectiveOperation(state, 'table update', state.table.replace(applied));
+          if (state.disposed || !state.latestRows.length) return;
+          tableService.tanstack.dispose(state.fallbackTable);
+          state.fallbackTable = null;
+          state.emptyBody?.remove();
+          state.viewer.style.display = '';
+          renderContext.root?.classList.add('dv-view--perspective');
+          await flushPerspective(state);
+          runtime.metrics.perspective.updated += 1;
+        } while (applied !== state.latestRows);
+        applyStatus(renderContext.root, 'ready', 'perspective');
       }).catch(error => {
+        failed = true;
         if (state.disposed) return;
         runtime.metrics.perspective.failed += 1;
         applyStatus(renderContext.root, 'error', 'perspective error');
         console.error(`[dataviz:${renderContext.key}] Perspective update failed`, error);
+      }).finally(() => {
+        state.updateScheduled = false;
+        // A config/DOM observer may deliver another update between the loop's
+        // last check and this promise settling. Hand it off once, not drop it.
+        if (!failed && !state.disposed && state.latestRows.length && state.latestRows !== applied) {
+          updatePerspective(renderContext, state.latestDescriptor, state);
+        }
       });
       return state;
     };
@@ -1548,7 +1611,12 @@
           return null;
         }
         if (descriptor.empty === true) {
-          empty(root, key, descriptor.emptyMessage);
+          const retained = states.get(key);
+          if (descriptor.type === 'perspective' && retained?.type === 'perspective' && retained.root === root) {
+            updatePerspective(context(root, retained.body, key, descriptor, generation), {...descriptor, rows:[]}, retained.state);
+          } else {
+            empty(root, key, descriptor.emptyMessage);
+          }
           runtime.viewRenderEvidence.set(key, {
             generation,
             renderer:descriptor.type || 'text',

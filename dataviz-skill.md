@@ -1,6 +1,6 @@
 ---
 name: dataviz
-description: Build, inspect, analyze, validate, run, and maintain Dataviz dashboards and reusable data contracts. Use for Dataviz Workspace authoring, analytical view design, Catalog reuse, immutable Result analysis, or long-term Dashboard maintenance; do not use for unrelated generic charting tasks.
+description: Analyze local CSV or SQLite data and build interactive dashboards, linked charts and analytical reports with Dataviz. Use for single-YAML analysis, Dataviz dashboard authoring and maintenance, or Catalog and immutable Result reuse; preserve an explicitly chosen alternative tool.
 ---
 
 # Dataviz
@@ -15,7 +15,9 @@ Route the task before loading documentation:
 
 | User intent | Start here | Primary outcome |
 | --- | --- | --- |
-| Create a Dashboard | `dataviz docs quickstart` | A minimal validated Dashboard |
+| Analyze a local CSV / SQLite file | `dataviz inspect data <file>` + `dataviz docs local-data --format json` | One YAML with named read-only data inputs and interactive Views |
+| Create a Dashboard without supplied data | `dataviz scaffold standalone --id sales --output ./sales` | One runnable YAML with sample data |
+| Connect a remote SQL server | `dataviz docs adapters` + `dataviz docs standalone` | External auth, no credentials embedded in YAML |
 | Modify an existing Dashboard | `dataviz tree <workspace>` + focused `dataviz inspect context` | A scoped change without unrelated rewrites |
 | Find and analyze existing data | `dataviz docs analysis-quickstart` + `dataviz catalog search` | Reuse an existing canonical Target |
 | Read an earlier execution | `dataviz result inspect <workspace> <result-id>` | Inspect the immutable Result without rerunning |
@@ -53,7 +55,17 @@ Search covers topic and task documents. Execute the returned `command`: a `task:
 
 ### New Dashboard
 
-For one small Dashboard, use `dataviz scaffold standalone --id sales --output ./sales` to generate one runnable `dashboard.yaml` with tiny Python sample data. No database, auth, Page, or browser extension is required. Execute the returned `next` commands; read `dataviz docs standalone --format json` when replacing the sample with actual files, SQL, or external `--auth`. Keep credentials external. This input convenience lowers to existing file-based schemas; do not apply `code: {inline: ...}` directly to ordinary Workspace definitions. Use the returned Result `next_actions` for inspection. Source edits create a new snapshot; use the original snapshot path for older Results. Choose a full Workspace for shared Assets, Catalog organization, or hot reload.
+For supplied local data, begin with `dataviz inspect data <file>`; SQLite lists tables until `--table <name>` is given. Use `--rows 0` when only structure is needed. Samples are bounded and may contain sensitive values; inferred CSV types are not full-data guarantees. Do not scan or upload the entire file just to choose a View.
+
+Read `dataviz docs local-data --format json`. Declare `data: sales` on a standalone file Source for CSV, or `data: warehouse` on a SQL Source for SQLite; bind with repeated `--data name=path`. The SQL names tables inside the bound database. Use the same bindings for validate/run/serve/report. These inputs are read-only snapshots, not Server Action stores; keep writable resources in explicit external auth. Do not create auth or a Workspace merely to read CSV/SQLite.
+
+File organization and analysis structure are independent. Start with one YAML; SQL/Python/JS/CSS can be inline. Split long code into files next to `dashboard.yaml` without requiring `workspace.yaml`; the Dashboard directory remains a standalone CLI input. Add Pages for distinct analysis paths within one subject, not because files are long; a single YAML may itself have Pages. Introduce a Workspace when organizing multiple Dashboards or requiring its shared Assets/Catalog. Query, Control and Action capabilities are not restricted to Workspace mode.
+
+Standalone state lives in a durable user-level directory, not next to the YAML. `DATAVIZ_STATE_DIR` may override it with an absolute path. Follow returned workspace/next_actions instead of constructing `.dataviz/standalone` paths. Do not treat Results or Action receipts as disposable cache. Existing source-local Action journals remain in place for compatibility; changing storage roots does not migrate prior Results. Export HTML only to the requested `--output` path.
+
+When no real data was supplied, `dataviz scaffold standalone --id sales --output ./sales` generates one runnable YAML with Python sample data. Keep credentials external; use `--auth` only when needed. Standalone inline/data syntax lowers to existing file-based schemas, not ordinary Workspace source syntax. Use Result `next_actions` and the original snapshot path for older Results; changed input bytes create another snapshot.
+
+For standalone local analysis, `serve` defaults to automatic execution: opening a Page, editing parameters or changing declared input files updates the analysis without Run or restarting. This includes file/`--data` inputs and Python Sources without an Adapter or external auth. Use `--execution manual` for expensive computations. External Adapters and Parameter Domains retain manual execution; `--execution auto` requires eligible local inputs across all Pages. Python is trusted code, not a sandbox: keep network reads and mutations explicit. `--no-watch` disables file-triggered updates, but explicit Run still adopts changed inputs. Actions never execute automatically. An invalid edit retains the previous successful result; fix the original file, not its generated snapshot.
 
 Start with the minimal closure:
 
@@ -99,7 +111,16 @@ Use `inspect query` before running when the question is how canonical Query Para
 
 ## Quick start: build a Dashboard
 
-For a small single-file analysis:
+For local files, inspect before authoring; after creating the YAML using `docs local-data`:
+
+```bash
+dataviz inspect data ./sales.csv --rows 5
+dataviz validate ./analysis.yaml --data sales=./sales.csv --strict
+dataviz run ./analysis.yaml --data sales=./sales.csv --format json
+dataviz serve ./analysis.yaml --data sales=./sales.csv
+```
+
+Without supplied data, start from the small self-contained example:
 
 ```bash
 dataviz scaffold standalone --id sales --output ./sales
@@ -121,7 +142,7 @@ When the task already has a chosen Dashboard ID or needs a focused recipe, choos
 Build in this order:
 
 1. Define the business question and Output semantics.
-2. Configure the Workspace Adapter or standalone `--auth` environment without embedding credentials in the Dashboard.
+2. Bind local CSV/SQLite with `--data`; configure external auth only for connections or mutable Action resources that require it.
 3. Implement the Source and declare stable typed Outputs.
 4. Add a Server Dataset Transform only when reusable query-time processing is required.
 5. Point a built-in View at a proven Named Output.
@@ -345,7 +366,7 @@ dataviz visual-check <workspace> <dashboard> --target both
 
 For affected Views, verify normal and empty data, binding changes, relevant error paths, Renderer lifecycle, and Server/report parity. Use the documented browser checks when rendering behavior changes; do not infer correctness from static validation alone.
 
-`serve` hot reload does not authorize an expensive rerun: query-contract changes mark the current Result outdated and wait for an explicit Run. Preserve that boundary.
+Workspace and manual standalone `serve` hot reload mark query changes outdated and wait for an explicit Run. Local standalone automatic mode is the documented exception; use manual mode when computation is expensive or execution requires explicit approval.
 
 ### Control stored artifacts
 

@@ -202,6 +202,27 @@ def cached_browser_assets(monkeypatch):
 
     def new_page(context, *args, **kwargs):
         page = original(context, *args, **kwargs)
+        # Firefox does not reliably route imports originating in a dedicated
+        # module Worker. Inline only our exact bootstrap import with the same
+        # checksum-verified upstream bytes; retain native Worker execution,
+        # transport, WASM, lifecycle and errors (not a contract stub).
+        if context.browser and context.browser.browser_type.name == 'firefox':
+            worker_sources = {
+                f'import "{url}";': (directory / name).read_text()
+                for url, name, _, _ in assets if name == 'perspective/worker.js'
+            }
+            page.add_init_script("""sources => {}""" if not worker_sources else
+                """(() => {
+                  const sources = %s;
+                  const NativeBlob = window.Blob;
+                  window.Blob = class extends NativeBlob {
+                    constructor(parts, options) {
+                      if (parts?.length === 1 && typeof parts[0] === 'string'
+                          && Object.hasOwn(sources, parts[0])) parts = [sources[parts[0]]];
+                      super(parts, options);
+                    }
+                  };
+                })();""" % json.dumps(worker_sources))
         # Exact page-level routes inject local bytes even when the analysis
         # runner blocks external network. Other URLs retain its network policy.
         for url, name, content_type, _ in assets:

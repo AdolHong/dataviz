@@ -106,6 +106,7 @@ class ApiRequest(BaseModel):
 
 
 class RunRequest(ApiRequest):
+    automatic: bool = False
     session_id: str = Field(min_length=8, max_length=128)
     page_id: str | None = None
     query_parameter_state: dict[str, dict[str, Any]] = Field(default_factory=dict)
@@ -217,10 +218,22 @@ class ParameterEditorUpdateRequest(ApiRequest):
     group: ParameterEditorGroupRequest
 
 
-def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
+def create_app(workspace_path: str | Path, *, watch: bool = True, standalone_input=None, execution=None, refresh_interval=None) -> FastAPI:
     workspace = load_workspace(workspace_path)
     workspace_root = workspace.root
     standalone = (workspace_root / ".dataviz" / "standalone.json").is_file()
+    from dataviz.server.standalone import local_auto_eligible
+    execution_mode = execution or ("auto" if standalone_input and local_auto_eligible(workspace) else "manual")
+    if execution_mode not in {"auto", "manual"}:
+        raise ValueError("Execution must be auto or manual")
+    if execution_mode == "auto" and not local_auto_eligible(workspace):
+        raise WorkspaceError("Automatic execution requires local file, unbound Python or --data inputs without external parameter domains")
+    if refresh_interval is not None:
+        if type(refresh_interval) is not int or not 1 <= refresh_interval <= 86400:
+            raise WorkspaceError("Refresh interval must be an integer from 1 to 86400 seconds")
+        if not standalone_input or execution_mode != "auto":
+            raise WorkspaceError("Scheduled refresh requires a local standalone Dashboard in auto mode")
+    snapshot_roots = {workspace_root}
     manager = RunManager(workspace)
     navigation_editor = NavigationEditor(workspace_root)
     parameter_editor = ParameterEditor()
@@ -235,7 +248,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         async def protect_standalone_snapshot(request, call_next):
             if request.url.path.startswith("/api/navigation/") or request.url.path.endswith("/parameter-editor"):
                 return JSONResponse(status_code=409, content={
-                    "error": "Edit the original standalone YAML and restart serve; generated snapshots are read-only.",
+                    "error": "Edit the original standalone YAML; generated snapshots are read-only.",
                 })
             return await call_next(request)
     workspace_refresh_lock = threading.RLock()
@@ -253,12 +266,29 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         with workspace_refresh_lock:
             return workspace
 
+    def load_candidate():
+        return load_workspace(standalone_input.prepare() if standalone_input else workspace_root)
+
+    def install_candidate(fresh):
+        nonlocal workspace, workspace_root
+        manager.install_workspace_snapshot(fresh, standalone_source=standalone_input.source if standalone_input else None)
+        workspace = fresh
+        workspace_root = fresh.root
+        snapshot_roots.add(fresh.root)
+        app.state.workspace = fresh
+
+    def run_workspace(run_id):
+        # Only internally registered Runs select a filesystem root. Never accept
+        # a path supplied by a browser, and never mutate old input generations.
+        record = manager.records.get(run_id)
+        return record.workspace if standalone_input and record and record.workspace else current_workspace()
+
     def refresh_workspace(*, preserve_on_error: bool = False):
         """Atomically publish a freshly loaded filesystem snapshot."""
         nonlocal workspace
         with workspace_refresh_lock:
             try:
-                fresh = load_workspace(workspace_root)
+                fresh = load_candidate()
             except WorkspaceError as error:
                 if not preserve_on_error:
                     raise
@@ -308,9 +338,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 # Execution endpoints may inspect/reject this complete candidate,
                 # but it is not installed as the Server's current snapshot.
                 return fresh
-            workspace = fresh
-            app.state.workspace = fresh
-            manager.install_workspace_snapshot(fresh)
+            install_candidate(fresh)
             return fresh
 
     def publish_workspace_change(changed_paths: set[str]) -> None:
@@ -318,7 +346,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         nonlocal workspace, reload_semantics
         with workspace_refresh_lock:
             try:
-                fresh = load_workspace(workspace_root)
+                fresh = load_candidate()
                 diagnostics = [item.as_dict() for item in validate_workspace(fresh)]
                 current_semantics = WorkspaceSemanticSnapshot.from_workspace(fresh)
             except WorkspaceError as error:
@@ -339,6 +367,12 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 changed_paths,
             )
             page_impacts = classify_page_changes(reload_semantics, current_semantics, changed_paths)
+            if standalone_input and fresh.root != workspace.root:
+                # A standalone generation includes code, data and presentation.
+                # Recompute the current page as one bounded transaction; never
+                # combine an old Run with files from a new input generation.
+                impacts = {identifier: "query" for identifier in fresh.dashboards}
+                page_impacts = {}
             error_diagnostics = [
                 item for item in diagnostics if item.get("level") == "error"
             ]
@@ -365,9 +399,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
 
             # A complete snapshot is always published in one assignment. Active
             # Runs retain the immutable snapshot they captured at start.
-            workspace = fresh
-            app.state.workspace = fresh
-            manager.install_workspace_snapshot(fresh)
+            install_candidate(fresh)
             reload_semantics = current_semantics
             change_journal.publish(
                 status="ready",
@@ -379,7 +411,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             )
             refresh_analysis_catalog_async(workspace_root)
 
-    workspace_watcher = WorkspaceFileWatcher(workspace_root, publish_workspace_change)
+    workspace_watcher = standalone_input.watcher(publish_workspace_change) if standalone_input else WorkspaceFileWatcher(workspace_root, publish_workspace_change)
     app.state.workspace_change_journal = change_journal
     app.state.workspace_watcher = workspace_watcher
     app.state.workspace_hot_reload_enabled = watch
@@ -443,9 +475,10 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
     def artifact_file_response(
         run_id: str, artifact: ArtifactDescriptor
     ) -> FileResponse:
-        path = ArtifactStore(workspace_root, run_id).resolve(artifact)
+        root = run_workspace(run_id).root
+        path = ArtifactStore(root, run_id).resolve(artifact)
         try:
-            path.relative_to(workspace_root)
+            path.relative_to(root)
         except ValueError as error:
             raise HTTPException(404, "Artifact file not found") from error
         if not path.is_file():
@@ -467,7 +500,11 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
     def shared_cache_path(share_id: str) -> Path:
         if not re.fullmatch(r"[A-Za-z0-9_-]{8,255}", share_id or ""):
             raise HTTPException(404, "Shared result not found")
-        root = (workspace_root / "shared_caches").resolve()
+        with workspace_refresh_lock:
+            roots = tuple(snapshot_roots)
+            fallback_root = workspace_root
+        owner = next((item for item in roots if (item / "shared_caches" / share_id).is_dir()), fallback_root)
+        root = (owner / "shared_caches").resolve()
         target = (root / share_id).resolve()
         if not target.is_relative_to(root):
             raise HTTPException(404, "Shared result not found")
@@ -495,7 +532,9 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         session_id: str,
         cache_root: Path,
         manifest: dict[str, Any],
+        snapshot=None,
     ) -> RunResult:
+        workspace_root = (snapshot or current_workspace()).root
         synthetic_run_id = (
             "run_shared_"
             + uuid.uuid5(
@@ -593,11 +632,15 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             )
         except WorkspaceError as error:
             raise HTTPException(409, "Shared Dashboard is unavailable") from error
+        if standalone_input:
+            snapshot = load_workspace(cache_root.parent.parent)
+            dashboard = snapshot.dashboard(dashboard_id, manifest.get("page_id"))
         result = hydrate_shared_result(
             share_id,
             checked,
             cache_root,
             manifest,
+            snapshot,
         )
         try:
             ensure_query_run_compatible(dashboard, result)
@@ -605,6 +648,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 result,
                 session_id=checked,
                 dashboard_id=dashboard_id,
+                _workspace=snapshot,
             )
             interaction = {
                 "run_id": result.run_id,
@@ -849,7 +893,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                     "presentation": {
                         "active": dashboard.presentation is not None,
                         "file": (
-                            str(dashboard.presentation_path.relative_to(workspace_root))
+                            str(dashboard.presentation_path.relative_to(snapshot.root))
                             if dashboard.presentation_path
                             else None
                         ),
@@ -952,6 +996,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             )
         return {
             "server": {"package_version": __version__},
+            "standalone_execution": ({"mode": execution_mode, "auto_allowed": local_auto_eligible(snapshot), "refresh_interval": refresh_interval} if standalone_input else None),
             "workspace": snapshot.definition.model_dump(mode="json", by_alias=True),
             "folders": _folder_summary(snapshot.navigation),
             "trash": [item.model_dump(mode="json") for item in snapshot.trash],
@@ -1151,10 +1196,14 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         # A user can save SQL and click Run before the polling loop reaches its
         # debounce boundary. Publish that filesystem generation first so the
         # returned revision describes the exact snapshot captured below.
-        if watch:
+        if watch or standalone_input:
             workspace_watcher.flush()
         try:
-            snapshot, _ = dashboard_from_disk(dashboard_id)
+            with workspace_refresh_lock:
+                snapshot, _ = dashboard_from_disk(dashboard_id)
+                run_revision = change_journal.revision
+            if request.automatic and (execution_mode != "auto" or not local_auto_eligible(snapshot)):
+                raise WorkspaceError("Automatic execution is disabled for this input. Use Run explicitly.")
         except WorkspaceError as error:
             raise HTTPException(409, error.message) from error
         try:
@@ -1171,7 +1220,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         return {
             "run_id": record.run_id,
             "status": record.status,
-            "workspace_revision": change_journal.revision,
+            "workspace_revision": run_revision,
         }
 
     def server_actions() -> ActionService:
@@ -1315,6 +1364,8 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         for record in records:
             query_run = record.result or record.snapshot
             query_outdated = False
+            if standalone_input and record.workspace and record.workspace.root != snapshot.root:
+                query_outdated = True
             if query_run is not None:
                 try:
                     ensure_query_run_compatible(
@@ -1379,7 +1430,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
     @app.post("/api/runs/{run_id}/interactions")
     def start_interaction(run_id: str, request: InteractionRequest):
         session_id = checked_session(request.session_id)
-        snapshot = refresh_workspace()
+        snapshot = current_workspace() if standalone_input else refresh_workspace()
         try:
             query_record = manager.get(run_id, session_id)
             if query_record is None:
@@ -1387,6 +1438,8 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                     "Query Run is unavailable in this browser-tab session",
                     details={"code": "query_run_unavailable"},
                 )
+            if standalone_input:
+                snapshot = run_workspace(run_id)
             dashboard = snapshot.dashboard(query_record.dashboard_id, query_record.page_id)
             plan = compile_interactive_plan(dashboard, normalize_interactive_target(request.transform_id))
             canonical_control_state = require_canonical_control_state(
@@ -1491,7 +1544,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         artifact = record.result.outputs.get(canonical)
         if artifact is None:
             raise HTTPException(404, "Interactive Output is not ready")
-        store = ArtifactStore(workspace_root, record.run_id)
+        store = ArtifactStore(run_workspace(record.run_id).root, record.run_id)
         runtime = current_workspace().definition.runtime
         if artifact.kind == "table":
             row_count = int(artifact.metadata.get("row_count", 0))
@@ -1588,7 +1641,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         artifact = snapshot.outputs.get(canonical)
         if artifact is None:
             raise HTTPException(404, "Output is not ready")
-        store = ArtifactStore(workspace_root, run_id)
+        store = ArtifactStore(run_workspace(run_id).root, run_id)
         runtime = current_workspace().definition.runtime
         if artifact.kind == "table":
             row_count = int(artifact.metadata.get("row_count", 0))
@@ -1708,6 +1761,9 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
             )
         checked = checked_session(session_id)
         record = manager.get(run_id, checked) if run_id else manager.latest_for(checked, dashboard_id, dashboard.page_id)
+        if standalone_input and record:
+            snapshot = run_workspace(record.run_id)
+            dashboard = snapshot.dashboard(dashboard_id, page_id)
         if run_id and not record:
             raise HTTPException(404, "Run not found in this browser-tab session")
         if record and record.dashboard_id != dashboard_id:
@@ -1743,7 +1799,7 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
                 _canvas_state_page(
                     label="Canvas waiting",
                     title=waiting_title,
-                    message="设置参数后，点击 Run。",
+                    message="正在分析本地数据…" if execution_mode == "auto" and local_auto_eligible(snapshot) else "设置参数后，点击 Run。",
                     tone="quiet",
                     show_title=not bool(dashboard.project_definition and len(dashboard.project_definition.pages) > 1),
                     bridge=_canvas_interaction_bridge(dashboard_id, run_id, frame_id),
@@ -1817,13 +1873,19 @@ def create_app(workspace_path: str | Path, *, watch: bool = True) -> FastAPI:
         request: ReportRequest,
     ):
         try:
-            snapshot, dashboard = dashboard_from_disk(dashboard_id)
+            if standalone_input:
+                snapshot = current_workspace()
+            else:
+                snapshot, dashboard = dashboard_from_disk(dashboard_id)
         except WorkspaceError as error:
             raise HTTPException(404, error.message) from error
         checked = checked_session(request.session_id)
         result = resolve_result(dashboard_id, request.run_id, checked)
         if not result:
             raise HTTPException(409, "Dashboard has no completed run")
+        if standalone_input:
+            snapshot = run_workspace(result.run_id)
+        workspace_root = snapshot.root
         try:
             dashboard = snapshot.dashboard(dashboard_id, result.page_id)
             ensure_query_run_compatible(dashboard, result)
